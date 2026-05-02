@@ -1,0 +1,74 @@
+# bot/middlewares/auth.py
+from __future__ import annotations
+
+import logging
+from typing import Any, Awaitable, Callable
+
+from aiogram import BaseMiddleware
+from aiogram.types import TelegramObject, Update, User as TgUser
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.config import settings
+from db import repository as repo
+
+logger = logging.getLogger(__name__)
+
+
+class AuthMiddleware(BaseMiddleware):
+    """
+    Авто-регистрация пользователя, проверка бана.
+    Добавляет db_user в data для хендлеров.
+    """
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        session: AsyncSession = data["session"]
+        tg_user: TgUser | None = data.get("event_from_user")
+
+        if not tg_user or tg_user.is_bot:
+            return await handler(event, data)
+
+        db_user = await repo.get_user_by_tg_id(session, tg_user.id)
+
+        if db_user is None:
+            # Обработка реферального кода из /start payload
+            referrer = None
+            referrer_l2 = None
+            update: Update | None = data.get("event_update")
+            if update and update.message and update.message.text:
+                parts = update.message.text.split()
+                if len(parts) == 2 and parts[0] == "/start":
+                    ref_code = parts[1]
+                    referrer = await repo.get_user_by_referral_code(session, ref_code)
+                    if referrer:
+                        # L2: referrer's referrer
+                        if referrer.referrer_id:
+                            referrer_l2 = await repo.get_user_by_id(session, referrer.referrer_id)
+
+            db_user = await repo.create_user(
+                session,
+                tg_id=tg_user.id,
+                username=tg_user.username,
+                full_name=tg_user.full_name,
+                welcome_credits=settings.WELCOME_BONUS_CREDITS,
+                referrer=referrer,
+                referrer_l2=referrer_l2,
+            )
+
+            # Начисляем реферальные бонусы
+            if referrer:
+                await repo.add_credits(session, referrer.id, settings.REFERRAL_L1_CREDITS)
+                logger.info("Referral L1 bonus: %s -> %s", tg_user.id, referrer.tg_id)
+            if referrer_l2:
+                await repo.add_credits(session, referrer_l2.id, settings.REFERRAL_L2_CREDITS)
+                logger.info("Referral L2 bonus: %s -> %s", tg_user.id, referrer_l2.tg_id)
+
+        elif db_user.is_banned:
+            return  # Просто игнорируем забаненных
+
+        data["db_user"] = db_user
+        return await handler(event, data)
