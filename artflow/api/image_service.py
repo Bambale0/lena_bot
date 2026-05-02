@@ -1,15 +1,28 @@
 # api/image_service.py
 """
 Единый интерфейс генерации изображений для всех моделей через CometAPI.
-Возвращает task_id (для async моделей) или сразу url (для sync).
+
+Модели и их endpoint-ы:
+  seedream-4.5      → /seededit/image/generate  (async, poll, returns URL)
+  nano-banano-pro   → /v1beta/models/gemini-3-pro-image-preview:generateContent  (sync, base64)
+  nano-banano-2     → /v1beta/models/gemini-3.1-flash-image-preview:generateContent  (sync, base64)
+  wan-2.7           → /v1/images/generations  (sync, URL)
+  gpt-image-1       → /v1/images/generations  (sync, URL)
+
+ImageResult.image_bytes — установлен для Gemini-моделей (base64 decoded)
+ImageResult.url         — установлен для остальных (прямая ссылка или task_id для async)
 """
 from __future__ import annotations
 
+import base64
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
-from api import comet_client
+import httpx
+
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,50 +35,126 @@ class ImageModel(StrEnum):
     GPT_IMAGE_1 = "gpt-image-1"
 
 
-# CometAPI model strings
-_MODEL_MAP: dict[ImageModel, str] = {
-    ImageModel.SEEDREAM_45: "seedream-4.5",
-    ImageModel.NANO_BANANO_PRO: "seedream-3-pro",
-    ImageModel.NANO_BANANO_2: "seedream-3",
-    ImageModel.WAN_27: "wan-2.7",
-    ImageModel.GPT_IMAGE_1: "gpt-image-1",
+# Gemini model strings на стороне CometAPI
+_GEMINI_MODEL_MAP: dict[ImageModel, str] = {
+    ImageModel.NANO_BANANO_PRO: "gemini-3-pro-image-preview",
+    ImageModel.NANO_BANANO_2: "gemini-3.1-flash-image-preview",
 }
 
-# Which models use the SeedEdit async endpoint
-_SEEDREAM_ASYNC = {ImageModel.SEEDREAM_45, ImageModel.NANO_BANANO_PRO, ImageModel.NANO_BANANO_2}
+_GEMINI_MODELS = {ImageModel.NANO_BANANO_PRO, ImageModel.NANO_BANANO_2}
+_SEEDREAM_ASYNC = {ImageModel.SEEDREAM_45}
 
 
 @dataclass
 class ImageResult:
-    is_async: bool
-    task_id: str | None = None
-    url: str | None = None
+    is_async: bool = False
+    task_id: str | None = None      # только для async (seedream)
+    url: str | None = None          # для sync URL-based моделей
+    image_bytes: bytes | None = None  # для Gemini — уже декодированные байты
+    mime_type: str = "image/png"    # для Gemini
 
 
 async def generate_image(
     model: ImageModel,
     prompt: str,
-    image_url: str | None = None,  # for img2img
-    size: str = "1024x1024",
+    image_bytes: bytes | None = None,   # для img2img (Gemini inline_data)
+    image_mime: str = "image/jpeg",
+    image_url: str | None = None,       # для img2img (seedream URL)
+    aspect_ratio: str = "1:1",
+    size: str = "1K",                   # только Gemini: 512px / 1K / 2K / 4K
 ) -> ImageResult:
-    api_model = _MODEL_MAP[model]
-
-    if model in _SEEDREAM_ASYNC:
-        return await _seedream_generate(api_model, prompt, image_url)
-    elif model == ImageModel.WAN_27:
-        return await _standard_generate(api_model, prompt, size)
+    if model in _GEMINI_MODELS:
+        return await _gemini_generate(
+            model, prompt, image_bytes=image_bytes, image_mime=image_mime, aspect_ratio=aspect_ratio, size=size
+        )
+    elif model == ImageModel.SEEDREAM_45:
+        return await _seedream_generate(prompt, image_url)
     elif model == ImageModel.GPT_IMAGE_1:
-        return await _gpt_image_generate(prompt, size)
+        return await _gpt_image_generate(prompt)
     else:
-        return await _standard_generate(api_model, prompt, size)
+        return await _standard_generate(model.value, prompt)
 
+
+# ─── Gemini Image Generation ──────────────────────────────────────────────────
+
+async def _gemini_generate(
+    model: ImageModel,
+    prompt: str,
+    image_bytes: bytes | None,
+    image_mime: str,
+    aspect_ratio: str,
+    size: str,
+) -> ImageResult:
+    """
+    POST /v1beta/models/{model}:generateContent
+    Ответ содержит inlineData (base64).
+    Auth: Bearer (CometAPI поддерживает оба заголовка).
+    """
+    api_model = _GEMINI_MODEL_MAP[model]
+    url = f"{settings.COMET_BASE_URL}/v1beta/models/{api_model}:generateContent"
+
+    # Строим parts
+    parts: list[dict[str, Any]] = [{"text": prompt}]
+    if image_bytes:
+        parts.append({
+            "inline_data": {
+                "mime_type": image_mime,
+                "data": base64.b64encode(image_bytes).decode(),
+            }
+        })
+
+    payload: dict[str, Any] = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {
+                "aspectRatio": aspect_ratio,
+                "imageSize": size,
+            },
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            url,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {settings.COMET_API_KEY}",
+                "Content-Type": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    # Извлекаем inlineData из первого кандидата
+    raw_b64: str | None = None
+    mime: str = "image/png"
+    try:
+        candidates = data["candidates"]
+        for part in candidates[0]["content"]["parts"]:
+            if "inlineData" in part:
+                raw_b64 = part["inlineData"]["data"]
+                mime = part["inlineData"].get("mimeType", "image/png")
+                break
+    except (KeyError, IndexError) as e:
+        raise RuntimeError(f"Gemini: неожиданный формат ответа: {e}\n{data}") from e
+
+    if not raw_b64:
+        raise RuntimeError(f"Gemini: изображение не найдено в ответе: {data}")
+
+    decoded = base64.b64decode(raw_b64)
+    logger.info("Gemini image generated: model=%s size=%d bytes", api_model, len(decoded))
+    return ImageResult(is_async=False, image_bytes=decoded, mime_type=mime)
+
+
+# ─── Seedream (async) ─────────────────────────────────────────────────────────
 
 async def _seedream_generate(
-    api_model: str, prompt: str, image_url: str | None
+    prompt: str, image_url: str | None
 ) -> ImageResult:
-    """SeedEdit/Seedream — async generation, returns task_id."""
+    from api import comet_client
     path = "/seededit/image/generate"
-    payload: dict = {"model": api_model, "prompt": prompt}
+    payload: dict[str, Any] = {"model": "seedream-4.5", "prompt": prompt}
     if image_url:
         payload["image_url"] = image_url
     resp = await comet_client.post(path, payload)
@@ -74,33 +163,35 @@ async def _seedream_generate(
     return ImageResult(is_async=True, task_id=task_id)
 
 
-async def _standard_generate(
-    api_model: str, prompt: str, size: str
-) -> ImageResult:
-    """Standard /v1/images/generations — sync, returns url immediately."""
-    resp = await comet_client.post(
-        "/v1/images/generations",
-        {"model": api_model, "prompt": prompt, "n": 1, "size": size},
-    )
-    url = resp["data"][0]["url"]
-    return ImageResult(is_async=False, url=url)
-
-
-async def _gpt_image_generate(prompt: str, size: str) -> ImageResult:
-    resp = await comet_client.post(
-        "/v1/images/generations",
-        {"model": "gpt-image-1", "prompt": prompt, "n": 1, "size": size, "quality": "high"},
-    )
-    url = resp["data"][0]["url"]
-    return ImageResult(is_async=False, url=url)
-
-
 async def poll_seedream_status(task_id: str) -> str | None:
     """Returns image URL when done, None if still processing."""
+    from api import comet_client
     resp = await comet_client.get(f"/seededit/task/{task_id}")
     status = resp.get("status") or resp.get("data", {}).get("status")
     if status == "succeed":
         return resp.get("image_url") or resp.get("data", {}).get("image_url")
     if status in ("failed", "error"):
         raise RuntimeError(f"Seedream failed: {resp.get('message', 'unknown error')}")
-    return None  # still processing
+    return None
+
+
+# ─── Standard /v1/images/generations ─────────────────────────────────────────
+
+async def _standard_generate(api_model: str, prompt: str) -> ImageResult:
+    from api import comet_client
+    resp = await comet_client.post(
+        "/v1/images/generations",
+        {"model": api_model, "prompt": prompt, "n": 1, "size": "1024x1024"},
+    )
+    url = resp["data"][0]["url"]
+    return ImageResult(is_async=False, url=url)
+
+
+async def _gpt_image_generate(prompt: str) -> ImageResult:
+    from api import comet_client
+    resp = await comet_client.post(
+        "/v1/images/generations",
+        {"model": "gpt-image-1", "prompt": prompt, "n": 1, "size": "1024x1024", "quality": "high"},
+    )
+    url = resp["data"][0]["url"]
+    return ImageResult(is_async=False, url=url)

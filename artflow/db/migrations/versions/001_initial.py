@@ -127,8 +127,8 @@ def upgrade() -> None:
         [
             # Images
             {"model_key": "seedream-4.5", "display_name": "🌸 Seedream 4.5", "gen_type": "image", "credits": 2, "is_active": True},
-            {"model_key": "nano-banano-pro", "display_name": "⚡ Nano Banano Pro", "gen_type": "image", "credits": 2, "is_active": True},
-            {"model_key": "nano-banano-2", "display_name": "⚡ Nano Banano 2", "gen_type": "image", "credits": 2, "is_active": True},
+            {"model_key": "nano-banano-pro", "display_name": "🍌 Nano Banano Pro (Gemini 3 Pro)", "gen_type": "image", "credits": 4, "is_active": True},
+            {"model_key": "nano-banano-2", "display_name": "🍌 Nano Banano 2 (Gemini 3.1 Flash)", "gen_type": "image", "credits": 2, "is_active": True},
             {"model_key": "wan-2.7", "display_name": "🌊 WAN 2.7", "gen_type": "image", "credits": 3, "is_active": True},
             {"model_key": "gpt-image-1", "display_name": "🤖 GPT Imagine 2", "gen_type": "image", "credits": 4, "is_active": True},
             # Video

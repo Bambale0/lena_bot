@@ -24,6 +24,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # 5433 снаружи чтобы не конфликтовать с локальным postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bot -d artflow"]
       interval: 5s
@@ -35,6 +37,8 @@ services:
     image: redis:7-alpine
     volumes:
       - redisdata:/data
+    ports:
+      - "6379:6379"   # для локального доступа при dev-режиме
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

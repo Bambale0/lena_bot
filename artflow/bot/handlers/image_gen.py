@@ -109,16 +109,18 @@ async def handle_prompt(
 
     if not result.is_async:
         # Синхронный результат — сразу отправляем
-        await _send_image_result(bot, message.chat.id, result.url, gen.id, prompt, status_msg)
-        await repo.finish_generation(session, gen.id, result.url)
+        result_ref = result.url or "gemini_inline"
+        await _send_image_result(bot, message.chat.id, result, gen.id, prompt, status_msg)
+        await repo.finish_generation(session, gen.id, result_ref)
         await state.clear()
     else:
-        # Асинхронный — запускаем polling
+        # Асинхронный (seedream) — запускаем polling
         await repo.update_generation_task(session, gen.id, result.task_id)
 
         async def on_success(url: str) -> None:
+            from api.image_service import ImageResult as IR
             await repo.finish_generation(session, gen.id, url)
-            await _send_image_result(bot, message.chat.id, url, gen.id, prompt, status_msg)
+            await _send_image_result(bot, message.chat.id, IR(is_async=False, url=url), gen.id, prompt, status_msg)
 
         async def on_failure(err: str) -> None:
             await repo.fail_generation(session, gen.id, err)
@@ -127,9 +129,8 @@ async def handle_prompt(
                 f"❌ Ошибка: {err}\nКредиты возвращены.", reply_markup=main_menu_kb()
             )
 
-        check_fn = image_service.poll_seedream_status
         asyncio.create_task(
-            polling.poll_until_done(result.task_id, check_fn, on_success, on_failure)
+            polling.poll_until_done(result.task_id, image_service.poll_seedream_status, on_success, on_failure)
         )
         await state.clear()
 
@@ -137,22 +138,29 @@ async def handle_prompt(
 async def _send_image_result(
     bot: Bot,
     chat_id: int,
-    url: str,
+    result: "image_service.ImageResult",
     gen_id: int,
     prompt: str,
     status_msg: Message,
 ) -> None:
+    from aiogram.types import BufferedInputFile
+
     try:
         await status_msg.delete()
     except Exception:
         pass
+
     caption = f"✅ Готово!\n\n<i>{prompt[:200]}</i>"
-    await bot.send_photo(
-        chat_id=chat_id,
-        photo=url,
-        caption=caption,
-        reply_markup=after_generation_kb(gen_id, "image"),
-    )
+    kb = after_generation_kb(gen_id, "image")
+
+    if result.image_bytes:
+        # Gemini — отправляем как байты
+        ext = "png" if "png" in result.mime_type else "jpg"
+        photo = BufferedInputFile(result.image_bytes, filename=f"artflow_{gen_id}.{ext}")
+    else:
+        photo = result.url  # type: ignore[assignment]
+
+    await bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, reply_markup=kb)
 
 
 # ── Регенерация ───────────────────────────────────────────────────────────────
