@@ -12,9 +12,8 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.redis import RedisStorage
-
-import redis.asyncio as aioredis
+from aiogram.fsm.storage.base import BaseStorage
+from aiogram.fsm.storage.memory import MemoryStorage
 
 from api.comet_client import close_client, get_client
 from bot.handlers import admin, balance, image_gen, payment, start, video_gen
@@ -27,13 +26,57 @@ from db.session import engine
 from db.models import Base
 
 
+async def _make_storage() -> tuple[BaseStorage, object | None]:
+    """
+    Пробуем Redis; если недоступен — MemoryStorage.
+    Возвращает (storage, redis_client | None).
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        import redis.asyncio as aioredis
+        from aiogram.fsm.storage.redis import RedisStorage
+
+        redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        await asyncio.wait_for(redis_client.ping(), timeout=2.0)
+        logger.info("FSM storage: Redis (%s)", settings.REDIS_URL)
+        return RedisStorage(redis=redis_client), redis_client
+    except Exception as e:
+        logger.warning(
+            "Redis недоступен (%s) → MemoryStorage "
+            "(FSM сбрасывается при перезапуске, для прода нужен Redis)",
+            e,
+        )
+        return MemoryStorage(), None
+
+
+async def _make_throttling_middleware(redis_client: object | None):
+    """ThrottlingMiddleware без Redis просто пропускает всё."""
+    if redis_client is not None:
+        return ThrottlingMiddleware(redis_client)
+
+    # Заглушка — не throttlит, но и не падает
+    from aiogram import BaseMiddleware
+    from aiogram.types import TelegramObject
+    from typing import Any, Awaitable, Callable
+
+    class NoopThrottle(BaseMiddleware):
+        async def __call__(
+            self,
+            handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+            event: TelegramObject,
+            data: dict[str, Any],
+        ) -> Any:
+            return await handler(event, data)
+
+    return NoopThrottle()
+
+
 async def main() -> None:
     setup_logging(logging.INFO)
     logger = logging.getLogger(__name__)
-    logger.info("Starting ArtFlow AI in POLLING mode (local dev)")
+    logger.info("Starting ArtFlow AI in POLLING mode")
 
-    redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    storage = RedisStorage(redis=redis_client)
+    storage, redis_client = await _make_storage()
 
     bot = Bot(
         token=settings.BOT_TOKEN,
@@ -44,7 +87,7 @@ async def main() -> None:
     # Middlewares
     dp.update.middleware(DbSessionMiddleware())
     dp.update.middleware(AuthMiddleware())
-    dp.message.middleware(ThrottlingMiddleware(redis_client))
+    dp.message.middleware(await _make_throttling_middleware(redis_client))
 
     # Routers
     dp.include_router(start.router)
@@ -54,13 +97,11 @@ async def main() -> None:
     dp.include_router(payment.router)
     dp.include_router(admin.router)
 
-    # DB tables
+    # DB tables (для prod используй alembic)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Удаляем webhook если был
     await bot.delete_webhook(drop_pending_updates=True)
-
     get_client()
     logger.info("Bot started. Press Ctrl+C to stop.")
 
@@ -71,7 +112,8 @@ async def main() -> None:
         )
     finally:
         await close_client()
-        await redis_client.aclose()
+        if redis_client:
+            await redis_client.aclose()
         await engine.dispose()
         logger.info("Bot stopped.")
 
