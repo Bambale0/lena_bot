@@ -11,7 +11,7 @@ import logging
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import GenerationType, ModelCost, PricePlan
+from db.models import GenerationType, ModelCost, PricePlan, UserPrompt
 from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)

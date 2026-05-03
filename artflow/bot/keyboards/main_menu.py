@@ -14,10 +14,11 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="💳 Пополнить", callback_data="menu:topup"),
     )
     builder.row(
-        InlineKeyboardButton(text="👥 Рефералы", callback_data="menu:referral"),
+        InlineKeyboardButton(text="🗂 Промпты", callback_data="menu:prompts"),
         InlineKeyboardButton(text="📋 История", callback_data="menu:history"),
     )
     builder.row(
+        InlineKeyboardButton(text="👥 Рефералы", callback_data="menu:referral"),
         InlineKeyboardButton(text="❓ Помощь", callback_data="menu:help"),
     )
     return builder.as_markup()

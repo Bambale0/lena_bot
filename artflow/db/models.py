@@ -135,3 +135,48 @@ class ModelCost(Base):
     gen_type: Mapped[GenerationType] = mapped_column(Enum(GenerationType), nullable=False)
     credits: Mapped[int] = mapped_column(Integer, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+# ── Marketplace промптов ───────────────────────────────────────────────────────
+
+class PromptCategory(str, enum.Enum):
+    art = "art"
+    business = "business"
+    marketing = "marketing"
+    photo = "photo"
+    other = "other"
+
+    def label(self) -> str:
+        return {
+            "art": "🎨 Арт",
+            "business": "💼 Бизнес",
+            "marketing": "📣 Маркетинг",
+            "photo": "📸 Фото",
+            "other": "🗂 Разное",
+        }[self.value]
+
+
+class PromptStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    deactivated = "deactivated"
+
+
+class UserPrompt(Base):
+    __tablename__ = "user_prompts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    author_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(60), nullable=False)
+    description: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[PromptCategory] = mapped_column(Enum(PromptCategory), nullable=False)
+    prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[PromptStatus] = mapped_column(
+        Enum(PromptStatus), default=PromptStatus.pending, nullable=False, index=True
+    )
+    reject_reason: Mapped[str | None] = mapped_column(String(500))
+    uses_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    author: Mapped["User"] = relationship(lazy="noload")

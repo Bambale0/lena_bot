@@ -48,6 +48,7 @@ def admin_menu_kb():
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
     builder.button(text="💰 Начислить кредиты", callback_data="adm:add_credits")
     builder.button(text="🚫 Бан / Разбан", callback_data="adm:ban")
+    builder.button(text="🗂 Промпты (модерация)", callback_data="adm:prompts")
     builder.button(text="📢 Рассылка", callback_data="adm:broadcast")
     builder.adjust(2)
     return builder.as_markup()
