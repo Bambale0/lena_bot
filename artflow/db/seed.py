@@ -35,6 +35,12 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "grok-video",      "display_name": "🐦 Grok Video",        "gen_type": GenerationType.video, "credits": 40},
     {"model_key": "kling-3.0",       "display_name": "⚡ Kling 3.0",         "gen_type": GenerationType.video, "credits": 30},
     {"model_key": "kling-2.6-motion","display_name": "🎭 Kling 2.6 Motion",  "gen_type": GenerationType.video, "credits": 35},
+    # Midjourney
+    {"model_key": "midjourney-imagine",  "display_name": "🖌️ MJ Imagine",  "gen_type": GenerationType.image, "credits": 10},
+    {"model_key": "midjourney-action",   "display_name": "🖌️ MJ Action",   "gen_type": GenerationType.image, "credits": 3},
+    {"model_key": "midjourney-blend",    "display_name": "🖼️ MJ Blend",    "gen_type": GenerationType.image, "credits": 12},
+    {"model_key": "midjourney-describe", "display_name": "🔍 MJ Describe",  "gen_type": GenerationType.image, "credits": 5},
+    {"model_key": "midjourney-video",    "display_name": "🎞️ MJ Video",    "gen_type": GenerationType.video,  "credits": 15},
 ]
 
 
@@ -65,12 +71,17 @@ async def _seed_price_plans(session: AsyncSession) -> None:
 
 
 async def _seed_model_costs(session: AsyncSession) -> None:
-    count = (await session.execute(select(func.count()).select_from(ModelCost))).scalar_one()
-    if count > 0:
+    """Upsert: добавляет только отсутствующие модели (идемпотентно)."""
+    existing_keys: set[str] = set(
+        (await session.execute(select(ModelCost.model_key))).scalars().all()
+    )
+    new_models = [d for d in DEFAULT_MODEL_COSTS if d["model_key"] not in existing_keys]
+
+    if not new_models:
         return
 
-    logger.info("Seed: вставляем %d моделей...", len(DEFAULT_MODEL_COSTS))
-    for data in DEFAULT_MODEL_COSTS:
+    logger.info("Seed: вставляем %d новых моделей...", len(new_models))
+    for data in new_models:
         session.add(ModelCost(
             model_key=data["model_key"],
             display_name=data["display_name"],

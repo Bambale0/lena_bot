@@ -10,6 +10,9 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🎬 Видео", callback_data="menu:video"),
     )
     builder.row(
+        InlineKeyboardButton(text="🖌️ Midjourney", callback_data="menu:mj"),
+    )
+    builder.row(
         InlineKeyboardButton(text="💎 Баланс", callback_data="menu:balance"),
         InlineKeyboardButton(text="💳 Пополнить", callback_data="menu:topup"),
     )
