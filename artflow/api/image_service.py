@@ -62,19 +62,23 @@ async def generate_image(
     image_bytes: bytes | None = None,
     image_url: str | None = None,       # для img2img (URL или Gemini)
     image_mime: str = "image/jpeg",
-    aspect_ratio: str = "1:1",
+    aspect_ratio: str | None = None,    # для Wan 2.7 Pro / Gemini
     size: str = "1K",                   # только Gemini: 512px / 1K / 2K / 4K
+    n: int = 1,                         # количество изображений (Wan 2.7 Pro)
 ) -> ImageResult:
     if model in _GEMINI_MODELS:
         return await _gemini_generate(
-            model, prompt, image_bytes=image_bytes, image_mime=image_mime, aspect_ratio=aspect_ratio, size=size
+            model, prompt, image_bytes=image_bytes, image_mime=image_mime,
+            aspect_ratio=aspect_ratio or "1:1", size=size
         )
     elif model == ImageModel.SEEDREAM_45:
         return await _seedream_generate(prompt, image_url)
     elif model == ImageModel.GPT_IMAGE_1:
         return await _gpt_image_generate(prompt)
     elif model == ImageModel.WAN_27_PRO:
-        return await _wan27pro_generate(prompt, image_url=image_url)
+        return await _wan27pro_generate(
+            prompt, image_url=image_url, aspect_ratio=aspect_ratio or "1:1", n=n
+        )
     else:
         return await _standard_generate(model.value, prompt)
 
@@ -213,7 +217,12 @@ async def _wan27pro_generate(
 ) -> "ImageResult":
     """Async image generation via kie.ai — returns task_id."""
     from api import kieai_client
-    inp: dict = {"prompt": prompt, "resolution": resolution, "n": n, "watermark": False}
+    inp: dict = {
+        "prompt": prompt,
+        "resolution": resolution,
+        "n": max(1, min(4, n)),
+        "watermark": False,
+    }
     urls = input_urls or ([image_url] if image_url else None)
     if urls:
         inp["input_urls"] = urls

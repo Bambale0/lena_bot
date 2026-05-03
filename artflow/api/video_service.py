@@ -64,9 +64,9 @@ class VideoResult:
     provider: str  # kling | grok | grok2 | seedance | veo | happyhorse
 
 
-# ── Models that need image bytes (not URL) for i2v ────────────────────────────
+# ── Capability sets ───────────────────────────────────────────────────────────
+
 NEEDS_IMAGE_BYTES: set[VideoModel] = {VideoModel.VEO_31_PRO}
-# Models that support i2v at all
 SUPPORTS_I2V: set[VideoModel] = {
     VideoModel.KLING_30,
     VideoModel.KLING_26_MOTION,
@@ -77,6 +77,8 @@ SUPPORTS_I2V: set[VideoModel] = {
 }
 
 
+# ── Entry point ───────────────────────────────────────────────────────────────
+
 async def generate_video(
     model: VideoModel,
     prompt: str,
@@ -84,21 +86,23 @@ async def generate_video(
     image_bytes: bytes | None = None,
     motion: MotionDirection | None = None,
     duration: int = 5,
+    aspect_ratio: str | None = None,
+    resolution: str | None = None,
 ) -> VideoResult:
-    if model in (VideoModel.KLING_30,):
-        return await _kling_generate(model, prompt, image_url, duration)
+    if model == VideoModel.KLING_30:
+        return await _kling_generate(model, prompt, image_url, duration, aspect_ratio)
     elif model == VideoModel.KLING_26_MOTION:
-        return await _kling_motion_generate(prompt, image_url, motion)
+        return await _kling_motion_generate(prompt, image_url, motion, duration)
     elif model == VideoModel.GROK_VIDEO:
         return await _grok_generate(prompt)
     elif model == VideoModel.GROK_IMAGINE:
-        return await _grok_imagine_generate(prompt, duration)
+        return await _grok_imagine_generate(prompt, duration, aspect_ratio)
     elif model == VideoModel.SEEDANCE_20:
-        return await _seedance_generate(prompt, image_url, duration)
+        return await _seedance_generate(prompt, image_url, duration, aspect_ratio)
     elif model == VideoModel.VEO_31_PRO:
-        return await _veo_generate(prompt, image_url, image_bytes)
+        return await _veo_generate(prompt, image_url, image_bytes, aspect_ratio)
     elif model in (VideoModel.HAPPYHORSE_T2V, VideoModel.HAPPYHORSE_I2V):
-        return await _happyhorse_generate(model, prompt, image_url, duration)
+        return await _happyhorse_generate(model, prompt, image_url, duration, aspect_ratio, resolution)
     else:
         raise ValueError(f"Unknown video model: {model}")
 
@@ -106,7 +110,11 @@ async def generate_video(
 # ── Kling ─────────────────────────────────────────────────────────────────────
 
 async def _kling_generate(
-    model: VideoModel, prompt: str, image_url: str | None, duration: int
+    model: VideoModel,
+    prompt: str,
+    image_url: str | None,
+    duration: int,
+    aspect_ratio: str | None,
 ) -> VideoResult:
     version_map = {VideoModel.KLING_30: "2.0"}
     version = version_map.get(model, "1.6")
@@ -127,6 +135,8 @@ async def _kling_generate(
             "duration": str(duration),
             "mode": "pro",
         }
+    if aspect_ratio:
+        payload["aspect_ratio"] = aspect_ratio
     resp = await comet_client.post(path, payload)
     task_id = resp["data"]["task_id"]
     logger.info("Kling task: %s", task_id)
@@ -134,12 +144,15 @@ async def _kling_generate(
 
 
 async def _kling_motion_generate(
-    prompt: str, image_url: str | None, motion: MotionDirection | None
+    prompt: str,
+    image_url: str | None,
+    motion: MotionDirection | None,
+    duration: int = 5,
 ) -> VideoResult:
     payload: dict[str, Any] = {
         "model_name": "kling-v1.6",
         "prompt": prompt,
-        "duration": "5",
+        "duration": str(duration),
         "mode": "pro",
     }
     if image_url:
@@ -196,19 +209,21 @@ async def poll_grok_status(task_id: str) -> str | None:
     return None
 
 
-# ── Grok Imagine (new endpoint /grok/v1/) ─────────────────────────────────────
+# ── Grok Imagine ──────────────────────────────────────────────────────────────
 
-async def _grok_imagine_generate(prompt: str, duration: int = 10) -> VideoResult:
-    resp = await comet_client.post(
-        "/grok/v1/videos/generations",
-        {
-            "model": "grok-imagine-video",
-            "prompt": prompt,
-            "duration": duration,
-            "aspect_ratio": "16:9",
-            "resolution": "720p",
-        },
-    )
+async def _grok_imagine_generate(
+    prompt: str,
+    duration: int = 10,
+    aspect_ratio: str | None = None,
+) -> VideoResult:
+    payload: dict[str, Any] = {
+        "model": "grok-imagine-video",
+        "prompt": prompt,
+        "duration": duration,
+        "aspect_ratio": aspect_ratio or "16:9",
+        "resolution": "720p",
+    }
+    resp = await comet_client.post("/grok/v1/videos/generations", payload)
     task_id = str(resp.get("request_id") or resp.get("id") or resp.get("data", {}).get("taskId"))
     logger.info("Grok Imagine task: %s", task_id)
     return VideoResult(task_id=task_id, provider="grok2")
@@ -225,22 +240,23 @@ async def poll_grok2_status(task_id: str) -> str | None:
     return None
 
 
-# ── Seedance 2.0 (CometAPI /v1/videos multipart) ─────────────────────────────
+# ── Seedance 2.0 ──────────────────────────────────────────────────────────────
 
 async def _seedance_generate(
-    prompt: str, image_url: str | None, duration: int = 5
+    prompt: str,
+    image_url: str | None,
+    duration: int = 5,
+    aspect_ratio: str | None = None,
 ) -> VideoResult:
     fields: dict[str, Any] = {
         "prompt": prompt,
         "model": "doubao-seedance-2-0",
         "seconds": str(duration),
-        "size": "16:9",
+        "size": aspect_ratio or "16:9",
     }
-    # Seedance accepts image_url as a form field for i2v
     if image_url:
         fields["image_url"] = image_url
 
-    # Send as multipart via files-tuple format
     files = {k: (None, v) for k, v in fields.items()}
     resp = await comet_client.post_multipart("/v1/videos", data={}, files=files)
     task_id = str(resp.get("id") or resp.get("task_id") or resp.get("data", {}).get("taskId"))
@@ -252,37 +268,40 @@ async def poll_seedance_status(task_id: str) -> str | None:
     resp = await comet_client.get(f"/v1/videos/{task_id}")
     status = str(resp.get("status", "")).lower()
     if status in ("success", "completed"):
-        return resp.get("video_url") or resp.get("url") or f"https://api.cometapi.com/v1/videos/{task_id}/content"
+        return (
+            resp.get("video_url")
+            or resp.get("url")
+            or f"https://api.cometapi.com/v1/videos/{task_id}/content"
+        )
     if status in ("failed", "error"):
         raise RuntimeError(f"Seedance failed: {resp.get('error', 'unknown error')}")
     return None
 
 
-# ── Veo 3.1 Pro (CometAPI /v1/videos multipart+file) ─────────────────────────
+# ── Veo 3.1 Pro ───────────────────────────────────────────────────────────────
 
 async def _veo_generate(
     prompt: str,
     image_url: str | None = None,
     image_bytes: bytes | None = None,
+    aspect_ratio: str | None = None,
 ) -> VideoResult:
+    # Veo uses "16x9" notation
+    size = (aspect_ratio or "16:9").replace(":", "x")
     if image_bytes:
-        # i2v: upload image as multipart file
         files: dict[str, Any] = {
             "prompt": (None, prompt),
             "model": (None, "veo3.1-pro"),
-            "size": (None, "16x9"),
+            "size": (None, size),
             "input_reference": ("reference.jpg", image_bytes, "image/jpeg"),
         }
-        resp = await comet_client.post_multipart("/v1/videos", data={}, files=files)
     else:
-        # t2v: plain JSON also accepted by CometAPI for Veo
         files = {
             "prompt": (None, prompt),
             "model": (None, "veo3.1-pro"),
-            "size": (None, "16x9"),
+            "size": (None, size),
         }
-        resp = await comet_client.post_multipart("/v1/videos", data={}, files=files)
-
+    resp = await comet_client.post_multipart("/v1/videos", data={}, files=files)
     task_id = str(resp.get("id") or resp.get("task_id") or resp.get("data", {}).get("taskId"))
     logger.info("Veo task: %s", task_id)
     return VideoResult(task_id=task_id, provider="veo")
@@ -293,34 +312,40 @@ async def poll_veo_status(task_id: str) -> str | None:
     data = resp.get("data", resp)
     status = str(data.get("status", "")).lower()
     if status in ("success", "completed"):
-        return data.get("video_url") or data.get("url") or f"https://api.cometapi.com/v1/videos/{task_id}/content"
+        return (
+            data.get("video_url")
+            or data.get("url")
+            or f"https://api.cometapi.com/v1/videos/{task_id}/content"
+        )
     if status in ("failed", "error"):
         raise RuntimeError(f"Veo failed: {data.get('error', 'unknown')}")
     return None
 
 
-# ── HappyHorse (aivideoapi.ai) ────────────────────────────────────────────────
+# ── HappyHorse ────────────────────────────────────────────────────────────────
 
 async def _happyhorse_generate(
     model: VideoModel,
     prompt: str,
     image_url: str | None,
     duration: int,
+    aspect_ratio: str | None,
+    resolution: str | None,
 ) -> VideoResult:
     from api import aivideoapi_client as hh
-    payload: dict[str, Any] = {
-        "model": model.value,
-        "input": {
-            "prompt": prompt,
-            "resolution": "720p",
-            "duration": max(3, min(15, duration)),
-        },
+    dur = max(3, min(15, duration))
+    inp: dict[str, Any] = {
+        "prompt": prompt,
+        "resolution": resolution or "720p",
+        "duration": dur,
     }
-    if model == VideoModel.HAPPYHORSE_I2V and image_url:
-        payload["input"]["image_urls"] = [image_url]
-    elif model == VideoModel.HAPPYHORSE_T2V:
-        payload["input"]["aspect_ratio"] = "16:9"
+    if model == VideoModel.HAPPYHORSE_I2V:
+        if image_url:
+            inp["image_urls"] = [image_url]
+    else:
+        inp["aspect_ratio"] = aspect_ratio or "16:9"
 
+    payload: dict[str, Any] = {"model": model.value, "input": inp}
     resp = await hh.post("/v1/videos/generations", payload)
     task_id = str(resp.get("data", {}).get("taskId") or resp.get("taskId"))
     logger.info("HappyHorse task: %s", task_id)
@@ -335,22 +360,22 @@ async def poll_happyhorse_status(task_id: str) -> str | None:
         urls = resp.get("output", {}).get("urls", [])
         if urls:
             return urls[0]
-        raise RuntimeError("HappyHorse: completed but no URL in response")
+        raise RuntimeError("HappyHorse: completed but no URL")
     if status == "failed":
         err = resp.get("error", {}).get("message", "unknown error")
         raise RuntimeError(f"HappyHorse failed: {err}")
     return None
 
 
-# ── Dispatch map: provider -> poll function ───────────────────────────────────
+# ── Dispatch map ──────────────────────────────────────────────────────────────
 
 POLL_FN_MAP = {
-    "kling":       poll_kling_status,
-    "grok":        poll_grok_status,
-    "grok2":       poll_grok2_status,
-    "seedance":    poll_seedance_status,
-    "veo":         poll_veo_status,
-    "happyhorse":  poll_happyhorse_status,
+    "kling":      poll_kling_status,
+    "grok":       poll_grok_status,
+    "grok2":      poll_grok2_status,
+    "seedance":   poll_seedance_status,
+    "veo":        poll_veo_status,
+    "happyhorse": poll_happyhorse_status,
 }
 
 

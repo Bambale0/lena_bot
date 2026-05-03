@@ -1,40 +1,41 @@
-# bot/states/image_gen.py
+# bot/states/__init__.py
 from aiogram.fsm.state import State, StatesGroup
 
 
 class ImageGenFSM(StatesGroup):
     model_select = State()
+    mode_select = State()          # text / image (for Wan i2i)
+    aspect_ratio_select = State()  # for Wan 2.7 Pro
+    count_select = State()         # for Wan 2.7 Pro
+    image_upload = State()         # optional img2img
     prompt_input = State()
-    image_upload = State()   # optional img2img
     generating = State()
 
 
-# bot/states/video_gen.py
 class VideoGenFSM(StatesGroup):
     model_select = State()
-    mode_select = State()     # text / image
-    motion_select = State()   # only for Kling 2.6 Motion
-    image_upload = State()    # optional
+    mode_select = State()           # text / image
+    image_upload = State()          # optional i2v
+    params_select = State()         # duration + aspect_ratio + resolution
+    motion_select = State()         # only for Kling 2.6 Motion
     prompt_input = State()
     generating = State()
 
 
-# bot/states/midjourney.py
 class MidjourneyFSM(StatesGroup):
     # Imagine flow
-    bot_type_select = State()      # MID_JOURNEY / NIJI_JOURNEY
-    speed_select = State()         # FAST / RELAX / TURBO
+    bot_type_select = State()
+    speed_select = State()
     prompt_input = State()
-    image_upload = State()         # optional img2img
+    image_upload = State()
     generating = State()
 
-    viewing_result = State()       # result shown + action buttons
-    action_polling = State()       # button clicked, polling new task
-
-    waiting_modal_input = State()  # Custom Zoom / Vary Region
+    viewing_result = State()
+    action_polling = State()
+    waiting_modal_input = State()
 
     # Blend flow
-    blend_collecting = State()     # collecting 2-5 images
+    blend_collecting = State()
     blend_generating = State()
 
     # Describe flow
@@ -42,7 +43,7 @@ class MidjourneyFSM(StatesGroup):
     describe_polling = State()
 
     # MJ Video flow
-    video_upload = State()         # upload first frame
-    video_speed_select = State()   # low / high
+    video_upload = State()
+    video_speed_select = State()
     video_prompt = State()
     video_generating = State()

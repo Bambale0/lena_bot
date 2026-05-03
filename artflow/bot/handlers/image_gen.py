@@ -6,13 +6,20 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, PhotoSize
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, polling
 from api.image_service import ImageModel
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
-from bot.keyboards.models import after_generation_kb, image_models_kb
+from bot.keyboards.models import (
+    IMAGE_CAPS,
+    after_generation_kb,
+    image_aspect_ratio_kb,
+    image_count_kb,
+    image_mode_kb,
+    image_models_kb,
+)
 from bot.states import ImageGenFSM
 from db import repository as repo
 from db.models import GenerationType, User
@@ -20,6 +27,10 @@ from db.models import GenerationType, User
 logger = logging.getLogger(__name__)
 router = Router(name="image_gen")
 
+_MODELS_WITH_MODES = {ImageModel.WAN_27_PRO, ImageModel.SEEDREAM_3}
+
+
+# ── Model select ──────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "menu:image")
 async def cb_image_menu(
@@ -52,17 +63,191 @@ async def cb_model_selected(
         )
         return
 
-    await state.update_data(model_key=model_key, credits=model_cost.credits)
-    await state.set_state(ImageGenFSM.prompt_input)
+    await state.update_data(
+        model_key=model_key,
+        credits=model_cost.credits,
+        aspect_ratio=None,
+        count=1,
+        image_file_id=None,
+    )
 
+    caps = IMAGE_CAPS.get(model_key, {})
+    modes = caps.get("modes", ["text"])
+
+    if len(modes) > 1:
+        await state.set_state(ImageGenFSM.mode_select)
+        await call.message.edit_text(  # type: ignore[union-attr]
+            f"✅ <b>{model_cost.display_name}</b> ({model_cost.credits} кр)\n\n"
+            "Выбери режим:",
+            reply_markup=image_mode_kb(model_key),
+        )
+    else:
+        await _go_to_ratio_or_prompt(call, state, model_key, model_cost.display_name)
+    await call.answer()
+
+
+async def _go_to_ratio_or_prompt(
+    call: CallbackQuery, state: FSMContext, model_key: str, display_name: str
+) -> None:
+    caps = IMAGE_CAPS.get(model_key, {})
+    data = await state.get_data()
+    mode = data.get("mode", "text")
+
+    if caps.get("aspect_ratios") and mode == "text":
+        await state.set_state(ImageGenFSM.aspect_ratio_select)
+        await call.message.edit_text(  # type: ignore[union-attr]
+            f"✅ <b>{display_name}</b>\n\n📐 Выбери соотношение сторон:",
+            reply_markup=image_aspect_ratio_kb(model_key),
+        )
+    elif caps.get("counts") and len(caps["counts"]) > 1 and mode == "text":
+        await state.set_state(ImageGenFSM.count_select)
+        await call.message.edit_text(  # type: ignore[union-attr]
+            f"✅ <b>{display_name}</b>\n\n🔢 Сколько изображений сгенерировать?",
+            reply_markup=image_count_kb(),
+        )
+    else:
+        await state.set_state(ImageGenFSM.prompt_input)
+        await call.message.edit_text(  # type: ignore[union-attr]
+            f"✅ <b>{display_name}</b>\n\n"
+            "✍️ Введи промпт:\n\n"
+            "<i>Пример: futuristic city at sunset, cinematic, 4k, detailed</i>",
+            reply_markup=back_to_menu_kb(),
+        )
+
+
+# ── Mode select ───────────────────────────────────────────────────────────────
+
+@router.callback_query(ImageGenFSM.mode_select, F.data.startswith("img_mode:"))
+async def cb_image_mode(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    parts = call.data.split(":")  # type: ignore[union-attr]
+    mode = parts[1]
+    model_key = parts[2]
+
+    await state.update_data(mode=mode)
+    model_cost = await repo.get_model_cost(session, model_key)
+    display_name = model_cost.display_name if model_cost else model_key
+
+    if mode == "image":
+        await state.set_state(ImageGenFSM.image_upload)
+        await call.message.edit_text(  # type: ignore[union-attr]
+            "🖼️ Загрузи референс-изображение (отправь фото в чат):",
+            reply_markup=back_to_menu_kb(),
+        )
+    else:
+        await _go_to_ratio_or_prompt(call, state, model_key, display_name)
+    await call.answer()
+
+
+# ── Aspect ratio select ───────────────────────────────────────────────────────
+
+@router.callback_query(ImageGenFSM.aspect_ratio_select, F.data.startswith("img_ratio:"))
+async def cb_image_ratio(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    ratio = call.data.split(":")[1]  # type: ignore[union-attr]
+    await state.update_data(aspect_ratio=ratio)
+
+    data = await state.get_data()
+    model_key = data["model_key"]
+    caps = IMAGE_CAPS.get(model_key, {})
+    model_cost = await repo.get_model_cost(session, model_key)
+    display_name = model_cost.display_name if model_cost else model_key
+
+    if caps.get("counts") and len(caps["counts"]) > 1:
+        await state.set_state(ImageGenFSM.count_select)
+        await call.message.edit_text(  # type: ignore[union-attr]
+            f"✅ <b>{display_name}</b> · {ratio}\n\n🔢 Сколько изображений?",
+            reply_markup=image_count_kb(),
+        )
+    else:
+        await state.set_state(ImageGenFSM.prompt_input)
+        await call.message.edit_text(  # type: ignore[union-attr]
+            f"✅ <b>{display_name}</b> · {ratio}\n\n"
+            "✍️ Введи промпт:",
+            reply_markup=back_to_menu_kb(),
+        )
+    await call.answer(f"Соотношение: {ratio}")
+
+
+@router.callback_query(ImageGenFSM.aspect_ratio_select, F.data.startswith("img_back:mode:"))
+async def cb_image_back_to_mode(
+    call: CallbackQuery, state: FSMContext
+) -> None:
+    model_key = call.data.split(":")[-1]  # type: ignore[union-attr]
+    await state.set_state(ImageGenFSM.mode_select)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"✅ Модель: <b>{model_cost.display_name}</b> ({model_cost.credits} кр)\n\n"
-        "Введи промпт на английском для лучшего результата.\n\n"
-        "<i>Пример: futuristic city at sunset, cinematic, 4k, detailed</i>",
-        reply_markup=back_to_menu_kb(),
+        "Выбери режим:",
+        reply_markup=image_mode_kb(model_key),
     )
     await call.answer()
 
+
+# ── Count select ──────────────────────────────────────────────────────────────
+
+@router.callback_query(ImageGenFSM.count_select, F.data.startswith("img_count:"))
+async def cb_image_count(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    count = int(call.data.split(":")[1])  # type: ignore[union-attr]
+    await state.update_data(count=count)
+
+    data = await state.get_data()
+    model_key = data["model_key"]
+    model_cost = await repo.get_model_cost(session, model_key)
+    display_name = model_cost.display_name if model_cost else model_key
+    ratio_str = f" · {data['aspect_ratio']}" if data.get("aspect_ratio") else ""
+
+    await state.set_state(ImageGenFSM.prompt_input)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"✅ <b>{display_name}</b>{ratio_str} · {count} изображ.\n\n"
+        "✍️ Введи промпт:",
+        reply_markup=back_to_menu_kb(),
+    )
+    await call.answer(f"{count} изображений")
+
+
+@router.callback_query(ImageGenFSM.count_select, F.data == "img_back:ratio")
+async def cb_count_back_to_ratio(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    data = await state.get_data()
+    model_key = data["model_key"]
+    model_cost = await repo.get_model_cost(session, model_key)
+    display_name = model_cost.display_name if model_cost else model_key
+
+    await state.set_state(ImageGenFSM.aspect_ratio_select)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"✅ <b>{display_name}</b>\n\n📐 Выбери соотношение сторон:",
+        reply_markup=image_aspect_ratio_kb(model_key),
+    )
+    await call.answer()
+
+
+# ── Image upload (img2img) ────────────────────────────────────────────────────
+
+@router.message(ImageGenFSM.image_upload, F.photo)
+async def handle_reference_upload(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    best_photo = sorted(message.photo, key=lambda p: p.file_size, reverse=True)  # type: ignore[union-attr]
+    file_id = best_photo[0].file_id
+    await state.update_data(image_file_id=file_id)
+
+    data = await state.get_data()
+    model_key = data["model_key"]
+    model_cost = await repo.get_model_cost(session, model_key)
+    display_name = model_cost.display_name if model_cost else model_key
+
+    await state.set_state(ImageGenFSM.prompt_input)
+    await message.answer(
+        f"✅ Референс загружен!\n\n✍️ Введи промпт:",
+        reply_markup=back_to_menu_kb(),
+    )
+
+
+# ── Prompt input ──────────────────────────────────────────────────────────────
 
 @router.message(ImageGenFSM.prompt_input, F.text)
 async def handle_prompt(
@@ -75,52 +260,66 @@ async def handle_prompt(
     data = await state.get_data()
     model_key: str = data["model_key"]
     credits: int = data["credits"]
+    aspect_ratio: str | None = data.get("aspect_ratio")
+    count: int = data.get("count", 1)
+    image_file_id: str | None = data.get("image_file_id")
     prompt = message.text.strip()  # type: ignore[union-attr]
 
-    # Списываем кредиты
+    image_url: str | None = None
+    if image_file_id:
+        file = await bot.get_file(image_file_id)
+        image_url = f"https://api.telegram.org/file/bot{bot.token}/{file.file_path}"
+
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await message.answer("❌ Недостаточно кредитов.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
-    # Создаём запись генерации
     gen = await repo.create_generation(
         session, db_user.id, model_key, GenerationType.image, prompt, credits
     )
 
     await state.set_state(ImageGenFSM.generating)
+    params_str = " · ".join(filter(None, [
+        aspect_ratio,
+        f"{count} шт" if count > 1 else None,
+    ]))
     status_msg = await message.answer(
-        f"⏳ Генерирую изображение...\n"
-        f"<code>{model_key}</code> · подожди немного"
+        f"⏳ <b>Генерирую изображение...</b>\n"
+        f"<code>{model_key}</code>"
+        + (f" · {params_str}" if params_str else "")
     )
 
-    # Запускаем генерацию
     try:
         model = ImageModel(model_key)
-        result = await image_service.generate_image(model, prompt)
+        result = await image_service.generate_image(
+            model, prompt,
+            image_url=image_url,
+            aspect_ratio=aspect_ratio,
+            n=count,
+        )
     except Exception as e:
         logger.error("Image generation error: %s", e)
         await repo.fail_generation(session, gen.id, str(e))
-        await repo.add_credits(session, db_user.id, credits)  # возврат кредитов
+        await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text("❌ Ошибка генерации. Кредиты возвращены.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
     if not result.is_async:
-        # Синхронный результат — сразу отправляем
-        result_ref = result.url or "gemini_inline"
         await _send_image_result(bot, message.chat.id, result, gen.id, prompt, status_msg)
-        await repo.finish_generation(session, gen.id, result_ref)
+        await repo.finish_generation(session, gen.id, result.url or "inline")
         await state.clear()
     else:
-        # Асинхронный (seedream) — запускаем polling
         await repo.update_generation_task(session, gen.id, result.task_id)
 
         async def on_success(url: str) -> None:
             from api.image_service import ImageResult as IR
             await repo.finish_generation(session, gen.id, url)
-            await _send_image_result(bot, message.chat.id, IR(is_async=False, url=url), gen.id, prompt, status_msg)
+            await _send_image_result(
+                bot, message.chat.id, IR(is_async=False, url=url), gen.id, prompt, status_msg
+            )
 
         async def on_failure(err: str) -> None:
             await repo.fail_generation(session, gen.id, err)
@@ -156,12 +355,11 @@ async def _send_image_result(
     except Exception:
         pass
 
-    caption = f"✅ Готово!\n\n<i>{prompt[:200]}</i>"
+    caption = f"✅ <b>Готово!</b>\n\n<i>{prompt[:200]}</i>"
     kb = after_generation_kb(gen_id, "image")
 
     if result.image_bytes:
-        # Gemini — отправляем как байты
-        ext = "png" if "png" in result.mime_type else "jpg"
+        ext = "png" if "png" in (result.mime_type or "") else "jpg"
         photo = BufferedInputFile(result.image_bytes, filename=f"artflow_{gen_id}.{ext}")
     else:
         photo = result.url  # type: ignore[assignment]
@@ -169,15 +367,13 @@ async def _send_image_result(
     await bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, reply_markup=kb)
 
 
-# ── Регенерация ───────────────────────────────────────────────────────────────
+# ── Regeneration ──────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("regen:image:"))
 async def cb_regen_image(
     call: CallbackQuery, session: AsyncSession, state: FSMContext
 ) -> None:
-    """Повторная генерация с той же моделью и промптом."""
     gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
-    # Получаем предыдущую генерацию
     from sqlalchemy import select
     from db.models import Generation
     result = await session.execute(select(Generation).where(Generation.id == gen_id))
@@ -185,10 +381,7 @@ async def cb_regen_image(
     if not prev_gen:
         await call.answer("Генерация не найдена", show_alert=True)
         return
-
     await state.update_data(model_key=prev_gen.model, credits=prev_gen.credits_spent)
     await state.set_state(ImageGenFSM.prompt_input)
-    # Эмулируем ввод промпта
-    await state.update_data(regen_prompt=prev_gen.prompt)
     await call.message.answer(prev_gen.prompt)  # type: ignore[union-attr]
     await call.answer()
