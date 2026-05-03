@@ -26,6 +26,7 @@ from db.session import engine
 from db.models import Base
 from payments.cryptobot import verify_webhook_signature
 from db import repository as repo
+from db.seed import run_seed
 from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ async def lifespan(app: FastAPI):
     # DB tables (для prod используй alembic)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await run_seed()
 
     # Webhook
     webhook_url = f"{settings.WEBHOOK_URL}{settings.WEBHOOK_PATH}"

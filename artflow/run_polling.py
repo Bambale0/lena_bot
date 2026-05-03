@@ -24,6 +24,7 @@ from core.config import settings
 from core.logger import setup_logging
 from db.session import engine
 from db.models import Base
+from db.seed import run_seed
 
 
 async def _make_storage() -> tuple[BaseStorage, object | None]:
@@ -101,6 +102,7 @@ async def main() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    await run_seed()
     await bot.delete_webhook(drop_pending_updates=True)
     get_client()
     logger.info("Bot started. Press Ctrl+C to stop.")
