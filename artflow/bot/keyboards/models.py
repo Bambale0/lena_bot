@@ -4,58 +4,87 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from api.image_service import ImageModel
+from api.image_service import ImageModel, MODEL_ASPECT_RATIOS, _SUPPORTS_IMG2IMG
 from api.video_service import MotionDirection, VideoModel
 from db.models import ModelCost
 
-# ── Capabilities registry ────────────────────────────────────────────────────
+# ── Video capabilities ────────────────────────────────────────────────────────
 
 VIDEO_CAPS: dict[str, dict] = {
-    VideoModel.KLING_30: {
-        "label": "Kling 3.0", "emoji": "🌊",
-        "modes": ["text", "image"],
+    VideoModel.KLING_26_T2V: {
+        "modes": ["text"],
         "duration_options": [5, 10],
-        "aspect_ratios": ["16:9", "9:16", "1:1"],
+        "aspect_ratios": ["1:1", "16:9", "9:16"],
         "has_resolution": False,
     },
-    VideoModel.KLING_26_MOTION: {
-        "label": "Kling 2.6 Motion", "emoji": "🌊",
-        "modes": ["text", "image"],
-        "duration_options": [5],
-        "aspect_ratios": ["16:9"],
-        "has_resolution": False,
-        "has_motion": True,
-    },
-    VideoModel.GROK_IMAGINE: {
-        "label": "Grok Imagine Video", "emoji": "⚡",
-        "modes": ["text"],
-        "duration_options": [5, 10, 15],
-        "aspect_ratios": ["16:9"],
-        "has_resolution": False,
-    },
-    VideoModel.GROK_VIDEO: {
-        "label": "Grok Video", "emoji": "⚡",
-        "modes": ["text"],
-        "duration_options": [],
+    VideoModel.KLING_26_I2V: {
+        "modes": ["image"],
+        "duration_options": [5, 10],
         "aspect_ratios": [],
         "has_resolution": False,
     },
-    VideoModel.SEEDANCE_20: {
-        "label": "Seedance 2.0", "emoji": "🌸",
+    VideoModel.KLING_26_MOTION: {
+        "modes": ["motion"],
+        "duration_options": [],
+        "aspect_ratios": [],
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
+    },
+    VideoModel.KLING_30: {
+        "modes": ["text", "image"],
+        "duration_options": [5, 10],
+        "aspect_ratios": [],
+        "has_resolution": False,
+    },
+    VideoModel.KLING_30_MOTION: {
+        "modes": ["motion"],
+        "duration_options": [],
+        "aspect_ratios": [],
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
+    },
+    VideoModel.WAN_27_T2V: {
+        "modes": ["text"],
+        "duration_options": [3, 5, 10, 15],
+        "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
+    },
+    VideoModel.WAN_27_I2V: {
+        "modes": ["image"],
+        "duration_options": [3, 5, 10, 15],
+        "aspect_ratios": [],
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
+    },
+    VideoModel.SEEDANCE_2: {
+        "modes": ["text", "image"],
+        "duration_options": [3, 5, 10],
+        "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
+        "has_resolution": True,
+        "resolutions": ["480p", "720p", "1080p"],
+    },
+    VideoModel.SEEDANCE_2_FAST: {
         "modes": ["text", "image"],
         "duration_options": [3, 5, 10],
         "aspect_ratios": ["16:9", "9:16", "1:1"],
-        "has_resolution": False,
+        "has_resolution": True,
+        "resolutions": ["480p", "720p"],
     },
-    VideoModel.VEO_31_PRO: {
-        "label": "Veo 3.1 Pro", "emoji": "🌿",
-        "modes": ["text", "image"],
+    VideoModel.GROK_T2V: {
+        "modes": ["text"],
+        "duration_options": [6, 10],
+        "aspect_ratios": ["16:9", "1:1", "9:16"],
+        "has_resolution": True,
+        "resolutions": ["480p", "720p"],
+    },
+    VideoModel.GROK_I2V: {
+        "modes": ["image"],
         "duration_options": [],
-        "aspect_ratios": ["16:9"],
+        "aspect_ratios": ["16:9", "1:1", "9:16"],
         "has_resolution": False,
     },
     VideoModel.HAPPYHORSE_T2V: {
-        "label": "HappyHorse T2V", "emoji": "🎠",
         "modes": ["text"],
         "duration_options": [3, 5, 8, 10, 15],
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
@@ -63,25 +92,75 @@ VIDEO_CAPS: dict[str, dict] = {
         "resolutions": ["720p", "1080p"],
     },
     VideoModel.HAPPYHORSE_I2V: {
-        "label": "HappyHorse I2V", "emoji": "🎠",
         "modes": ["image"],
         "duration_options": [3, 5, 8, 10, 15],
         "aspect_ratios": [],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
     },
+    VideoModel.VEO_3_FAST: {
+        "modes": ["text", "image"],
+        "duration_options": [],
+        "aspect_ratios": ["16:9", "9:16"],
+        "has_resolution": False,
+    },
+    VideoModel.VEO_3: {
+        "modes": ["text", "image"],
+        "duration_options": [],
+        "aspect_ratios": ["16:9", "9:16"],
+        "has_resolution": False,
+    },
+    VideoModel.VEO_3_LITE: {
+        "modes": ["text", "image"],
+        "duration_options": [],
+        "aspect_ratios": ["16:9", "9:16"],
+        "has_resolution": False,
+    },
 }
 
+# ── Image capabilities ────────────────────────────────────────────────────────
+
 IMAGE_CAPS: dict[str, dict] = {
+    ImageModel.SEEDREAM_45: {
+        "modes": ["text"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.SEEDREAM_45, []),
+        "counts": [1],
+        "has_quality": True,
+    },
+    ImageModel.SEEDREAM_45_EDIT: {
+        "modes": ["image"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.SEEDREAM_45_EDIT, []),
+        "counts": [1],
+        "has_quality": True,
+    },
+    ImageModel.GROK_T2I: {
+        "modes": ["text"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.GROK_T2I, []),
+        "counts": [1],
+    },
+    ImageModel.GROK_I2I: {
+        "modes": ["image"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.GROK_I2I, []),
+        "counts": [1],
+    },
     ImageModel.WAN_27_PRO: {
         "modes": ["text", "image"],
-        "aspect_ratios": ["1:1", "16:9", "9:16", "4:3", "3:4"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.WAN_27_PRO, []),
         "counts": [1, 2, 4],
-        "resolutions": ["2K"],
     },
-    ImageModel.SEEDREAM_3: {
+    ImageModel.NANO_BANANA: {
+        "modes": ["text"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA, []),
+        "counts": [1],
+    },
+    ImageModel.NANO_BANANA_2: {
+        "modes": ["text"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_2, []),
+        "counts": [1],
+    },
+    ImageModel.NANO_BANANA_PRO: {
         "modes": ["text", "image"],
-        "aspect_ratios": [],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_PRO, []),
         "counts": [1],
     },
 }
@@ -105,11 +184,13 @@ def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
 
 def image_mode_kb(model_key: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="✍️ Текст → Изображение", callback_data=f"img_mode:text:{model_key}"),
-    )
     caps = IMAGE_CAPS.get(model_key, {})
-    if "image" in caps.get("modes", []):
+    modes = caps.get("modes", ["text"])
+    if "text" in modes:
+        builder.row(
+            InlineKeyboardButton(text="✍️ Текст → Изображение", callback_data=f"img_mode:text:{model_key}"),
+        )
+    if "image" in modes:
         builder.row(
             InlineKeyboardButton(text="🖼️ Референс → Изображение", callback_data=f"img_mode:image:{model_key}"),
         )
@@ -121,14 +202,12 @@ def image_aspect_ratio_kb(model_key: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     caps = IMAGE_CAPS.get(model_key, {})
     ratios = caps.get("aspect_ratios", [])
-    if ratios:
-        buttons = [
-            InlineKeyboardButton(text=r, callback_data=f"img_ratio:{r}")
-            for r in ratios
-        ]
-        builder.row(*buttons[:3])
-        if len(buttons) > 3:
-            builder.row(*buttons[3:])
+    buttons = [
+        InlineKeyboardButton(text=r, callback_data=f"img_ratio:{r}")
+        for r in ratios
+    ]
+    for i in range(0, len(buttons), 3):
+        builder.row(*buttons[i:i+3])
     builder.row(InlineKeyboardButton(text="← Назад", callback_data=f"img_back:mode:{model_key}"))
     return builder.as_markup()
 
@@ -139,8 +218,16 @@ def image_count_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="1 изображение", callback_data="img_count:1"),
         InlineKeyboardButton(text="2 изображения", callback_data="img_count:2"),
     )
+    builder.row(InlineKeyboardButton(text="4 изображения", callback_data="img_count:4"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="img_back:ratio"))
+    return builder.as_markup()
+
+
+def image_quality_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="4 изображения", callback_data="img_count:4"),
+        InlineKeyboardButton(text="🔷 2K (стандарт)", callback_data="img_quality:basic"),
+        InlineKeyboardButton(text="💎 4K (высокое)", callback_data="img_quality:high"),
     )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="img_back:ratio"))
     return builder.as_markup()
@@ -174,64 +261,68 @@ def video_mode_kb(model_key: str) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(text="🖼️ Фото → Видео", callback_data=f"vid_mode:image:{model_key}"),
         )
+    if "motion" in modes:
+        builder.row(
+            InlineKeyboardButton(text="🕺 Motion Control", callback_data=f"vid_mode:motion:{model_key}"),
+        )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
     return builder.as_markup()
 
 
-def video_params_kb(model_key: str, dur: int | None, ratio: str | None, res: str | None) -> InlineKeyboardMarkup:
-    """Dynamic params keyboard for a specific model."""
+def video_params_kb(
+    model_key: str,
+    dur: int | None,
+    ratio: str | None,
+    res: str | None,
+) -> InlineKeyboardMarkup:
     caps = VIDEO_CAPS.get(model_key, {})
     builder = InlineKeyboardBuilder()
 
     duration_options = caps.get("duration_options", [])
     if duration_options:
-        dur_buttons = []
-        for d in duration_options:
-            mark = "✅ " if dur == d else ""
-            dur_buttons.append(
-                InlineKeyboardButton(text=f"{mark}{d} сек", callback_data=f"vpar_dur:{d}")
+        dur_buttons = [
+            InlineKeyboardButton(
+                text=f"{'✅ ' if dur == d else ''}{d} сек",
+                callback_data=f"vpar_dur:{d}",
             )
-        builder.row(*dur_buttons[:4])
-        if len(dur_buttons) > 4:
-            builder.row(*dur_buttons[4:])
+            for d in duration_options
+        ]
+        for i in range(0, len(dur_buttons), 4):
+            builder.row(*dur_buttons[i:i+4])
 
     aspect_ratios = caps.get("aspect_ratios", [])
     if aspect_ratios:
-        ratio_buttons = []
-        for r in aspect_ratios:
-            mark = "✅ " if ratio == r else ""
-            ratio_buttons.append(
-                InlineKeyboardButton(text=f"{mark}{r}", callback_data=f"vpar_ratio:{r}")
+        ratio_buttons = [
+            InlineKeyboardButton(
+                text=f"{'✅ ' if ratio == r else ''}{r}",
+                callback_data=f"vpar_ratio:{r}",
             )
-        builder.row(*ratio_buttons[:3])
-        if len(ratio_buttons) > 3:
-            builder.row(*ratio_buttons[3:])
+            for r in aspect_ratios
+        ]
+        for i in range(0, len(ratio_buttons), 3):
+            builder.row(*ratio_buttons[i:i+3])
 
-    resolutions = caps.get("resolutions", [])
+    resolutions = caps.get("resolutions", []) if caps.get("has_resolution") else []
     if resolutions:
         res_buttons = [
             InlineKeyboardButton(
                 text=f"{'✅ ' if res == r else ''}{r}",
-                callback_data=f"vpar_res:{r}"
+                callback_data=f"vpar_res:{r}",
             )
             for r in resolutions
         ]
         builder.row(*res_buttons)
 
-    builder.row(
-        InlineKeyboardButton(text="▶️ Далее: Промпт", callback_data="vpar_next"),
-    )
+    builder.row(InlineKeyboardButton(text="▶️ Далее: Промпт", callback_data="vpar_next"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="vpar_back"))
     return builder.as_markup()
 
 
 def motion_control_kb() -> InlineKeyboardMarkup:
+    """Камера-управление для Kling 2.6 (legacy, не используется в motion-control flow)."""
     builder = InlineKeyboardBuilder()
     for direction in MotionDirection:
-        builder.button(
-            text=direction.label(),
-            callback_data=f"motion:{direction.value}",
-        )
+        builder.button(text=direction.label(), callback_data=f"motion:{direction.value}")
     builder.adjust(2)
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
     return builder.as_markup()

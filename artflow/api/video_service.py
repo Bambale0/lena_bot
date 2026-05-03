@@ -1,79 +1,97 @@
 # api/video_service.py
 """
-Video generation service.
+Video generation service — единый провайдер KIE.AI.
 
-Models and providers:
-  kling-3.0            -> CometAPI  /kling/v1/  (provider: kling)
-  kling-2.6-motion     -> CometAPI  /kling/v1/  (provider: kling)
-  grok-video           -> CometAPI  /v1/video/  (provider: grok)
-  grok-imagine-video   -> CometAPI  /grok/v1/   (provider: grok2)
-  doubao-seedance-2-0  -> CometAPI  /v1/videos  multipart (provider: seedance)
-  veo3.1-pro           -> CometAPI  /v1/videos  multipart+file (provider: veo)
-  happyhorse-1.0-*     -> aivideoapi.ai          (provider: happyhorse)
+Все модели кроме Veo:
+  POST /api/v1/jobs/createTask   →  VideoResult(task_id, provider="kieai")
+  GET  /api/v1/jobs/recordInfo   →  poll_kieai_status
+
+Veo 3:
+  POST /api/v1/veo/generate      →  VideoResult(task_id=videoId, provider="veo")
+  GET  /api/v1/veo/video/{id}    →  poll_veo_status
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from api import comet_client
+from api import kieai_client
 
 logger = logging.getLogger(__name__)
 
 
 class VideoModel(StrEnum):
-    KLING_30 = "kling-3.0"
-    KLING_26_MOTION = "kling-2.6-motion"
-    GROK_VIDEO = "grok-video"
-    GROK_IMAGINE = "grok-imagine-video"
-    SEEDANCE_20 = "doubao-seedance-2-0"
-    VEO_31_PRO = "veo3.1-pro"
-    HAPPYHORSE_T2V = "happyhorse-1.0-text-to-video"
-    HAPPYHORSE_I2V = "happyhorse-1.0-image-to-video"
+    # Kling
+    KLING_26_T2V    = "kling-2.6/text-to-video"
+    KLING_26_I2V    = "kling-2.6/image-to-video"
+    KLING_26_MOTION = "kling-2.6/motion-control"
+    KLING_30        = "kling-3.0/video"
+    KLING_30_MOTION = "kling-3.0/motion-control"
+    # WAN
+    WAN_27_T2V      = "wan/2-7-text-to-video"
+    WAN_27_I2V      = "wan/2-7-image-to-video"
+    # Seedance
+    SEEDANCE_2      = "bytedance/seedance-2"
+    SEEDANCE_2_FAST = "bytedance/seedance-2-fast"
+    # Grok
+    GROK_T2V        = "grok-imagine/text-to-video"
+    GROK_I2V        = "grok-imagine/image-to-video"
+    # HappyHorse
+    HAPPYHORSE_T2V  = "happyhorse/text-to-video"
+    HAPPYHORSE_I2V  = "happyhorse/image-to-video"
+    # Veo (special endpoint)
+    VEO_3           = "veo3"
+    VEO_3_FAST      = "veo3_fast"
+    VEO_3_LITE      = "veo3_lite"
 
 
 class MotionDirection(StrEnum):
-    PAN_LEFT = "pan_left"
+    PAN_LEFT  = "pan_left"
     PAN_RIGHT = "pan_right"
-    TILT_UP = "tilt_up"
+    TILT_UP   = "tilt_up"
     TILT_DOWN = "tilt_down"
-    ZOOM_IN = "zoom_in"
-    ZOOM_OUT = "zoom_out"
+    ZOOM_IN   = "zoom_in"
+    ZOOM_OUT  = "zoom_out"
     ORBIT_LEFT = "orbit_left"
-    ROLL_CW = "roll_clockwise"
+    ROLL_CW   = "roll_clockwise"
 
     def label(self) -> str:
-        _labels = {
-            "pan_left": "◄ Pan Left",
-            "pan_right": "► Pan Right",
-            "tilt_up": "▲ Tilt Up",
-            "tilt_down": "▼ Tilt Down",
-            "zoom_in": "🔍 Zoom In",
-            "zoom_out": "🔎 Zoom Out",
-            "orbit_left": "↺ Orbit",
+        return {
+            "pan_left":       "◄ Pan Left",
+            "pan_right":      "► Pan Right",
+            "tilt_up":        "▲ Tilt Up",
+            "tilt_down":      "▼ Tilt Down",
+            "zoom_in":        "🔍 Zoom In",
+            "zoom_out":       "🔎 Zoom Out",
+            "orbit_left":     "↺ Orbit",
             "roll_clockwise": "↻ Roll",
-        }
-        return _labels.get(self.value, self.value)
+        }.get(self.value, self.value)
 
 
 @dataclass
 class VideoResult:
     task_id: str
-    provider: str  # kling | grok | grok2 | seedance | veo | happyhorse
+    provider: str  # "kieai" | "veo"
 
 
-# ── Capability sets ───────────────────────────────────────────────────────────
+# ── Model sets ────────────────────────────────────────────────────────────────
+_VEO_MODELS = {VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE}
+_MOTION_MODELS = {VideoModel.KLING_26_MOTION, VideoModel.KLING_30_MOTION}
 
-NEEDS_IMAGE_BYTES: set[VideoModel] = {VideoModel.VEO_31_PRO}
 SUPPORTS_I2V: set[VideoModel] = {
+    VideoModel.KLING_26_I2V,
     VideoModel.KLING_30,
-    VideoModel.KLING_26_MOTION,
-    VideoModel.GROK_VIDEO,
+    VideoModel.WAN_27_I2V,
+    VideoModel.SEEDANCE_2,
+    VideoModel.SEEDANCE_2_FAST,
+    VideoModel.GROK_I2V,
     VideoModel.HAPPYHORSE_I2V,
-    VideoModel.SEEDANCE_20,
-    VideoModel.VEO_31_PRO,
+    VideoModel.VEO_3,
+    VideoModel.VEO_3_FAST,
+    VideoModel.VEO_3_LITE,
 }
 
 
@@ -83,299 +101,264 @@ async def generate_video(
     model: VideoModel,
     prompt: str,
     image_url: str | None = None,
-    image_bytes: bytes | None = None,
+    last_frame_url: str | None = None,
+    image_bytes: bytes | None = None,   # not used by kie.ai (kept for signature compat)
     motion: MotionDirection | None = None,
     duration: int = 5,
     aspect_ratio: str | None = None,
     resolution: str | None = None,
+    # Motion Control specific
+    reference_video_url: str | None = None,
+    # Grok mode
+    grok_mode: str = "normal",
 ) -> VideoResult:
-    if model == VideoModel.KLING_30:
-        return await _kling_generate(model, prompt, image_url, duration, aspect_ratio)
-    elif model == VideoModel.KLING_26_MOTION:
-        return await _kling_motion_generate(prompt, image_url, motion, duration)
-    elif model == VideoModel.GROK_VIDEO:
-        return await _grok_generate(prompt)
-    elif model == VideoModel.GROK_IMAGINE:
-        return await _grok_imagine_generate(prompt, duration, aspect_ratio)
-    elif model == VideoModel.SEEDANCE_20:
-        return await _seedance_generate(prompt, image_url, duration, aspect_ratio)
-    elif model == VideoModel.VEO_31_PRO:
-        return await _veo_generate(prompt, image_url, image_bytes, aspect_ratio)
-    elif model in (VideoModel.HAPPYHORSE_T2V, VideoModel.HAPPYHORSE_I2V):
-        return await _happyhorse_generate(model, prompt, image_url, duration, aspect_ratio, resolution)
-    else:
-        raise ValueError(f"Unknown video model: {model}")
-
-
-# ── Kling ─────────────────────────────────────────────────────────────────────
-
-async def _kling_generate(
-    model: VideoModel,
-    prompt: str,
-    image_url: str | None,
-    duration: int,
-    aspect_ratio: str | None,
-) -> VideoResult:
-    version_map = {VideoModel.KLING_30: "2.0"}
-    version = version_map.get(model, "1.6")
-    if image_url:
-        path = "/kling/v1/videos/image2video"
-        payload: dict[str, Any] = {
-            "model_name": f"kling-v{version}",
-            "image_url": image_url,
-            "prompt": prompt,
-            "duration": str(duration),
-            "mode": "pro",
-        }
-    else:
-        path = "/kling/v1/videos/text2video"
-        payload = {
-            "model_name": f"kling-v{version}",
-            "prompt": prompt,
-            "duration": str(duration),
-            "mode": "pro",
-        }
-    if aspect_ratio:
-        payload["aspect_ratio"] = aspect_ratio
-    resp = await comet_client.post(path, payload)
-    task_id = resp["data"]["task_id"]
-    logger.info("Kling task: %s", task_id)
-    return VideoResult(task_id=task_id, provider="kling")
-
-
-async def _kling_motion_generate(
-    prompt: str,
-    image_url: str | None,
-    motion: MotionDirection | None,
-    duration: int = 5,
-) -> VideoResult:
-    payload: dict[str, Any] = {
-        "model_name": "kling-v1.6",
-        "prompt": prompt,
-        "duration": str(duration),
-        "mode": "pro",
-    }
-    if image_url:
-        payload["image_url"] = image_url
-    if motion:
-        cfg: dict[str, int] = {"horizontal": 0, "vertical": 0, "zoom": 0, "tilt": 0, "pan": 0, "roll": 0}
-        if motion == MotionDirection.PAN_LEFT:      cfg["pan"] = -10
-        elif motion == MotionDirection.PAN_RIGHT:   cfg["pan"] = 10
-        elif motion == MotionDirection.TILT_UP:     cfg["tilt"] = 10
-        elif motion == MotionDirection.TILT_DOWN:   cfg["tilt"] = -10
-        elif motion == MotionDirection.ZOOM_IN:     cfg["zoom"] = 10
-        elif motion == MotionDirection.ZOOM_OUT:    cfg["zoom"] = -10
-        elif motion == MotionDirection.ORBIT_LEFT:  cfg["horizontal"] = -10
-        elif motion == MotionDirection.ROLL_CW:     cfg["roll"] = 10
-        payload["camera_control"] = {"type": "preset_motion", "config": cfg}
-    path = "/kling/v1/videos/image2video" if image_url else "/kling/v1/videos/text2video"
-    resp = await comet_client.post(path, payload)
-    task_id = resp["data"]["task_id"]
-    logger.info("Kling motion task: %s", task_id)
-    return VideoResult(task_id=task_id, provider="kling")
-
-
-async def poll_kling_status(task_id: str) -> str | None:
-    resp = await comet_client.get(f"/kling/v1/videos/text2video/{task_id}")
-    status = resp.get("data", {}).get("task_status")
-    if status == "succeed":
-        videos = resp["data"].get("task_result", {}).get("videos", [])
-        if videos:
-            return videos[0].get("url")
-    if status == "failed":
-        raise RuntimeError(resp.get("data", {}).get("task_status_msg", "Kling failed"))
-    return None
-
-
-# ── Grok (old endpoint) ───────────────────────────────────────────────────────
-
-async def _grok_generate(prompt: str) -> VideoResult:
-    resp = await comet_client.post(
-        "/v1/video/generate",
-        {"model": "grok-2-vision", "prompt": prompt},
+    if model in _VEO_MODELS:
+        return await _veo_generate(model, prompt, image_url, aspect_ratio)
+    return await _kieai_generate(
+        model, prompt,
+        image_url=image_url,
+        last_frame_url=last_frame_url,
+        motion=motion,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        reference_video_url=reference_video_url,
+        grok_mode=grok_mode,
     )
-    task_id = str(resp.get("task_id") or resp.get("id"))
-    logger.info("Grok video task: %s", task_id)
-    return VideoResult(task_id=task_id, provider="grok")
 
 
-async def poll_grok_status(task_id: str) -> str | None:
-    resp = await comet_client.get(f"/v1/video/generate/{task_id}")
-    status = resp.get("status")
-    if status == "succeeded":
-        return resp.get("video_url") or resp.get("url")
-    if status in ("failed", "error"):
-        raise RuntimeError(f"Grok video failed: {resp.get('message', 'error')}")
-    return None
+# ── Universal KIE.AI generator ────────────────────────────────────────────────
 
-
-# ── Grok Imagine ──────────────────────────────────────────────────────────────
-
-async def _grok_imagine_generate(
-    prompt: str,
-    duration: int = 10,
-    aspect_ratio: str | None = None,
-) -> VideoResult:
-    payload: dict[str, Any] = {
-        "model": "grok-imagine-video",
-        "prompt": prompt,
-        "duration": duration,
-        "aspect_ratio": aspect_ratio or "16:9",
-        "resolution": "720p",
-    }
-    resp = await comet_client.post("/grok/v1/videos/generations", payload)
-    task_id = str(resp.get("request_id") or resp.get("id") or resp.get("data", {}).get("taskId"))
-    logger.info("Grok Imagine task: %s", task_id)
-    return VideoResult(task_id=task_id, provider="grok2")
-
-
-async def poll_grok2_status(task_id: str) -> str | None:
-    resp = await comet_client.get(f"/grok/v1/videos/{task_id}")
-    data = resp.get("data", resp)
-    status = str(data.get("status", "")).upper()
-    if status == "SUCCESS":
-        return data.get("data", {}).get("video", {}).get("url") or data.get("video_url")
-    if status in ("FAILURE", "FAILED", "failed"):
-        raise RuntimeError(f"Grok Imagine failed: {data.get('fail_reason', 'error')}")
-    return None
-
-
-# ── Seedance 2.0 ──────────────────────────────────────────────────────────────
-
-async def _seedance_generate(
-    prompt: str,
-    image_url: str | None,
-    duration: int = 5,
-    aspect_ratio: str | None = None,
-) -> VideoResult:
-    fields: dict[str, Any] = {
-        "prompt": prompt,
-        "model": "doubao-seedance-2-0",
-        "seconds": str(duration),
-        "size": aspect_ratio or "16:9",
-    }
-    if image_url:
-        fields["image_url"] = image_url
-
-    files = {k: (None, v) for k, v in fields.items()}
-    resp = await comet_client.post_multipart("/v1/videos", data={}, files=files)
-    task_id = str(resp.get("id") or resp.get("task_id") or resp.get("data", {}).get("taskId"))
-    logger.info("Seedance task: %s", task_id)
-    return VideoResult(task_id=task_id, provider="seedance")
-
-
-async def poll_seedance_status(task_id: str) -> str | None:
-    resp = await comet_client.get(f"/v1/videos/{task_id}")
-    status = str(resp.get("status", "")).lower()
-    if status in ("success", "completed"):
-        return (
-            resp.get("video_url")
-            or resp.get("url")
-            or f"https://api.cometapi.com/v1/videos/{task_id}/content"
-        )
-    if status in ("failed", "error"):
-        raise RuntimeError(f"Seedance failed: {resp.get('error', 'unknown error')}")
-    return None
-
-
-# ── Veo 3.1 Pro ───────────────────────────────────────────────────────────────
-
-async def _veo_generate(
-    prompt: str,
-    image_url: str | None = None,
-    image_bytes: bytes | None = None,
-    aspect_ratio: str | None = None,
-) -> VideoResult:
-    # Veo uses "16x9" notation
-    size = (aspect_ratio or "16:9").replace(":", "x")
-    if image_bytes:
-        files: dict[str, Any] = {
-            "prompt": (None, prompt),
-            "model": (None, "veo3.1-pro"),
-            "size": (None, size),
-            "input_reference": ("reference.jpg", image_bytes, "image/jpeg"),
-        }
-    else:
-        files = {
-            "prompt": (None, prompt),
-            "model": (None, "veo3.1-pro"),
-            "size": (None, size),
-        }
-    resp = await comet_client.post_multipart("/v1/videos", data={}, files=files)
-    task_id = str(resp.get("id") or resp.get("task_id") or resp.get("data", {}).get("taskId"))
-    logger.info("Veo task: %s", task_id)
-    return VideoResult(task_id=task_id, provider="veo")
-
-
-async def poll_veo_status(task_id: str) -> str | None:
-    resp = await comet_client.get(f"/v1/videos/{task_id}")
-    data = resp.get("data", resp)
-    status = str(data.get("status", "")).lower()
-    if status in ("success", "completed"):
-        return (
-            data.get("video_url")
-            or data.get("url")
-            or f"https://api.cometapi.com/v1/videos/{task_id}/content"
-        )
-    if status in ("failed", "error"):
-        raise RuntimeError(f"Veo failed: {data.get('error', 'unknown')}")
-    return None
-
-
-# ── HappyHorse ────────────────────────────────────────────────────────────────
-
-async def _happyhorse_generate(
+async def _kieai_generate(
     model: VideoModel,
     prompt: str,
     image_url: str | None,
+    last_frame_url: str | None,
+    motion: MotionDirection | None,
     duration: int,
     aspect_ratio: str | None,
     resolution: str | None,
+    reference_video_url: str | None,
+    grok_mode: str,
 ) -> VideoResult:
-    from api import aivideoapi_client as hh
-    dur = max(3, min(15, duration))
-    inp: dict[str, Any] = {
-        "prompt": prompt,
-        "resolution": resolution or "720p",
-        "duration": dur,
-    }
-    if model == VideoModel.HAPPYHORSE_I2V:
+    inp: dict[str, Any] = {}
+    m = model.value
+
+    # ── Kling 2.6 T2V ────────────────────────────────────────────────────────
+    if m == VideoModel.KLING_26_T2V:
+        inp = {
+            "prompt": prompt,
+            "sound": False,
+            "aspect_ratio": aspect_ratio or "16:9",
+            "duration": str(duration),
+        }
+
+    # ── Kling 2.6 I2V ────────────────────────────────────────────────────────
+    elif m == VideoModel.KLING_26_I2V:
+        inp = {
+            "prompt": prompt,
+            "image_urls": [image_url] if image_url else [],
+            "sound": False,
+            "duration": str(duration),
+        }
+
+    # ── Kling 2.6 Motion Control ──────────────────────────────────────────────
+    elif m == VideoModel.KLING_26_MOTION:
+        inp = {
+            "input_urls": [image_url] if image_url else [],
+            "video_urls": [reference_video_url] if reference_video_url else [],
+            "character_orientation": "video",
+            "mode": resolution or "720p",
+        }
+        if prompt:
+            inp["prompt"] = prompt
+
+    # ── Kling 3.0 ─────────────────────────────────────────────────────────────
+    elif m == VideoModel.KLING_30:
+        inp = {
+            "prompt": prompt,
+            "mode": "pro",
+            "sound": False,
+            "duration": duration,
+        }
+        image_urls: list[str] = []
         if image_url:
-            inp["image_urls"] = [image_url]
+            image_urls.append(image_url)
+        if last_frame_url:
+            image_urls.append(last_frame_url)
+        if image_urls:
+            inp["image_urls"] = image_urls
+
+    # ── Kling 3.0 Motion Control ──────────────────────────────────────────────
+    elif m == VideoModel.KLING_30_MOTION:
+        inp = {
+            "input_urls": [image_url] if image_url else [],
+            "video_urls": [reference_video_url] if reference_video_url else [],
+            "mode": "pro" if resolution == "1080p" else "std",
+        }
+        if prompt:
+            inp["prompt"] = prompt
+
+    # ── WAN 2.7 T2V ──────────────────────────────────────────────────────────
+    elif m == VideoModel.WAN_27_T2V:
+        inp = {
+            "prompt": prompt,
+            "resolution": resolution or "1080p",
+            "ratio": aspect_ratio or "16:9",
+            "duration": duration,
+            "prompt_extend": True,
+            "watermark": False,
+        }
+
+    # ── WAN 2.7 I2V ──────────────────────────────────────────────────────────
+    elif m == VideoModel.WAN_27_I2V:
+        inp = {
+            "prompt": prompt,
+            "first_frame_url": image_url or "",
+            "duration": duration,
+            "resolution": resolution or "1080p",
+            "prompt_extend": True,
+            "watermark": False,
+        }
+        if last_frame_url:
+            inp["last_frame_url"] = last_frame_url
+
+    # ── Seedance 2 / 2 Fast ───────────────────────────────────────────────────
+    elif m in (VideoModel.SEEDANCE_2, VideoModel.SEEDANCE_2_FAST):
+        inp = {
+            "prompt": prompt,
+            "resolution": resolution or "720p",
+            "aspect_ratio": aspect_ratio or "16:9",
+            "duration": duration,
+            "generate_audio": False,
+        }
+        if image_url:
+            inp["first_frame_url"] = image_url
+        if last_frame_url:
+            inp["last_frame_url"] = last_frame_url
+
+    # ── Grok T2V ─────────────────────────────────────────────────────────────
+    elif m == VideoModel.GROK_T2V:
+        inp = {
+            "prompt": prompt,
+            "aspect_ratio": aspect_ratio or "16:9",
+            "mode": grok_mode,
+            "duration": str(duration),
+            "resolution": resolution or "720p",
+        }
+
+    # ── Grok I2V ─────────────────────────────────────────────────────────────
+    elif m == VideoModel.GROK_I2V:
+        inp = {
+            "prompt": prompt,
+            "image_url": image_url or "",
+            "mode": grok_mode,
+        }
+        if aspect_ratio:
+            inp["aspect_ratio"] = aspect_ratio
+
+    # ── HappyHorse T2V ────────────────────────────────────────────────────────
+    elif m == VideoModel.HAPPYHORSE_T2V:
+        inp = {
+            "prompt": prompt,
+            "resolution": resolution or "1080p",
+            "aspect_ratio": aspect_ratio or "16:9",
+            "duration": max(3, min(15, duration)),
+        }
+
+    # ── HappyHorse I2V ────────────────────────────────────────────────────────
+    elif m == VideoModel.HAPPYHORSE_I2V:
+        inp = {
+            "image_urls": [image_url] if image_url else [],
+            "resolution": resolution or "1080p",
+            "duration": max(3, min(15, duration)),
+        }
+        if prompt:
+            inp["prompt"] = prompt
+
     else:
-        inp["aspect_ratio"] = aspect_ratio or "16:9"
+        raise ValueError(f"Unknown video model: {model}")
 
-    payload: dict[str, Any] = {"model": model.value, "input": inp}
-    resp = await hh.post("/v1/videos/generations", payload)
+    resp = await kieai_client.create_task({"model": m, "input": inp})
     task_id = str(resp.get("data", {}).get("taskId") or resp.get("taskId"))
-    logger.info("HappyHorse task: %s", task_id)
-    return VideoResult(task_id=task_id, provider="happyhorse")
+    logger.info("KIE.AI video task %s: %s", m, task_id)
+    return VideoResult(task_id=task_id, provider="kieai")
 
 
-async def poll_happyhorse_status(task_id: str) -> str | None:
-    from api import aivideoapi_client as hh
-    resp = await hh.get(f"/v1/tasks/{task_id}")
-    status = resp.get("status", "")
-    if status == "completed":
-        urls = resp.get("output", {}).get("urls", [])
+# ── Veo 3 ─────────────────────────────────────────────────────────────────────
+
+async def _veo_generate(
+    model: VideoModel,
+    prompt: str,
+    image_url: str | None,
+    aspect_ratio: str | None,
+) -> VideoResult:
+    payload: dict[str, Any] = {
+        "prompt": prompt,
+        "model": model.value,
+        "aspect_ratio": aspect_ratio or "16:9",
+        "enableTranslation": True,
+    }
+    if image_url:
+        payload["imageUrls"] = [image_url]
+        payload["generationType"] = "REFERENCE_2_VIDEO"
+    else:
+        payload["generationType"] = "TEXT_2_VIDEO"
+
+    resp = await kieai_client.create_veo_task(payload)
+    video_id = str(resp.get("data", {}).get("videoId") or resp.get("videoId"))
+    logger.info("Veo task videoId: %s", video_id)
+    return VideoResult(task_id=video_id, provider="veo")
+
+
+# ── Poll functions ────────────────────────────────────────────────────────────
+
+async def poll_kieai_status(task_id: str) -> str | None:
+    """Universal poller for all non-Veo KIE.AI models."""
+    resp = await kieai_client.get_task_status(task_id)
+    data = resp.get("data", {})
+    state = str(data.get("state", "")).lower()
+
+    if state == "success":
+        result_json_str = data.get("resultJson", "{}")
+        try:
+            parsed = json.loads(result_json_str)
+        except json.JSONDecodeError:
+            parsed = {}
+        urls = parsed.get("resultUrls", [])
         if urls:
             return urls[0]
-        raise RuntimeError("HappyHorse: completed but no URL")
-    if status == "failed":
-        err = resp.get("error", {}).get("message", "unknown error")
-        raise RuntimeError(f"HappyHorse failed: {err}")
+        raise RuntimeError("KIE.AI: success but no resultUrls in resultJson")
+
+    if state == "fail":
+        raise RuntimeError(f"KIE.AI task failed: {data.get('failMsg', 'unknown error')}")
+
+    return None  # waiting / queuing / generating
+
+
+async def poll_veo_status(video_id: str) -> str | None:
+    resp = await kieai_client.get_veo_status(video_id)
+    data = resp.get("data", {})
+    state = str(data.get("state", "")).lower()
+
+    if state == "success":
+        url = data.get("videoUrl")
+        if not url:
+            result_urls = data.get("resultUrls", [])
+            url = result_urls[0] if result_urls else None
+        if url:
+            return url
+        raise RuntimeError("Veo3: success but no videoUrl")
+
+    if state == "fail":
+        raise RuntimeError(f"Veo3 failed: {data.get('failMsg', 'unknown error')}")
+
     return None
 
 
-# ── Dispatch map ──────────────────────────────────────────────────────────────
-
-POLL_FN_MAP = {
-    "kling":      poll_kling_status,
-    "grok":       poll_grok_status,
-    "grok2":      poll_grok2_status,
-    "seedance":   poll_seedance_status,
-    "veo":        poll_veo_status,
-    "happyhorse": poll_happyhorse_status,
+POLL_FN_MAP: dict[str, Any] = {
+    "kieai": poll_kieai_status,
+    "veo":   poll_veo_status,
 }
 
 

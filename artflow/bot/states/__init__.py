@@ -4,9 +4,9 @@ from aiogram.fsm.state import State, StatesGroup
 
 class ImageGenFSM(StatesGroup):
     model_select = State()
-    mode_select = State()          # text / image (for Wan i2i)
-    aspect_ratio_select = State()  # for Wan 2.7 Pro
-    count_select = State()         # for Wan 2.7 Pro
+    mode_select = State()          # text / image
+    aspect_ratio_select = State()  # aspect ratio step
+    count_select = State()         # count or quality step
     image_upload = State()         # optional img2img
     prompt_input = State()
     generating = State()

@@ -25,28 +25,33 @@ DEFAULT_PRICE_PLANS = [
 
 # ── Стоимость моделей ─────────────────────────────────────────────────────────
 DEFAULT_MODEL_COSTS = [
-    # Изображения
-    {"model_key": "seedream-4.5",    "display_name": "🌸 Seedream 4.5",               "gen_type": GenerationType.image, "credits": 2},
-    {"model_key": "nano-banano-pro", "display_name": "🍌 Nano Banano Pro (Gemini 3 Pro)",   "gen_type": GenerationType.image, "credits": 4},
-    {"model_key": "nano-banano-2",   "display_name": "🍌 Nano Banano 2 (Gemini 3.1 Flash)", "gen_type": GenerationType.image, "credits": 2},
-    {"model_key": "wan-2.7",         "display_name": "🌊 WAN 2.7",                    "gen_type": GenerationType.image, "credits": 3},
-    {"model_key": "gpt-image-1",     "display_name": "🤖 GPT Imagine 2",              "gen_type": GenerationType.image, "credits": 4},
-    # Видео
-    {"model_key": "grok-video",      "display_name": "🐦 Grok Video",        "gen_type": GenerationType.video, "credits": 40},
-    {"model_key": "kling-3.0",       "display_name": "⚡ Kling 3.0",         "gen_type": GenerationType.video, "credits": 30},
-    {"model_key": "kling-2.6-motion","display_name": "🎭 Kling 2.6 Motion",  "gen_type": GenerationType.video, "credits": 35},
-    # Grok Imagine Video (новый endpoint)
-    {"model_key": "grok-imagine-video",              "display_name": "🐦 Grok Imagine Video", "gen_type": GenerationType.video, "credits": 45},
-    # Seedance 2.0
-    {"model_key": "doubao-seedance-2-0",             "display_name": "🌱 Seedance 2.0",       "gen_type": GenerationType.video, "credits": 30},
-    # Veo 3.1 Pro
-    {"model_key": "veo3.1-pro",                      "display_name": "🎬 Veo 3.1 Pro",        "gen_type": GenerationType.video, "credits": 50},
-    # HappyHorse
-    {"model_key": "happyhorse-1.0-text-to-video",    "display_name": "🐎 HappyHorse T2V",     "gen_type": GenerationType.video, "credits": 25},
-    {"model_key": "happyhorse-1.0-image-to-video",   "display_name": "🐎 HappyHorse I2V",     "gen_type": GenerationType.video, "credits": 30},
-    # Wan 2.7 Image Pro (kie.ai)
-    {"model_key": "wan-2.7-pro",                     "display_name": "🌊 WAN 2.7 Image Pro",  "gen_type": GenerationType.image, "credits": 5},
-    # Midjourney
+    # ── Изображения (KIE.AI) ──────────────────────────────────────────────────
+    {"model_key": "seedream/4.5-text-to-image", "display_name": "🌸 Seedream 4.5",        "gen_type": GenerationType.image, "credits": 3},
+    {"model_key": "seedream/4.5-edit",          "display_name": "🌸 Seedream 4.5 Edit",   "gen_type": GenerationType.image, "credits": 3},
+    {"model_key": "grok-imagine/text-to-image", "display_name": "⚡ Grok Imagine T2I",    "gen_type": GenerationType.image, "credits": 3},
+    {"model_key": "grok-imagine/image-to-image","display_name": "⚡ Grok Imagine I2I",    "gen_type": GenerationType.image, "credits": 3},
+    {"model_key": "wan/2-7-image-pro",          "display_name": "🌊 WAN 2.7 Image Pro",   "gen_type": GenerationType.image, "credits": 5},
+    {"model_key": "google/nano-banana",         "display_name": "🍌 Nano Banana",         "gen_type": GenerationType.image, "credits": 2},
+    {"model_key": "nano-banana-2",              "display_name": "🍌 Nano Banana 2",        "gen_type": GenerationType.image, "credits": 3},
+    {"model_key": "nano-banana-pro",            "display_name": "🍌 Nano Banana Pro",      "gen_type": GenerationType.image, "credits": 4},
+    # ── Видео (KIE.AI) ────────────────────────────────────────────────────────
+    {"model_key": "kling-2.6/text-to-video",   "display_name": "⚙️ Kling 2.6 T2V",       "gen_type": GenerationType.video, "credits": 30},
+    {"model_key": "kling-2.6/image-to-video",  "display_name": "⚙️ Kling 2.6 I2V",       "gen_type": GenerationType.video, "credits": 35},
+    {"model_key": "kling-2.6/motion-control",  "display_name": "🕺 Kling 2.6 Motion",     "gen_type": GenerationType.video, "credits": 40},
+    {"model_key": "kling-3.0/video",           "display_name": "⚡ Kling 3.0",             "gen_type": GenerationType.video, "credits": 40},
+    {"model_key": "kling-3.0/motion-control",  "display_name": "🕺 Kling 3.0 Motion",     "gen_type": GenerationType.video, "credits": 50},
+    {"model_key": "wan/2-7-text-to-video",     "display_name": "🌊 WAN 2.7 T2V",          "gen_type": GenerationType.video, "credits": 25},
+    {"model_key": "wan/2-7-image-to-video",    "display_name": "🌊 WAN 2.7 I2V",          "gen_type": GenerationType.video, "credits": 30},
+    {"model_key": "bytedance/seedance-2",      "display_name": "🌱 Seedance 2",            "gen_type": GenerationType.video, "credits": 35},
+    {"model_key": "bytedance/seedance-2-fast", "display_name": "🌱 Seedance 2 Fast",       "gen_type": GenerationType.video, "credits": 25},
+    {"model_key": "grok-imagine/text-to-video","display_name": "⚡ Grok T2V",              "gen_type": GenerationType.video, "credits": 35},
+    {"model_key": "grok-imagine/image-to-video","display_name":"⚡ Grok I2V",              "gen_type": GenerationType.video, "credits": 35},
+    {"model_key": "happyhorse/text-to-video",  "display_name": "🐎 HappyHorse T2V",        "gen_type": GenerationType.video, "credits": 25},
+    {"model_key": "happyhorse/image-to-video", "display_name": "🐎 HappyHorse I2V",        "gen_type": GenerationType.video, "credits": 30},
+    {"model_key": "veo3_fast",                 "display_name": "🎬 Veo 3 Fast",            "gen_type": GenerationType.video, "credits": 50},
+    {"model_key": "veo3",                      "display_name": "🎬 Veo 3",                 "gen_type": GenerationType.video, "credits": 70},
+    {"model_key": "veo3_lite",                 "display_name": "🎬 Veo 3 Lite",            "gen_type": GenerationType.video, "credits": 35},
+    # ── Midjourney ────────────────────────────────────────────────────────────
     {"model_key": "midjourney-imagine",  "display_name": "🖌️ MJ Imagine",  "gen_type": GenerationType.image, "credits": 10},
     {"model_key": "midjourney-action",   "display_name": "🖌️ MJ Action",   "gen_type": GenerationType.image, "credits": 3},
     {"model_key": "midjourney-blend",    "display_name": "🖼️ MJ Blend",    "gen_type": GenerationType.image, "credits": 12},
