@@ -169,9 +169,21 @@ async def handle_video_prompt(
 
     motion = MotionDirection(motion_str) if motion_str else None
 
+    # Veo requires binary image upload (not URL)
+    image_bytes: bytes | None = None
+    if model_key == VideoModel.VEO_31_PRO and image_url and image_file_id:
+        try:
+            import io
+            file_info = await bot.get_file(image_file_id)
+            buf = await bot.download_file(file_info.file_path)
+            image_bytes = buf.read() if hasattr(buf, "read") else bytes(buf)
+        except Exception as dl_err:
+            logger.warning("Veo: failed to download image bytes: %s", dl_err)
+
     try:
         result = await video_service.generate_video(
-            VideoModel(model_key), prompt, image_url=image_url, motion=motion
+            VideoModel(model_key), prompt, image_url=image_url,
+            image_bytes=image_bytes, motion=motion
         )
     except Exception as e:
         logger.error("Video generation error: %s", e)
@@ -183,11 +195,7 @@ async def handle_video_prompt(
 
     await repo.update_generation_task(session, gen.id, result.task_id)
 
-    poll_fn = (
-        video_service.poll_kling_status
-        if result.provider == "kling"
-        else video_service.poll_grok_status
-    )
+    poll_fn = video_service.get_poll_fn(result.provider)
 
     async def on_success(url: str) -> None:
         await repo.finish_generation(session, gen.id, url)

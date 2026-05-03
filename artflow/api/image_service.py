@@ -33,6 +33,7 @@ class ImageModel(StrEnum):
     NANO_BANANO_2 = "nano-banano-2"
     WAN_27 = "wan-2.7"
     GPT_IMAGE_1 = "gpt-image-1"
+    WAN_27_PRO = "wan-2.7-pro"   # kie.ai — async image gen/editing
 
 
 # Gemini model strings на стороне CometAPI
@@ -43,6 +44,7 @@ _GEMINI_MODEL_MAP: dict[ImageModel, str] = {
 
 _GEMINI_MODELS = {ImageModel.NANO_BANANO_PRO, ImageModel.NANO_BANANO_2}
 _SEEDREAM_ASYNC = {ImageModel.SEEDREAM_45}
+_KIEAI_ASYNC = {ImageModel.WAN_27_PRO}
 
 
 @dataclass
@@ -57,9 +59,9 @@ class ImageResult:
 async def generate_image(
     model: ImageModel,
     prompt: str,
-    image_bytes: bytes | None = None,   # для img2img (Gemini inline_data)
+    image_bytes: bytes | None = None,
+    image_url: str | None = None,       # для img2img (URL или Gemini)
     image_mime: str = "image/jpeg",
-    image_url: str | None = None,       # для img2img (seedream URL)
     aspect_ratio: str = "1:1",
     size: str = "1K",                   # только Gemini: 512px / 1K / 2K / 4K
 ) -> ImageResult:
@@ -71,6 +73,8 @@ async def generate_image(
         return await _seedream_generate(prompt, image_url)
     elif model == ImageModel.GPT_IMAGE_1:
         return await _gpt_image_generate(prompt)
+    elif model == ImageModel.WAN_27_PRO:
+        return await _wan27pro_generate(prompt, image_url=image_url)
     else:
         return await _standard_generate(model.value, prompt)
 
@@ -195,3 +199,49 @@ async def _gpt_image_generate(prompt: str) -> ImageResult:
     )
     url = resp["data"][0]["url"]
     return ImageResult(is_async=False, url=url)
+
+
+# ── Wan 2.7 Image Pro (kie.ai) ────────────────────────────────────────────────
+
+async def _wan27pro_generate(
+    prompt: str,
+    input_urls: list[str] | None = None,
+    image_url: str | None = None,
+    aspect_ratio: str = "1:1",
+    resolution: str = "2K",
+    n: int = 1,
+) -> "ImageResult":
+    """Async image generation via kie.ai — returns task_id."""
+    from api import kieai_client
+    inp: dict = {"prompt": prompt, "resolution": resolution, "n": n, "watermark": False}
+    urls = input_urls or ([image_url] if image_url else None)
+    if urls:
+        inp["input_urls"] = urls
+    else:
+        inp["aspect_ratio"] = aspect_ratio
+    payload = {"model": "wan/2-7-image-pro", "input": inp}
+    resp = await kieai_client.post("/api/v1/jobs/createTask", payload)
+    task_id = str(resp.get("data", {}).get("taskId") or resp.get("taskId"))
+    logger.info("Wan 2.7 Pro task: %s", task_id)
+    return ImageResult(is_async=True, task_id=task_id)
+
+
+async def poll_wan27pro_status(task_id: str) -> str | None:
+    """Returns first image URL when done, None if still processing."""
+    from api import kieai_client
+    resp = await kieai_client.get(f"/api/v1/jobs/{task_id}/detail")
+    # Common kie.ai response shapes
+    data = resp.get("data", resp)
+    status = str(data.get("status", data.get("state", ""))).lower()
+    if status in ("success", "completed", "finish", "done"):
+        # Extract first image URL
+        result = data.get("result") or data.get("output") or {}
+        if isinstance(result, list) and result:
+            return result[0] if isinstance(result[0], str) else result[0].get("url")
+        if isinstance(result, dict):
+            urls = result.get("imageUrls") or result.get("urls") or result.get("images") or []
+            if urls:
+                return urls[0] if isinstance(urls[0], str) else urls[0].get("url")
+    if status in ("failed", "error", "failure"):
+        raise RuntimeError(f"Wan 2.7 Pro failed: {data.get('message', 'unknown')}")
+    return None

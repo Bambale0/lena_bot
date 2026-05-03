@@ -35,6 +35,17 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "grok-video",      "display_name": "🐦 Grok Video",        "gen_type": GenerationType.video, "credits": 40},
     {"model_key": "kling-3.0",       "display_name": "⚡ Kling 3.0",         "gen_type": GenerationType.video, "credits": 30},
     {"model_key": "kling-2.6-motion","display_name": "🎭 Kling 2.6 Motion",  "gen_type": GenerationType.video, "credits": 35},
+    # Grok Imagine Video (новый endpoint)
+    {"model_key": "grok-imagine-video",              "display_name": "🐦 Grok Imagine Video", "gen_type": GenerationType.video, "credits": 45},
+    # Seedance 2.0
+    {"model_key": "doubao-seedance-2-0",             "display_name": "🌱 Seedance 2.0",       "gen_type": GenerationType.video, "credits": 30},
+    # Veo 3.1 Pro
+    {"model_key": "veo3.1-pro",                      "display_name": "🎬 Veo 3.1 Pro",        "gen_type": GenerationType.video, "credits": 50},
+    # HappyHorse
+    {"model_key": "happyhorse-1.0-text-to-video",    "display_name": "🐎 HappyHorse T2V",     "gen_type": GenerationType.video, "credits": 25},
+    {"model_key": "happyhorse-1.0-image-to-video",   "display_name": "🐎 HappyHorse I2V",     "gen_type": GenerationType.video, "credits": 30},
+    # Wan 2.7 Image Pro (kie.ai)
+    {"model_key": "wan-2.7-pro",                     "display_name": "🌊 WAN 2.7 Image Pro",  "gen_type": GenerationType.image, "credits": 5},
     # Midjourney
     {"model_key": "midjourney-imagine",  "display_name": "🖌️ MJ Imagine",  "gen_type": GenerationType.image, "credits": 10},
     {"model_key": "midjourney-action",   "display_name": "🖌️ MJ Action",   "gen_type": GenerationType.image, "credits": 3},

@@ -22,9 +22,15 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://bot:password@postgres:5432/artflow"
     REDIS_URL: str = "redis://redis:6379"
 
-    # CometAPI
+    # CometAPI (Kling, Seedream, Gemini, Grok, Seedance, Veo, WAN)
     COMET_API_KEY: str
     COMET_BASE_URL: str = "https://api.cometapi.com"
+
+    # aivideoapi.ai (HappyHorse)
+    AIVIDEOAPI_KEY: str = ""
+
+    # kie.ai (Wan 2.7 Image Pro)
+    KIE_AI_KEY: str = ""
 
     # YooKassa
     YOOKASSA_SHOP_ID: str = ""
@@ -45,7 +51,7 @@ class Settings(BaseSettings):
 
     # Polling
     POLLING_INTERVAL: float = 3.0
-    POLLING_TIMEOUT: int = 300
+    POLLING_TIMEOUT: int = 600
 
 
 settings = Settings()

@@ -129,8 +129,14 @@ async def handle_prompt(
                 f"❌ Ошибка: {err}\nКредиты возвращены.", reply_markup=main_menu_kb()
             )
 
+        from api.image_service import ImageModel as IM
+        check_fn = (
+            image_service.poll_wan27pro_status
+            if ImageModel(model_key) == IM.WAN_27_PRO
+            else image_service.poll_seedream_status
+        )
         asyncio.create_task(
-            polling.poll_until_done(result.task_id, image_service.poll_seedream_status, on_success, on_failure)
+            polling.poll_until_done(result.task_id, check_fn, on_success, on_failure)
         )
         await state.clear()
 
