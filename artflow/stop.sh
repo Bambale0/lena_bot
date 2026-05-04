@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# stop.sh — остановка ArtFlow AI (без Docker)
+# stop.sh — остановка APIX (без Docker)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
-log()  { echo -e "${GREEN}[artflow]${NC} $*"; }
-warn() { echo -e "${YELLOW}[artflow]${NC} $*"; }
-err()  { echo -e "${RED}[artflow]${NC} $*" >&2; }
-info() { echo -e "${CYAN}[artflow]${NC} $*"; }
+log()  { echo -e "${GREEN}[apix]${NC} $*"; }
+warn() { echo -e "${YELLOW}[apix]${NC} $*"; }
+err()  { echo -e "${RED}[apix]${NC} $*" >&2; }
+info() { echo -e "${CYAN}[apix]${NC} $*"; }
 
-PID_FILE="$SCRIPT_DIR/.artflow.pid"
-LOG_FILE="$SCRIPT_DIR/artflow.log"
+PID_FILE="$SCRIPT_DIR/.apix.pid"
+LOG_FILE="$SCRIPT_DIR/apix.log"
 
 _stop() {
   # 1. По PID-файлу (bg-режим)

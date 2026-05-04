@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# start.sh — локальный запуск ArtFlow AI без Docker
+# start.sh — локальный запуск APIX без Docker
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
-log()  { echo -e "${GREEN}[artflow]${NC} $*"; }
-warn() { echo -e "${YELLOW}[artflow]${NC} $*"; }
-err()  { echo -e "${RED}[artflow]${NC} $*" >&2; }
-info() { echo -e "${CYAN}[artflow]${NC} $*"; }
+log()  { echo -e "${GREEN}[apix]${NC} $*"; }
+warn() { echo -e "${YELLOW}[apix]${NC} $*"; }
+err()  { echo -e "${RED}[apix]${NC} $*" >&2; }
+info() { echo -e "${CYAN}[apix]${NC} $*"; }
 
-PID_FILE="$SCRIPT_DIR/.artflow.pid"
-LOG_FILE="$SCRIPT_DIR/artflow.log"
+PID_FILE="$SCRIPT_DIR/.apix.pid"
+LOG_FILE="$SCRIPT_DIR/apix.log"
 
 # ── Python ────────────────────────────────────────────────────────────────────
 if   [[ -f "$SCRIPT_DIR/venv/bin/python"  ]]; then PYTHON="$SCRIPT_DIR/venv/bin/python"
@@ -89,7 +89,7 @@ _start_fg() {
   log "Запуск бота (foreground, Ctrl+C для остановки)..."
   echo ""
   info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  info "  ArtFlow AI  |  LOCAL DEV (no Docker)"
+  info "  APIX  |  LOCAL DEV (no Docker)"
   info "  Python:  $PYTHON"
   info "  DB:      ${DATABASE_URL:-не задан}"
   info "  Redis:   ${REDIS_URL:-redis://localhost:6379}"
@@ -161,7 +161,7 @@ case "$MODE" in
     echo "Использование:"
     echo "  ./start.sh           — запуск в foreground (Ctrl+C для остановки)"
     echo "  ./start.sh fg        — то же самое"
-    echo "  ./start.sh bg        — запуск в фоне (PID сохраняется в .artflow.pid)"
+    echo "  ./start.sh bg        — запуск в фоне (PID сохраняется в .apix.pid)"
     echo "  ./start.sh setup     — создать venv + установить зависимости"
     echo "  ./start.sh migrate   — только применить миграции"
     echo ""

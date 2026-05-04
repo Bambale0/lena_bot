@@ -3,16 +3,16 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards.payment import crypto_pay_kb, crypto_plans_kb, topup_kb
+from bot.keyboards.payment import crypto_pay_kb, crypto_plans_kb, payment_link_kb, topup_kb
 from bot.keyboards.main_menu import back_to_menu_kb
 from core.config import settings
 from db import repository as repo
 from db.models import PaymentProvider, User
-from payments import cryptobot, yookassa
+from payments import cryptobot, tbank
 
 logger = logging.getLogger(__name__)
 router = Router(name="payment")
@@ -31,11 +31,11 @@ async def cb_topup(call: CallbackQuery, session: AsyncSession) -> None:
     await call.answer()
 
 
-# ─── ЮKassa ──────────────────────────────────────────────────────────────────
+# ─── T-Bank / рубли ──────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("topup:rub:"))
 async def cb_topup_rub(
-    call: CallbackQuery, session: AsyncSession, bot: Bot
+    call: CallbackQuery, session: AsyncSession, db_user: User
 ) -> None:
     plan_key = call.data.split(":")[2]  # type: ignore[union-attr]
     plan = await repo.get_price_plan_by_key(session, plan_key)
@@ -43,7 +43,34 @@ async def cb_topup_rub(
         await call.answer("Тариф не найден", show_alert=True)
         return
 
-    await yookassa.send_invoice(bot, call.from_user.id, plan, settings.YOOKASSA_PROVIDER_TOKEN)
+    if not settings.TBANK_TERMINAL_KEY or not settings.TBANK_PASSWORD:
+        await call.answer("T-Банк не настроен", show_alert=True)
+        return
+
+    try:
+        payment = await tbank.create_payment(plan, db_user.id)
+    except Exception as e:
+        logger.error("T-Bank payment error: %s", e)
+        await call.answer("Ошибка создания платежа. Попробуй позже.", show_alert=True)
+        return
+
+    await repo.create_transaction(
+        session,
+        user_id=db_user.id,
+        amount_rub=plan.price_rub,
+        credits=plan.credits,
+        provider=PaymentProvider.tbank,
+        external_id=payment.payment_id,
+    )
+
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"🏦 <b>Оплата через T-Банк</b>\n\n"
+        f"Тариф: {plan.label}\n"
+        f"Сумма: <b>{plan.price_rub:.0f} ₽</b>\n\n"
+        f"Открой ссылку для оплаты картой или через СБП.\n"
+        f"<i>После успешной оплаты кредиты зачислятся автоматически.</i>",
+        reply_markup=payment_link_kb("💳 Перейти к оплате", payment.payment_url),
+    )
     await call.answer()
 
 

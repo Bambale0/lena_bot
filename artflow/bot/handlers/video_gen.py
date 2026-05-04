@@ -16,6 +16,7 @@ from bot.keyboards.models import (
     VIDEO_CAPS,
     after_generation_kb,
     video_mode_kb,
+    video_model_info,
     video_models_kb,
     video_params_kb,
 )
@@ -90,7 +91,15 @@ async def cb_video_menu(call: CallbackQuery, session: AsyncSession, state: FSMCo
     await state.set_state(VideoGenFSM.model_select)
     model_costs = await repo.get_all_model_costs(session)
     await call.message.edit_text(  # type: ignore[union-attr]
-        "🎬 <b>Генерация видео</b>\n\nВыбери модель:",
+        "🎬 <b>Генерация видео</b>\n\n"
+        "Выбери модель. Все поддерживают текстовый промпт, часть — загрузку изображения:\n\n"
+        "• <b>Kling 3.0</b> — плавное движение, text & img→video\n"
+        "• <b>Kling Motion</b> — управление камерой (pan, zoom, orbit)\n"
+        "• <b>Veo 3.1 Pro</b> — высшее качество от Google\n"
+        "• <b>Seedance 2.0</b> — плавная анимация\n"
+        "• <b>Grok</b> — быстрая реалистичная генерация\n\n"
+        "⏱ Генерация занимает <b>1–5 минут</b> — бот пришлёт видео, когда готово.\n\n"
+        "👇 <b>Выбери модель:</b>",
         reply_markup=video_models_kb(model_costs),
     )
     await call.answer()
@@ -313,6 +322,8 @@ async def cb_vpar_back(call: CallbackQuery, state: FSMContext, session: AsyncSes
     await call.answer()
 
 
+
+
 # ── Prompt / motion video URL ─────────────────────────────────────────────────
 
 @router.message(VideoGenFSM.prompt_input, F.text)
@@ -400,7 +411,7 @@ async def handle_video_prompt(
         logger.error("Video generation error: %s", e)
         await repo.fail_generation(session, gen.id, str(e))
         await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text("❌ Ошибка запуска. Кредиты возвращены.", reply_markup=main_menu_kb())
+        await status_msg.edit_text("❌ Ошибка запуска генерации. Кредиты возвращены.\n\nПопробуй другую модель или повтори через минуту.", reply_markup=main_menu_kb())
         await state.clear()
         return
 

@@ -20,7 +20,6 @@ def mj_submenu_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
 
-
 def mj_bot_type_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for bt in MJBotType:
@@ -91,6 +90,14 @@ def mj_video_speed_kb() -> InlineKeyboardMarkup:
     for motion in MJVideoMotion:
         builder.button(text=motion.label(), callback_data=f"mj_vmot:{motion.value}")
     builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:mj"))
+    return builder.as_markup()
+
+
+def mj_reference_upload_kb() -> InlineKeyboardMarkup:
+    """Предложение загрузить референс перед промптом для Imagine."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="⏭ Без референса", callback_data="mj_ref:skip"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:mj"))
     return builder.as_markup()
 

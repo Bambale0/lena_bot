@@ -25,6 +25,7 @@ from core.logger import setup_logging
 from db.session import engine
 from db.models import Base
 from payments.cryptobot import verify_webhook_signature
+from payments.tbank import verify_notification_token
 from db import repository as repo
 from db.seed import run_seed
 from db.session import AsyncSessionLocal
@@ -97,7 +98,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutdown complete")
 
 
-app = FastAPI(title="ArtFlow AI", lifespan=lifespan)
+app = FastAPI(title="APIX", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -160,6 +161,43 @@ async def cryptobot_webhook(request: Request) -> dict:
     return {"ok": True}
 
 
+@app.post("/webhook/tbank")
+async def tbank_webhook(request: Request) -> dict:
+    data = await request.json()
+
+    if not verify_notification_token(data, settings.TBANK_PASSWORD):
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    if not data.get("Success"):
+        return {"ok": True}
+
+    status = str(data.get("Status", ""))
+    if status != "CONFIRMED":
+        return {"ok": True}
+
+    external_id = str(data.get("PaymentId", ""))
+    if not external_id:
+        raise HTTPException(status_code=400, detail="PaymentId is required")
+
+    async with AsyncSessionLocal() as session:
+        tx = await repo.confirm_transaction(session, external_id)
+        if tx:
+            new_balance = await repo.add_credits(session, tx.user_id, tx.credits)
+            user = await repo.get_user_by_id(session, tx.user_id)
+            if user and bot:
+                try:
+                    await bot.send_message(
+                        user.tg_id,
+                        f"✅ Оплата через T-Банк подтверждена!\n"
+                        f"Зачислено: <b>+{tx.credits} кредитов</b>\n"
+                        f"Баланс: <b>{new_balance} кр</b>",
+                    )
+                except Exception as e:
+                    logger.warning("Failed to notify user %s: %s", user.tg_id, e)
+
+    return {"ok": True}
+
+
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "service": "artflow-ai"}
+    return {"status": "ok", "service": "apix"}

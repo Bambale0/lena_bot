@@ -39,3 +39,10 @@ def crypto_pay_kb(pay_url: str) -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="💸 Оплатить в CryptoBot", url=pay_url))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:topup"))
     return builder.as_markup()
+
+
+def payment_link_kb(text: str, pay_url: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text=text, url=pay_url))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:topup"))
+    return builder.as_markup()

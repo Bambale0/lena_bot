@@ -18,8 +18,10 @@ from bot.keyboards.models import (
     image_aspect_ratio_kb,
     image_count_kb,
     image_mode_kb,
+    image_model_info,
     image_models_kb,
     image_quality_kb,
+    reference_upload_kb,
 )
 from bot.states import ImageGenFSM
 from db import repository as repo
@@ -36,7 +38,13 @@ async def cb_image_menu(call: CallbackQuery, session: AsyncSession, state: FSMCo
     await state.set_state(ImageGenFSM.model_select)
     model_costs = await repo.get_all_model_costs(session)
     await call.message.edit_text(  # type: ignore[union-attr]
-        "🎨 <b>Генерация изображений</b>\n\nВыбери модель:",
+        "🎨 <b>Генерация изображений</b>\n\n"
+        "Выбери AI-модель. Каждая имеет свои сильные стороны:\n\n"
+        "• <b>Seedream</b> — максимум деталей и реализма\n"
+        "• <b>Gemini Pro/Flash</b> — точное следование описанию, поддержка img2img\n"
+        "• <b>WAN</b> — кино-стиль, персонажи, фэнтези\n"
+        "• <b>GPT Image</b> — понимает сложные и длинные промпты\n\n"
+        "👇 <b>Нажми на модель для выбора:</b>",
         reply_markup=image_models_kb(model_costs),
     )
     await call.answer()
@@ -182,6 +190,8 @@ async def cb_image_back_to_mode(call: CallbackQuery, state: FSMContext) -> None:
         "Выбери режим:", reply_markup=image_mode_kb(model_key),
     )
     await call.answer()
+
+
 
 
 # ── Quality / Count ───────────────────────────────────────────────────────────

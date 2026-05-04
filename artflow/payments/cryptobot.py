@@ -40,7 +40,7 @@ async def create_invoice(
     payload = {
         "asset": "USDT",
         "amount": f"{amount_usd:.2f}",
-        "description": f"ArtFlow AI — {credits} кредитов",
+        "description": f"APIX — {credits} кредитов",
         "payload": f"{plan_key}:{user_id}",
         "paid_btn_name": "callback",
         "paid_btn_url": f"https://t.me/{settings.BOT_TOKEN.split(':')[0]}",  # будет перекрыто webhook

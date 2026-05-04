@@ -27,7 +27,11 @@ async def cb_balance(call: CallbackQuery, db_user: User) -> None:
         f"💎 <b>Твой баланс</b>\n\n"
         f"Кредиты: <b>{db_user.credits}</b>\n"
         f"Подписка: {sub_status}\n\n"
-        f"<i>Изображение: 2–4 кр · Видео: 30–40 кр</i>"
+        f"<b>Стоимость генерации:</b>\n"
+        f"• Изображение: 2–10 кр\n"
+        f"• Видео: 20–50 кр\n"
+        f"• Midjourney: 5–15 кр\n\n"
+        f"💳 Нажми «Пополнить» в главном меню, чтобы купить кредиты."
     )
     await call.message.edit_text(text, reply_markup=back_to_menu_kb())  # type: ignore[union-attr]
     await call.answer()

@@ -1,0 +1,15 @@
+[Unit]
+Description=APIX Webhook API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/lena/lena_bot/artflow
+ExecStart=/root/lena/lena_bot/artflow/start_webhook.sh
+Restart=always
+RestartSec=5
+User=root
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

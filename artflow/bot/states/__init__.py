@@ -4,10 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class ImageGenFSM(StatesGroup):
     model_select = State()
-    mode_select = State()          # text / image
-    aspect_ratio_select = State()  # aspect ratio step
-    count_select = State()         # count or quality step
-    image_upload = State()         # optional img2img
+    reference_upload = State()  # optional reference image
     prompt_input = State()
     generating = State()
 
@@ -24,8 +21,9 @@ class VideoGenFSM(StatesGroup):
 
 class MidjourneyFSM(StatesGroup):
     # Imagine flow
-    bot_type_select = State()
-    speed_select = State()
+    bot_type_select = State()      # MID_JOURNEY / NIJI_JOURNEY
+    speed_select = State()         # FAST / RELAX / TURBO
+    reference_upload = State()     # optional reference image
     prompt_input = State()
     image_upload = State()
     generating = State()

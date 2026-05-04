@@ -45,6 +45,7 @@ class TransactionStatus(str, enum.Enum):
 class PaymentProvider(str, enum.Enum):
     yookassa = "yookassa"
     cryptobot = "cryptobot"
+    tbank = "tbank"
 
 
 class User(Base):

@@ -165,6 +165,28 @@ IMAGE_CAPS: dict[str, dict] = {
     },
 }
 
+# ── Model descriptions ────────────────────────────────────────────────────────
+
+IMAGE_MODEL_DESC: dict[str, str] = {
+    "seedream-4.5":    "🌟 Топ качество · реализм · детали · медленнее",
+    "nano-banano-pro": "⚡ Gemini Pro · точное следование промпту · img2img",
+    "nano-banano-2":   "🚀 Gemini Flash · быстро · стиль · иллюстрации",
+    "wan-2.7":         "🎭 WAN · кино-стиль · персонажи · фэнтези",
+    "wan-2.7-pro":     "💎 WAN Pro · kie.ai · высокое разрешение · async",
+    "gpt-image-1":     "🤖 GPT Image · понимает сложные описания · творчество",
+}
+
+VIDEO_MODEL_DESC: dict[str, str] = {
+    "kling-3.0":               "🎬 Kling 3.0 · плавное движение · text & img2video",
+    "kling-2.6-motion":        "🎥 Kling Motion · управление камерой (pan/zoom/tilt)",
+    "grok-video":              "⚡ Grok · быстрая генерация · реализм",
+    "grok-imagine-video":      "✨ Grok Imagine · творческие сцены",
+    "doubao-seedance-2-0":     "🌊 Seedance 2.0 · плавная анимация · текст→видео",
+    "veo3.1-pro":              "🏆 Veo 3.1 Pro · Google · высшее качество · img2video",
+    "happyhorse-1.0-text-to-video":  "🐎 HappyHorse · text2video · быстро",
+    "happyhorse-1.0-image-to-video": "🐎 HappyHorse · img2video · анимация фото",
+}
+
 
 # ── Image keyboards ───────────────────────────────────────────────────────────
 
@@ -172,14 +194,21 @@ def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for mc in model_costs:
         if mc.gen_type.value == "image":
+            desc = IMAGE_MODEL_DESC.get(mc.model_key, "")
+            label = f"{mc.display_name} · {mc.credits} кр"
             builder.row(
                 InlineKeyboardButton(
-                    text=f"{mc.display_name} — {mc.credits} кр",
+                    text=label,
                     callback_data=f"img_model:{mc.model_key}",
                 )
             )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
+
+
+def image_model_info(model_key: str) -> str:
+    """Returns description text for a model to show in the screen body."""
+    return IMAGE_MODEL_DESC.get(model_key, "")
 
 
 def image_mode_kb(model_key: str) -> InlineKeyboardMarkup:
@@ -235,18 +264,23 @@ def image_quality_kb() -> InlineKeyboardMarkup:
 
 # ── Video keyboards ───────────────────────────────────────────────────────────
 
+
 def video_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for mc in model_costs:
         if mc.gen_type.value == "video":
             builder.row(
                 InlineKeyboardButton(
-                    text=f"{mc.display_name} — {mc.credits} кр",
+                    text=f"{mc.display_name} · {mc.credits} кр",
                     callback_data=f"vid_model:{mc.model_key}",
                 )
             )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
+
+
+def video_model_info(model_key: str) -> str:
+    return VIDEO_MODEL_DESC.get(model_key, "")
 
 
 def video_mode_kb(model_key: str) -> InlineKeyboardMarkup:
@@ -328,14 +362,22 @@ def motion_control_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def reference_upload_kb(back_cb: str = "menu:main") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="⏭ Пропустить (без референса)", callback_data="ref:skip"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data=back_cb))
+    return builder.as_markup()
+
+
 def after_generation_kb(gen_id: int, gen_type: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🔄 Ещё вариант", callback_data=f"regen:{gen_type}:{gen_id}"),
-        InlineKeyboardButton(text="✏️ Изменить промпт", callback_data=f"reprompt:{gen_type}:{gen_id}"),
+        InlineKeyboardButton(text="✏️ Новый промпт", callback_data=f"reprompt:{gen_type}:{gen_id}"),
     )
     builder.row(
         InlineKeyboardButton(text="⚙️ Изменить параметры", callback_data=f"reparams:{gen_type}:{gen_id}"),
     )
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
+

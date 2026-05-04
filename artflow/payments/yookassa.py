@@ -26,7 +26,7 @@ async def send_invoice(
     await bot.send_invoice(
         chat_id=chat_id,
         title=f"Пополнение баланса: {plan.label}",
-        description=f"Вы получите {plan.credits} кредитов на аккаунт ArtFlow AI",
+        description=f"Вы получите {plan.credits} кредитов на аккаунт APIX",
         payload=f"yookassa:{plan.key}",
         provider_token=provider_token,
         currency="RUB",

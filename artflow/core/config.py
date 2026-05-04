@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     CRYPTOBOT_TOKEN: str = ""
     CRYPTOBOT_BASE_URL: str = "https://pay.crypt.bot/api"
 
+    # T-Bank Acquiring
+    TBANK_TERMINAL_KEY: str = ""
+    TBANK_PASSWORD: str = ""
+    TBANK_BASE_URL: str = "https://securepay.tinkoff.ru/v2"
+    TBANK_SUCCESS_URL: str = ""
+    TBANK_FAIL_URL: str = ""
+
     # Feature flags
     SUBSCRIPTION_ENABLED: bool = False
 

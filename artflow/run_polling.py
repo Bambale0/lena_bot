@@ -75,7 +75,7 @@ async def _make_throttling_middleware(redis_client: object | None):
 async def main() -> None:
     setup_logging(logging.INFO)
     logger = logging.getLogger(__name__)
-    logger.info("Starting ArtFlow AI in POLLING mode")
+    logger.info("Starting APIX in POLLING mode")
 
     storage, redis_client = await _make_storage()
 

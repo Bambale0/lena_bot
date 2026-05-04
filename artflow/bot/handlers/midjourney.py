@@ -34,6 +34,7 @@ from bot.keyboards.midjourney import (
     mj_blend_submit_kb,
     mj_bot_type_kb,
     mj_dimensions_kb,
+    mj_reference_upload_kb,
     mj_skip_prompt_kb,
     mj_speed_kb,
     mj_submenu_kb,
@@ -61,7 +62,18 @@ _MJ_ACTION_MODEL = "midjourney-action"
 async def cb_mj_menu(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await call.message.edit_text(  # type: ignore[union-attr]
-        "🖌️ <b>Midjourney</b>\n\nВыбери действие:",
+        "🖌️ <b>Midjourney</b>\n\n"
+        "Мощнейший AI для генерации изображений и видео. Что умеет:\n\n"
+        "🎨 <b>Imagine</b> — создать изображение по текстовому промпту "
+        "(+ референс-фото опционально). Получаешь 4 варианта с кнопками U (upscale), "
+        "V (variation), 🔄 (reroll) и другими действиями.\n\n"
+        "🖼️ <b>Blend</b> — смешать от 2 до 5 изображений в одно. "
+        "Отлично для создания уникальных стилей.\n\n"
+        "🔍 <b>Describe</b> — загрузи любое фото и получи готовый промпт, "
+        "который его описывает. Удобно для изучения стилей.\n\n"
+        "🎞️ <b>Video</b> — оживи изображение, превратив его в видео "
+        "с настраиваемой интенсивностью движения.\n\n"
+        "👇 Выбери действие:",
         reply_markup=mj_submenu_kb(),
     )
     await call.answer()
@@ -75,7 +87,12 @@ async def cb_mj_menu(call: CallbackQuery, state: FSMContext) -> None:
 async def cb_imagine_start(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(MidjourneyFSM.bot_type_select)
     await call.message.edit_text(  # type: ignore[union-attr]
-        "🤖 Выбери модель бота:",
+        "🎨 <b>Imagine — выбор модели бота</b>\n\n"
+        "🎨 <b>Midjourney</b> — универсальный стиль, реализм, концепт-арт, "
+        "архитектура, продуктовые снимки. Работает с любыми промптами.\n\n"
+        "🌸 <b>Niji Journey</b> — специализирован на аниме, манге и японской "
+        "иллюстрации. Идеален для персонажей в аниме-стиле.\n\n"
+        "👇 Выбери:",
         reply_markup=mj_bot_type_kb(),
     )
     await call.answer()
@@ -87,7 +104,11 @@ async def cb_bot_type(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(bot_type=bot_type_val)
     await state.set_state(MidjourneyFSM.speed_select)
     await call.message.edit_text(  # type: ignore[union-attr]
-        "⚡ Выбери скорость генерации:",
+        "⚡ <b>Выбери скорость генерации</b>\n\n"
+        "⚡ <b>Fast</b> — быстрая очередь, результат за ~1 мин. Стандартный выбор.\n\n"
+        "🚀 <b>Turbo</b> — приоритетная очередь, ещё быстрее. "
+        "Подходит, когда нужно срочно.\n\n"
+        "😌 <b>Relax</b> — дольше, но дешевле. Когда результат не нужен немедленно.",
         reply_markup=mj_speed_kb(),
     )
     await call.answer()
@@ -108,15 +129,58 @@ async def cb_speed(call: CallbackQuery, state: FSMContext, session: AsyncSession
         return
 
     await state.update_data(speed=speed_val, credits=credits)
-    await state.set_state(MidjourneyFSM.prompt_input)
+    await state.set_state(MidjourneyFSM.reference_upload)
 
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"✏️ Введи промпт для Midjourney:\n\n"
-        f"<i>Пример: a cute cat in neon city, cyberpunk, 8k --ar 16:9 --v 6.1</i>\n\n"
-        f"Стоимость: <b>{credits} кр.</b>",
+        f"📎 <b>Референс-изображение</b> (опционально) · {credits} кр\n\n"
+        "Если хочешь, чтобы Midjourney ориентировался на стиль конкретного изображения, "
+        "загрузи его сейчас. Ссылка будет добавлена в начало промпта автоматически.\n\n"
+        "Или нажми «Без референса» и просто введи промпт.",
+        reply_markup=mj_reference_upload_kb(),
+    )
+    await call.answer()
+
+
+@router.callback_query(MidjourneyFSM.reference_upload, F.data == "mj_ref:skip")
+async def cb_mj_ref_skip(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(reference_b64=None)
+    await state.set_state(MidjourneyFSM.prompt_input)
+    data = await state.get_data()
+    credits: int = data.get("credits", 10)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"✏️ <b>Введи промпт для Midjourney</b> · {credits} кр\n\n"
+        "Пиши на английском — MJ понимает его лучше всего.\n\n"
+        "<b>Параметры:</b>\n"
+        "• <code>--ar 16:9</code> / <code>--ar 1:1</code> — соотношение сторон\n"
+        "• <code>--v 6.1</code> — версия Midjourney\n"
+        "• <code>--style raw</code> — меньше AI-обработки, ближе к промпту\n"
+        "• <code>--q 2</code> — высокое качество (медленнее)\n\n"
+        "<b>Примеры:</b>\n"
+        "<i>a cute cat in neon city, cyberpunk, 8k --ar 16:9 --v 6.1</i>\n"
+        "<i>portrait of a warrior, epic fantasy, oil painting --ar 2:3</i>",
         reply_markup=back_to_menu_kb(),
     )
     await call.answer()
+
+
+@router.message(MidjourneyFSM.reference_upload, F.photo)
+async def handle_mj_reference_photo(message: Message, state: FSMContext, bot: Bot) -> None:
+    photo = message.photo[-1]
+    file = await bot.get_file(photo.file_id)
+    buf = await bot.download_file(file.file_path)
+    raw = buf.read() if hasattr(buf, "read") else bytes(buf)
+    b64 = "data:image/jpeg;base64," + base64.b64encode(raw).decode()
+    await state.update_data(reference_b64=b64)
+    await state.set_state(MidjourneyFSM.prompt_input)
+    data = await state.get_data()
+    credits: int = data.get("credits", 10)
+    await message.answer(
+        f"✅ Референс получен! · {credits} кр\n\n"
+        "✏️ <b>Введи промпт</b> — изображение будет добавлено как стиль-референс.\n\n"
+        "Можно указать вес референса: <code>image.jpg::1.5</code> (чем выше, тем сильнее влияние)\n\n"
+        "<i>Пример: same style portrait, cinematic, studio light --ar 3:4</i>",
+        reply_markup=back_to_menu_kb(),
+    )
 
 
 @router.message(MidjourneyFSM.prompt_input, F.text)
@@ -132,6 +196,8 @@ async def handle_imagine_prompt(
     bot_type = MJBotType(data.get("bot_type", MJBotType.MIDJOURNEY))
     speed = MJSpeed(data.get("speed", MJSpeed.FAST))
     credits: int = data.get("credits", 10)
+    reference_b64: str | None = data.get("reference_b64")
+    base64_array = [reference_b64] if reference_b64 else None
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
@@ -149,7 +215,7 @@ async def handle_imagine_prompt(
     )
 
     try:
-        task_id = await mj.imagine(prompt, bot_type=bot_type, speed=speed)
+        task_id = await mj.imagine(prompt, bot_type=bot_type, speed=speed, base64_array=base64_array)
     except Exception as e:
         logger.error("MJ imagine submit error: %s", e)
         await repo.fail_generation(session, gen.id, str(e))
@@ -396,10 +462,13 @@ async def cb_blend_start(call: CallbackQuery, state: FSMContext, session: AsyncS
     await state.update_data(blend_images=[], blend_credits=credits)
     await state.set_state(MidjourneyFSM.blend_collecting)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"🖼️ <b>Blend</b>\n\n"
-        f"Отправь 2–5 изображений по одному.\n"
-        f"После отправки минимум 2-х появится кнопка «Блендить».\n\n"
-        f"Стоимость: <b>{credits} кр.</b>",
+        f"🖼️ <b>Blend — смешивание изображений</b> · {credits} кр\n\n"
+        "Отправляй фото по одному — от 2 до 5 штук. "
+        "Midjourney смешает их в одно изображение, сохраняя стиль, цвета и элементы каждого.\n\n"
+        "💡 <b>Советы:</b>\n"
+        "• Выбирай изображения с похожей композицией\n"
+        "• Хорошо сочетаются портрет + текстура или пейзаж + стиль\n"
+        "• После 2-х фото появится кнопка «Блендить»",
         reply_markup=mj_blend_submit_kb(0),
     )
     await call.answer()
@@ -534,9 +603,14 @@ async def cb_describe_start(call: CallbackQuery, state: FSMContext, session: Asy
     await state.update_data(describe_credits=credits)
     await state.set_state(MidjourneyFSM.describe_upload)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"🔍 <b>Describe</b>\n\n"
-        f"Отправь изображение — Midjourney сгенерирует описание-промпт.\n\n"
-        f"Стоимость: <b>{credits} кр.</b>",
+        f"🔍 <b>Describe</b> · {credits} кр\n\n"
+        "Загрузи любое изображение — Midjourney проанализирует его и выдаст "
+        "4 варианта текстового промпта, которые описывают это изображение.\n\n"
+        "💡 <b>Зачем это нужно:</b>\n"
+        "• Узнать, как описать понравившийся стиль\n"
+        "• Получить базу для своего промпта\n"
+        "• Изучить язык Midjourney\n\n"
+        "👇 Отправь фото:",
         reply_markup=back_to_menu_kb(),
     )
     await call.answer()
@@ -631,9 +705,14 @@ async def cb_mj_video_start(call: CallbackQuery, state: FSMContext, session: Asy
     await state.update_data(video_credits=credits)
     await state.set_state(MidjourneyFSM.video_upload)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"🎞️ <b>MJ Video</b>\n\n"
-        f"Отправь изображение — оно станет первым кадром видео.\n\n"
-        f"Стоимость: <b>{credits} кр.</b>",
+        f"🎞️ <b>MJ Video — изображение в видео</b> · {credits} кр\n\n"
+        "Отправь изображение — оно станет первым кадром. "
+        "Midjourney оживит его, добавив движение.\n\n"
+        "💡 <b>Лучше всего работает с:</b>\n"
+        "• Портретами людей и персонажей\n"
+        "• Пейзажами с природой\n"
+        "• Абстрактными и фантастическими сценами\n\n"
+        "👇 Отправь фото:",
         reply_markup=back_to_menu_kb(),
     )
     await call.answer()
@@ -648,7 +727,9 @@ async def handle_video_upload(message: Message, state: FSMContext, bot: Bot) -> 
     await state.update_data(video_image_url=image_url)
     await state.set_state(MidjourneyFSM.video_speed_select)
     await message.answer(
-        "⚡ Выбери интенсивность движения:",
+        "⚡ <b>Интенсивность движения</b>\n\n"
+        "🐢 <b>Low</b> — плавное, едва заметное движение. Хорошо для портретов.\n"
+        "🏎 <b>High</b> — активное, динамичное движение. Больше эффекта.",
         reply_markup=mj_video_speed_kb(),
     )
 
@@ -659,8 +740,10 @@ async def cb_video_motion(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(video_motion=motion_val)
     await state.set_state(MidjourneyFSM.video_prompt)
     await call.message.edit_text(  # type: ignore[union-attr]
-        "✍️ Введи текстовый промпт для видео\n"
-        "или нажми «Без промпта»:",
+        "✍️ <b>Промпт для видео</b> (опционально)\n\n"
+        "Можно добавить текстовое описание движения или атмосферы. "
+        "Если не нужно — нажми «Без промпта».\n\n"
+        "<i>Пример: gentle wind, hair flowing, soft bokeh</i>",
         reply_markup=mj_skip_prompt_kb(),
     )
     await call.answer()

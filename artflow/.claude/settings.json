@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(redis-cli -p 6666 ping)",
+      "Bash(systemctl status *)",
+      "Bash(redis-server --port 6666 --daemonize yes --logfile /var/log/redis/redis-6666.log)",
+      "Bash(pg_isready -h localhost -p 5432)",
+      "Bash(psql -U postgres -c \"\\\\l artflow\")",
+      "Bash(psql -U postgres -c \"\\\\l\")"
+    ]
+  }
+}
