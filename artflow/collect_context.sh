@@ -24,7 +24,7 @@ file_dump() {
     {
       echo
       echo "---------------- FILE: $path ----------------"
-      sed -n '1,320p' "$path"
+      cat "$path"
       echo
       echo "---------------- END FILE: $path ----------------"
       echo

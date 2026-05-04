@@ -4,9 +4,16 @@ from aiogram.fsm.state import State, StatesGroup
 
 class ImageGenFSM(StatesGroup):
     model_select = State()
+    mode_select = State()
+    image_upload = State()
     reference_upload = State()  # optional reference image
+    aspect_ratio_select = State()
+    count_select = State()
     prompt_input = State()
     generating = State()
+    session_active = State()
+    remix_prompt = State()
+    session_reference_upload = State()
 
 
 class VideoGenFSM(StatesGroup):
