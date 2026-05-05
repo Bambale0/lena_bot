@@ -111,6 +111,7 @@ async def generate_video(
     reference_video_url: str | None = None,
     # Grok mode
     grok_mode: str = "normal",
+    callback_url: str | None = None,
 ) -> VideoResult:
     if model in _VEO_MODELS:
         return await _veo_generate(model, prompt, image_url, aspect_ratio)
@@ -124,6 +125,7 @@ async def generate_video(
         resolution=resolution,
         reference_video_url=reference_video_url,
         grok_mode=grok_mode,
+        callback_url=callback_url,
     )
 
 
@@ -140,6 +142,7 @@ async def _kieai_generate(
     resolution: str | None,
     reference_video_url: str | None,
     grok_mode: str,
+    callback_url: str | None,
 ) -> VideoResult:
     inp: dict[str, Any] = {}
     m = model.value
@@ -279,7 +282,7 @@ async def _kieai_generate(
     else:
         raise ValueError(f"Unknown video model: {model}")
 
-    resp = await kieai_client.create_task({"model": m, "input": inp})
+    resp = await kieai_client.create_task({"model": m, "input": inp}, callback_url=callback_url)
     task_id = str(resp.get("data", {}).get("taskId") or resp.get("taskId"))
     logger.info("KIE.AI video task %s: %s", m, task_id)
     return VideoResult(task_id=task_id, provider="kieai")

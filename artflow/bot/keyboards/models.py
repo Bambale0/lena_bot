@@ -193,22 +193,140 @@ def _prioritize_ratio(ratios: list[str], preferred: str = "9:16") -> list[str]:
     """Put the most important aspect ratio first without dropping options."""
     return ([preferred] if preferred in ratios else []) + [r for r in ratios if r != preferred]
 
+
+_IMAGE_MODEL_ORDER: list[str] = [
+    ImageModel.NANO_BANANA_2,
+    ImageModel.NANO_BANANA_PRO,
+    ImageModel.NANO_BANANA,
+    ImageModel.SEEDREAM_45,
+    ImageModel.SEEDREAM_45_EDIT,
+    ImageModel.WAN_27_PRO,
+    ImageModel.GROK_T2I,
+    ImageModel.GROK_I2I,
+]
+
+_VIDEO_MODEL_ORDER: list[str] = [
+    VideoModel.KLING_30,
+    VideoModel.VEO_3_LITE,
+    VideoModel.SEEDANCE_2_FAST,
+    VideoModel.HAPPYHORSE_T2V,
+    VideoModel.VEO_3,
+    VideoModel.VEO_3_FAST,
+    VideoModel.SEEDANCE_2,
+    VideoModel.WAN_27_T2V,
+    VideoModel.GROK_T2V,
+    VideoModel.KLING_26_I2V,
+    VideoModel.WAN_27_I2V,
+    VideoModel.GROK_I2V,
+    VideoModel.HAPPYHORSE_I2V,
+    VideoModel.KLING_26_MOTION,
+    VideoModel.KLING_30_MOTION,
+    VideoModel.KLING_26_T2V,
+]
+
+_IMAGE_GROUPS: list[tuple[str, list[str]]] = [
+    ("fast", [
+        ImageModel.NANO_BANANA_2,
+        ImageModel.NANO_BANANA,
+        ImageModel.GROK_T2I,
+        ImageModel.SEEDREAM_45,
+    ]),
+    ("edit", [
+        ImageModel.NANO_BANANA_PRO,
+        ImageModel.SEEDREAM_45_EDIT,
+        ImageModel.GROK_I2I,
+        ImageModel.WAN_27_PRO,
+    ]),
+]
+
+_VIDEO_GROUPS: list[tuple[str, list[str]]] = [
+    ("fast", [
+        VideoModel.KLING_30,
+        VideoModel.VEO_3_LITE,
+        VideoModel.SEEDANCE_2_FAST,
+        VideoModel.HAPPYHORSE_T2V,
+    ]),
+    ("quality", [
+        VideoModel.VEO_3,
+        VideoModel.VEO_3_FAST,
+        VideoModel.SEEDANCE_2,
+        VideoModel.WAN_27_T2V,
+        VideoModel.GROK_T2V,
+        VideoModel.KLING_26_T2V,
+    ]),
+    ("i2v", [
+        VideoModel.KLING_26_I2V,
+        VideoModel.WAN_27_I2V,
+        VideoModel.GROK_I2V,
+        VideoModel.HAPPYHORSE_I2V,
+    ]),
+    ("motion", [
+        VideoModel.KLING_26_MOTION,
+        VideoModel.KLING_30_MOTION,
+    ]),
+]
+
+IMAGE_GROUP_TITLES: dict[str, str] = {
+    "fast": "⚡ Быстрый старт",
+    "edit": "🎯 Референс и редактирование",
+}
+
+VIDEO_GROUP_TITLES: dict[str, str] = {
+    "fast": "⚡ Быстрый старт",
+    "quality": "🎬 Кино и качество",
+    "i2v": "🖼️ Из изображения в видео",
+    "motion": "🕺 Управление камерой",
+}
+
+
+def _model_button(mc: ModelCost, prefix: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text=f"{mc.display_name} · {mc.credits} кр",
+        callback_data=f"{prefix}:{mc.model_key}",
+    )
+
+
+def _sorted_models(model_costs: list[ModelCost], allowed_keys: list[str]) -> list[ModelCost]:
+    order = {key: idx for idx, key in enumerate(allowed_keys)}
+    filtered = [mc for mc in model_costs if mc.model_key in order]
+    return sorted(filtered, key=lambda mc: order[mc.model_key])
+
+
+def _build_model_list_kb(
+    model_costs: list[ModelCost],
+    keys: list[str],
+    callback_prefix: str,
+    back_callback: str,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for mc in _sorted_models(model_costs, keys):
+        builder.row(_model_button(mc, callback_prefix))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data=back_callback))
+    return builder.as_markup()
+
 # ── Image keyboards ───────────────────────────────────────────────────────────
 
-def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
+def image_model_groups_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for mc in model_costs:
-        if mc.gen_type.value == "image":
-            desc = IMAGE_MODEL_DESC.get(mc.model_key, "")
-            label = f"{mc.display_name} · {mc.credits} кр"
-            builder.row(
-                InlineKeyboardButton(
-                    text=label,
-                    callback_data=f"img_model:{mc.model_key}",
-                )
+    for group_key, _ in _IMAGE_GROUPS:
+        builder.row(
+            InlineKeyboardButton(
+                text=IMAGE_GROUP_TITLES[group_key],
+                callback_data=f"img_group:{group_key}",
             )
+        )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
+
+
+def image_models_kb(model_costs: list[ModelCost], group_key: str) -> InlineKeyboardMarkup:
+    keys = dict(_IMAGE_GROUPS).get(group_key, [])
+    return _build_model_list_kb(
+        model_costs=model_costs,
+        keys=keys,
+        callback_prefix="img_model",
+        back_callback="menu:image",
+    )
 
 
 def image_model_info(model_key: str) -> str:
@@ -270,18 +388,27 @@ def image_quality_kb() -> InlineKeyboardMarkup:
 # ── Video keyboards ───────────────────────────────────────────────────────────
 
 
-def video_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
+def video_model_groups_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for mc in model_costs:
-        if mc.gen_type.value == "video":
-            builder.row(
-                InlineKeyboardButton(
-                    text=f"{mc.display_name} · {mc.credits} кр",
-                    callback_data=f"vid_model:{mc.model_key}",
-                )
+    for group_key, _ in _VIDEO_GROUPS:
+        builder.row(
+            InlineKeyboardButton(
+                text=VIDEO_GROUP_TITLES[group_key],
+                callback_data=f"vid_group:{group_key}",
             )
+        )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
+
+
+def video_models_kb(model_costs: list[ModelCost], group_key: str) -> InlineKeyboardMarkup:
+    keys = dict(_VIDEO_GROUPS).get(group_key, [])
+    return _build_model_list_kb(
+        model_costs=model_costs,
+        keys=keys,
+        callback_prefix="vid_model",
+        back_callback="menu:video",
+    )
 
 
 def video_model_info(model_key: str) -> str:

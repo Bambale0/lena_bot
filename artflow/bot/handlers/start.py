@@ -74,3 +74,8 @@ async def cb_main_menu(call: CallbackQuery, db_user: User, state: FSMContext) ->
 async def cb_help(call: CallbackQuery) -> None:
     await call.message.edit_text(HELP_TEXT, reply_markup=back_to_menu_kb())  # type: ignore[union-attr]
     await call.answer()
+
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(call: CallbackQuery) -> None:
+    await call.answer()

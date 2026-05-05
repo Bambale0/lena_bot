@@ -5,7 +5,7 @@ import secrets
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update, desc
+from sqlalchemy import select, update, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
@@ -208,7 +208,7 @@ async def archive_active_image_sessions(session: AsyncSession, user_id: int) -> 
             ImageSession.user_id == user_id,
             ImageSession.status == ImageSessionStatus.active,
         )
-        .values(status=ImageSessionStatus.archived)
+        .values(status=ImageSessionStatus.archived, updated_at=func.now())
     )
     await session.commit()
 
@@ -276,7 +276,7 @@ async def update_image_session_reference(
     await session.execute(
         update(ImageSession)
         .where(ImageSession.id == image_session_id)
-        .values(reference_file_id=reference_file_id)
+        .values(reference_file_id=reference_file_id, updated_at=func.now())
     )
     await session.commit()
 
@@ -289,7 +289,7 @@ async def update_image_session_base_prompt(
     await session.execute(
         update(ImageSession)
         .where(ImageSession.id == image_session_id)
-        .values(base_prompt=base_prompt)
+        .values(base_prompt=base_prompt, updated_at=func.now())
     )
     await session.commit()
 
@@ -303,7 +303,11 @@ async def update_image_session_last_result(
     await session.execute(
         update(ImageSession)
         .where(ImageSession.id == image_session_id)
-        .values(last_result_url=result_url, last_generation_id=generation_id)
+        .values(
+            last_result_url=result_url,
+            last_generation_id=generation_id,
+            updated_at=func.now(),
+        )
     )
     await session.commit()
 

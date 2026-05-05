@@ -1,28 +1,40 @@
 # api/kie_webhook.py
 from __future__ import annotations
 
+import json
 from typing import Any
 
 
-def extract_task_id(payload: dict[str, Any]) -> str | None:
-    data = payload.get("data") or {}
-    info = payload.get("info") or {}
+def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
-    return (
-        str(data.get("task_id"))
-        if data.get("task_id")
-        else str(data.get("taskId"))
-        if data.get("taskId")
-        else str(payload.get("task_id"))
-        if payload.get("task_id")
-        else str(payload.get("taskId"))
-        if payload.get("taskId")
-        else str(info.get("task_id"))
-        if info.get("task_id")
-        else str(info.get("taskId"))
-        if info.get("taskId")
-        else None
-    )
+
+def _nested_dicts(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    data = _as_dict(payload.get("data"))
+    info = _as_dict(payload.get("info"))
+    nested_payload = _as_dict(payload.get("payload"))
+    data_payload = _as_dict(data.get("payload"))
+    data_result = _as_dict(data.get("resultJson"))
+    info_result = _as_dict(info.get("resultJson"))
+    payload_result = _as_dict(payload.get("resultJson"))
+    return [data, info, nested_payload, data_payload, data_result, info_result, payload_result]
+
+
+def extract_task_id(payload: dict[str, Any]) -> str | None:
+    for source in _nested_dicts(payload) + [payload]:
+        for key in ("task_id", "taskId"):
+            value = source.get(key)
+            if value:
+                return str(value)
+    return None
 
 
 def is_success(payload: dict[str, Any]) -> bool:
@@ -30,10 +42,13 @@ def is_success(payload: dict[str, Any]) -> bool:
     if code is not None and str(code) not in {"0", "200", "success", "SUCCESS"}:
         return False
 
-    data = payload.get("data") or {}
+    data = _as_dict(payload.get("data"))
+    info = _as_dict(payload.get("info"))
     state = str(
         data.get("state")
         or data.get("status")
+        or info.get("state")
+        or info.get("status")
         or payload.get("state")
         or payload.get("status")
         or ""
@@ -49,30 +64,28 @@ def is_success(payload: dict[str, Any]) -> bool:
 
 
 def extract_error(payload: dict[str, Any]) -> str:
-    data = payload.get("data") or {}
-    return str(
-        data.get("failMsg")
-        or data.get("error")
-        or data.get("msg")
-        or payload.get("msg")
-        or payload.get("error")
-        or "KIE generation failed"
-    )
+    for source in _nested_dicts(payload) + [payload]:
+        for key in ("failMsg", "error", "msg", "message"):
+            value = source.get(key)
+            if value:
+                return str(value)
+    return "KIE generation failed"
 
 
 def extract_result_urls(payload: dict[str, Any]) -> list[str]:
-    data = payload.get("data") or {}
-    info = payload.get("info") or {}
-
-    candidates: list[Any] = [
-        data.get("result_urls"),
-        data.get("resultUrls"),
-        data.get("result_urls".replace("_", "")),
-        info.get("result_urls"),
-        info.get("resultUrls"),
-        payload.get("result_urls"),
-        payload.get("resultUrls"),
-    ]
+    sources = _nested_dicts(payload) + [payload]
+    candidates: list[Any] = []
+    for source in sources:
+        candidates.extend(
+            [
+                source.get("result_urls"),
+                source.get("resultUrls"),
+                source.get("video_urls"),
+                source.get("videoUrls"),
+                source.get("image_urls"),
+                source.get("imageUrls"),
+            ]
+        )
 
     urls: list[str] = []
     for item in candidates:
@@ -81,10 +94,11 @@ def extract_result_urls(payload: dict[str, Any]) -> list[str]:
         elif isinstance(item, str) and item:
             urls.append(item)
 
-    for key in ("video_url", "videoUrl", "image_url", "imageUrl", "url"):
-        value = data.get(key) or info.get(key) or payload.get(key)
-        if isinstance(value, str) and value:
-            urls.append(value)
+    for source in sources:
+        for key in ("video_url", "videoUrl", "image_url", "imageUrl", "url"):
+            value = source.get(key)
+            if isinstance(value, str) and value:
+                urls.append(value)
 
     # Keep order, remove duplicates.
     seen = set()

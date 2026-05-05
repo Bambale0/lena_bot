@@ -60,6 +60,7 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         )
+        inspector = inspect(bind)
 
     image_session_indexes = {idx["name"] for idx in inspector.get_indexes("image_sessions")}
     if "ix_image_sessions_user_id" not in image_session_indexes:

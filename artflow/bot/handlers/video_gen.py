@@ -14,7 +14,9 @@ from api.video_service import VideoModel
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     VIDEO_CAPS,
+    VIDEO_GROUP_TITLES,
     after_generation_kb,
+    video_model_groups_kb,
     video_mode_kb,
     video_model_info,
     video_models_kb,
@@ -89,18 +91,28 @@ def _has_params(model_key: str) -> bool:
 @router.callback_query(F.data == "menu:video")
 async def cb_video_menu(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     await state.set_state(VideoGenFSM.model_select)
-    model_costs = await repo.get_all_model_costs(session)
     await call.message.edit_text(  # type: ignore[union-attr]
         "🎬 <b>Генерация видео</b>\n\n"
-        "Выбери модель. Все поддерживают текстовый промпт, часть — загрузку изображения:\n\n"
-        "• <b>Kling 3.0</b> — плавное движение, text & img→video\n"
-        "• <b>Kling Motion</b> — управление камерой (pan, zoom, orbit)\n"
-        "• <b>Veo 3.1 Pro</b> — высшее качество от Google\n"
-        "• <b>Seedance 2.0</b> — плавная анимация\n"
-        "• <b>Grok</b> — быстрая реалистичная генерация\n\n"
+        "Модели разложены по типу задачи, чтобы не искать нужную среди всего списка:\n\n"
+        "• <b>⚡ Быстрый старт</b> — для коротких и понятных роликов\n"
+        "• <b>🎬 Кино и качество</b> — для более сильной картинки\n"
+        "• <b>🖼️ Из изображения в видео</b> — если хочешь оживить фото\n"
+        "• <b>🕺 Управление камерой</b> — если нужен pan/zoom/orbit\n\n"
         "⏱ Генерация занимает <b>1–5 минут</b> — бот пришлёт видео, когда готово.\n\n"
-        "👇 <b>Выбери модель:</b>",
-        reply_markup=video_models_kb(model_costs),
+        "👇 <b>Сначала выбери категорию:</b>",
+        reply_markup=video_model_groups_kb(),
+    )
+    await call.answer()
+
+
+@router.callback_query(VideoGenFSM.model_select, F.data.startswith("vid_group:"))
+async def cb_video_group(call: CallbackQuery, session: AsyncSession) -> None:
+    group_key = call.data.split(":")[1]  # type: ignore[union-attr]
+    model_costs = await repo.get_all_model_costs(session)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"🎬 <b>{VIDEO_GROUP_TITLES.get(group_key, 'Модели')}</b>\n\n"
+        "Выбери модель внутри этой категории:",
+        reply_markup=video_models_kb(model_costs, group_key),
     )
     await call.answer()
 

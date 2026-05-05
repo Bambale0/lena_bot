@@ -5,6 +5,7 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
+from aiogram import Bot
 from aiogram.types import TelegramObject, Update, User as TgUser
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,15 @@ from core.config import settings
 from db import repository as repo
 
 logger = logging.getLogger(__name__)
+
+
+async def _notify_referral(bot: Bot | None, tg_id: int, text: str) -> None:
+    if not bot:
+        return
+    try:
+        await bot.send_message(tg_id, text)
+    except Exception as e:
+        logger.warning("Failed to send referral notification to %s: %s", tg_id, e)
 
 
 class AuthMiddleware(BaseMiddleware):
@@ -28,6 +38,7 @@ class AuthMiddleware(BaseMiddleware):
     ) -> Any:
         session: AsyncSession = data["session"]
         tg_user: TgUser | None = data.get("event_from_user")
+        bot: Bot | None = data.get("bot")
 
         if not tg_user or tg_user.is_bot:
             return await handler(event, data)
@@ -63,9 +74,21 @@ class AuthMiddleware(BaseMiddleware):
             if referrer:
                 await repo.add_credits(session, referrer.id, settings.REFERRAL_L1_CREDITS)
                 logger.info("Referral L1 bonus: %s -> %s", tg_user.id, referrer.tg_id)
+                await _notify_referral(
+                    bot,
+                    referrer.tg_id,
+                    "🎉 По твоей ссылке пришёл новый пользователь!\n"
+                    f"+{settings.REFERRAL_L1_CREDITS} кредитов начислено.",
+                )
             if referrer_l2:
                 await repo.add_credits(session, referrer_l2.id, settings.REFERRAL_L2_CREDITS)
                 logger.info("Referral L2 bonus: %s -> %s", tg_user.id, referrer_l2.tg_id)
+                await _notify_referral(
+                    bot,
+                    referrer_l2.tg_id,
+                    "🎉 По второй линии пришёл новый пользователь!\n"
+                    f"+{settings.REFERRAL_L2_CREDITS} кредитов начислено.",
+                )
 
         elif db_user.is_banned:
             return  # Просто игнорируем забаненных

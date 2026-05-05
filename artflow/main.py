@@ -267,19 +267,19 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                 caption = f"✅ <b>Готово!</b>\n\n<i>{gen.prompt[:200]}</i>"
                 if gen.gen_type == GenerationType.image:
                     caption += (
-                        "\n\n🎨 <b>Серия активна.</b> "
-                        "Можешь отправлять новый текст или фото — настройки сохранятся."
+                        "\n\n🎨 <b>Серия активна.</b>\n"
+                        "Теперь просто отправляй новый текст или фото — настройки сохранятся."
                     )
                     await bot.send_photo(
-                        user.tg_id,
-                        result_url,
+                        chat_id=user.tg_id,
+                        photo=result_url,
                         caption=caption,
                         reply_markup=image_session_kb(gen.id),
                     )
                 else:
                     await bot.send_video(
-                        user.tg_id,
-                        result_url,
+                        chat_id=user.tg_id,
+                        video=result_url,
                         caption=caption,
                         reply_markup=after_generation_kb(gen.id, "video"),
                     )

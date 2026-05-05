@@ -1,7 +1,6 @@
 # bot/handlers/image_gen.py
 from __future__ import annotations
 
-import asyncio
 import logging
 from urllib.parse import urlencode
 
@@ -10,14 +9,15 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import image_service, polling
+from api import image_service
 from api.image_service import ImageModel
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     IMAGE_CAPS,
-    after_generation_kb,
+    IMAGE_GROUP_TITLES,
     image_session_kb,
     image_aspect_ratio_kb,
+    image_model_groups_kb,
     image_count_kb,
     image_mode_kb,
     image_model_info,
@@ -28,7 +28,7 @@ from bot.keyboards.models import (
 from bot.states import ImageGenFSM
 from core.config import settings
 from db import repository as repo
-from db.models import GenerationType, ImageGenerationAction, User
+from db.models import GenerationType, ImageGenerationAction, ImageSession, User
 
 logger = logging.getLogger(__name__)
 router = Router(name="image_gen")
@@ -57,21 +57,154 @@ def _session_caption(prompt: str) -> str:
     )
 
 
+def _safe_image_model(model_key: str) -> ImageModel | None:
+    try:
+        return ImageModel(model_key)
+    except ValueError:
+        logger.warning("Unknown image model in session flow: %s", model_key)
+        return None
+
+
+def _supports_img2img(model_key: str) -> bool:
+    caps = IMAGE_CAPS.get(model_key, {})
+    return "image" in caps.get("modes", [])
+
+
+async def _resolve_image_session(
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext,
+    gen_id: int | None = None,
+) -> tuple[ImageSession | None, int | None]:
+    data = await state.get_data()
+    image_session_id = data.get("image_session_id")
+
+    if image_session_id:
+        image_session = await repo.get_image_session(session, image_session_id, db_user.id)
+        if image_session:
+            return image_session, gen_id
+
+    if gen_id:
+        gen = await repo.get_generation_by_id(session, gen_id)
+        if gen and gen.user_id == db_user.id and gen.image_session_id:
+            image_session = await repo.get_image_session(session, gen.image_session_id, db_user.id)
+            if image_session:
+                return image_session, gen.id
+
+    image_session = await repo.get_active_image_session(session, db_user.id)
+    return image_session, gen_id
+
+
+async def _session_reference_url(
+    bot: Bot,
+    image_session: ImageSession,
+    prefer_last_result: bool = False,
+) -> str | None:
+    if prefer_last_result and image_session.last_result_url:
+        return image_session.last_result_url
+    if image_session.reference_file_id:
+        return await _telegram_file_url(bot, image_session.reference_file_id)
+    return None
+
+
+async def _launch_session_generation(
+    *,
+    source_message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    image_session: ImageSession,
+    prompt: str,
+    action_type: ImageGenerationAction,
+    reference_url: str | None = None,
+    parent_generation_id: int | None = None,
+    launching_text: str,
+    queued_text: str,
+) -> bool:
+    model_cost = await repo.get_model_cost(session, image_session.model)
+    credits = model_cost.credits if model_cost else 1
+    model = _safe_image_model(image_session.model)
+    if model is None:
+        await source_message.answer("❌ Модель серии больше не поддерживается.", reply_markup=main_menu_kb())
+        return False
+
+    ok = await repo.spend_credits(session, db_user.id, credits)
+    if not ok:
+        await source_message.answer("❌ Недостаточно кредитов.", reply_markup=main_menu_kb())
+        return False
+
+    await repo.update_image_session_base_prompt(session, image_session.id, prompt)
+
+    gen = await repo.create_generation(
+        session,
+        db_user.id,
+        image_session.model,
+        GenerationType.image,
+        prompt,
+        credits,
+        image_session_id=image_session.id,
+        parent_generation_id=parent_generation_id,
+        action_type=action_type,
+    )
+
+    status_msg = await source_message.answer(launching_text)
+
+    try:
+        result = await image_service.generate_image(
+            model,
+            prompt,
+            image_url=reference_url,
+            aspect_ratio=image_session.aspect_ratio,
+            n=image_session.count,
+            quality=image_session.quality,
+            callback_url=_kie_callback_url(),
+        )
+    except Exception as e:
+        logger.error("Session image generation error: %s", e)
+        await repo.fail_generation(session, gen.id, str(e))
+        await repo.add_credits(session, db_user.id, credits)
+        await status_msg.edit_text("❌ Ошибка генерации. Кредиты возвращены.", reply_markup=image_session_kb(parent_generation_id))
+        return False
+
+    await repo.update_generation_task(session, gen.id, result.task_id or "")
+    await state.set_state(ImageGenFSM.session_active)
+    await state.update_data(
+        image_session_id=image_session.id,
+        model_key=image_session.model,
+        credits=credits,
+        aspect_ratio=image_session.aspect_ratio,
+        count=image_session.count,
+        quality=image_session.quality,
+        image_file_id=image_session.reference_file_id,
+    )
+    await status_msg.edit_text(queued_text, reply_markup=image_session_kb(gen.id))
+    return True
+
+
 # ── Model select ──────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "menu:image")
 async def cb_image_menu(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     await state.set_state(ImageGenFSM.model_select)
-    model_costs = await repo.get_all_model_costs(session)
     await call.message.edit_text(  # type: ignore[union-attr]
         "🎨 <b>Генерация изображений</b>\n\n"
-        "Выбери AI-модель. Каждая имеет свои сильные стороны:\n\n"
-        "• <b>Seedream</b> — максимум деталей и реализма\n"
-        "• <b>Gemini Pro/Flash</b> — точное следование описанию, поддержка img2img\n"
-        "• <b>WAN</b> — кино-стиль, персонажи, фэнтези\n"
-        "• <b>GPT Image</b> — понимает сложные и длинные промпты\n\n"
-        "👇 <b>Нажми на модель для выбора:</b>",
-        reply_markup=image_models_kb(model_costs),
+        "Модели разложены по сценариям, чтобы было проще выбрать без угадываний:\n\n"
+        "• <b>⚡ Быстрый старт</b> — когда нужен результат быстро\n"
+        "• <b>🎯 Референс и редактирование</b> — если хочешь править по фото или референсу\n\n"
+        "👇 <b>Сначала выбери категорию:</b>",
+        reply_markup=image_model_groups_kb(),
+    )
+    await call.answer()
+
+
+@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_group:"))
+async def cb_image_group(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
+    group_key = call.data.split(":")[1]  # type: ignore[union-attr]
+    model_costs = await repo.get_all_model_costs(session)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"🎨 <b>{IMAGE_GROUP_TITLES.get(group_key, 'Модели')}</b>\n\n"
+        "Выбери модель внутри этой категории:",
+        reply_markup=image_models_kb(model_costs, group_key),
     )
     await call.answer()
 
@@ -443,12 +576,14 @@ async def handle_session_prompt(
     credits = model_cost.credits if model_cost else int(data.get("credits", 1))
     prompt = message.text.strip()  # type: ignore[union-attr]
 
-    image_url = await _telegram_file_url(bot, image_session.reference_file_id)
+    image_url = await _session_reference_url(bot, image_session, prefer_last_result=False)
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await message.answer("❌ Недостаточно кредитов.", reply_markup=main_menu_kb())
         return
+
+    await repo.update_image_session_base_prompt(session, image_session.id, prompt)
 
     parent_id = image_session.last_generation_id
     gen = await repo.create_generation(
@@ -460,7 +595,7 @@ async def handle_session_prompt(
         credits,
         image_session_id=image_session.id,
         parent_generation_id=parent_id,
-        action_type=ImageGenerationAction.remix,
+        action_type=ImageGenerationAction.initial,
     )
 
     status_msg = await message.answer(
@@ -533,10 +668,59 @@ async def cb_image_session_settings(call: CallbackQuery, session: AsyncSession, 
 
 
 @router.callback_query(F.data.startswith("img_session:remix:"))
-async def cb_image_session_remix(call: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(ImageGenFSM.session_active)
+async def cb_image_session_remix(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    gen_id = int(call.data.split(":")[-1])  # type: ignore[union-attr]
+    image_session, _ = await _resolve_image_session(session, db_user, state, gen_id if gen_id > 0 else None)
+    if image_session:
+        await state.update_data(image_session_id=image_session.id)
+    await state.set_state(ImageGenFSM.remix_prompt)
     await call.message.answer("✨ Напиши, что изменить в текущей картинке:")
     await call.answer()
+
+
+@router.message(ImageGenFSM.remix_prompt, F.text)
+async def handle_remix_prompt(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    bot: Bot,
+) -> None:
+    prompt = message.text.strip()  # type: ignore[union-attr]
+    image_session, _ = await _resolve_image_session(session, db_user, state)
+    if not image_session:
+        await message.answer("Серия не найдена. Начни новую генерацию.", reply_markup=main_menu_kb())
+        await state.clear()
+        return
+
+    reference_url: str | None = None
+    launch_note = "✨ <b>Применяю изменения к текущей картинке...</b>"
+    if _supports_img2img(image_session.model):
+        reference_url = await _session_reference_url(bot, image_session, prefer_last_result=True)
+    else:
+        launch_note = (
+            "✨ <b>Делаю ремикс по тексту...</b>\n"
+            "Текущая модель не поддерживает прямую привязку к изображению, поэтому запущу text-to-image."
+        )
+
+    await _launch_session_generation(
+        source_message=message,
+        state=state,
+        session=session,
+        db_user=db_user,
+        image_session=image_session,
+        prompt=prompt,
+        action_type=ImageGenerationAction.remix,
+        reference_url=reference_url,
+        parent_generation_id=image_session.last_generation_id,
+        launching_text=launch_note,
+        queued_text="⏳ <b>Ремикс запущен.</b> Результат придёт сюда автоматически.",
+    )
 
 
 @router.callback_query(F.data.startswith("img_session:repeat:"))
@@ -547,13 +731,8 @@ async def cb_image_session_repeat(
     db_user: User,
     bot: Bot,
 ) -> None:
-    data = await state.get_data()
-    image_session_id = data.get("image_session_id")
-    image_session = (
-        await repo.get_image_session(session, image_session_id, db_user.id)
-        if image_session_id
-        else await repo.get_active_image_session(session, db_user.id)
-    )
+    gen_id = int(call.data.split(":")[-1])  # type: ignore[union-attr]
+    image_session, _ = await _resolve_image_session(session, db_user, state, gen_id if gen_id > 0 else None)
     if not image_session:
         await call.answer("Серия не найдена", show_alert=True)
         return
@@ -563,17 +742,33 @@ async def cb_image_session_repeat(
         await call.answer("Нечего повторять", show_alert=True)
         return
 
-    fake_message = call.message
-    if fake_message:
-        await state.set_state(ImageGenFSM.session_active)
-        await state.update_data(image_session_id=image_session.id)
-        await fake_message.answer(last_gen.prompt)
-    await call.answer("Повторяю последний промпт")
+    if not call.message:
+        await call.answer("Не удалось запустить повтор", show_alert=True)
+        return
+
+    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False)
+    await _launch_session_generation(
+        source_message=call.message,
+        state=state,
+        session=session,
+        db_user=db_user,
+        image_session=image_session,
+        prompt=last_gen.prompt,
+        action_type=ImageGenerationAction.repeat,
+        reference_url=reference_url,
+        parent_generation_id=image_session.last_generation_id,
+        launching_text="🔁 <b>Повторяю последнюю генерацию...</b>",
+        queued_text="⏳ <b>Повтор запущен.</b> Результат придёт сюда автоматически.",
+    )
+    await call.answer("Повторяю последнюю генерацию")
 
 
 @router.callback_query(F.data.startswith("img_session:animate:"))
 async def cb_image_session_animate(call: CallbackQuery) -> None:
-    await call.answer("Оживление подключим следующим шагом через video image-to-video.", show_alert=True)
+    await call.answer(
+        "🎬 Оживление фото подключается следующим шагом. Пока можешь открыть раздел Видео и загрузить это изображение.",
+        show_alert=True,
+    )
 
 
 # ── Regen ─────────────────────────────────────────────────────────────────────
