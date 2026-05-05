@@ -1,26 +1,20 @@
 from __future__ import annotations
 
-import mimetypes
+import hashlib
 from pathlib import Path
-from uuid import uuid4
-
-import httpx
-from aiogram import Bot
 
 from core.config import settings
 
-
 UPLOAD_ROOT = Path(settings.STATIC_UPLOAD_DIR)
 
-_EXT_BY_CONTENT_TYPE = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-    "video/mp4": ".mp4",
-    "video/webm": ".webm",
-    "video/quicktime": ".mov",
-}
+
+def get_static_upload_mount_path() -> str:
+    return settings.STATIC_UPLOAD_URL_PATH
+
+
+def get_static_upload_directory() -> Path:
+    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    return UPLOAD_ROOT
 
 
 def public_upload_url(filename: str) -> str:
@@ -29,41 +23,55 @@ def public_upload_url(filename: str) -> str:
     return f"{base}/{path}/{filename}"
 
 
-def _extension(content_type: str | None, fallback_url: str | None = None) -> str:
-    if content_type:
-        clean_type = content_type.split(";", 1)[0].strip().lower()
-        if clean_type in _EXT_BY_CONTENT_TYPE:
-            return _EXT_BY_CONTENT_TYPE[clean_type]
-        guessed = mimetypes.guess_extension(clean_type)
-        if guessed:
-            return guessed
+def detect_image_extension(data: bytes, content_type: str | None = None) -> str:
+    """Return KIE-friendly image extension. Never return .bin for image refs."""
+    ct = (content_type or "").lower()
 
-    if fallback_url:
-        suffix = Path(fallback_url.split("?", 1)[0]).suffix.lower()
-        if suffix:
-            return suffix[:12]
+    if "jpeg" in ct or "jpg" in ct:
+        return ".jpg"
+    if "png" in ct:
+        return ".png"
+    if "webp" in ct:
+        return ".webp"
 
-    return ".bin"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith(b"RIFF") and b"WEBP" in data[:16]:
+        return ".webp"
+
+    # Telegram PhotoSize is JPEG in practice. KIE rejects .bin.
+    return ".jpg"
 
 
-async def save_bytes(data: bytes, *, content_type: str | None = None, fallback_url: str | None = None) -> str:
-    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-    filename = f"{uuid4().hex}{_extension(content_type, fallback_url)}"
-    path = UPLOAD_ROOT / filename
+def save_public_file(data: bytes, content_type: str | None = None) -> str:
+    upload_dir = get_static_upload_directory()
+    ext = detect_image_extension(data, content_type)
+    digest = hashlib.sha256(data).hexdigest()[:32]
+    filename = f"{digest}{ext}"
+    path = upload_dir / filename
     path.write_bytes(data)
     return public_upload_url(filename)
 
 
 async def mirror_url(url: str) -> str:
-    async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        return await save_bytes(resp.content, content_type=resp.headers.get("content-type"), fallback_url=url)
+    """
+    Backward-compatible helper.
+
+    Older code imports mirror_url from api.public_files.
+    For now it returns the URL as-is unless another implementation is needed.
+    Generated Telegram uploads should use save_public_file(...), not this.
+    """
+    return url
 
 
-async def mirror_telegram_file(bot: Bot, file_id: str | None) -> str | None:
-    if not file_id:
-        return None
+async def mirror_telegram_file(bot, file_id: str) -> str:
+    """
+    Download Telegram file and mirror it to public static upload directory.
+    Returns KIE-compatible public URL with real image extension.
+    """
     file = await bot.get_file(file_id)
-    telegram_url = f"https://api.telegram.org/file/bot{bot.token}/{file.file_path}"
-    return await mirror_url(telegram_url)
+    downloaded = await bot.download_file(file.file_path)
+    data = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
+    return save_public_file(data)

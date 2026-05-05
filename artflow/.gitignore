@@ -8,4 +8,9 @@ dist/
 *.egg-info/
 pgdata/
 redisdata/
+venv/static/upload/*
+.logs/*
+static/*
 venv/
+.bin
+.log

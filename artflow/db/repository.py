@@ -223,6 +223,7 @@ async def create_image_session(
     count: int,
     base_prompt: str | None,
     reference_file_id: str | None,
+    reference_url: str | None = None,
 ) -> ImageSession:
     await archive_active_image_sessions(session, user_id)
 
@@ -236,6 +237,7 @@ async def create_image_session(
         base_prompt=base_prompt,
         last_prompt=base_prompt,
         reference_file_id=reference_file_id,
+        reference_url=reference_url,
         status=ImageSessionStatus.active,
     )
     session.add(image_session)

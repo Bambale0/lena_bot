@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from urllib.parse import urlencode
+from pathlib import Path
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -85,6 +87,35 @@ def _quality_label(model_key: str, quality: str | None) -> str:
         for value, label in _quality_options(model_key)
     }
     return clean_labels.get(quality or "", quality or "по умолчанию")
+
+
+def _detect_image_ext(raw: bytes) -> str:
+    if raw.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if raw.startswith(b"RIFF") and b"WEBP" in raw[:16]:
+        return ".webp"
+    return ".jpg"
+
+
+async def _telegram_photo_public_url(bot: Bot, file_id: str) -> str:
+    """Download Telegram photo and save as public image file for KIE."""
+    upload_dir = Path(settings.STATIC_UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    file = await bot.get_file(file_id)
+    downloaded = await bot.download_file(file.file_path)
+    raw = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
+
+    ext = _detect_image_ext(raw)
+    digest = hashlib.sha256(raw).hexdigest()[:32]
+    filename = f"{digest}{ext}"
+    out = upload_dir / filename
+    out.write_bytes(raw)
+
+    return f"{settings.WEBHOOK_URL.rstrip('/')}{settings.STATIC_UPLOAD_URL_PATH.rstrip('/')}/{filename}"
+
 
 
 async def _resolve_image_session(

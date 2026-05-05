@@ -140,6 +140,7 @@ class ImageSession(Base):
     base_prompt: Mapped[str | None] = mapped_column(Text)
     last_prompt: Mapped[str | None] = mapped_column(Text)
     reference_file_id: Mapped[str | None] = mapped_column(Text)
+    reference_url: Mapped[str | None] = mapped_column(Text)
     last_result_url: Mapped[str | None] = mapped_column(Text)
     last_generation_id: Mapped[int | None] = mapped_column(Integer)
 
