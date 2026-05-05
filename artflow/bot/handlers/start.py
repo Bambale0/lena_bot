@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
+from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db.models import User
 
@@ -50,7 +51,6 @@ HELP_TEXT = (
     f"• Реферал реферала: +{settings.REFERRAL_L2_CREDITS} кр"
 )
 
-
 @router.message(CommandStart())
 async def cmd_start(message: Message, db_user: User, state: FSMContext) -> None:
     await state.clear()
@@ -63,19 +63,24 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext) -> None:
 @router.callback_query(F.data == "menu:main")
 async def cb_main_menu(call: CallbackQuery, db_user: User, state: FSMContext) -> None:
     await state.clear()
-    await call.message.edit_text(  # type: ignore[union-attr]
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
         WELCOME_TEXT.format(credits=db_user.credits),
         reply_markup=main_menu_kb(),
     )
-    await call.answer()
+    await safe_answer_callback(call)
 
 
 @router.callback_query(F.data == "menu:help")
 async def cb_help(call: CallbackQuery) -> None:
-    await call.message.edit_text(HELP_TEXT, reply_markup=back_to_menu_kb())  # type: ignore[union-attr]
-    await call.answer()
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        HELP_TEXT,
+        reply_markup=back_to_menu_kb(),
+    )
+    await safe_answer_callback(call)
 
 
 @router.callback_query(F.data == "noop")
 async def cb_noop(call: CallbackQuery) -> None:
-    await call.answer()
+    await safe_answer_callback(call)

@@ -15,16 +15,32 @@ PID_FILE="$SCRIPT_DIR/.apix.pid"
 LOG_FILE="$SCRIPT_DIR/apix.log"
 UVICORN_HOST="${UVICORN_HOST:-127.0.0.1}"
 UVICORN_PORT="${API_PORT:-7777}"
+REQUIRED_PYTHON="3.12"
 
 # ── Python ────────────────────────────────────────────────────────────────────
 if   [[ -f "$SCRIPT_DIR/venv/bin/python"  ]]; then PYTHON="$SCRIPT_DIR/venv/bin/python"
 elif [[ -f "$SCRIPT_DIR/.venv/bin/python" ]]; then PYTHON="$SCRIPT_DIR/.venv/bin/python"
+elif command -v python3.12 &>/dev/null;           then PYTHON="$(command -v python3.12)"
 elif command -v python3 &>/dev/null;              then PYTHON="$(command -v python3)"
 else err "Python 3 не найден"; exit 1; fi
 
-if   [[ -f "$SCRIPT_DIR/venv/bin/uvicorn"  ]]; then UVICORN="$SCRIPT_DIR/venv/bin/uvicorn"
-elif [[ -f "$SCRIPT_DIR/.venv/bin/uvicorn" ]]; then UVICORN="$SCRIPT_DIR/.venv/bin/uvicorn"
-else err "uvicorn не найден в venv/.venv"; exit 1; fi
+_check_python_version() {
+  "$PYTHON" - <<'PY'
+import sys
+required = (3, 12)
+current = sys.version_info[:2]
+if current < required:
+    raise SystemExit(f"Python {required[0]}.{required[1]}+ required, got {current[0]}.{current[1]}")
+PY
+}
+
+if [[ -f "$SCRIPT_DIR/venv/bin/python" || -f "$SCRIPT_DIR/.venv/bin/python" ]]; then
+  _check_python_version || {
+    err "Найдено старое virtualenv. Проект переведён на Python ${REQUIRED_PYTHON}+."
+    err "Пересоздай окружение: rm -rf venv .venv && ./start.sh setup"
+    exit 1
+  }
+fi
 
 # ── .env ──────────────────────────────────────────────────────────────────────
 _load_env() {
@@ -78,11 +94,23 @@ _check_redis() {
 # ── venv + зависимости ────────────────────────────────────────────────────────
 _setup() {
   log "Создаём виртуальное окружение..."
-  python3 -m venv venv
+  if command -v python3.12 &>/dev/null; then
+    BASE_PYTHON="$(command -v python3.12)"
+  elif [[ "${PYTHON:-}" != "" ]]; then
+    BASE_PYTHON="$PYTHON"
+  else
+    err "Python ${REQUIRED_PYTHON}+ не найден"
+    exit 1
+  fi
+  "$BASE_PYTHON" -m venv venv
   log "Устанавливаем зависимости..."
   venv/bin/pip install --upgrade pip -q
   venv/bin/pip install -r requirements.txt -q
   PYTHON="$SCRIPT_DIR/venv/bin/python"
+  _check_python_version || {
+    err "После setup активен не Python ${REQUIRED_PYTHON}+."
+    exit 1
+  }
   log "venv готов ✓"
 }
 
@@ -100,7 +128,7 @@ _start_fg() {
   info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   info "  APIX  |  BOT WEBHOOK MODE"
   info "  Python:   $PYTHON"
-  info "  Uvicorn:  $UVICORN"
+  info "  Версия:   $("$PYTHON" -c 'import sys; print(sys.version.split()[0])')"
   info "  DB:       ${DATABASE_URL:-не задан}"
   info "  Redis:    ${REDIS_URL:-redis://localhost:6379}"
   info "  Webhook:  ${WEBHOOK_URL:-не задан}${WEBHOOK_PATH:-/webhook/telegram}"
@@ -111,7 +139,7 @@ _start_fg() {
   echo ""
 
   export PYTHONPATH="$SCRIPT_DIR"
-  exec "$UVICORN" main:app --host "$UVICORN_HOST" --port "$UVICORN_PORT" --workers 1
+  exec "$PYTHON" -m uvicorn main:app --host "$UVICORN_HOST" --port "$UVICORN_PORT" --workers 1
 }
 
 # ── Запуск бота в webhook-режиме (background, записывает PID) ────────────────
@@ -128,7 +156,7 @@ _start_bg() {
 
   log "Запуск бота в webhook-режиме (background)..."
   export PYTHONPATH="$SCRIPT_DIR"
-  nohup "$UVICORN" main:app --host "$UVICORN_HOST" --port "$UVICORN_PORT" --workers 1 >> "$LOG_FILE" 2>&1 &
+  nohup "$PYTHON" -m uvicorn main:app --host "$UVICORN_HOST" --port "$UVICORN_PORT" --workers 1 >> "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   sleep 2
 

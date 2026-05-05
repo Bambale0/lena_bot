@@ -23,6 +23,7 @@ from bot.keyboards.models import (
     video_params_kb,
 )
 from bot.states import VideoGenFSM
+from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import GenerationType, User
 
@@ -91,7 +92,8 @@ def _has_params(model_key: str) -> bool:
 @router.callback_query(F.data == "menu:video")
 async def cb_video_menu(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     await state.set_state(VideoGenFSM.model_select)
-    await call.message.edit_text(  # type: ignore[union-attr]
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
         "🎬 <b>Генерация видео</b>\n\n"
         "Модели разложены по типу задачи, чтобы не искать нужную среди всего списка:\n\n"
         "• <b>⚡ Быстрый старт</b> — для коротких и понятных роликов\n"
@@ -102,19 +104,20 @@ async def cb_video_menu(call: CallbackQuery, session: AsyncSession, state: FSMCo
         "👇 <b>Сначала выбери категорию:</b>",
         reply_markup=video_model_groups_kb(),
     )
-    await call.answer()
+    await safe_answer_callback(call)
 
 
 @router.callback_query(VideoGenFSM.model_select, F.data.startswith("vid_group:"))
 async def cb_video_group(call: CallbackQuery, session: AsyncSession) -> None:
     group_key = call.data.split(":")[1]  # type: ignore[union-attr]
     model_costs = await repo.get_all_model_costs(session)
-    await call.message.edit_text(  # type: ignore[union-attr]
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
         f"🎬 <b>{VIDEO_GROUP_TITLES.get(group_key, 'Модели')}</b>\n\n"
         "Выбери модель внутри этой категории:",
         reply_markup=video_models_kb(model_costs, group_key),
     )
-    await call.answer()
+    await safe_answer_callback(call)
 
 
 @router.callback_query(VideoGenFSM.model_select, F.data.startswith("vid_model:"))
@@ -149,11 +152,12 @@ async def cb_video_model(
         await _handle_mode(call, state, session, model_key, model_cost.display_name, modes[0])
     else:
         await state.set_state(VideoGenFSM.mode_select)
-        await call.message.edit_text(  # type: ignore[union-attr]
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
             f"✅ <b>{model_cost.display_name}</b> ({model_cost.credits} кр)\n\nВыбери режим:",
             reply_markup=video_mode_kb(model_key),
         )
-    await call.answer()
+    await safe_answer_callback(call)
 
 
 async def _handle_mode(
@@ -162,14 +166,16 @@ async def _handle_mode(
 ) -> None:
     if mode == "image":
         await state.set_state(VideoGenFSM.image_upload)
-        await call.message.edit_text(  # type: ignore[union-attr]
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
             f"✅ <b>{display_name}</b> · i2v\n\n🖼️ Загрузи первый кадр:",
             reply_markup=back_to_menu_kb(),
         )
     elif mode == "motion":
         await state.set_state(VideoGenFSM.image_upload)
         await state.update_data(motion_step="person")
-        await call.message.edit_text(  # type: ignore[union-attr]
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
             f"✅ <b>{display_name}</b> · Motion Control\n\n"
             "👤 <b>Шаг 1/2:</b> Загрузи фото персонажа\n"
             "<i>(голова, плечи, торс; JPEG/PNG; ≤10 МБ)</i>",
@@ -191,7 +197,7 @@ async def cb_video_mode(
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
     await _handle_mode(call, state, session, model_key, display_name, mode)
-    await call.answer()
+    await safe_answer_callback(call)
 
 
 # ── Image / person upload ─────────────────────────────────────────────────────

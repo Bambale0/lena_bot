@@ -176,6 +176,10 @@ IMAGE_MODEL_DESC: dict[str, str] = {
     "gpt-image-1":     "🤖 GPT Image · понимает сложные описания · творчество",
 }
 
+HIDDEN_IMAGE_MODELS = {
+    ImageModel.NANO_BANANA,
+}
+
 VIDEO_MODEL_DESC: dict[str, str] = {
     "kling-3.0":               "🎬 Kling 3.0 · плавное движение · text & img2video",
     "kling-2.6-motion":        "🎥 Kling Motion · управление камерой (pan/zoom/tilt)",
@@ -188,22 +192,10 @@ VIDEO_MODEL_DESC: dict[str, str] = {
 }
 
 
-
 def _prioritize_ratio(ratios: list[str], preferred: str = "9:16") -> list[str]:
-    """Put the most important aspect ratio first without dropping options."""
+    """Put the preferred aspect ratio first without dropping the rest."""
     return ([preferred] if preferred in ratios else []) + [r for r in ratios if r != preferred]
 
-
-_IMAGE_MODEL_ORDER: list[str] = [
-    ImageModel.NANO_BANANA_2,
-    ImageModel.NANO_BANANA_PRO,
-    ImageModel.NANO_BANANA,
-    ImageModel.SEEDREAM_45,
-    ImageModel.SEEDREAM_45_EDIT,
-    ImageModel.WAN_27_PRO,
-    ImageModel.GROK_T2I,
-    ImageModel.GROK_I2I,
-]
 
 _VIDEO_MODEL_ORDER: list[str] = [
     VideoModel.KLING_30,
@@ -224,52 +216,44 @@ _VIDEO_MODEL_ORDER: list[str] = [
     VideoModel.KLING_26_T2V,
 ]
 
-_IMAGE_GROUPS: list[tuple[str, list[str]]] = [
-    ("fast", [
-        ImageModel.NANO_BANANA_2,
-        ImageModel.NANO_BANANA,
-        ImageModel.GROK_T2I,
-        ImageModel.SEEDREAM_45,
-    ]),
-    ("edit", [
-        ImageModel.NANO_BANANA_PRO,
-        ImageModel.SEEDREAM_45_EDIT,
-        ImageModel.GROK_I2I,
-        ImageModel.WAN_27_PRO,
-    ]),
-]
-
 _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
-    ("fast", [
-        VideoModel.KLING_30,
-        VideoModel.VEO_3_LITE,
-        VideoModel.SEEDANCE_2_FAST,
-        VideoModel.HAPPYHORSE_T2V,
-    ]),
-    ("quality", [
-        VideoModel.VEO_3,
-        VideoModel.VEO_3_FAST,
-        VideoModel.SEEDANCE_2,
-        VideoModel.WAN_27_T2V,
-        VideoModel.GROK_T2V,
-        VideoModel.KLING_26_T2V,
-    ]),
-    ("i2v", [
-        VideoModel.KLING_26_I2V,
-        VideoModel.WAN_27_I2V,
-        VideoModel.GROK_I2V,
-        VideoModel.HAPPYHORSE_I2V,
-    ]),
-    ("motion", [
-        VideoModel.KLING_26_MOTION,
-        VideoModel.KLING_30_MOTION,
-    ]),
+    (
+        "fast",
+        [
+            VideoModel.KLING_30,
+            VideoModel.VEO_3_LITE,
+            VideoModel.SEEDANCE_2_FAST,
+            VideoModel.HAPPYHORSE_T2V,
+        ],
+    ),
+    (
+        "quality",
+        [
+            VideoModel.VEO_3,
+            VideoModel.VEO_3_FAST,
+            VideoModel.SEEDANCE_2,
+            VideoModel.WAN_27_T2V,
+            VideoModel.GROK_T2V,
+            VideoModel.KLING_26_T2V,
+        ],
+    ),
+    (
+        "i2v",
+        [
+            VideoModel.KLING_26_I2V,
+            VideoModel.WAN_27_I2V,
+            VideoModel.GROK_I2V,
+            VideoModel.HAPPYHORSE_I2V,
+        ],
+    ),
+    (
+        "motion",
+        [
+            VideoModel.KLING_26_MOTION,
+            VideoModel.KLING_30_MOTION,
+        ],
+    ),
 ]
-
-IMAGE_GROUP_TITLES: dict[str, str] = {
-    "fast": "⚡ Быстрый старт",
-    "edit": "🎯 Референс и редактирование",
-}
 
 VIDEO_GROUP_TITLES: dict[str, str] = {
     "fast": "⚡ Быстрый старт",
@@ -292,41 +276,26 @@ def _sorted_models(model_costs: list[ModelCost], allowed_keys: list[str]) -> lis
     return sorted(filtered, key=lambda mc: order[mc.model_key])
 
 
-def _build_model_list_kb(
-    model_costs: list[ModelCost],
-    keys: list[str],
-    callback_prefix: str,
-    back_callback: str,
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for mc in _sorted_models(model_costs, keys):
-        builder.row(_model_button(mc, callback_prefix))
-    builder.row(InlineKeyboardButton(text="← Назад", callback_data=back_callback))
-    return builder.as_markup()
-
 # ── Image keyboards ───────────────────────────────────────────────────────────
 
-def image_model_groups_kb() -> InlineKeyboardMarkup:
+def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for group_key, _ in _IMAGE_GROUPS:
-        builder.row(
-            InlineKeyboardButton(
-                text=IMAGE_GROUP_TITLES[group_key],
-                callback_data=f"img_group:{group_key}",
+    for mc in model_costs:
+        if (
+            mc.gen_type.value == "image"
+            and mc.model_key in IMAGE_CAPS
+            and mc.model_key not in HIDDEN_IMAGE_MODELS
+        ):
+            desc = IMAGE_MODEL_DESC.get(mc.model_key, "")
+            label = f"{mc.display_name} · {mc.credits} кр"
+            builder.row(
+                InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"img_model:{mc.model_key}",
+                )
             )
-        )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
-
-
-def image_models_kb(model_costs: list[ModelCost], group_key: str) -> InlineKeyboardMarkup:
-    keys = dict(_IMAGE_GROUPS).get(group_key, [])
-    return _build_model_list_kb(
-        model_costs=model_costs,
-        keys=keys,
-        callback_prefix="img_model",
-        back_callback="menu:image",
-    )
 
 
 def image_model_info(model_key: str) -> str:
@@ -385,6 +354,40 @@ def image_quality_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    suffix = str(gen_id or 0)
+    builder.row(
+        InlineKeyboardButton(text="✨ Ремикс", callback_data=f"img_session:remix:{suffix}"),
+        InlineKeyboardButton(text="🔁 Повторить", callback_data=f"img_session:repeat:{suffix}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🎬 Оживить", callback_data=f"img_session:animate:{suffix}"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_session:settings"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🆕 Новая серия", callback_data="img_session:new"),
+        InlineKeyboardButton(text="🏠 Меню", callback_data="menu:main"),
+    )
+    return builder.as_markup()
+
+
+def image_session_settings_kb(image_session_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📐 Формат", callback_data=f"img_sset:ratio:{image_session_id}"),
+        InlineKeyboardButton(text="💎 Качество", callback_data=f"img_sset:quality:{image_session_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔢 Количество", callback_data=f"img_sset:count:{image_session_id}"),
+        InlineKeyboardButton(text="🔁 Сменить модель", callback_data=f"img_sset:model:{image_session_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="← К серии", callback_data=f"img_sset:back:{image_session_id}")
+    )
+    return builder.as_markup()
+
+
 # ── Video keyboards ───────────────────────────────────────────────────────────
 
 
@@ -401,14 +404,34 @@ def video_model_groups_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def video_models_kb(model_costs: list[ModelCost], group_key: str) -> InlineKeyboardMarkup:
-    keys = dict(_VIDEO_GROUPS).get(group_key, [])
-    return _build_model_list_kb(
-        model_costs=model_costs,
-        keys=keys,
-        callback_prefix="vid_model",
-        back_callback="menu:video",
+def video_models_kb(
+    model_costs: list[ModelCost],
+    group_key: str | None = None,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    supported_video_keys = set(VIDEO_CAPS.keys())
+    if group_key:
+        keys = dict(_VIDEO_GROUPS).get(group_key, [])
+        for mc in _sorted_models([mc for mc in model_costs if mc.model_key in supported_video_keys], keys):
+            builder.row(_model_button(mc, "vid_model"))
+        builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
+        return builder.as_markup()
+
+    ordered = _sorted_models(
+        [mc for mc in model_costs if mc.gen_type.value == "video" and mc.model_key in supported_video_keys],
+        _VIDEO_MODEL_ORDER,
     )
+    remaining = [
+        mc
+        for mc in model_costs
+        if mc.gen_type.value == "video"
+        and mc.model_key in supported_video_keys
+        and mc.model_key not in {m.model_key for m in ordered}
+    ]
+    for mc in ordered + remaining:
+        builder.row(_model_button(mc, "vid_model"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
+    return builder.as_markup()
 
 
 def video_model_info(model_key: str) -> str:
@@ -511,23 +534,4 @@ def after_generation_kb(gen_id: int, gen_type: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="⚙️ Изменить параметры", callback_data=f"reparams:{gen_type}:{gen_id}"),
     )
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
-    return builder.as_markup()
-
-
-
-def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    suffix = str(gen_id or 0)
-    builder.row(
-        InlineKeyboardButton(text="✨ Ремикс", callback_data=f"img_session:remix:{suffix}"),
-        InlineKeyboardButton(text="🔁 Повторить", callback_data=f"img_session:repeat:{suffix}"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🎬 Оживить", callback_data=f"img_session:animate:{suffix}"),
-        InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_session:settings"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🆕 Новая серия", callback_data="img_session:new"),
-        InlineKeyboardButton(text="🏠 Меню", callback_data="menu:main"),
-    )
     return builder.as_markup()

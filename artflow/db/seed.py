@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import GenerationType, ModelCost, PricePlan, UserPrompt
@@ -59,12 +59,23 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "midjourney-video",    "display_name": "🎞️ MJ Video",    "gen_type": GenerationType.video,  "credits": 15},
 ]
 
+LEGACY_MODEL_ALIASES_TO_DISABLE = {
+    "google/nano-banana",
+    "seedream-4.5",
+    "nano-banano-2",
+    "nano-banano-pro",
+    "wan-2.7",
+    "wan-2.7-pro",
+    "gpt-image-1",
+}
+
 
 async def run_seed() -> None:
     """Вставляет данные только если таблицы пустые."""
     async with AsyncSessionLocal() as session:
         await _seed_price_plans(session)
         await _seed_model_costs(session)
+        await _disable_legacy_model_aliases(session)
 
 
 async def _seed_price_plans(session: AsyncSession) -> None:
@@ -107,3 +118,19 @@ async def _seed_model_costs(session: AsyncSession) -> None:
         ))
     await session.commit()
     logger.info("Seed: модели вставлены ✓")
+
+
+async def _disable_legacy_model_aliases(session: AsyncSession) -> None:
+    result = await session.execute(
+        update(ModelCost)
+        .where(ModelCost.model_key.in_(LEGACY_MODEL_ALIASES_TO_DISABLE), ModelCost.is_active == True)
+        .values(is_active=False)
+        .returning(ModelCost.model_key)
+    )
+    disabled = list(result.scalars().all())
+    if not disabled:
+        await session.rollback()
+        return
+
+    await session.commit()
+    logger.info("Seed: отключены legacy model aliases: %s", ", ".join(sorted(disabled)))

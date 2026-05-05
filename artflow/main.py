@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import Update
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
@@ -21,6 +22,7 @@ from bot.handlers import admin, balance, image_gen, marketplace, midjourney, pay
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
+from bot.utils.telegram_ui import is_benign_telegram_error
 from core.config import settings
 from core.logger import setup_logging
 from db.models import GenerationType
@@ -116,7 +118,13 @@ async def telegram_webhook(
 
     body = await request.json()
     update = Update.model_validate(body)
-    await dp.feed_update(bot, update)  # type: ignore[arg-type]
+    try:
+        await dp.feed_update(bot, update)  # type: ignore[arg-type]
+    except TelegramBadRequest as e:
+        if is_benign_telegram_error(e):
+            logger.warning("Ignoring benign Telegram callback error: %s", e)
+            return {"ok": True}
+        raise
     return {"ok": True}
 
 
