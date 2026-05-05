@@ -151,7 +151,7 @@ async def _session_reference_url(
 ) -> str | None:
     """
     Для remix берём last_result_url.
-    Для обычной серии берём reference_file_id.
+    Для обычной серии берём reference_url.
     Для text-only моделей image_url не передаём.
     """
     if not _supports_img2img(image_session.model):
@@ -160,8 +160,8 @@ async def _session_reference_url(
     if prefer_last_result and image_session.last_result_url:
         return image_session.last_result_url
 
-    if image_session.reference_file_id:
-        return await _telegram_file_url(bot, image_session.reference_file_id)
+    if image_session.reference_url:
+        return await _telegram_file_url(bot, image_session.reference_url)
 
     return None
 
@@ -318,7 +318,7 @@ async def _launch_session_generation(
         aspect_ratio=image_session.aspect_ratio,
         count=image_session.count,
         quality=image_session.quality,
-        image_file_id=image_session.reference_file_id,
+        image_file_id=image_session.reference_url,
         remix_mode=False,
         remix_parent_generation_id=None,
     )
@@ -366,7 +366,7 @@ async def cb_image_menu(
             aspect_ratio=image_session.aspect_ratio,
             count=image_session.count,
             quality=image_session.quality,
-            image_file_id=image_session.reference_file_id,
+            image_file_id=image_session.reference_url,
             remix_mode=False,
             remix_parent_generation_id=None,
         )
@@ -688,7 +688,7 @@ async def handle_prompt(
         quality=quality,
         count=count,
         base_prompt=prompt,
-        reference_file_id=image_file_id,
+        reference_url=image_file_id,
     )
     await state.update_data(image_session_id=image_session.id)
 

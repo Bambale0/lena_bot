@@ -9,8 +9,10 @@ dist/
 pgdata/
 redisdata/
 venv/static/upload/*
-.logs/*
-static/*
+logs/
+
+static/
 venv/
+
 .bin
 .log

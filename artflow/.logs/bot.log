@@ -15,3 +15,55 @@ INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
 2026-05-05 16:05:43,482 | WARNING  | api.image_service | Invalid aspect ratio for nano-banana-2: 4. Falling back to auto
 2026-05-05 16:05:43,730 | ERROR    | bot.handlers.image_gen | Session image generation error: KIE.AI image createTask failed for nano-banana-2: 500 File type not supported
 INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     Started server process [3017090]
+INFO:     Waiting for application startup.
+2026-05-05 21:37:03,191 | INFO     | main | Webhook set: https://apix.chillcreative.ru/webhook/telegram
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:7777 (Press CTRL+C to quit)
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+2026-05-05 21:37:47,880 | ERROR    | bot.handlers.image_gen | Session image generation error: KIE.AI image createTask failed for nano-banana-pro: 402 Credits insufficient : Your current balance isn’t enough to run this request. Please top up to continue.
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     193.32.162.134:0 - "GET /lvwvalu7il9zX.notathing HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.git/config HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.git/HEAD HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.git-credentials HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.git/logs/HEAD HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.git/logs/refs/heads/main HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.git/logs/refs/heads/master HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.git/index HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.git/packed-refs HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.gitconfig HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.netrc HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /_netrc HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.config/gh/hosts.yml HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.config/gh/config.yml HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.npmrc HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.config/git/credentials HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.composer/auth.json HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.github/workflows/main.yml HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.github/workflows/ci.yml HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.github/workflows/deploy.yml HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /.gitlab-ci.yml HTTP/1.0" 404 Not Found
+INFO:     193.32.162.134:0 - "GET /bitbucket-pipelines.yml HTTP/1.0" 404 Not Found
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-05-05 23:12:13,598 | INFO     | main | Shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [3017090]
+INFO:     Started server process [3021384]
+INFO:     Waiting for application startup.
+2026-05-05 23:12:16,754 | INFO     | main | Webhook set: https://apix.chillcreative.ru/webhook/telegram
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:7777 (Press CTRL+C to quit)
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
+INFO:     91.108.5.111:0 - "POST /webhook/telegram HTTP/1.0" 200 OK
