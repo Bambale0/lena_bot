@@ -10,9 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
     Generation,
-    ImageGenerationAction,
-    ImageSession,
-    ImageSessionStatus,
     GenerationStatus,
     GenerationType,
     ModelCost,
@@ -126,9 +123,6 @@ async def create_generation(
     gen_type: GenerationType,
     prompt: str,
     credits_spent: int,
-    image_session_id: int | None = None,
-    parent_generation_id: int | None = None,
-    action_type: ImageGenerationAction | None = None,
 ) -> Generation:
     gen = Generation(
         user_id=user_id,
@@ -136,9 +130,6 @@ async def create_generation(
         gen_type=gen_type,
         prompt=prompt,
         credits_spent=credits_spent,
-        image_session_id=image_session_id,
-        parent_generation_id=parent_generation_id,
-        action_type=action_type,
         status=GenerationStatus.pending,
     )
     session.add(gen)
@@ -188,137 +179,6 @@ async def fail_generation(
         )
     )
     await session.commit()
-
-async def get_generation_by_id(session: AsyncSession, gen_id: int) -> Generation | None:
-    result = await session.execute(select(Generation).where(Generation.id == gen_id))
-    return result.scalar_one_or_none()
-
-
-async def get_generation_by_task_id(session: AsyncSession, task_id: str) -> Generation | None:
-    result = await session.execute(select(Generation).where(Generation.task_id == task_id))
-    return result.scalar_one_or_none()
-
-
-# ─── Image Sessions ──────────────────────────────────────────────────────────
-
-async def archive_active_image_sessions(session: AsyncSession, user_id: int) -> None:
-    await session.execute(
-        update(ImageSession)
-        .where(
-            ImageSession.user_id == user_id,
-            ImageSession.status == ImageSessionStatus.active,
-        )
-        .values(status=ImageSessionStatus.archived)
-    )
-    await session.commit()
-
-
-async def create_image_session(
-    session: AsyncSession,
-    user_id: int,
-    model: str,
-    mode: str,
-    aspect_ratio: str | None,
-    quality: str,
-    count: int,
-    base_prompt: str | None,
-    reference_file_id: str | None,
-) -> ImageSession:
-    await archive_active_image_sessions(session, user_id)
-
-    image_session = ImageSession(
-        user_id=user_id,
-        model=model,
-        mode=mode,
-        aspect_ratio=aspect_ratio,
-        quality=quality,
-        count=count,
-        base_prompt=base_prompt,
-        reference_file_id=reference_file_id,
-        status=ImageSessionStatus.active,
-    )
-    session.add(image_session)
-    await session.commit()
-    await session.refresh(image_session)
-    return image_session
-
-
-async def get_image_session(
-    session: AsyncSession,
-    image_session_id: int,
-    user_id: int | None = None,
-) -> ImageSession | None:
-    stmt = select(ImageSession).where(ImageSession.id == image_session_id)
-    if user_id is not None:
-        stmt = stmt.where(ImageSession.user_id == user_id)
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
-
-
-async def get_active_image_session(session: AsyncSession, user_id: int) -> ImageSession | None:
-    result = await session.execute(
-        select(ImageSession)
-        .where(
-            ImageSession.user_id == user_id,
-            ImageSession.status == ImageSessionStatus.active,
-        )
-        .order_by(desc(ImageSession.updated_at))
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
-
-
-async def update_image_session_reference(
-    session: AsyncSession,
-    image_session_id: int,
-    reference_file_id: str | None,
-) -> None:
-    await session.execute(
-        update(ImageSession)
-        .where(ImageSession.id == image_session_id)
-        .values(reference_file_id=reference_file_id)
-    )
-    await session.commit()
-
-
-async def update_image_session_base_prompt(
-    session: AsyncSession,
-    image_session_id: int,
-    base_prompt: str | None,
-) -> None:
-    await session.execute(
-        update(ImageSession)
-        .where(ImageSession.id == image_session_id)
-        .values(base_prompt=base_prompt)
-    )
-    await session.commit()
-
-
-async def update_image_session_last_result(
-    session: AsyncSession,
-    image_session_id: int,
-    result_url: str | None,
-    generation_id: int | None,
-) -> None:
-    await session.execute(
-        update(ImageSession)
-        .where(ImageSession.id == image_session_id)
-        .values(last_result_url=result_url, last_generation_id=generation_id)
-    )
-    await session.commit()
-
-
-async def get_last_session_generation(
-    session: AsyncSession,
-    image_session_id: int,
-) -> Generation | None:
-    result = await session.execute(
-        select(Generation)
-        .where(Generation.image_session_id == image_session_id)
-        .order_by(desc(Generation.created_at))
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
 
 
 async def get_user_history(

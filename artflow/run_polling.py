@@ -22,8 +22,6 @@ from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from core.config import settings
 from core.logger import setup_logging
-from db.session import engine
-from db.models import Base
 from db.seed import run_seed
 
 
@@ -100,10 +98,6 @@ async def main() -> None:
     dp.include_router(marketplace.router)
     dp.include_router(marketplace.mod_router)
 
-    # DB tables (для prod используй alembic)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     await run_seed()
     await bot.delete_webhook(drop_pending_updates=True)
     get_client()
@@ -118,7 +112,6 @@ async def main() -> None:
         await close_client()
         if redis_client:
             await redis_client.aclose()
-        await engine.dispose()
         logger.info("Bot stopped.")
 
 

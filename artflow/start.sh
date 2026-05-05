@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# start.sh — локальный запуск APIX без Docker
+# start.sh — локальный запуск бота APIX в webhook-режиме без Docker
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,12 +13,18 @@ info() { echo -e "${CYAN}[apix]${NC} $*"; }
 
 PID_FILE="$SCRIPT_DIR/.apix.pid"
 LOG_FILE="$SCRIPT_DIR/apix.log"
+UVICORN_HOST="${UVICORN_HOST:-127.0.0.1}"
+UVICORN_PORT="${API_PORT:-7777}"
 
 # ── Python ────────────────────────────────────────────────────────────────────
 if   [[ -f "$SCRIPT_DIR/venv/bin/python"  ]]; then PYTHON="$SCRIPT_DIR/venv/bin/python"
 elif [[ -f "$SCRIPT_DIR/.venv/bin/python" ]]; then PYTHON="$SCRIPT_DIR/.venv/bin/python"
 elif command -v python3 &>/dev/null;              then PYTHON="$(command -v python3)"
 else err "Python 3 не найден"; exit 1; fi
+
+if   [[ -f "$SCRIPT_DIR/venv/bin/uvicorn"  ]]; then UVICORN="$SCRIPT_DIR/venv/bin/uvicorn"
+elif [[ -f "$SCRIPT_DIR/.venv/bin/uvicorn" ]]; then UVICORN="$SCRIPT_DIR/.venv/bin/uvicorn"
+else err "uvicorn не найден в venv/.venv"; exit 1; fi
 
 # ── .env ──────────────────────────────────────────────────────────────────────
 _load_env() {
@@ -36,8 +42,12 @@ _load_env() {
 _check() {
   [[ "${BOT_TOKEN:-}" == "" || "${BOT_TOKEN:-}" == "your_bot_token_here" ]] && {
     err "BOT_TOKEN не задан в .env"; exit 1; }
+  [[ "${WEBHOOK_URL:-}" == "" ]] && {
+    err "WEBHOOK_URL не задан в .env"; exit 1; }
+  [[ "${WEBHOOK_SECRET:-}" == "" || "${WEBHOOK_SECRET:-}" == "change_me_secret" ]] && {
+    warn "WEBHOOK_SECRET не задан или оставлен дефолтным"; }
   [[ "${COMET_API_KEY:-}" == "" || "${COMET_API_KEY:-}" == "your_cometapi_key_here" ]] && {
-    warn "COMET_API_KEY не задан — генерация работать не будет"; }
+    warn "COMET_API_KEY не задан — часть генераций работать не будет"; }
 }
 
 # ── Проверка сервисов (postgres / redis) ──────────────────────────────────────
@@ -79,30 +89,32 @@ _setup() {
 # ── Миграции ─────────────────────────────────────────────────────────────────
 _migrate() {
   log "Применяем миграции Alembic..."
-  PYTHONPATH="$SCRIPT_DIR" $PYTHON -m alembic upgrade head \
-    && log "Миграции применены ✓" \
-    || warn "Alembic: ошибка (таблицы создадутся автоматически через SQLAlchemy)"
+  PYTHONPATH="$SCRIPT_DIR" $PYTHON -m alembic upgrade head
+  log "Миграции применены ✓"
 }
 
-# ── Запуск бота (foreground) ──────────────────────────────────────────────────
+# ── Запуск бота в webhook-режиме (foreground) ────────────────────────────────
 _start_fg() {
-  log "Запуск бота (foreground, Ctrl+C для остановки)..."
+  log "Запуск бота в webhook-режиме (foreground, Ctrl+C для остановки)..."
   echo ""
   info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  info "  APIX  |  LOCAL DEV (no Docker)"
-  info "  Python:  $PYTHON"
-  info "  DB:      ${DATABASE_URL:-не задан}"
-  info "  Redis:   ${REDIS_URL:-redis://localhost:6379}"
-  info "  Лог:     (консоль)"
-  info "  Стоп:    Ctrl+C"
+  info "  APIX  |  BOT WEBHOOK MODE"
+  info "  Python:   $PYTHON"
+  info "  Uvicorn:  $UVICORN"
+  info "  DB:       ${DATABASE_URL:-не задан}"
+  info "  Redis:    ${REDIS_URL:-redis://localhost:6379}"
+  info "  Webhook:  ${WEBHOOK_URL:-не задан}${WEBHOOK_PATH:-/webhook/telegram}"
+  info "  Listen:   http://${UVICORN_HOST}:${UVICORN_PORT}"
+  info "  Лог:      (консоль)"
+  info "  Стоп:     Ctrl+C"
   info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
 
   export PYTHONPATH="$SCRIPT_DIR"
-  exec $PYTHON run_polling.py
+  exec "$UVICORN" main:app --host "$UVICORN_HOST" --port "$UVICORN_PORT" --workers 1
 }
 
-# ── Запуск бота (background, записывает PID) ──────────────────────────────────
+# ── Запуск бота в webhook-режиме (background, записывает PID) ────────────────
 _start_bg() {
   if [[ -f "$PID_FILE" ]]; then
     OLD_PID=$(cat "$PID_FILE")
@@ -114,9 +126,9 @@ _start_bg() {
     fi
   fi
 
-  log "Запуск бота (background)..."
+  log "Запуск бота в webhook-режиме (background)..."
   export PYTHONPATH="$SCRIPT_DIR"
-  nohup $PYTHON run_polling.py >> "$LOG_FILE" 2>&1 &
+  nohup "$UVICORN" main:app --host "$UVICORN_HOST" --port "$UVICORN_PORT" --workers 1 >> "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   sleep 2
 
@@ -159,9 +171,9 @@ case "$MODE" in
   *)
     echo ""
     echo "Использование:"
-    echo "  ./start.sh           — запуск в foreground (Ctrl+C для остановки)"
+    echo "  ./start.sh           — запуск бота в webhook-режиме (foreground)"
     echo "  ./start.sh fg        — то же самое"
-    echo "  ./start.sh bg        — запуск в фоне (PID сохраняется в .apix.pid)"
+    echo "  ./start.sh bg        — запуск бота в webhook-режиме (background)"
     echo "  ./start.sh setup     — создать venv + установить зависимости"
     echo "  ./start.sh migrate   — только применить миграции"
     echo ""

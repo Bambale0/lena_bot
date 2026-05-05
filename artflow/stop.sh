@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stop.sh — остановка APIX (без Docker)
+# stop.sh — остановка бота APIX (webhook-режим, без Docker)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,24 +15,18 @@ PID_FILE="$SCRIPT_DIR/.apix.pid"
 LOG_FILE="$SCRIPT_DIR/apix.log"
 
 _stop() {
-  # 1. По PID-файлу (bg-режим)
   if [[ -f "$PID_FILE" ]]; then
     PID=$(cat "$PID_FILE")
     if kill -0 "$PID" 2>/dev/null; then
-      kill "$PID" && log "Бот остановлен (PID $PID) ✓"
+      kill "$PID" && log "Бот остановлен по PID $PID ✓"
       rm -f "$PID_FILE"
       return 0
     else
       warn "PID $PID уже не запущен"
       rm -f "$PID_FILE"
     fi
-  fi
-
-  # 2. По имени процесса (fg-режим или если pid-файл потерян)
-  if pgrep -f "run_polling.py" &>/dev/null; then
-    pkill -f "run_polling.py" && log "Процесс run_polling.py остановлен ✓"
   else
-    warn "Запущенный бот не найден"
+    warn "PID-файл не найден. Бот через этот скрипт не запускался или уже остановлен"
   fi
 }
 
@@ -47,11 +41,8 @@ _status() {
     else
       info "  Бот: ❌ pid-файл есть, процесс мёртв (PID $PID)"
     fi
-  elif pgrep -f "run_polling.py" &>/dev/null; then
-    PID=$(pgrep -f "run_polling.py")
-    info "  Бот: ✅ запущен (PID $PID, fg-режим)"
   else
-    info "  Бот: ⬜ не запущен"
+    info "  Бот: ⬜ PID-файл не найден"
   fi
 
   [[ -f "$LOG_FILE" ]] \
@@ -63,7 +54,7 @@ _status() {
 }
 
 _logs() {
-  [[ ! -f "$LOG_FILE" ]] && { warn "Лог-файл не найден (бот запущен в fg-режиме?)"; exit 1; }
+  [[ ! -f "$LOG_FILE" ]] && { warn "Лог-файл не найден (процесс запущен в fg-режиме?)"; exit 1; }
   tail -f "$LOG_FILE"
 }
 

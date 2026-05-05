@@ -16,14 +16,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from api.comet_client import close_client, get_client
-from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 from bot.handlers import admin, balance, image_gen, marketplace, midjourney, payment, start, video_gen
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from core.config import settings
 from core.logger import setup_logging
-from db.models import GenerationType
+from db.session import engine
+from db.models import Base
 from payments.cryptobot import verify_webhook_signature
 from payments.tbank import verify_notification_token
 from db import repository as repo
@@ -71,6 +71,9 @@ async def lifespan(app: FastAPI):
     dp.include_router(marketplace.router)
     dp.include_router(marketplace.mod_router)
 
+    # DB tables (для prod используй alembic)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     await run_seed()
 
     # Webhook
@@ -91,6 +94,7 @@ async def lifespan(app: FastAPI):
     await bot.delete_webhook()
     await close_client()
     await redis_client.aclose()
+    await engine.dispose()
     logger.info("Shutdown complete")
 
 
@@ -193,100 +197,6 @@ async def tbank_webhook(request: Request) -> dict:
 
     return {"ok": True}
 
-
-
-# ── KIE.AI Webhook ────────────────────────────────────────────────────────────
-
-@app.post(settings.KIE_WEBHOOK_PATH)
-async def kie_webhook(request: Request, secret: str | None = None) -> dict:
-    if settings.KIE_WEBHOOK_SECRET and secret != settings.KIE_WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid KIE webhook secret")
-
-    payload = await request.json()
-    task_id = extract_task_id(payload)
-    if not task_id:
-        logger.warning("KIE webhook without task_id: %s", payload)
-        return {"ok": True}
-
-    async with AsyncSessionLocal() as session:
-        gen = await repo.get_generation_by_task_id(session, task_id)
-        if not gen:
-            logger.warning("KIE webhook for unknown task_id=%s", task_id)
-            return {"ok": True}
-
-        # Idempotency: if already finished, acknowledge duplicate callback.
-        if gen.status.value in {"done", "failed"}:
-            return {"ok": True}
-
-        user = await repo.get_user_by_id(session, gen.user_id)
-        if not user:
-            logger.warning("KIE webhook user not found for generation=%s", gen.id)
-            return {"ok": True}
-
-        if not is_success(payload):
-            err = extract_error(payload)
-            await repo.fail_generation(session, gen.id, err)
-            await repo.add_credits(session, gen.user_id, gen.credits_spent)
-            if bot:
-                try:
-                    await bot.send_message(
-                        user.tg_id,
-                        f"❌ Генерация не удалась.\nКредиты возвращены.\n\n<code>{err[:500]}</code>",
-                    )
-                except Exception as e:
-                    logger.warning("Failed to notify KIE failure user=%s: %s", user.tg_id, e)
-            return {"ok": True}
-
-        urls = extract_result_urls(payload)
-        if not urls:
-            err = "KIE callback success but no result urls"
-            await repo.fail_generation(session, gen.id, err)
-            await repo.add_credits(session, gen.user_id, gen.credits_spent)
-            if bot:
-                try:
-                    await bot.send_message(user.tg_id, f"❌ {err}. Кредиты возвращены.")
-                except Exception as e:
-                    logger.warning("Failed to notify empty KIE result user=%s: %s", user.tg_id, e)
-            return {"ok": True}
-
-        result_url = urls[0]
-        await repo.finish_generation(session, gen.id, result_url)
-
-        if gen.image_session_id:
-            await repo.update_image_session_last_result(
-                session,
-                gen.image_session_id,
-                result_url,
-                gen.id,
-            )
-
-        if bot:
-            try:
-                from bot.keyboards.models import image_session_kb, after_generation_kb
-
-                caption = f"✅ <b>Готово!</b>\n\n<i>{gen.prompt[:200]}</i>"
-                if gen.gen_type == GenerationType.image:
-                    caption += (
-                        "\n\n🎨 <b>Серия активна.</b> "
-                        "Можешь отправлять новый текст или фото — настройки сохранятся."
-                    )
-                    await bot.send_photo(
-                        user.tg_id,
-                        result_url,
-                        caption=caption,
-                        reply_markup=image_session_kb(gen.id),
-                    )
-                else:
-                    await bot.send_video(
-                        user.tg_id,
-                        result_url,
-                        caption=caption,
-                        reply_markup=after_generation_kb(gen.id, "video"),
-                    )
-            except Exception as e:
-                logger.warning("Failed to send KIE result user=%s gen=%s: %s", user.tg_id, gen.id, e)
-
-    return {"ok": True}
 
 @app.get("/health")
 async def health() -> dict:

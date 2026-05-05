@@ -1,7 +1,7 @@
 # db/seed.py
 """
 Автозаполнение начальных данных при старте.
-Вызывается из run_polling.py и main.py (lifespan) после create_all.
+Вызывается из run_polling.py и main.py после применения миграций.
 Идемпотентно — не дублирует записи.
 """
 from __future__ import annotations

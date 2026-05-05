@@ -35,19 +35,6 @@ class GenerationStatus(str, enum.Enum):
     failed = "failed"
 
 
-class ImageSessionStatus(str, enum.Enum):
-    active = "active"
-    archived = "archived"
-
-
-class ImageGenerationAction(str, enum.Enum):
-    initial = "initial"
-    remix = "remix"
-    repeat = "repeat"
-    reference_update = "reference_update"
-    animate = "animate"
-
-
 class TransactionStatus(str, enum.Enum):
     pending = "pending"
     paid = "paid"
@@ -91,22 +78,7 @@ class Generation(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    task_id: Mapped[str | None] = mapped_column(String(256), index=True)  # KIE task id
-    image_session_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("image_sessions.id"),
-        nullable=True,
-        index=True,
-    )
-    parent_generation_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("generations.id"),
-        nullable=True,
-    )
-    action_type: Mapped[ImageGenerationAction | None] = mapped_column(
-        Enum(ImageGenerationAction),
-        nullable=True,
-    )
+    task_id: Mapped[str | None] = mapped_column(String(256))  # CometAPI task id
     model: Mapped[str] = mapped_column(String(64), nullable=False)
     gen_type: Mapped[GenerationType] = mapped_column(Enum(GenerationType), nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
@@ -120,43 +92,6 @@ class Generation(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship(back_populates="generations", lazy="noload")
-
-
-
-class ImageSession(Base):
-    """Saved image generation settings for iterative Syntx-like workflow."""
-
-    __tablename__ = "image_sessions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-
-    model: Mapped[str] = mapped_column(String(64), nullable=False)
-    mode: Mapped[str] = mapped_column(String(32), default="text", nullable=False)
-    aspect_ratio: Mapped[str | None] = mapped_column(String(32))
-    quality: Mapped[str] = mapped_column(String(32), default="basic", nullable=False)
-    count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-
-    base_prompt: Mapped[str | None] = mapped_column(Text)
-    reference_file_id: Mapped[str | None] = mapped_column(Text)
-    last_result_url: Mapped[str | None] = mapped_column(Text)
-    last_generation_id: Mapped[int | None] = mapped_column(Integer)
-
-    status: Mapped[ImageSessionStatus] = mapped_column(
-        Enum(ImageSessionStatus),
-        default=ImageSessionStatus.active,
-        nullable=False,
-        index=True,
-    )
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-    user: Mapped["User"] = relationship(lazy="noload")
 
 
 class Transaction(Base):

@@ -188,11 +188,6 @@ VIDEO_MODEL_DESC: dict[str, str] = {
 }
 
 
-
-def _prioritize_ratio(ratios: list[str], preferred: str = "9:16") -> list[str]:
-    """Put the most important aspect ratio first without dropping options."""
-    return ([preferred] if preferred in ratios else []) + [r for r in ratios if r != preferred]
-
 # ── Image keyboards ───────────────────────────────────────────────────────────
 
 def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
@@ -235,7 +230,7 @@ def image_mode_kb(model_key: str) -> InlineKeyboardMarkup:
 def image_aspect_ratio_kb(model_key: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     caps = IMAGE_CAPS.get(model_key, {})
-    ratios = _prioritize_ratio(caps.get("aspect_ratios", []))
+    ratios = caps.get("aspect_ratios", [])
     buttons = [
         InlineKeyboardButton(text=r, callback_data=f"img_ratio:{r}")
         for r in ratios
@@ -386,21 +381,3 @@ def after_generation_kb(gen_id: int, gen_type: str) -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 
-
-
-def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    suffix = str(gen_id or 0)
-    builder.row(
-        InlineKeyboardButton(text="✨ Ремикс", callback_data=f"img_session:remix:{suffix}"),
-        InlineKeyboardButton(text="🔁 Повторить", callback_data=f"img_session:repeat:{suffix}"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🎬 Оживить", callback_data=f"img_session:animate:{suffix}"),
-        InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_session:settings"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🆕 Новая серия", callback_data="img_session:new"),
-        InlineKeyboardButton(text="🏠 Меню", callback_data="menu:main"),
-    )
-    return builder.as_markup()

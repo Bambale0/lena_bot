@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from urllib.parse import urlencode
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -16,7 +15,6 @@ from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     IMAGE_CAPS,
     after_generation_kb,
-    image_session_kb,
     image_aspect_ratio_kb,
     image_count_kb,
     image_mode_kb,
@@ -26,35 +24,11 @@ from bot.keyboards.models import (
     reference_upload_kb,
 )
 from bot.states import ImageGenFSM
-from core.config import settings
 from db import repository as repo
-from db.models import GenerationType, ImageGenerationAction, User
+from db.models import GenerationType, User
 
 logger = logging.getLogger(__name__)
 router = Router(name="image_gen")
-
-def _kie_callback_url() -> str:
-    params = {}
-    if settings.KIE_WEBHOOK_SECRET:
-        params["secret"] = settings.KIE_WEBHOOK_SECRET
-    query = f"?{urlencode(params)}" if params else ""
-    return f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}{query}"
-
-
-async def _telegram_file_url(bot: Bot, file_id: str | None) -> str | None:
-    if not file_id:
-        return None
-    file = await bot.get_file(file_id)
-    return f"https://api.telegram.org/file/bot{bot.token}/{file.file_path}"
-
-
-def _session_caption(prompt: str) -> str:
-    return (
-        "✅ <b>Готово!</b>\n\n"
-        f"<i>{prompt[:200]}</i>\n\n"
-        "🎨 <b>Серия активна.</b> Теперь просто отправляй новый текст или фото — "
-        "настройки сохранятся."
-    )
 
 
 # ── Model select ──────────────────────────────────────────────────────────────
@@ -313,25 +287,10 @@ async def handle_prompt(
     image_file_id: str | None = data.get("image_file_id")
     prompt = message.text.strip()  # type: ignore[union-attr]
 
-    image_url = await _telegram_file_url(bot, image_file_id)
-
-    image_session_id: int | None = data.get("image_session_id")
-    image_session = None
-    if image_session_id:
-        image_session = await repo.get_image_session(session, image_session_id, db_user.id)
-    if image_session is None:
-        image_session = await repo.create_image_session(
-            session=session,
-            user_id=db_user.id,
-            model=model_key,
-            mode=data.get("mode", "text"),
-            aspect_ratio=aspect_ratio,
-            quality=quality,
-            count=count,
-            base_prompt=prompt,
-            reference_file_id=image_file_id,
-        )
-        await state.update_data(image_session_id=image_session.id)
+    image_url: str | None = None
+    if image_file_id:
+        file = await bot.get_file(image_file_id)
+        image_url = f"https://api.telegram.org/file/bot{bot.token}/{file.file_path}"
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
@@ -340,14 +299,7 @@ async def handle_prompt(
         return
 
     gen = await repo.create_generation(
-        session,
-        db_user.id,
-        model_key,
-        GenerationType.image,
-        prompt,
-        credits,
-        image_session_id=image_session.id,
-        action_type=ImageGenerationAction.initial,
+        session, db_user.id, model_key, GenerationType.image, prompt, credits
     )
 
     await state.set_state(ImageGenFSM.generating)
@@ -360,13 +312,8 @@ async def handle_prompt(
 
     try:
         result = await image_service.generate_image(
-            ImageModel(model_key),
-            prompt,
-            image_url=image_url,
-            aspect_ratio=aspect_ratio,
-            n=count,
-            quality=quality,
-            callback_url=_kie_callback_url(),
+            ImageModel(model_key), prompt,
+            image_url=image_url, aspect_ratio=aspect_ratio, n=count, quality=quality,
         )
     except Exception as e:
         logger.error("Image generation error: %s", e)
@@ -378,22 +325,27 @@ async def handle_prompt(
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
 
-    await state.set_state(ImageGenFSM.session_active)
-    await state.update_data(
-        image_session_id=image_session.id,
-        model_key=model_key,
-        credits=credits,
-        aspect_ratio=aspect_ratio,
-        count=count,
-        quality=quality,
-        image_file_id=image_file_id,
+    async def on_success(url: str) -> None:
+        from api.image_service import ImageResult as IR
+        await repo.finish_generation(session, gen.id, url)
+        await _send_image_result(
+            bot, message.chat.id,
+            IR(is_async=False, url=url), gen.id, prompt, status_msg,
+        )
+
+    async def on_failure(err: str) -> None:
+        await repo.fail_generation(session, gen.id, err)
+        await repo.add_credits(session, db_user.id, credits)
+        await status_msg.edit_text(
+            f"❌ Ошибка: {err}\nКредиты возвращены.", reply_markup=main_menu_kb()
+        )
+
+    asyncio.create_task(
+        polling.poll_until_done(
+            result.task_id or "", image_service.poll_kieai_status, on_success, on_failure
+        )
     )
-    await status_msg.edit_text(
-        "⏳ <b>Задача запущена.</b>\n"
-        "Пришлю результат, когда генерация будет готова.\n\n"
-        "Настройки серии сохранены — можешь дождаться результата или продолжить позже.",
-        reply_markup=image_session_kb(gen.id),
-    )
+    await state.clear()
 
 
 async def _send_image_result(
@@ -406,174 +358,14 @@ async def _send_image_result(
         await status_msg.delete()
     except Exception:
         pass
-    caption = _session_caption(prompt)
-    kb = image_session_kb(gen_id)
+    caption = f"✅ <b>Готово!</b>\n\n<i>{prompt[:200]}</i>"
+    kb = after_generation_kb(gen_id, "image")
     if result.image_bytes:
         ext = "png" if "png" in (result.mime_type or "") else "jpg"
         photo = BufferedInputFile(result.image_bytes, filename=f"artflow_{gen_id}.{ext}")
     else:
         photo = result.url  # type: ignore[assignment]
     await bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, reply_markup=kb)
-
-
-
-# ── Active image session ──────────────────────────────────────────────────────
-
-@router.message(ImageGenFSM.session_active, F.text)
-async def handle_session_prompt(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User,
-    bot: Bot,
-) -> None:
-    data = await state.get_data()
-    image_session_id = data.get("image_session_id")
-    image_session = (
-        await repo.get_image_session(session, image_session_id, db_user.id)
-        if image_session_id
-        else await repo.get_active_image_session(session, db_user.id)
-    )
-    if not image_session:
-        await message.answer("Серия не найдена. Начни новую генерацию.", reply_markup=main_menu_kb())
-        await state.clear()
-        return
-
-    model_cost = await repo.get_model_cost(session, image_session.model)
-    credits = model_cost.credits if model_cost else int(data.get("credits", 1))
-    prompt = message.text.strip()  # type: ignore[union-attr]
-
-    image_url = await _telegram_file_url(bot, image_session.reference_file_id)
-
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
-        await message.answer("❌ Недостаточно кредитов.", reply_markup=main_menu_kb())
-        return
-
-    parent_id = image_session.last_generation_id
-    gen = await repo.create_generation(
-        session,
-        db_user.id,
-        image_session.model,
-        GenerationType.image,
-        prompt,
-        credits,
-        image_session_id=image_session.id,
-        parent_generation_id=parent_id,
-        action_type=ImageGenerationAction.remix,
-    )
-
-    status_msg = await message.answer(
-        f"⏳ <b>Генерирую в активной серии...</b>\n<code>{image_session.model}</code>"
-    )
-
-    try:
-        result = await image_service.generate_image(
-            ImageModel(image_session.model),
-            prompt,
-            image_url=image_url,
-            aspect_ratio=image_session.aspect_ratio,
-            n=image_session.count,
-            quality=image_session.quality,
-            callback_url=_kie_callback_url(),
-        )
-    except Exception as e:
-        logger.error("Session image generation error: %s", e)
-        await repo.fail_generation(session, gen.id, str(e))
-        await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text("❌ Ошибка генерации. Кредиты возвращены.", reply_markup=image_session_kb(parent_id))
-        return
-
-    await repo.update_generation_task(session, gen.id, result.task_id or "")
-    await state.update_data(image_session_id=image_session.id)
-    await status_msg.edit_text(
-        "⏳ <b>Задача запущена.</b> Результат придёт сюда автоматически.",
-        reply_markup=image_session_kb(gen.id),
-    )
-
-
-@router.message(ImageGenFSM.session_active, F.photo)
-async def handle_session_photo(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User,
-) -> None:
-    data = await state.get_data()
-    image_session_id = data.get("image_session_id")
-    image_session = (
-        await repo.get_image_session(session, image_session_id, db_user.id)
-        if image_session_id
-        else await repo.get_active_image_session(session, db_user.id)
-    )
-    if not image_session:
-        await message.answer("Серия не найдена. Начни новую генерацию.", reply_markup=main_menu_kb())
-        await state.clear()
-        return
-
-    best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
-    await repo.update_image_session_reference(session, image_session.id, best[0].file_id)
-    await state.update_data(image_file_id=best[0].file_id, image_session_id=image_session.id)
-    await message.answer(
-        "✅ Новый референс сохранён для активной серии. Теперь напиши, что изменить.",
-        reply_markup=image_session_kb(image_session.last_generation_id),
-    )
-
-
-@router.callback_query(F.data == "img_session:new")
-async def cb_image_session_new(call: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User) -> None:
-    await repo.archive_active_image_sessions(session, db_user.id)
-    await state.clear()
-    await cb_image_menu(call, session, state)
-
-
-@router.callback_query(F.data == "img_session:settings")
-async def cb_image_session_settings(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
-    await cb_image_menu(call, session, state)
-
-
-@router.callback_query(F.data.startswith("img_session:remix:"))
-async def cb_image_session_remix(call: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(ImageGenFSM.session_active)
-    await call.message.answer("✨ Напиши, что изменить в текущей картинке:")
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("img_session:repeat:"))
-async def cb_image_session_repeat(
-    call: CallbackQuery,
-    session: AsyncSession,
-    state: FSMContext,
-    db_user: User,
-    bot: Bot,
-) -> None:
-    data = await state.get_data()
-    image_session_id = data.get("image_session_id")
-    image_session = (
-        await repo.get_image_session(session, image_session_id, db_user.id)
-        if image_session_id
-        else await repo.get_active_image_session(session, db_user.id)
-    )
-    if not image_session:
-        await call.answer("Серия не найдена", show_alert=True)
-        return
-
-    last_gen = await repo.get_last_session_generation(session, image_session.id)
-    if not last_gen:
-        await call.answer("Нечего повторять", show_alert=True)
-        return
-
-    fake_message = call.message
-    if fake_message:
-        await state.set_state(ImageGenFSM.session_active)
-        await state.update_data(image_session_id=image_session.id)
-        await fake_message.answer(last_gen.prompt)
-    await call.answer("Повторяю последний промпт")
-
-
-@router.callback_query(F.data.startswith("img_session:animate:"))
-async def cb_image_session_animate(call: CallbackQuery) -> None:
-    await call.answer("Оживление подключим следующим шагом через video image-to-video.", show_alert=True)
 
 
 # ── Regen ─────────────────────────────────────────────────────────────────────

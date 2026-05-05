@@ -89,10 +89,9 @@ async def generate_image(
     size: str = "1K",                   # unused (kept for compat)
     n: int = 1,
     quality: str = "basic",             # "basic"=2K / "high"=4K (Seedream)
-    callback_url: str | None = None,
 ) -> ImageResult:
     inp = _build_input(model, prompt, image_url, aspect_ratio, n, quality)
-    resp = await kieai_client.create_task({"model": model.value, "input": inp}, callback_url=callback_url)
+    resp = await kieai_client.create_task({"model": model.value, "input": inp})
     task_id = str(resp.get("data", {}).get("taskId") or resp.get("taskId"))
     logger.info("KIE.AI image task %s: %s", model.value, task_id)
     return ImageResult(is_async=True, task_id=task_id)

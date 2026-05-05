@@ -32,10 +32,6 @@ class Settings(BaseSettings):
     # kie.ai (Wan 2.7 Image Pro)
     KIE_AI_KEY: str = ""
 
-    # KIE.AI callbacks
-    KIE_WEBHOOK_PATH: str = "/webhook/kie"
-    KIE_WEBHOOK_SECRET: str = ""
-
     # YooKassa
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""

@@ -80,15 +80,9 @@ async def _retry_get(path: str, params: dict[str, Any] | None = None) -> dict[st
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def create_task(
-    payload: dict[str, Any],
-    callback_url: str | None = None,
-) -> dict[str, Any]:
+async def create_task(payload: dict[str, Any]) -> dict[str, Any]:
     """POST /api/v1/jobs/createTask — для всех моделей кроме Veo."""
-    request_payload = dict(payload)
-    if callback_url:
-        request_payload["callBackUrl"] = callback_url
-    return await _retry_post("/api/v1/jobs/createTask", request_payload)
+    return await _retry_post("/api/v1/jobs/createTask", payload)
 
 
 async def get_task_status(task_id: str) -> dict[str, Any]:
