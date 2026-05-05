@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     KIE_WEBHOOK_PATH: str = "/webhook/kie"
     KIE_WEBHOOK_SECRET: str = ""
 
+    # Public static uploads used as stable references for KIE and Telegram.
+    STATIC_UPLOAD_DIR: str = "static/upload"
+    STATIC_UPLOAD_URL_PATH: str = "/static/upload"
+
     # YooKassa
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""

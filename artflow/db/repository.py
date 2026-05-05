@@ -234,6 +234,7 @@ async def create_image_session(
         quality=quality,
         count=count,
         base_prompt=base_prompt,
+        last_prompt=base_prompt,
         reference_file_id=reference_file_id,
         status=ImageSessionStatus.active,
     )
@@ -290,6 +291,19 @@ async def update_image_session_base_prompt(
         update(ImageSession)
         .where(ImageSession.id == image_session_id)
         .values(base_prompt=base_prompt, updated_at=func.now())
+    )
+    await session.commit()
+
+
+async def update_image_session_last_prompt(
+    session: AsyncSession,
+    image_session_id: int,
+    last_prompt: str | None,
+) -> None:
+    await session.execute(
+        update(ImageSession)
+        .where(ImageSession.id == image_session_id)
+        .values(last_prompt=last_prompt, updated_at=func.now())
     )
     await session.commit()
 

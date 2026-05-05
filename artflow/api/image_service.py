@@ -17,6 +17,7 @@ from enum import StrEnum
 from typing import Any
 
 from api import kieai_client
+from api.kie_model_specs import IMAGE_SPECS, build_kie_input, resolve_model_for_reference
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +39,9 @@ class ImageModel(StrEnum):
 
 # Models that support image input
 _SUPPORTS_IMG2IMG: set[ImageModel] = {
-    ImageModel.SEEDREAM_45_EDIT,
-    ImageModel.GROK_I2I,
-    ImageModel.WAN_27_PRO,
-    ImageModel.NANO_BANANA_PRO,
+    ImageModel(spec.model)
+    for spec in IMAGE_SPECS.values()
+    if "image" in spec.supported_modes and spec.model in set(item.value for item in ImageModel)
 }
 
 # Models with quality param
@@ -57,14 +57,14 @@ _COUNT_MODELS: set[ImageModel] = {
 
 # Aspect ratio options per model
 MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
-    ImageModel.SEEDREAM_45:      ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"],
-    ImageModel.SEEDREAM_45_EDIT: ["1:1", "4:3", "3:4", "16:9", "9:16"],
+    ImageModel.SEEDREAM_45:      ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"],
+    ImageModel.SEEDREAM_45_EDIT: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"],
     ImageModel.GROK_T2I:         ["1:1", "2:3", "3:2", "16:9", "9:16"],
     ImageModel.GROK_I2I:         ["1:1", "2:3", "3:2", "16:9", "9:16"],
-    ImageModel.WAN_27_PRO:       ["1:1", "4:3", "3:4", "16:9", "9:16"],
-    ImageModel.NANO_BANANA:      ["1:1", "9:16", "16:9", "3:4", "4:3"],
-    ImageModel.NANO_BANANA_2:    ["1:1", "9:16", "16:9", "3:4", "4:3", "2:1", "1:2"],
-    ImageModel.NANO_BANANA_PRO:  ["1:1", "9:16", "16:9"],
+    ImageModel.WAN_27_PRO:       ["1:1", "16:9", "4:3", "21:9", "3:4", "9:16", "8:1", "1:8"],
+    ImageModel.NANO_BANANA:      ["auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"],
+    ImageModel.NANO_BANANA_2:    ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+    ImageModel.NANO_BANANA_PRO:  ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
 }
 
 
@@ -91,10 +91,26 @@ async def generate_image(
     quality: str = "basic",             # "basic"=2K / "high"=4K (Seedream)
     callback_url: str | None = None,
 ) -> ImageResult:
-    inp = _build_input(model, prompt, image_url, aspect_ratio, n, quality)
-    resp = await kieai_client.create_task({"model": model.value, "input": inp}, callback_url=callback_url)
-    task_id = str(resp.get("data", {}).get("taskId") or resp.get("taskId"))
-    logger.info("KIE.AI image task %s: %s", model.value, task_id)
+    resolved_model, inp = _build_input(model, prompt, image_url, aspect_ratio, n, quality)
+    resp = await kieai_client.create_task({"model": resolved_model, "input": inp}, callback_url=callback_url)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"KIE.AI image: invalid createTask response for {resolved_model}: {resp!r}")
+
+    code = resp.get("code")
+    if code not in (None, 200, "200"):
+        raise RuntimeError(f"KIE.AI image createTask failed for {resolved_model}: {code} {resp.get('msg')}")
+
+    data = resp.get("data")
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        raise RuntimeError(f"KIE.AI image: invalid createTask data for {resolved_model}: {data!r}")
+
+    task_id = str(data.get("taskId") or resp.get("taskId") or "").strip()
+    if not task_id:
+        raise RuntimeError(f"KIE.AI image: empty taskId for {resolved_model}: {resp!r}")
+
+    logger.info("KIE.AI image task %s: %s", resolved_model, task_id)
     return ImageResult(is_async=True, task_id=task_id)
 
 
@@ -105,88 +121,39 @@ def _build_input(
     aspect_ratio: str | None,
     n: int,
     quality: str,
-) -> dict[str, Any]:
-    m = model.value
-    ratio = aspect_ratio or "1:1"
+) -> tuple[str, dict[str, Any]]:
+    ratio_value = aspect_ratio
+    resolved_for_validation = resolve_model_for_reference(model.value) if image_url else model.value
+    try:
+        ratio_model = ImageModel(resolved_for_validation)
+    except ValueError:
+        ratio_model = model
+    allowed_ratios = MODEL_ASPECT_RATIOS.get(ratio_model, [])
+    if ratio_value and allowed_ratios and ratio_value not in allowed_ratios:
+        logger.warning("Invalid aspect ratio for %s: %s. Falling back to %s", model.value, ratio_value, allowed_ratios[0])
+        ratio_value = allowed_ratios[0]
 
-    # ── Seedream 4.5 T2I ─────────────────────────────────────────────────────
-    if m == ImageModel.SEEDREAM_45:
-        return {
-            "prompt": prompt,
-            "aspect_ratio": ratio,
-            "quality": quality,
-            "nsfw_checker": False,
-        }
+    quality_value = quality
+    resolution_value = None
+    if model in {ImageModel.WAN_27_PRO, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}:
+        resolution_value = quality_value if quality_value in {"1K", "2K", "4K"} else None
 
-    # ── Seedream 4.5 Edit ────────────────────────────────────────────────────
-    if m == ImageModel.SEEDREAM_45_EDIT:
-        return {
-            "prompt": prompt,
-            "image_url": image_url or "",
-            "aspect_ratio": ratio,
-            "quality": quality,
-        }
+    if model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} and quality_value not in {"1K", "2K", "4K"}:
+        quality_value = "1K" if model == ImageModel.NANO_BANANA_2 else "2K"
+    elif model not in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} and quality_value in {"1K", "2K", "4K"}:
+        quality_value = "basic"
 
-    # ── Grok T2I ─────────────────────────────────────────────────────────────
-    if m == ImageModel.GROK_T2I:
-        return {
-            "prompt": prompt,
-            "aspect_ratio": ratio,
-            "nsfw_checker": False,
-        }
-
-    # ── Grok I2I ─────────────────────────────────────────────────────────────
-    if m == ImageModel.GROK_I2I:
-        return {
-            "prompt": prompt,
-            "image_url": image_url or "",
-            "aspect_ratio": ratio,
-        }
-
-    # ── WAN 2.7 Image Pro ────────────────────────────────────────────────────
-    if m == ImageModel.WAN_27_PRO:
-        inp: dict[str, Any] = {
-            "prompt": prompt,
-            "resolution": "2K",
-            "n": max(1, min(4, n)),
-            "watermark": False,
-        }
-        if image_url:
-            inp["input_urls"] = [image_url]
-        else:
-            inp["aspect_ratio"] = ratio
-        return inp
-
-    # ── Nano Banana (v1) ─────────────────────────────────────────────────────
-    if m == ImageModel.NANO_BANANA:
-        return {
-            "prompt": prompt,
-            "image_size": ratio,
-            "output_format": "png",
-        }
-
-    # ── Nano Banana 2 ─────────────────────────────────────────────────────────
-    if m == ImageModel.NANO_BANANA_2:
-        return {
-            "prompt": prompt,
-            "image_size": ratio,
-            "resolution": "2K",
-            "output_format": "jpg",
-        }
-
-    # ── Nano Banana Pro ───────────────────────────────────────────────────────
-    if m == ImageModel.NANO_BANANA_PRO:
-        inp2: dict[str, Any] = {
-            "prompt": prompt,
-            "aspect_ratio": ratio,
-            "resolution": "2K",
-            "output_format": "jpg",
-        }
-        if image_url:
-            inp2["image_input"] = [image_url]
-        return inp2
-
-    raise ValueError(f"Unknown image model: {model}")
+    return build_kie_input(
+        model=model.value,
+        prompt=prompt,
+        reference_urls=image_url,
+        params={
+            "aspect_ratio": ratio_value,
+            "n": n,
+            "quality": quality_value,
+            "resolution": resolution_value,
+        },
+    )
 
 
 # ── Poll functions ────────────────────────────────────────────────────────────
@@ -194,7 +161,15 @@ def _build_input(
 async def poll_kieai_status(task_id: str) -> str | None:
     """Universal poller for all KIE.AI image models."""
     resp = await kieai_client.get_task_status(task_id)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"KIE.AI image: invalid status response for task {task_id}: {resp!r}")
+
     data = resp.get("data", {})
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        raise RuntimeError(f"KIE.AI image: invalid status data for task {task_id}: {data!r}")
+
     state = str(data.get("state", "")).lower()
 
     if state == "success":

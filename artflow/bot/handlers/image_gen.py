@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service
 from api.image_service import ImageModel
+from api.kie_model_specs import IMAGE_SPECS
+from api.public_files import mirror_telegram_file
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     IMAGE_CAPS,
@@ -41,15 +43,13 @@ def _kie_callback_url() -> str:
 
 
 async def _telegram_file_url(bot: Bot, file_id: str | None) -> str | None:
-    if not file_id:
-        return None
-    file = await bot.get_file(file_id)
-    return f"https://api.telegram.org/file/bot{bot.token}/{file.file_path}"
+    return await mirror_telegram_file(bot, file_id)
 
 
 def _supports_img2img(model_key: str) -> bool:
     caps = IMAGE_CAPS.get(model_key, {})
-    return "image" in caps.get("modes", [])
+    spec = IMAGE_SPECS.get(model_key)
+    return "image" in caps.get("modes", []) or bool(spec and spec.remix_model)
 
 
 def _safe_image_model(model_key: str) -> ImageModel | None:
@@ -58,6 +58,33 @@ def _safe_image_model(model_key: str) -> ImageModel | None:
     except ValueError:
         logger.warning("Unknown image model in session flow: %s", model_key)
         return None
+
+
+def _ratio_options_for_mode(model_key: str, mode: str | None) -> list[str]:
+    caps = IMAGE_CAPS.get(model_key, {})
+    ratio_modes = caps.get("aspect_ratio_modes", caps.get("modes", ["text"]))
+    if mode and mode not in ratio_modes:
+        return []
+    return caps.get("aspect_ratios", [])
+
+
+def _should_select_aspect_ratio(model_key: str, mode: str | None) -> bool:
+    return bool(_ratio_options_for_mode(model_key, mode))
+
+
+def _quality_options(model_key: str) -> list[tuple[str, str]]:
+    return IMAGE_CAPS.get(model_key, {}).get(
+        "quality_options",
+        [("basic", "🔷 2K"), ("high", "💎 4K")],
+    )
+
+
+def _quality_label(model_key: str, quality: str | None) -> str:
+    clean_labels = {
+        value: label.replace("🔷 ", "").replace("💎 ", "").replace(" (стандарт)", "").replace(" (высокое)", "")
+        for value, label in _quality_options(model_key)
+    }
+    return clean_labels.get(quality or "", quality or "по умолчанию")
 
 
 async def _resolve_image_session(
@@ -109,21 +136,42 @@ async def _session_reference_url(
 
 
 def _session_settings_text(image_session: ImageSession) -> str:
-    quality_label = "4K" if image_session.quality == "high" else "2K"
+    caps = IMAGE_CAPS.get(image_session.model, {})
+    ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
+    quality_label = _quality_label(image_session.model, image_session.quality) if caps.get("has_quality") else "фиксированное"
+    count_label = str(image_session.count) if len(caps.get("counts", [1])) > 1 else "фиксированное"
+    ratio_label = image_session.aspect_ratio or ("по умолчанию" if ratios else "не используется")
     return (
         "⚙️ <b>Настройки активной серии</b>\n\n"
         f"Модель: <code>{image_session.model}</code>\n"
         f"Режим: <code>{image_session.mode}</code>\n"
-        f"Формат: <b>{image_session.aspect_ratio or 'по умолчанию'}</b>\n"
+        f"Формат: <b>{ratio_label}</b>\n"
         f"Качество: <b>{quality_label}</b>\n"
-        f"Количество: <b>{image_session.count}</b>\n\n"
-        "Можно менять параметры, не теряя активную серию."
+        f"Количество: <b>{count_label}</b>\n\n"
+        "Показываю только настройки, которые поддерживает эта модель."
+    )
+
+
+def _active_image_session_text(image_session: ImageSession) -> str:
+    caps = IMAGE_CAPS.get(image_session.model, {})
+    ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
+    quality_label = _quality_label(image_session.model, image_session.quality) if caps.get("has_quality") else "фиксированное"
+    count_label = str(image_session.count) if len(caps.get("counts", [1])) > 1 else "фиксированное"
+    ratio_label = image_session.aspect_ratio or ("по умолчанию" if ratios else "не используется")
+    return (
+        "🎨 <b>Активная серия изображений</b>\n\n"
+        f"Модель: <code>{image_session.model}</code>\n"
+        f"Формат: <b>{ratio_label}</b>\n"
+        f"Качество: <b>{quality_label}</b>\n"
+        f"Количество: <b>{count_label}</b>\n\n"
+        "Просто отправь новый prompt или фото.\n"
+        "Настройки уже сохранены."
     )
 
 
 def _session_ratio_choices_kb(image_session: ImageSession) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    ratios = IMAGE_CAPS.get(image_session.model, {}).get("aspect_ratios", [])
+    ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
     buttons = [
         InlineKeyboardButton(
             text=f"{'✅ ' if ratio == image_session.aspect_ratio else ''}{ratio}",
@@ -139,7 +187,7 @@ def _session_ratio_choices_kb(image_session: ImageSession) -> InlineKeyboardMark
 
 def _session_quality_choices_kb(image_session: ImageSession) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for quality, label in (("basic", "🔷 2K"), ("high", "💎 4K")):
+    for quality, label in _quality_options(image_session.model):
         builder.row(
             InlineKeyboardButton(
                 text=f"{'✅ ' if image_session.quality == quality else ''}{label}",
@@ -205,6 +253,8 @@ async def _launch_session_generation(
         parent_generation_id=parent_generation_id,
         action_type=action_type,
     )
+    await repo.update_image_session_last_prompt(session, image_session.id, prompt)
+    image_session.last_prompt = prompt
 
     status_msg = await source_message.answer(launching_text)
 
@@ -247,8 +297,11 @@ async def _launch_session_generation(
 
 # ── Model select ──────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "menu:image")
-async def cb_image_menu(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
+async def _open_image_model_select(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
     await state.set_state(ImageGenFSM.model_select)
     model_costs = await repo.get_all_model_costs(session)
     await safe_edit_message(
@@ -262,6 +315,39 @@ async def cb_image_menu(call: CallbackQuery, session: AsyncSession, state: FSMCo
         "👇 <b>Нажми на модель для выбора:</b>",
         reply_markup=image_models_kb(model_costs),
     )
+
+
+@router.callback_query(F.data == "menu:image")
+async def cb_image_menu(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    image_session = await repo.get_active_image_session(session, db_user.id)
+    if image_session:
+        model_cost = await repo.get_model_cost(session, image_session.model)
+        await state.set_state(ImageGenFSM.session_active)
+        await state.update_data(
+            image_session_id=image_session.id,
+            model_key=image_session.model,
+            credits=model_cost.credits if model_cost else 1,
+            aspect_ratio=image_session.aspect_ratio,
+            count=image_session.count,
+            quality=image_session.quality,
+            image_file_id=image_session.reference_file_id,
+            remix_mode=False,
+            remix_parent_generation_id=None,
+        )
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            _active_image_session_text(image_session),
+            reply_markup=image_session_kb(image_session.last_generation_id),
+        )
+        await safe_answer_callback(call)
+        return
+
+    await _open_image_model_select(call, session, state)
     await safe_answer_callback(call)
 
 
@@ -331,7 +417,7 @@ async def _go_to_next_step(
         )
         return
 
-    if caps.get("aspect_ratios") and mode == "text":
+    if _should_select_aspect_ratio(model_key, mode) and not data.get("aspect_ratio"):
         await state.set_state(ImageGenFSM.aspect_ratio_select)
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
@@ -345,7 +431,7 @@ async def _go_to_next_step(
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
             f"✅ <b>{display_name}</b>\n\n💎 Качество изображения:",
-            reply_markup=image_quality_kb(),
+            reply_markup=image_quality_kb(model_key),
         )
         return
 
@@ -354,7 +440,7 @@ async def _go_to_next_step(
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
             f"✅ <b>{display_name}</b>\n\n🔢 Количество изображений:",
-            reply_markup=image_count_kb(),
+            reply_markup=image_count_kb(model_key),
         )
         return
 
@@ -383,7 +469,7 @@ async def cb_image_mode(call: CallbackQuery, state: FSMContext, session: AsyncSe
 
 @router.callback_query(ImageGenFSM.aspect_ratio_select, F.data.startswith("img_ratio:"))
 async def cb_image_ratio(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
-    ratio = call.data.split(":")[1]  # type: ignore[union-attr]
+    ratio = call.data.removeprefix("img_ratio:")  # type: ignore[union-attr]
     await state.update_data(aspect_ratio=ratio)
     data = await state.get_data()
     model_key = data["model_key"]
@@ -396,14 +482,14 @@ async def cb_image_ratio(call: CallbackQuery, state: FSMContext, session: AsyncS
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
             f"✅ <b>{display_name}</b> · {ratio}\n\n💎 Качество:",
-            reply_markup=image_quality_kb(),
+            reply_markup=image_quality_kb(model_key),
         )
     elif len(caps.get("counts", [1])) > 1:
         await state.set_state(ImageGenFSM.count_select)
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
             f"✅ <b>{display_name}</b> · {ratio}\n\n🔢 Количество изображений:",
-            reply_markup=image_count_kb(),
+            reply_markup=image_count_kb(model_key),
         )
     else:
         await state.set_state(ImageGenFSM.prompt_input)
@@ -437,15 +523,24 @@ async def cb_image_quality(call: CallbackQuery, state: FSMContext, session: Asyn
     model_key = data["model_key"]
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
-    ratio = data.get("aspect_ratio", "1:1")
-    q_label = "4K" if quality == "high" else "2K"
+    ratio = data.get("aspect_ratio")
+    q_label = _quality_label(model_key, quality)
+    summary = " · ".join(part for part in (display_name, ratio, q_label) if part)
 
-    await state.set_state(ImageGenFSM.prompt_input)
-    await safe_edit_message(
-        call.message,  # type: ignore[arg-type]
-        f"✅ <b>{display_name}</b> · {ratio} · {q_label}\n\n✍️ Введи промпт:",
-        reply_markup=back_to_menu_kb(),
-    )
+    if len(IMAGE_CAPS.get(model_key, {}).get("counts", [1])) > 1:
+        await state.set_state(ImageGenFSM.count_select)
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            f"✅ <b>{summary}</b>\n\n🔢 Количество изображений:",
+            reply_markup=image_count_kb(model_key),
+        )
+    else:
+        await state.set_state(ImageGenFSM.prompt_input)
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            f"✅ <b>{summary}</b>\n\n✍️ Введи промпт:",
+            reply_markup=back_to_menu_kb(),
+        )
     await call.answer(q_label)
 
 
@@ -457,12 +552,13 @@ async def cb_image_count(call: CallbackQuery, state: FSMContext, session: AsyncS
     model_key = data["model_key"]
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
-    ratio = data.get("aspect_ratio", "1:1")
+    ratio = data.get("aspect_ratio")
+    summary = " · ".join(part for part in (display_name, ratio, f"{count} изображ.") if part)
 
     await state.set_state(ImageGenFSM.prompt_input)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        f"✅ <b>{display_name}</b> · {ratio} · {count} изображ.\n\n✍️ Введи промпт:",
+        f"✅ <b>{summary}</b>\n\n✍️ Введи промпт:",
         reply_markup=back_to_menu_kb(),
     )
     await call.answer(f"{count} шт")
@@ -474,12 +570,21 @@ async def cb_count_back(call: CallbackQuery, state: FSMContext, session: AsyncSe
     model_key = data["model_key"]
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
-    await state.set_state(ImageGenFSM.aspect_ratio_select)
-    await safe_edit_message(
-        call.message,  # type: ignore[arg-type]
-        f"✅ <b>{display_name}</b>\n\n📐 Соотношение сторон:",
-        reply_markup=image_aspect_ratio_kb(model_key),
-    )
+    mode = data.get("mode", "text")
+    if _should_select_aspect_ratio(model_key, mode):
+        await state.set_state(ImageGenFSM.aspect_ratio_select)
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            f"✅ <b>{display_name}</b>\n\n📐 Соотношение сторон:",
+            reply_markup=image_aspect_ratio_kb(model_key),
+        )
+    else:
+        await state.set_state(ImageGenFSM.mode_select)
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            f"✅ <b>{display_name}</b>\n\nВыбери режим:",
+            reply_markup=image_mode_kb(model_key),
+        )
     await call.answer()
 
 
@@ -499,11 +604,23 @@ async def handle_reference_upload(
     display_name = model_cost.display_name if model_cost else model_key
 
     caps = IMAGE_CAPS.get(model_key, {})
-    if caps.get("has_quality"):
+    if _should_select_aspect_ratio(model_key, data.get("mode", "image")) and not data.get("aspect_ratio"):
+        await state.set_state(ImageGenFSM.aspect_ratio_select)
+        await message.answer(
+            f"✅ Референс загружен!\n\n📐 Формат · <b>{display_name}</b>:",
+            reply_markup=image_aspect_ratio_kb(model_key),
+        )
+    elif caps.get("has_quality"):
         await state.set_state(ImageGenFSM.count_select)
         await message.answer(
             f"✅ Референс загружен!\n\n💎 Качество · <b>{display_name}</b>:",
-            reply_markup=image_quality_kb(),
+            reply_markup=image_quality_kb(model_key),
+        )
+    elif len(caps.get("counts", [1])) > 1:
+        await state.set_state(ImageGenFSM.count_select)
+        await message.answer(
+            f"✅ Референс загружен!\n\n🔢 Количество изображений · <b>{display_name}</b>:",
+            reply_markup=image_count_kb(model_key),
         )
     else:
         await state.set_state(ImageGenFSM.prompt_input)
@@ -717,7 +834,7 @@ async def cb_image_session_settings(
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         _session_settings_text(image_session),
-        reply_markup=image_session_settings_kb(image_session.id),
+        reply_markup=image_session_settings_kb(image_session.id, image_session.model, image_session.mode),
     )
     await call.answer()
 
@@ -755,7 +872,8 @@ async def cb_image_session_new(
 ) -> None:
     await repo.archive_active_image_sessions(session, db_user.id)
     await state.clear()
-    await cb_image_menu(call, session, state)
+    await _open_image_model_select(call, session, state)
+    await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("img_session:animate:"))
@@ -777,7 +895,7 @@ async def cb_image_settings_ratio(
         await call.answer("Активная серия не найдена", show_alert=True)
         return
 
-    ratios = IMAGE_CAPS.get(image_session.model, {}).get("aspect_ratios", [])
+    ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
     if not ratios:
         await call.answer("У модели нет выбора формата", show_alert=True)
         return
@@ -803,13 +921,18 @@ async def cb_image_settings_ratio_set(
         await call.answer("Активная серия не найдена", show_alert=True)
         return
 
+    ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
+    if ratio not in ratios:
+        await call.answer("Этот формат недоступен для модели", show_alert=True)
+        return
+
     image_session.aspect_ratio = ratio
     await session.commit()
     await state.update_data(image_session_id=image_session.id, aspect_ratio=ratio)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         _session_settings_text(image_session),
-        reply_markup=image_session_settings_kb(image_session.id),
+        reply_markup=image_session_settings_kb(image_session.id, image_session.model, image_session.mode),
     )
     await call.answer("Формат обновлён")
 
@@ -851,13 +974,22 @@ async def cb_image_settings_quality_set(
         await call.answer("Активная серия не найдена", show_alert=True)
         return
 
+    if not IMAGE_CAPS.get(image_session.model, {}).get("has_quality"):
+        await call.answer("У модели нет настройки качества", show_alert=True)
+        return
+
+    allowed_quality = {value for value, _ in _quality_options(image_session.model)}
+    if quality not in allowed_quality:
+        await call.answer("Это качество недоступно для модели", show_alert=True)
+        return
+
     image_session.quality = quality
     await session.commit()
     await state.update_data(image_session_id=image_session.id, quality=quality)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         _session_settings_text(image_session),
-        reply_markup=image_session_settings_kb(image_session.id),
+        reply_markup=image_session_settings_kb(image_session.id, image_session.model, image_session.mode),
     )
     await call.answer("Качество обновлено")
 
@@ -901,13 +1033,18 @@ async def cb_image_settings_count_set(
         return
 
     count = int(count_raw)
+    counts = IMAGE_CAPS.get(image_session.model, {}).get("counts", [1])
+    if count not in counts:
+        await call.answer("Это количество недоступно для модели", show_alert=True)
+        return
+
     image_session.count = count
     await session.commit()
     await state.update_data(image_session_id=image_session.id, count=count)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         _session_settings_text(image_session),
-        reply_markup=image_session_settings_kb(image_session.id),
+        reply_markup=image_session_settings_kb(image_session.id, image_session.model, image_session.mode),
     )
     await call.answer("Количество обновлено")
 
@@ -921,7 +1058,8 @@ async def cb_image_settings_model(
 ) -> None:
     await repo.archive_active_image_sessions(session, db_user.id)
     await state.clear()
-    await cb_image_menu(call, session, state)
+    await _open_image_model_select(call, session, state)
+    await safe_answer_callback(call)
 
 
 # ── Regen ─────────────────────────────────────────────────────────────────────

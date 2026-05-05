@@ -7,10 +7,12 @@ from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from db import repository as repo
 from db.models import User
 
 logger = logging.getLogger(__name__)
@@ -52,21 +54,28 @@ HELP_TEXT = (
 )
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, db_user: User, state: FSMContext) -> None:
+async def cmd_start(message: Message, db_user: User, state: FSMContext, session: AsyncSession) -> None:
     await state.clear()
+    image_session = await repo.get_active_image_session(session, db_user.id)
     await message.answer(
         WELCOME_TEXT.format(credits=db_user.credits),
-        reply_markup=main_menu_kb(),
+        reply_markup=main_menu_kb(has_active_image_session=bool(image_session)),
     )
 
 
 @router.callback_query(F.data == "menu:main")
-async def cb_main_menu(call: CallbackQuery, db_user: User, state: FSMContext) -> None:
+async def cb_main_menu(
+    call: CallbackQuery,
+    db_user: User,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
     await state.clear()
+    image_session = await repo.get_active_image_session(session, db_user.id)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         WELCOME_TEXT.format(credits=db_user.credits),
-        reply_markup=main_menu_kb(),
+        reply_markup=main_menu_kb(has_active_image_session=bool(image_session)),
     )
     await safe_answer_callback(call)
 

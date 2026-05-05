@@ -19,6 +19,7 @@ from enum import StrEnum
 from typing import Any
 
 from api import kieai_client
+from api.kie_model_specs import VIDEO_SPECS, build_kie_input
 
 logger = logging.getLogger(__name__)
 
@@ -82,17 +83,11 @@ _VEO_MODELS = {VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE}
 _MOTION_MODELS = {VideoModel.KLING_26_MOTION, VideoModel.KLING_30_MOTION}
 
 SUPPORTS_I2V: set[VideoModel] = {
-    VideoModel.KLING_26_I2V,
-    VideoModel.KLING_30,
-    VideoModel.WAN_27_I2V,
-    VideoModel.SEEDANCE_2,
-    VideoModel.SEEDANCE_2_FAST,
-    VideoModel.GROK_I2V,
-    VideoModel.HAPPYHORSE_I2V,
-    VideoModel.VEO_3,
-    VideoModel.VEO_3_FAST,
-    VideoModel.VEO_3_LITE,
+    VideoModel(spec.model)
+    for spec in VIDEO_SPECS.values()
+    if "image" in spec.supported_modes and spec.model in set(item.value for item in VideoModel)
 }
+SUPPORTS_I2V.update({VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -144,147 +139,39 @@ async def _kieai_generate(
     grok_mode: str,
     callback_url: str | None,
 ) -> VideoResult:
-    inp: dict[str, Any] = {}
-    m = model.value
-
-    # ── Kling 2.6 T2V ────────────────────────────────────────────────────────
-    if m == VideoModel.KLING_26_T2V:
-        inp = {
-            "prompt": prompt,
-            "sound": False,
-            "aspect_ratio": aspect_ratio or "16:9",
-            "duration": str(duration),
-        }
-
-    # ── Kling 2.6 I2V ────────────────────────────────────────────────────────
-    elif m == VideoModel.KLING_26_I2V:
-        inp = {
-            "prompt": prompt,
-            "image_urls": [image_url] if image_url else [],
-            "sound": False,
-            "duration": str(duration),
-        }
-
-    # ── Kling 2.6 Motion Control ──────────────────────────────────────────────
-    elif m == VideoModel.KLING_26_MOTION:
-        inp = {
-            "input_urls": [image_url] if image_url else [],
-            "video_urls": [reference_video_url] if reference_video_url else [],
-            "character_orientation": "video",
-            "mode": resolution or "720p",
-        }
-        if prompt:
-            inp["prompt"] = prompt
-
-    # ── Kling 3.0 ─────────────────────────────────────────────────────────────
-    elif m == VideoModel.KLING_30:
-        inp = {
-            "prompt": prompt,
-            "mode": "pro",
-            "sound": False,
+    resolved_model, inp = build_kie_input(
+        model=model.value,
+        prompt=prompt,
+        reference_urls=image_url,
+        params={
+            "last_frame_url": last_frame_url,
             "duration": duration,
-        }
-        image_urls: list[str] = []
-        if image_url:
-            image_urls.append(image_url)
-        if last_frame_url:
-            image_urls.append(last_frame_url)
-        if image_urls:
-            inp["image_urls"] = image_urls
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolution,
+            "reference_video_url": reference_video_url,
+            "grok_mode": grok_mode,
+        },
+    )
 
-    # ── Kling 3.0 Motion Control ──────────────────────────────────────────────
-    elif m == VideoModel.KLING_30_MOTION:
-        inp = {
-            "input_urls": [image_url] if image_url else [],
-            "video_urls": [reference_video_url] if reference_video_url else [],
-            "mode": "pro" if resolution == "1080p" else "std",
-        }
-        if prompt:
-            inp["prompt"] = prompt
+    resp = await kieai_client.create_task({"model": resolved_model, "input": inp}, callback_url=callback_url)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"KIE.AI video: invalid createTask response for {resolved_model}: {resp!r}")
 
-    # ── WAN 2.7 T2V ──────────────────────────────────────────────────────────
-    elif m == VideoModel.WAN_27_T2V:
-        inp = {
-            "prompt": prompt,
-            "resolution": resolution or "1080p",
-            "ratio": aspect_ratio or "16:9",
-            "duration": duration,
-            "prompt_extend": True,
-            "watermark": False,
-        }
+    code = resp.get("code")
+    if code not in (None, 200, "200"):
+        raise RuntimeError(f"KIE.AI video createTask failed for {resolved_model}: {code} {resp.get('msg')}")
 
-    # ── WAN 2.7 I2V ──────────────────────────────────────────────────────────
-    elif m == VideoModel.WAN_27_I2V:
-        inp = {
-            "prompt": prompt,
-            "first_frame_url": image_url or "",
-            "duration": duration,
-            "resolution": resolution or "1080p",
-            "prompt_extend": True,
-            "watermark": False,
-        }
-        if last_frame_url:
-            inp["last_frame_url"] = last_frame_url
+    data = resp.get("data")
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        raise RuntimeError(f"KIE.AI video: invalid createTask data for {resolved_model}: {data!r}")
 
-    # ── Seedance 2 / 2 Fast ───────────────────────────────────────────────────
-    elif m in (VideoModel.SEEDANCE_2, VideoModel.SEEDANCE_2_FAST):
-        inp = {
-            "prompt": prompt,
-            "resolution": resolution or "720p",
-            "aspect_ratio": aspect_ratio or "16:9",
-            "duration": duration,
-            "generate_audio": False,
-        }
-        if image_url:
-            inp["first_frame_url"] = image_url
-        if last_frame_url:
-            inp["last_frame_url"] = last_frame_url
+    task_id = str(data.get("taskId") or resp.get("taskId") or "").strip()
+    if not task_id:
+        raise RuntimeError(f"KIE.AI video: empty taskId for {resolved_model}: {resp!r}")
 
-    # ── Grok T2V ─────────────────────────────────────────────────────────────
-    elif m == VideoModel.GROK_T2V:
-        inp = {
-            "prompt": prompt,
-            "aspect_ratio": aspect_ratio or "16:9",
-            "mode": grok_mode,
-            "duration": str(duration),
-            "resolution": resolution or "720p",
-        }
-
-    # ── Grok I2V ─────────────────────────────────────────────────────────────
-    elif m == VideoModel.GROK_I2V:
-        inp = {
-            "prompt": prompt,
-            "image_url": image_url or "",
-            "mode": grok_mode,
-        }
-        if aspect_ratio:
-            inp["aspect_ratio"] = aspect_ratio
-
-    # ── HappyHorse T2V ────────────────────────────────────────────────────────
-    elif m == VideoModel.HAPPYHORSE_T2V:
-        inp = {
-            "prompt": prompt,
-            "resolution": resolution or "1080p",
-            "aspect_ratio": aspect_ratio or "16:9",
-            "duration": max(3, min(15, duration)),
-        }
-
-    # ── HappyHorse I2V ────────────────────────────────────────────────────────
-    elif m == VideoModel.HAPPYHORSE_I2V:
-        inp = {
-            "image_urls": [image_url] if image_url else [],
-            "resolution": resolution or "1080p",
-            "duration": max(3, min(15, duration)),
-        }
-        if prompt:
-            inp["prompt"] = prompt
-
-    else:
-        raise ValueError(f"Unknown video model: {model}")
-
-    resp = await kieai_client.create_task({"model": m, "input": inp}, callback_url=callback_url)
-    task_id = str(resp.get("data", {}).get("taskId") or resp.get("taskId"))
-    logger.info("KIE.AI video task %s: %s", m, task_id)
+    logger.info("KIE.AI video task %s: %s", resolved_model, task_id)
     return VideoResult(task_id=task_id, provider="kieai")
 
 

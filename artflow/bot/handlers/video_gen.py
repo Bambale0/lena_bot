@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import urlencode
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import polling, video_service
 from api.video_service import VideoModel
+from api.public_files import mirror_telegram_file
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     VIDEO_CAPS,
@@ -24,11 +26,20 @@ from bot.keyboards.models import (
 )
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from core.config import settings
 from db import repository as repo
 from db.models import GenerationType, User
 
 logger = logging.getLogger(__name__)
 router = Router(name="video_gen")
+
+
+def _kie_callback_url() -> str:
+    params = {}
+    if settings.KIE_WEBHOOK_SECRET:
+        params["secret"] = settings.KIE_WEBHOOK_SECRET
+    query = f"?{urlencode(params)}" if params else ""
+    return f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}{query}"
 
 _DEFAULT_DURATION: dict[str, int] = {
     VideoModel.KLING_26_T2V: 5,
@@ -48,7 +59,7 @@ _DEFAULT_RATIO: dict[str, str] = {
     VideoModel.WAN_27_T2V: "16:9",
     VideoModel.SEEDANCE_2: "16:9",
     VideoModel.SEEDANCE_2_FAST: "16:9",
-    VideoModel.GROK_T2V: "16:9",
+    VideoModel.GROK_T2V: "2:3",
     VideoModel.GROK_I2V: "16:9",
     VideoModel.HAPPYHORSE_T2V: "16:9",
     VideoModel.VEO_3_FAST: "16:9",
@@ -60,9 +71,11 @@ _DEFAULT_RES: dict[str, str] = {
     VideoModel.WAN_27_I2V: "1080p",
     VideoModel.SEEDANCE_2: "720p",
     VideoModel.SEEDANCE_2_FAST: "720p",
-    VideoModel.GROK_T2V: "720p",
+    VideoModel.GROK_T2V: "480p",
+    VideoModel.GROK_I2V: "480p",
     VideoModel.HAPPYHORSE_T2V: "1080p",
     VideoModel.HAPPYHORSE_I2V: "1080p",
+    VideoModel.KLING_30: "pro",
     VideoModel.KLING_26_MOTION: "720p",
     VideoModel.KLING_30_MOTION: "720p",
 }
@@ -74,6 +87,7 @@ def _params_summary(data: dict) -> str:
         data.get("aspect_ratio"),
         f"{data['duration']} сек" if data.get("duration") else None,
         data.get("resolution"),
+        data.get("grok_mode"),
     ] if p]
     return " · ".join(parts) if parts else "по умолчанию"
 
@@ -83,7 +97,8 @@ def _has_params(model_key: str) -> bool:
     return bool(
         caps.get("duration_options") or
         caps.get("aspect_ratios") or
-        (caps.get("has_resolution") and caps.get("resolutions"))
+        (caps.get("has_resolution") and caps.get("resolutions")) or
+        caps.get("mode_options")
     )
 
 
@@ -142,6 +157,7 @@ async def cb_video_model(
         duration=_DEFAULT_DURATION.get(model_key, 5),
         aspect_ratio=_DEFAULT_RATIO.get(model_key),
         resolution=_DEFAULT_RES.get(model_key),
+        grok_mode="normal" if VIDEO_CAPS.get(model_key, {}).get("mode_options") else None,
     )
 
     caps = VIDEO_CAPS.get(model_key, {})
@@ -236,7 +252,7 @@ async def handle_image_upload(
             "Нажимай кнопки (✅ = выбрано), потом <b>Далее</b>:",
             reply_markup=video_params_kb(
                 model_key, updated.get("duration"),
-                updated.get("aspect_ratio"), updated.get("resolution"),
+                updated.get("aspect_ratio"), updated.get("resolution"), updated.get("grok_mode"),
             ),
         )
     else:
@@ -257,7 +273,7 @@ async def _go_to_params_or_prompt(
             "Нажимай кнопки (✅ = выбрано), потом <b>Далее</b>:",
             reply_markup=video_params_kb(
                 model_key, data.get("duration"),
-                data.get("aspect_ratio"), data.get("resolution"),
+                data.get("aspect_ratio"), data.get("resolution"), data.get("grok_mode"),
             ),
         )
     else:
@@ -274,18 +290,18 @@ async def cb_vpar_dur(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(duration=dur)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(data["model_key"], dur, data.get("aspect_ratio"), data.get("resolution"))
+        reply_markup=video_params_kb(data["model_key"], dur, data.get("aspect_ratio"), data.get("resolution"), data.get("grok_mode"))
     )
     await call.answer(f"{dur} сек")
 
 
 @router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_ratio:"))
 async def cb_vpar_ratio(call: CallbackQuery, state: FSMContext) -> None:
-    ratio = call.data.split(":")[1]  # type: ignore[union-attr]
+    ratio = call.data.removeprefix("vpar_ratio:")  # type: ignore[union-attr]
     await state.update_data(aspect_ratio=ratio)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(data["model_key"], data.get("duration"), ratio, data.get("resolution"))
+        reply_markup=video_params_kb(data["model_key"], data.get("duration"), ratio, data.get("resolution"), data.get("grok_mode"))
     )
     await call.answer(ratio)
 
@@ -296,9 +312,26 @@ async def cb_vpar_res(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(resolution=res)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(data["model_key"], data.get("duration"), data.get("aspect_ratio"), res)
+        reply_markup=video_params_kb(data["model_key"], data.get("duration"), data.get("aspect_ratio"), res, data.get("grok_mode"))
     )
     await call.answer(res)
+
+
+@router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_mode:"))
+async def cb_vpar_mode(call: CallbackQuery, state: FSMContext) -> None:
+    mode = call.data.split(":")[1]  # type: ignore[union-attr]
+    await state.update_data(grok_mode=mode)
+    data = await state.get_data()
+    await call.message.edit_reply_markup(  # type: ignore[union-attr]
+        reply_markup=video_params_kb(
+            data["model_key"],
+            data.get("duration"),
+            data.get("aspect_ratio"),
+            data.get("resolution"),
+            mode,
+        )
+    )
+    await call.answer(mode)
 
 
 @router.callback_query(VideoGenFSM.params_select, F.data == "vpar_next")
@@ -357,6 +390,7 @@ async def handle_video_prompt(
     duration: int = data.get("duration", 5)
     aspect_ratio: str | None = data.get("aspect_ratio")
     resolution: str | None = data.get("resolution")
+    grok_mode: str = data.get("grok_mode", "normal")
     prompt = message.text.strip()  # type: ignore[union-attr]
 
     # Motion Control: step 2 — user sent reference video URL
@@ -372,7 +406,7 @@ async def handle_video_prompt(
                 f"✅ Ссылка сохранена!\n\n⚙️ <b>Параметры</b> · {display_name}:",
                 reply_markup=video_params_kb(
                     model_key, updated.get("duration"),
-                    updated.get("aspect_ratio"), updated.get("resolution"),
+                    updated.get("aspect_ratio"), updated.get("resolution"), updated.get("grok_mode"),
                 ),
             )
         else:
@@ -390,11 +424,7 @@ async def handle_video_prompt(
         await state.update_data(motion_step="ready")
         prompt = data.get("motion_prompt") or ""
 
-    # Get image URL
-    image_url: str | None = None
-    if image_file_id:
-        file = await bot.get_file(image_file_id)
-        image_url = f"https://api.telegram.org/file/bot{bot.token}/{file.file_path}"
+    image_url = await mirror_telegram_file(bot, image_file_id)
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
@@ -424,6 +454,8 @@ async def handle_video_prompt(
             aspect_ratio=aspect_ratio,
             resolution=resolution,
             reference_video_url=data.get("reference_video_url"),
+            grok_mode=grok_mode,
+            callback_url=_kie_callback_url(),
         )
     except Exception as e:
         logger.error("Video generation error: %s", e)
@@ -434,6 +466,14 @@ async def handle_video_prompt(
         return
 
     await repo.update_generation_task(session, gen.id, result.task_id)
+    if result.provider == "kieai":
+        await status_msg.edit_text(
+            "⏳ <b>Видео-задача запущена.</b>\n"
+            "Пришлю результат автоматически, когда KIE отправит webhook."
+        )
+        await state.clear()
+        return
+
     poll_fn = video_service.get_poll_fn(result.provider)
 
     async def on_success(url: str) -> None:

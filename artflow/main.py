@@ -13,11 +13,13 @@ from aiogram.types import Update
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 import redis.asyncio as aioredis
 
 from api.comet_client import close_client, get_client
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
+from api.public_files import UPLOAD_ROOT, mirror_url
 from bot.handlers import admin, balance, image_gen, marketplace, midjourney, payment, start, video_gen
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
@@ -97,6 +99,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="APIX", lifespan=lifespan)
+UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount(settings.STATIC_UPLOAD_URL_PATH, StaticFiles(directory=str(UPLOAD_ROOT)), name="static_upload")
 
 app.add_middleware(
     CORSMiddleware,
@@ -257,7 +261,12 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                     logger.warning("Failed to notify empty KIE result user=%s: %s", user.tg_id, e)
             return {"ok": True}
 
-        result_url = urls[0]
+        try:
+            result_url = await mirror_url(urls[0])
+        except Exception as e:
+            logger.warning("Failed to mirror KIE result task_id=%s url=%s: %s", task_id, urls[0], e)
+            result_url = urls[0]
+
         await repo.finish_generation(session, gen.id, result_url)
 
         if gen.image_session_id:

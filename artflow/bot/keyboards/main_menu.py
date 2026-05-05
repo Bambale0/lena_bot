@@ -3,8 +3,12 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def main_menu_kb() -> InlineKeyboardMarkup:
+def main_menu_kb(*, has_active_image_session: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    if has_active_image_session:
+        builder.row(
+            InlineKeyboardButton(text="🎨 Вернуться к серии", callback_data="menu:image"),
+        )
     builder.row(
         InlineKeyboardButton(text="🎨 Изображение", callback_data="menu:image"),
         InlineKeyboardButton(text="🎬 Видео", callback_data="menu:video"),
