@@ -200,6 +200,45 @@ HIDDEN_IMAGE_MODELS = {
     ImageModel.NANO_BANANA,
 }
 
+IMAGE_SCENARIOS: dict[str, dict[str, str]] = {
+    "fast": {
+        "title": "⚡ Быстро и просто",
+        "description": "Для первого результата без лишних настроек",
+        "model": ImageModel.NANO_BANANA_PRO,
+        "mode": "text",
+    },
+    "quality": {
+        "title": "🌸 Максимум качества",
+        "description": "Чистый результат, хороший баланс скорости и качества",
+        "model": ImageModel.NANO_BANANA_2,
+        "mode": "image",
+    },
+    "hot_wan": {
+        "title": "🔥🔥🔥 WAN",
+        "description": "Кино, постеры, fashion, сцена",
+        "model": ImageModel.WAN_27_PRO,
+        "mode": "text",
+    },
+    "hot_seedream": {
+        "title": "🔥🔥🔥 Seedream",
+        "description": "Детали, реализм, рекламная подача",
+        "model": ImageModel.SEEDREAM_45,
+        "mode": "text",
+    },
+    "edit": {
+        "title": "🖼️ Из фото в новую версию",
+        "description": "Редактирование и ремикс по референсу",
+        "model": ImageModel.NANO_BANANA_2,
+        "mode": "image",
+    },
+    "cinematic": {
+        "title": "🎬 Кино и стиль",
+        "description": "Фэнтези, fashion, постер, сцена",
+        "model": ImageModel.WAN_27_PRO,
+        "mode": "text",
+    },
+}
+
 VIDEO_MODEL_DESC: dict[str, str] = {
     "kling-3.0":               "🎬 Kling 3.0 · плавное движение · text & img2video",
     "kling-2.6-motion":        "🎥 Kling Motion · управление камерой (pan/zoom/tilt)",
@@ -314,6 +353,21 @@ def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
                     callback_data=f"img_model:{mc.model_key}",
                 )
             )
+    builder.row(InlineKeyboardButton(text="← К сценариям", callback_data="menu:image"))
+    return builder.as_markup()
+
+
+def image_scenarios_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for scenario_key in ("fast", "quality", "hot_wan", "hot_seedream", "edit", "cinematic"):
+        scenario = IMAGE_SCENARIOS[scenario_key]
+        builder.row(
+            InlineKeyboardButton(
+                text=scenario["title"],
+                callback_data=f"img_scn:{scenario_key}",
+            )
+        )
+    builder.row(InlineKeyboardButton(text="🧠 Все модели", callback_data="img_menu:advanced"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
 
@@ -382,22 +436,26 @@ def image_quality_kb(model_key: str | None = None) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
+def image_active_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    suffix = str(gen_id or 0)
     builder.row(
-        InlineKeyboardButton(text="✨ Ремикс", callback_data=f"img_session:remix:{suffix}"),
-        InlineKeyboardButton(text="🔁 Повторить", callback_data=f"img_session:repeat:{suffix}"),
+        InlineKeyboardButton(text="✨ Ремикс", callback_data="img_remix"),
+        InlineKeyboardButton(text="🔁 Ещё вариант", callback_data="img_variation"),
     )
     builder.row(
-        InlineKeyboardButton(text="🎬 Оживить", callback_data=f"img_session:animate:{suffix}"),
-        InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_session:settings"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_settings"),
     )
     builder.row(
-        InlineKeyboardButton(text="🆕 Новая серия", callback_data="img_session:new"),
-        InlineKeyboardButton(text="🏠 Меню", callback_data="menu:main"),
+        InlineKeyboardButton(text="🆕 Новая серия", callback_data="img_new"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"),
     )
     return builder.as_markup()
+
+
+def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
+    return image_active_kb()
 
 
 def image_session_settings_kb(
@@ -576,9 +634,14 @@ def motion_control_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def reference_upload_kb(back_cb: str = "menu:main") -> InlineKeyboardMarkup:
+def reference_upload_kb(
+    back_cb: str = "menu:main",
+    *,
+    allow_skip: bool = True,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="⏭ Пропустить (без референса)", callback_data="ref:skip"))
+    if allow_skip:
+        builder.row(InlineKeyboardButton(text="⏭ Пропустить (без референса)", callback_data="ref:skip"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data=back_cb))
     return builder.as_markup()
 

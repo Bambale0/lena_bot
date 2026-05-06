@@ -8,15 +8,18 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram import Bot
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.filters.admin import IsAdmin
 from db import repository as repo
+from db.models import User, WithdrawalStatus
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin")
@@ -44,6 +47,8 @@ class AdminFSM(StatesGroup):
 def admin_menu_kb():
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Статистика", callback_data="adm:stats")
+    builder.button(text="👥 Рефералы", callback_data="adm:referrals")
+    builder.button(text="💸 Заявки на вывод", callback_data="adm:withdrawals")
     builder.button(text="💳 Прайс-лист", callback_data="adm:price")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
     builder.button(text="💰 Начислить кредиты", callback_data="adm:add_credits")
@@ -54,16 +59,42 @@ def admin_menu_kb():
     return builder.as_markup()
 
 
+async def _show_admin_menu(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    text = "🔧 <b>Панель администратора</b>"
+    try:
+        await call.message.edit_text(text, reply_markup=admin_menu_kb())  # type: ignore[union-attr]
+    except TelegramBadRequest as e:
+        if "there is no text in the message to edit" not in str(e).lower():
+            raise
+        await call.message.answer(text, reply_markup=admin_menu_kb())  # type: ignore[union-attr]
+    await call.answer()
+
+
 @router.message(Command("admin"))
 async def cmd_admin(message: Message) -> None:
     await message.answer("🔧 <b>Панель администратора</b>", reply_markup=admin_menu_kb())
 
 
+@router.callback_query(F.data == "menu:admin")
+async def cb_admin_menu(call: CallbackQuery, state: FSMContext) -> None:
+    await _show_admin_menu(call, state)
+
+
 @router.callback_query(F.data == "adm:back")
 async def cb_admin_back(call: CallbackQuery, state: FSMContext) -> None:
-    await state.clear()
-    await call.message.edit_text("🔧 <b>Панель администратора</b>", reply_markup=admin_menu_kb())
-    await call.answer()
+    await _show_admin_menu(call, state)
+
+
+def _user_label(user: User) -> str:
+    username = f"@{user.username}" if user.username else "без username"
+    return f"{username} · <code>{user.tg_id}</code>"
+
+
+def _admin_back_kb():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    return builder.as_markup()
 
 
 # ─── Статистика ───────────────────────────────────────────────────────────────
@@ -85,6 +116,209 @@ async def cb_stats(call: CallbackQuery, session: AsyncSession) -> None:
         reply_markup=builder.as_markup(),
     )
     await call.answer()
+
+
+# ─── Рефералы ─────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "adm:referrals")
+async def cb_referrals(call: CallbackQuery, session: AsyncSession) -> None:
+    leaders = await repo.get_referral_leaders(session, limit=15)
+    builder = InlineKeyboardBuilder()
+
+    if not leaders:
+        builder.button(text="← Назад", callback_data="adm:back")
+        await call.message.edit_text(  # type: ignore[union-attr]
+            "👥 <b>Рефералы</b>\n\nПока нет пользователей с рефералами.",
+            reply_markup=builder.as_markup(),
+        )
+        await call.answer()
+        return
+
+    lines = ["👥 <b>Реферальная статистика</b>\n"]
+    for i, leader in enumerate(leaders, 1):
+        user = leader.user
+        lines.append(
+            f"{i}. {_user_label(user)}\n"
+            f"   L1: <b>{leader.l1_count}</b> · L2: <b>{leader.l2_count}</b> · "
+            f"L3: <b>{leader.l3_count}</b> · всего: <b>{leader.total_count}</b>"
+        )
+        builder.button(
+            text=f"{i}. {user.username or user.tg_id} · {leader.total_count}",
+            callback_data=f"adm:ref_user:{user.id}",
+        )
+
+    builder.button(text="← Назад", callback_data="adm:back")
+    builder.adjust(1)
+    await call.message.edit_text("\n".join(lines), reply_markup=builder.as_markup())  # type: ignore[union-attr]
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:ref_user:"))
+async def cb_referral_user(call: CallbackQuery, session: AsyncSession) -> None:
+    user_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
+    user = await repo.get_user_by_id(session, user_id)
+    if not user:
+        await call.answer("Пользователь не найден", show_alert=True)
+        return
+    l1, l2, l3 = await repo.count_user_referrals(session, user.id)
+
+    builder = InlineKeyboardBuilder()
+    if l1:
+        builder.button(text=f"L1 прямые: {l1}", callback_data=f"adm:ref_level:{user.id}:1")
+    if l2:
+        builder.button(text=f"L2: {l2}", callback_data=f"adm:ref_level:{user.id}:2")
+    if l3:
+        builder.button(text=f"L3: {l3}", callback_data=f"adm:ref_level:{user.id}:3")
+    builder.button(text="← К рефералам", callback_data="adm:referrals")
+    builder.adjust(1)
+
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"👤 <b>Реферер</b>\n\n"
+        f"{_user_label(user)}\n"
+        f"Имя: <b>{user.full_name or '—'}</b>\n"
+        f"Баланс: <b>{user.credits}</b> кр\n"
+        f"Код: <code>{user.referral_code}</code>\n\n"
+        f"Прямые L1: <b>{l1}</b>\n"
+        f"Уровень L2: <b>{l2}</b>\n"
+        f"Уровень L3: <b>{l3}</b>",
+        reply_markup=builder.as_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:ref_level:"))
+async def cb_referral_level(call: CallbackQuery, session: AsyncSession) -> None:
+    _, _, user_id_raw, level_raw = call.data.split(":", 3)  # type: ignore[union-attr]
+    user_id = int(user_id_raw)
+    level = int(level_raw)
+    parent = await repo.get_user_by_id(session, user_id)
+    children = await repo.get_referral_children(session, user_id, level=level, limit=25)
+    if not parent:
+        await call.answer("Пользователь не найден", show_alert=True)
+        return
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="← К карточке", callback_data=f"adm:ref_user:{user_id}")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+
+    if not children:
+        await call.message.edit_text(  # type: ignore[union-attr]
+            f"👥 <b>L{level} рефералы</b>\n\nУ {_user_label(parent)} нет пользователей на этом уровне.",
+            reply_markup=builder.as_markup(),
+        )
+        await call.answer()
+        return
+
+    lines = [f"👥 <b>L{level} рефералы</b>\nРеферер: {_user_label(parent)}\n"]
+    for i, item in enumerate(children, 1):
+        user = item.user
+        lines.append(
+            f"{i}. {_user_label(user)}\n"
+            f"   Имя: {user.full_name or '—'}\n"
+            f"   Генераций: <b>{item.generations_count}</b> · оплат: <b>{item.paid_rub:.0f}₽</b> · "
+            f"баланс: <b>{user.credits}</b> кр"
+        )
+
+    await call.message.edit_text("\n".join(lines), reply_markup=builder.as_markup())  # type: ignore[union-attr]
+    await call.answer()
+
+
+# ─── Вывод средств ────────────────────────────────────────────────────────────
+
+def withdrawal_admin_kb(request_id: int):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Подтвердить выплату", callback_data=f"adm:wd:approve:{request_id}")
+    builder.button(text="❌ Отклонить", callback_data=f"adm:wd:reject:{request_id}")
+    builder.button(text="← Заявки", callback_data="adm:withdrawals")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@router.callback_query(F.data == "adm:withdrawals")
+async def cb_withdrawals(call: CallbackQuery, session: AsyncSession) -> None:
+    requests = await repo.get_pending_withdrawal_requests(session, limit=20)
+    builder = InlineKeyboardBuilder()
+    if not requests:
+        builder.button(text="← Назад", callback_data="adm:back")
+        await call.message.edit_text(  # type: ignore[union-attr]
+            "💸 <b>Заявки на вывод</b>\n\nНет ожидающих заявок.",
+            reply_markup=builder.as_markup(),
+        )
+        await call.answer()
+        return
+
+    lines = ["💸 <b>Заявки на вывод</b>\n"]
+    for view in requests:
+        req = view.request
+        user = view.user
+        lines.append(
+            f"#{req.id} · <b>{req.amount_rub:.0f}₽</b> · {_user_label(user)}\n"
+            f"   {req.payout_details[:80]}"
+        )
+        builder.button(text=f"#{req.id} · {req.amount_rub:.0f}₽ · {user.username or user.tg_id}", callback_data=f"adm:wd:view:{req.id}")
+    builder.button(text="← Назад", callback_data="adm:back")
+    builder.adjust(1)
+    await call.message.edit_text("\n".join(lines), reply_markup=builder.as_markup())  # type: ignore[union-attr]
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:wd:view:"))
+async def cb_withdrawal_view(call: CallbackQuery, session: AsyncSession) -> None:
+    request_id = int(call.data.split(":")[3])  # type: ignore[union-attr]
+    view = await repo.get_withdrawal_request(session, request_id)
+    if not view:
+        await call.answer("Заявка не найдена", show_alert=True)
+        return
+    req = view.request
+    user = view.user
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"💸 <b>Заявка на вывод #{req.id}</b>\n\n"
+        f"Пользователь: {_user_label(user)}\n"
+        f"Имя: <b>{user.full_name or '—'}</b>\n"
+        f"Сумма: <b>{req.amount_rub:.2f}₽</b>\n"
+        f"Статус: <b>{req.status.value}</b>\n\n"
+        f"<b>Реквизиты:</b>\n<code>{req.payout_details}</code>",
+        reply_markup=withdrawal_admin_kb(req.id) if req.status == WithdrawalStatus.pending else _admin_back_kb(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:wd:approve:"))
+@router.callback_query(F.data.startswith("adm:wd:reject:"))
+async def cb_withdrawal_decide(call: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
+    parts = call.data.split(":")  # type: ignore[union-attr]
+    action = parts[2]
+    request_id = int(parts[3])
+    status = WithdrawalStatus.approved if action == "approve" else WithdrawalStatus.rejected
+    view = await repo.set_withdrawal_status(
+        session,
+        request_id,
+        status=status,
+        admin_tg_id=call.from_user.id,
+    )
+    if not view:
+        await call.answer("Заявка уже обработана или не найдена", show_alert=True)
+        return
+
+    req = view.request
+    user = view.user
+    status_text = "подтверждена" if status == WithdrawalStatus.approved else "отклонена"
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"✅ Заявка #{req.id} {status_text}.\n\n"
+        f"Пользователь: {_user_label(user)}\n"
+        f"Сумма: <b>{req.amount_rub:.2f}₽</b>",
+        reply_markup=_admin_back_kb(),
+    )
+    try:
+        await bot.send_message(
+            user.tg_id,
+            f"💸 Заявка на вывод #{req.id} {status_text}.\n"
+            f"Сумма: <b>{req.amount_rub:.2f}₽</b>",
+        )
+    except Exception as e:
+        logger.warning("Failed to notify withdrawal user %s: %s", user.tg_id, e)
+    await call.answer("Готово")
 
 
 # ─── Прайс-лист ───────────────────────────────────────────────────────────────

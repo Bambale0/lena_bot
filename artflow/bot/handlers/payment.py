@@ -11,7 +11,7 @@ from bot.keyboards.payment import crypto_pay_kb, crypto_plans_kb, payment_link_k
 from bot.keyboards.main_menu import back_to_menu_kb
 from core.config import settings
 from db import repository as repo
-from db.models import PaymentProvider, User
+from db.models import PaymentProvider, TransactionStatus, User
 from payments import cryptobot, tbank
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,14 @@ router = Router(name="payment")
 
 # Примерный курс RUB/USDT (в проде получать динамически)
 RUB_TO_USDT = 90.0
+
+TBANK_FINAL_FAILURE_STATUSES = {
+    "CANCELED",
+    "CANCELLED",
+    "REJECTED",
+    "DEADLINE_EXPIRED",
+    "AUTH_FAIL",
+}
 
 
 @router.callback_query(F.data == "menu:topup")
@@ -72,6 +80,98 @@ async def cb_topup_rub(
         reply_markup=payment_link_kb("💳 Перейти к оплате", payment.payment_url),
     )
     await call.answer()
+
+
+async def _cancel_tbank_transaction(
+    *,
+    session: AsyncSession,
+    db_user: User,
+    payment_id: str,
+) -> tuple[bool, str]:
+    tx = await repo.get_last_tbank_transaction(session, db_user.id)
+    if not tx or tx.external_id != payment_id:
+        return False, "Можно отменить только последний T-Банк платёж."
+
+    if tx.status == TransactionStatus.refunded:
+        return False, "Этот платёж уже отменён."
+    if tx.status == TransactionStatus.failed:
+        return False, "Этот платёж уже завершён как неуспешный."
+
+    state = await tbank.get_payment_state(payment_id)
+    provider_status = str(state.get("Status", "")).upper()
+
+    if provider_status in TBANK_FINAL_FAILURE_STATUSES:
+        await repo.set_transaction_status(session, payment_id, TransactionStatus.failed)
+        return True, "Платёж уже был отменён на стороне T-Банка."
+
+    if provider_status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
+        await repo.set_transaction_status(session, payment_id, TransactionStatus.refunded)
+        return True, "Платёж уже был возвращён."
+
+    await tbank.cancel_payment(payment_id)
+
+    new_status = TransactionStatus.refunded if tx.status == TransactionStatus.paid else TransactionStatus.failed
+    await repo.set_transaction_status(session, payment_id, new_status)
+
+    if new_status == TransactionStatus.refunded:
+        return True, "Последний платёж отменён и помечен как возврат."
+    return True, "Последний платёж отменён."
+
+
+@router.callback_query(F.data == "topup:tbank:cancel_last")
+async def cb_tbank_cancel_last(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    tx = await repo.get_last_cancellable_tbank_transaction(session, db_user.id)
+    if not tx or not tx.external_id:
+        await call.answer("Нет последнего T-Банк платежа для отмены.", show_alert=True)
+        return
+
+    try:
+        ok, text = await _cancel_tbank_transaction(
+            session=session,
+            db_user=db_user,
+            payment_id=tx.external_id,
+        )
+    except Exception as e:
+        logger.error("T-Bank cancel-last error: user_id=%s payment_id=%s error=%s", db_user.id, tx.external_id, e)
+        await call.answer("Не удалось отменить платёж. Попробуй ещё раз.", show_alert=True)
+        return
+
+    await call.answer(text, show_alert=True)
+
+
+@router.callback_query(F.data.startswith("topup:tbank:cancel:"))
+async def cb_tbank_cancel_payment(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    payment_id = call.data.split(":")[-1]  # type: ignore[union-attr]
+    if not payment_id:
+        await call.answer("Платёж не найден.", show_alert=True)
+        return
+
+    try:
+        ok, text = await _cancel_tbank_transaction(
+            session=session,
+            db_user=db_user,
+            payment_id=payment_id,
+        )
+    except Exception as e:
+        logger.error("T-Bank cancel error: user_id=%s payment_id=%s error=%s", db_user.id, payment_id, e)
+        await call.answer("Не удалось отменить платёж. Попробуй ещё раз.", show_alert=True)
+        return
+
+    if ok:
+        await call.message.edit_text(  # type: ignore[union-attr]
+            "↩️ <b>Платёж отменён</b>\n\n"
+            "Если захочешь, можно создать новый платёж из меню пополнения.",
+            reply_markup=back_to_menu_kb(),
+        )
+    await call.answer(text, show_alert=True)
 
 
 @router.pre_checkout_query()

@@ -3,8 +3,17 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def main_menu_kb(*, has_active_image_session: bool = False) -> InlineKeyboardMarkup:
+def main_menu_kb(
+    *,
+    balance: int | None = None,
+    has_active_image_session: bool = False,
+    is_admin: bool = False,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    if balance is not None:
+        builder.row(
+            InlineKeyboardButton(text=f"🍌 Баланс: {balance}", callback_data="menu:balance"),
+        )
     if has_active_image_session:
         builder.row(
             InlineKeyboardButton(text="🎨 Вернуться к серии", callback_data="menu:image"),
@@ -14,24 +23,39 @@ def main_menu_kb(*, has_active_image_session: bool = False) -> InlineKeyboardMar
         InlineKeyboardButton(text="🎬 Видео", callback_data="menu:video"),
     )
     builder.row(
-        InlineKeyboardButton(text="🖌️ Midjourney", callback_data="menu:mj"),
+        InlineKeyboardButton(text="🎵 Песня", callback_data="menu:music"),
     )
     builder.row(
-        InlineKeyboardButton(text="💎 Баланс", callback_data="menu:balance"),
-        InlineKeyboardButton(text="💳 Пополнить", callback_data="menu:topup"),
+        InlineKeyboardButton(text="🔥 Лента", callback_data="menu:feed"),
+        InlineKeyboardButton(text="👑 Топ дня", callback_data="menu:top_day"),
     )
     builder.row(
-        InlineKeyboardButton(text="🗂 Промпты", callback_data="menu:prompts"),
+        InlineKeyboardButton(text="🧠 Midjourney", callback_data="menu:mj"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📚 Библиотека промптов", callback_data="menu:prompts"),
         InlineKeyboardButton(text="📋 История", callback_data="menu:history"),
     )
     builder.row(
         InlineKeyboardButton(text="👥 Рефералы", callback_data="menu:referral"),
         InlineKeyboardButton(text="❓ Помощь", callback_data="menu:help"),
     )
+    builder.row(
+        InlineKeyboardButton(text="💳 Пополнить", callback_data="menu:topup"),
+    )
+    if is_admin:
+        builder.row(InlineKeyboardButton(text="👑 Админ", callback_data="menu:admin"))
     return builder.as_markup()
 
 
 def back_to_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
+    return builder.as_markup()
+
+
+def balance_screen_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💳 Пополнить", callback_data="menu:topup"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()

@@ -6,7 +6,7 @@ KIE_URL = "https://api.kie.ai/api/v1/generate"
 
 async def create_music_task(prompt: str, instrumental: bool = False):
     headers = {
-        "Authorization": f"Bearer {settings.KIE_API_KEY}",
+        "Authorization": f"Bearer {settings.KIE_AI_KEY}",
         "Content-Type": "application/json",
     }
 

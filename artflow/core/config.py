@@ -68,5 +68,10 @@ class Settings(BaseSettings):
     POLLING_INTERVAL: float = 3.0
     POLLING_TIMEOUT: int = 600
 
+    @property
+    def KIE_API_KEY(self) -> str:
+        """Backward-compatible alias for legacy music code."""
+        return self.KIE_AI_KEY
+
 
 settings = Settings()

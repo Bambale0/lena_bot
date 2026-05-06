@@ -13,6 +13,7 @@ from aiogram.types import Update
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 import redis.asyncio as aioredis
@@ -20,14 +21,15 @@ import redis.asyncio as aioredis
 from api.comet_client import close_client, get_client
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 from api.public_files import UPLOAD_ROOT, mirror_url
-from bot.handlers import admin, balance, image_gen, marketplace, midjourney, payment, start, video_gen
+from bot.handlers import admin, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen
+from bot.keyboards.main_menu import back_to_menu_kb
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.utils.telegram_ui import is_benign_telegram_error
 from core.config import settings
 from core.logger import setup_logging
-from db.models import GenerationType
+from db.models import GenerationType, TransactionStatus
 from payments.cryptobot import verify_webhook_signature
 from payments.tbank import verify_notification_token
 from db import repository as repo
@@ -66,8 +68,10 @@ async def lifespan(app: FastAPI):
 
     # Routers
     dp.include_router(start.router)
+    dp.include_router(feed.router)
     dp.include_router(image_gen.router)
     dp.include_router(video_gen.router)
+    dp.include_router(music_gen.router)
     dp.include_router(midjourney.router)
     dp.include_router(balance.router)
     dp.include_router(payment.router)
@@ -162,6 +166,7 @@ async def cryptobot_webhook(request: Request) -> dict:
                         f"✅ Оплата криптой подтверждена!\n"
                         f"Зачислено: <b>+{tx.credits} кредитов</b>\n"
                         f"Баланс: <b>{new_balance} кр</b>",
+                        reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
                     logger.warning("Failed to notify user %s: %s", user.tg_id, e)
@@ -170,40 +175,49 @@ async def cryptobot_webhook(request: Request) -> dict:
 
 
 @app.post("/webhook/tbank")
-async def tbank_webhook(request: Request) -> dict:
+async def tbank_webhook(request: Request) -> PlainTextResponse:
     data = await request.json()
 
     if not verify_notification_token(data, settings.TBANK_PASSWORD):
+        logger.warning(
+            "Invalid T-Bank webhook token: payment_id=%s status=%s order_id=%s",
+            data.get("PaymentId"),
+            data.get("Status"),
+            data.get("OrderId"),
+        )
         raise HTTPException(status_code=403, detail="Invalid token")
 
     if not data.get("Success"):
-        return {"ok": True}
+        return PlainTextResponse("OK")
 
     status = str(data.get("Status", ""))
-    if status != "CONFIRMED":
-        return {"ok": True}
-
     external_id = str(data.get("PaymentId", ""))
     if not external_id:
         raise HTTPException(status_code=400, detail="PaymentId is required")
 
     async with AsyncSessionLocal() as session:
-        tx = await repo.confirm_transaction(session, external_id)
-        if tx:
-            new_balance = await repo.add_credits(session, tx.user_id, tx.credits)
-            user = await repo.get_user_by_id(session, tx.user_id)
-            if user and bot:
-                try:
-                    await bot.send_message(
-                        user.tg_id,
-                        f"✅ Оплата через T-Банк подтверждена!\n"
-                        f"Зачислено: <b>+{tx.credits} кредитов</b>\n"
-                        f"Баланс: <b>{new_balance} кр</b>",
-                    )
-                except Exception as e:
-                    logger.warning("Failed to notify user %s: %s", user.tg_id, e)
+        if status == "CONFIRMED":
+            tx = await repo.confirm_transaction(session, external_id)
+            if tx:
+                new_balance = await repo.add_credits(session, tx.user_id, tx.credits)
+                user = await repo.get_user_by_id(session, tx.user_id)
+                if user and bot:
+                    try:
+                        await bot.send_message(
+                            user.tg_id,
+                            f"✅ Оплата через T-Банк подтверждена!\n"
+                            f"Зачислено: <b>+{tx.credits} кредитов</b>\n"
+                            f"Баланс: <b>{new_balance} кр</b>",
+                            reply_markup=back_to_menu_kb(),
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to notify user %s: %s", user.tg_id, e)
+        elif status in {"CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL"}:
+            await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
+        elif status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
+            await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
 
-    return {"ok": True}
+    return PlainTextResponse("OK")
 
 
 

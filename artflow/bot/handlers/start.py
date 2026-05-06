@@ -9,10 +9,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
+from bot.keyboards.main_menu import back_to_menu_kb
+from bot.ui.router import render_screen
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
-from db import repository as repo
 from db.models import User
 
 logger = logging.getLogger(__name__)
@@ -56,10 +56,25 @@ HELP_TEXT = (
 @router.message(CommandStart())
 async def cmd_start(message: Message, db_user: User, state: FSMContext, session: AsyncSession) -> None:
     await state.clear()
-    image_session = await repo.get_active_image_session(session, db_user.id)
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) == 2 and parts[1].startswith("feed_"):
+        gen_id_raw = parts[1].split("_", 1)[1]
+        if gen_id_raw.isdigit():
+            from bot.handlers.feed import show_feed_card_by_id
+
+            await show_feed_card_by_id(message=message, session=session, gen_id=int(gen_id_raw))
+            return
+    if len(parts) == 2 and parts[1].startswith("prompt_"):
+        prompt_id_raw = parts[1].split("_", 1)[1]
+        if prompt_id_raw.isdigit():
+            from bot.handlers.marketplace import show_prompt_card_by_id
+
+            await show_prompt_card_by_id(message=message, session=session, prompt_id=int(prompt_id_raw))
+            return
+    screen = await render_screen(screen="main", session=session, db_user=db_user)
     await message.answer(
-        WELCOME_TEXT.format(credits=db_user.credits),
-        reply_markup=main_menu_kb(has_active_image_session=bool(image_session)),
+        screen.text,
+        reply_markup=screen.reply_markup,
     )
 
 
@@ -71,11 +86,11 @@ async def cb_main_menu(
     session: AsyncSession,
 ) -> None:
     await state.clear()
-    image_session = await repo.get_active_image_session(session, db_user.id)
+    screen = await render_screen(screen="main", session=session, db_user=db_user)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        WELCOME_TEXT.format(credits=db_user.credits),
-        reply_markup=main_menu_kb(has_active_image_session=bool(image_session)),
+        screen.text,
+        reply_markup=screen.reply_markup,
     )
     await safe_answer_callback(call)
 

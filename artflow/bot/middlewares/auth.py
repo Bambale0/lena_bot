@@ -49,6 +49,7 @@ class AuthMiddleware(BaseMiddleware):
             # Обработка реферального кода из /start payload
             referrer = None
             referrer_l2 = None
+            referrer_l3 = None
             update: Update | None = data.get("event_update")
             if update and update.message and update.message.text:
                 parts = update.message.text.split()
@@ -59,6 +60,8 @@ class AuthMiddleware(BaseMiddleware):
                         # L2: referrer's referrer
                         if referrer.referrer_id:
                             referrer_l2 = await repo.get_user_by_id(session, referrer.referrer_id)
+                        if referrer_l2 and referrer_l2.referrer_id:
+                            referrer_l3 = await repo.get_user_by_id(session, referrer_l2.referrer_id)
 
             db_user = await repo.create_user(
                 session,
@@ -68,6 +71,7 @@ class AuthMiddleware(BaseMiddleware):
                 welcome_credits=settings.WELCOME_BONUS_CREDITS,
                 referrer=referrer,
                 referrer_l2=referrer_l2,
+                referrer_l3=referrer_l3,
             )
 
             # Начисляем реферальные бонусы

@@ -3,9 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class PromptUploadFSM(StatesGroup):
-    title = State()
-    description = State()
-    category = State()
+    upload_image = State()
     prompt_text = State()
     confirm = State()
 

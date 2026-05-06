@@ -1,83 +1,50 @@
 # bot/keyboards/prompts.py
+from __future__ import annotations
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from db.models import PromptCategory, PromptStatus, UserPrompt
+from db.models import PromptStatus, UserPrompt
+from db.prompt_repository import COLLECTION_TAGS
 
 PAGE_SIZE = 8
 
 
-def category_filter_kb(selected: str | None = None) -> InlineKeyboardMarkup:
+def prompts_home_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(
-            text=f"{'✅ ' if selected is None else ''}Все категории",
-            callback_data="prompts:cat:all",
-        )
+        InlineKeyboardButton(text="🔥 Trending", callback_data="prompts:trending"),
+        InlineKeyboardButton(text="👑 Top today", callback_data="prompts:top_today"),
     )
-    for cat in PromptCategory:
-        check = "✅ " if selected == cat.value else ""
-        builder.button(text=f"{check}{cat.label()}", callback_data=f"prompts:cat:{cat.value}")
-    builder.adjust(2)
-    builder.row(
-        InlineKeyboardButton(text="➕ Добавить промпт", callback_data="prompts:add"),
-        InlineKeyboardButton(text="📊 Мои промпты", callback_data="prompts:my"),
-    )
+    builder.row(InlineKeyboardButton(text="🧠 Best prompts", callback_data="prompts:best"))
+    builder.row(InlineKeyboardButton(text="📁 Разделы", callback_data="prompts:collections"))
+    builder.row(InlineKeyboardButton(text="➕ Добавить свой", callback_data="prompts:add"))
+    builder.row(InlineKeyboardButton(text="📊 Мои промпты", callback_data="prompts:my"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 
 
-def prompts_list_kb(
-    prompts: list[UserPrompt],
-    page: int,
-    total: int,
-    category: str | None,
-) -> InlineKeyboardMarkup:
+def prompt_collections_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for p in prompts:
-        builder.row(
-            InlineKeyboardButton(
-                text=f"{p.title[:40]} · {p.uses_count}×",
-                callback_data=f"prompts:view:{p.id}",
-            )
-        )
-
-    # Пагинация
-    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="◀", callback_data=f"prompts:page:{page-1}:{category or 'all'}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
-    if (page + 1) * PAGE_SIZE < total:
-        nav.append(InlineKeyboardButton(text="▶", callback_data=f"prompts:page:{page+1}:{category or 'all'}"))
-    if nav:
-        builder.row(*nav)
-
-    builder.row(
-        InlineKeyboardButton(text="🔍 Категории", callback_data="prompts:open"),
-        InlineKeyboardButton(text="🏠 Меню", callback_data="menu:main"),
-    )
+    for tag, label in COLLECTION_TAGS.items():
+        builder.row(InlineKeyboardButton(text=label, callback_data=f"prompts:collection:{tag}:0"))
+    builder.row(InlineKeyboardButton(text="◀ Назад", callback_data="prompts:open"))
     return builder.as_markup()
 
 
-def prompt_detail_kb(prompt_id: int) -> InlineKeyboardMarkup:
+def prompt_card_kb(prompt_id: int, *, source: str, index: int, has_next: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✨ Использовать", callback_data=f"prompts:use:{prompt_id}"),
+        InlineKeyboardButton(text="🚀 Использовать", callback_data=f"prompt_use:{prompt_id}"),
+        InlineKeyboardButton(text="✨ Ремикс", callback_data=f"prompt_remix:{prompt_id}"),
     )
     builder.row(
-        InlineKeyboardButton(text="◀ К списку", callback_data="prompts:open"),
-        InlineKeyboardButton(text="🏠 Меню", callback_data="menu:main"),
+        InlineKeyboardButton(text="❤️ Лайк", callback_data=f"prompt_like:{prompt_id}:{source}:{index}"),
+        InlineKeyboardButton(text="📤 Поделиться", callback_data=f"prompt_share:{prompt_id}"),
     )
-    return builder.as_markup()
-
-
-def category_select_kb() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for cat in PromptCategory:
-        builder.button(text=cat.label(), callback_data=f"prompt_cat:{cat.value}")
-    builder.adjust(2)
-    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="menu:main"))
+    if has_next:
+        builder.row(InlineKeyboardButton(text="➡️ Далее", callback_data=f"prompt_next:{source}:{index+1}"))
+    builder.row(InlineKeyboardButton(text="◀ К промптам", callback_data="prompts:open"))
     return builder.as_markup()
 
 
@@ -85,9 +52,9 @@ def prompt_confirm_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="✅ Отправить на модерацию", callback_data="prompt_confirm:yes"),
-        InlineKeyboardButton(text="✏️ Изменить", callback_data="prompt_confirm:edit"),
+        InlineKeyboardButton(text="✏️ Начать заново", callback_data="prompt_confirm:edit"),
     )
-    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="menu:main"))
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="prompts:open"))
     return builder.as_markup()
 
 
@@ -103,7 +70,7 @@ def my_prompts_kb(prompts: list[UserPrompt]) -> InlineKeyboardMarkup:
         icon = status_icons.get(p.status.value, "❓")
         builder.row(
             InlineKeyboardButton(
-                text=f"{icon} {p.title[:35]} · {p.uses_count}×",
+                text=f"{icon} {p.title[:35]} · {p.uses_count}× · ❤️ {p.likes}",
                 callback_data=f"prompts:my_view:{p.id}",
             )
         )
@@ -114,14 +81,10 @@ def my_prompts_kb(prompts: list[UserPrompt]) -> InlineKeyboardMarkup:
 def my_prompt_detail_kb(prompt_id: int, status: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if status == "approved":
-        builder.row(
-            InlineKeyboardButton(text="🔴 Деактивировать", callback_data=f"prompts:deactivate:{prompt_id}")
-        )
+        builder.row(InlineKeyboardButton(text="🔴 Деактивировать", callback_data=f"prompts:deactivate:{prompt_id}"))
     builder.row(InlineKeyboardButton(text="◀ Мои промпты", callback_data="prompts:my"))
     return builder.as_markup()
 
-
-# ── Модерация (для /admin) ────────────────────────────────────────────────────
 
 def moderation_kb(prompt_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -129,16 +92,5 @@ def moderation_kb(prompt_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ Одобрить", callback_data=f"mod:approve:{prompt_id}"),
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"mod:reject:{prompt_id}"),
     )
-    builder.row(
-        InlineKeyboardButton(text="🚫 Деактивировать", callback_data=f"mod:deactivate:{prompt_id}"),
-    )
-    return builder.as_markup()
-
-
-def use_prompt_model_kb(prompt_id: int) -> InlineKeyboardMarkup:
-    """Выбор модели после нажатия 'Использовать' из каталога."""
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🎨 Генерировать изображение", callback_data=f"prompts:gen_img:{prompt_id}"))
-    builder.row(InlineKeyboardButton(text="🎬 Генерировать видео", callback_data=f"prompts:gen_vid:{prompt_id}"))
-    builder.row(InlineKeyboardButton(text="◀ Назад", callback_data=f"prompts:view:{prompt_id}"))
+    builder.row(InlineKeyboardButton(text="🚫 Деактивировать", callback_data=f"mod:deactivate:{prompt_id}"))
     return builder.as_markup()

@@ -5,6 +5,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
+    ARRAY,
     BigInteger,
     Boolean,
     DateTime,
@@ -61,6 +62,12 @@ class PaymentProvider(str, enum.Enum):
     tbank = "tbank"
 
 
+class WithdrawalStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -77,6 +84,7 @@ class User(Base):
     # 2-level referral
     referrer_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     referrer_l2_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    referrer_l3_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     referral_code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
 
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -84,6 +92,7 @@ class User(Base):
 
     generations: Mapped[list[Generation]] = relationship(back_populates="user", lazy="noload")
     transactions: Mapped[list[Transaction]] = relationship(back_populates="user", lazy="noload")
+    withdrawal_requests: Mapped[list[ReferralWithdrawalRequest]] = relationship(back_populates="user", lazy="noload")
 
 
 class Generation(Base):
@@ -111,6 +120,9 @@ class Generation(Base):
     gen_type: Mapped[GenerationType] = mapped_column(Enum(GenerationType), nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     result_url: Mapped[str | None] = mapped_column(Text)
+    is_public_feed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    likes_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    shares_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     credits_spent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     status: Mapped[GenerationStatus] = mapped_column(
         Enum(GenerationStatus), default=GenerationStatus.pending, nullable=False
@@ -140,6 +152,7 @@ class ImageSession(Base):
     base_prompt: Mapped[str | None] = mapped_column(Text)
     last_prompt: Mapped[str | None] = mapped_column(Text)
     reference_file_id: Mapped[str | None] = mapped_column(Text)
+    reference_file_ids: Mapped[str | None] = mapped_column(Text)
     reference_url: Mapped[str | None] = mapped_column(Text)
     last_result_url: Mapped[str | None] = mapped_column(Text)
     last_generation_id: Mapped[int | None] = mapped_column(Integer)
@@ -176,6 +189,27 @@ class Transaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="transactions", lazy="noload")
+
+
+class ReferralWithdrawalRequest(Base):
+    __tablename__ = "referral_withdrawal_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    amount_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    payout_details: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[WithdrawalStatus] = mapped_column(
+        Enum(WithdrawalStatus),
+        default=WithdrawalStatus.pending,
+        nullable=False,
+        index=True,
+    )
+    admin_tg_id: Mapped[int | None] = mapped_column(BigInteger)
+    admin_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="withdrawal_requests", lazy="noload")
 
 
 class PricePlan(Base):
@@ -240,6 +274,11 @@ class UserPrompt(Base):
     description: Mapped[str] = mapped_column(String(200), nullable=False)
     category: Mapped[PromptCategory] = mapped_column(Enum(PromptCategory), nullable=False)
     prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    preview_url: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(String(64))
+    tags: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
+    likes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     status: Mapped[PromptStatus] = mapped_column(
         Enum(PromptStatus), default=PromptStatus.pending, nullable=False, index=True
     )

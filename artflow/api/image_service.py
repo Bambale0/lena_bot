@@ -82,7 +82,7 @@ class ImageResult:
 async def generate_image(
     model: ImageModel,
     prompt: str,
-    image_url: str | None = None,
+    image_url: str | list[str] | None = None,
     image_bytes: bytes | None = None,   # unused (kept for compat)
     image_mime: str = "image/jpeg",     # unused (kept for compat)
     aspect_ratio: str | None = None,
@@ -117,7 +117,7 @@ async def generate_image(
 def _build_input(
     model: ImageModel,
     prompt: str,
-    image_url: str | None,
+    image_url: str | list[str] | None,
     aspect_ratio: str | None,
     n: int,
     quality: str,

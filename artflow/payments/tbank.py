@@ -59,7 +59,14 @@ async def _request(method: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = response.json()
 
     if not data.get("Success"):
-        raise TBankError(data.get("Message") or data.get("Details") or "T-Bank API error")
+        error_code = str(data.get("ErrorCode", "")).strip()
+        message = str(data.get("Message", "")).strip()
+        details = str(data.get("Details", "")).strip()
+        parts = [part for part in (message, details) if part]
+        text = " | ".join(parts) if parts else "T-Bank API error"
+        if error_code:
+            text = f"[{error_code}] {text}"
+        raise TBankError(text)
 
     return data
 
@@ -111,3 +118,16 @@ async def get_payment_state(payment_id: str) -> dict[str, Any]:
     }
     payload["Token"] = make_token(payload, settings.TBANK_PASSWORD)
     return await _request("GetState", payload)
+
+
+async def cancel_payment(payment_id: str, amount_kopecks: int | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "TerminalKey": settings.TBANK_TERMINAL_KEY,
+        "PaymentId": payment_id,
+    }
+    if amount_kopecks is not None:
+        payload["Amount"] = amount_kopecks
+    payload["Token"] = make_token(payload, settings.TBANK_PASSWORD)
+    data = await _request("Cancel", payload)
+    logger.info("T-Bank payment cancelled: payment_id=%s status=%s", payment_id, data.get("Status"))
+    return data
