@@ -5,6 +5,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 dist/
+!webapp/dist/
+!webapp/dist/**
 *.egg-info/
 pgdata/
 redisdata/
@@ -20,7 +22,8 @@ venv/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*.zip
+.tmp_apix_archive/
 webapp/node_modules/
 webapp/.vite/
-webapp/dist/
 webapp/tsconfig.tsbuildinfo

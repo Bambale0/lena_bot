@@ -10,6 +10,9 @@ npm run build
 cd ..
 ```
 
+The built `webapp/dist` directory is committed, so a plain `git pull` also
+keeps `/app` available. Rebuild it after frontend changes.
+
 Restart webhook service:
 
 ```bash

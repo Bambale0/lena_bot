@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.public_files import ensure_public_image_url
 from api.webapp_auth import get_webapp_user
 from core.config import settings
 from db import prompt_repository, repository as repo
@@ -86,7 +87,7 @@ def _prompt_payload(prompt: UserPrompt, *, include_detail: bool = False) -> dict
         "id": prompt.id,
         "title": prompt.title,
         "description": prompt.description,
-        "preview_url": prompt.preview_url,
+        "preview_url": ensure_public_image_url(prompt.preview_url),
         "category": prompt.category.value,
         "uses_count": prompt.uses_count,
         "price_bananas": 4,
@@ -338,7 +339,7 @@ async def use_prompt(
         user_id=user.id,
         model=prompt.model or DEFAULT_IMAGE_MODEL,
         prompt=prompt.prompt_text,
-        reference_url=prompt.preview_url,
+        reference_url=ensure_public_image_url(prompt.preview_url),
     )
     return {
         "ok": True,

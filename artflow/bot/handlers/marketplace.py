@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InputMediaPhoto, Message
+from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.image_service import ImageModel
-from api.public_files import mirror_telegram_file
+from api.public_files import ensure_public_image_url, local_upload_path_from_url, mirror_telegram_file
 from bot.filters.admin import IsAdmin
 from bot.keyboards.prompts import (
     moderation_kb,
@@ -50,6 +52,7 @@ from db.prompt_repository import (
 logger = logging.getLogger(__name__)
 router = Router(name="marketplace")
 DEFAULT_PROMPT_MODEL = ImageModel.NANO_BANANA_PRO
+PROMPT_FALLBACK_IMAGE = Path(__file__).resolve().parents[1] / "assets" / "prompt_fallback.jpg"
 
 
 def _prompt_library_text() -> str:
@@ -88,6 +91,18 @@ def _prompt_source_title(source: str) -> str:
     return "📂 Промпты"
 
 
+def _prompt_photo_source(preview_url: str | None):
+    normalized_url = ensure_public_image_url(preview_url)
+    local_path = local_upload_path_from_url(normalized_url)
+    if local_path and local_path.exists():
+        return FSInputFile(local_path)
+    if normalized_url:
+        return normalized_url
+    if PROMPT_FALLBACK_IMAGE.exists():
+        return FSInputFile(PROMPT_FALLBACK_IMAGE)
+    return None
+
+
 async def _prompts_for_source(session: AsyncSession, source: str) -> list[UserPrompt]:
     if source == "top":
         return await get_top_prompts(session)
@@ -119,22 +134,31 @@ async def _show_prompt_card(
         has_next=index + 1 < total,
     )
 
-    if prompt.preview_url:
+    photo_source = _prompt_photo_source(prompt.preview_url)
+    if photo_source:
         if holder.photo:
             try:
                 await holder.edit_media(
                     media=InputMediaPhoto(
-                        media=prompt.preview_url,
+                        media=photo_source,
                         caption=caption,
                         parse_mode="HTML",
                     ),
                     reply_markup=reply_markup,
                 )
                 return
-            except Exception:
-                pass
-        await holder.answer_photo(prompt.preview_url, caption=caption, reply_markup=reply_markup)
-        return
+            except Exception as e:
+                logger.debug("Failed to edit prompt media prompt=%s: %s", prompt.id, e)
+        try:
+            await holder.answer_photo(photo_source, caption=caption, reply_markup=reply_markup)
+            return
+        except TelegramBadRequest as e:
+            logger.warning(
+                "Prompt photo fallback failed prompt=%s preview=%s error=%s",
+                prompt.id,
+                prompt.preview_url,
+                e,
+            )
 
     await safe_edit_message(holder, caption, reply_markup=reply_markup)
 
@@ -222,7 +246,8 @@ async def _launch_prompt_generation(
         credits_spent=model_cost.credits,
     )
 
-    mode = "image" if remix and prompt.preview_url and _supports_img2img(model_key) else "text"
+    prompt_preview_url = ensure_public_image_url(prompt.preview_url)
+    mode = "image" if remix and prompt_preview_url and _supports_img2img(model_key) else "text"
     image_session = await repo.create_image_session(
         session=session,
         user_id=db_user.id,
@@ -233,7 +258,7 @@ async def _launch_prompt_generation(
         count=_default_count_for_model(model_key),
         base_prompt=prompt.prompt_text,
         reference_file_id=None,
-        reference_url=prompt.preview_url if mode == "image" else None,
+        reference_url=prompt_preview_url if mode == "image" else None,
     )
 
     await _launch_session_generation(
@@ -244,7 +269,7 @@ async def _launch_prompt_generation(
         image_session=image_session,
         prompt=prompt.prompt_text,
         action_type=ImageGenerationAction.remix if remix else ImageGenerationAction.initial,
-        reference_url=prompt.preview_url if mode == "image" else None,
+        reference_url=prompt_preview_url if mode == "image" else None,
         parent_generation_id=None,
         launching_text="⏳ <b>Запускаю генерацию по промпту...</b>",
         queued_text="⏳ <b>Генерация запущена.</b> Результат придёт сюда автоматически.",
@@ -481,10 +506,11 @@ async def fsm_confirm(
 
     for admin_id in settings.ADMIN_IDS:
         try:
-            if prompt.preview_url:
+            admin_photo = _prompt_photo_source(prompt.preview_url)
+            if admin_photo:
                 await bot.send_photo(
                     admin_id,
-                    photo=prompt.preview_url,
+                    photo=admin_photo,
                     caption=(
                         f"📬 <b>Новый промпт на модерацию</b>\n\n"
                         f"ID: {prompt.id}\n"
@@ -670,9 +696,10 @@ async def cb_adm_prompts(call: CallbackQuery, session: AsyncSession) -> None:
     for p in pending[:10]:
         author = await repo.get_user_by_id(session, p.author_id)
         author_str = f"@{author.username}" if author and author.username else str(p.author_id)
-        if p.preview_url:
+        pending_photo = _prompt_photo_source(p.preview_url)
+        if pending_photo:
             await call.message.answer_photo(
-                p.preview_url,
+                pending_photo,
                 caption=(
                     f"📬 <b>#{p.id}</b> — {p.title}\n"
                     f"Автор: {author_str}\n"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from core.config import settings
 
@@ -21,6 +22,20 @@ def public_upload_url(filename: str) -> str:
     base = settings.WEBHOOK_URL.rstrip("/")
     path = settings.STATIC_UPLOAD_URL_PATH.strip("/")
     return f"{base}/{path}/{filename}"
+
+
+def local_upload_path_from_url(url: str | None) -> Path | None:
+    if not url:
+        return None
+    parsed = urlparse(url)
+    path = unquote(parsed.path if parsed.scheme else url)
+    upload_prefix = "/" + settings.STATIC_UPLOAD_URL_PATH.strip("/") + "/"
+    if not path.startswith(upload_prefix):
+        return None
+    filename = Path(path.removeprefix(upload_prefix)).name
+    if not filename:
+        return None
+    return UPLOAD_ROOT / filename
 
 
 def detect_image_extension(data: bytes, content_type: str | None = None) -> str:
@@ -43,6 +58,29 @@ def detect_image_extension(data: bytes, content_type: str | None = None) -> str:
 
     # Telegram PhotoSize is JPEG in practice. KIE rejects .bin.
     return ".jpg"
+
+
+def ensure_public_image_url(url: str | None) -> str | None:
+    """
+    Return a Telegram/KIE-friendly public image URL.
+
+    Early mirrored Telegram photos could be stored under .bin names even when
+    their bytes were JPEG. Telegram is much more reliable with a real image
+    extension, so lazily create a sibling file with the detected suffix.
+    """
+    path = local_upload_path_from_url(url)
+    if not url or not path or not path.exists() or not path.is_file():
+        return url
+
+    data = path.read_bytes()
+    ext = detect_image_extension(data)
+    if path.suffix.lower() == ext:
+        return url
+
+    image_path = path.with_suffix(ext)
+    if not image_path.exists():
+        image_path.write_bytes(data)
+    return public_upload_url(image_path.name)
 
 
 def save_public_file(data: bytes, content_type: str | None = None) -> str:
