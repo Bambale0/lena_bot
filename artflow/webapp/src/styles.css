@@ -29,17 +29,83 @@ button {
 }
 
 .appRoot {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   min-height: 100vh;
   color: var(--text);
-  background: var(--bg);
+  background:
+    linear-gradient(125deg, rgba(255, 255, 255, 0.035), transparent 34%),
+    var(--bg);
   background-attachment: fixed;
   padding: env(safe-area-inset-top) 0 calc(94px + env(safe-area-inset-bottom));
 }
 
+.appRoot::before,
+.appRoot::after {
+  content: "";
+  position: fixed;
+  inset: -24%;
+  z-index: -2;
+  pointer-events: none;
+  transform: translate3d(0, 0, 0);
+}
+
+.appRoot::before {
+  background:
+    linear-gradient(115deg, transparent 8%, color-mix(in srgb, var(--accent) 42%, transparent) 24%, transparent 43%),
+    linear-gradient(245deg, transparent 14%, color-mix(in srgb, var(--accent2) 36%, transparent) 38%, transparent 58%),
+    conic-gradient(from 120deg at 50% 50%, transparent, color-mix(in srgb, var(--accent) 26%, transparent), transparent, color-mix(in srgb, var(--accent2) 22%, transparent), transparent);
+  filter: blur(52px) saturate(1.18);
+  opacity: 0.74;
+  animation: auroraDrift 18s ease-in-out infinite alternate;
+}
+
+.appRoot::after {
+  z-index: -1;
+  background:
+    repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 26px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent 40%, rgba(0, 0, 0, 0.12));
+  filter: blur(12px);
+  opacity: 0.32;
+  mix-blend-mode: soft-light;
+  animation: veilShift 24s ease-in-out infinite alternate;
+}
+
 .appFrame {
+  position: relative;
+  z-index: 1;
   width: min(100%, 520px);
   margin: 0 auto;
   padding: 14px;
+}
+
+@keyframes auroraDrift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) rotate(-8deg) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, 2%, 0) rotate(5deg) scale(1.06);
+  }
+  100% {
+    transform: translate3d(-1%, 5%, 0) rotate(12deg) scale(1.03);
+  }
+}
+
+@keyframes veilShift {
+  0% {
+    transform: translate3d(-2%, 0, 0) skewX(-3deg);
+  }
+  100% {
+    transform: translate3d(2%, -2%, 0) skewX(3deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appRoot::before,
+  .appRoot::after {
+    animation: none;
+  }
 }
 
 .page {
