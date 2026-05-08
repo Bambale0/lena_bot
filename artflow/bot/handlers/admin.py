@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -13,7 +14,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram import Bot
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -561,21 +562,78 @@ async def handle_price_label(message: Message, session: AsyncSession, state: FSM
 
 # ─── Стоимость моделей ────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "adm:models")
-async def cb_models(call: CallbackQuery, session: AsyncSession) -> None:
-    costs = await repo.get_all_model_costs(session)
+_MODELS_PAGE_SIZE = 12
+
+
+def _models_kb(costs: list, page: int) -> "InlineKeyboardMarkup":
+    """Build paginated model costs keyboard."""
+    total = len(costs)
+    total_pages = max(1, (total + _MODELS_PAGE_SIZE - 1) // _MODELS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * _MODELS_PAGE_SIZE
+    chunk = costs[start : start + _MODELS_PAGE_SIZE]
+
     builder = InlineKeyboardBuilder()
-    for mc in costs:
+    for mc in chunk:
+        # Use gen_type emoji prefix
+        prefix = "🖼" if str(mc.gen_type) in ("image", "GenerationType.image") else "🎬"
+        label = mc.display_name[:30]
+        
+        # Для видео-моделей всегда показываем кр/сек
+        # Если в model_key есть resolution, добавляем пометку в скобках
+        if str(mc.gen_type) not in ("image", "GenerationType.image"):
+            # Парсим resolution из ключа если есть
+            res_match = re.search(r'__resolution=(\w+)', mc.model_key)
+            if res_match:
+                resolution = res_match.group(1)
+                # Убираем " · за сек" из названия, если есть
+                label = label.replace(" · за сек", "").replace(f" · {resolution}", "")
+                cred_label = f"{mc.credits} кр/сек ({resolution})"
+            else:
+                cred_label = f"{mc.credits} кр/сек"
+        else:
+            cred_label = f"{mc.credits} кр"
+            
         builder.button(
-            text=f"{mc.display_name} — {mc.credits} кр",
+            text=f"{prefix} {label} — {cred_label}",
             callback_data=f"adm:model_edit:{mc.model_key}",
         )
-    builder.button(text="← Назад", callback_data="adm:back")
     builder.adjust(1)
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text="◀️ Пред", callback_data=f"adm:models_pg:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="adm:noop"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(text="След ▶️", callback_data=f"adm:models_pg:{page + 1}"))
+    builder.row(*nav_row)
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="adm:back"))
+    return builder.as_markup()
+
+
+@router.callback_query(F.data == "adm:models")
+async def cb_models(call: CallbackQuery, session: AsyncSession) -> None:
+    # Filter: only show clean model keys (no "::" legacy separator)
+    all_costs = await repo.get_all_model_costs(session)
+    costs = [mc for mc in all_costs if "::" not in mc.model_key]
     await call.message.edit_text(
-        "⚙️ <b>Стоимость моделей</b>\n\nНажми для изменения:",
-        reply_markup=builder.as_markup(),
+        f"⚙️ <b>Стоимость моделей</b> ({len(costs)} активных)\n\nНажми для изменения:",
+        reply_markup=_models_kb(costs, 0),
     )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:models_pg:"))
+async def cb_models_page(call: CallbackQuery, session: AsyncSession) -> None:
+    page = int(call.data.split(":")[2])
+    all_costs = await repo.get_all_model_costs(session)
+    costs = [mc for mc in all_costs if "::" not in mc.model_key]
+    await call.message.edit_reply_markup(reply_markup=_models_kb(costs, page))
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm:noop")
+async def cb_noop(call: CallbackQuery) -> None:
     await call.answer()
 
 

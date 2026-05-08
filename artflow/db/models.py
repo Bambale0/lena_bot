@@ -28,6 +28,7 @@ class Base(DeclarativeBase):
 class GenerationType(str, enum.Enum):
     image = "image"
     video = "video"
+    music = "music"
 
 
 class GenerationStatus(str, enum.Enum):
@@ -122,7 +123,11 @@ class Generation(Base):
     gen_type: Mapped[GenerationType] = mapped_column(Enum(GenerationType), nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     result_url: Mapped[str | None] = mapped_column(Text)
-    is_public_feed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_public_feed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_prompt_library: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    source_feed_gen_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("generations.id"), nullable=True
+    )
     likes_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     shares_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     credits_spent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.services.session_service import MainMenuContext
 from bot.ui.common import ScreenRender
+from core.config import settings
 
 def render_main_menu(context: MainMenuContext) -> ScreenRender:
     builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="📱 Открыть приложение",
+            web_app=WebAppInfo(url=f"{settings.WEBHOOK_URL.rstrip('/')}/app"),
+        ),
+    )
     builder.row(
         InlineKeyboardButton(text=f"💋 Баланс: {context.balance}", callback_data="menu:balance"),
     )

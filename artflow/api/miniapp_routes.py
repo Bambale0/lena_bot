@@ -13,7 +13,7 @@ from api import image_service, video_service
 from api.image_service import ImageModel
 from api.miniapp_auth import get_miniapp_user
 from api.video_service import VideoModel
-from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
+from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS, _KLING_PER_SEC
 from core.config import settings
 from db import repository as repo
 from db.models import (
@@ -21,6 +21,8 @@ from db.models import (
     ImageGenerationAction,
     User,
 )
+
+MUSIC_CREDITS = 20  # cost per music generation
 from db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,10 @@ class ModelInfo(BaseModel):
     quality_options: list[dict[str, str]]
     counts: list[int]
     has_quality: bool
+    is_per_second: bool = False
+    credits_per_sec: int | None = None
+    durations: list[int] = []
+    resolutions: list[str] = []
 
 
 class GenerationOut(BaseModel):
@@ -72,6 +78,8 @@ class GenerationOut(BaseModel):
     result_url: str | None
     credits_spent: int
     created_at: str
+    is_public_feed: bool = False
+    is_prompt_library: bool = False
 
 
 class ImageGenRequest(BaseModel):
@@ -79,8 +87,9 @@ class ImageGenRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=4000)
     aspect_ratio: str | None = None
     quality: str = "basic"
-    count: int = Field(default=1, ge=1, le=4)
+    count: int = Field(default=1, ge=1, le=6)
     reference_url: str | None = None
+    reference_urls: list[str] = []
 
 
 class VideoGenRequest(BaseModel):
@@ -99,6 +108,11 @@ class PromptSubmitRequest(BaseModel):
     description: str = Field(default="", max_length=500)
     prompt_text: str = Field(..., min_length=10, max_length=4000)
     category: str = "other"
+
+
+class MusicGenRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    instrumental: bool = False
 
 
 class TopupRequest(BaseModel):
@@ -163,15 +177,22 @@ async def list_video_models(
         if mc.model_key not in video_keys:
             continue
         caps: dict[str, Any] = VIDEO_CAPS.get(mc.model_key, {})
+        kling_rates = _KLING_PER_SEC.get(mc.model_key, {})
+        is_per_sec = bool(kling_rates)
+        credits_per_sec = min(kling_rates.values()) if kling_rates else None
         result.append(ModelInfo(
             key=mc.model_key,
             display_name=mc.display_name,
-            credits=mc.credits,
+            credits=credits_per_sec if is_per_sec else mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
-            quality_options=[],
+            quality_options=[{"value": r, "label": r} for r in (caps.get("resolutions") or [])],
             counts=[],
-            has_quality=False,
+            has_quality=bool(caps.get("has_resolution")),
+            is_per_second=is_per_sec,
+            credits_per_sec=credits_per_sec,
+            durations=caps.get("duration_options", []),
+            resolutions=caps.get("resolutions") or [],
         ))
     return result
 
@@ -213,6 +234,9 @@ async def create_image_generation(
     if not ok:
         raise HTTPException(status_code=402, detail="Failed to spend credits")
 
+    if body.reference_url and (body.reference_url.startswith("blob:") or not body.reference_url.startswith("http")):
+        raise HTTPException(status_code=422, detail="Invalid reference URL — upload the image first")
+
     # Determine mode from reference presence
     has_ref = bool(body.reference_url)
     image_session = await repo.create_image_session(
@@ -234,11 +258,19 @@ async def create_image_generation(
         action_type=ImageGenerationAction.initial,
     )
 
+    # Merge reference_url + reference_urls into a single list
+    ref_urls: str | list[str] | None = None
+    all_refs = [u for u in ([body.reference_url] if body.reference_url else []) + list(body.reference_urls) if u and u.startswith("http")]
+    if len(all_refs) == 1:
+        ref_urls = all_refs[0]
+    elif len(all_refs) > 1:
+        ref_urls = all_refs
+
     try:
         result = await image_service.generate_image(
             model,
             body.prompt,
-            image_url=body.reference_url,
+            image_url=ref_urls,
             aspect_ratio=body.aspect_ratio,
             n=body.count,
             quality=body.quality,
@@ -301,11 +333,15 @@ async def create_video_generation(
         body.prompt, model_cost.credits,
     )
 
+    image_url = body.image_url if body.mode == "image" else None
+    if image_url and (image_url.startswith("blob:") or not image_url.startswith("http")):
+        raise HTTPException(status_code=422, detail="Invalid image URL — upload the image first")
+
     try:
         result = await video_service.generate_video(
             model,
             body.prompt,
-            image_url=body.image_url if body.mode == "image" else None,
+            image_url=image_url,
             duration=body.duration,
             aspect_ratio=body.aspect_ratio,
             resolution=body.resolution,
@@ -319,6 +355,51 @@ async def create_video_generation(
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
+
+    await session.refresh(gen)
+    return _gen_out(gen)
+
+
+# ── music generation ──────────────────────────────────────────────────────────
+
+@router.post("/generate/music", response_model=GenerationOut, status_code=202)
+async def create_music_generation(
+    body: MusicGenRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> GenerationOut:
+    """Start Suno music generation. Returns immediately; poll /generations/{id}."""
+    from api.music_service import create_music_task, register_miniapp_task
+
+    if user.credits < MUSIC_CREDITS:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Insufficient credits: need {MUSIC_CREDITS}, have {user.credits}",
+        )
+
+    active = await repo.count_user_active_generations(session, user.id)
+    if active >= MAX_CONCURRENT:
+        raise HTTPException(status_code=429, detail="Too many concurrent generations")
+
+    ok = await repo.spend_credits(session, user.id, MUSIC_CREDITS)
+    if not ok:
+        raise HTTPException(status_code=402, detail="Failed to spend credits")
+
+    gen = await repo.create_generation(
+        session, user.id, "suno/v4.5", GenerationType.music,
+        body.prompt, MUSIC_CREDITS,
+    )
+
+    try:
+        task_id = await create_music_task(body.prompt, body.instrumental)
+    except Exception as exc:
+        logger.error("miniapp music gen error user=%s: %s", user.id, exc)
+        await repo.fail_generation(session, gen.id, str(exc))
+        await repo.add_credits(session, user.id, MUSIC_CREDITS)
+        raise HTTPException(status_code=502, detail="Music generation service error")
+
+    await repo.update_generation_task(session, gen.id, task_id)
+    register_miniapp_task(task_id, gen.id)
 
     await session.refresh(gen)
     return _gen_out(gen)
@@ -356,23 +437,36 @@ async def get_history(
 async def get_feed(
     limit: int = Query(default=20, ge=1, le=50),
     session: AsyncSession = Depends(get_session),
-    _: User = Depends(get_miniapp_user),
+    user: User = Depends(get_miniapp_user),
 ) -> list[dict]:
-    """Public image feed (liked / shared generations)."""
+    """Public image feed — prompt is hidden from non-authors."""
     cards = await repo.get_feed_generations(session, limit=limit)
     return [
         {
             "id": c.generation.id,
             "model": c.generation.model,
-            "prompt": c.generation.prompt[:300],
             "result_url": c.generation.result_url,
             "likes_count": c.generation.likes_count,
             "shares_count": c.generation.shares_count,
             "aspect_ratio": c.aspect_ratio,
             "author": c.username or c.full_name or "anon",
+            "is_mine": c.generation.user_id == user.id,
         }
         for c in cards
     ]
+
+
+@router.post("/generations/{gen_id}/share", status_code=200)
+async def share_generation(
+    gen_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Publish own generation to the public feed."""
+    gen = await repo.share_to_feed(session, gen_id, user.id)
+    if not gen:
+        raise HTTPException(status_code=404, detail="Generation not found or not ready")
+    return {"id": gen.id, "is_public_feed": gen.is_public_feed}
 
 
 @router.post("/feed/{gen_id}/like", status_code=200)
@@ -385,6 +479,117 @@ async def like_feed_post(
     if not gen:
         raise HTTPException(status_code=404, detail="Post not found")
     return {"likes_count": gen.likes_count}
+
+
+@router.post("/feed/{gen_id}/remix", response_model=GenerationOut, status_code=202)
+async def remix_feed_post(
+    gen_id: int,
+    body: VideoGenRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> GenerationOut:
+    """
+    Start a generation using the hidden prompt of a public feed post.
+    The user chooses model/params; the original author's prompt is used silently.
+    """
+    source = await repo.get_public_feed_generation(session, gen_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Post not found or not public")
+
+    # Use the source prompt but with the user-chosen model
+    try:
+        model = VideoModel(body.model)
+        gen_type = "video"
+    except ValueError:
+        try:
+            img_model = ImageModel(body.model)
+            gen_type = "image"
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Unknown model: {body.model!r}")
+
+    model_cost = await repo.resolve_video_model_cost(session, body.model, duration=body.duration, resolution=body.resolution) \
+        if gen_type == "video" else await repo.resolve_image_model_cost(session, body.model, quality=body.quality or "basic")
+    if not model_cost:
+        raise HTTPException(status_code=422, detail="Model not available")
+
+    if user.credits < model_cost.credits:
+        raise HTTPException(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}")
+
+    active = await repo.count_user_active_generations(session, user.id)
+    if active >= MAX_CONCURRENT:
+        raise HTTPException(status_code=429, detail="Too many concurrent generations")
+
+    ok = await repo.spend_credits(session, user.id, model_cost.credits)
+    if not ok:
+        raise HTTPException(status_code=402, detail="Failed to spend credits")
+
+    from db.models import GenerationType as GT
+    gen_type_enum = GT.video if gen_type == "video" else GT.image
+    gen = await repo.create_generation(
+        session, user.id, body.model, gen_type_enum,
+        source.prompt, model_cost.credits,
+        source_feed_gen_id=gen_id,
+    )
+
+    try:
+        if gen_type == "video":
+            result = await video_service.generate_video(
+                model, source.prompt,
+                image_url=body.image_url if body.mode == "image" else None,
+                duration=body.duration, aspect_ratio=body.aspect_ratio,
+                resolution=body.resolution, grok_mode=body.grok_mode,
+                callback_url=_kie_callback_url(),
+            )
+        else:
+            result = await image_service.generate_image(
+                img_model, source.prompt,
+                image_url=body.image_url if body.mode == "image" else None,
+                aspect_ratio=body.aspect_ratio, n=1,
+                quality=body.quality or "basic",
+                callback_url=_kie_callback_url(),
+            )
+    except Exception as exc:
+        logger.error("feed remix error user=%s gen=%s: %s", user.id, gen_id, exc)
+        await repo.fail_generation(session, gen.id, str(exc))
+        await repo.add_credits(session, user.id, model_cost.credits)
+        raise HTTPException(status_code=502, detail="Generation service error")
+
+    await repo.update_generation_task(session, gen.id, result.task_id or "")
+    await repo.increment_feed_share(session, gen_id)
+    await session.refresh(gen)
+    return _gen_out(gen)
+
+
+@router.get("/feed/{gen_id}/link")
+async def get_feed_share_link(
+    gen_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Returns a shareable Telegram deeplink for this public post. Only the author can get it."""
+    from db.models import GenerationStatus
+    gen = await repo.get_generation_by_id(session, gen_id)
+    if not gen or gen.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    if not gen.is_public_feed:
+        raise HTTPException(status_code=400, detail="Generation is not public yet — share to feed first")
+    from core.config import settings
+    bot_username = settings.BOT_USERNAME if hasattr(settings, "BOT_USERNAME") else "apixbot"
+    link = f"https://t.me/{bot_username}?start=feed_{gen_id}"
+    return {"link": link, "gen_id": gen_id}
+
+
+@router.post("/generations/{gen_id}/share-library", status_code=200)
+async def share_to_library(
+    gen_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Opt this generation's prompt into the public prompt library."""
+    gen = await repo.share_to_library(session, gen_id, user.id)
+    if not gen:
+        raise HTTPException(status_code=404, detail="Generation not found or not ready")
+    return {"id": gen.id, "is_prompt_library": gen.is_prompt_library}
 
 
 # ── prompt library ────────────────────────────────────────────────────────────
@@ -561,6 +766,8 @@ def _gen_out(gen) -> GenerationOut:
         result_url=gen.result_url,
         credits_spent=gen.credits_spent,
         created_at=gen.created_at.isoformat() if gen.created_at else "",
+        is_public_feed=bool(gen.is_public_feed),
+        is_prompt_library=bool(getattr(gen, "is_prompt_library", False)),
     )
 
 

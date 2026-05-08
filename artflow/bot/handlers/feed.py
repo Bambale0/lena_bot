@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.keyboards.feed import empty_feed_kb, feed_card_kb
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.models import IMAGE_CAPS
+from bot.keyboards.prompts import prompt_use_model_kb
+from bot.states import PromptUseFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import User
@@ -249,4 +251,27 @@ async def cb_feed_share(call: CallbackQuery, session: AsyncSession, db_user: Use
     )
     await safe_answer_callback(call, "Ссылка готова")
 
+
+@router.callback_query(F.data.startswith("feed:use:"))
+async def cb_feed_use(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext,
+) -> None:
+    gen_id = int(call.data.split(":")[2])
+    gen = await repo.get_generation_by_id(session, gen_id)
+    if not gen or not gen.prompt:
+        await call.answer("Генерация не найдена", show_alert=True)
+        return
+
+    model_costs = await repo.get_all_model_costs(session)
+    await state.set_state(PromptUseFSM.model_select)
+    await state.update_data(feed_use_gen_id=gen_id, feed_use_prompt=gen.prompt, feed_use_model=gen.model)
+    await call.message.answer(  # type: ignore[union-attr]
+        "🎨 <b>Повторить генерацию</b>\n\n"
+        "<i>Выбери модель:</i>",
+        reply_markup=prompt_use_model_kb(gen_id, model_costs),
+    )
+    await safe_answer_callback(call)
 

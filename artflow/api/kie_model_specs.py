@@ -64,7 +64,7 @@ def _str_duration(params: dict[str, Any]) -> dict[str, Any]:
 def _wan_image_params(params: dict[str, Any]) -> dict[str, Any]:
     out = {
         "resolution": params.get("resolution") or "2K",
-        "n": max(1, min(4, int(params.get("n") or 1))),
+        "n": max(1, min(6, int(params.get("n") or 1))),
         "enable_sequential": bool(params.get("enable_sequential", False)),
         "thinking_mode": bool(params.get("thinking_mode", False)),
         "watermark": False,
@@ -100,8 +100,10 @@ def _grok_i2v_params(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _kling_30_params(params: dict[str, Any]) -> dict[str, Any]:
+    _RES_MAP = {"2K": "pro", "4K": "4K", "std": "std", "pro": "pro"}
+    raw_res = params.get("mode_quality") or params.get("resolution") or "pro"
     return {
-        "mode": params.get("mode_quality") or params.get("resolution") or "pro",
+        "mode": _RES_MAP.get(raw_res, raw_res),
         "sound": False,
         "duration": str(params.get("duration") or 5),
         "aspect_ratio": params.get("aspect_ratio") or "16:9",
@@ -173,7 +175,7 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
         reference_field="image_input",
         reference_type=KieReferenceType.LIST,
         optional_params={"aspect_ratio": "aspect_ratio", "quality": "resolution"},
-        defaults={"aspect_ratio": "auto", "resolution": "1K", "output_format": "jpg"},
+        defaults={"aspect_ratio": "auto", "resolution": "2K", "output_format": "jpg"},
     ),
     "nano-banana-pro": KieModelSpec(
         model="nano-banana-pro",
@@ -182,7 +184,50 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
         reference_field="image_input",
         reference_type=KieReferenceType.LIST,
         optional_params={"aspect_ratio": "aspect_ratio", "quality": "resolution"},
-        defaults={"aspect_ratio": "auto", "resolution": "1K", "output_format": "png"},
+        defaults={"aspect_ratio": "auto", "resolution": "2K", "output_format": "png"},
+    ),
+    "qwen/text-to-image": KieModelSpec(
+        model="qwen/text-to-image",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("text",),
+        optional_params={"aspect_ratio": "aspect_ratio"},
+        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+        remix_model="qwen/image-to-image",
+    ),
+    "qwen/image-to-image": KieModelSpec(
+        model="qwen/image-to-image",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("image",),
+        reference_field="image_urls",
+        reference_type=KieReferenceType.LIST,
+        optional_params={"aspect_ratio": "aspect_ratio"},
+        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+    ),
+    "qwen/image-edit": KieModelSpec(
+        model="qwen/image-edit",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("image",),
+        reference_field="image_urls",
+        reference_type=KieReferenceType.LIST,
+        optional_params={"aspect_ratio": "aspect_ratio"},
+        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+    ),
+    "qwen2/text-to-image": KieModelSpec(
+        model="qwen2/text-to-image",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("text",),
+        optional_params={"aspect_ratio": "aspect_ratio"},
+        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+        remix_model="qwen2/image-edit",
+    ),
+    "qwen2/image-edit": KieModelSpec(
+        model="qwen2/image-edit",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("image",),
+        reference_field="image_urls",
+        reference_type=KieReferenceType.LIST,
+        optional_params={"aspect_ratio": "aspect_ratio"},
+        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
     ),
 }
 

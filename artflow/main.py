@@ -12,7 +12,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import Update, URLInputFile
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,7 +23,7 @@ from api.comet_client import close_client, get_client
 from api.miniapp_routes import router as miniapp_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 from api.music_service import extract_music_urls, pop_task
-from api.public_files import UPLOAD_ROOT, mirror_url
+from api.public_files import UPLOAD_ROOT, mirror_url, save_public_file
 from bot.handlers import admin, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.middlewares.auth import AuthMiddleware
@@ -125,7 +125,6 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    await bot.delete_webhook()
     await close_client()
     await redis_client.aclose()
     logger.info("Shutdown complete")
@@ -136,12 +135,30 @@ UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 app.mount(settings.STATIC_UPLOAD_URL_PATH, StaticFiles(directory=str(UPLOAD_ROOT)), name="static_upload")
 app.include_router(miniapp_router)
 
+WEBAPP_DIST = Path("webapp/dist")
+if WEBAPP_DIST.exists():
+    app.mount("/app", StaticFiles(directory=str(WEBAPP_DIST), html=True), name="miniapp")
+else:
+    @app.get("/app", response_class=PlainTextResponse)
+    async def miniapp_not_built() -> str:
+        return "Mini app is not built. Run: cd webapp && npm install && npm run build"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)) -> dict:
+    """Upload an image for use as a reference in generation."""
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 20 MB)")
+    url = save_public_file(data, file.content_type)
+    return {"url": url}
 
 
 # ── Telegram Webhook ──────────────────────────────────────────────────────────
@@ -335,20 +352,32 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                         "\n\n🎨 <b>Серия активна.</b>\n"
                         "Теперь просто отправляй новый текст или фото — настройки сохранятся."
                     )
-                    await bot.send_photo(
-                        chat_id=user.tg_id,
-                        photo=result_url,
-                        caption=caption,
-                        reply_markup=image_session_kb(gen.id),
-                    )
-                    await bot.send_document(
-                        chat_id=user.tg_id,
-                        document=URLInputFile(result_url, filename="image.jpg"),
-                    )
+                    for idx, url in enumerate(urls):
+                        is_first = idx == 0
+                        img_caption = caption if is_first else None
+                        img_kb = image_session_kb(gen.id) if is_first else None
+                        try:
+                            await bot.send_photo(
+                                chat_id=user.tg_id,
+                                photo=URLInputFile(url, filename="image.jpg"),
+                                caption=img_caption,
+                                reply_markup=img_kb,
+                            )
+                        except Exception:
+                            await bot.send_document(
+                                chat_id=user.tg_id,
+                                document=URLInputFile(url, filename="image.jpg"),
+                                caption=img_caption,
+                                reply_markup=img_kb,
+                            )
+                        await bot.send_document(
+                            chat_id=user.tg_id,
+                            document=URLInputFile(url, filename="image.jpg"),
+                        )
                 else:
                     await bot.send_video(
                         chat_id=user.tg_id,
-                        video=result_url,
+                        video=URLInputFile(result_url, filename="video.mp4"),
                         caption=caption,
                         reply_markup=after_generation_kb(gen.id, "video"),
                     )
@@ -370,39 +399,56 @@ async def kie_music_webhook(request: Request) -> dict:
         logger.warning("KIE music webhook without task_id: %s", payload)
         return {"ok": True}
 
+    from api.music_service import pop_miniapp_task
+
     tg_id = pop_task(task_id)
-    if not tg_id or not bot:
+    miniapp_gen_id = pop_miniapp_task(task_id)
+
+    if not tg_id and not miniapp_gen_id:
         logger.warning("KIE music webhook: unknown task_id=%s", task_id)
         return {"ok": True}
 
     if not is_success(payload):
         err = extract_error(payload)
         logger.warning("KIE music failed task_id=%s: %s", task_id, err)
-        try:
-            await bot.send_message(tg_id, f"❌ Ошибка генерации музыки:\n{err}", reply_markup=back_to_menu_kb())
-        except Exception as e:
-            logger.warning("Failed to notify music failure tg_id=%s: %s", tg_id, e)
+        if miniapp_gen_id:
+            async with AsyncSessionLocal() as session:
+                gen = await repo.get_generation_by_id(session, miniapp_gen_id)
+                if gen:
+                    await repo.fail_generation(session, gen.id, err)
+                    await repo.add_credits(session, gen.user_id, gen.credits_spent)
+        if tg_id and bot:
+            try:
+                await bot.send_message(tg_id, f"❌ Ошибка генерации музыки:\n{err}", reply_markup=back_to_menu_kb())
+            except Exception as e:
+                logger.warning("Failed to notify music failure tg_id=%s: %s", tg_id, e)
         return {"ok": True}
 
     audio_urls = extract_music_urls(payload)
     if not audio_urls:
         logger.warning("KIE music webhook: no audio URLs task_id=%s payload=%s", task_id, payload)
-        try:
-            await bot.send_message(tg_id, "❌ Музыка готова, но ссылка не найдена.", reply_markup=back_to_menu_kb())
-        except Exception:
-            pass
+        if tg_id and bot:
+            try:
+                await bot.send_message(tg_id, "❌ Музыка готова, но ссылка не найдена.", reply_markup=back_to_menu_kb())
+            except Exception:
+                pass
         return {"ok": True}
 
-    try:
-        for url in audio_urls:
-            await bot.send_audio(
-                chat_id=tg_id,
-                audio=URLInputFile(url, filename="track.mp3"),
-                caption="🎵 <b>Трек готов!</b>",
-                reply_markup=back_to_menu_kb(),
-            )
-    except Exception as e:
-        logger.warning("Failed to send music result tg_id=%s: %s", tg_id, e)
+    if miniapp_gen_id:
+        async with AsyncSessionLocal() as session:
+            await repo.finish_generation(session, miniapp_gen_id, audio_urls[0])
+
+    if tg_id and bot:
+        try:
+            for url in audio_urls:
+                await bot.send_audio(
+                    chat_id=tg_id,
+                    audio=URLInputFile(url, filename="track.mp3"),
+                    caption="🎵 <b>Трек готов!</b>",
+                    reply_markup=back_to_menu_kb(),
+                )
+        except Exception as e:
+            logger.warning("Failed to send music result tg_id=%s: %s", tg_id, e)
 
     return {"ok": True}
 

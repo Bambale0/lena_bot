@@ -431,7 +431,7 @@ async def cb_prompt_pick_model(
     call: CallbackQuery,
     state: FSMContext,
 ) -> None:
-    _, prompt_id_raw, model_key = call.data.split(":", 2)  # type: ignore[union-attr]
+    _, id_raw, model_key = call.data.split(":", 2)  # type: ignore[union-attr]
     await state.update_data(use_model_key=model_key)
     await state.set_state(PromptUseFSM.reference_upload)
     await safe_edit_message(
@@ -439,7 +439,7 @@ async def cb_prompt_pick_model(
         "🖼 <b>Референс (необязательно)</b>\n\n"
         "Отправь фото-референс, чтобы задать стиль,\n"
         "или нажми <b>«Без референса»</b> для запуска прямо сейчас.",
-        reply_markup=prompt_use_reference_kb(int(prompt_id_raw)),
+        reply_markup=prompt_use_reference_kb(int(id_raw)),
     )
     await call.answer()
 
@@ -456,9 +456,56 @@ async def cb_prompt_skip_ref(
     from db.models import ImageGenerationAction
 
     data = await state.get_data()
-    prompt_id = data.get("use_prompt_id") or int(call.data.split(":")[1])  # type: ignore[union-attr]
     model_key: str = data.get("use_model_key") or DEFAULT_PROMPT_MODEL
 
+    # Feed use flow: prompt comes from state directly
+    if data.get("feed_use_prompt") is not None:
+        prompt_text: str = data["feed_use_prompt"]
+        model_cost = await repo.resolve_image_model_cost(
+            session, model_key, quality=_default_quality_for_model(model_key),
+        )
+        if not model_cost:
+            await call.answer("Модель недоступна", show_alert=True)
+            await state.clear()
+            return
+        if db_user.credits < model_cost.credits:
+            await call.answer(
+                f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+                show_alert=True,
+            )
+            await state.clear()
+            return
+        image_session = await repo.create_image_session(
+            session=session,
+            user_id=db_user.id,
+            model=model_key,
+            mode="text",
+            aspect_ratio=None,
+            quality=_default_quality_for_model(model_key),
+            count=_default_count_for_model(model_key),
+            base_prompt=prompt_text,
+            reference_file_id=None,
+            reference_url=None,
+        )
+        await state.clear()
+        await _launch_session_generation(
+            source_message=call.message,  # type: ignore[arg-type]
+            state=state,
+            session=session,
+            db_user=db_user,
+            image_session=image_session,
+            prompt=prompt_text,
+            action_type=ImageGenerationAction.initial,
+            reference_url=None,
+            parent_generation_id=None,
+            launching_text="⏳ <b>Запускаю генерацию...</b>",
+            queued_text="⏳ <b>Генерация запущена.</b> Результат придёт сюда автоматически.",
+        )
+        await call.answer()
+        return
+
+    # Prompt library flow
+    prompt_id = data.get("use_prompt_id") or int(call.data.split(":")[1])  # type: ignore[union-attr]
     prompt = await get_prompt_by_id(session, prompt_id)
     if not prompt:
         await call.answer("Промпт не найден", show_alert=True)
@@ -535,9 +582,64 @@ async def fsm_prompt_use_reference(
     state: FSMContext,
     bot: Bot,
 ) -> None:
+    from api.public_files import mirror_telegram_file
+    from bot.handlers.image_gen import _launch_session_generation, _supports_img2img
+    from db.models import ImageGenerationAction
+
     data = await state.get_data()
+    model_key: str = data.get("use_model_key") or DEFAULT_PROMPT_MODEL
+
+    best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
+    reference_url = await mirror_telegram_file(bot, best[0].file_id)
+
+    # Feed use flow
+    if data.get("feed_use_prompt") is not None:
+        prompt_text: str = data["feed_use_prompt"]
+        mode = "image" if reference_url and _supports_img2img(model_key) else "text"
+        model_cost = await repo.resolve_image_model_cost(
+            session, model_key, quality=_default_quality_for_model(model_key),
+        )
+        if not model_cost:
+            await message.answer("Модель недоступна.", reply_markup=back_to_menu_kb())
+            await state.clear()
+            return
+        if db_user.credits < model_cost.credits:
+            await message.answer(
+                f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+                reply_markup=back_to_menu_kb(),
+            )
+            await state.clear()
+            return
+        image_session = await repo.create_image_session(
+            session=session,
+            user_id=db_user.id,
+            model=model_key,
+            mode=mode,
+            aspect_ratio=None,
+            quality=_default_quality_for_model(model_key),
+            count=_default_count_for_model(model_key),
+            base_prompt=prompt_text,
+            reference_file_id=None,
+            reference_url=reference_url if mode == "image" else None,
+        )
+        await state.clear()
+        await _launch_session_generation(
+            source_message=message,
+            state=state,
+            session=session,
+            db_user=db_user,
+            image_session=image_session,
+            prompt=prompt_text,
+            action_type=ImageGenerationAction.initial,
+            reference_url=reference_url if mode == "image" else None,
+            parent_generation_id=None,
+            launching_text="⏳ <b>Запускаю генерацию...</b>",
+            queued_text="⏳ <b>Генерация запущена.</b> Результат придёт сюда автоматически.",
+        )
+        return
+
+    # Prompt library flow
     prompt_id = data.get("use_prompt_id")
-    model_key = data.get("use_model_key")
     if not prompt_id:
         await state.clear()
         return
@@ -548,16 +650,8 @@ async def fsm_prompt_use_reference(
         await state.clear()
         return
 
-    from api.public_files import mirror_telegram_file
-
-    best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
-    reference_url = await mirror_telegram_file(bot, best[0].file_id)
-
-    if model_key:
+    if model_key and model_key != DEFAULT_PROMPT_MODEL:
         prompt.model = model_key
-
-    from bot.handlers.image_gen import _launch_session_generation, _supports_img2img
-    from db.models import ImageGenerationAction
 
     effective_model = model_key or prompt.model or DEFAULT_PROMPT_MODEL
     mode = "image" if reference_url and _supports_img2img(effective_model) else "text"

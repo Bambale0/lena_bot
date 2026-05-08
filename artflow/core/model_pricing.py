@@ -14,6 +14,7 @@ QUALITY_LABELS: dict[str, str] = {
 RESOLUTION_LABELS: dict[str, str] = {
     "std": "Std",
     "pro": "Pro",
+    "2K": "2K",
     "4K": "4K",
     "480p": "480p",
     "720p": "720p",
@@ -54,13 +55,10 @@ def video_pricing_keys(
     duration: int | None = None,
     resolution: str | None = None,
 ) -> list[str]:
+    """Pricing lookup: resolution-only (credits = per-second rate)."""
     keys: list[str] = []
-    if duration is not None and resolution:
-        keys.append(pricing_variant_key(model_key, duration=duration, resolution=resolution))
     if resolution:
         keys.append(pricing_variant_key(model_key, resolution=resolution))
-    if duration is not None:
-        keys.append(pricing_variant_key(model_key, duration=duration))
     keys.append(model_key)
     return _unique(keys)
 

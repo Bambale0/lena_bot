@@ -151,16 +151,17 @@ async def cb_video_model(
     if not model_cost:
         await call.answer("Модель недоступна", show_alert=True)
         return
-    if db_user.credits < model_cost.credits:
+    min_credits = model_cost.credits * default_duration
+    if db_user.credits < min_credits:
         await call.answer(
-            f"Недостаточно кредитов! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно кредитов! Нужно минимум {min_credits} (за {default_duration} сек), у тебя {db_user.credits}.",
             show_alert=True,
         )
         return
 
     await state.update_data(
         model_key=model_key,
-        credits=model_cost.credits,
+        credits=model_cost.credits,  # per-second rate
         duration=default_duration,
         aspect_ratio=_DEFAULT_RATIO.get(model_key),
         resolution=default_resolution,
@@ -177,7 +178,7 @@ async def cb_video_model(
         await state.set_state(VideoGenFSM.mode_select)
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
-            f"✅ <b>{model_cost.display_name}</b> ({model_cost.credits} кр)\n\nВыбери режим:",
+            f"✅ <b>{model_cost.display_name}</b> ({model_cost.credits} кр/сек)\n\nВыбери режим:",
             reply_markup=video_mode_kb(model_key),
         )
     await safe_answer_callback(call)
@@ -225,6 +226,60 @@ async def cb_video_mode(
 
 # ── Image / person upload ─────────────────────────────────────────────────────
 
+@router.message(VideoGenFSM.image_upload, F.video)
+async def handle_video_upload(
+    message: Message, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
+) -> None:
+    """Motion Control step 2: user uploads reference video."""
+    data = await state.get_data()
+    motion_step: str | None = data.get("motion_step")
+
+    if motion_step != "video_url":
+        await message.answer("Пожалуйста, загрузи видео только на шаге 2 Motion Control.", reply_markup=back_to_menu_kb())
+        return
+
+    video = message.video  # type: ignore[union-attr]
+    video_duration: int = video.duration or 5
+    file_id = video.file_id
+    model_key: str = data["model_key"]
+    resolution: str | None = data.get("resolution")
+
+    # Calculate cost based on video duration and per-second rate
+    model_cost = await repo.resolve_video_model_cost(session, model_key, resolution=resolution)
+    credits_per_sec = model_cost.credits if model_cost else int(data.get("credits", 8))
+    total_credits = credits_per_sec * video_duration
+
+    if db_user.credits < total_credits:
+        await message.answer(
+            f"❌ Недостаточно кредитов!\n"
+            f"Видео: {video_duration} сек × {credits_per_sec} кр/сек = {total_credits} кр\n"
+            f"Баланс: {db_user.credits} кр.",
+            reply_markup=back_to_menu_kb(),
+        )
+        return
+
+    # Mirror video to public storage for KIE API
+    video_url = await mirror_telegram_file(bot, file_id)
+
+    await state.update_data(
+        reference_video_url=video_url,
+        motion_duration=video_duration,
+        motion_credits=total_credits,
+        credits=credits_per_sec,
+        motion_step="prompt",
+    )
+    await state.set_state(VideoGenFSM.prompt_input)
+
+    model_cost_obj = await repo.get_model_cost(session, model_key)
+    display_name = model_cost_obj.display_name if model_cost_obj else model_key
+    await message.answer(
+        f"✅ Видео загружено! ({video_duration} сек × {credits_per_sec} кр/сек = <b>{total_credits} кр</b>)\n\n"
+        f"✅ <b>{display_name}</b>\n\n"
+        "✍️ Введи промпт (или отправь <code>-</code> для пропуска):",
+        reply_markup=back_to_menu_kb(),
+    )
+
+
 @router.message(VideoGenFSM.image_upload, F.photo)
 async def handle_image_upload(
     message: Message, state: FSMContext, session: AsyncSession
@@ -240,11 +295,11 @@ async def handle_image_upload(
         await state.update_data(image_file_id=file_id, motion_step="video_url")
         await message.answer(
             "✅ Фото загружено!\n\n"
-            "🎬 <b>Шаг 2/2:</b> Введи URL референсного видео\n"
-            "<i>(прямая ссылка на MP4, макс. 30 сек)</i>",
+            "🎬 <b>Шаг 2/2:</b> Загрузи референсное видео\n"
+            "<i>(видеофайл MP4, макс. 30 сек — бот автоматически определит длину)</i>",
             reply_markup=back_to_menu_kb(),
         )
-        await state.set_state(VideoGenFSM.prompt_input)
+        await state.set_state(VideoGenFSM.image_upload)
         return
 
     await state.update_data(image_file_id=file_id)
@@ -354,9 +409,13 @@ async def cb_vpar_next(call: CallbackQuery, state: FSMContext, session: AsyncSes
     if model_cost:
         await state.update_data(credits=model_cost.credits)
     summary = _params_summary(data)
+    duration_val = data.get("duration", 5)
+    cps = model_cost.credits if model_cost else data.get("credits", 0)
+    total_creds = cps * duration_val
+    await state.update_data(credits=cps)
     await state.set_state(VideoGenFSM.prompt_input)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"✅ <b>{display_name}</b> ({model_cost.credits if model_cost else data.get('credits', 0)} кр)"
+        f"✅ <b>{display_name}</b> ({cps} кр/сек × {duration_val} сек = {total_creds} кр)"
         f" · <code>{summary}</code>\n\n✍️ Введи промпт:",
         reply_markup=back_to_menu_kb(),
     )
@@ -435,7 +494,7 @@ async def handle_video_prompt(
     # Motion Control: optional prompt step
     if motion_step == "prompt":
         await state.update_data(motion_prompt=prompt if prompt != "-" else "")
-        await state.update_data(motion_step="ready")
+        await state.update_data(motion_step="done")
         prompt = data.get("motion_prompt") or ""
 
     image_url = (
@@ -450,7 +509,13 @@ async def handle_video_prompt(
         duration=duration,
         resolution=resolution,
     )
-    credits = model_cost.credits if model_cost else int(data.get("credits", 0))
+    # Per-second pricing: credits = rate_per_sec × duration
+    motion_credits = data.get("motion_credits")  # pre-calculated for motion control
+    if motion_credits is not None:
+        credits = int(motion_credits)
+    else:
+        credits_per_sec = model_cost.credits if model_cost else int(data.get("credits", 0))
+        credits = credits_per_sec * duration
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:

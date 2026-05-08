@@ -279,6 +279,7 @@ async def create_generation(
     image_session_id: int | None = None,
     parent_generation_id: int | None = None,
     action_type: ImageGenerationAction | None = None,
+    source_feed_gen_id: int | None = None,
 ) -> Generation:
     gen = Generation(
         user_id=user_id,
@@ -289,6 +290,7 @@ async def create_generation(
         image_session_id=image_session_id,
         parent_generation_id=parent_generation_id,
         action_type=action_type,
+        source_feed_gen_id=source_feed_gen_id,
         status=GenerationStatus.pending,
     )
     session.add(gen)
@@ -323,6 +325,14 @@ async def finish_generation(
         )
     )
     await session.commit()
+
+    # Pay 5% royalty to the author of the source feed post (if remixed from feed)
+    gen = await get_generation_by_id(session, gen_id)
+    if gen and gen.source_feed_gen_id:
+        source = await get_generation_by_id(session, gen.source_feed_gen_id)
+        if source and source.user_id != gen.user_id and gen.credits_spent > 0:
+            royalty = max(1, round(gen.credits_spent * 0.05))
+            await add_credits(session, source.user_id, royalty)
 
 
 async def fail_generation(
@@ -478,6 +488,49 @@ async def get_feed_generation_card(
     )
     cards = await _feed_cards_from_stmt(session, stmt)
     return cards[0] if cards else None
+
+
+async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
+    await session.execute(
+        update(Generation)
+        .where(
+            Generation.id == gen_id,
+            Generation.user_id == user_id,
+            Generation.status == GenerationStatus.done,
+            Generation.result_url.is_not(None),
+        )
+        .values(is_public_feed=True)
+    )
+    await session.commit()
+    return await get_generation_by_id(session, gen_id)
+
+
+async def share_to_library(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
+    await session.execute(
+        update(Generation)
+        .where(
+            Generation.id == gen_id,
+            Generation.user_id == user_id,
+            Generation.status == GenerationStatus.done,
+            Generation.result_url.is_not(None),
+        )
+        .values(is_prompt_library=True)
+    )
+    await session.commit()
+    return await get_generation_by_id(session, gen_id)
+
+
+async def get_public_feed_generation(session: AsyncSession, gen_id: int) -> Generation | None:
+    """Return a generation only if it is publicly shared to the feed."""
+    result = await session.execute(
+        select(Generation).where(
+            Generation.id == gen_id,
+            Generation.is_public_feed.is_(True),
+            Generation.status == GenerationStatus.done,
+            Generation.result_url.is_not(None),
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def like_feed_generation(session: AsyncSession, gen_id: int) -> Generation | None:

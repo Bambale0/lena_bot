@@ -42,6 +42,12 @@ class ImageModel(StrEnum):
     NANO_BANANA   = "google/nano-banana"
     NANO_BANANA_2 = "nano-banana-2"
     NANO_BANANA_PRO = "nano-banana-pro"
+    # Qwen
+    QWEN_T2I      = "qwen/text-to-image"
+    QWEN_I2I      = "qwen/image-to-image"
+    QWEN_EDIT     = "qwen/image-edit"
+    QWEN2_T2I     = "qwen2/text-to-image"
+    QWEN2_EDIT    = "qwen2/image-edit"
 
 
 # Models that support image input
@@ -72,6 +78,9 @@ MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.NANO_BANANA:      ["auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"],
     ImageModel.NANO_BANANA_2:    ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
     ImageModel.NANO_BANANA_PRO:  ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+    ImageModel.QWEN_T2I:         ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+    ImageModel.QWEN_I2I:         ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+    ImageModel.QWEN2_T2I:        ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
 }
 
 

@@ -21,6 +21,9 @@ def feed_card_kb(
         ),
     )
     builder.row(
+        InlineKeyboardButton(text="🔁 Повторить", callback_data=f"feed:use:{gen_id}"),
+    )
+    builder.row(
         InlineKeyboardButton(text="📚 Библиотека промптов", callback_data="menu:prompts"),
         InlineKeyboardButton(text="🏠 Главная", callback_data="menu:main"),
     )

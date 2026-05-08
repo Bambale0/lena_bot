@@ -35,7 +35,7 @@ VIDEO_CAPS: dict[str, dict] = {
         "duration_options": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         "aspect_ratios": ["16:9", "9:16", "1:1"],
         "has_resolution": True,
-        "resolutions": ["std", "pro", "4K"],
+        "resolutions": ["2K", "4K"],
     },
     VideoModel.KLING_30_MOTION: {
         "modes": ["motion"],
@@ -140,6 +140,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "counts": [1],
         "has_quality": True,
         "quality_options": [("basic", "🔷 2K"), ("high", "💎 4K")],
+        "max_refs": 3,
     },
     ImageModel.GROK_T2I: {
         "modes": ["text"],
@@ -152,14 +153,16 @@ IMAGE_CAPS: dict[str, dict] = {
         "aspect_ratios": [],
         "aspect_ratio_modes": [],
         "counts": [1],
+        "max_refs": 4,
     },
     ImageModel.WAN_27_PRO: {
         "modes": ["text", "image"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.WAN_27_PRO, []),
         "aspect_ratio_modes": ["text"],
-        "counts": [1, 2, 4],
+        "counts": [1, 2, 4, 6],
         "has_quality": True,
         "quality_options": [("1K", "1K"), ("2K", "2K"), ("4K", "4K")],
+        "max_refs": 4,
     },
     ImageModel.NANO_BANANA: {
         "modes": ["text"],
@@ -171,17 +174,52 @@ IMAGE_CAPS: dict[str, dict] = {
         "modes": ["text", "image"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_2, []),
         "aspect_ratio_modes": ["text", "image"],
-        "counts": [1],
+        "counts": [1, 2, 4, 6],
         "has_quality": True,
-        "quality_options": [("1K", "1K"), ("2K", "2K"), ("4K", "4K")],
+        "quality_options": [("2K", "2K"), ("4K", "4K")],
+        "max_refs": 4,
     },
     ImageModel.NANO_BANANA_PRO: {
         "modes": ["text", "image"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_PRO, []),
         "aspect_ratio_modes": ["text", "image"],
-        "counts": [1],
+        "counts": [1, 2, 4, 6],
         "has_quality": True,
-        "quality_options": [("1K", "1K"), ("2K", "2K"), ("4K", "4K")],
+        "quality_options": [("2K", "2K"), ("4K", "4K")],
+        "max_refs": 4,
+    },
+    ImageModel.QWEN_T2I: {
+        "modes": ["text"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.QWEN_T2I, []),
+        "aspect_ratio_modes": ["text"],
+        "counts": [1],
+    },
+    ImageModel.QWEN_I2I: {
+        "modes": ["image"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.QWEN_I2I, []),
+        "aspect_ratio_modes": ["image"],
+        "counts": [1],
+        "max_refs": 4,
+    },
+    ImageModel.QWEN_EDIT: {
+        "modes": ["image"],
+        "aspect_ratios": [],
+        "aspect_ratio_modes": [],
+        "counts": [1],
+        "max_refs": 4,
+    },
+    ImageModel.QWEN2_T2I: {
+        "modes": ["text"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.QWEN2_T2I, []),
+        "aspect_ratio_modes": ["text"],
+        "counts": [1],
+    },
+    ImageModel.QWEN2_EDIT: {
+        "modes": ["image"],
+        "aspect_ratios": [],
+        "aspect_ratio_modes": [],
+        "counts": [1],
+        "max_refs": 4,
     },
 }
 
@@ -194,6 +232,11 @@ IMAGE_MODEL_DESC: dict[str, str] = {
     "wan-2.7":         "🎭 WAN · кино-стиль · персонажи · фэнтези",
     "wan-2.7-pro":     "💎 WAN Pro · kie.ai · высокое разрешение · async",
     "gpt-image-1":     "🤖 GPT Image · понимает сложные описания · творчество",
+    ImageModel.QWEN_T2I:  "🟣 Qwen T2I · реалистично · детали · текст→изображение",
+    ImageModel.QWEN_I2I:  "🟣 Qwen I2I · трансформация по референсу",
+    ImageModel.QWEN_EDIT: "🟣 Qwen Edit · редактирование по референсу",
+    ImageModel.QWEN2_T2I: "🟣 Qwen2 T2I · улучшенная генерация · v2",
+    ImageModel.QWEN2_EDIT:"🟣 Qwen2 Edit · продвинутое редактирование · v2",
 }
 
 HIDDEN_IMAGE_MODELS = {
@@ -339,9 +382,22 @@ VIDEO_GROUP_TITLES: dict[str, str] = {
 }
 
 
+# Per-second rates for Kling models (cheapest resolution first)
+_KLING_PER_SEC: dict[str, dict[str, int]] = {
+    VideoModel.KLING_26_T2V:    {"720p": 5, "1080p": 7},
+    VideoModel.KLING_26_I2V:    {"720p": 6, "1080p": 8},
+    VideoModel.KLING_26_MOTION: {"720p": 7, "1080p": 9},
+    VideoModel.KLING_30:        {"2K": 8, "4K": 10},
+    VideoModel.KLING_30_MOTION: {"2K": 9, "4K": 11},
+}
+_KLING_BASE_RATE: dict[str, int] = {k: min(v.values()) for k, v in _KLING_PER_SEC.items()}
+
+
 def _model_button(mc: ModelCost, prefix: str) -> InlineKeyboardButton:
+    base_rate = _KLING_BASE_RATE.get(mc.model_key)
+    price_txt = f"от {base_rate} 💋/сек" if base_rate else f"{mc.credits} 💋"
     return InlineKeyboardButton(
-        text=f"{mc.display_name} · {mc.credits} 💋",
+        text=f"{mc.display_name} · {price_txt}",
         callback_data=f"{prefix}:{mc.model_key}",
     )
 
@@ -484,6 +540,10 @@ def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
     if gen_id:
         builder.row(
             InlineKeyboardButton(text="🎬 Оживить", callback_data=f"img_session:animate:{gen_id}"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
+            InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}"),
         )
     builder.row(
         InlineKeyboardButton(text="📸 Фото → Промпт", callback_data="img:photo2prompt"),
@@ -661,7 +721,17 @@ def video_params_kb(
         ]
         builder.row(*mode_buttons)
 
-    builder.row(InlineKeyboardButton(text="▶️ Далее: Промпт", callback_data="vpar_next"))
+    kling_rates = _KLING_PER_SEC.get(model_key, {})
+    if kling_rates and dur and res and res in kling_rates:
+        rate = kling_rates[res]
+        next_text = f"▶️ Далее · {dur} сек × {rate} = {dur * rate} 💋"
+    elif kling_rates and dur:
+        rate = min(kling_rates.values())
+        next_text = f"▶️ Далее · {dur} сек × от {rate} = от {dur * rate} 💋"
+    else:
+        next_text = "▶️ Далее: Промпт"
+
+    builder.row(InlineKeyboardButton(text=next_text, callback_data="vpar_next"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="vpar_back"))
     return builder.as_markup()
 
@@ -688,6 +758,28 @@ def reference_upload_kb(
     return builder.as_markup()
 
 
+def multi_ref_kb(
+    uploaded: int,
+    max_refs: int,
+    *,
+    allow_skip: bool = False,
+) -> InlineKeyboardMarkup:
+    """Shown after each reference upload when model supports multiple refs."""
+    builder = InlineKeyboardBuilder()
+    if uploaded < max_refs:
+        builder.row(InlineKeyboardButton(
+            text=f"📸 Добавить ещё ({uploaded}/{max_refs})",
+            callback_data="ref:add_more",
+        ))
+    builder.row(InlineKeyboardButton(
+        text=f"✅ Готово ({uploaded} фото)",
+        callback_data="ref:done_multi",
+    ))
+    if allow_skip and uploaded == 0:
+        builder.row(InlineKeyboardButton(text="⏭ Без референса", callback_data="ref:skip"))
+    return builder.as_markup()
+
+
 def after_generation_kb(gen_id: int, gen_type: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -696,6 +788,10 @@ def after_generation_kb(gen_id: int, gen_type: str) -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="⚙️ Изменить параметры", callback_data=f"reparams:{gen_type}:{gen_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
+        InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}"),
     )
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()

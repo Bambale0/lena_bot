@@ -5,8 +5,10 @@ from core.config import settings
 
 KIE_URL = "https://api.kie.ai/api/v1/suno/generate"
 
-# task_id → tg_id: хранит ожидающие задачи до прихода колбека
+# task_id → tg_id (bot flow)
 _pending: dict[str, int] = {}
+# task_id → gen_id (miniapp flow)
+_pending_gen: dict[str, int] = {}
 
 
 def register_task(task_id: str, tg_id: int) -> None:
@@ -15,6 +17,14 @@ def register_task(task_id: str, tg_id: int) -> None:
 
 def pop_task(task_id: str) -> int | None:
     return _pending.pop(task_id, None)
+
+
+def register_miniapp_task(task_id: str, gen_id: int) -> None:
+    _pending_gen[task_id] = gen_id
+
+
+def pop_miniapp_task(task_id: str) -> int | None:
+    return _pending_gen.pop(task_id, None)
 
 
 def extract_music_urls(payload: dict) -> list[str]:
@@ -44,7 +54,11 @@ def extract_music_urls(payload: dict) -> list[str]:
     return urls
 
 
-async def create_music_task(prompt: str, instrumental: bool = False) -> str:
+async def create_music_task(
+    prompt: str,
+    instrumental: bool = False,
+    callback_url: str | None = None,
+) -> str:
     headers = {
         "Authorization": f"Bearer {settings.KIE_AI_KEY}",
         "Content-Type": "application/json",
@@ -54,7 +68,7 @@ async def create_music_task(prompt: str, instrumental: bool = False) -> str:
         "customMode": False,
         "instrumental": instrumental,
         "model": "V4_5",
-        "callBackUrl": f"{settings.WEBHOOK_URL}/webhook/kie/music",
+        "callBackUrl": callback_url or f"{settings.WEBHOOK_URL}/webhook/kie/music",
     }
 
     async with httpx.AsyncClient(timeout=60) as client:

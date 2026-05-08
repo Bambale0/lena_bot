@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import image_service
 from api.image_service import ImageModel
 from api.photo_prompt_service import generate_prompt_from_photo
-from api.kie_model_specs import IMAGE_SPECS
+from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
 from api.public_files import mirror_telegram_file
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
@@ -25,6 +25,7 @@ from bot.keyboards.models import (
     image_mode_kb,
     image_models_kb,
     image_quality_kb,
+    multi_ref_kb,
     reference_upload_kb,
     image_session_kb,
     image_session_settings_kb,
@@ -154,17 +155,33 @@ async def _session_reference_url(
     image_session: ImageSession,
     *,
     prefer_last_result: bool = False,
-) -> str | None:
+    state: FSMContext | None = None,
+) -> str | list[str] | None:
     """
-    Для remix берём last_result_url.
-    Для обычной серии берём reference_url.
-    Для text-only моделей image_url не передаём.
+    Returns reference URL(s) for the current session.
+    For remix: uses last_result_url.
+    For multi-ref models: returns list of resolved URLs from ref_file_ids in FSM state.
+    For single-ref: returns single URL string.
     """
     if not _supports_img2img(image_session.model):
         return None
 
     if prefer_last_result and image_session.last_result_url:
         return image_session.last_result_url
+
+    # Check FSM state for collected multi-ref file IDs
+    if state:
+        data = await state.get_data()
+        ref_file_ids: list[str] = list(data.get("ref_file_ids", []))
+        if len(ref_file_ids) > 1:
+            urls = []
+            for fid in ref_file_ids:
+                url = await _telegram_file_url(bot, fid)
+                if url:
+                    urls.append(url)
+            return urls if urls else None
+        if len(ref_file_ids) == 1:
+            return await _telegram_file_url(bot, ref_file_ids[0])
 
     if image_session.reference_file_id:
         return await _telegram_file_url(bot, image_session.reference_file_id)
@@ -338,7 +355,7 @@ async def _launch_session_generation(
     image_session: ImageSession,
     prompt: str,
     action_type: ImageGenerationAction,
-    reference_url: str | None,
+    reference_url: str | list[str] | None,
     parent_generation_id: int | None,
     launching_text: str,
     queued_text: str,
@@ -355,6 +372,14 @@ async def _launch_session_generation(
         await source_message.answer(
             "❌ Модель серии больше не поддерживается.",
             reply_markup=main_menu_kb(),
+        )
+        return False
+
+    spec = IMAGE_SPECS.get(image_session.model)
+    if spec and spec.reference_type != KieReferenceType.NONE and not reference_url:
+        await source_message.answer(
+            "❌ Эта модель требует референс-изображение. Отправь фото.",
+            reply_markup=image_session_kb(parent_generation_id),
         )
         return False
 
@@ -802,13 +827,47 @@ async def handle_reference_upload(
     db_user: User,
 ) -> None:
     best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
-    await state.update_data(image_file_id=best[0].file_id)
+    file_id = best[0].file_id
     data = await state.get_data()
     model_key = data["model_key"]
+
+    # Collect into multi-ref list
+    existing: list[str] = list(data.get("ref_file_ids", []))
+    caps = IMAGE_CAPS.get(model_key, {})
+    max_refs: int = caps.get("max_refs", 1)
+
+    if file_id not in existing:
+        existing.append(file_id)
+    await state.update_data(image_file_id=existing[0], ref_file_ids=existing)
+
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
 
-    caps = IMAGE_CAPS.get(model_key, {})
+    # If model supports multiple refs and we haven't hit the max, ask for more
+    if max_refs > 1:
+        can_add_more = len(existing) < max_refs
+        await message.answer(
+            f"✅ Фото {len(existing)}/{max_refs} загружено!"
+            + (f"\nМожно добавить ещё (до {max_refs} фото)" if can_add_more else "\nДостигнут максимум."),
+            reply_markup=multi_ref_kb(len(existing), max_refs),
+        )
+        return
+
+    # Single-ref flow (unchanged)
+    await state.update_data(image_file_id=file_id)
+    await _after_ref_upload(message, state, session, db_user, model_key, display_name, caps)
+
+
+async def _after_ref_upload(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    model_key: str,
+    display_name: str,
+    caps: dict,
+) -> None:
+    data = await state.get_data()
     if _should_select_aspect_ratio(model_key, data.get("mode", "image")) and not data.get("aspect_ratio"):
         await state.set_state(ImageGenFSM.aspect_ratio_select)
         await message.answer(
@@ -830,6 +889,27 @@ async def handle_reference_upload(
     else:
         image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
         await _show_active_image_session_message(message, state, session, db_user, image_session)
+
+
+@router.callback_query(ImageGenFSM.image_upload, F.data == "ref:add_more")
+async def cb_ref_add_more(call: CallbackQuery, state: FSMContext) -> None:
+    await call.answer("Отправь следующее фото 📸")
+
+
+@router.callback_query(ImageGenFSM.image_upload, F.data == "ref:done_multi")
+async def cb_ref_done_multi(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    data = await state.get_data()
+    model_key = data["model_key"]
+    model_cost = await repo.get_model_cost(session, model_key)
+    display_name = model_cost.display_name if model_cost else model_key
+    caps = IMAGE_CAPS.get(model_key, {})
+    await call.answer()
+    await _after_ref_upload(call.message, state, session, db_user, model_key, display_name, caps)  # type: ignore[arg-type]
 
 
 @router.callback_query(ImageGenFSM.image_upload, F.data == "ref:skip")
@@ -867,7 +947,7 @@ async def handle_prompt(
     prompt = message.text.strip()  # type: ignore[union-attr]
     image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
 
-    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False)
+    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
     if not _supports_img2img(image_session.model):
         reference_url = None
 
@@ -912,6 +992,7 @@ async def handle_session_prompt(
         bot,
         image_session,
         prefer_last_result=is_remix,
+        state=state,
     )
 
     await _launch_session_generation(
@@ -1013,7 +1094,7 @@ async def cb_image_session_repeat(
         await call.answer("Нечего повторять", show_alert=True)
         return
 
-    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False)
+    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
 
     await _launch_session_generation(
         source_message=call.message,  # type: ignore[arg-type]
@@ -1353,6 +1434,30 @@ async def cb_image_settings_model(
     await safe_answer_callback(call)
 
 
+# ── Share to feed ─────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("gen:share:"))
+async def cb_gen_share(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    from bot.utils.telegram_ui import safe_answer_callback
+    gen_id = int(call.data.split(":")[-1])
+    gen = await repo.share_to_feed(session, gen_id, db_user.id)
+    if not gen:
+        await safe_answer_callback(call, "❌ Не удалось поделиться")
+        return
+    await safe_answer_callback(call, "✅ Опубликовано в ленте!")
+
+
+@router.callback_query(F.data.startswith("gen:library:"))
+async def cb_gen_library(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    from bot.utils.telegram_ui import safe_answer_callback
+    gen_id = int(call.data.split(":")[-1])
+    gen = await repo.share_to_library(session, gen_id, db_user.id)
+    if not gen:
+        await safe_answer_callback(call, "❌ Не удалось добавить в библиотеку")
+        return
+    await safe_answer_callback(call, "📚 Промпт добавлен в библиотеку!")
+
+
 # ── Regen ─────────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("regen:image:"))
@@ -1404,37 +1509,26 @@ async def cb_regen_image(
 
 # ── Photo → Prompt ────────────────────────────────────────────────────────────
 
-from aiogram.types import CopyTextButton as _CopyTextButton
 
-
-def _p2p_result_kb(prompt: str, *, ref_file_id: str | None, model_key: str | None, model_name: str | None) -> InlineKeyboardMarkup:
+def _p2p_result_kb(*, ref_file_id: str | None, model_key: str | None, model_name: str | None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    # Native Telegram copy button (Bot API 7.0+)
-    builder.row(
-        InlineKeyboardButton(
-            text="📋 Скопировать промпт",
-            copy_text=_CopyTextButton(text=prompt[:256]),
-        )
-    )
-    # Reference toggle
     ref_label = "🖼️ Изменить референс ✅" if ref_file_id else "🖼️ Загрузить референс"
     builder.row(InlineKeyboardButton(text=ref_label, callback_data="p2p:ref"))
-    # Model picker
     model_label = f"🎨 {model_name} ✅" if model_key else "🎨 Выбрать модель"
     builder.row(InlineKeyboardButton(text=model_label, callback_data="p2p:model"))
-    # Generate (enabled when model OR ref chosen, or active session exists)
     builder.row(InlineKeyboardButton(text="✅ Сгенерировать", callback_data="p2p:generate"))
     builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="img:cancel_prompt"))
     return builder.as_markup()
 
 
-def _p2p_prompt_text(prompt: str, *, ref_file_id: str | None, model_name: str | None) -> str:
-    ref_line = "📎 Референс: ✅ добавлен\n" if ref_file_id else "📎 Референс: не выбран\n"
+def _p2p_prompt_text(*, ref_file_id: str | None, model_name: str | None) -> str:
+    ref_line = "📎 Референс: ✅ добавлен\n" if ref_file_id else "📎 Референс: не выбран (необязательно)\n"
     model_line = f"🎨 Модель: <b>{model_name}</b>\n" if model_name else "🎨 Модель: не выбрана\n"
     return (
-        "✨ <b>Готовый промпт:</b>\n\n"
-        f"<code>{prompt}</code>\n\n"
-        f"{ref_line}{model_line}"
+        "✨ <b>Промпт готов!</b>\n\n"
+        "ИИ проанализировал фото и создал промпт — он применится автоматически.\n\n"
+        f"{ref_line}{model_line}\n"
+        "Выбери модель и нажми <b>Сгенерировать</b>."
     )
 
 
@@ -1452,9 +1546,9 @@ async def cb_photo_to_prompt(
     )
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "📸 <b>Фото → Промпт</b>\n\n"
-        "Отправь фотографию — ИИ создаст детальный промпт на русском для точного повтора.\n\n"
-        "После этого можно скопировать промпт, загрузить референс и выбрать модель.",
+        "📸 <b>Фото → Генерация</b>\n\n"
+        "Отправь фотографию — ИИ проанализирует её и сразу запустит генерацию.\n\n"
+        "Можно также выбрать модель и загрузить референс перед стартом.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="❌ Отмена", callback_data="img:cancel_prompt"),
         ]]),
@@ -1490,15 +1584,13 @@ async def handle_photo_to_prompt(
         )
         return
 
-    # Auto-set analyzed photo as reference
     await state.update_data(generated_prompt=prompt, p2p_ref_file_id=file_id)
     data = await state.get_data()
 
     await wait_msg.delete()
     await message.answer(
-        _p2p_prompt_text(prompt, ref_file_id=file_id, model_name=data.get("p2p_model_name")),
+        _p2p_prompt_text(ref_file_id=file_id, model_name=data.get("p2p_model_name")),
         reply_markup=_p2p_result_kb(
-            prompt,
             ref_file_id=file_id,
             model_key=data.get("p2p_model_key"),
             model_name=data.get("p2p_model_name"),
@@ -1532,9 +1624,8 @@ async def handle_p2p_ref_upload(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     prompt = data.get("generated_prompt", "")
     await message.answer(
-        _p2p_prompt_text(prompt, ref_file_id=ref_file_id, model_name=data.get("p2p_model_name")),
+        _p2p_prompt_text(ref_file_id=ref_file_id, model_name=data.get("p2p_model_name")),
         reply_markup=_p2p_result_kb(
-            prompt,
             ref_file_id=ref_file_id,
             model_key=data.get("p2p_model_key"),
             model_name=data.get("p2p_model_name"),
@@ -1546,12 +1637,10 @@ async def handle_p2p_ref_upload(message: Message, state: FSMContext) -> None:
 async def cb_p2p_back_to_result(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(ImageGenFSM.photo_to_prompt)
     data = await state.get_data()
-    prompt = data.get("generated_prompt", "")
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        _p2p_prompt_text(prompt, ref_file_id=data.get("p2p_ref_file_id"), model_name=data.get("p2p_model_name")),
+        _p2p_prompt_text(ref_file_id=data.get("p2p_ref_file_id"), model_name=data.get("p2p_model_name")),
         reply_markup=_p2p_result_kb(
-            prompt,
             ref_file_id=data.get("p2p_ref_file_id"),
             model_key=data.get("p2p_model_key"),
             model_name=data.get("p2p_model_name"),
@@ -1598,9 +1687,8 @@ async def cb_p2p_model_selected(
     prompt = data.get("generated_prompt", "")
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        _p2p_prompt_text(prompt, ref_file_id=data.get("p2p_ref_file_id"), model_name=display_name),
+        _p2p_prompt_text(ref_file_id=data.get("p2p_ref_file_id"), model_name=display_name),
         reply_markup=_p2p_result_kb(
-            prompt,
             ref_file_id=data.get("p2p_ref_file_id"),
             model_key=model_key,
             model_name=display_name,

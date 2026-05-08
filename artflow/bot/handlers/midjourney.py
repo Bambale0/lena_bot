@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import midjourney_service as mj
 from api import polling
+from api.public_files import mirror_telegram_file
 from api.midjourney_service import (
     MJBotType,
     MJButton,
@@ -248,7 +249,7 @@ async def handle_imagine_prompt(
         _mj_photo_url = task_result.image_url or url
         await bot.send_photo(
             chat_id=message.chat.id,
-            photo=_mj_photo_url,
+            photo=URLInputFile(_mj_photo_url, filename="image.jpg"),
             caption=caption,
             reply_markup=mj_action_buttons_kb(task_result.buttons),
         )
@@ -358,7 +359,7 @@ async def cb_mj_action(
         caption = f"✅ <b>{label}</b> готово!"
         await bot.send_photo(
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
-            photo=media_url,
+            photo=URLInputFile(media_url, filename="image.jpg"),
             caption=caption,
             reply_markup=mj_action_buttons_kb(task_result.buttons),
         )
@@ -442,7 +443,7 @@ async def _submit_modal(
         _modal_url = task_result.image_url or url
         await bot.send_photo(
             chat_id=message.chat.id,
-            photo=_modal_url,
+            photo=URLInputFile(_modal_url, filename="image.jpg"),
             caption="✅ Modal готово!",
             reply_markup=mj_action_buttons_kb(task_result.buttons),
         )
@@ -580,7 +581,7 @@ async def cb_blend_submit(
         _blend_url = task_result.image_url or url
         await bot.send_photo(
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
-            photo=_blend_url,
+            photo=URLInputFile(_blend_url, filename="image.jpg"),
             caption="✅ Blend готово!",
             reply_markup=mj_action_buttons_kb(task_result.buttons),
         )
@@ -740,9 +741,7 @@ async def cb_mj_video_start(call: CallbackQuery, state: FSMContext, session: Asy
 @router.message(MidjourneyFSM.video_upload, F.photo)
 async def handle_video_upload(message: Message, state: FSMContext, bot: Bot) -> None:
     photo: PhotoSize = message.photo[-1]  # type: ignore[index]
-    file = await bot.get_file(photo.file_id)
-    # Сохраняем как URL через file_path
-    image_url = f"https://api.telegram.org/file/bot{bot.token}/{file.file_path}"
+    image_url = await mirror_telegram_file(bot, photo.file_id)
     await state.update_data(video_image_url=image_url)
     await state.set_state(MidjourneyFSM.video_speed_select)
     await message.answer(
@@ -833,7 +832,7 @@ async def _submit_mj_video(
 
         await bot.send_video(
             chat_id=message.chat.id,
-            video=url,
+            video=URLInputFile(url, filename="video.mp4"),
             caption="✅ MJ Видео готово!",
             reply_markup=main_menu_kb(),
         )
