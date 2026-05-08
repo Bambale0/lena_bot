@@ -12,6 +12,8 @@ def render_image_scenarios() -> ScreenRender:
         for scenario in (
             IMAGE_SCENARIOS["fast"],
             IMAGE_SCENARIOS["quality"],
+            IMAGE_SCENARIOS["avatar"],
+            IMAGE_SCENARIOS["glow"],
             IMAGE_SCENARIOS["hot_wan"],
             IMAGE_SCENARIOS["hot_seedream"],
             IMAGE_SCENARIOS["edit"],

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Date, cast, select, update, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.model_pricing import image_pricing_keys, video_pricing_keys
 from db.models import (
     Generation,
     ImageGenerationAction,
@@ -954,7 +955,9 @@ async def toggle_price_plan(session: AsyncSession, key: str) -> bool | None:
 
 async def get_all_model_costs(session: AsyncSession) -> list[ModelCost]:
     result = await session.execute(
-        select(ModelCost).where(ModelCost.is_active == True)
+        select(ModelCost)
+        .where(ModelCost.is_active == True)
+        .order_by(ModelCost.gen_type, ModelCost.display_name, ModelCost.model_key)
     )
     return list(result.scalars().all())
 
@@ -964,6 +967,40 @@ async def get_model_cost(session: AsyncSession, model_key: str) -> ModelCost | N
         select(ModelCost).where(ModelCost.model_key == model_key)
     )
     return result.scalar_one_or_none()
+
+
+async def get_first_active_model_cost(session: AsyncSession, keys: list[str]) -> ModelCost | None:
+    result = await session.execute(
+        select(ModelCost)
+        .where(ModelCost.is_active == True, ModelCost.model_key.in_(keys))
+    )
+    costs = {cost.model_key: cost for cost in result.scalars().all()}
+    for key in keys:
+        if key in costs:
+            return costs[key]
+    return None
+
+
+async def resolve_image_model_cost(
+    session: AsyncSession,
+    model_key: str,
+    *,
+    quality: str | None = None,
+) -> ModelCost | None:
+    return await get_first_active_model_cost(session, image_pricing_keys(model_key, quality))
+
+
+async def resolve_video_model_cost(
+    session: AsyncSession,
+    model_key: str,
+    *,
+    duration: int | None = None,
+    resolution: str | None = None,
+) -> ModelCost | None:
+    return await get_first_active_model_cost(
+        session,
+        video_pricing_keys(model_key, duration=duration, resolution=resolution),
+    )
 
 
 async def set_model_cost(session: AsyncSession, model_key: str, credits: int) -> bool:

@@ -29,6 +29,10 @@ TBANK_FINAL_FAILURE_STATUSES = {
 }
 
 
+def _fmt_amount(value: float) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
 @router.callback_query(F.data == "menu:topup")
 async def cb_topup(call: CallbackQuery, session: AsyncSession) -> None:
     plans = await repo.get_active_price_plans(session)
@@ -74,7 +78,7 @@ async def cb_topup_rub(
     await call.message.edit_text(  # type: ignore[union-attr]
         f"🏦 <b>Оплата через T-Банк</b>\n\n"
         f"Тариф: {plan.label}\n"
-        f"Сумма: <b>{plan.price_rub:.0f} ₽</b>\n\n"
+        f"Сумма: <b>{_fmt_amount(plan.price_rub)} ₽</b>\n\n"
         f"Открой ссылку для оплаты картой или через СБП.\n"
         f"<i>После успешной оплаты 💋 зачислятся автоматически.</i>",
         reply_markup=payment_link_kb("💳 Перейти к оплате", payment.payment_url),
@@ -223,7 +227,7 @@ async def cb_crypto_plan(
     await call.message.edit_text(  # type: ignore[union-attr]
         f"🪙 <b>Оплата криптой</b>\n\n"
         f"Тариф: {plan.label}\n"
-        f"Сумма: <b>{amount_usd:.2f} USDT</b>\n\n"
+        f"Сумма: <b>{_fmt_amount(amount_usd)} USDT</b>\n\n"
         f"Нажми кнопку для оплаты в CryptoBot.\n"
         f"<i>После оплаты 💋 зачислятся автоматически.</i>",
         reply_markup=crypto_pay_kb(invoice.bot_invoice_url),

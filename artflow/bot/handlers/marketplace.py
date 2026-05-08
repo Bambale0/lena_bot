@@ -233,7 +233,11 @@ async def _launch_prompt_generation(
     from db.models import ImageGenerationAction
 
     model_key = prompt.model or DEFAULT_PROMPT_MODEL
-    model_cost = await repo.get_model_cost(session, model_key)
+    model_cost = await repo.resolve_image_model_cost(
+        session,
+        model_key,
+        quality=_default_quality_for_model(model_key),
+    )
     if not model_cost:
         await call.answer("Модель для этого промпта недоступна", show_alert=True)
         return
@@ -458,7 +462,11 @@ async def cb_prompt_skip_ref(
         await state.clear()
         return
 
-    model_cost = await repo.get_model_cost(session, model_key)
+    model_cost = await repo.resolve_image_model_cost(
+        session,
+        model_key,
+        quality=_default_quality_for_model(model_key),
+    )
     if not model_cost:
         await call.answer("Модель недоступна", show_alert=True)
         await state.clear()
@@ -550,7 +558,11 @@ async def fsm_prompt_use_reference(
 
     effective_model = model_key or prompt.model or DEFAULT_PROMPT_MODEL
     mode = "image" if reference_url and _supports_img2img(effective_model) else "text"
-    model_cost = await repo.get_model_cost(session, effective_model)
+    model_cost = await repo.resolve_image_model_cost(
+        session,
+        effective_model,
+        quality=_default_quality_for_model(effective_model),
+    )
     if not model_cost:
         await message.answer("Модель недоступна.", reply_markup=back_to_menu_kb())
         await state.clear()

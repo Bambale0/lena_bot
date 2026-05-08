@@ -5,12 +5,16 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from db.models import PricePlan
 
 
+def _fmt_amount(value: float) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
 def topup_kb(plans: list[PricePlan]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for plan in plans:
         builder.row(
             InlineKeyboardButton(
-                text=f"💳 {plan.label} — {plan.price_rub:.0f}₽",
+                text=f"💳 {plan.label} — {_fmt_amount(plan.price_rub)}₽",
                 callback_data=f"topup:rub:{plan.key}",
             )
         )
@@ -26,7 +30,7 @@ def crypto_plans_kb(plans: list[PricePlan]) -> InlineKeyboardMarkup:
     for plan in plans:
         builder.row(
             InlineKeyboardButton(
-                text=f"🪙 {plan.label} — ${plan.price_rub / 90:.0f} USDT",
+                text=f"🪙 {plan.label} — ${_fmt_amount(plan.price_rub / 90)} USDT",
                 callback_data=f"topup:crypto_plan:{plan.key}",
             )
         )

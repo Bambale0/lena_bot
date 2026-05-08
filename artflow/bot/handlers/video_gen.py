@@ -140,7 +140,14 @@ async def cb_video_model(
     call: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User
 ) -> None:
     model_key = call.data.split(":")[1]  # type: ignore[union-attr]
-    model_cost = await repo.get_model_cost(session, model_key)
+    default_duration = _DEFAULT_DURATION.get(model_key, 5)
+    default_resolution = _DEFAULT_RES.get(model_key)
+    model_cost = await repo.resolve_video_model_cost(
+        session,
+        model_key,
+        duration=default_duration,
+        resolution=default_resolution,
+    )
     if not model_cost:
         await call.answer("Модель недоступна", show_alert=True)
         return
@@ -154,9 +161,9 @@ async def cb_video_model(
     await state.update_data(
         model_key=model_key,
         credits=model_cost.credits,
-        duration=_DEFAULT_DURATION.get(model_key, 5),
+        duration=default_duration,
         aspect_ratio=_DEFAULT_RATIO.get(model_key),
-        resolution=_DEFAULT_RES.get(model_key),
+        resolution=default_resolution,
         grok_mode="normal" if VIDEO_CAPS.get(model_key, {}).get("mode_options") else None,
     )
 
@@ -337,12 +344,20 @@ async def cb_vpar_mode(call: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(VideoGenFSM.params_select, F.data == "vpar_next")
 async def cb_vpar_next(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
-    model_cost = await repo.get_model_cost(session, data["model_key"])
+    model_cost = await repo.resolve_video_model_cost(
+        session,
+        data["model_key"],
+        duration=data.get("duration"),
+        resolution=data.get("resolution"),
+    )
     display_name = model_cost.display_name if model_cost else data["model_key"]
+    if model_cost:
+        await state.update_data(credits=model_cost.credits)
     summary = _params_summary(data)
     await state.set_state(VideoGenFSM.prompt_input)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"✅ <b>{display_name}</b> · <code>{summary}</code>\n\n✍️ Введи промпт:",
+        f"✅ <b>{display_name}</b> ({model_cost.credits if model_cost else data.get('credits', 0)} кр)"
+        f" · <code>{summary}</code>\n\n✍️ Введи промпт:",
         reply_markup=back_to_menu_kb(),
     )
     await call.answer()
@@ -383,7 +398,6 @@ async def handle_video_prompt(
 ) -> None:
     data = await state.get_data()
     model_key: str = data["model_key"]
-    credits: int = data["credits"]
     mode: str = data.get("mode", "text")
     motion_step: str | None = data.get("motion_step")
     image_file_id: str | None = data.get("image_file_id")
@@ -429,6 +443,14 @@ async def handle_video_prompt(
         if image_file_id
         else data.get("image_url")
     )
+
+    model_cost = await repo.resolve_video_model_cost(
+        session,
+        model_key,
+        duration=duration,
+        resolution=resolution,
+    )
+    credits = model_cost.credits if model_cost else int(data.get("credits", 0))
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:

@@ -342,7 +342,11 @@ async def _launch_session_generation(
     launching_text: str,
     queued_text: str,
 ) -> bool:
-    model_cost = await repo.get_model_cost(session, image_session.model)
+    model_cost = await repo.resolve_image_model_cost(
+        session,
+        image_session.model,
+        quality=image_session.quality,
+    )
     credits = model_cost.credits if model_cost else 1
 
     model = _safe_image_model(image_session.model)
@@ -432,7 +436,8 @@ async def _start_image_model_flow(
     model_key: str,
     forced_mode: str | None = None,
 ) -> None:
-    model_cost = await repo.get_model_cost(session, model_key)
+    default_quality = _quality_options(model_key)[0][0] if IMAGE_CAPS.get(model_key, {}).get("has_quality") else "basic"
+    model_cost = await repo.resolve_image_model_cost(session, model_key, quality=default_quality)
     if not model_cost:
         await call.answer("Модель недоступна", show_alert=True)
         return
@@ -449,7 +454,7 @@ async def _start_image_model_flow(
         aspect_ratio=None,
         count=1,
         image_file_id=None,
-        quality="basic",
+        quality=default_quality,
         remix_mode=False,
         remix_parent_generation_id=None,
     )
@@ -475,7 +480,11 @@ async def cb_image_menu(
 ) -> None:
     image_session = await repo.get_active_image_session(session, db_user.id)
     if image_session:
-        model_cost = await repo.get_model_cost(session, image_session.model)
+        model_cost = await repo.resolve_image_model_cost(
+            session,
+            image_session.model,
+            quality=image_session.quality,
+        )
         await state.set_state(ImageGenFSM.session_active)
         await state.update_data(
             image_session_id=image_session.id,
@@ -708,10 +717,11 @@ async def cb_image_quality(
     await state.update_data(quality=quality)
     data = await state.get_data()
     model_key = data["model_key"]
-    model_cost = await repo.get_model_cost(session, model_key)
+    model_cost = await repo.resolve_image_model_cost(session, model_key, quality=quality)
     display_name = model_cost.display_name if model_cost else model_key
     ratio = data.get("aspect_ratio")
     q_label = _quality_label(model_key, quality)
+    await state.update_data(credits=model_cost.credits if model_cost else data.get("credits"))
     summary = " · ".join(part for part in (display_name, ratio, q_label) if part)
 
     if len(IMAGE_CAPS.get(model_key, {}).get("counts", [1])) > 1:
@@ -1111,7 +1121,16 @@ async def cb_image_session_animate(
         return
 
     model_key = VideoModel.GROK_I2V
-    model_cost = await repo.get_model_cost(session, model_key)
+    duration = _DEFAULT_DURATION.get(model_key, 6)
+    aspect_ratio = _DEFAULT_RATIO.get(model_key, "16:9")
+    resolution = _DEFAULT_RES.get(model_key, "480p")
+    grok_mode = "normal" if VIDEO_CAPS.get(model_key, {}).get("mode_options") else None
+    model_cost = await repo.resolve_video_model_cost(
+        session,
+        model_key,
+        duration=duration,
+        resolution=resolution,
+    )
     if not model_cost:
         await call.answer("Модель Grok I2V недоступна", show_alert=True)
         return
@@ -1121,11 +1140,6 @@ async def cb_image_session_animate(
             show_alert=True,
         )
         return
-
-    duration = _DEFAULT_DURATION.get(model_key, 6)
-    aspect_ratio = _DEFAULT_RATIO.get(model_key, "16:9")
-    resolution = _DEFAULT_RES.get(model_key, "480p")
-    grok_mode = "normal" if VIDEO_CAPS.get(model_key, {}).get("mode_options") else None
 
     await state.set_state(VideoGenFSM.params_select)
     await state.update_data(
@@ -1256,7 +1270,12 @@ async def cb_image_settings_quality_set(
 
     image_session.quality = quality
     await session.commit()
-    await state.update_data(image_session_id=image_session.id, quality=quality)
+    model_cost = await repo.resolve_image_model_cost(session, image_session.model, quality=quality)
+    await state.update_data(
+        image_session_id=image_session.id,
+        quality=quality,
+        credits=model_cost.credits if model_cost else None,
+    )
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         _session_settings_text(image_session),

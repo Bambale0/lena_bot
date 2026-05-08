@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
+from bot.keyboards.payment import topup_kb
 from bot.ui.main_menu import render_main_menu
 
 
@@ -36,3 +37,7 @@ def test_render_main_menu_active_session_text() -> None:
     context = SimpleNamespace(balance=1003, active_image_session=session, is_admin=False)
     render = render_main_menu(context)
     assert "Активная серия найдена" in render.text
+def test_topup_keyboard_keeps_decimal_price() -> None:
+    plans = [SimpleNamespace(label="10 сек · Pro", price_rub=199.5, key="p1")]
+    buttons = flatten_buttons(topup_kb(plans))
+    assert buttons[0].text == "💳 10 сек · Pro — 199.5₽"

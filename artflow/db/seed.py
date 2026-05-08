@@ -11,6 +11,7 @@ import logging
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.model_pricing import duration_label, pricing_variant_key, quality_label, resolution_label
 from db.models import GenerationType, ModelCost, PricePlan, UserPrompt
 from db.session import AsyncSessionLocal
 
@@ -58,6 +59,155 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "midjourney-describe", "display_name": "🔍 MJ Describe",  "gen_type": GenerationType.image, "credits": 5},
     {"model_key": "midjourney-video",    "display_name": "🎞️ MJ Video",    "gen_type": GenerationType.video,  "credits": 15},
 ]
+
+
+_IMAGE_VARIANT_COSTS = [
+    ("seedream/4.5-text-to-image", "🌸 Seedream 4.5", [("basic", 3), ("high", 4)]),
+    ("seedream/4.5-edit", "🌸 Seedream 4.5 Edit", [("basic", 3), ("high", 4)]),
+    ("wan/2-7-image-pro", "🌊 WAN 2.7 Image Pro", [("1K", 4), ("2K", 5), ("4K", 6)]),
+    ("nano-banana-2", "🍌 Nano Banana 2", [("1K", 2), ("2K", 3), ("4K", 4)]),
+    ("nano-banana-pro", "🍌 Nano Banana Pro", [("1K", 3), ("2K", 4), ("4K", 5)]),
+]
+
+_KLING_VIDEO_VARIANTS = [
+    (
+        "kling-2.6/text-to-video",
+        "⚙️ Kling 2.6 T2V",
+        [5, 10],
+        [],
+        {5: 30, 10: 40},
+    ),
+    (
+        "kling-2.6/image-to-video",
+        "⚙️ Kling 2.6 I2V",
+        [5, 10],
+        [],
+        {5: 35, 10: 45},
+    ),
+    (
+        "kling-2.6/motion-control",
+        "🕺 Kling 2.6 Motion",
+        [],
+        ["720p", "1080p"],
+        {"720p": 40, "1080p": 50},
+    ),
+    (
+        "kling-3.0/video",
+        "⚡ Kling 3.0",
+        [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        ["std", "pro", "4K"],
+        {
+            (3, "std"): 25,
+            (3, "pro"): 30,
+            (3, "4K"): 35,
+            (4, "std"): 30,
+            (4, "pro"): 35,
+            (4, "4K"): 40,
+            (5, "std"): 35,
+            (5, "pro"): 40,
+            (5, "4K"): 45,
+            (6, "std"): 40,
+            (6, "pro"): 45,
+            (6, "4K"): 50,
+            (7, "std"): 45,
+            (7, "pro"): 50,
+            (7, "4K"): 55,
+            (8, "std"): 50,
+            (8, "pro"): 55,
+            (8, "4K"): 60,
+            (9, "std"): 55,
+            (9, "pro"): 60,
+            (9, "4K"): 65,
+            (10, "std"): 60,
+            (10, "pro"): 65,
+            (10, "4K"): 70,
+            (11, "std"): 65,
+            (11, "pro"): 70,
+            (11, "4K"): 75,
+            (12, "std"): 70,
+            (12, "pro"): 75,
+            (12, "4K"): 80,
+            (13, "std"): 75,
+            (13, "pro"): 80,
+            (13, "4K"): 85,
+            (14, "std"): 80,
+            (14, "pro"): 85,
+            (14, "4K"): 90,
+            (15, "std"): 85,
+            (15, "pro"): 90,
+            (15, "4K"): 95,
+        },
+    ),
+    (
+        "kling-3.0/motion-control",
+        "🕺 Kling 3.0 Motion",
+        [],
+        ["720p", "1080p"],
+        {"720p": 50, "1080p": 60},
+    ),
+]
+
+
+def _build_variant_model_costs() -> list[dict]:
+    records: list[dict] = []
+
+    for model_key, display_name, tiers in _IMAGE_VARIANT_COSTS:
+        for quality, credits in tiers:
+            records.append(
+                {
+                    "model_key": pricing_variant_key(model_key, quality=quality),
+                    "display_name": f"{display_name} · {quality_label(quality)}",
+                    "gen_type": GenerationType.image,
+                    "credits": credits,
+                }
+            )
+
+    for model_key, display_name, durations, resolutions, prices in _KLING_VIDEO_VARIANTS:
+        if durations and resolutions:
+            for duration in durations:
+                for resolution in resolutions:
+                    records.append(
+                        {
+                            "model_key": pricing_variant_key(
+                                model_key,
+                                duration=duration,
+                                resolution=resolution,
+                            ),
+                            "display_name": (
+                                f"{display_name} · {duration_label(duration)} · {resolution_label(resolution)}"
+                            ),
+                            "gen_type": GenerationType.video,
+                            "credits": prices[(duration, resolution)],
+                        }
+                    )
+            continue
+
+        if durations:
+            for duration in durations:
+                records.append(
+                    {
+                        "model_key": pricing_variant_key(model_key, duration=duration),
+                        "display_name": f"{display_name} · {duration_label(duration)}",
+                        "gen_type": GenerationType.video,
+                        "credits": prices[duration],
+                    }
+                )
+            continue
+
+        for resolution in resolutions:
+            records.append(
+                {
+                    "model_key": pricing_variant_key(model_key, resolution=resolution),
+                    "display_name": f"{display_name} · {resolution_label(resolution)}",
+                    "gen_type": GenerationType.video,
+                    "credits": prices[resolution],
+                }
+            )
+
+    return records
+
+
+DEFAULT_MODEL_COSTS.extend(_build_variant_model_costs())
 
 LEGACY_MODEL_ALIASES_TO_DISABLE = {
     "google/nano-banana",

@@ -35,12 +35,14 @@ def _fmt_price(price: float) -> str:
 
 class AdminFSM(StatesGroup):
     # Price plan editing
+    edit_price_label = State()
     edit_price_key = State()
     edit_price_credits = State()
     edit_price_rub = State()
     new_price_credits = State()
     new_price_rub = State()
     # Model cost editing
+    edit_model_display_name = State()
     edit_model_key = State()
     edit_model_credits = State()
     # Credits management
@@ -367,6 +369,7 @@ async def cb_price_edit(
     builder = InlineKeyboardBuilder()
     builder.button(text="✏️ Изменить цену", callback_data=f"adm:price_set_rub:{plan.key}")
     builder.button(text="✏️ Изменить кредиты", callback_data=f"adm:price_set_cr:{plan.key}")
+    builder.button(text="✏️ Изменить название", callback_data=f"adm:price_set_label:{plan.key}")
     builder.button(
         text="🔴 Выключить" if plan.is_active else "🟢 Включить",
         callback_data=f"adm:price_toggle:{plan.key}",
@@ -482,9 +485,12 @@ async def cb_price_set_rub_start(call: CallbackQuery, state: FSMContext) -> None
 @router.message(AdminFSM.edit_price_rub)
 async def handle_price_rub(message: Message, session: AsyncSession, state: FSMContext) -> None:
     try:
-        new_price = float(message.text.strip())  # type: ignore[union-attr]
+        new_price = float((message.text or "").strip().replace(",", "."))
     except ValueError:
         await message.answer("Введи число (например: 299)")
+        return
+    if new_price <= 0:
+        await message.answer("Цена должна быть больше нуля.")
         return
 
     data = await state.get_data()
@@ -506,6 +512,18 @@ async def cb_price_set_credits_start(call: CallbackQuery, state: FSMContext) -> 
     await call.answer()
 
 
+@router.callback_query(F.data.startswith("adm:price_set_label:"))
+async def cb_price_set_label_start(call: CallbackQuery, state: FSMContext) -> None:
+    plan_key = call.data.split(":")[2]  # type: ignore[union-attr]
+    await state.set_state(AdminFSM.edit_price_label)
+    await state.update_data(edit_plan_key=plan_key)
+    await call.message.answer(
+        "Введи новое название тарифа.\n"
+        "Например: <code>10 сек · Pro</code> или <code>500 💋</code>"
+    )
+    await call.answer()
+
+
 @router.message(AdminFSM.edit_price_credits)
 async def handle_price_credits(message: Message, session: AsyncSession, state: FSMContext) -> None:
     try:
@@ -522,6 +540,23 @@ async def handle_price_credits(message: Message, session: AsyncSession, state: F
         await session.commit()
     await state.clear()
     await message.answer(f"✅ Кредиты тарифа <code>{plan_key}</code> обновлены: {new_credits}")
+
+
+@router.message(AdminFSM.edit_price_label)
+async def handle_price_label(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    new_label = (message.text or "").strip()
+    if not new_label:
+        await message.answer("Название не должно быть пустым.")
+        return
+
+    data = await state.get_data()
+    plan_key = data["edit_plan_key"]
+    plan = await repo.get_price_plan_by_key(session, plan_key)
+    if plan:
+        plan.label = new_label
+        await session.commit()
+    await state.clear()
+    await message.answer(f"✅ Название тарифа <code>{plan_key}</code> обновлено: <b>{new_label}</b>")
 
 
 # ─── Стоимость моделей ────────────────────────────────────────────────────────
@@ -545,12 +580,46 @@ async def cb_models(call: CallbackQuery, session: AsyncSession) -> None:
 
 
 @router.callback_query(F.data.startswith("adm:model_edit:"))
-async def cb_model_edit(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_model_edit(call: CallbackQuery, session: AsyncSession) -> None:
+    model_key = call.data.split(":")[2]  # type: ignore[union-attr]
+    model_cost = await repo.get_model_cost(session, model_key)
+    if not model_cost:
+        await call.answer("Модель не найдена", show_alert=True)
+        return
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✏️ Изменить стоимость", callback_data=f"adm:model_set_cr:{model_key}")
+    builder.button(text="✏️ Изменить название", callback_data=f"adm:model_set_name:{model_key}")
+    builder.button(text="← Назад", callback_data="adm:models")
+    builder.adjust(1)
+
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"⚙️ <b>Редактирование стоимости модели</b>\n\n"
+        f"Ключ: <code>{model_cost.model_key}</code>\n"
+        f"Название: <b>{model_cost.display_name}</b>\n"
+        f"Стоимость: <b>{model_cost.credits}</b> кр",
+        reply_markup=builder.as_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:model_set_cr:"))
+async def cb_model_set_credits_start(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":")[2]  # type: ignore[union-attr]
     await state.set_state(AdminFSM.edit_model_credits)
     await state.update_data(edit_model_key=model_key)
+    await call.message.answer(f"Введи новую стоимость в кредитах для <code>{model_key}</code>:")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:model_set_name:"))
+async def cb_model_set_name_start(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.split(":")[2]  # type: ignore[union-attr]
+    await state.set_state(AdminFSM.edit_model_display_name)
+    await state.update_data(edit_model_key=model_key)
     await call.message.answer(
-        f"Введи новую стоимость в кредитах для <code>{model_key}</code>:"
+        "Введи новое название позиции.\n"
+        "Например: <code>⚡ Kling 3.0 · 10 сек · Pro</code>"
     )
     await call.answer()
 
@@ -571,6 +640,27 @@ async def handle_model_credits(message: Message, session: AsyncSession, state: F
         await message.answer(f"✅ Стоимость <code>{model_key}</code> обновлена: {new_credits} кр")
     else:
         await message.answer("❌ Модель не найдена")
+
+
+@router.message(AdminFSM.edit_model_display_name)
+async def handle_model_display_name(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    new_name = (message.text or "").strip()
+    if not new_name:
+        await message.answer("Название не должно быть пустым.")
+        return
+
+    data = await state.get_data()
+    model_key = data["edit_model_key"]
+    model_cost = await repo.get_model_cost(session, model_key)
+    if not model_cost:
+        await state.clear()
+        await message.answer("❌ Модель не найдена")
+        return
+
+    model_cost.display_name = new_name
+    await session.commit()
+    await state.clear()
+    await message.answer(f"✅ Название <code>{model_key}</code> обновлено: <b>{new_name}</b>")
 
 
 # ─── Кредиты ─────────────────────────────────────────────────────────────────

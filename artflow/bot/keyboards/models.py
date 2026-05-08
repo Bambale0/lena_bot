@@ -231,6 +231,18 @@ IMAGE_SCENARIOS: dict[str, dict[str, str]] = {
         "model": ImageModel.NANO_BANANA_2,
         "mode": "image",
     },
+    "avatar": {
+        "title": "👤 Аватар",
+        "description": "Аватарка, портрет, профиль по фото",
+        "model": ImageModel.NANO_BANANA_PRO,
+        "mode": "image",
+    },
+    "glow": {
+        "title": "✨ Glow",
+        "description": "Свечение, неон, мягкий glow-эффект на фото",
+        "model": ImageModel.NANO_BANANA_PRO,
+        "mode": "image",
+    },
     "cinematic": {
         "title": "🎬 Кино и стиль",
         "description": "Фэнтези, fashion, постер, сцена",
@@ -364,7 +376,7 @@ def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
 
 def image_scenarios_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for scenario_key in ("fast", "quality", "hot_wan", "hot_seedream", "edit", "cinematic"):
+    for scenario_key in ("fast", "quality", "avatar", "glow", "hot_wan", "hot_seedream", "edit", "cinematic"):
         scenario = IMAGE_SCENARIOS[scenario_key]
         builder.row(
             InlineKeyboardButton(
