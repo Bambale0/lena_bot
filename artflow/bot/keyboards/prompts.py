@@ -4,7 +4,7 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from db.models import PromptStatus, UserPrompt
+from db.models import ModelCost, PromptStatus, UserPrompt
 from db.prompt_repository import COLLECTION_TAGS
 
 PAGE_SIZE = 8
@@ -35,7 +35,7 @@ def prompt_collections_kb() -> InlineKeyboardMarkup:
 def prompt_card_kb(prompt_id: int, *, source: str, index: int, has_next: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="🚀 Использовать", callback_data=f"prompt_use:{prompt_id}"),
+        InlineKeyboardButton(text="🔁 Повторить", callback_data=f"prompt_use:{prompt_id}"),
         InlineKeyboardButton(text="✨ Ремикс", callback_data=f"prompt_remix:{prompt_id}"),
     )
     builder.row(
@@ -83,6 +83,35 @@ def my_prompt_detail_kb(prompt_id: int, status: str) -> InlineKeyboardMarkup:
     if status == "approved":
         builder.row(InlineKeyboardButton(text="🔴 Деактивировать", callback_data=f"prompts:deactivate:{prompt_id}"))
     builder.row(InlineKeyboardButton(text="◀ Мои промпты", callback_data="prompts:my"))
+    return builder.as_markup()
+
+
+def prompt_use_model_kb(prompt_id: int, model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
+    from bot.keyboards.models import HIDDEN_IMAGE_MODELS, IMAGE_CAPS
+
+    builder = InlineKeyboardBuilder()
+    for mc in model_costs:
+        if (
+            mc.gen_type.value == "image"
+            and mc.model_key in IMAGE_CAPS
+            and mc.model_key not in HIDDEN_IMAGE_MODELS
+        ):
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"{mc.display_name} · {mc.credits} 💋",
+                    callback_data=f"prompt_pick_model:{prompt_id}:{mc.model_key}",
+                )
+            )
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="prompts:open"))
+    return builder.as_markup()
+
+
+def prompt_use_reference_kb(prompt_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="▶ Без референса", callback_data=f"prompt_skip_ref:{prompt_id}")
+    )
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="prompts:open"))
     return builder.as_markup()
 
 

@@ -7,9 +7,12 @@ from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject
 
+from core.config import settings
+
 logger = logging.getLogger(__name__)
 
 THROTTLE_LIMIT = 1.5  # seconds between messages
+_ADMIN_SET: frozenset[int] = frozenset(settings.ADMIN_IDS)
 
 
 class ThrottlingMiddleware(BaseMiddleware):
@@ -27,6 +30,9 @@ class ThrottlingMiddleware(BaseMiddleware):
 
         user_id = event.from_user.id if event.from_user else None
         if not user_id:
+            return await handler(event, data)
+
+        if user_id in _ADMIN_SET:
             return await handler(event, data)
 
         key = f"throttle:{user_id}"

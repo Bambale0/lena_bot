@@ -38,6 +38,8 @@ from db.models import GenerationType, ImageGenerationAction, ImageSession, User
 logger = logging.getLogger(__name__)
 router = Router(name="image_gen")
 
+MAX_CONCURRENT_GENERATIONS = 6
+
 
 def _kie_callback_url() -> str:
     params = {}
@@ -165,6 +167,9 @@ async def _session_reference_url(
 
     if image_session.reference_file_id:
         return await _telegram_file_url(bot, image_session.reference_file_id)
+
+    if image_session.reference_url:
+        return image_session.reference_url
 
     return None
 
@@ -348,9 +353,18 @@ async def _launch_session_generation(
         )
         return False
 
+    active_count = await repo.count_user_active_generations(session, db_user.id)
+    if active_count >= MAX_CONCURRENT_GENERATIONS:
+        await source_message.answer(
+            f"⏳ У тебя уже {active_count} генераций в очереди. "
+            f"Подожди, пока завершатся текущие.",
+            reply_markup=main_menu_kb(),
+        )
+        return False
+
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await source_message.answer("❌ Недостаточно кредитов.", reply_markup=main_menu_kb())
+        await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         return False
 
     gen = await repo.create_generation(
@@ -384,7 +398,7 @@ async def _launch_session_generation(
         await repo.fail_generation(session, gen.id, str(e))
         await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
-            "❌ Ошибка генерации. Кредиты возвращены.",
+            "❌ Ошибка генерации. 💋 возвращены.",
             reply_markup=image_session_kb(parent_generation_id),
         )
         return False
@@ -424,7 +438,7 @@ async def _start_image_model_flow(
         return
     if db_user.credits < model_cost.credits:
         await call.answer(
-            f"Недостаточно кредитов! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         return
@@ -856,7 +870,7 @@ async def handle_prompt(
         action_type=ImageGenerationAction.initial,
         reference_url=reference_url,
         parent_generation_id=None,
-        launching_text=f"⏳ <b>Запускаю генерацию...</b>\n<code>{model_key}</code>",
+        launching_text=f"⏳ <b>Запускаю генерацию...</b>\n<code>{image_session.model}</code>",
         queued_text="⏳ <b>Задача запущена.</b> Пришлю результат, когда генерация будет готова.",
     )
 
@@ -1067,8 +1081,75 @@ async def cb_image_session_new(
 
 
 @router.callback_query(F.data.startswith("img_session:animate:"))
-async def cb_image_session_animate(call: CallbackQuery) -> None:
-    await call.answer("Оживление подключим следующим шагом через image-to-video.", show_alert=True)
+async def cb_image_session_animate(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    from api.video_service import VideoModel
+    from bot.handlers.video_gen import _DEFAULT_DURATION, _DEFAULT_RATIO, _DEFAULT_RES
+    from bot.keyboards.models import VIDEO_CAPS, video_params_kb
+    from bot.states import VideoGenFSM
+
+    gen_id_raw = call.data.split(":")[-1]  # type: ignore[union-attr]
+    gen_id = int(gen_id_raw) if gen_id_raw.isdigit() and int(gen_id_raw) > 0 else None
+
+    result_url: str | None = None
+    if gen_id:
+        gen = await repo.get_generation_by_id(session, gen_id)
+        if gen and gen.user_id == db_user.id:
+            result_url = gen.result_url
+
+    if not result_url:
+        image_session, _ = await _resolve_image_session(session, db_user, state)
+        if image_session:
+            result_url = image_session.last_result_url
+
+    if not result_url:
+        await call.answer("Сначала дождись готового изображения", show_alert=True)
+        return
+
+    model_key = VideoModel.GROK_I2V
+    model_cost = await repo.get_model_cost(session, model_key)
+    if not model_cost:
+        await call.answer("Модель Grok I2V недоступна", show_alert=True)
+        return
+    if db_user.credits < model_cost.credits:
+        await call.answer(
+            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            show_alert=True,
+        )
+        return
+
+    duration = _DEFAULT_DURATION.get(model_key, 6)
+    aspect_ratio = _DEFAULT_RATIO.get(model_key, "16:9")
+    resolution = _DEFAULT_RES.get(model_key, "480p")
+    grok_mode = "normal" if VIDEO_CAPS.get(model_key, {}).get("mode_options") else None
+
+    await state.set_state(VideoGenFSM.params_select)
+    await state.update_data(
+        model_key=model_key,
+        mode="image",
+        credits=model_cost.credits,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        grok_mode=grok_mode,
+        image_file_id=None,
+        image_url=result_url,
+        reference_video_url=None,
+        motion_step=None,
+    )
+
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        f"🎬 <b>Оживляем изображение</b>\n\n"
+        f"Модель: <code>{model_cost.display_name}</code>\n\n"
+        "⚙️ Настрой параметры и нажми <b>Далее →</b>",
+        reply_markup=video_params_kb(model_key, duration, aspect_ratio, resolution, grok_mode),
+    )
+    await safe_answer_callback(call)
 
 
 # ── Session settings actions ──────────────────────────────────────────────────

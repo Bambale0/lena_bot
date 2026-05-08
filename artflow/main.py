@@ -10,7 +10,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import Update
+from aiogram.types import Update, URLInputFile
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -141,7 +141,7 @@ async def telegram_webhook(
         await dp.feed_update(bot, update)  # type: ignore[arg-type]
     except TelegramBadRequest as e:
         if is_benign_telegram_error(e):
-            logger.warning("Ignoring benign Telegram callback error: %s", e)
+            logger.debug("Ignoring benign Telegram callback error: %s", e)
             return {"ok": True}
         raise
     return {"ok": True}
@@ -175,8 +175,8 @@ async def cryptobot_webhook(request: Request) -> dict:
                     await bot.send_message(
                         user.tg_id,
                         f"✅ Оплата криптой подтверждена!\n"
-                        f"Зачислено: <b>+{tx.credits} кредитов</b>\n"
-                        f"Баланс: <b>{new_balance} кр</b>",
+                        f"Зачислено: <b>+{tx.credits} 💋</b>\n"
+                        f"Баланс: <b>{new_balance} 💋</b>",
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
@@ -217,8 +217,8 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
                         await bot.send_message(
                             user.tg_id,
                             f"✅ Оплата через T-Банк подтверждена!\n"
-                            f"Зачислено: <b>+{tx.credits} кредитов</b>\n"
-                            f"Баланс: <b>{new_balance} кр</b>",
+                            f"Зачислено: <b>+{tx.credits} 💋</b>\n"
+                            f"Баланс: <b>{new_balance} 💋</b>",
                             reply_markup=back_to_menu_kb(),
                         )
                     except Exception as e:
@@ -269,6 +269,7 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                     await bot.send_message(
                         user.tg_id,
                         f"❌ Генерация не удалась.\nКредиты возвращены.\n\n<code>{err[:500]}</code>",
+                        reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
                     logger.warning("Failed to notify KIE failure user=%s: %s", user.tg_id, e)
@@ -281,7 +282,7 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
             await repo.add_credits(session, gen.user_id, gen.credits_spent)
             if bot:
                 try:
-                    await bot.send_message(user.tg_id, f"❌ {err}. Кредиты возвращены.")
+                    await bot.send_message(user.tg_id, f"❌ {err}. Кредиты возвращены.", reply_markup=back_to_menu_kb())
                 except Exception as e:
                     logger.warning("Failed to notify empty KIE result user=%s: %s", user.tg_id, e)
             return {"ok": True}
@@ -317,6 +318,10 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                         photo=result_url,
                         caption=caption,
                         reply_markup=image_session_kb(gen.id),
+                    )
+                    await bot.send_document(
+                        chat_id=user.tg_id,
+                        document=URLInputFile(result_url, filename="image.jpg"),
                     )
                 else:
                     await bot.send_video(

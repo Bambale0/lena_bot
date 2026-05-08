@@ -12,7 +12,6 @@ def feed_card_kb(
     has_next: bool = True,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="✨ Ремикс", callback_data=f"feed:remix:{gen_id}"))
     builder.row(
         InlineKeyboardButton(text="❤️", callback_data=f"feed:like:{gen_id}:{source}:{index}"),
         InlineKeyboardButton(text="📤", callback_data=f"feed:share:{gen_id}"),

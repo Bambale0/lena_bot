@@ -11,7 +11,7 @@ from core.config import settings
 def render_main_menu(context: MainMenuContext) -> ScreenRender:
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text=f"🍌 Баланс: {context.balance}", callback_data="menu:balance"),
+        InlineKeyboardButton(text=f"💋 Баланс: {context.balance}", callback_data="menu:balance"),
     )
 
     if context.active_image_session:

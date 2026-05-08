@@ -14,7 +14,7 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, PhotoSize
+from aiogram.types import CallbackQuery, Message, PhotoSize, URLInputFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import midjourney_service as mj
@@ -123,7 +123,7 @@ async def cb_speed(call: CallbackQuery, state: FSMContext, session: AsyncSession
 
     if db_user.credits < credits:
         await call.answer(
-            f"Недостаточно кредитов! Нужно {credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋! Нужно {credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         return
@@ -132,7 +132,7 @@ async def cb_speed(call: CallbackQuery, state: FSMContext, session: AsyncSession
     await state.set_state(MidjourneyFSM.reference_upload)
 
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"📎 <b>Референс-изображение</b> (опционально) · {credits} кр\n\n"
+        f"📎 <b>Референс-изображение</b> (опционально) · {credits} 💋\n\n"
         "Если хочешь, чтобы Midjourney ориентировался на стиль конкретного изображения, "
         "загрузи его сейчас. Ссылка будет добавлена в начало промпта автоматически.\n\n"
         "Или нажми «Без референса» и просто введи промпт.",
@@ -148,7 +148,7 @@ async def cb_mj_ref_skip(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     credits: int = data.get("credits", 10)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"✏️ <b>Введи промпт для Midjourney</b> · {credits} кр\n\n"
+        f"✏️ <b>Введи промпт для Midjourney</b> · {credits} 💋\n\n"
         "Пиши на английском — MJ понимает его лучше всего.\n\n"
         "<b>Параметры:</b>\n"
         "• <code>--ar 16:9</code> / <code>--ar 1:1</code> — соотношение сторон\n"
@@ -175,7 +175,7 @@ async def handle_mj_reference_photo(message: Message, state: FSMContext, bot: Bo
     data = await state.get_data()
     credits: int = data.get("credits", 10)
     await message.answer(
-        f"✅ Референс получен! · {credits} кр\n\n"
+        f"✅ Референс получен! · {credits} 💋\n\n"
         "✏️ <b>Введи промпт</b> — изображение будет добавлено как стиль-референс.\n\n"
         "Можно указать вес референса: <code>image.jpg::1.5</code> (чем выше, тем сильнее влияние)\n\n"
         "<i>Пример: same style portrait, cinematic, studio light --ar 3:4</i>",
@@ -201,7 +201,7 @@ async def handle_imagine_prompt(
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await message.answer("❌ Недостаточно кредитов.", reply_markup=main_menu_kb())
+        await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
@@ -220,7 +220,7 @@ async def handle_imagine_prompt(
         logger.error("MJ imagine submit error: %s", e)
         await repo.fail_generation(session, gen.id, str(e))
         await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text("❌ Ошибка при отправке запроса. Кредиты возвращены.", reply_markup=main_menu_kb())
+        await status_msg.edit_text("❌ Ошибка при отправке запроса. 💋 возвращены.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
@@ -245,11 +245,16 @@ async def handle_imagine_prompt(
             pass
 
         caption = f"✅ Готово!\n\n<i>{prompt[:200]}</i>"
+        _mj_photo_url = task_result.image_url or url
         await bot.send_photo(
             chat_id=message.chat.id,
-            photo=task_result.image_url or url,
+            photo=_mj_photo_url,
             caption=caption,
             reply_markup=mj_action_buttons_kb(task_result.buttons),
+        )
+        await bot.send_document(
+            chat_id=message.chat.id,
+            document=URLInputFile(_mj_photo_url, filename="image.jpg"),
         )
 
     async def on_failure(err: str) -> None:
@@ -266,7 +271,7 @@ async def handle_imagine_prompt(
         await repo.fail_generation(session, gen.id, err)
         await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
-            f"❌ Ошибка: {err}\nКредиты возвращены.", reply_markup=main_menu_kb()
+            f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb()
         )
         await state.clear()
 
@@ -305,13 +310,13 @@ async def cb_mj_action(
 
     if db_user.credits < credits:
         await call.answer(
-            f"Недостаточно кредитов ({credits} кр.)", show_alert=True
+            f"Недостаточно 💋 ({credits})", show_alert=True
         )
         return
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await call.answer("Недостаточно кредитов", show_alert=True)
+        await call.answer("Недостаточно 💋", show_alert=True)
         return
 
     label = (btn_data.get("emoji", "") + btn_data.get("label", "")).strip()
@@ -357,6 +362,10 @@ async def cb_mj_action(
             caption=caption,
             reply_markup=mj_action_buttons_kb(task_result.buttons),
         )
+        await bot.send_document(
+            chat_id=call.message.chat.id,  # type: ignore[union-attr]
+            document=URLInputFile(media_url, filename="image.jpg"),
+        )
 
     async def on_failure(err: str) -> None:
         if err == "__MODAL__":
@@ -371,7 +380,7 @@ async def cb_mj_action(
 
         await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
-            f"❌ Ошибка: {err}\nКредиты возвращены.", reply_markup=main_menu_kb()
+            f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb()
         )
         await state.clear()
 
@@ -430,11 +439,16 @@ async def _submit_modal(
         except Exception:
             pass
 
+        _modal_url = task_result.image_url or url
         await bot.send_photo(
             chat_id=message.chat.id,
-            photo=task_result.image_url or url,
+            photo=_modal_url,
             caption="✅ Modal готово!",
             reply_markup=mj_action_buttons_kb(task_result.buttons),
+        )
+        await bot.send_document(
+            chat_id=message.chat.id,
+            document=URLInputFile(_modal_url, filename="image.jpg"),
         )
 
     async def on_failure(err: str) -> None:
@@ -456,19 +470,19 @@ async def cb_blend_start(call: CallbackQuery, state: FSMContext, session: AsyncS
     credits = model_cost.credits if model_cost else 12
 
     if db_user.credits < credits:
-        await call.answer(f"Недостаточно кредитов ({credits} кр.)", show_alert=True)
+        await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
         return
 
     await state.update_data(blend_images=[], blend_credits=credits)
     await state.set_state(MidjourneyFSM.blend_collecting)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"🖼️ <b>Blend — смешивание изображений</b> · {credits} кр\n\n"
-        "Отправляй фото по одному — от 2 до 5 штук. "
+        f"🖼️ <b>Blend — смешивание изображений</b> · {credits} 💋\n\n"
+        "Отправляй фото по одному — от 2 до 6 штук. "
         "Midjourney смешает их в одно изображение, сохраняя стиль, цвета и элементы каждого.\n\n"
         "💡 <b>Советы:</b>\n"
         "• Выбирай изображения с похожей композицией\n"
         "• Хорошо сочетаются портрет + текстура или пейзаж + стиль\n"
-        "• После 2-х фото появится кнопка «Блендить»",
+        "• После 2-х фото появится кнопка «Блендить» (до 6 изображений)",
         reply_markup=mj_blend_submit_kb(0),
     )
     await call.answer()
@@ -485,8 +499,8 @@ async def handle_blend_photo(
     data = await state.get_data()
     images: list[str] = data.get("blend_images", [])
 
-    if len(images) >= 5:
-        await message.answer("Максимум 5 изображений. Нажми «Блендить».")
+    if len(images) >= 6:
+        await message.answer("Максимум 6 изображений. Нажми «Блендить».")
         return
 
     photo: PhotoSize = message.photo[-1]  # type: ignore[index]
@@ -498,7 +512,7 @@ async def handle_blend_photo(
 
     count = len(images)
     await message.answer(
-        f"✅ Фото {count}/5 добавлено.",
+        f"✅ Фото {count}/6 добавлено.",
         reply_markup=mj_blend_submit_kb(count),
     )
 
@@ -521,7 +535,7 @@ async def cb_blend_submit(
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await call.answer("Недостаточно кредитов", show_alert=True)
+        await call.answer("Недостаточно 💋", show_alert=True)
         return
 
     await state.set_state(MidjourneyFSM.blend_generating)
@@ -563,17 +577,22 @@ async def cb_blend_submit(
         except Exception:
             pass
 
+        _blend_url = task_result.image_url or url
         await bot.send_photo(
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
-            photo=task_result.image_url or url,
+            photo=_blend_url,
             caption="✅ Blend готово!",
             reply_markup=mj_action_buttons_kb(task_result.buttons),
+        )
+        await bot.send_document(
+            chat_id=call.message.chat.id,  # type: ignore[union-attr]
+            document=URLInputFile(_blend_url, filename="image.jpg"),
         )
 
     async def on_failure(err: str) -> None:
         await repo.fail_generation(session, gen.id, err)
         await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text(f"❌ Ошибка: {err}\nКредиты возвращены.", reply_markup=main_menu_kb())
+        await status_msg.edit_text(f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
         await state.clear()
 
     asyncio.create_task(
@@ -597,13 +616,13 @@ async def cb_describe_start(call: CallbackQuery, state: FSMContext, session: Asy
     credits = model_cost.credits if model_cost else 5
 
     if db_user.credits < credits:
-        await call.answer(f"Недостаточно кредитов ({credits} кр.)", show_alert=True)
+        await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
         return
 
     await state.update_data(describe_credits=credits)
     await state.set_state(MidjourneyFSM.describe_upload)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"🔍 <b>Describe</b> · {credits} кр\n\n"
+        f"🔍 <b>Describe</b> · {credits} 💋\n\n"
         "Загрузи любое изображение — Midjourney проанализирует его и выдаст "
         "4 варианта текстового промпта, которые описывают это изображение.\n\n"
         "💡 <b>Зачем это нужно:</b>\n"
@@ -629,7 +648,7 @@ async def handle_describe_photo(
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await message.answer("❌ Недостаточно кредитов.", reply_markup=main_menu_kb())
+        await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
@@ -680,7 +699,7 @@ async def handle_describe_photo(
     async def on_failure(err: str) -> None:
         await repo.fail_generation(session, gen.id, err)
         await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text(f"❌ Ошибка: {err}\nКредиты возвращены.", reply_markup=main_menu_kb())
+        await status_msg.edit_text(f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
         await state.clear()
 
     asyncio.create_task(
@@ -699,13 +718,13 @@ async def cb_mj_video_start(call: CallbackQuery, state: FSMContext, session: Asy
     credits = model_cost.credits if model_cost else 15
 
     if db_user.credits < credits:
-        await call.answer(f"Недостаточно кредитов ({credits} кр.)", show_alert=True)
+        await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
         return
 
     await state.update_data(video_credits=credits)
     await state.set_state(MidjourneyFSM.video_upload)
     await call.message.edit_text(  # type: ignore[union-attr]
-        f"🎞️ <b>MJ Video — изображение в видео</b> · {credits} кр\n\n"
+        f"🎞️ <b>MJ Video — изображение в видео</b> · {credits} 💋\n\n"
         "Отправь изображение — оно станет первым кадром. "
         "Midjourney оживит его, добавив движение.\n\n"
         "💡 <b>Лучше всего работает с:</b>\n"
@@ -780,7 +799,7 @@ async def _submit_mj_video(
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await message.answer("❌ Недостаточно кредитов.", reply_markup=main_menu_kb())
+        await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
@@ -822,7 +841,7 @@ async def _submit_mj_video(
     async def on_failure(err: str) -> None:
         await repo.fail_generation(session, gen.id, err)
         await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text(f"❌ Ошибка: {err}\nКредиты возвращены.", reply_markup=main_menu_kb())
+        await status_msg.edit_text(f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
         await state.clear()
 
     asyncio.create_task(

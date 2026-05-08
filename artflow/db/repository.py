@@ -113,25 +113,26 @@ async def create_user(
 
 
 async def add_credits(session: AsyncSession, user_id: int, amount: int) -> int:
-    await session.execute(
-        update(User).where(User.id == user_id).values(credits=User.credits + amount)
+    result = await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(credits=User.credits + amount)
+        .returning(User.credits)
     )
     await session.commit()
-    result = await session.execute(select(User.credits).where(User.id == user_id))
     return result.scalar_one()
 
 
 async def spend_credits(session: AsyncSession, user_id: int, amount: int) -> bool:
-    """Returns False if not enough credits."""
-    result = await session.execute(select(User.credits).where(User.id == user_id))
-    balance = result.scalar_one()
-    if balance < amount:
-        return False
-    await session.execute(
-        update(User).where(User.id == user_id).values(credits=User.credits - amount)
+    """Atomically deduct credits. Returns False if not enough credits."""
+    result = await session.execute(
+        update(User)
+        .where(User.id == user_id, User.credits >= amount)
+        .values(credits=User.credits - amount)
+        .returning(User.id)
     )
     await session.commit()
-    return True
+    return result.scalar_one_or_none() is not None
 
 
 async def count_users(session: AsyncSession) -> int:
@@ -672,6 +673,18 @@ async def get_user_history(
         .limit(limit)
     )
     return list(result.scalars().all())
+
+
+async def count_user_active_generations(session: AsyncSession, user_id: int) -> int:
+    result = await session.execute(
+        select(func.count())
+        .select_from(Generation)
+        .where(
+            Generation.user_id == user_id,
+            Generation.status.in_([GenerationStatus.pending, GenerationStatus.processing]),
+        )
+    )
+    return result.scalar_one()
 
 
 async def count_generations_today(session: AsyncSession) -> int:

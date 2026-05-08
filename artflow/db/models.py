@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -287,3 +288,18 @@ class UserPrompt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     author: Mapped["User"] = relationship(lazy="noload")
+
+
+class PromptLike(Base):
+    __tablename__ = "prompt_likes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "prompt_id", name="uq_prompt_likes_user_prompt"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    prompt_id: Mapped[int] = mapped_column(Integer, ForeignKey("user_prompts.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(lazy="noload")
+    prompt: Mapped["UserPrompt"] = relationship(lazy="noload")

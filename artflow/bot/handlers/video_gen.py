@@ -424,11 +424,15 @@ async def handle_video_prompt(
         await state.update_data(motion_step="ready")
         prompt = data.get("motion_prompt") or ""
 
-    image_url = await mirror_telegram_file(bot, image_file_id)
+    image_url = (
+        await mirror_telegram_file(bot, image_file_id)
+        if image_file_id
+        else data.get("image_url")
+    )
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await message.answer("❌ Недостаточно кредитов.", reply_markup=main_menu_kb())
+        await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
@@ -461,7 +465,7 @@ async def handle_video_prompt(
         logger.error("Video generation error: %s", e)
         await repo.fail_generation(session, gen.id, str(e))
         await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text("❌ Ошибка запуска генерации. Кредиты возвращены.\n\nПопробуй другую модель или повтори через минуту.", reply_markup=main_menu_kb())
+        await status_msg.edit_text("❌ Ошибка запуска генерации. 💋 возвращены.\n\nПопробуй другую модель или повтори через минуту.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
@@ -494,7 +498,7 @@ async def handle_video_prompt(
         await repo.fail_generation(session, gen.id, err)
         await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
-            f"❌ Ошибка: {err}\nКредиты возвращены.", reply_markup=main_menu_kb()
+            f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb()
         )
 
     asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))

@@ -6,10 +6,12 @@ import math
 import re
 
 from sqlalchemy import desc, func, select, update
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import repository as repo
-from db.models import PromptCategory, PromptStatus, UserPrompt
+from db.models import PromptCategory, PromptLike, PromptStatus, UserPrompt
 
 logger = logging.getLogger(__name__)
 
@@ -221,14 +223,32 @@ async def increment_usage(session: AsyncSession, prompt_id: int) -> None:
     await session.commit()
 
 
-async def like_prompt(session: AsyncSession, prompt_id: int) -> UserPrompt | None:
-    await session.execute(
-        update(UserPrompt)
-        .where(UserPrompt.id == prompt_id)
-        .values(likes=UserPrompt.likes + 1)
-    )
-    await session.commit()
-    return await get_prompt_by_id(session, prompt_id)
+async def like_prompt(session: AsyncSession, prompt_id: int, user_id: int) -> tuple[UserPrompt | None, str]:
+    try:
+        inserted_like = await session.execute(
+            insert(PromptLike)
+            .values(user_id=user_id, prompt_id=prompt_id)
+            .on_conflict_do_nothing(constraint="uq_prompt_likes_user_prompt")
+            .returning(PromptLike.id)
+        )
+        liked_now = inserted_like.scalar_one_or_none() is not None
+
+        if liked_now:
+            await session.execute(
+                update(UserPrompt)
+                .where(UserPrompt.id == prompt_id)
+                .values(likes=UserPrompt.likes + 1)
+            )
+
+        await session.commit()
+        # Only refetch when the card needs to update (like was new)
+        if liked_now:
+            return await get_prompt_by_id(session, prompt_id), "liked"
+        return None, "duplicate"
+    except IntegrityError as exc:
+        await session.rollback()
+        logger.warning("Prompt like integrity error prompt=%s user=%s: %s", prompt_id, user_id, exc)
+        return None, "missing"
 
 
 async def apply_prompt_rewards(

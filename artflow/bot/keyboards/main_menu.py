@@ -12,7 +12,7 @@ def main_menu_kb(
     builder = InlineKeyboardBuilder()
     if balance is not None:
         builder.row(
-            InlineKeyboardButton(text=f"🍌 Баланс: {balance}", callback_data="menu:balance"),
+            InlineKeyboardButton(text=f"💋 Баланс: {balance}", callback_data="menu:balance"),
         )
     if has_active_image_session:
         builder.row(

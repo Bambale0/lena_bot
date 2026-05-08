@@ -6,7 +6,30 @@
       "Bash(redis-server --port 6666 --daemonize yes --logfile /var/log/redis/redis-6666.log)",
       "Bash(pg_isready -h localhost -p 5432)",
       "Bash(psql -U postgres -c \"\\\\l artflow\")",
-      "Bash(psql -U postgres -c \"\\\\l\")"
+      "Bash(psql -U postgres -c \"\\\\l\")",
+      "Bash(pg_lsclusters)",
+      "Bash(service postgresql *)",
+      "Bash(pg_ctlcluster 14 main start)",
+      "Bash(systemctl is-enabled *)",
+      "Bash(journalctl -u postgresql --since \"1 hour ago\" --no-pager -n 30)",
+      "Bash(tail -50 /var/log/postgresql/postgresql-14-main.log 2>/dev/null)",
+      "Read(//var/log/postgresql/**)",
+      "Bash(journalctl --disk-usage)",
+      "Bash(journalctl --vacuum-size=200M)",
+      "Bash(grep -n \"SystemMaxUse\\\\|SystemKeepFree\\\\|MaxRetentionSec\" /etc/systemd/journald.conf 2>/dev/null | head -10)",
+      "Read(//etc/systemd/**)",
+      "Bash(python3 scripts/watcher.py --service artflow-webhook --debounce 2.0)",
+      "Bash(python3 -c \"import scripts.watcher\")",
+      "Bash(python3 scripts/watcher.py --help)",
+      "Bash(systemctl stop *)",
+      "Bash(python3 /root/lena/lena_bot/artflow/scripts/watcher.py --service artflow-webhook --debounce 2.0)",
+      "Bash(kill %1)",
+      "Bash(systemctl daemon-reload *)",
+      "Bash(journalctl -u artflow-webhook -n 30 --no-pager)"
+    ],
+    "additionalDirectories": [
+      "/etc/systemd",
+      "/tmp"
     ]
   }
 }

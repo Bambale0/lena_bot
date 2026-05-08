@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 def get_main_menu_keyboard(balance: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=f"🍌 Баланс: {balance}", callback_data="balance")
+            InlineKeyboardButton(text=f"💋 Баланс: {balance}", callback_data="balance")
         ],
 
         [

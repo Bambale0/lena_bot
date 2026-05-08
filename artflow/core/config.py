@@ -41,11 +41,6 @@ class Settings(BaseSettings):
     STATIC_UPLOAD_DIR: str = "static/upload"
     STATIC_UPLOAD_URL_PATH: str = "/static/upload"
 
-    # YooKassa
-    YOOKASSA_SHOP_ID: str = ""
-    YOOKASSA_SECRET_KEY: str = ""
-    YOOKASSA_PROVIDER_TOKEN: str = ""
-
     # CryptoBot
     CRYPTOBOT_TOKEN: str = ""
     CRYPTOBOT_BASE_URL: str = "https://pay.crypt.bot/api"

@@ -82,7 +82,7 @@ class AuthMiddleware(BaseMiddleware):
                     bot,
                     referrer.tg_id,
                     "🎉 По твоей ссылке пришёл новый пользователь!\n"
-                    f"+{settings.REFERRAL_L1_CREDITS} кредитов начислено.",
+                    f"+{settings.REFERRAL_L1_CREDITS} 💋 начислено.",
                 )
             if referrer_l2:
                 await repo.add_credits(session, referrer_l2.id, settings.REFERRAL_L2_CREDITS)
@@ -91,7 +91,7 @@ class AuthMiddleware(BaseMiddleware):
                     bot,
                     referrer_l2.tg_id,
                     "🎉 По второй линии пришёл новый пользователь!\n"
-                    f"+{settings.REFERRAL_L2_CREDITS} кредитов начислено.",
+                    f"+{settings.REFERRAL_L2_CREDITS} 💋 начислено.",
                 )
 
         elif db_user.is_banned:

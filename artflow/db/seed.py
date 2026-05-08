@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 # ── Стартовые тарифы ──────────────────────────────────────────────────────────
 DEFAULT_PRICE_PLANS = [
-    {"key": "credits_100",  "label": "100 кредитов",  "credits": 100,  "price_rub": 199.0,  "sort_order": 1},
-    {"key": "credits_300",  "label": "300 кредитов",  "credits": 300,  "price_rub": 499.0,  "sort_order": 2},
-    {"key": "credits_1000", "label": "1000 кредитов", "credits": 1000, "price_rub": 1490.0, "sort_order": 3},
+    {"key": "credits_100",  "label": "100 💋",  "credits": 100,  "price_rub": 199.0,  "sort_order": 1},
+    {"key": "credits_300",  "label": "300 💋",  "credits": 300,  "price_rub": 499.0,  "sort_order": 2},
+    {"key": "credits_1000", "label": "1000 💋", "credits": 1000, "price_rub": 1490.0, "sort_order": 3},
 ]
 
 # ── Стоимость моделей ─────────────────────────────────────────────────────────

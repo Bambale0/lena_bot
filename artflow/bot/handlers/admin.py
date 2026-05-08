@@ -15,11 +15,12 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram import Bot
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.filters.admin import IsAdmin
 from db import repository as repo
-from db.models import User, WithdrawalStatus
+from db.models import PricePlan, User, WithdrawalStatus
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin")
@@ -27,11 +28,18 @@ router.message.filter(IsAdmin())
 router.callback_query.filter(IsAdmin())
 
 
+def _fmt_price(price: float) -> str:
+    """'199' для целых, '99.5' для дробных — без лишних нулей."""
+    return f"{price:g}"
+
+
 class AdminFSM(StatesGroup):
     # Price plan editing
     edit_price_key = State()
     edit_price_credits = State()
     edit_price_rub = State()
+    new_price_credits = State()
+    new_price_rub = State()
     # Model cost editing
     edit_model_key = State()
     edit_model_credits = State()
@@ -325,19 +333,14 @@ async def cb_withdrawal_decide(call: CallbackQuery, session: AsyncSession, bot: 
 
 @router.callback_query(F.data == "adm:price")
 async def cb_price_list(call: CallbackQuery, session: AsyncSession) -> None:
-    plans = await repo.get_active_price_plans(session)
-    all_plans = await session.execute(
-        __import__("sqlalchemy", fromlist=["select"]).select(
-            __import__("db.models", fromlist=["PricePlan"]).PricePlan
-        ).order_by(__import__("db.models", fromlist=["PricePlan"]).PricePlan.sort_order)
-    )
-    all_plans = list(all_plans.scalars().all())
+    result = await session.execute(select(PricePlan).order_by(PricePlan.sort_order))
+    all_plans = list(result.scalars().all())
 
     builder = InlineKeyboardBuilder()
     for plan in all_plans:
         status = "✅" if plan.is_active else "❌"
         builder.button(
-            text=f"{status} {plan.label} — {plan.price_rub:.0f}₽ / {plan.credits}кр",
+            text=f"{status} {plan.label} — {_fmt_price(plan.price_rub)}₽ / {plan.credits} 💋",
             callback_data=f"adm:price_edit:{plan.key}",
         )
     builder.button(text="➕ Новый тариф", callback_data="adm:price_new")
@@ -376,7 +379,7 @@ async def cb_price_edit(
         f"Ключ: <code>{plan.key}</code>\n"
         f"Название: {plan.label}\n"
         f"Кредиты: {plan.credits}\n"
-        f"Цена: {plan.price_rub:.0f}₽\n"
+        f"Цена: {_fmt_price(plan.price_rub)}₽\n"
         f"Статус: {'✅ Активен' if plan.is_active else '❌ Выключен'}",
         reply_markup=builder.as_markup(),
     )
@@ -389,6 +392,82 @@ async def cb_price_toggle(call: CallbackQuery, session: AsyncSession) -> None:
     new_state = await repo.toggle_price_plan(session, plan_key)
     await call.answer(f"Тариф {'включён' if new_state else 'выключен'}", show_alert=True)
     await cb_price_list(call, session)
+
+
+@router.callback_query(F.data == "adm:price_new")
+async def cb_price_new_start(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(AdminFSM.new_price_credits)
+    await call.message.answer(  # type: ignore[union-attr]
+        "➕ <b>Новый тариф</b>\n\n"
+        "Введи количество кредитов.\n"
+        "Например: <code>500</code>"
+    )
+    await call.answer()
+
+
+@router.message(AdminFSM.new_price_credits)
+async def handle_new_price_credits(message: Message, state: FSMContext) -> None:
+    try:
+        credits = int((message.text or "").strip())
+    except ValueError:
+        await message.answer("Введи целое число кредитов, например: <code>500</code>")
+        return
+    if credits <= 0:
+        await message.answer("Количество кредитов должно быть больше нуля.")
+        return
+
+    await state.update_data(new_price_credits=credits)
+    await state.set_state(AdminFSM.new_price_rub)
+    await message.answer(
+        f"Кредиты: <b>{credits}</b>\n\n"
+        "Теперь введи цену в рублях.\n"
+        "Например: <code>799</code>"
+    )
+
+
+@router.message(AdminFSM.new_price_rub)
+async def handle_new_price_rub(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    raw = (message.text or "").strip().replace(",", ".")
+    try:
+        price_rub = float(raw)
+    except ValueError:
+        await message.answer("Введи цену числом, например: <code>799</code>")
+        return
+    if price_rub <= 0:
+        await message.answer("Цена должна быть больше нуля.")
+        return
+
+    data = await state.get_data()
+    credits = int(data["new_price_credits"])
+    base_key = f"credits_{credits}"
+    plan_key = base_key
+    candidate = await repo.get_price_plan_by_key(session, plan_key)
+    if candidate:
+        suffix = int(price_rub)
+        plan_key = f"{base_key}_{suffix}"
+        # ensure uniqueness if same price also exists
+        while await repo.get_price_plan_by_key(session, plan_key):
+            plan_key = f"{base_key}_{suffix}_{id(plan_key) % 10000}"
+
+    max_result = await session.execute(select(func.max(PricePlan.sort_order)))
+    sort_order = (max_result.scalar_one_or_none() or 0) + 1
+
+    plan = await repo.upsert_price_plan(
+        session,
+        key=plan_key,
+        label=f"{credits} 💋",
+        credits=credits,
+        price_rub=price_rub,
+        sort_order=sort_order,
+    )
+    await state.clear()
+    await message.answer(
+        f"✅ Новый тариф создан\n\n"
+        f"Ключ: <code>{plan.key}</code>\n"
+        f"Название: <b>{plan.label}</b>\n"
+        f"Кредиты: <b>{plan.credits}</b>\n"
+        f"Цена: <b>{_fmt_price(plan.price_rub)}₽</b>",
+    )
 
 
 @router.callback_query(F.data.startswith("adm:price_set_rub:"))
@@ -415,7 +494,7 @@ async def handle_price_rub(message: Message, session: AsyncSession, state: FSMCo
         plan.price_rub = new_price
         await session.commit()
     await state.clear()
-    await message.answer(f"✅ Цена тарифа <code>{plan_key}</code> обновлена: {new_price:.0f}₽")
+    await message.answer(f"✅ Цена тарифа <code>{plan_key}</code> обновлена: {_fmt_price(new_price)}₽")
 
 
 @router.callback_query(F.data.startswith("adm:price_set_cr:"))

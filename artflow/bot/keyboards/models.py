@@ -273,6 +273,7 @@ _VIDEO_MODEL_ORDER: list[str] = [
     VideoModel.KLING_26_MOTION,
     VideoModel.KLING_30_MOTION,
     VideoModel.KLING_26_T2V,
+    # Kling 3.0 and Veo are listed above but also appear in i2v group
 ]
 
 _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
@@ -299,6 +300,10 @@ _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
     (
         "i2v",
         [
+            VideoModel.KLING_30,
+            VideoModel.VEO_3,
+            VideoModel.VEO_3_FAST,
+            VideoModel.VEO_3_LITE,
             VideoModel.KLING_26_I2V,
             VideoModel.WAN_27_I2V,
             VideoModel.GROK_I2V,
@@ -324,7 +329,7 @@ VIDEO_GROUP_TITLES: dict[str, str] = {
 
 def _model_button(mc: ModelCost, prefix: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(
-        text=f"{mc.display_name} · {mc.credits} кр",
+        text=f"{mc.display_name} · {mc.credits} 💋",
         callback_data=f"{prefix}:{mc.model_key}",
     )
 
@@ -346,7 +351,7 @@ def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
             and mc.model_key not in HIDDEN_IMAGE_MODELS
         ):
             desc = IMAGE_MODEL_DESC.get(mc.model_key, "")
-            label = f"{mc.display_name} · {mc.credits} кр"
+            label = f"{mc.display_name} · {mc.credits} 💋"
             builder.row(
                 InlineKeyboardButton(
                     text=label,
@@ -455,7 +460,25 @@ def image_active_kb() -> InlineKeyboardMarkup:
 
 
 def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
-    return image_active_kb()
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✨ Ремикс", callback_data="img_remix"),
+        InlineKeyboardButton(text="🔁 Ещё вариант", callback_data="img_variation"),
+    )
+    if gen_id:
+        builder.row(
+            InlineKeyboardButton(text="🎬 Оживить", callback_data=f"img_session:animate:{gen_id}"),
+        )
+    builder.row(
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_settings"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🆕 Новая серия", callback_data="img_new"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"),
+    )
+    return builder.as_markup()
 
 
 def image_session_settings_kb(

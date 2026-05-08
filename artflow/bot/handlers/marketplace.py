@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.image_service import ImageModel
 from api.public_files import ensure_public_image_url, local_upload_path_from_url, mirror_telegram_file
 from bot.filters.admin import IsAdmin
+from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.prompts import (
     moderation_kb,
     my_prompt_detail_kb,
@@ -20,9 +21,12 @@ from bot.keyboards.prompts import (
     prompt_card_kb,
     prompt_collections_kb,
     prompt_confirm_kb,
+    prompt_use_model_kb,
+    prompt_use_reference_kb,
     prompts_home_kb,
 )
 from bot.states.prompt import PromptModerateFSM, PromptUploadFSM
+from bot.states import PromptUseFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import PromptStatus, User, UserPrompt
@@ -68,11 +72,12 @@ def _prompt_library_text() -> str:
 
 def _prompt_card_caption(prompt: UserPrompt, *, position: int | None = None, total: int | None = None) -> str:
     ranking = f"#{position} из {total}\n\n" if position and total else ""
+    tags = "  ".join(f"#{t}" for t in (prompt.tags or []))
+    tags_line = f"\n{tags}" if tags else ""
     return (
         f"{ranking}<b>{prompt.title}</b>\n\n"
-        f"{prompt.prompt_text[:700]}\n\n"
-        f"🔥 Использовали: <b>{prompt.uses_count}</b>\n"
-        f"❤️ Лайки: <b>{prompt.likes}</b>"
+        f"<i>{prompt.description}</i>{tags_line}\n\n"
+        f"🔥 Использовали: <b>{prompt.uses_count}</b>  ❤️ <b>{prompt.likes}</b>"
     )
 
 
@@ -194,7 +199,7 @@ async def show_prompt_card_by_id(
 ) -> None:
     prompt = await get_prompt_by_id(session, prompt_id)
     if not prompt or prompt.status != PromptStatus.approved or not prompt.is_public:
-        await message.answer("Промпт не найден или скрыт.")
+        await message.answer("Промпт не найден или скрыт.", reply_markup=back_to_menu_kb())
         return
     await _show_prompt_card(holder=message, prompt=prompt, source="top", index=0, total=1)
 
@@ -234,7 +239,7 @@ async def _launch_prompt_generation(
         return
     if db_user.credits < model_cost.credits:
         await call.answer(
-            f"Недостаточно кредитов. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         return
@@ -279,11 +284,11 @@ async def _launch_prompt_generation(
         author = await repo.get_user_by_id(session, prompt.author_id)
         if author:
             try:
-                parts = [f"+{rewards['author']} кр автору"]
+                parts = [f"+{rewards['author']} 💋 автору"]
                 if rewards["l2"] > 0:
-                    parts.append(f"+{rewards['l2']} кр lvl2")
+                    parts.append(f"+{rewards['l2']} 💋 lvl2")
                 if rewards["l3"] > 0:
-                    parts.append(f"+{rewards['l3']} кр lvl3")
+                    parts.append(f"+{rewards['l3']} 💋 lvl3")
                 await bot.send_message(
                     author.tg_id,
                     f"💰 Промпт «<b>{prompt.title}</b>» использовали.\n" + " · ".join(parts),
@@ -349,11 +354,17 @@ async def cb_prompt_next(call: CallbackQuery, session: AsyncSession) -> None:
 
 
 @router.callback_query(F.data.startswith("prompt_like:"))
-async def cb_prompt_like(call: CallbackQuery, session: AsyncSession) -> None:
+async def cb_prompt_like(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     _, prompt_id_raw, source, index_raw = call.data.split(":", 3)  # type: ignore[union-attr]
-    prompt = await like_prompt(session, int(prompt_id_raw))
-    if not prompt:
+    prompt, like_status = await like_prompt(session, int(prompt_id_raw), db_user.id)
+    if like_status == "duplicate":
+        await call.answer("Ты уже лайкал этот промпт")
+        return
+    if like_status == "missing":
         await call.answer("Промпт не найден", show_alert=True)
+        return
+    if not prompt:
+        await call.answer()
         return
     prompts = await _prompts_for_source(session, source)
     await _show_prompt_card(
@@ -377,7 +388,8 @@ async def cb_prompt_share(call: CallbackQuery, session: AsyncSession, db_user: U
     share_link = f"https://t.me/{bot_info.username}?start=prompt_{prompt.id}"
     await call.message.answer(
         f"📤 Поделись промптом «<b>{prompt.title}</b>»:\n{share_link}\n\n"
-        f"Твоя реферальная ссылка: https://t.me/{bot_info.username}?start={db_user.referral_code}"
+        f"Твоя реферальная ссылка: https://t.me/{bot_info.username}?start={db_user.referral_code}",
+        reply_markup=back_to_menu_kb(),
     )
     await call.answer("Ссылка готова")
 
@@ -388,15 +400,211 @@ async def cb_prompt_use(
     session: AsyncSession,
     db_user: User,
     state: FSMContext,
-    bot: Bot,
 ) -> None:
     prompt_id = int(call.data.split(":")[1])  # type: ignore[union-attr]
     prompt = await get_prompt_by_id(session, prompt_id)
     if not prompt:
         await call.answer("Промпт не найден", show_alert=True)
         return
-    await _launch_prompt_generation(call=call, session=session, state=state, db_user=db_user, bot=bot, prompt=prompt, remix=False)
+
+    model_costs = await repo.get_all_model_costs(session)
+    await state.set_state(PromptUseFSM.model_select)
+    await state.update_data(use_prompt_id=prompt_id)
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        f"🎨 <b>{prompt.title}</b>\n\n"
+        "<i>Выбери модель для генерации:</i>",
+        reply_markup=prompt_use_model_kb(prompt_id, model_costs),
+    )
     await call.answer()
+
+
+@router.callback_query(PromptUseFSM.model_select, F.data.startswith("prompt_pick_model:"))
+async def cb_prompt_pick_model(
+    call: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    _, prompt_id_raw, model_key = call.data.split(":", 2)  # type: ignore[union-attr]
+    await state.update_data(use_model_key=model_key)
+    await state.set_state(PromptUseFSM.reference_upload)
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "🖼 <b>Референс (необязательно)</b>\n\n"
+        "Отправь фото-референс, чтобы задать стиль,\n"
+        "или нажми <b>«Без референса»</b> для запуска прямо сейчас.",
+        reply_markup=prompt_use_reference_kb(int(prompt_id_raw)),
+    )
+    await call.answer()
+
+
+@router.callback_query(PromptUseFSM.reference_upload, F.data.startswith("prompt_skip_ref:"))
+async def cb_prompt_skip_ref(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    from bot.handlers.image_gen import _launch_session_generation
+    from db.models import ImageGenerationAction
+
+    data = await state.get_data()
+    prompt_id = data.get("use_prompt_id") or int(call.data.split(":")[1])  # type: ignore[union-attr]
+    model_key: str = data.get("use_model_key") or DEFAULT_PROMPT_MODEL
+
+    prompt = await get_prompt_by_id(session, prompt_id)
+    if not prompt:
+        await call.answer("Промпт не найден", show_alert=True)
+        await state.clear()
+        return
+
+    model_cost = await repo.get_model_cost(session, model_key)
+    if not model_cost:
+        await call.answer("Модель недоступна", show_alert=True)
+        await state.clear()
+        return
+    if db_user.credits < model_cost.credits:
+        await call.answer(
+            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            show_alert=True,
+        )
+        await state.clear()
+        return
+
+    prompt, rewards = await use_prompt(session, prompt.id, db_user.id, credits_spent=model_cost.credits)
+    image_session = await repo.create_image_session(
+        session=session,
+        user_id=db_user.id,
+        model=model_key,
+        mode="text",
+        aspect_ratio=None,
+        quality=_default_quality_for_model(model_key),
+        count=_default_count_for_model(model_key),
+        base_prompt=prompt.prompt_text,
+        reference_file_id=None,
+        reference_url=None,
+    )
+    await state.clear()
+    await _launch_session_generation(
+        source_message=call.message,  # type: ignore[arg-type]
+        state=state,
+        session=session,
+        db_user=db_user,
+        image_session=image_session,
+        prompt=prompt.prompt_text,
+        action_type=ImageGenerationAction.initial,
+        reference_url=None,
+        parent_generation_id=None,
+        launching_text="⏳ <b>Запускаю генерацию по промпту...</b>",
+        queued_text="⏳ <b>Генерация запущена.</b> Результат придёт сюда автоматически.",
+    )
+    if rewards["author"] > 0:
+        author = await repo.get_user_by_id(session, prompt.author_id)
+        if author:
+            try:
+                parts = [f"+{rewards['author']} 💋 автору"]
+                if rewards["l2"] > 0:
+                    parts.append(f"+{rewards['l2']} 💋 lvl2")
+                if rewards["l3"] > 0:
+                    parts.append(f"+{rewards['l3']} 💋 lvl3")
+                await bot.send_message(
+                    author.tg_id,
+                    f"💰 Промпт «<b>{prompt.title}</b>» использовали.\n" + " · ".join(parts),
+                )
+            except Exception as e:
+                logger.warning("Failed to notify prompt author %s: %s", author.tg_id, e)
+    await call.answer()
+
+
+@router.message(PromptUseFSM.reference_upload, F.photo)
+async def fsm_prompt_use_reference(
+    message: Message,
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    data = await state.get_data()
+    prompt_id = data.get("use_prompt_id")
+    model_key = data.get("use_model_key")
+    if not prompt_id:
+        await state.clear()
+        return
+
+    prompt = await get_prompt_by_id(session, prompt_id)
+    if not prompt:
+        await message.answer("Промпт не найден.", reply_markup=back_to_menu_kb())
+        await state.clear()
+        return
+
+    from api.public_files import mirror_telegram_file
+
+    best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
+    reference_url = await mirror_telegram_file(bot, best[0].file_id)
+
+    if model_key:
+        prompt.model = model_key
+
+    from bot.handlers.image_gen import _launch_session_generation, _supports_img2img
+    from db.models import ImageGenerationAction
+
+    effective_model = model_key or prompt.model or DEFAULT_PROMPT_MODEL
+    mode = "image" if reference_url and _supports_img2img(effective_model) else "text"
+    model_cost = await repo.get_model_cost(session, effective_model)
+    if not model_cost:
+        await message.answer("Модель недоступна.", reply_markup=back_to_menu_kb())
+        await state.clear()
+        return
+    if db_user.credits < model_cost.credits:
+        await message.answer(
+            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            reply_markup=back_to_menu_kb(),
+        )
+        await state.clear()
+        return
+
+    prompt, rewards = await use_prompt(session, prompt.id, db_user.id, credits_spent=model_cost.credits)
+    image_session = await repo.create_image_session(
+        session=session,
+        user_id=db_user.id,
+        model=effective_model,
+        mode=mode,
+        aspect_ratio=None,
+        quality=_default_quality_for_model(effective_model),
+        count=_default_count_for_model(effective_model),
+        base_prompt=prompt.prompt_text,
+        reference_file_id=None,
+        reference_url=reference_url if mode == "image" else None,
+    )
+    await state.clear()
+    await _launch_session_generation(
+        source_message=message,
+        state=state,
+        session=session,
+        db_user=db_user,
+        image_session=image_session,
+        prompt=prompt.prompt_text,
+        action_type=ImageGenerationAction.initial,
+        reference_url=reference_url if mode == "image" else None,
+        parent_generation_id=None,
+        launching_text="⏳ <b>Запускаю генерацию по промпту...</b>",
+        queued_text="⏳ <b>Генерация запущена.</b> Результат придёт сюда автоматически.",
+    )
+    if rewards["author"] > 0:
+        author = await repo.get_user_by_id(session, prompt.author_id)
+        if author:
+            try:
+                parts = [f"+{rewards['author']} 💋 автору"]
+                if rewards["l2"] > 0:
+                    parts.append(f"+{rewards['l2']} 💋 lvl2")
+                if rewards["l3"] > 0:
+                    parts.append(f"+{rewards['l3']} 💋 lvl3")
+                await bot.send_message(
+                    author.tg_id,
+                    f"💰 Промпт «<b>{prompt.title}</b>» использовали.\n" + " · ".join(parts),
+                )
+            except Exception as e:
+                logger.warning("Failed to notify prompt author %s: %s", author.tg_id, e)
 
 
 @router.callback_query(F.data.startswith("prompt_remix:"))
@@ -443,7 +651,8 @@ async def fsm_upload_image(message: Message, state: FSMContext, bot: Bot) -> Non
     await state.set_state(PromptUploadFSM.prompt_text)
     await message.answer(
         "<b>Шаг 2/2</b> — Отправь сам промпт.\n\n"
-        "Теги я постараюсь определить автоматически по содержанию."
+        "Теги я постараюсь определить автоматически по содержанию.",
+        reply_markup=back_to_menu_kb(),
     )
 
 

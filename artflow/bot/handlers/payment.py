@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.payment import crypto_pay_kb, crypto_plans_kb, payment_link_kb, topup_kb
@@ -76,7 +76,7 @@ async def cb_topup_rub(
         f"Тариф: {plan.label}\n"
         f"Сумма: <b>{plan.price_rub:.0f} ₽</b>\n\n"
         f"Открой ссылку для оплаты картой или через СБП.\n"
-        f"<i>После успешной оплаты кредиты зачислятся автоматически.</i>",
+        f"<i>После успешной оплаты 💋 зачислятся автоматически.</i>",
         reply_markup=payment_link_kb("💳 Перейти к оплате", payment.payment_url),
     )
     await call.answer()
@@ -174,44 +174,6 @@ async def cb_tbank_cancel_payment(
     await call.answer(text, show_alert=True)
 
 
-@router.pre_checkout_query()
-async def pre_checkout(query: PreCheckoutQuery) -> None:
-    """Всегда подтверждаем pre_checkout."""
-    await query.answer(ok=True)
-
-
-@router.message(F.successful_payment)
-async def successful_payment(
-    message: Message, session: AsyncSession, db_user: User
-) -> None:
-    payment = message.successful_payment  # type: ignore[union-attr]
-    payload = payment.invoice_payload  # "yookassa:credits_100"
-    plan_key = payload.split(":")[1]
-
-    plan = await repo.get_price_plan_by_key(session, plan_key)
-    if not plan:
-        logger.error("Plan not found after payment: %s", plan_key)
-        return
-
-    await repo.create_transaction(
-        session,
-        user_id=db_user.id,
-        amount_rub=plan.price_rub,
-        credits=plan.credits,
-        provider=PaymentProvider.yookassa,
-        external_id=payment.telegram_payment_charge_id,
-    )
-    new_balance = await repo.add_credits(session, db_user.id, plan.credits)
-
-    await message.answer(
-        f"✅ Оплата прошла успешно!\n\n"
-        f"Зачислено: <b>+{plan.credits} кредитов</b>\n"
-        f"Текущий баланс: <b>{new_balance} кредитов</b>",
-        reply_markup=back_to_menu_kb(),
-    )
-    logger.info("Payment success: user=%s plan=%s credits=%s", db_user.tg_id, plan_key, plan.credits)
-
-
 # ─── CryptoBot ────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "topup:crypto")
@@ -263,7 +225,7 @@ async def cb_crypto_plan(
         f"Тариф: {plan.label}\n"
         f"Сумма: <b>{amount_usd:.2f} USDT</b>\n\n"
         f"Нажми кнопку для оплаты в CryptoBot.\n"
-        f"<i>После оплаты кредиты зачислятся автоматически.</i>",
+        f"<i>После оплаты 💋 зачислятся автоматически.</i>",
         reply_markup=crypto_pay_kb(invoice.bot_invoice_url),
     )
     await call.answer()

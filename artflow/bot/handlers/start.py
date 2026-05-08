@@ -24,7 +24,7 @@ WELCOME_TEXT = (
     "🎨 <b>Изображения</b> — Gemini, WAN, GPT Image, Seedream\n"
     "🎬 <b>Видео</b> — Kling, Veo, Grok, Seedance и другие\n"
     "🖌️ <b>Midjourney</b> — Imagine, Blend, Describe, Video\n\n"
-    "🎁 На твой счёт зачислено <b>{credits} стартовых кредитов</b>!\n\n"
+    "🎁 На твой счёт зачислено <b>{credits} 💋</b>!\n\n"
     "Выбери, что хочешь создать:"
 )
 
@@ -45,12 +45,12 @@ HELP_TEXT = (
     "• Указывай освещение: <i>golden hour, neon glow, studio light</i>\n"
     "• Упоминай качество: <i>8k, sharp focus, highly detailed</i>\n\n"
     "📌 <b>Стоимость:</b>\n"
-    "• Изображение: 2–10 кредитов\n"
-    "• Видео: 20–50 кредитов\n"
-    "• Midjourney: 5–15 кредитов\n\n"
+    "• Изображение: 2–10 💋\n"
+    "• Видео: 20–50 💋\n"
+    "• Midjourney: 5–15 💋\n\n"
     f"👥 <b>Реферальная программа:</b>\n"
-    f"• Прямой реферал: +{settings.REFERRAL_L1_CREDITS} кр\n"
-    f"• Реферал реферала: +{settings.REFERRAL_L2_CREDITS} кр"
+    f"• Прямой реферал: +{settings.REFERRAL_L1_CREDITS} 💋\n"
+    f"• Реферал реферала: +{settings.REFERRAL_L2_CREDITS} 💋"
 )
 
 @router.message(CommandStart())

@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.main_menu import back_to_menu_kb
+from bot.states import MusicFSM
 from bot.ui.router import render_screen
 from bot.utils.telegram_ui import safe_answer_callback
 from db.models import User
@@ -22,6 +23,7 @@ async def music_menu(
     session: AsyncSession,
     db_user: User,
 ) -> None:
+    await state.set_state(MusicFSM.prompt_input)
     await state.update_data(instrumental=False)
     screen = await render_screen(screen="music", session=session, db_user=db_user)
     await call.message.answer(  # type: ignore[union-attr]
@@ -34,6 +36,7 @@ async def music_menu(
 @router.callback_query(F.data.startswith("music:mode:"))
 async def music_mode(call: CallbackQuery, state: FSMContext) -> None:
     mode = call.data.split(":")[-1]  # type: ignore[union-attr]
+    await state.set_state(MusicFSM.prompt_input)
     await state.update_data(instrumental=(mode == "instrumental"))
     label = "без текста" if mode == "instrumental" else "с текстом"
     await call.message.answer(  # type: ignore[union-attr]
@@ -44,22 +47,20 @@ async def music_mode(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(F.text == "🎵 Песня")
 async def music_entry(msg: Message, state: FSMContext):
+    await state.set_state(MusicFSM.prompt_input)
     await state.update_data(instrumental=False)
     await msg.answer("🎵 Напиши описание трека", reply_markup=back_to_menu_kb())
 
-@router.message()
+@router.message(MusicFSM.prompt_input, F.text)
 async def music_prompt(msg: Message, state: FSMContext):
     data = await state.get_data()
 
-    if "instrumental" not in data:
-        return
-
-    await msg.answer("⏳ Генерирую...")
+    await msg.answer("⏳ Генерирую...", reply_markup=back_to_menu_kb())
 
     try:
-        task_id = await create_music_task(msg.text, data["instrumental"])
-        await msg.answer(f"🎵 Запущено! ID: {task_id}")
+        task_id = await create_music_task(msg.text, data.get("instrumental", False))
+        await msg.answer(f"🎵 Запущено! ID: {task_id}", reply_markup=back_to_menu_kb())
     except Exception as e:
-        await msg.answer(f"❌ Ошибка: {e}")
+        await msg.answer(f"❌ Ошибка: {e}", reply_markup=back_to_menu_kb())
 
     await state.clear()

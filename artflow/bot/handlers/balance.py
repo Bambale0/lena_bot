@@ -49,12 +49,12 @@ async def cb_balance(call: CallbackQuery, db_user: User) -> None:
     )
     text = (
         f"💎 <b>Твой баланс</b>\n\n"
-        f"Кредиты: <b>{db_user.credits}</b>\n"
+        f"💋 Поцелуи: <b>{db_user.credits}</b>\n"
         f"Подписка: {sub_status}\n\n"
         f"<b>Стоимость генерации:</b>\n"
-        f"• Изображение: 2–10 кр\n"
-        f"• Видео: 20–50 кр\n"
-        f"• Midjourney: 5–15 кр\n\n"
+        f"• Изображение: 2–10 💋\n"
+        f"• Видео: 20–50 💋\n"
+        f"• Midjourney: 5–15 💋\n\n"
         f"💳 Пополнить баланс можно прямо здесь."
     )
     await call.message.edit_text(text, reply_markup=balance_screen_kb())  # type: ignore[union-attr]
@@ -82,8 +82,8 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
         f"• L2: <b>{l2}</b>\n"
         f"• L3: <b>{l3}</b>\n\n"
         f"💰 <b>Бонусы:</b>\n"
-        f"• Уровень 1 (прямой): +{settings.REFERRAL_L1_CREDITS} кредитов\n"
-        f"• Уровень 2 (реферал реферала): +{settings.REFERRAL_L2_CREDITS} кредитов\n\n"
+        f"• Уровень 1 (прямой): +{settings.REFERRAL_L1_CREDITS} 💋\n"
+        f"• Уровень 2 (реферал реферала): +{settings.REFERRAL_L2_CREDITS} 💋\n\n"
         f"<i>Бонусы начисляются при первом запуске бота приглашённым.</i>"
     )
     if withdrawal_lines:
@@ -98,7 +98,8 @@ async def cb_referral_withdraw(call: CallbackQuery, state: FSMContext) -> None:
     await call.message.answer(  # type: ignore[union-attr]
         "💸 <b>Заявка на ручной вывод</b>\n\n"
         "Введи сумму в рублях, которую нужно вывести.\n"
-        "Например: <code>1500</code>"
+        "Например: <code>1500</code>",
+        reply_markup=back_to_menu_kb(),
     )
     await call.answer()
 
@@ -109,16 +110,17 @@ async def handle_withdraw_amount(message: Message, state: FSMContext) -> None:
     try:
         amount = float(raw)
     except ValueError:
-        await message.answer("Введи сумму числом, например: <code>1500</code>")
+        await message.answer("Введи сумму числом, например: <code>1500</code>", reply_markup=back_to_menu_kb())
         return
     if amount <= 0:
-        await message.answer("Сумма должна быть больше нуля.")
+        await message.answer("Сумма должна быть больше нуля.", reply_markup=back_to_menu_kb())
         return
     await state.update_data(withdraw_amount=amount)
     await state.set_state(WithdrawalFSM.details)
     await message.answer(
         "Теперь отправь реквизиты для выплаты одним сообщением.\n\n"
-        "Например: банк + номер телефона / карта / USDT-кошелёк."
+        "Например: банк + номер телефона / карта / USDT-кошелёк.",
+        reply_markup=back_to_menu_kb(),
     )
 
 
@@ -132,7 +134,7 @@ async def handle_withdraw_details(
 ) -> None:
     details = (message.text or "").strip()
     if len(details) < 5:
-        await message.answer("Реквизиты слишком короткие. Отправь банк/номер/кошелёк подробнее.")
+        await message.answer("Реквизиты слишком короткие. Отправь банк/номер/кошелёк подробнее.", reply_markup=back_to_menu_kb())
         return
     data = await state.get_data()
     amount = float(data["withdraw_amount"])
@@ -191,7 +193,7 @@ async def cb_history(
         lines.append(
             f"{i}. {icon} {status_icon} <code>{gen.model}</code>\n"
             f"   <i>{gen.prompt[:60]}{'...' if len(gen.prompt) > 60 else ''}</i>\n"
-            f"   -{gen.credits_spent} кр"
+            f"   -{gen.credits_spent} 💋"
         )
 
     await call.message.edit_text(  # type: ignore[union-attr]

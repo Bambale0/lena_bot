@@ -11,6 +11,7 @@ from aiogram.types import CallbackQuery, InputMediaPhoto, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.feed import empty_feed_kb, feed_card_kb
+from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.models import IMAGE_CAPS
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
@@ -60,7 +61,6 @@ def _feed_caption(card: FeedGenerationCard, *, position: int | None = None) -> s
         f"🎨 <b>{html.escape(_model_label(gen.model))}</b>{ratio}\n\n"
         f"<i>{prompt}</i>\n\n"
         f"❤️ <b>{gen.likes_count}</b>\n"
-        f"🔥 <b>{card.remix_count}</b> remix\n"
         f"📤 <b>{gen.shares_count}</b>\n"
         f"────────────"
     )
@@ -244,7 +244,8 @@ async def cb_feed_share(call: CallbackQuery, session: AsyncSession, db_user: Use
     share_link = f"https://t.me/{bot_info.username}?start=feed_{gen.id}"
     await call.message.answer(
         f"📤 <b>Ссылка на пост</b>\n{share_link}\n\n"
-        f"👥 Твоя реферальная ссылка:\nhttps://t.me/{bot_info.username}?start={db_user.referral_code}"
+        f"👥 Твоя реферальная ссылка:\nhttps://t.me/{bot_info.username}?start={db_user.referral_code}",
+        reply_markup=back_to_menu_kb(),
     )
     await safe_answer_callback(call, "Ссылка готова")
 
@@ -271,7 +272,7 @@ async def cb_feed_remix(
         return
     if db_user.credits < model_cost.credits:
         await call.answer(
-            f"Недостаточно кредитов. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         return

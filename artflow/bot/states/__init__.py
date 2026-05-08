@@ -52,3 +52,12 @@ class MidjourneyFSM(StatesGroup):
     video_speed_select = State()
     video_prompt = State()
     video_generating = State()
+
+
+class MusicFSM(StatesGroup):
+    prompt_input = State()
+
+
+class PromptUseFSM(StatesGroup):
+    model_select = State()
+    reference_upload = State()
