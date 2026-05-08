@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     TBANK_SUCCESS_URL: str = ""
     TBANK_FAIL_URL: str = ""
 
+    # KIE.AI photo → prompt (GPT-5.x vision via kie.ai)
+    KIE_PHOTO_PROMPT_MODEL: str = "gpt-5-2"
+    KIE_PHOTO_PROMPT_FALLBACK: str = "gpt-5-5"
+
     # Feature flags
     SUBSCRIPTION_ENABLED: bool = False
 

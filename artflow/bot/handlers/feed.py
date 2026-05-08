@@ -15,7 +15,7 @@ from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.models import IMAGE_CAPS
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
-from db.models import ImageGenerationAction, User
+from db.models import User
 from db.repository import FeedGenerationCard
 
 logger = logging.getLogger(__name__)
@@ -250,66 +250,3 @@ async def cb_feed_share(call: CallbackQuery, session: AsyncSession, db_user: Use
     await safe_answer_callback(call, "Ссылка готова")
 
 
-@router.callback_query(F.data.startswith("feed:remix:"))
-async def cb_feed_remix(
-    call: CallbackQuery,
-    session: AsyncSession,
-    db_user: User,
-    state: FSMContext,
-) -> None:
-    from bot.handlers.image_gen import _launch_session_generation, _supports_img2img
-
-    gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
-    card = await repo.get_feed_generation_card(session, gen_id)
-    if not card:
-        await call.answer("Пост не найден", show_alert=True)
-        return
-
-    gen = card.generation
-    model_cost = await repo.get_model_cost(session, gen.model)
-    if not model_cost:
-        await call.answer("Модель этого поста недоступна", show_alert=True)
-        return
-    if db_user.credits < model_cost.credits:
-        await call.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
-            show_alert=True,
-        )
-        return
-
-    reference_url = gen.result_url if _supports_img2img(gen.model) else None
-    mode = "image" if reference_url else "text"
-    image_session = await repo.create_image_session(
-        session=session,
-        user_id=db_user.id,
-        model=gen.model,
-        mode=mode,
-        aspect_ratio=card.aspect_ratio,
-        quality=_default_quality_for_model(gen.model, card.quality),
-        count=_default_count_for_model(gen.model, card.count),
-        base_prompt=gen.prompt,
-        reference_file_id=None,
-        reference_url=reference_url,
-    )
-
-    await state.update_data(
-        prompt=gen.prompt,
-        model=gen.model,
-        aspect_ratio=card.aspect_ratio,
-        reference_url=reference_url,
-        image_session_id=image_session.id,
-    )
-    await _launch_session_generation(
-        source_message=call.message,  # type: ignore[arg-type]
-        state=state,
-        session=session,
-        db_user=db_user,
-        image_session=image_session,
-        prompt=gen.prompt,
-        action_type=ImageGenerationAction.remix,
-        reference_url=reference_url,
-        parent_generation_id=gen.id,
-        launching_text="✨ <b>Запускаю ремикс из ленты...</b>",
-        queued_text="⏳ <b>Ремикс запущен.</b> Результат придёт сюда автоматически.",
-    )
-    await safe_answer_callback(call, "Ремикс запущен ✨")

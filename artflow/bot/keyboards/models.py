@@ -384,6 +384,7 @@ def image_scenarios_kb() -> InlineKeyboardMarkup:
                 callback_data=f"img_scn:{scenario_key}",
             )
         )
+    builder.row(InlineKeyboardButton(text="📸 Фото → Промпт", callback_data="img:photo2prompt"))
     builder.row(InlineKeyboardButton(text="🧠 Все модели", callback_data="img_menu:advanced"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
@@ -460,6 +461,9 @@ def image_active_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🔁 Ещё вариант", callback_data="img_variation"),
     )
     builder.row(
+        InlineKeyboardButton(text="📸 Фото → Промпт", callback_data="img:photo2prompt"),
+    )
+    builder.row(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_settings"),
     )
     builder.row(
@@ -481,6 +485,9 @@ def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(text="🎬 Оживить", callback_data=f"img_session:animate:{gen_id}"),
         )
+    builder.row(
+        InlineKeyboardButton(text="📸 Фото → Промпт", callback_data="img:photo2prompt"),
+    )
     builder.row(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_settings"),
     )

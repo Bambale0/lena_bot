@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service
 from api.image_service import ImageModel
+from api.photo_prompt_service import generate_prompt_from_photo
 from api.kie_model_specs import IMAGE_SPECS
 from api.public_files import mirror_telegram_file
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
@@ -1399,3 +1400,297 @@ async def cb_regen_image(
         queued_text="⏳ <b>Задача запущена.</b> Результат придёт сюда автоматически.",
     )
     await call.answer()
+
+
+# ── Photo → Prompt ────────────────────────────────────────────────────────────
+
+from aiogram.types import CopyTextButton as _CopyTextButton
+
+
+def _p2p_result_kb(prompt: str, *, ref_file_id: str | None, model_key: str | None, model_name: str | None) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    # Native Telegram copy button (Bot API 7.0+)
+    builder.row(
+        InlineKeyboardButton(
+            text="📋 Скопировать промпт",
+            copy_text=_CopyTextButton(text=prompt[:256]),
+        )
+    )
+    # Reference toggle
+    ref_label = "🖼️ Изменить референс ✅" if ref_file_id else "🖼️ Загрузить референс"
+    builder.row(InlineKeyboardButton(text=ref_label, callback_data="p2p:ref"))
+    # Model picker
+    model_label = f"🎨 {model_name} ✅" if model_key else "🎨 Выбрать модель"
+    builder.row(InlineKeyboardButton(text=model_label, callback_data="p2p:model"))
+    # Generate (enabled when model OR ref chosen, or active session exists)
+    builder.row(InlineKeyboardButton(text="✅ Сгенерировать", callback_data="p2p:generate"))
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="img:cancel_prompt"))
+    return builder.as_markup()
+
+
+def _p2p_prompt_text(prompt: str, *, ref_file_id: str | None, model_name: str | None) -> str:
+    ref_line = "📎 Референс: ✅ добавлен\n" if ref_file_id else "📎 Референс: не выбран\n"
+    model_line = f"🎨 Модель: <b>{model_name}</b>\n" if model_name else "🎨 Модель: не выбрана\n"
+    return (
+        "✨ <b>Готовый промпт:</b>\n\n"
+        f"<code>{prompt}</code>\n\n"
+        f"{ref_line}{model_line}"
+    )
+
+
+@router.callback_query(F.data == "img:photo2prompt")
+async def cb_photo_to_prompt(
+    call: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    await state.set_state(ImageGenFSM.photo_to_prompt)
+    await state.update_data(
+        generated_prompt=None,
+        p2p_ref_file_id=None,
+        p2p_model_key=None,
+        p2p_model_name=None,
+    )
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "📸 <b>Фото → Промпт</b>\n\n"
+        "Отправь фотографию — ИИ создаст детальный промпт на русском для точного повтора.\n\n"
+        "После этого можно скопировать промпт, загрузить референс и выбрать модель.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отмена", callback_data="img:cancel_prompt"),
+        ]]),
+    )
+    await safe_answer_callback(call)
+
+
+@router.message(ImageGenFSM.photo_to_prompt, F.photo)
+async def handle_photo_to_prompt(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
+    file_id = best[0].file_id
+
+    wait_msg = await message.answer("⏳ Анализирую фотографию…")
+
+    try:
+        tg_file = await bot.get_file(file_id)
+        downloaded = await bot.download_file(tg_file.file_path)
+        raw = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)  # type: ignore[union-attr]
+        ext = _detect_image_ext(raw)
+        mime = "image/jpeg" if ext == ".jpg" else ("image/png" if ext == ".png" else "image/webp")
+        prompt = await generate_prompt_from_photo(raw, mime)
+    except Exception as exc:
+        logger.error("photo_to_prompt error: %s", exc)
+        await wait_msg.edit_text(
+            "❌ Не удалось проанализировать фото. Попробуй ещё раз.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="❌ Закрыть", callback_data="img:cancel_prompt"),
+            ]]),
+        )
+        return
+
+    # Auto-set analyzed photo as reference
+    await state.update_data(generated_prompt=prompt, p2p_ref_file_id=file_id)
+    data = await state.get_data()
+
+    await wait_msg.delete()
+    await message.answer(
+        _p2p_prompt_text(prompt, ref_file_id=file_id, model_name=data.get("p2p_model_name")),
+        reply_markup=_p2p_result_kb(
+            prompt,
+            ref_file_id=file_id,
+            model_key=data.get("p2p_model_key"),
+            model_name=data.get("p2p_model_name"),
+        ),
+    )
+
+
+# ── p2p: reference upload ─────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "p2p:ref")
+async def cb_p2p_ref(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(ImageGenFSM.photo_to_prompt_ref)
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "🖼️ <b>Загрузи референс-изображение</b>\n\n"
+        "Отправь фото, которое будет использоваться как референс при генерации.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="← Назад", callback_data="p2p:back_to_result"),
+        ]]),
+    )
+    await safe_answer_callback(call)
+
+
+@router.message(ImageGenFSM.photo_to_prompt_ref, F.photo)
+async def handle_p2p_ref_upload(message: Message, state: FSMContext) -> None:
+    best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
+    ref_file_id = best[0].file_id
+    await state.update_data(p2p_ref_file_id=ref_file_id)
+    await state.set_state(ImageGenFSM.photo_to_prompt)
+
+    data = await state.get_data()
+    prompt = data.get("generated_prompt", "")
+    await message.answer(
+        _p2p_prompt_text(prompt, ref_file_id=ref_file_id, model_name=data.get("p2p_model_name")),
+        reply_markup=_p2p_result_kb(
+            prompt,
+            ref_file_id=ref_file_id,
+            model_key=data.get("p2p_model_key"),
+            model_name=data.get("p2p_model_name"),
+        ),
+    )
+
+
+@router.callback_query(F.data == "p2p:back_to_result")
+async def cb_p2p_back_to_result(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(ImageGenFSM.photo_to_prompt)
+    data = await state.get_data()
+    prompt = data.get("generated_prompt", "")
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        _p2p_prompt_text(prompt, ref_file_id=data.get("p2p_ref_file_id"), model_name=data.get("p2p_model_name")),
+        reply_markup=_p2p_result_kb(
+            prompt,
+            ref_file_id=data.get("p2p_ref_file_id"),
+            model_key=data.get("p2p_model_key"),
+            model_name=data.get("p2p_model_name"),
+        ),
+    )
+    await safe_answer_callback(call)
+
+
+# ── p2p: model select ─────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "p2p:model")
+async def cb_p2p_model(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    await state.set_state(ImageGenFSM.photo_to_prompt_model)
+    model_costs = await repo.get_all_model_costs(session)
+    from bot.ui.router import render_screen
+    screen = await render_screen(screen="image_advanced", session=session, db_user=db_user, extra={"model_costs": model_costs})
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "🎨 <b>Выбери модель для генерации</b>\n\n" + screen.text.split("\n\n", 1)[-1],
+        reply_markup=screen.reply_markup,
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(ImageGenFSM.photo_to_prompt_model, F.data.startswith("img_model:"))
+async def cb_p2p_model_selected(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    model_key = call.data.split(":")[1]  # type: ignore[union-attr]
+    model_cost = await repo.get_model_cost(session, model_key)
+    display_name = model_cost.display_name if model_cost else model_key
+
+    await state.set_state(ImageGenFSM.photo_to_prompt)
+    await state.update_data(p2p_model_key=model_key, p2p_model_name=display_name)
+
+    data = await state.get_data()
+    prompt = data.get("generated_prompt", "")
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        _p2p_prompt_text(prompt, ref_file_id=data.get("p2p_ref_file_id"), model_name=display_name),
+        reply_markup=_p2p_result_kb(
+            prompt,
+            ref_file_id=data.get("p2p_ref_file_id"),
+            model_key=model_key,
+            model_name=display_name,
+        ),
+    )
+    await call.answer(f"Модель: {display_name}")
+
+
+# ── p2p: generate ─────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "p2p:generate")
+async def cb_p2p_generate(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    bot: Bot,
+) -> None:
+    data = await state.get_data()
+    prompt = data.get("generated_prompt", "").strip()
+    model_key = data.get("p2p_model_key")
+    ref_file_id = data.get("p2p_ref_file_id")
+
+    if not prompt:
+        await call.answer("Промпт не найден", show_alert=True)
+        return
+
+    # Resolve model: explicit choice → active session → error
+    image_session = None
+    if model_key:
+        quality_opts = IMAGE_CAPS.get(model_key, {}).get("quality_options") or []
+        quality = quality_opts[0][0] if quality_opts else "basic"
+        mode = "image" if ref_file_id and _supports_img2img(model_key) else "text"
+        image_session = await repo.create_image_session(
+            session=session,
+            user_id=db_user.id,
+            model=model_key,
+            mode=mode,
+            aspect_ratio=None,
+            quality=quality,
+            count=1,
+            base_prompt=None,
+            reference_file_id=ref_file_id if mode == "image" else None,
+        )
+    else:
+        image_session = await repo.get_active_image_session(session, db_user.id)
+        if not image_session:
+            await call.answer("Выбери модель или открой активную серию", show_alert=True)
+            return
+
+    # Build reference URL if session uses image mode
+    reference_url: str | None = None
+    if ref_file_id and _supports_img2img(image_session.model):
+        reference_url = await _telegram_file_url(bot, ref_file_id)
+
+    await _launch_session_generation(
+        source_message=call.message,  # type: ignore[arg-type]
+        state=state,
+        session=session,
+        db_user=db_user,
+        image_session=image_session,
+        prompt=prompt,
+        action_type=ImageGenerationAction.initial,
+        reference_url=reference_url,
+        parent_generation_id=None,
+        launching_text="📸 <b>Генерирую по промпту из фото...</b>",
+        queued_text="⏳ <b>Задача запущена.</b> Результат придёт сюда автоматически.",
+    )
+    await safe_answer_callback(call)
+
+
+# ── p2p: cancel ───────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "img:cancel_prompt")
+async def cb_cancel_prompt(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    image_session = await repo.get_active_image_session(session, db_user.id)
+    if image_session:
+        await _show_active_image_session_callback(call, state, session, db_user, image_session)
+    else:
+        await state.clear()
+        from bot.ui.router import render_screen
+        screen = await render_screen(screen="image_entry", session=session, db_user=db_user)
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            screen.text,
+            reply_markup=screen.reply_markup,
+        )
+    await safe_answer_callback(call)

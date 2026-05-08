@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, WebAppInfo
+from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.services.session_service import MainMenuContext
 from bot.ui.common import ScreenRender
-from core.config import settings
-
 
 def render_main_menu(context: MainMenuContext) -> ScreenRender:
     builder = InlineKeyboardBuilder()
@@ -51,7 +49,7 @@ def render_main_menu(context: MainMenuContext) -> ScreenRender:
     )
     builder.row(
         InlineKeyboardButton(text="🔥 Лента", callback_data="menu:feed"),
-        InlineKeyboardButton(text="👑 Топ дня", callback_data="menu:top_day"),
+        InlineKeyboardButton(text="📸 Фото → Промпт", callback_data="img:photo2prompt"),
     )
     builder.row(
         InlineKeyboardButton(text="🧠 Midjourney", callback_data="menu:mj"),
@@ -66,12 +64,6 @@ def render_main_menu(context: MainMenuContext) -> ScreenRender:
     )
     builder.row(
         InlineKeyboardButton(text="💳 Пополнить", callback_data="menu:topup"),
-    )
-    builder.row(
-        InlineKeyboardButton(
-            text="📱 Открыть приложение",
-            web_app=WebAppInfo(url=f"{settings.WEBHOOK_URL.rstrip('/')}/app"),
-        ),
     )
     if context.is_admin:
         builder.row(InlineKeyboardButton(text="👑 Админ", callback_data="menu:admin"))

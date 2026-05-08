@@ -23,7 +23,6 @@ from api.comet_client import close_client, get_client
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 from api.music_service import extract_music_urls, pop_task
 from api.public_files import UPLOAD_ROOT, mirror_url
-from api.webapp_routes import router as webapp_router
 from bot.handlers import admin, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.middlewares.auth import AuthMiddleware
@@ -134,15 +133,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="APIX", lifespan=lifespan)
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 app.mount(settings.STATIC_UPLOAD_URL_PATH, StaticFiles(directory=str(UPLOAD_ROOT)), name="static_upload")
-app.include_router(webapp_router)
-
-WEBAPP_DIST = Path("webapp/dist")
-if WEBAPP_DIST.exists():
-    app.mount("/app", StaticFiles(directory=str(WEBAPP_DIST), html=True), name="webapp")
-else:
-    @app.get("/app")
-    async def webapp_not_built() -> PlainTextResponse:
-        return PlainTextResponse("Mini app is not built. Run cd webapp && npm run build.")
 
 app.add_middleware(
     CORSMiddleware,

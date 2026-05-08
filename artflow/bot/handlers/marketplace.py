@@ -367,6 +367,9 @@ async def cb_prompt_like(call: CallbackQuery, session: AsyncSession, db_user: Us
     if like_status == "missing":
         await call.answer("Промпт не найден", show_alert=True)
         return
+    if like_status == "unavailable":
+        await call.answer("Лайки временно недоступны", show_alert=True)
+        return
     if not prompt:
         await call.answer()
         return

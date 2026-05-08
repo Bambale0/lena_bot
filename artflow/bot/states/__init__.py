@@ -14,6 +14,9 @@ class ImageGenFSM(StatesGroup):
     session_active = State()
     remix_prompt = State()
     session_reference_upload = State()
+    photo_to_prompt = State()
+    photo_to_prompt_ref = State()
+    photo_to_prompt_model = State()
 
 
 class VideoGenFSM(StatesGroup):

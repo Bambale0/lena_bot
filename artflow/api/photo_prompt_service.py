@@ -1,0 +1,83 @@
+"""Generate a detailed image recreation prompt from a photo via KIE.AI GPT-5.x vision."""
+from __future__ import annotations
+
+import base64
+import logging
+
+import httpx
+
+from core.config import settings
+
+logger = logging.getLogger(__name__)
+
+_KIE_BASE = "https://api.kie.ai"
+
+_SYSTEM_PROMPT = (
+    "Ты — эксперт по промптам для AI-генерации изображений. "
+    "Проанализируй предоставленное изображение и создай единственный, детальный промпт, "
+    "который позволит AI-генератору воссоздать его максимально точно. "
+    "Опиши: главный объект и элементы, художественный стиль и технику, "
+    "композицию и кадрирование, освещение и тени, цветовую палитру, "
+    "настроение и атмосферу, текстуры, детали, угол камеры и перспективу. "
+    "Выведи ТОЛЬКО текст промпта на русском языке, без пояснений и лишних слов."
+)
+
+
+async def generate_prompt_from_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    """Call KIE.AI GPT-5.2 (fallback GPT-5.5) vision to produce an image-recreation prompt."""
+    b64 = base64.b64encode(image_bytes).decode()
+    image_data_url = f"data:{mime_type};base64,{b64}"
+
+    for model in (settings.KIE_PHOTO_PROMPT_MODEL, settings.KIE_PHOTO_PROMPT_FALLBACK):
+        try:
+            result = await _call_kie_gpt(model, image_data_url)
+            logger.info("photo_prompt: generated via %s (%d chars)", model, len(result))
+            return result
+        except Exception as exc:
+            logger.warning("photo_prompt: %s failed — %s", model, exc)
+
+    raise RuntimeError("Both KIE GPT models failed to generate a prompt.")
+
+
+async def _call_kie_gpt(model: str, image_data_url: str) -> str:
+    # KIE endpoint: POST https://api.kie.ai/{model}/v1/chat/completions
+    url = f"{_KIE_BASE}/{model}/v1/chat/completions"
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": _SYSTEM_PROMPT}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": image_data_url},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Analyze this image and generate a detailed AI image prompt "
+                            "that would recreate it as closely as possible."
+                        ),
+                    },
+                ],
+            },
+        ],
+        "reasoning_effort": "high",
+    }
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        resp = await client.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {settings.KIE_AI_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
