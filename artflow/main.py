@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 import redis.asyncio as aioredis
 
 from api.comet_client import close_client, get_client
+from api.miniapp_routes import router as miniapp_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 from api.music_service import extract_music_urls, pop_task
 from api.public_files import UPLOAD_ROOT, mirror_url
@@ -133,6 +134,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="APIX", lifespan=lifespan)
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 app.mount(settings.STATIC_UPLOAD_URL_PATH, StaticFiles(directory=str(UPLOAD_ROOT)), name="static_upload")
+app.include_router(miniapp_router)
 
 app.add_middleware(
     CORSMiddleware,
