@@ -11,7 +11,7 @@ from bot.ui.router import render_screen
 from bot.utils.telegram_ui import safe_answer_callback
 from db.models import User
 
-from api.music_service import create_music_task
+from api.music_service import create_music_task, register_task
 
 router = Router(name="music_gen")
 
@@ -59,7 +59,11 @@ async def music_prompt(msg: Message, state: FSMContext):
 
     try:
         task_id = await create_music_task(msg.text, data.get("instrumental", False))
-        await msg.answer(f"🎵 Запущено! ID: {task_id}", reply_markup=back_to_menu_kb())
+        register_task(task_id, msg.from_user.id)  # type: ignore[union-attr]
+        await msg.answer(
+            "🎵 <b>Генерация запущена!</b>\n\nТрек придёт сюда автоматически (~1-2 мин).",
+            reply_markup=back_to_menu_kb(),
+        )
     except Exception as e:
         await msg.answer(f"❌ Ошибка: {e}", reply_markup=back_to_menu_kb())
 

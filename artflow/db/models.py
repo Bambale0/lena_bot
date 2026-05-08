@@ -82,11 +82,12 @@ class User(Base):
     is_subscribed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     subscription_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # 2-level referral
+    # 3-level referral
     referrer_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     referrer_l2_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     referrer_l3_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     referral_code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    referral_balance: Mapped[float] = mapped_column(Float, default=0.0, nullable=False, server_default="0")
 
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

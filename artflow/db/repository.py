@@ -124,6 +124,17 @@ async def add_credits(session: AsyncSession, user_id: int, amount: int) -> int:
     return result.scalar_one()
 
 
+async def add_referral_balance(session: AsyncSession, user_id: int, amount_rub: float) -> float:
+    result = await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(referral_balance=User.referral_balance + amount_rub)
+        .returning(User.referral_balance)
+    )
+    await session.commit()
+    return result.scalar_one()
+
+
 async def spend_credits(session: AsyncSession, user_id: int, amount: int) -> bool:
     """Atomically deduct credits. Returns False if not enough credits."""
     result = await session.execute(

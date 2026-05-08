@@ -57,8 +57,12 @@ class Settings(BaseSettings):
 
     # Credits
     WELCOME_BONUS_CREDITS: int = 15
-    REFERRAL_L1_CREDITS: int = 20
-    REFERRAL_L2_CREDITS: int = 10
+    REFERRAL_L1_CREDITS: int = 3   # бонус кредитами при регистрации реферала
+
+    # Реферальные комиссии с оплат (%)
+    REFERRAL_COMMISSION_L1: float = 0.30
+    REFERRAL_COMMISSION_L2: float = 0.07
+    REFERRAL_COMMISSION_L3: float = 0.03
 
     # Polling
     POLLING_INTERVAL: float = 3.0

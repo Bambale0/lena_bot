@@ -21,6 +21,7 @@ import redis.asyncio as aioredis
 
 from api.comet_client import close_client, get_client
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
+from api.music_service import extract_music_urls, pop_task
 from api.public_files import UPLOAD_ROOT, mirror_url
 from api.webapp_routes import router as webapp_router
 from bot.handlers import admin, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen
@@ -39,6 +40,32 @@ from db.seed import run_seed
 from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+
+
+async def _accrue_referral_commissions(session, user: "User", amount_rub: float) -> None:
+    """Начисляет реферальные комиссии с платежа по трём линиям."""
+    pairs = [
+        (user.referrer_id, settings.REFERRAL_COMMISSION_L1),
+        (user.referrer_l2_id, settings.REFERRAL_COMMISSION_L2),
+        (user.referrer_l3_id, settings.REFERRAL_COMMISSION_L3),
+    ]
+    for ref_id, pct in pairs:
+        if not ref_id or pct <= 0:
+            continue
+        commission = round(amount_rub * pct, 2)
+        await repo.add_referral_balance(session, ref_id, commission)
+        referrer = await repo.get_user_by_id(session, ref_id)
+        if referrer and bot:
+            try:
+                await bot.send_message(
+                    referrer.tg_id,
+                    f"💰 Реферальная комиссия: <b>+{commission:.2f}₽</b>\n"
+                    f"Один из рефералов пополнил баланс на {amount_rub:.0f}₽.",
+                )
+            except Exception:
+                pass
+        logger.info("Referral commission %.2f₽ -> user_id=%s (%.0f%%)", commission, ref_id, pct * 100)
+
 
 # ── Global instances ──────────────────────────────────────────────────────────
 
@@ -168,19 +195,20 @@ async def cryptobot_webhook(request: Request) -> dict:
         tx = await repo.confirm_transaction(session, external_id)
         if tx:
             new_balance = await repo.add_credits(session, tx.user_id, tx.credits)
-            # Уведомляем пользователя
             user = await repo.get_user_by_id(session, tx.user_id)
-            if user and bot:
-                try:
-                    await bot.send_message(
-                        user.tg_id,
-                        f"✅ Оплата криптой подтверждена!\n"
-                        f"Зачислено: <b>+{tx.credits} 💋</b>\n"
-                        f"Баланс: <b>{new_balance} 💋</b>",
-                        reply_markup=back_to_menu_kb(),
-                    )
-                except Exception as e:
-                    logger.warning("Failed to notify user %s: %s", user.tg_id, e)
+            if user:
+                await _accrue_referral_commissions(session, user, tx.amount_rub)
+                if bot:
+                    try:
+                        await bot.send_message(
+                            user.tg_id,
+                            f"✅ Оплата криптой подтверждена!\n"
+                            f"Зачислено: <b>+{tx.credits} 💋</b>\n"
+                            f"Баланс: <b>{new_balance} 💋</b>",
+                            reply_markup=back_to_menu_kb(),
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to notify user %s: %s", user.tg_id, e)
 
     return {"ok": True}
 
@@ -212,17 +240,19 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
             if tx:
                 new_balance = await repo.add_credits(session, tx.user_id, tx.credits)
                 user = await repo.get_user_by_id(session, tx.user_id)
-                if user and bot:
-                    try:
-                        await bot.send_message(
-                            user.tg_id,
-                            f"✅ Оплата через T-Банк подтверждена!\n"
-                            f"Зачислено: <b>+{tx.credits} 💋</b>\n"
-                            f"Баланс: <b>{new_balance} 💋</b>",
-                            reply_markup=back_to_menu_kb(),
-                        )
-                    except Exception as e:
-                        logger.warning("Failed to notify user %s: %s", user.tg_id, e)
+                if user:
+                    await _accrue_referral_commissions(session, user, tx.amount_rub)
+                    if bot:
+                        try:
+                            await bot.send_message(
+                                user.tg_id,
+                                f"✅ Оплата через T-Банк подтверждена!\n"
+                                f"Зачислено: <b>+{tx.credits} 💋</b>\n"
+                                f"Баланс: <b>{new_balance} 💋</b>",
+                                reply_markup=back_to_menu_kb(),
+                            )
+                        except Exception as e:
+                            logger.warning("Failed to notify user %s: %s", user.tg_id, e)
         elif status in {"CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL"}:
             await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
         elif status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
@@ -334,6 +364,56 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                 logger.warning("Failed to send KIE result user=%s gen=%s: %s", user.tg_id, gen.id, e)
 
     return {"ok": True}
+
+
+@app.post("/webhook/kie/music")
+async def kie_music_webhook(request: Request) -> dict:
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"ok": True}
+
+    task_id = extract_task_id(payload)
+    if not task_id:
+        logger.warning("KIE music webhook without task_id: %s", payload)
+        return {"ok": True}
+
+    tg_id = pop_task(task_id)
+    if not tg_id or not bot:
+        logger.warning("KIE music webhook: unknown task_id=%s", task_id)
+        return {"ok": True}
+
+    if not is_success(payload):
+        err = extract_error(payload)
+        logger.warning("KIE music failed task_id=%s: %s", task_id, err)
+        try:
+            await bot.send_message(tg_id, f"❌ Ошибка генерации музыки:\n{err}", reply_markup=back_to_menu_kb())
+        except Exception as e:
+            logger.warning("Failed to notify music failure tg_id=%s: %s", tg_id, e)
+        return {"ok": True}
+
+    audio_urls = extract_music_urls(payload)
+    if not audio_urls:
+        logger.warning("KIE music webhook: no audio URLs task_id=%s payload=%s", task_id, payload)
+        try:
+            await bot.send_message(tg_id, "❌ Музыка готова, но ссылка не найдена.", reply_markup=back_to_menu_kb())
+        except Exception:
+            pass
+        return {"ok": True}
+
+    try:
+        for url in audio_urls:
+            await bot.send_audio(
+                chat_id=tg_id,
+                audio=URLInputFile(url, filename="track.mp3"),
+                caption="🎵 <b>Трек готов!</b>",
+                reply_markup=back_to_menu_kb(),
+            )
+    except Exception as e:
+        logger.warning("Failed to send music result tg_id=%s: %s", tg_id, e)
+
+    return {"ok": True}
+
 
 @app.get("/health")
 async def health() -> dict:

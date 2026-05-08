@@ -49,8 +49,10 @@ HELP_TEXT = (
     "• Видео: 20–50 💋\n"
     "• Midjourney: 5–15 💋\n\n"
     f"👥 <b>Реферальная программа:</b>\n"
-    f"• Прямой реферал: +{settings.REFERRAL_L1_CREDITS} 💋\n"
-    f"• Реферал реферала: +{settings.REFERRAL_L2_CREDITS} 💋"
+    f"• Бонус за реферала: +{settings.REFERRAL_L1_CREDITS} 💋\n"
+    f"• Комиссия с оплат: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
+    f"{int(settings.REFERRAL_COMMISSION_L2 * 100)}% / "
+    f"{int(settings.REFERRAL_COMMISSION_L3 * 100)}%"
 )
 
 @router.message(CommandStart())

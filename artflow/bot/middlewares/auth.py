@@ -74,7 +74,7 @@ class AuthMiddleware(BaseMiddleware):
                 referrer_l3=referrer_l3,
             )
 
-            # Начисляем реферальные бонусы
+            # Начисляем реферальные бонусы (только L1 — кредитами)
             if referrer:
                 await repo.add_credits(session, referrer.id, settings.REFERRAL_L1_CREDITS)
                 logger.info("Referral L1 bonus: %s -> %s", tg_user.id, referrer.tg_id)
@@ -83,15 +83,6 @@ class AuthMiddleware(BaseMiddleware):
                     referrer.tg_id,
                     "🎉 По твоей ссылке пришёл новый пользователь!\n"
                     f"+{settings.REFERRAL_L1_CREDITS} 💋 начислено.",
-                )
-            if referrer_l2:
-                await repo.add_credits(session, referrer_l2.id, settings.REFERRAL_L2_CREDITS)
-                logger.info("Referral L2 bonus: %s -> %s", tg_user.id, referrer_l2.tg_id)
-                await _notify_referral(
-                    bot,
-                    referrer_l2.tg_id,
-                    "🎉 По второй линии пришёл новый пользователь!\n"
-                    f"+{settings.REFERRAL_L2_CREDITS} 💋 начислено.",
                 )
 
         elif db_user.is_banned:

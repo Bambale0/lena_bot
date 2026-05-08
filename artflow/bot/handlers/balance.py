@@ -73,6 +73,7 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
             f"• #{request.id}: {request.amount_rub:.0f}₽ · {request.status.value}"
         )
 
+    earned = db_user.referral_balance
     text = (
         f"👥 <b>Реферальная программа</b>\n\n"
         f"Твоя ссылка:\n"
@@ -81,10 +82,12 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
         f"• L1 прямые: <b>{l1}</b>\n"
         f"• L2: <b>{l2}</b>\n"
         f"• L3: <b>{l3}</b>\n\n"
-        f"💰 <b>Бонусы:</b>\n"
-        f"• Уровень 1 (прямой): +{settings.REFERRAL_L1_CREDITS} 💋\n"
-        f"• Уровень 2 (реферал реферала): +{settings.REFERRAL_L2_CREDITS} 💋\n\n"
-        f"<i>Бонусы начисляются при первом запуске бота приглашённым.</i>"
+        f"💰 <b>Заработано комиссий: {earned:.2f}₽</b>\n\n"
+        f"<b>Условия:</b>\n"
+        f"• Бонус за реферала: +{settings.REFERRAL_L1_CREDITS} 💋\n"
+        f"• Комиссия с оплат L1: {int(settings.REFERRAL_COMMISSION_L1 * 100)}%\n"
+        f"• Комиссия с оплат L2: {int(settings.REFERRAL_COMMISSION_L2 * 100)}%\n"
+        f"• Комиссия с оплат L3: {int(settings.REFERRAL_COMMISSION_L3 * 100)}%"
     )
     if withdrawal_lines:
         text += "\n\n💸 <b>Последние заявки на вывод:</b>\n" + "\n".join(withdrawal_lines)
