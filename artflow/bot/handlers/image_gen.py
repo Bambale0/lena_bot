@@ -29,6 +29,7 @@ from bot.keyboards.models import (
     reference_upload_kb,
     image_session_kb,
     image_session_settings_kb,
+    image_dynamic_settings_kb,
 )
 from bot.states import ImageGenFSM
 from bot.ui.router import render_screen
@@ -581,96 +582,165 @@ async def cb_image_scenario(
     await safe_answer_callback(call)
 
 
-@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_model:"))
-async def cb_model_selected(
-    call: CallbackQuery,
-    session: AsyncSession,
-    state: FSMContext,
-    db_user: User,
-) -> None:
-    model_key = call.data.split(":")[1]  # type: ignore[union-attr]
-    await _start_image_model_flow(
-        call=call,
-        session=session,
-        state=state,
-        db_user=db_user,
-        model_key=model_key,
+
+
+@router.callback_query(F.data.startswith("img_dyn:mode:"))
+async def cb_image_dynamic_mode(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.split(":", 2)[2]
+    await state.update_data(image_model=model_key)
+    await call.message.edit_text(
+        "🔀 <b>Выбери режим модели</b>",
+        reply_markup=image_mode_kb(model_key),
     )
+    await state.set_state(ImageGenFSM.mode_select)
     await call.answer()
 
 
-async def _go_to_next_step(
-    call: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User,
-    model_key: str,
-    display_name: str,
-) -> None:
-    caps = IMAGE_CAPS.get(model_key, {})
+@router.callback_query(F.data.startswith("img_dyn:reference:"))
+async def cb_image_dynamic_reference(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.split(":", 2)[2]
+    await state.update_data(image_model=model_key, image_mode="image")
+    await call.message.edit_text(
+        "🖼 <b>Загрузи фото-референс</b>\n\n"
+        "После фото отправь текст, что нужно изменить или какой стиль сделать.",
+        reply_markup=get_back_keyboard("menu:image"),
+    )
+    await state.set_state(ImageGenFSM.waiting_reference)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("img_dyn:ratio:"))
+async def cb_image_dynamic_ratio(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.split(":", 2)[2]
+    await state.update_data(image_model=model_key)
+    await call.message.edit_text(
+        "📐 <b>Выбери формат</b>",
+        reply_markup=image_aspect_ratio_kb(model_key),
+    )
+    await state.set_state(ImageGenFSM.aspect_ratio_select)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("img_dyn:quality:"))
+async def cb_image_dynamic_quality(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.split(":", 2)[2]
+    await state.update_data(image_model=model_key)
+    await call.message.edit_text(
+        "💎 <b>Выбери качество</b>",
+        reply_markup=image_quality_kb(model_key),
+    )
+    await state.set_state(ImageGenFSM.count_select)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("img_dyn:count:"))
+async def cb_image_dynamic_count(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.split(":", 2)[2]
+    await state.update_data(image_model=model_key)
+    await call.message.edit_text(
+        "🔢 <b>Выбери количество изображений</b>",
+        reply_markup=image_count_kb(model_key),
+    )
+    await state.set_state(ImageGenFSM.count_select)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("img_dyn:enhance:"))
+async def cb_image_dynamic_enhance(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.split(":", 2)[2]
     data = await state.get_data()
-    mode = data.get("mode", "text")
+    mode = data.get("image_mode")
+    await state.update_data(image_model=model_key, image_prompt_enhance=True)
+    await call.message.edit_text(
+        "✨ <b>Улучшение промпта включено</b>\n\n"
+        "Теперь нажми «Продолжить» и напиши идею. Я подготовлю её аккуратнее перед генерацией.",
+        reply_markup=image_dynamic_settings_kb(model_key, mode),
+    )
+    await call.answer("Улучшение промпта включено")
 
-    if mode == "image" and not data.get("image_file_id"):
-        await state.set_state(ImageGenFSM.image_upload)
-        allow_skip = "text" in caps.get("modes", [])
-        await safe_edit_message(
-            call.message,  # type: ignore[arg-type]
-            "🖼️ Загрузи референс-изображение:",
-            reply_markup=reference_upload_kb("menu:image", allow_skip=allow_skip),
+
+@router.callback_query(F.data.startswith("img_dyn:continue:"))
+async def cb_image_dynamic_continue(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.split(":", 2)[2]
+    data = await state.get_data()
+
+    caps = IMAGE_CAPS.get(model_key, {})
+    modes = caps.get("modes", ["text"])
+    mode = data.get("image_mode") or ("text" if "text" in modes else modes[0])
+
+    await state.update_data(image_model=model_key, image_mode=mode)
+
+    if mode == "image":
+        await call.message.edit_text(
+            "🖼 <b>Загрузи фото-референс</b>\n\n"
+            "После фото отправь текст, что нужно изменить или какой стиль сделать.",
+            reply_markup=get_back_keyboard("menu:image"),
         )
-        return
-
-    if _should_select_aspect_ratio(model_key, mode) and not data.get("aspect_ratio"):
-        await state.set_state(ImageGenFSM.aspect_ratio_select)
-        await safe_edit_message(
-            call.message,  # type: ignore[arg-type]
-            f"✅ <b>{display_name}</b>\n\n📐 Соотношение сторон:",
-            reply_markup=image_aspect_ratio_kb(model_key),
+        await state.set_state(ImageGenFSM.waiting_reference)
+    else:
+        await call.message.edit_text(
+            "✍️ <b>Напиши промпт для изображения</b>\n\n"
+            "Опиши, что нужно создать. Можно писать обычным языком.",
+            reply_markup=get_back_keyboard("menu:image"),
         )
-        return
+        await state.set_state(ImageGenFSM.waiting_prompt)
 
-    if caps.get("has_quality"):
-        await state.set_state(ImageGenFSM.count_select)
-        await safe_edit_message(
-            call.message,  # type: ignore[arg-type]
-            f"✅ <b>{display_name}</b>\n\n💎 Качество изображения:",
-            reply_markup=image_quality_kb(model_key),
-        )
-        return
-
-    if len(caps.get("counts", [1])) > 1:
-        await state.set_state(ImageGenFSM.count_select)
-        await safe_edit_message(
-            call.message,  # type: ignore[arg-type]
-            f"✅ <b>{display_name}</b>\n\n🔢 Количество изображений:",
-            reply_markup=image_count_kb(model_key),
-        )
-        return
-
-    image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)  # type: ignore[name-defined]
-    await _show_active_image_session_callback(call, state, session, db_user, image_session)  # type: ignore[name-defined]
+    await call.answer()
 
 
-# ── Mode select ───────────────────────────────────────────────────────────────
+@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_model:"))
+async def cb_image_model(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.removeprefix("img_model:")
+    caps = IMAGE_CAPS.get(model_key, {})
+    modes = caps.get("modes", ["text"])
+    default_mode = "text" if "text" in modes else modes[0]
+
+    await state.update_data(
+        image_model=model_key,
+        image_mode=default_mode,
+    )
+
+    model_title = get_image_model_label(model_key) if "get_image_model_label" in globals() else model_key
+
+    text = (
+        f"🎛 <b>{model_title}</b>\n\n"
+        "Я покажу только настройки, которые реально поддерживает эта модель.\n"
+        "Выбери параметры или нажми «Продолжить»."
+    )
+
+    await call.message.edit_text(
+        text,
+        reply_markup=image_dynamic_settings_kb(model_key, default_mode),
+    )
+    await state.set_state(ImageGenFSM.model_select)
+    await call.answer()
+
 
 @router.callback_query(ImageGenFSM.mode_select, F.data.startswith("img_mode:"))
-async def cb_image_mode(
-    call: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User,
-) -> None:
-    parts = call.data.split(":")  # type: ignore[union-attr]
-    mode, model_key = parts[1], parts[2]
-    await state.update_data(mode=mode)
-    model_cost = await repo.get_model_cost(session, model_key)
-    display_name = model_cost.display_name if model_cost else model_key
-    await _go_to_next_step(call, state, session, db_user, model_key, display_name)
+async def cb_image_mode(call: CallbackQuery, state: FSMContext) -> None:
+    _, mode, model_key = call.data.split(":", 2)
+
+    await state.update_data(
+        image_model=model_key,
+        image_mode=mode,
+    )
+
+    model_title = get_image_model_label(model_key) if "get_image_model_label" in globals() else model_key
+    mode_label = "Референс → изображение" if mode == "image" else "Текст → изображение"
+
+    text = (
+        f"🎛 <b>{model_title}</b>\n\n"
+        f"Режим: <b>{mode_label}</b>\n\n"
+        "Теперь доступны только подходящие настройки."
+    )
+
+    await call.message.edit_text(
+        text,
+        reply_markup=image_dynamic_settings_kb(model_key, mode),
+    )
+    await state.set_state(ImageGenFSM.model_select)
     await call.answer()
 
-
-# ── Aspect ratio ──────────────────────────────────────────────────────────────
 
 @router.callback_query(ImageGenFSM.aspect_ratio_select, F.data.startswith("img_ratio:"))
 async def cb_image_ratio(

@@ -754,3 +754,147 @@ def after_generation_kb(gen_id: int, gen_type: str) -> InlineKeyboardMarkup:
     )
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
+
+
+# ── Dynamic model settings keyboards ──────────────────────────────────────────
+
+def get_image_capabilities(model_key: str) -> dict:
+    caps = dict(IMAGE_CAPS.get(model_key, {}))
+    caps.setdefault("modes", ["text"])
+    caps.setdefault("aspect_ratios", [])
+    caps.setdefault("aspect_ratio_modes", caps.get("modes", []))
+    caps.setdefault("quality_options", [])
+    caps.setdefault("counts", [1])
+    caps.setdefault("has_quality", bool(caps.get("quality_options")))
+    caps.setdefault("supports_reference", "image" in caps.get("modes", []) or bool(caps.get("max_refs")))
+    caps.setdefault("supports_prompt_enhance", True)
+    return caps
+
+
+def image_available_settings(model_key: str, mode: str | None = None) -> list[str]:
+    caps = get_image_capabilities(model_key)
+    settings: list[str] = []
+
+    modes = caps.get("modes") or ["text"]
+    selected_mode = mode or modes[0]
+    ratio_modes = caps.get("aspect_ratio_modes") or modes
+
+    if len(modes) > 1:
+        settings.append("mode")
+
+    if caps.get("supports_reference") and selected_mode == "image":
+        settings.append("reference")
+
+    if caps.get("aspect_ratios") and selected_mode in ratio_modes:
+        settings.append("aspect_ratio")
+
+    if caps.get("has_quality") and caps.get("quality_options"):
+        settings.append("quality")
+
+    if len(caps.get("counts") or [1]) > 1:
+        settings.append("count")
+
+    if caps.get("supports_prompt_enhance", True):
+        settings.append("prompt_enhance")
+
+    return settings
+
+
+def image_dynamic_settings_kb(model_key: str, mode: str | None = None) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    settings = image_available_settings(model_key, mode)
+
+    if "mode" in settings:
+        builder.button(text="🔀 Режим", callback_data=f"img_dyn:mode:{model_key}")
+
+    if "reference" in settings:
+        builder.button(text="🖼 Референс", callback_data=f"img_dyn:reference:{model_key}")
+
+    if "aspect_ratio" in settings:
+        builder.button(text="📐 Формат", callback_data=f"img_dyn:ratio:{model_key}")
+
+    if "quality" in settings:
+        builder.button(text="💎 Качество", callback_data=f"img_dyn:quality:{model_key}")
+
+    if "count" in settings:
+        builder.button(text="🔢 Количество", callback_data=f"img_dyn:count:{model_key}")
+
+    if "prompt_enhance" in settings:
+        builder.button(text="✨ Улучшить промпт", callback_data=f"img_dyn:enhance:{model_key}")
+
+    builder.button(text="✅ Продолжить", callback_data=f"img_dyn:continue:{model_key}")
+    builder.button(text="← Назад", callback_data="img_menu:advanced")
+    builder.adjust(2, 2, 2, 1, 1)
+    return builder.as_markup()
+
+
+# ── Dynamic image settings by model capabilities ──────────────────────────────
+
+def get_image_capabilities(model_key: str) -> dict:
+    caps = dict(IMAGE_CAPS.get(model_key, {}))
+    caps.setdefault("modes", ["text"])
+    caps.setdefault("aspect_ratios", [])
+    caps.setdefault("aspect_ratio_modes", caps.get("modes", []))
+    caps.setdefault("quality_options", [])
+    caps.setdefault("counts", [1])
+    caps.setdefault("has_quality", bool(caps.get("quality_options")))
+    caps.setdefault("supports_reference", "image" in caps.get("modes", []) or bool(caps.get("max_refs")))
+    caps.setdefault("supports_prompt_enhance", True)
+    return caps
+
+
+def image_available_settings(model_key: str, mode: str | None = None) -> list[str]:
+    caps = get_image_capabilities(model_key)
+    settings: list[str] = []
+
+    modes = caps.get("modes") or ["text"]
+    selected_mode = mode or ("text" if "text" in modes else modes[0])
+    ratio_modes = caps.get("aspect_ratio_modes") or modes
+
+    if len(modes) > 1:
+        settings.append("mode")
+
+    if caps.get("supports_reference") and selected_mode == "image":
+        settings.append("reference")
+
+    if caps.get("aspect_ratios") and selected_mode in ratio_modes:
+        settings.append("aspect_ratio")
+
+    if caps.get("has_quality") and caps.get("quality_options"):
+        settings.append("quality")
+
+    if len(caps.get("counts") or [1]) > 1:
+        settings.append("count")
+
+    if caps.get("supports_prompt_enhance", True):
+        settings.append("prompt_enhance")
+
+    return settings
+
+
+def image_dynamic_settings_kb(model_key: str, mode: str | None = None) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    settings = image_available_settings(model_key, mode)
+
+    if "mode" in settings:
+        builder.button(text="🔀 Режим", callback_data=f"img_dyn:mode:{model_key}")
+
+    if "reference" in settings:
+        builder.button(text="🖼 Референс", callback_data=f"img_dyn:reference:{model_key}")
+
+    if "aspect_ratio" in settings:
+        builder.button(text="📐 Формат", callback_data=f"img_dyn:ratio:{model_key}")
+
+    if "quality" in settings:
+        builder.button(text="💎 Качество", callback_data=f"img_dyn:quality:{model_key}")
+
+    if "count" in settings:
+        builder.button(text="🔢 Количество", callback_data=f"img_dyn:count:{model_key}")
+
+    if "prompt_enhance" in settings:
+        builder.button(text="✨ Улучшить промпт", callback_data=f"img_dyn:enhance:{model_key}")
+
+    builder.button(text="✅ Продолжить", callback_data=f"img_dyn:continue:{model_key}")
+    builder.button(text="← Все модели", callback_data="img_menu:advanced")
+    builder.adjust(2, 2, 2, 1, 1)
+    return builder.as_markup()
