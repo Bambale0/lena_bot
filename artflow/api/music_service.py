@@ -28,30 +28,90 @@ def pop_miniapp_task(task_id: str) -> int | None:
 
 
 def extract_music_urls(payload: dict) -> list[str]:
-    """Извлекает аудио-URL из колбека KIE Suno (clips[].audio_url)."""
+    """Extract one best audio URL per Suno/KIE track."""
     urls: list[str] = []
-    data = payload.get("data") or {}
-    if isinstance(data, str):
-        import json
-        try:
-            data = json.loads(data)
-        except Exception:
-            data = {}
 
-    clips = data.get("clips") or payload.get("clips") or []
-    for clip in clips:
-        if isinstance(clip, dict):
-            url = clip.get("audio_url") or clip.get("audioUrl")
-            if url:
-                urls.append(url)
+    def is_url(value: object) -> bool:
+        return isinstance(value, str) and (
+            value.startswith("http://") or value.startswith("https://")
+        )
 
-    # fallback: прямые поля
-    for key in ("audio_url", "audioUrl"):
-        v = data.get(key) or payload.get(key)
-        if v and v not in urls:
-            urls.append(v)
+    def pick_track_url(track: dict) -> str | None:
+        # One URL per generated track. Prefer downloadable mp3.
+        for key in (
+            "audio_url",
+            "audioUrl",
+            "source_audio_url",
+            "sourceAudioUrl",
+            "source_stream_audio_url",
+            "sourceStreamAudioUrl",
+            "stream_audio_url",
+            "streamAudioUrl",
+        ):
+            value = track.get(key)
+            if is_url(value):
+                return value
+        return None
 
-    return urls
+    data = payload.get("data") if isinstance(payload, dict) else None
+
+    # New KIE callback shape:
+    # {"data": {"callbackType": "complete", "data": [{track}, ...]}}
+    if isinstance(data, dict):
+        tracks = data.get("data")
+        if isinstance(tracks, list):
+            for track in tracks:
+                if isinstance(track, dict):
+                    url = pick_track_url(track)
+                    if url:
+                        urls.append(url)
+
+        # Record-info / older shape:
+        # {"data": {"response": {"sunoData": [{track}, ...]}}}
+        response = data.get("response")
+        if isinstance(response, dict):
+            suno_data = response.get("sunoData")
+            if isinstance(suno_data, list):
+                for track in suno_data:
+                    if isinstance(track, dict):
+                        url = pick_track_url(track)
+                        if url:
+                            urls.append(url)
+
+        clips = data.get("clips")
+        if isinstance(clips, list):
+            for track in clips:
+                if isinstance(track, dict):
+                    url = pick_track_url(track)
+                    if url:
+                        urls.append(url)
+
+        # Direct single-track fallback
+        direct = pick_track_url(data)
+        if direct:
+            urls.append(direct)
+
+    # Root-level fallbacks
+    clips = payload.get("clips") if isinstance(payload, dict) else None
+    if isinstance(clips, list):
+        for track in clips:
+            if isinstance(track, dict):
+                url = pick_track_url(track)
+                if url:
+                    urls.append(url)
+
+    direct = pick_track_url(payload)
+    if direct:
+        urls.append(direct)
+
+    # Deduplicate while preserving order.
+    seen = set()
+    result = []
+    for url in urls:
+        if url not in seen:
+            seen.add(url)
+            result.append(url)
+    return result
 
 
 async def create_music_task(
