@@ -305,11 +305,6 @@ _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
             VideoModel.VEO_3_LITE,
             VideoModel.SEEDANCE_2_FAST,
             VideoModel.HAPPYHORSE_T2V,
-        ],
-    ),
-    (
-        "quality",
-        [
             VideoModel.VEO_3,
             VideoModel.VEO_3_FAST,
             VideoModel.SEEDANCE_2,
@@ -329,6 +324,8 @@ _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
             VideoModel.WAN_27_I2V,
             VideoModel.GROK_I2V,
             VideoModel.HAPPYHORSE_I2V,
+            VideoModel.SEEDANCE_2,
+            VideoModel.SEEDANCE_2_FAST,
         ],
     ),
     (
@@ -342,7 +339,6 @@ _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
 
 VIDEO_GROUP_TITLES: dict[str, str] = {
     "fast": "⚡ Быстрый старт",
-    "quality": "🎬 Кино и качество",
     "i2v": "🖼️ Из изображения в видео",
     "motion": "🕺 Управление камерой",
 }
