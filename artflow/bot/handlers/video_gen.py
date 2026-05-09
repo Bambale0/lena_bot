@@ -590,3 +590,27 @@ async def handle_video_prompt(
 
     asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))
     await state.clear()
+
+
+# ── Video params: continue to prompt ──────────────────────────────────────────
+@router.callback_query(F.data == "vpar_next")
+async def cb_video_params_next(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    motion_step = data.get("motion_step")
+
+    if motion_step:
+        await state.update_data(motion_step="prompt")
+        text = (
+            "✍️ <b>Промпт для оживления</b>\n\n"
+            "Опиши, что должно происходить в кадре: движение камеры, эмоции, атмосферу.\n\n"
+            "Пример: <i>камера медленно приближается, герои слегка двигаются, лучи солнца проходят сквозь деревья</i>\n\n"
+            "Можно отправить <code>-</code>, если промпт не нужен."
+        )
+    else:
+        text = (
+            "✍️ <b>Промпт для видео</b>\n\n"
+            "Опиши сцену, движение и стиль ролика."
+        )
+
+    await call.message.edit_text(text)
+    await call.answer()

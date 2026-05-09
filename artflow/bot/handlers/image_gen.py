@@ -1025,7 +1025,29 @@ async def cb_image_reference_skip(
     await state.update_data(mode="text", image_file_id=None)
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
-    await _go_to_next_step(call, state, session, db_user, model_key, display_name)
+    caps = IMAGE_CAPS.get(model_key, {})
+    modes = caps.get("modes", ["text"])
+    default_mode = "text" if "text" in modes else modes[0]
+
+    await state.update_data(
+        model_key=model_key,
+        image_model=model_key,
+        mode=default_mode,
+        image_mode=default_mode,
+    )
+
+    text = (
+        f"🎛 <b>{display_name}</b>\n\n"
+        "Я покажу только настройки, которые реально поддерживает эта модель.\n"
+        "Выбери параметры или нажми «Продолжить»."
+    )
+
+    await call.message.edit_text(
+        text,
+        reply_markup=image_dynamic_settings_kb(model_key, default_mode),
+    )
+    await state.set_state(ImageGenFSM.model_select)
+    await call.answer()
     await call.answer()
 
 
