@@ -455,19 +455,28 @@ async def _open_image_model_select(
 
 
 async def _start_image_model_flow(
-    *,
     call: CallbackQuery,
-    session: AsyncSession,
     state: FSMContext,
+    session: AsyncSession,
     db_user: User,
     model_key: str,
     forced_mode: str | None = None,
 ) -> None:
-    default_quality = _quality_options(model_key)[0][0] if IMAGE_CAPS.get(model_key, {}).get("has_quality") else "basic"
-    model_cost = await repo.resolve_image_model_cost(session, model_key, quality=default_quality)
+    default_quality = (
+        _quality_options(model_key)[0][0]
+        if IMAGE_CAPS.get(model_key, {}).get("has_quality")
+        else "basic"
+    )
+
+    model_cost = await repo.resolve_image_model_cost(
+        session,
+        model_key,
+        quality=default_quality,
+    )
     if not model_cost:
         await call.answer("Модель недоступна", show_alert=True)
         return
+
     if db_user.credits < model_cost.credits:
         await call.answer(
             f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
@@ -475,27 +484,43 @@ async def _start_image_model_flow(
         )
         return
 
+    caps = IMAGE_CAPS.get(model_key, {})
+    modes = caps.get("modes", ["text"])
+
+    if forced_mode and forced_mode in modes:
+        default_mode = forced_mode
+    else:
+        default_mode = "text" if "text" in modes else modes[0]
+
     await state.update_data(
         model_key=model_key,
+        image_model=model_key,
+        mode=default_mode,
+        image_mode=default_mode,
         credits=model_cost.credits,
         aspect_ratio=None,
+        image_aspect_ratio=None,
         count=1,
+        image_count=1,
         image_file_id=None,
         quality=default_quality,
+        image_quality=default_quality,
         remix_mode=False,
         remix_parent_generation_id=None,
     )
 
-    caps = IMAGE_CAPS.get(model_key, {})
-    modes = caps.get("modes", ["text"])
-    if forced_mode and forced_mode in modes:
-        await state.update_data(mode=forced_mode)
-        await _go_to_next_step(call, state, session, db_user, model_key, model_cost.display_name)
-        return
+    text = (
+        f"🎛 <b>{model_cost.display_name}</b>\n\n"
+        "Я покажу только настройки, которые реально поддерживает эта модель.\n"
+        "Выбери параметры или нажми «Продолжить»."
+    )
 
-    default_mode = "image" if "image" in modes else modes[0]
-    await state.update_data(mode=default_mode)
-    await _go_to_next_step(call, state, session, db_user, model_key, model_cost.display_name)
+    await call.message.edit_text(
+        text,
+        reply_markup=image_dynamic_settings_kb(model_key, default_mode),
+    )
+    await state.set_state(ImageGenFSM.model_select)
+    await call.answer()
 
 
 @router.callback_query(F.data == "menu:image")
