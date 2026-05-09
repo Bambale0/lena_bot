@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 from core.config import settings
 
-KIE_URL = "https://api.kie.ai/api/v1/suno/generate"
+KIE_URL = "https://api.kie.ai/api/v1/generate"
 
 # task_id → tg_id (bot flow)
 _pending: dict[str, int] = {}

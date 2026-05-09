@@ -415,16 +415,84 @@ async def kie_music_webhook(request: Request) -> dict:
 
     from api.music_service import pop_miniapp_task
 
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        data = {}
+
+    status = (
+        data.get("status")
+        or payload.get("status")
+        or data.get("state")
+        or payload.get("state")
+        or ""
+    )
+
+    msg = (
+        data.get("errorMessage")
+        or payload.get("errorMessage")
+        or data.get("msg")
+        or payload.get("msg")
+        or ""
+    )
+
+    extracted_error = extract_error(payload) or ""
+    normalized_msg = f"{msg} {extracted_error}".strip().lower()
+
+    # Suno/KIE can send an intermediate callback after lyrics/text are ready.
+    # This is NOT a failed generation and task_id must NOT be popped here.
+    if (
+        status in {"PENDING", "TEXT_SUCCESS"}
+        or "text generated successfully" in normalized_msg
+        or "lyrics/text generation successful" in normalized_msg
+    ):
+        logger.info(
+            "KIE music still processing task_id=%s status=%s msg=%s",
+            task_id,
+            status,
+            normalized_msg,
+        )
+        return {"ok": True}
+
+    audio_urls = extract_music_urls(payload)
+
+    # If callback has no audio and does not look final-failed, keep waiting.
+    # This prevents losing task_id on odd partial callbacks with empty status.
+    failed_markers = (
+        "failed",
+        "sensitive",
+        "error",
+        "insufficient",
+        "unauthorized",
+        "invalid",
+    )
+    looks_failed = (
+        status in {"CREATE_TASK_FAILED", "GENERATE_AUDIO_FAILED", "CALLBACK_EXCEPTION", "SENSITIVE_WORD_ERROR"}
+        or any(x in normalized_msg for x in failed_markers)
+    )
+
+    if not audio_urls and not looks_failed and not is_success(payload):
+        if "all generated successfully" in normalized_msg:
+            logger.warning("KIE music final-looking callback without parsed audio task_id=%s payload=%s", task_id, payload)
+        else:
+            logger.info(
+                "KIE music non-final callback task_id=%s status=%s msg=%s",
+                task_id,
+                status,
+                normalized_msg,
+            )
+        return {"ok": True}
+
+    # Pop only on final success or final failure.
     tg_id = pop_task(task_id)
     miniapp_gen_id = pop_miniapp_task(task_id)
 
     if not tg_id and not miniapp_gen_id:
-        logger.warning("KIE music webhook: unknown task_id=%s", task_id)
+        logger.warning("KIE music webhook: unknown task_id=%s status=%s", task_id, status)
         return {"ok": True}
 
-    if not is_success(payload):
-        err = extract_error(payload)
-        logger.warning("KIE music failed task_id=%s: %s", task_id, err)
+    if looks_failed or (not audio_urls and not is_success(payload)):
+        err = extracted_error or msg or f"Music generation failed: {status}"
+        logger.warning("KIE music failed task_id=%s status=%s: %s", task_id, status, err)
         if miniapp_gen_id:
             async with AsyncSessionLocal() as session:
                 gen = await repo.get_generation_by_id(session, miniapp_gen_id)
@@ -433,14 +501,17 @@ async def kie_music_webhook(request: Request) -> dict:
                     await repo.add_credits(session, gen.user_id, gen.credits_spent)
         if tg_id and bot:
             try:
-                await bot.send_message(tg_id, f"❌ Ошибка генерации музыки:\n{err}", reply_markup=back_to_menu_kb())
+                await bot.send_message(
+                    tg_id,
+                    f"❌ Ошибка генерации музыки:\n{err}",
+                    reply_markup=back_to_menu_kb(),
+                )
             except Exception as e:
                 logger.warning("Failed to notify music failure tg_id=%s: %s", tg_id, e)
         return {"ok": True}
 
-    audio_urls = extract_music_urls(payload)
     if not audio_urls:
-        logger.warning("KIE music webhook: no audio URLs task_id=%s payload=%s", task_id, payload)
+        logger.warning("KIE music webhook: no audio URLs task_id=%s status=%s payload=%s", task_id, status, payload)
         if tg_id and bot:
             try:
                 await bot.send_message(tg_id, "❌ Музыка готова, но ссылка не найдена.", reply_markup=back_to_menu_kb())

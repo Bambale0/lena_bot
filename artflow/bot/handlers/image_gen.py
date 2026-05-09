@@ -608,109 +608,112 @@ async def cb_image_scenario(
 
 
 
-
-@router.callback_query(F.data.startswith("img_dyn:mode:"))
+@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:mode:"))
 async def cb_image_dynamic_mode(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    await state.update_data(image_model=model_key)
-    await call.message.edit_text(
+    await state.update_data(model_key=model_key, image_model=model_key)
+    await safe_edit_message(
+        call.message,
         "🔀 <b>Выбери режим модели</b>",
         reply_markup=image_mode_kb(model_key),
     )
     await state.set_state(ImageGenFSM.mode_select)
-    await call.answer()
+    await safe_answer_callback(call)
 
 
-@router.callback_query(F.data.startswith("img_dyn:reference:"))
-async def cb_image_dynamic_reference(call: CallbackQuery, state: FSMContext) -> None:
-    model_key = call.data.split(":", 2)[2]
-    await state.update_data(image_model=model_key, image_mode="image")
-    await call.message.edit_text(
-        "🖼 <b>Загрузи фото-референс</b>\n\n"
-        "После фото отправь текст, что нужно изменить или какой стиль сделать.",
-        reply_markup=back_to_menu_kb(),
-    )
-    await state.set_state(ImageGenFSM.waiting_reference)
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("img_dyn:ratio:"))
+@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:ratio:"))
 async def cb_image_dynamic_ratio(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    await state.update_data(image_model=model_key)
-    await call.message.edit_text(
+    await state.update_data(model_key=model_key, image_model=model_key)
+    await safe_edit_message(
+        call.message,
         "📐 <b>Выбери формат</b>",
         reply_markup=image_aspect_ratio_kb(model_key),
     )
     await state.set_state(ImageGenFSM.aspect_ratio_select)
-    await call.answer()
+    await safe_answer_callback(call)
 
 
-@router.callback_query(F.data.startswith("img_dyn:quality:"))
+@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:quality:"))
 async def cb_image_dynamic_quality(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    await state.update_data(image_model=model_key)
-    await call.message.edit_text(
+    await state.update_data(model_key=model_key, image_model=model_key)
+    await safe_edit_message(
+        call.message,
         "💎 <b>Выбери качество</b>",
         reply_markup=image_quality_kb(model_key),
     )
     await state.set_state(ImageGenFSM.count_select)
-    await call.answer()
+    await safe_answer_callback(call)
 
 
-@router.callback_query(F.data.startswith("img_dyn:count:"))
+@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:count:"))
 async def cb_image_dynamic_count(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    await state.update_data(image_model=model_key)
-    await call.message.edit_text(
-        "🔢 <b>Выбери количество изображений</b>",
+    await state.update_data(model_key=model_key, image_model=model_key)
+    await safe_edit_message(
+        call.message,
+        "🔢 <b>Выбери количество</b>",
         reply_markup=image_count_kb(model_key),
     )
     await state.set_state(ImageGenFSM.count_select)
-    await call.answer()
+    await safe_answer_callback(call)
 
 
-@router.callback_query(F.data.startswith("img_dyn:enhance:"))
+@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:enhance:"))
 async def cb_image_dynamic_enhance(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
     data = await state.get_data()
-    mode = data.get("image_mode")
-    await state.update_data(image_model=model_key, image_prompt_enhance=True)
-    await call.message.edit_text(
-        "✨ <b>Улучшение промпта включено</b>\n\n"
-        "Теперь нажми «Продолжить» и напиши идею. Я подготовлю её аккуратнее перед генерацией.",
+    mode = data.get("image_mode") or data.get("mode")
+    current = bool(data.get("image_prompt_enhance"))
+    await state.update_data(
+        model_key=model_key,
+        image_model=model_key,
+        image_prompt_enhance=not current,
+    )
+    await safe_edit_message(
+        call.message,
+        "✨ <b>Улучшение промпта</b>\n\n"
+        f"Статус: <b>{'включено' if not current else 'выключено'}</b>\n\n"
+        "Выбери параметры или нажми «Продолжить».",
         reply_markup=image_dynamic_settings_kb(model_key, mode),
     )
-    await call.answer("Улучшение промпта включено")
+    await safe_answer_callback(call)
 
 
-@router.callback_query(F.data.startswith("img_dyn:continue:"))
+@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:continue:"))
 async def cb_image_dynamic_continue(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
     data = await state.get_data()
-
     caps = IMAGE_CAPS.get(model_key, {})
     modes = caps.get("modes", ["text"])
-    mode = data.get("image_mode") or ("text" if "text" in modes else modes[0])
+    mode = data.get("image_mode") or data.get("mode") or ("text" if "text" in modes else modes[0])
 
-    await state.update_data(image_model=model_key, image_mode=mode)
+    await state.update_data(
+        model_key=model_key,
+        image_model=model_key,
+        mode=mode,
+        image_mode=mode,
+    )
 
     if mode == "image":
-        await call.message.edit_text(
+        await safe_edit_message(
+            call.message,
             "🖼 <b>Загрузи фото-референс</b>\n\n"
             "После фото отправь текст, что нужно изменить или какой стиль сделать.",
             reply_markup=back_to_menu_kb(),
         )
-        await state.set_state(ImageGenFSM.waiting_reference)
+        await state.set_state(ImageGenFSM.image_upload)
     else:
-        await call.message.edit_text(
+        await safe_edit_message(
+            call.message,
             "✍️ <b>Напиши промпт для изображения</b>\n\n"
-            "Опиши, что нужно создать. Можно писать обычным языком.",
+            "Опиши, что нужно создать. Можно обычным языком.",
             reply_markup=back_to_menu_kb(),
         )
-        await state.set_state(ImageGenFSM.waiting_prompt)
+        await state.set_state(ImageGenFSM.prompt_input)
 
-    await call.answer()
+    await safe_answer_callback(call)
 
 
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_model:"))
@@ -1065,8 +1068,20 @@ async def handle_prompt(
     image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
 
     reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
+    data = await state.get_data()
+    current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
+
     if not _supports_img2img(image_session.model):
         reference_url = None
+
+    if current_mode == "image" and not reference_url:
+        await message.answer(
+            "🖼 Для выбранной модели нужен фото-референс.\n\n"
+            "Отправь фото, а потом напиши, что нужно изменить.",
+            reply_markup=back_to_menu_kb(),
+        )
+        await state.set_state(ImageGenFSM.image_upload)
+        return
 
     await _launch_session_generation(
         source_message=message,
@@ -1111,6 +1126,20 @@ async def handle_session_prompt(
         prefer_last_result=is_remix,
         state=state,
     )
+
+    current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
+
+    if not _supports_img2img(image_session.model):
+        reference_url = None
+
+    if current_mode == "image" and not reference_url:
+        await message.answer(
+            "🖼 Для выбранной модели нужен фото-референс.\n\n"
+            "Отправь фото, а потом напиши, что нужно изменить.",
+            reply_markup=back_to_menu_kb(),
+        )
+        await state.set_state(ImageGenFSM.image_upload)
+        return
 
     await _launch_session_generation(
         source_message=message,
