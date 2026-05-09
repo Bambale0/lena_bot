@@ -1038,6 +1038,71 @@ function Profile({ user, history, setScreen, setTopup }) {
 
 // ── Prompts screen ────────────────────────────────────────────────────────────
 
+
+function PhotoPromptTool({ setScreen, generatedPhotoPrompt, setGeneratedPhotoPrompt }) {
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef(null);
+
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    try {
+      const prompt = await photoPromptApi(file);
+      setGeneratedPhotoPrompt({
+        prompt,
+        fileName: file.name,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      setGeneratedPhotoPrompt({
+        prompt: "Не удалось проанализировать изображение. Попробуй другое фото или повтори позже.",
+        error: err.message,
+        createdAt: new Date().toISOString(),
+      });
+    } finally {
+      setLoading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function copyPrompt() {
+    if (!generatedPhotoPrompt?.prompt) return;
+    try {
+      await navigator.clipboard.writeText(generatedPhotoPrompt.prompt);
+    } catch {}
+  }
+
+  return (
+    <section className="photoPromptTool">
+      <div>
+        <h2>📸 Промпт по фото</h2>
+        <p>Загрузи изображение — я разберу стиль, сцену, свет и превращу в готовый prompt.</p>
+      </div>
+
+      <button className="photoPromptUpload" onClick={() => inputRef.current?.click()} disabled={loading}>
+        {loading ? "Анализирую изображение..." : "Загрузить фото для анализа"}
+      </button>
+      <input ref={inputRef} type="file" accept="image/*" hidden onChange={onFile} />
+
+      {generatedPhotoPrompt?.prompt && (
+        <div className="generatedPromptCard">
+          <div className="generatedPromptTop">
+            <b>Готовый prompt</b>
+            {generatedPhotoPrompt.fileName && <span>{generatedPhotoPrompt.fileName}</span>}
+          </div>
+          <p>{generatedPhotoPrompt.prompt}</p>
+          <div className="generatedPromptActions">
+            <button onClick={copyPrompt}>📋 Скопировать</button>
+            <button onClick={() => setScreen("studio")}>✨ В студию</button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Prompts({ prompts, loading, setScreen }) {
   const [category, setCategory] = useState("all");
   const cats = [["all","Все"], ["image","Фото"], ["other","Другое"]];
@@ -1047,7 +1112,7 @@ function Prompts({ prompts, loading, setScreen }) {
 
   return (
     <>
-      <h1>Библиотека промптов</h1>
+      <h1>Библиотека промптов</h1>\n      <PhotoPromptTool setScreen={setScreen} generatedPhotoPrompt={generatedPhotoPrompt} setGeneratedPhotoPrompt={setGeneratedPhotoPrompt} />
       <div className="chips top" style={{ marginBottom: 16 }}>
         {cats.map(([k, l]) => (
           <button key={k} className={category === k ? "active" : ""} onClick={() => setCategory(k)}>{l}</button>

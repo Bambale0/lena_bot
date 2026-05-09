@@ -5,7 +5,7 @@ import logging
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from api.video_service import VideoModel
 from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS, _KLING_PER_SEC
 from core.config import settings
 from db import repository as repo
+from api.photo_prompt_service import generate_prompt_from_photo
 from db.models import (
     GenerationType,
     ImageGenerationAction,
@@ -116,6 +117,13 @@ class FeedRemixRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=6)
 
 
+
+
+class PromptImproveRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    kind: str = "image"
+
+
 class PromptSubmitRequest(BaseModel):
     title: str = Field(..., min_length=3, max_length=120)
     description: str = Field(default="", max_length=500)
@@ -149,6 +157,54 @@ async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
 
 
 # ── models ────────────────────────────────────────────────────────────────────
+
+
+
+@router.post("/photo-prompt")
+async def miniapp_photo_prompt(
+    file: UploadFile = File(...),
+    user: User = Depends(get_miniapp_user),
+):
+    """Generate prompt from uploaded photo for miniapp studio."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+
+    mime = file.content_type or "image/jpeg"
+    if not mime.startswith("image/"):
+        raise HTTPException(status_code=422, detail="Only image files are supported")
+
+    try:
+        prompt = await generate_prompt_from_photo(data, mime)
+    except Exception as e:
+        logger.exception("miniapp photo prompt error user=%s: %s", user.id, e)
+        raise HTTPException(status_code=502, detail=f"Photo prompt failed: {e}")
+
+    return {"prompt": prompt}
+
+
+@router.post("/prompt/improve")
+async def miniapp_improve_prompt(
+    body: PromptImproveRequest,
+    user: User = Depends(get_miniapp_user),
+):
+    """Lightweight prompt improver for miniapp studio."""
+    prompt = body.prompt.strip()
+    kind = body.kind
+
+    if kind == "video":
+        improved = (
+            f"{prompt}. Cinematic video scene, clear subject action, smooth camera movement, "
+            f"natural motion, expressive lighting, detailed environment, high quality, coherent sequence."
+        )
+    else:
+        improved = (
+            f"{prompt}. Premium detailed image, cinematic composition, soft realistic light, "
+            f"clean background, sharp focus, high detail, balanced colors, professional visual style."
+        )
+
+    return {"prompt": improved}
+
 
 @router.get("/models/image", response_model=list[ModelInfo])
 async def list_image_models(
