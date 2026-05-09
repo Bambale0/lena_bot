@@ -364,19 +364,12 @@ function FeedCard({ item, idx, onRemix }) {
 }
 
 function Feed({ feed, feedLoading, prompts, setScreen, onRemix }) {
-  const [filter, setFilter] = useState("all");
-  const filters = [["all","Все"], ["image","Фото"], ["video","Видео"]];
-  const filtered = filter === "all" ? feed : feed.filter(f => f.gen_type === filter || (filter === "image" && !f.gen_type));
+  const filtered = feed;
 
   return (
     <>
       <h1>Лента</h1>
       <PromptFeed prompts={prompts} setScreen={setScreen} />
-      <div className="chips top" style={{ marginBottom: 16 }}>
-        {filters.map(([k, l]) => (
-          <button key={k} className={filter === k ? "active" : ""} onClick={() => setFilter(k)}>{l}</button>
-        ))}
-      </div>
       {feedLoading ? <Spinner /> : (
         <div className="feedList">
           {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} />)}
@@ -929,7 +922,7 @@ function Profile({ user, history, setScreen, setTopup }) {
 
 function Prompts({ prompts, loading, setScreen }) {
   const [category, setCategory] = useState("all");
-  const cats = [["all","Все"], ["image","Фото"], ["video","Видео"], ["other","Другое"]];
+  const cats = [["all","Все"], ["image","Фото"], ["other","Другое"]];
   const filtered = category === "all" ? prompts : prompts.filter(p => p.category === category);
 
   if (loading) return <><h1>Библиотека</h1><Spinner /></>;
