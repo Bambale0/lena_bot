@@ -29,3 +29,7 @@ yarn-error.log*
 webapp/node_modules/
 webapp/.vite/
 webapp/tsconfig.tsbuildinfo
+
+# miniapp build
+webapp/dist/
+webapp/node_modules/
