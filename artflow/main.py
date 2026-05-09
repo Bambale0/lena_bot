@@ -130,6 +130,18 @@ async def lifespan(app: FastAPI):
     logger.info("Shutdown complete")
 
 
+
+@app.middleware("http")
+async def miniapp_no_cache(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/app" or path.startswith("/app/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 app = FastAPI(title="APIX", lifespan=lifespan)
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 app.mount(settings.STATIC_UPLOAD_URL_PATH, StaticFiles(directory=str(UPLOAD_ROOT)), name="static_upload")

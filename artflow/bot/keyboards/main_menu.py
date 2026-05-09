@@ -12,7 +12,7 @@ def main_menu_kb(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=f"{settings.WEBHOOK_URL.rstrip('/')}/app")),
+        InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=f"{settings.WEBHOOK_URL.rstrip('/')}/app?v=1778285568")),
     )
     if balance is not None:
         builder.row(
