@@ -460,13 +460,99 @@ function ChipGroup({ options, value, onChange }) {
   );
 }
 
+
+function ScenarioCard({ active, icon, title, hint, onClick }) {
+  return (
+    <button className={`scenarioCard ${active ? "active" : ""}`} onClick={onClick}>
+      <b>{icon}</b>
+      <span>{title}</span>
+      <small>{hint}</small>
+    </button>
+  );
+}
+
+function getImageScenario(model) {
+  const key = String(model?.key || "").toLowerCase();
+  const modes = model?.modes || ["text"];
+
+  if (modes.includes("image")) return "edit";
+  if (key.includes("seedream")) return "quality";
+  if (key.includes("wan")) return "quality";
+  if (key.includes("nano") || key.includes("banana")) return "fast";
+  return "all";
+}
+
+function getVideoScenario(model) {
+  const key = String(model?.key || "").toLowerCase();
+  const modes = model?.modes || ["text"];
+  const motion = model?.motion_controls || [];
+
+  if (motion.length || key.includes("motion") || key.includes("camera")) return "motion";
+  if (modes.includes("image")) return "i2v";
+  if (key.includes("fast") || key.includes("turbo")) return "fast";
+  return "quality";
+}
+
+function getScenarioModels(kind, scenario, imageModels, videoModels) {
+  const source = kind === "image" ? imageModels : videoModels;
+  if (scenario === "all") return source;
+
+  return source.filter((m) => {
+    if (kind === "image") return getImageScenario(m) === scenario;
+    return getVideoScenario(m) === scenario;
+  });
+}
+
+
+
+function normalizeQualityOptions(model) {
+  return (model?.quality_options || []).map((q) => {
+    if (typeof q === "object") return q;
+    return { value: q, label: q };
+  });
+}
+
+function normalizeMotionControls(model) {
+  const raw = model?.motion_controls || model?.camera_controls || [];
+  if (raw.length) return raw;
+
+  const key = String(model?.key || "").toLowerCase();
+  if (key.includes("grok")) return ["normal", "motion", "cinematic"];
+  if (key.includes("kling")) return ["auto", "pan_left", "pan_right", "zoom_in", "zoom_out", "orbit"];
+  if (key.includes("veo")) return ["auto", "dolly_in", "dolly_out", "handheld"];
+  return ["auto"];
+}
+
+function motionLabel(x) {
+  return {
+    auto: "Авто",
+    normal: "Normal",
+    motion: "Motion",
+    cinematic: "Кино",
+    pan_left: "Pan ←",
+    pan_right: "Pan →",
+    zoom_in: "Zoom +",
+    zoom_out: "Zoom −",
+    orbit: "Orbit",
+    dolly_in: "Dolly +",
+    dolly_out: "Dolly −",
+    handheld: "Handheld",
+  }[x] || x;
+}
+
 function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, generation, setTopup, remixSource, clearRemix }) {
   const isRemix = !!remixSource;
-  const initialKind = remixSource?.gen_type === "video" ? "video" : "image";
 
-  const [kind, setKind] = useState(initialKind);
-  const models = kind === "image" ? imageModels : videoModels;
-  const [model, setModel] = useState(remixSource?.model || models[0]?.key || "");
+  const [kind, setKind] = useState(remixSource?.gen_type === "video" ? "video" : "image");
+  const [scenario, setScenario] = useState("fast");
+
+  const sourceModels = kind === "image" ? imageModels : videoModels;
+  const scenarioModels = getScenarioModels(kind, scenario, imageModels, videoModels);
+  const visibleModels = scenarioModels.length ? scenarioModels : sourceModels;
+
+  const [model, setModel] = useState(visibleModels[0]?.key || "");
+  const current = visibleModels.find((m) => m.key === model) || visibleModels[0] || sourceModels[0];
+
   const [mode, setMode] = useState("text");
   const [prompt, setPrompt] = useState("");
   const [ratio, setRatio] = useState("9:16");
@@ -474,51 +560,57 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
   const [count, setCount] = useState(1);
   const [duration, setDuration] = useState(5);
   const [resolution, setResolution] = useState("720p");
-  const [grokMode, setGrokMode] = useState("normal");
+  const [motion, setMotion] = useState("auto");
   const [refUrl, setRefUrl] = useState("");
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
 
-  const current = models.find(m => m.key === model) || models[0];
+  useEffect(() => {
+    if (kind === "image") setScenario("fast");
+    else setScenario("fast");
+  }, [kind]);
 
   useEffect(() => {
-    if (remixSource) {
-      setKind(remixSource.gen_type === "video" ? "video" : "image");
-      setModel(remixSource.model || models[0]?.key || "");
-    }
-  }, [remixSource]);
-
-  useEffect(() => { if (!isRemix) { setModel(models[0]?.key || ""); setMode("text"); } }, [kind]);
+    const list = getScenarioModels(kind, scenario, imageModels, videoModels);
+    const models = list.length ? list : (kind === "image" ? imageModels : videoModels);
+    setModel(models[0]?.key || "");
+  }, [kind, scenario, imageModels, videoModels]);
 
   useEffect(() => {
     if (!current) return;
-    const firstRatio = current.aspect_ratios?.[0];
-    if (firstRatio) setRatio(firstRatio);
-    const firstQ = current.quality_options?.[0]?.value || current.quality_options?.[0];
-    if (firstQ) setQuality(typeof firstQ === "object" ? firstQ.value : firstQ);
-    const firstDur = current.durations?.[0] || 5;
-    setDuration(firstDur);
-    const firstRes = current.resolutions?.[0] || "720p";
-    setResolution(firstRes);
-    setCount(1);
-    setGrokMode("normal");
-  }, [model, kind]);
+
+    const modes = current.modes || ["text"];
+    setMode(modes.includes("image") && (scenario === "edit" || scenario === "i2v") ? "image" : modes[0] || "text");
+
+    setRatio((current.aspect_ratios || [])[0] || "9:16");
+
+    const q = normalizeQualityOptions(current)[0];
+    setQuality(q?.value || "basic");
+
+    setCount((current.counts || [1])[0] || 1);
+    setDuration((current.durations || current.duration_options || [5])[0] || 5);
+    setResolution((current.resolutions || ["720p"])[0] || "720p");
+    setMotion(normalizeMotionControls(current)[0] || "auto");
+  }, [current?.key, scenario]);
 
   async function handleFileUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
+
       const res = await fetch("/upload", {
         method: "POST",
         headers: { "X-Telegram-Init-Data": initData() },
         body: fd,
       });
+
       if (!res.ok) throw new Error("Upload failed");
-      const { url } = await res.json();
-      setRefUrl(url);
+      const data = await res.json();
+      setRefUrl(data.url);
     } catch {
       setRefUrl(URL.createObjectURL(file));
     } finally {
@@ -526,200 +618,222 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
     }
   }
 
-  const estimatedCost = current?.is_per_second
-    ? duration * (current.credits_per_sec || current.credits || 0)
-    : (current?.credits || 0);
+  const isPerSecond = Boolean(current?.is_per_second);
+  const perSec = Number(current?.credits_per_sec || current?.credits || 0);
+  const baseCost = Number(current?.credits || 0);
+  const estimatedCost = kind === "video" && isPerSecond ? duration * perSec : baseCost;
+
+  const modes = current?.modes || ["text"];
+  const qualityOptions = normalizeQualityOptions(current);
+  const motionOptions = normalizeMotionControls(current);
+  const durations = current?.durations || current?.duration_options || [];
+  const resolutions = current?.resolutions || [];
+  const counts = current?.counts || [1];
+
+  const canUseReference = modes.includes("image");
+  const showMode = modes.length > 1;
+  const showRatio = (current?.aspect_ratios || []).length > 1;
+  const showQuality = kind === "image" && qualityOptions.length > 1;
+  const showCount = kind === "image" && counts.length > 1;
+  const showDuration = kind === "video" && durations.length > 0;
+  const showResolution = kind === "video" && resolutions.length > 1;
+  const showMotion = kind === "video" && (scenario === "motion" || motionOptions.length > 1);
 
   function handleGenerate() {
-    if (user.credits < estimatedCost) { setTopup(true); return; }
+    if (!current) return;
+
+    if (user.credits < estimatedCost) {
+      setTopup(true);
+      return;
+    }
+
     const payload = {
-      model, mode, aspect_ratio: ratio, quality, count,
-      duration, resolution, grok_mode: grokMode,
+      model,
+      prompt,
+      mode,
+      aspect_ratio: ratio,
+      quality,
+      count,
+      duration,
+      resolution,
+      grok_mode: motion,
       image_url: mode === "image" ? refUrl || null : null,
       reference_url: mode === "image" ? refUrl || null : null,
     };
+
     if (isRemix) onRemixGenerate(remixSource.gen_id, payload);
-    else onGenerate(kind, { ...payload, prompt });
+    else onGenerate(kind, payload);
   }
 
-  const genStatus = generation?.status;
-  const statusColor = genStatus === "done" ? "#4ade80" : genStatus === "failed" ? "#f87171" : "#facc15";
-
-  // model capability flags
-  const showQuality = kind === "image" && current?.has_quality && (current.quality_options || []).length > 1;
-  const showCount = kind === "image" && (current?.counts || [1]).length > 1;
-  const showRatio = (current?.aspect_ratios || []).length > 1;
-  const showDuration = kind === "video" && (current?.durations || []).length > 0;
-  const showResolution = kind === "video" && (current?.resolutions || []).length > 1;
-  const showGrokMode = kind === "video" && current?.key?.includes("grok");
+  const scenarios = kind === "image"
+    ? [
+        ["fast", "⚡", "Быстро", "минимум настроек"],
+        ["quality", "💎", "Качество", "детальнее и дороже"],
+        ["edit", "🖼", "По фото", "референс / img2img"],
+        ["all", "☰", "Все", "ручной выбор"],
+      ]
+    : [
+        ["fast", "⚡", "Быстро", "короткий ролик"],
+        ["quality", "🎬", "Кино", "лучшее качество"],
+        ["i2v", "🖼", "Фото → видео", "оживить кадр"],
+        ["motion", "🎥", "Motion", "камера и движение"],
+        ["all", "☰", "Все", "ручной выбор"],
+      ];
 
   return (
-    <section>
+    <section className="studioClean">
       <div className="studioHead">
-        <h1>{isRemix ? "🔁 Повтор из ленты" : "Студия"}</h1>
+        <div>
+          <h1>{isRemix ? "🔁 Повтор из ленты" : "Студия"}</h1>
+          <p>{kind === "image" ? "Создай изображение или ремикс по фото" : "Создай видео, оживи фото или настрой камеру"}</p>
+        </div>
         <button className="balanceBtn" onClick={() => setTopup(true)}>{user.credits} 💋</button>
       </div>
 
       {isRemix && (
-        <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 12, background: "rgba(124,58,237,.12)", border: "1px solid rgba(124,58,237,.3)", fontSize: 13, color: "#c4b5fd", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="remixNotice">
           <span>Промпт автора скрыт — выбери модель и параметры</span>
-          <button onClick={clearRemix} style={{ background: "none", border: "none", color: "rgba(255,255,255,.4)", fontSize: 16, cursor: "pointer", padding: "0 4px" }}>✕</button>
+          <button onClick={clearRemix}>×</button>
         </div>
       )}
 
-      <SettingsRow label="Тип">
+      <SettingsRow label="Что создаём">
         <div className="tabs">
           <button className={kind === "image" ? "active" : ""} onClick={() => setKind("image")}>🖼 Фото</button>
           <button className={kind === "video" ? "active" : ""} onClick={() => setKind("video")}>🎬 Видео</button>
         </div>
       </SettingsRow>
 
+      <SettingsRow label="Сценарий">
+        <div className="scenarioGrid">
+          {scenarios.map(([id, icon, title, hint]) => (
+            <ScenarioCard
+              key={id}
+              active={scenario === id}
+              icon={icon}
+              title={title}
+              hint={hint}
+              onClick={() => setScenario(id)}
+            />
+          ))}
+        </div>
+      </SettingsRow>
+
       <SettingsRow label="Модель">
-        <div className="models">
-          {models.map(m => (
-            <button key={m.key} onClick={() => setModel(m.key)} className={model === m.key ? "active" : ""}>
-              <i>{kind === "video" ? "🎬" : m.key.includes("seedream") ? "☁️" : m.key.includes("wan") ? "🌊" : m.key.includes("grok") ? "⚡" : "🍌"}</i>
-              <span>{m.display_name}</span>
-              <small style={{ color: "rgba(255,255,255,.4)", fontSize: 10 }}>
-                {m.is_per_second ? `от ${m.credits_per_sec || m.credits} 💋/сек` : `${m.credits} 💋`}
-              </small>
+        <div className="modelList">
+          {visibleModels.map((m) => (
+            <button key={m.key} className={model === m.key ? "active" : ""} onClick={() => setModel(m.key)}>
+              <i>{kind === "video" ? "🎬" : m.key?.includes("seedream") ? "☁️" : m.key?.includes("wan") ? "🌊" : m.key?.includes("grok") ? "⚡" : "🍌"}</i>
+              <span>
+                <b>{m.display_name}</b>
+                <small>
+                  {(m.modes || ["text"]).includes("image") ? "text + photo" : "text"}
+                  {" · "}
+                  {m.is_per_second ? `${m.credits_per_sec || m.credits} 💋/сек` : `${m.credits} 💋`}
+                </small>
+              </span>
             </button>
           ))}
         </div>
       </SettingsRow>
 
-      {(current?.modes || ["text"]).length > 1 && (
+      {showMode && (
         <SettingsRow label="Режим">
           <div className="tabs soft">
-            {(current?.modes || ["text"]).map(m => (
+            {modes.map((m) => (
               <button key={m} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>
-                {m === "text" ? `Text → ${kind === "video" ? "Video" : "Image"}` :
-                 m === "image" ? `Image → ${kind === "video" ? "Video" : "Image"}` :
-                 m === "motion" ? "🕺 Motion Control" : m}
+                {m === "text" ? "Text" : m === "image" ? "Image / reference" : m}
               </button>
             ))}
           </div>
         </SettingsRow>
       )}
 
-      {mode === "image" && (
+      {mode === "image" && canUseReference && (
         <SettingsRow label="Референс">
           <div className="refBlock">
-            {refUrl
-              ? <div className="refPreview">
-                  <img src={refUrl} alt="reference" />
-                  <button onClick={() => setRefUrl("")} className="refRemove">✕</button>
-                </div>
-              : <button className="refUpload" onClick={() => fileRef.current?.click()} disabled={uploading}>
-                  {uploading ? "Загрузка..." : "📎 Загрузить референс"}
-                </button>
-            }
+            {refUrl ? (
+              <div className="refPreview">
+                <img src={refUrl} alt="reference" />
+                <button className="refRemove" onClick={() => setRefUrl("")}>×</button>
+              </div>
+            ) : (
+              <button className="refUpload" onClick={() => fileRef.current?.click()} disabled={uploading}>
+                {uploading ? "Загрузка..." : "📎 Загрузить фото"}
+              </button>
+            )}
             <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFileUpload} />
           </div>
         </SettingsRow>
       )}
 
-      {showRatio && (
-        <SettingsRow label="Соотношение сторон">
-          <ChipGroup
-            options={(current?.aspect_ratios || []).slice(0, 8)}
-            value={ratio}
-            onChange={setRatio}
-          />
-        </SettingsRow>
-      )}
+      <div className="settingsGrid">
+        {showRatio && (
+          <SettingsRow label="Формат">
+            <ChipGroup options={current.aspect_ratios} value={ratio} onChange={setRatio} />
+          </SettingsRow>
+        )}
 
-      {showQuality && (
-        <SettingsRow label="Качество">
-          <ChipGroup
-            options={(current.quality_options || []).map(q =>
-              typeof q === "object" ? q : { value: q, label: q }
-            )}
-            value={quality}
-            onChange={setQuality}
-          />
-        </SettingsRow>
-      )}
+        {showQuality && (
+          <SettingsRow label="Качество">
+            <ChipGroup options={qualityOptions} value={quality} onChange={setQuality} />
+          </SettingsRow>
+        )}
 
-      {showCount && (
-        <SettingsRow label="Количество изображений">
-          <ChipGroup
-            options={(current.counts || [1]).map(n => ({ value: n, label: `${n} шт` }))}
-            value={count}
-            onChange={setCount}
-          />
-        </SettingsRow>
-      )}
+        {showCount && (
+          <SettingsRow label="Количество">
+            <ChipGroup options={counts} value={count} onChange={setCount} />
+          </SettingsRow>
+        )}
 
-      {showDuration && (
-        <SettingsRow label="Длительность">
-          <ChipGroup
-            options={(current.durations || [5]).map(d => ({ value: d, label: `${d}с` }))}
-            value={duration}
-            onChange={setDuration}
-          />
-        </SettingsRow>
-      )}
+        {showDuration && (
+          <SettingsRow label="Длительность">
+            <ChipGroup options={durations.map((d) => ({ value: d, label: `${d} сек` }))} value={duration} onChange={setDuration} />
+          </SettingsRow>
+        )}
 
-      {showResolution && (
-        <SettingsRow label="Разрешение">
-          <ChipGroup
-            options={current.resolutions || []}
-            value={resolution}
-            onChange={setResolution}
-          />
-        </SettingsRow>
-      )}
+        {showResolution && (
+          <SettingsRow label="Разрешение">
+            <ChipGroup options={resolutions} value={resolution} onChange={setResolution} />
+          </SettingsRow>
+        )}
 
-      {showGrokMode && (
-        <SettingsRow label="Стиль Grok">
-          <ChipGroup
-            options={["normal","fun","spicy"].map(m => ({ value: m, label: m === "normal" ? "Норм" : m === "fun" ? "Весёлый" : "Горячий" }))}
-            value={grokMode}
-            onChange={setGrokMode}
-          />
-        </SettingsRow>
-      )}
+        {showMotion && (
+          <SettingsRow label="Motion control">
+            <ChipGroup options={motionOptions.map((m) => ({ value: m, label: motionLabel(m) }))} value={motion} onChange={setMotion} />
+          </SettingsRow>
+        )}
+      </div>
 
       {!isRemix && (
         <SettingsRow label="Промпт">
           <textarea
             value={prompt}
-            onChange={e => setPrompt(e.target.value)}
-            placeholder={kind === "video" ? "Опишите движение, сцену и камеру..." : "Опишите вашу идею..."}
-            maxLength={4000}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={kind === "video" ? "Опиши сцену, движение и настроение..." : "Опиши идею изображения..."}
           />
         </SettingsRow>
       )}
 
+      <div className="studioActions">
+        <button className="secondaryBtn">✨ Улучшить промпт</button>
+        <button className="secondaryBtn" onClick={() => fileRef.current?.click()}>🖼 Prompt по фото</button>
+      </div>
+
       <button
-        disabled={(!isRemix && !prompt.trim()) || genStatus === "pending"}
+        className="primary studioGenerate"
+        disabled={!current || (!isRemix && !prompt.trim())}
         onClick={handleGenerate}
-        className="primary"
-        style={{ width: "100%", padding: 14, borderRadius: 16, marginTop: 4, fontSize: 15 }}
       >
-        {genStatus === "pending"
-          ? "⏳ Генерация..."
-          : current?.is_per_second
-            ? `${kind === "video" ? "Создать видео" : "Сгенерировать"} · ${duration}с × ${current.credits_per_sec || current.credits} = ${estimatedCost} 💋`
-            : `${kind === "video" ? "Создать видео" : "Сгенерировать"} · ${count > 1 ? `${count} × ` : ""}${current?.credits || 0} = ${(current?.credits || 0) * count} 💋`}
+        {kind === "video" ? "Создать видео" : "Сгенерировать"}
+        <span>{estimatedCost || current?.credits || 0} 💋</span>
       </button>
 
       {generation && (
-        <div className="status" style={{ borderColor: `${statusColor}44`, background: `${statusColor}11`, marginTop: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <b>Генерация #{generation.id}</b>
-            <span style={{ color: statusColor, fontSize: 13 }}>{generation.status}</span>
-          </div>
-          {generation.result_url && (
-            <div className="genResult">
-              <MediaThumb url={generation.result_url} type={kind} idx={0} className="genResultMedia" />
-            </div>
-          )}
-          {generation.status === "done" && generation.id > 0 && (
-            <GenShareButtons genId={generation.id} />
-          )}
-          {generation.error && <p style={{ color: "#f87171", margin: "8px 0 0", fontSize: 12 }}>{generation.error}</p>}
+        <div className="status">
+          <b>Генерация #{generation.id}</b>
+          <span>{generation.status}</span>
+          {generation.error && <p>{generation.error}</p>}
         </div>
       )}
     </section>

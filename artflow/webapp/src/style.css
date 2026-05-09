@@ -258,3 +258,226 @@ textarea{width:100%;height:112px;margin-top:16px;padding:14px;resize:none;outlin
 .viewerActions button:first-child {
   background: linear-gradient(90deg,#7c3aed,#d946ef);
 }
+
+.studioClean .studioHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.studioClean .studioHead h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.studioClean .studioHead p {
+  margin: 4px 0 0;
+  color: rgba(255,255,255,.45);
+  font-size: 13px;
+}
+
+.settingRow {
+  margin-bottom: 16px;
+}
+
+.settingLabel {
+  margin-bottom: 8px;
+  color: rgba(255,255,255,.45);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.scenarioGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.scenarioCard {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 2px 10px;
+  align-items: center;
+  text-align: left;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.045);
+  padding: 12px;
+}
+
+.scenarioCard b {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: rgba(0,0,0,.32);
+  font-size: 18px;
+}
+
+.scenarioCard span {
+  font-weight: 650;
+  font-size: 14px;
+}
+
+.scenarioCard small {
+  color: rgba(255,255,255,.42);
+  font-size: 11px;
+}
+
+.scenarioCard.active {
+  border-color: rgba(168,85,247,.72);
+  background: linear-gradient(135deg, rgba(124,58,237,.28), rgba(217,70,239,.14));
+}
+
+.modelList {
+  display: grid;
+  gap: 9px;
+}
+
+.modelList button {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.045);
+  padding: 11px 12px;
+}
+
+.modelList button.active {
+  border-color: rgba(168,85,247,.8);
+  background: rgba(124,58,237,.18);
+}
+
+.modelList i {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: rgba(0,0,0,.35);
+  font-style: normal;
+  font-size: 21px;
+}
+
+.modelList b {
+  display: block;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.modelList small {
+  display: block;
+  margin-top: 2px;
+  color: rgba(255,255,255,.42);
+  font-size: 11px;
+}
+
+.settingsGrid {
+  display: grid;
+  gap: 2px;
+}
+
+.refBlock {
+  border-radius: 16px;
+  border: 1px dashed rgba(255,255,255,.15);
+  background: rgba(255,255,255,.04);
+  padding: 10px;
+}
+
+.refUpload {
+  width: 100%;
+  border-radius: 14px;
+  background: rgba(255,255,255,.07);
+  color: white;
+  padding: 13px;
+  font-weight: 600;
+}
+
+.refPreview {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.refPreview img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  display: block;
+}
+
+.refRemove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.65);
+  color: white;
+  font-size: 20px;
+}
+
+.studioActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.secondaryBtn {
+  border-radius: 14px;
+  background: rgba(255,255,255,.07);
+  color: rgba(255,255,255,.76);
+  padding: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.studioGenerate {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 18px;
+  margin-top: 14px;
+  padding: 15px;
+  font-size: 16px;
+}
+
+.studioGenerate span {
+  border-radius: 10px;
+  background: rgba(0,0,0,.22);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.remixNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(124,58,237,.32);
+  background: rgba(124,58,237,.13);
+  color: #c4b5fd;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.remixNotice button {
+  background: transparent;
+  color: rgba(255,255,255,.55);
+  font-size: 20px;
+}
