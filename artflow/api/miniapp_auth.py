@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 from urllib.parse import parse_qsl, unquote
 
 from fastapi import Depends, HTTPException, Header
@@ -13,6 +14,9 @@ from core.config import settings
 from db import repository as repo
 from db.models import User
 from db.session import get_session
+
+
+TELEGRAM_INIT_DATA_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
 
 def _verify_init_data(init_data: str) -> dict:
@@ -26,6 +30,13 @@ def _verify_init_data(init_data: str) -> dict:
 
     if not hmac.compare_digest(computed_hash, received_hash):
         raise HTTPException(status_code=401, detail="Invalid Telegram initData signature")
+
+    try:
+        auth_date = int(params.get("auth_date", "0"))
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Malformed auth_date in initData")
+    if auth_date <= 0 or time.time() - auth_date > TELEGRAM_INIT_DATA_MAX_AGE_SECONDS:
+        raise HTTPException(status_code=401, detail="Telegram initData expired")
 
     raw_user = params.get("user")
     if not raw_user:

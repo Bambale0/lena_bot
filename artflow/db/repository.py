@@ -584,7 +584,7 @@ async def create_image_session(
     quality: str,
     count: int,
     base_prompt: str | None,
-    reference_file_id: str | None,
+    reference_file_id: str | None = None,
     reference_file_ids: list[str] | None = None,
     reference_url: str | None = None,
 ) -> ImageSession:

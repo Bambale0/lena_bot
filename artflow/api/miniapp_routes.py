@@ -67,6 +67,7 @@ class ModelInfo(BaseModel):
     credits_per_sec: int | None = None
     durations: list[int] = []
     resolutions: list[str] = []
+    motion_controls: list[str] = []
 
 
 class GenerationOut(BaseModel):
@@ -101,6 +102,18 @@ class VideoGenRequest(BaseModel):
     resolution: str | None = None
     image_url: str | None = None
     grok_mode: str = "normal"
+
+
+class FeedRemixRequest(BaseModel):
+    model: str
+    mode: str = "text"                    # "text" | "image"
+    duration: int = Field(default=5, ge=2, le=30)
+    aspect_ratio: str | None = None
+    resolution: str | None = None
+    image_url: str | None = None
+    grok_mode: str = "normal"
+    quality: str = "basic"
+    count: int = Field(default=1, ge=1, le=6)
 
 
 class PromptSubmitRequest(BaseModel):
@@ -193,6 +206,7 @@ async def list_video_models(
             credits_per_sec=credits_per_sec,
             durations=caps.get("duration_options", []),
             resolutions=caps.get("resolutions") or [],
+            motion_controls=caps.get("motion_controls", []),
         ))
     return result
 
@@ -248,6 +262,7 @@ async def create_image_generation(
         quality=body.quality,
         count=body.count,
         base_prompt=body.prompt,
+        reference_file_id=None,
         reference_url=body.reference_url,
     )
 
@@ -484,7 +499,7 @@ async def like_feed_post(
 @router.post("/feed/{gen_id}/remix", response_model=GenerationOut, status_code=202)
 async def remix_feed_post(
     gen_id: int,
-    body: VideoGenRequest,
+    body: FeedRemixRequest,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> GenerationOut:
@@ -544,7 +559,7 @@ async def remix_feed_post(
             result = await image_service.generate_image(
                 img_model, source.prompt,
                 image_url=body.image_url if body.mode == "image" else None,
-                aspect_ratio=body.aspect_ratio, n=1,
+                aspect_ratio=body.aspect_ratio, n=body.count,
                 quality=body.quality or "basic",
                 callback_url=_kie_callback_url(),
             )

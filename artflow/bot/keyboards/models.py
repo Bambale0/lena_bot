@@ -10,6 +10,8 @@ from db.models import ModelCost
 
 # ── Video capabilities ────────────────────────────────────────────────────────
 
+DEFAULT_MOTION_CONTROLS = ["auto", "pan_left", "pan_right", "zoom_in", "zoom_out", "orbit", "dolly_in", "dolly_out", "handheld", "cinematic"]
+
 VIDEO_CAPS: dict[str, dict] = {
     VideoModel.KLING_26_T2V: {
         "modes": ["text"],
