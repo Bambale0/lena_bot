@@ -6,7 +6,7 @@ HTTP-клиент для api.kie.ai — единый провайдер всех
   POST /api/v1/jobs/createTask          — создать задачу (все модели кроме Veo)
   GET  /api/v1/jobs/recordInfo?taskId=  — статус задачи (все модели кроме Veo)
   POST /api/v1/veo/generate             — создать Veo-задачу
-  GET  /api/v1/veo/video/{videoId}      — статус Veo-задачи
+  GET  /api/v1/veo/record-info?taskId=  — статус Veo-задачи
 """
 from __future__ import annotations
 
@@ -61,6 +61,15 @@ async def _retry_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     raise RuntimeError(f"kie.ai: max retries exceeded for POST {path}")
 
 
+def _ensure_dict(resp: Any) -> dict[str, Any]:
+    """Ensure response is a dict, return empty dict if None."""
+    if resp is None:
+        return {}
+    if isinstance(resp, dict):
+        return resp
+    return {}
+
+
 async def _retry_get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     client = get_client()
     for attempt in range(3):
@@ -101,12 +110,33 @@ async def create_veo_task(payload: dict[str, Any]) -> dict[str, Any]:
     return await _retry_post("/api/v1/veo/generate", payload)
 
 
-async def get_veo_status(video_id: str) -> dict[str, Any]:
-    """GET /api/v1/veo/video/{videoId} — статус Veo-задачи."""
-    return await _retry_get(f"/api/v1/veo/video/{video_id}")
+async def get_veo_status(task_id: str) -> dict[str, Any]:
+    """GET /api/v1/veo/record-info?taskId= — статус Veo-задачи."""
+    return await _retry_get("/api/v1/veo/record-info", params={"taskId": task_id})
+
+
+
+# ── Veo 3.1 4K enhancement ──────────────────────────────────────────────────
+
+async def create_veo_4k_task(
+    task_id: str,
+    index: int = 0,
+    callback_url: str | None = None,
+) -> dict[str, Any]:
+    """POST /api/v1/veo/4k/generate — запросить 4K-улучшение видео."""
+    payload: dict[str, Any] = {"taskId": task_id, "index": index}
+    if callback_url:
+        payload["callBackUrl"] = callback_url
+    return await _retry_post("/api/v1/veo/4k/generate", payload)
+
+
+async def get_veo_4k_status(task_id: str) -> dict[str, Any]:
+    """GET /api/v1/veo/4k/record-info?taskId= — статус 4K-улучшения."""
+    return await _retry_get("/api/v1/veo/4k/record-info", params={"taskId": task_id})
 
 
 # Aliases for backward-compat with old Wan 2.7 Pro calls
+
 async def post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     return await _retry_post(path, payload)
 

@@ -8,7 +8,8 @@ Video generation service — единый провайдер KIE.AI.
 
 Veo 3:
   POST /api/v1/veo/generate      →  VideoResult(task_id=videoId, provider="veo")
-  GET  /api/v1/veo/video/{id}    →  poll_veo_status
+  GET  /api/v1/veo/record-info   →  poll_veo_status
+  GET  /api/v1/veo/4k/record-info →  poll_veo_4k_status
 """
 from __future__ import annotations
 
@@ -114,9 +115,12 @@ async def generate_video(
     # Grok mode
     grok_mode: str = "normal",
     callback_url: str | None = None,
+    enable_fallback: bool = False,
 ) -> VideoResult:
     if model in _VEO_MODELS:
-        return await _veo_generate(model, prompt, image_url, aspect_ratio)
+        return await _veo_generate(model, prompt, image_url, aspect_ratio,
+                                       callback_url=callback_url,
+                                       enable_fallback=enable_fallback)
     return await _kieai_generate(
         model, prompt,
         image_url=image_url,
@@ -189,13 +193,18 @@ async def _veo_generate(
     prompt: str,
     image_url: str | None,
     aspect_ratio: str | None,
+    callback_url: str | None = None,
+    enable_fallback: bool = False,
 ) -> VideoResult:
     payload: dict[str, Any] = {
         "prompt": prompt,
         "model": model.value,
         "aspect_ratio": aspect_ratio or "16:9",
         "enableTranslation": True,
+        "enableFallback": enable_fallback,
     }
+    if callback_url:
+        payload["callBackUrl"] = callback_url
     if image_url:
         payload["imageUrls"] = [image_url]
         payload["generationType"] = "REFERENCE_2_VIDEO"
@@ -203,9 +212,15 @@ async def _veo_generate(
         payload["generationType"] = "TEXT_2_VIDEO"
 
     resp = await kieai_client.create_veo_task(payload)
-    video_id = str(resp.get("data", {}).get("videoId") or resp.get("videoId"))
-    logger.info("Veo task videoId: %s", video_id)
-    return VideoResult(task_id=video_id, provider="veo")
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"Veo3: API returned non-dict response: {type(resp)}")
+    data = resp.get("data")
+    if not isinstance(data, dict):
+        data = {}
+    # Veo 3.1 returns taskId in data
+    task_id = str(data.get("taskId") or resp.get("taskId") or "")
+    logger.info("Veo task taskId: %s", task_id)
+    return VideoResult(task_id=task_id, provider="veo")
 
 
 # ── Poll functions ────────────────────────────────────────────────────────────
@@ -252,10 +267,55 @@ async def poll_veo_status(video_id: str) -> str | None:
 
     return None
 
+# ── Veo 3.1 4K enhancement ──────────────────────────────────────────────────
+
+async def generate_video_4k(
+    task_id: str,
+    index: int = 0,
+    callback_url: str | None = None,
+) -> VideoResult:
+    """Request 4K enhancement for a previously generated Veo video.
+
+    After a Veo video is generated, call this to get a 4K version.
+    The result will be delivered via callback or can be polled.
+    """
+    resp = await kieai_client.create_veo_4k_task(task_id, index=index, callback_url=callback_url)
+    if not isinstance(resp, dict):
+        resp = {}
+    data = resp.get("data")
+    if not isinstance(data, dict):
+        data = {}
+    new_task_id = str(data.get("taskId") or resp.get("taskId") or "")
+    logger.info("Veo 4K enhancement taskId: %s", new_task_id)
+    return VideoResult(task_id=new_task_id, provider="veo_4k")
+
+
+async def poll_veo_4k_status(task_id: str) -> str | None:
+    """Poll 4K enhancement status. Returns video URL when done."""
+    resp = await kieai_client.get_veo_4k_status(task_id)
+    data = resp.get("data", {})
+    state = str(data.get("state", "")).lower()
+
+    if state in ("success", "1"):
+        info = data.get("info") or {}
+        result_urls = info.get("resultUrls") or data.get("resultUrls") or []
+        if result_urls:
+            return result_urls[0]
+        url = data.get("videoUrl") or info.get("videoUrl")
+        if url:
+            return url
+        raise RuntimeError("Veo3 4K: success but no videoUrl in response")
+
+    if state in ("fail", "failed", "error", "2", "500"):
+        raise RuntimeError(f"Veo3 4K failed: {data.get('msg', data.get('errorMessage', 'unknown error'))}")
+
+    return None
+
 
 POLL_FN_MAP: dict[str, Any] = {
     "kieai": poll_kieai_status,
     "veo":   poll_veo_status,
+    "veo_4k": poll_veo_4k_status,
 }
 
 

@@ -106,21 +106,24 @@ VIDEO_CAPS: dict[str, dict] = {
     },
     VideoModel.VEO_3_FAST: {
         "modes": ["text", "image"],
-        "duration_options": [],
+        "duration_options": [5, 10, 15],
         "aspect_ratios": ["16:9", "9:16"],
-        "has_resolution": False,
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
     },
     VideoModel.VEO_3: {
         "modes": ["text", "image"],
-        "duration_options": [],
+        "duration_options": [5, 10, 15],
         "aspect_ratios": ["16:9", "9:16"],
-        "has_resolution": False,
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
     },
     VideoModel.VEO_3_LITE: {
         "modes": ["text", "image"],
-        "duration_options": [],
+        "duration_options": [5, 10, 15],
         "aspect_ratios": ["16:9", "9:16"],
-        "has_resolution": False,
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
     },
 }
 

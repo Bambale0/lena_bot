@@ -340,6 +340,68 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         optional_params={"duration": "duration", "resolution": "resolution", "seed": "seed"},
         defaults={"duration": 5, "resolution": "1080p", "seed": 0},
     ),
+
+    # ── Veo 3 ────────────────────────────────────────────────────────────────
+    "veo3": KieModelSpec(
+        model="veo3",
+        media_type=KieMediaType.VIDEO,
+        supported_modes=("text", "image"),
+        reference_type=KieReferenceType.SINGLE,
+        reference_field="first_frame_url",
+        optional_params={
+            "aspect_ratio": "aspect_ratio",
+            "duration": "duration",
+            "resolution": "resolution",
+        },
+        defaults={
+            "aspect_ratio": "16:9",
+            "duration": 5,
+            "nsfw_checker": False,
+            "enableTranslation": True,
+            "enableFallback": False,
+        },
+        param_builder=_str_duration,
+    ),
+    "veo3_fast": KieModelSpec(
+        model="veo3_fast",
+        media_type=KieMediaType.VIDEO,
+        supported_modes=("text", "image"),
+        reference_type=KieReferenceType.SINGLE,
+        reference_field="first_frame_url",
+        optional_params={
+            "aspect_ratio": "aspect_ratio",
+            "duration": "duration",
+            "resolution": "resolution",
+        },
+        defaults={
+            "aspect_ratio": "16:9",
+            "duration": 5,
+            "nsfw_checker": False,
+            "enableTranslation": True,
+            "enableFallback": False,
+        },
+        param_builder=_str_duration,
+    ),
+    "veo3_lite": KieModelSpec(
+        model="veo3_lite",
+        media_type=KieMediaType.VIDEO,
+        supported_modes=("text", "image"),
+        reference_type=KieReferenceType.SINGLE,
+        reference_field="first_frame_url",
+        optional_params={
+            "aspect_ratio": "aspect_ratio",
+            "duration": "duration",
+            "resolution": "resolution",
+        },
+        defaults={
+            "aspect_ratio": "16:9",
+            "duration": 5,
+            "nsfw_checker": False,
+            "enableTranslation": True,
+            "enableFallback": False,
+        },
+        param_builder=_str_duration,
+    ),
 }
 
 
