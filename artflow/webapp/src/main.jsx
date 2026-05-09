@@ -476,10 +476,10 @@ function getImageScenario(model) {
   const modes = model?.modes || ["text"];
 
   if (modes.includes("image")) return "edit";
-  if (key.includes("seedream")) return "quality";
-  if (key.includes("wan")) return "quality";
+  if (key.includes("seedream")) return "fast";
+  if (key.includes("wan")) return "fast";
   if (key.includes("nano") || key.includes("banana")) return "fast";
-  return "all";
+  return "fast";
 }
 
 function getVideoScenario(model) {
@@ -668,7 +668,6 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
   const scenarios = kind === "image"
     ? [
         ["fast", "⚡", "Быстро", "минимум настроек"],
-        ["quality", "💎", "Качество", "детальнее и дороже"],
         ["edit", "🖼", "По фото", "референс / img2img"],
         ["all", "☰", "Все", "ручной выбор"],
       ]
