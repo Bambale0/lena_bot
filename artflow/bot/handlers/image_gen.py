@@ -628,7 +628,7 @@ async def cb_image_dynamic_reference(call: CallbackQuery, state: FSMContext) -> 
     await call.message.edit_text(
         "🖼 <b>Загрузи фото-референс</b>\n\n"
         "После фото отправь текст, что нужно изменить или какой стиль сделать.",
-        reply_markup=get_back_keyboard("menu:image"),
+        reply_markup=back_to_menu_kb(),
     )
     await state.set_state(ImageGenFSM.waiting_reference)
     await call.answer()
@@ -699,14 +699,14 @@ async def cb_image_dynamic_continue(call: CallbackQuery, state: FSMContext) -> N
         await call.message.edit_text(
             "🖼 <b>Загрузи фото-референс</b>\n\n"
             "После фото отправь текст, что нужно изменить или какой стиль сделать.",
-            reply_markup=get_back_keyboard("menu:image"),
+            reply_markup=back_to_menu_kb(),
         )
         await state.set_state(ImageGenFSM.waiting_reference)
     else:
         await call.message.edit_text(
             "✍️ <b>Напиши промпт для изображения</b>\n\n"
             "Опиши, что нужно создать. Можно писать обычным языком.",
-            reply_markup=get_back_keyboard("menu:image"),
+            reply_markup=back_to_menu_kb(),
         )
         await state.set_state(ImageGenFSM.waiting_prompt)
 
