@@ -43,6 +43,25 @@ async function publishGeneration(id) {
   return api(`/generations/${id}/publish`, { method: "POST" });
 }
 
+async function photoPromptApi(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+
+  const res = await fetch(`${API_BASE}/photo-prompt`, {
+    method: "POST",
+    headers: { "X-Telegram-Init-Data": initData() },
+    body: fd,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Photo prompt failed: ${res.status}`);
+  }
+
+  const data = await res.json();
+  return data.prompt || "";
+}
+
 async function api(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -816,7 +835,6 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
 
       <div className="studioActions">
         <button className="secondaryBtn">✨ Улучшить промпт</button>
-        <button className="secondaryBtn" onClick={() => fileRef.current?.click()}>🖼 Prompt по фото</button>
       </div>
 
       <button
@@ -1104,14 +1122,75 @@ function PhotoPromptTool({ setScreen, generatedPhotoPrompt, setGeneratedPhotoPro
 }
 
 function Prompts({ prompts, loading, setScreen }) {
+  const [photoPromptLoading, setPhotoPromptLoading] = useState(false);
+  const [photoPromptResult, setPhotoPromptResult] = useState("");
+  const photoPromptInputRef = useRef(null);
   const filtered = prompts || [];
+
+  async function handlePromptPhotoFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setPhotoPromptLoading(true);
+    try {
+      const prompt = await photoPromptApi(file);
+      setPhotoPromptResult(prompt || "Не удалось получить prompt по фото.");
+    } catch (err) {
+      setPhotoPromptResult("Ошибка анализа фото: " + (err?.message || err));
+    } finally {
+      setPhotoPromptLoading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function copyPhotoPrompt() {
+    if (!photoPromptResult) return;
+    try {
+      await navigator.clipboard.writeText(photoPromptResult);
+    } catch {}
+  }
 
   if (loading) return <><h1>Библиотека</h1><Spinner /></>;
 
   return (
     <>
       <h1>Библиотека промптов</h1>
-      <PhotoPromptTool setScreen={setScreen} generatedPhotoPrompt={generatedPhotoPrompt} setGeneratedPhotoPrompt={setGeneratedPhotoPrompt} />
+      <section className="photoPromptTool">
+        <div>
+          <h2>📸 Промпт по фото</h2>
+          <p>Загрузи изображение — я проанализирую стиль, композицию, свет и сделаю готовый prompt.</p>
+        </div>
+
+        <button
+          className="photoPromptUpload"
+          onClick={() => photoPromptInputRef.current?.click()}
+          disabled={photoPromptLoading}
+        >
+          {photoPromptLoading ? "Анализирую фото..." : "Загрузить фото для анализа"}
+        </button>
+
+        <input
+          ref={photoPromptInputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={handlePromptPhotoFile}
+        />
+
+        {photoPromptResult && (
+          <div className="generatedPromptCard">
+            <div className="generatedPromptTop">
+              <b>Готовый prompt</b>
+            </div>
+            <p>{photoPromptResult}</p>
+            <div className="generatedPromptActions">
+              <button onClick={copyPhotoPrompt}>📋 Скопировать</button>
+              <button onClick={() => setScreen("studio")}>✨ В студию</button>
+            </div>
+          </div>
+        )}
+      </section>
+
       <div style={{ display: "grid", gap: 12 }}>
         {filtered.map((p, i) => (
           <button key={p.id} className="promptListCard" onClick={() => setScreen("studio")}>
