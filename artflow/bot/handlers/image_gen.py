@@ -515,12 +515,13 @@ async def _start_image_model_flow(
         "Выбери параметры или нажми «Продолжить»."
     )
 
-    await call.message.edit_text(
+    await safe_edit_message(
+        call.message,
         text,
         reply_markup=image_dynamic_settings_kb(model_key, default_mode),
     )
     await state.set_state(ImageGenFSM.model_select)
-    await call.answer()
+    await safe_answer_callback(call)
 
 
 @router.callback_query(F.data == "menu:image")
@@ -604,7 +605,6 @@ async def cb_image_scenario(
         model_key=scenario["model"],
         forced_mode=scenario["mode"],
     )
-    await safe_answer_callback(call)
 
 
 

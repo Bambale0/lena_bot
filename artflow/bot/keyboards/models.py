@@ -247,14 +247,14 @@ HIDDEN_IMAGE_MODELS = {
 
 IMAGE_SCENARIOS: dict[str, dict[str, str]] = {
     "fast": {
-        "title": "⚡ Быстро и просто",
-        "description": "Текст → изображение. Быстрый старт без лишней ручной настройки",
+        "title": "⚡ Быстрый старт",
+        "description": "Текст → изображение. Быстро создать картинку по описанию",
         "model": ImageModel.NANO_BANANA_PRO,
         "mode": "text",
     },
     "edit": {
         "title": "🖼️ Из фото в новую версию",
-        "description": "Референс → новое изображение. Ремикс, правки, стилизация",
+        "description": "Фото → изображение. Ремикс, правки, стилизация по референсу",
         "model": ImageModel.NANO_BANANA_2,
         "mode": "image",
     },

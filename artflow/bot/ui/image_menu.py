@@ -24,9 +24,8 @@ def render_image_scenarios() -> ScreenRender:
 
     text = (
         "🎨 <b>Изображения</b>\n\n"
-        "Выбери простой режим или открой все модели для ручной настройки.\n\n"
-        f"{scenario_lines}\n\n"
-        "В ручном режиме кнопки и параметры будут меняться под возможности выбранной модели."
+        "Выбери сценарий. Полный ручной контроль — во вкладке <b>Все модели</b>.\n\n"
+        f"{scenario_lines}"
     )
     return ScreenRender(text=text, reply_markup=image_scenarios_kb())
 
@@ -34,8 +33,8 @@ def render_image_scenarios() -> ScreenRender:
 def render_image_advanced_menu(model_costs: list[ModelCost]) -> ScreenRender:
     text = (
         "🧠 <b>Все модели изображений</b>\n\n"
-        "Полный ручной режим: сам выбираешь модель, режим и параметры.\n\n"
-        "Кнопки настроек будут появляться динамически — только если выбранная модель это поддерживает."
+        "Ручной режим: модель, формат, качество, количество и референсы.\n"
+        "Доступные кнопки зависят от возможностей выбранной модели."
     )
     return ScreenRender(text=text, reply_markup=image_models_kb(model_costs))
 
@@ -61,12 +60,9 @@ def render_active_image_session(image_session: ImageSession) -> ScreenRender:
     text = (
         "🎨 <b>Активная серия</b>\n\n"
         f"🍌 <b>{model_label}</b>\n"
-        f"📐 {ratio} · {count_label}\n\n"
+        f"📐 {ratio} · {count_label}\n"
         f"📎 Референс: <b>{reference_label}</b>\n\n"
-        "────────────\n\n"
-        "✍️ Отправь текст или фото\n"
-        "Бот продолжит генерацию\n\n"
-        "────────────"
+        "Отправь текст или фото — бот продолжит генерацию."
     )
     return ScreenRender(
         text=text,
