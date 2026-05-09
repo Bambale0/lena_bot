@@ -28,19 +28,19 @@ def make_init_data(*, user_id: int = 42, auth_date: int | None = None, token: st
 
 
 def test__verify_init_data_accepts_valid_hash() -> None:
-    data = _verify_init_data(make_init_data(user_id=777), BOT_TOKEN)
-    assert data["user"]["id"] == 777
+    data = _verify_init_data(make_init_data(user_id=777), bot_token=BOT_TOKEN)
+    assert data["id"] == 777
 
 
 def test__verify_init_data_rejects_tampered_payload() -> None:
     init_data = make_init_data(user_id=777).replace("777", "778")
     with pytest.raises(HTTPException) as exc:
-        _verify_init_data(init_data, BOT_TOKEN)
+        _verify_init_data(init_data, bot_token=BOT_TOKEN)
     assert exc.value.status_code == 401
 
 
 def test__verify_init_data_rejects_expired_auth_date() -> None:
     expired = int(time.time()) - 8 * 24 * 60 * 60
     with pytest.raises(HTTPException) as exc:
-        _verify_init_data(make_init_data(auth_date=expired), BOT_TOKEN)
+        _verify_init_data(make_init_data(auth_date=expired), bot_token=BOT_TOKEN)
     assert exc.value.status_code == 401

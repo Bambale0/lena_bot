@@ -822,43 +822,6 @@ def image_dynamic_settings_kb(model_key: str, mode: str | None = None) -> Inline
     builder.button(text="← Назад", callback_data="img_menu:advanced")
     builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
-
-
-# ── Dynamic image settings by model capabilities ──────────────────────────────
-
-def get_image_capabilities(model_key: str) -> dict:
-    caps = dict(IMAGE_CAPS.get(model_key, {}))
-    caps.setdefault("modes", ["text"])
-    caps.setdefault("aspect_ratios", [])
-    caps.setdefault("aspect_ratio_modes", caps.get("modes", []))
-    caps.setdefault("quality_options", [])
-    caps.setdefault("counts", [1])
-    caps.setdefault("has_quality", bool(caps.get("quality_options")))
-    caps.setdefault("supports_reference", "image" in caps.get("modes", []) or bool(caps.get("max_refs")))
-    caps.setdefault("supports_prompt_enhance", True)
-    return caps
-
-
-def image_available_settings(model_key: str, mode: str | None = None) -> list[str]:
-    caps = get_image_capabilities(model_key)
-    settings: list[str] = []
-
-    modes = caps.get("modes") or ["text"]
-    selected_mode = mode or ("text" if "text" in modes else modes[0])
-    ratio_modes = caps.get("aspect_ratio_modes") or modes
-
-    if len(modes) > 1:
-        settings.append("mode")
-
-    if caps.get("supports_reference") and selected_mode == "image":
-        settings.append("reference")
-
-    if caps.get("aspect_ratios") and selected_mode in ratio_modes:
-        settings.append("aspect_ratio")
-
-    if caps.get("has_quality") and caps.get("quality_options"):
-        settings.append("quality")
-
     if len(caps.get("counts") or [1]) > 1:
         settings.append("count")
 

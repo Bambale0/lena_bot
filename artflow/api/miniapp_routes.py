@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["miniapp"])
 
+
+@router.get("/health")
+async def health() -> dict:
+    return {"status": "ok"}
+
+
 MAX_CONCURRENT = 6
 
 
@@ -522,6 +528,7 @@ async def get_feed(
             "aspect_ratio": c.aspect_ratio,
             "author": c.username or c.full_name or "anon",
             "is_mine": c.generation.user_id == user.id,
+                "remixes": c.remix_count,
         }
         for c in cards
     ]

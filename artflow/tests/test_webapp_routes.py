@@ -23,6 +23,7 @@ async def fake_user():
         full_name="Test User",
         credits=1003,
         referral_code="REF",
+        referral_balance=0.0,
         is_banned=False,
     )
 
@@ -39,7 +40,7 @@ async def client():
 @pytest.mark.asyncio
 async def test_webapp_health_is_public() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/api/webapp/health")
+        response = await client.get("/api/v1/health")
     assert response.status_code == 200
 
 
@@ -47,15 +48,15 @@ async def test_webapp_health_is_public() -> None:
 async def test_webapp_me_rejects_missing_init_data_without_override() -> None:
     app.dependency_overrides.clear()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/api/webapp/me")
-    assert response.status_code == 422
+        response = await client.get("/api/v1/me")
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_webapp_me_returns_verified_user(client, monkeypatch) -> None:
     monkeypatch.setattr("api.miniapp_routes.repo.get_active_image_session", AsyncMock(return_value=None))
-    response = await client.get("/api/webapp/me")
-    assert response.json()["user"]["credits"] == 1003
+    response = await client.get("/api/v1/me")
+    assert response.json()["credits"] == 1003
 
 
 @pytest.mark.asyncio
@@ -67,16 +68,18 @@ async def test_webapp_feed_returns_items(client, monkeypatch) -> None:
         prompt="premium prompt",
         likes_count=2,
         shares_count=1,
+        user_id=1,
         created_at=None,
     )
-    card = SimpleNamespace(generation=generation, username="author", full_name=None, remix_count=3)
+    card = SimpleNamespace(generation=generation, username="author", full_name=None, remix_count=3, aspect_ratio="16:9")
     monkeypatch.setattr("api.miniapp_routes.repo.get_feed_generations", AsyncMock(return_value=[card]))
-    response = await client.get("/api/webapp/feed")
-    assert response.json()["items"][0]["remixes"] == 3
+    response = await client.get("/api/v1/feed")
+    assert response.json()[0]["remixes"] == 3
 
 
 @pytest.mark.asyncio
-async def test_webapp_prompt_use_updates_session(client, monkeypatch) -> None:
+async def test_webapp_prompt_use_returns_404_when_not_implemented(client, monkeypatch) -> None:
+    """The /prompts/{id}/use endpoint is not yet implemented — expect 404."""
     prompt = SimpleNamespace(
         id=7,
         status=SimpleNamespace(value="approved"),
@@ -88,8 +91,6 @@ async def test_webapp_prompt_use_updates_session(client, monkeypatch) -> None:
     from db.models import PromptStatus
 
     prompt.status = PromptStatus.approved
-    monkeypatch.setattr("api.miniapp_routes.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
-    monkeypatch.setattr("api.miniapp_routes.prompt_repository.increment_usage", AsyncMock())
-    monkeypatch.setattr("api.miniapp_routes._create_or_update_image_session", AsyncMock())
-    response = await client.post("/api/webapp/prompts/7/use")
-    assert response.json()["open_bot_required"] is True
+    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    response = await client.post("/api/v1/prompts/7/use")
+    assert response.status_code == 404

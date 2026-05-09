@@ -55,10 +55,14 @@ def video_pricing_keys(
     duration: int | None = None,
     resolution: str | None = None,
 ) -> list[str]:
-    """Pricing lookup: resolution-only (credits = per-second rate)."""
+    """Pricing lookup: full match → resolution-only → duration-only → base."""
     keys: list[str] = []
+    if resolution and duration is not None:
+        keys.append(pricing_variant_key(model_key, duration=duration, resolution=resolution))
     if resolution:
         keys.append(pricing_variant_key(model_key, resolution=resolution))
+    if duration is not None:
+        keys.append(pricing_variant_key(model_key, duration=duration))
     keys.append(model_key)
     return _unique(keys)
 

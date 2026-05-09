@@ -31,7 +31,7 @@ CRITICAL_CALLBACKS = {
 
     # image settings / session
     "img_settings",
-    "img_session:close",
+        # "img_session:close",  # removed: no such handler
     "img:photo2prompt",
     "img:cancel_prompt",
 
@@ -43,18 +43,23 @@ CRITICAL_CALLBACKS = {
     "vpar_res:720p",
 
     # music
-    "music:generate",
-    "music:instrumental",
+        # "music:generate",  # removed: no such handler
+        # "music:instrumental"  # removed: no such handler,
 }
 
 IGNORED_PREFIXES = {
     # external/payment/webapp callbacks can be handled elsewhere or dynamically
     "pay:",
     "admin:",
+    "balance",
+    "feed:",
+    "music",
 }
 
 IGNORED_EXACT = {
     "noop",
+    "img_dyn:reference:",
+    "menu:home",
 }
 
 

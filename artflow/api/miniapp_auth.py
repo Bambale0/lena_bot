@@ -19,13 +19,14 @@ from db.session import get_session
 TELEGRAM_INIT_DATA_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
 
-def _verify_init_data(init_data: str) -> dict:
+def _verify_init_data(init_data: str, bot_token: str | None = None) -> dict:
     """Verify Telegram WebApp initData HMAC and return parsed user dict."""
     params = dict(parse_qsl(init_data, keep_blank_values=True))
     received_hash = params.pop("hash", "")
 
     data_check = "\n".join(f"{k}={v}" for k, v in sorted(params.items()))
-    secret_key = hmac.new(b"WebAppData", settings.BOT_TOKEN.encode(), hashlib.sha256).digest()
+    token = bot_token or settings.BOT_TOKEN
+    secret_key = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
     computed_hash = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(computed_hash, received_hash):
