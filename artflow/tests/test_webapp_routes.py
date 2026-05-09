@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from api.webapp_auth import get_webapp_user
+from api.miniapp_auth import get_miniapp_user
 from db.session import get_session
 from main import app
 
@@ -30,7 +30,7 @@ async def fake_user():
 @pytest.fixture
 async def client():
     app.dependency_overrides[get_session] = fake_session
-    app.dependency_overrides[get_webapp_user] = fake_user
+    app.dependency_overrides[get_miniapp_user] = fake_user
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
@@ -53,7 +53,7 @@ async def test_webapp_me_rejects_missing_init_data_without_override() -> None:
 
 @pytest.mark.asyncio
 async def test_webapp_me_returns_verified_user(client, monkeypatch) -> None:
-    monkeypatch.setattr("api.webapp_routes.repo.get_active_image_session", AsyncMock(return_value=None))
+    monkeypatch.setattr("api.miniapp_routes.repo.get_active_image_session", AsyncMock(return_value=None))
     response = await client.get("/api/webapp/me")
     assert response.json()["user"]["credits"] == 1003
 
@@ -70,7 +70,7 @@ async def test_webapp_feed_returns_items(client, monkeypatch) -> None:
         created_at=None,
     )
     card = SimpleNamespace(generation=generation, username="author", full_name=None, remix_count=3)
-    monkeypatch.setattr("api.webapp_routes.repo.get_feed_generations", AsyncMock(return_value=[card]))
+    monkeypatch.setattr("api.miniapp_routes.repo.get_feed_generations", AsyncMock(return_value=[card]))
     response = await client.get("/api/webapp/feed")
     assert response.json()["items"][0]["remixes"] == 3
 
@@ -88,8 +88,8 @@ async def test_webapp_prompt_use_updates_session(client, monkeypatch) -> None:
     from db.models import PromptStatus
 
     prompt.status = PromptStatus.approved
-    monkeypatch.setattr("api.webapp_routes.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
-    monkeypatch.setattr("api.webapp_routes.prompt_repository.increment_usage", AsyncMock())
-    monkeypatch.setattr("api.webapp_routes._create_or_update_image_session", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr("api.miniapp_routes.prompt_repository.increment_usage", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes._create_or_update_image_session", AsyncMock())
     response = await client.post("/api/webapp/prompts/7/use")
     assert response.json()["open_bot_required"] is True

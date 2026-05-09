@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import HTTPException
 
-from api.webapp_auth import verify_telegram_init_data
+from api.miniapp_auth import _verify_init_data
 
 
 BOT_TOKEN = "123456:test-token"
@@ -27,20 +27,20 @@ def make_init_data(*, user_id: int = 42, auth_date: int | None = None, token: st
     return urlencode(payload)
 
 
-def test_verify_telegram_init_data_accepts_valid_hash() -> None:
-    data = verify_telegram_init_data(make_init_data(user_id=777), BOT_TOKEN)
+def test__verify_init_data_accepts_valid_hash() -> None:
+    data = _verify_init_data(make_init_data(user_id=777), BOT_TOKEN)
     assert data["user"]["id"] == 777
 
 
-def test_verify_telegram_init_data_rejects_tampered_payload() -> None:
+def test__verify_init_data_rejects_tampered_payload() -> None:
     init_data = make_init_data(user_id=777).replace("777", "778")
     with pytest.raises(HTTPException) as exc:
-        verify_telegram_init_data(init_data, BOT_TOKEN)
+        _verify_init_data(init_data, BOT_TOKEN)
     assert exc.value.status_code == 401
 
 
-def test_verify_telegram_init_data_rejects_expired_auth_date() -> None:
+def test__verify_init_data_rejects_expired_auth_date() -> None:
     expired = int(time.time()) - 8 * 24 * 60 * 60
     with pytest.raises(HTTPException) as exc:
-        verify_telegram_init_data(make_init_data(auth_date=expired), BOT_TOKEN)
+        _verify_init_data(make_init_data(auth_date=expired), BOT_TOKEN)
     assert exc.value.status_code == 401
