@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import mimetypes
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -141,12 +142,14 @@ async def mirror_telegram_file(bot, file_id: str, is_video: bool = False) -> str
     data = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
 
     # Detect if this is actually a video file based on content
-    if not is_video and is_video_content_type(file.mime_type):
+    # (aiogram File object has no mime_type, so derive from file path)
+    guessed_mime, _ = mimetypes.guess_type(file.file_path or "")
+    if not is_video and is_video_content_type(guessed_mime):
         is_video = True
 
     if is_video:
         upload_dir = get_static_upload_directory()
-        ext = detect_video_extension(data, file.mime_type)
+        ext = detect_video_extension(data, guessed_mime)
         digest = hashlib.sha256(data).hexdigest()[:32]
         filename = f"{digest}{ext}"
         video_path = upload_dir / filename

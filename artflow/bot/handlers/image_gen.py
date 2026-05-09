@@ -688,6 +688,20 @@ async def cb_image_dynamic_enhance(call: CallbackQuery, state: FSMContext) -> No
     await safe_answer_callback(call)
 
 
+@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:reference:"))
+async def cb_image_dynamic_reference(call: CallbackQuery, state: FSMContext) -> None:
+    model_key = call.data.split(":", 2)[2]
+    await state.update_data(model_key=model_key, image_model=model_key)
+    await safe_edit_message(
+        call.message,
+        "🖼 <b>Загрузи фото-референс</b>\n\n"
+        "Отправь фото, которое будет использоваться как основа для генерации.",
+        reply_markup=back_to_menu_kb(),
+    )
+    await state.set_state(ImageGenFSM.image_upload)
+    await safe_answer_callback(call)
+
+
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:continue:"))
 async def cb_image_dynamic_continue(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]

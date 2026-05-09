@@ -384,10 +384,6 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                                 caption=img_caption,
                                 reply_markup=img_kb,
                             )
-                        await bot.send_document(
-                            chat_id=user.tg_id,
-                            document=URLInputFile(url, filename="image.jpg"),
-                        )
                 else:
                     await bot.send_video(
                         chat_id=user.tg_id,

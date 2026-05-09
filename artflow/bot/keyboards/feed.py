@@ -47,6 +47,6 @@ def get_generation_result_keyboard(generation_id: int) -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="🔁 Ещё вариант", callback_data=f"feed:again:{generation_id}"),
-        InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home"),
+        InlineKeyboardButton(text="🏠 Меню", callback_data="menu:main"),
     )
     return builder.as_markup()
