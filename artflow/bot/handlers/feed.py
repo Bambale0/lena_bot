@@ -275,3 +275,19 @@ async def cb_feed_use(
     )
     await safe_answer_callback(call)
 
+
+
+@router.callback_query(F.data.startswith("feed:publish:"))
+async def cb_publish_generation(call: CallbackQuery, session: AsyncSession) -> None:
+    generation_id = int(call.data.split(":")[-1])
+    gen = await repo.get_generation_by_id(session, generation_id)
+
+    if not gen:
+        await call.answer("Генерация не найдена", show_alert=True)
+        return
+
+    gen.is_public_feed = True
+    gen.is_prompt_library = True
+    await session.commit()
+
+    await call.answer("Добавлено в библиотеку промптов ✨", show_alert=False)

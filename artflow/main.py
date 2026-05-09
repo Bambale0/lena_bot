@@ -26,6 +26,7 @@ from api.music_service import extract_music_urls, pop_task
 from api.public_files import UPLOAD_ROOT, mirror_url, save_public_file
 from bot.handlers import admin, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen
 from bot.keyboards.main_menu import back_to_menu_kb
+from bot.keyboards.feed import get_generation_result_keyboard
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware

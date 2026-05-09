@@ -34,9 +34,14 @@ const fallbackPlans = [
 // ── Telegram WebApp helpers ──────────────────────────────────────────────────
 
 function tg() { return window.Telegram?.WebApp || null; }
+function tgUser() { return tg()?.initDataUnsafe?.user || null; }
 function initData() { return tg()?.initData || ""; }
 
 // ── API client ───────────────────────────────────────────────────────────────
+
+async function publishGeneration(id) {
+  return api(`/generations/${id}/publish`, { method: "POST" });
+}
 
 async function api(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -116,7 +121,7 @@ function Header({ screen, setScreen, user, setTopup }) {
       </button>
       <span className="headerTitle">APIX</span>
       <div className="headerRight">
-        <Avatar name={user.full_name || user.username} />
+        <Avatar photoUrl={user.photo_url} name={user.full_name || user.username} />
         <button className="balanceBtn" onClick={() => setTopup(true)}>
           {user.credits} 💋
         </button>
@@ -222,7 +227,7 @@ function TopupModal({ onClose }) {
 function ProfileStrip({ user, historyCount, setScreen, setTopup }) {
   return (
     <section className="profileStrip">
-      <Avatar name={user.full_name || user.username} />
+      <Avatar photoUrl={user.photo_url} name={user.full_name || user.username} />
       <div className="grow">
         <h2>{user.full_name || user.username || "APIX"}</h2>
         <p>@{user.username || "user"}</p>
@@ -282,7 +287,7 @@ function Home({ user, feed, prompts, historyCount, setScreen, setTopup }) {
         </div>
         <div className="grid">
           {feed.slice(0, 4).map((f, i) => (
-            <button key={f.id || i} className="feedCard" onClick={() => setScreen("feed")}>
+            <button key={f.id || i} className="feedCard" onClick={() => f.result_url ? setViewer(f) : setScreen("feed")}>
               <MediaThumb url={f.result_url} type="image" idx={i} />
               <div><span>{f.model}</span><p>{f.prompt}</p></div>
             </button>
@@ -869,7 +874,7 @@ function Profile({ user, history, setScreen, setTopup }) {
   return (
     <>
       <section className="profileMini">
-        <Avatar name={user.full_name || user.username} />
+        <Avatar photoUrl={user.photo_url} name={user.full_name || user.username} />
         <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{user.full_name || user.username}</h2>
           <p style={{ margin: "2px 0 0", color: "rgba(255,255,255,.42)", fontSize: 13 }}>@{user.username || "user"}</p>
@@ -962,6 +967,24 @@ function Prompts({ prompts, loading, setScreen }) {
 }
 
 // ── App root ─────────────────────────────────────────────────────────────────
+
+function FullViewer({ item, onClose }) {
+  if (!item) return null;
+  return <div className="viewer" onClick={onClose}>
+    <div className="viewerPanel" onClick={(e) => e.stopPropagation()}>
+      <button className="viewerClose" onClick={onClose}>×</button>
+      {item.result_url ? <img src={item.result_url} alt="" /> : <Art type="a" />}
+      <div className="viewerMeta">
+        <b>{item.model || "Generation"}</b>
+        <p>{item.prompt || "Промпт скрыт"}</p>
+        <div className="viewerActions">
+          <button onClick={() => item.id && publishGeneration(item.id)}>📚 В библиотеку</button>
+          <button onClick={onClose}>Закрыть</button>
+        </div>
+      </div>
+    </div>
+  </div>
+}
 
 function App() {
   const [screen, setScreen] = useState("home");

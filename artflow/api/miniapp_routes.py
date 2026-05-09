@@ -801,3 +801,27 @@ def _prompt_out(p) -> dict:
         "author_id": p.author_id,
         "created_at": p.created_at.isoformat() if p.created_at else "",
     }
+
+
+@router.post("/generations/{gen_id}/publish")
+async def publish_generation_to_library(
+    gen_id: int,
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """User explicitly publishes own generation to public feed/prompt library."""
+    gen = await repo.get_generation_by_id(session, gen_id)
+    if not gen or gen.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+
+    gen.is_public_feed = True
+    gen.is_prompt_library = True
+    await session.commit()
+    await session.refresh(gen)
+
+    return {
+        "ok": True,
+        "id": gen.id,
+        "is_public_feed": gen.is_public_feed,
+        "is_prompt_library": gen.is_prompt_library,
+    }

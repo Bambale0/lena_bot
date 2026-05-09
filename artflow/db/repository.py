@@ -1076,3 +1076,9 @@ async def set_model_cost(session: AsyncSession, model_key: str, credits: int) ->
     )
     await session.commit()
     return result.scalar_one_or_none() is not None
+
+async def get_generation_by_id(session, generation_id: int):
+    result = await session.execute(
+        select(Generation).where(Generation.id == generation_id)
+    )
+    return result.scalar_one_or_none()

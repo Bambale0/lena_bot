@@ -36,3 +36,17 @@ def empty_feed_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="📚 Библиотека промптов", callback_data="menu:prompts"))
     builder.row(InlineKeyboardButton(text="🏠 Главная", callback_data="menu:main"))
     return builder.as_markup()
+
+
+def get_generation_result_keyboard(generation_id: int) -> InlineKeyboardMarkup:
+    """Buttons shown directly under generated media."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✨ Ремикс", callback_data=f"feed:remix:{generation_id}"),
+        InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"feed:publish:{generation_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔁 Ещё вариант", callback_data=f"feed:again:{generation_id}"),
+        InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home"),
+    )
+    return builder.as_markup()
