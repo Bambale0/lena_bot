@@ -248,15 +248,51 @@ HIDDEN_IMAGE_MODELS = {
 IMAGE_SCENARIOS: dict[str, dict[str, str]] = {
     "fast": {
         "title": "⚡ Быстро и просто",
-        "description": "Текст → изображение. Быстрый старт без лишней ручной настройки",
+        "description": "Для первого результата без лишних настроек",
         "model": ImageModel.NANO_BANANA_PRO,
+        "mode": "text",
+    },
+    "quality": {
+        "title": "🌸 Максимум качества",
+        "description": "Чистый результат, хороший баланс скорости и качества",
+        "model": ImageModel.NANO_BANANA_2,
+        "mode": "image",
+    },
+    "hot_wan": {
+        "title": "🔥🔥🔥 WAN",
+        "description": "Кино, постеры, fashion, сцена",
+        "model": ImageModel.WAN_27_PRO,
+        "mode": "text",
+    },
+    "hot_seedream": {
+        "title": "🔥🔥🔥 Seedream",
+        "description": "Детали, реализм, рекламная подача",
+        "model": ImageModel.SEEDREAM_45,
         "mode": "text",
     },
     "edit": {
         "title": "🖼️ Из фото в новую версию",
-        "description": "Референс → новое изображение. Ремикс, правки, стилизация",
+        "description": "Редактирование и ремикс по референсу",
         "model": ImageModel.NANO_BANANA_2,
         "mode": "image",
+    },
+    "avatar": {
+        "title": "👤 Аватар",
+        "description": "Аватарка, портрет, профиль по фото",
+        "model": ImageModel.NANO_BANANA_PRO,
+        "mode": "image",
+    },
+    "glow": {
+        "title": "✨ Glow",
+        "description": "Свечение, неон, мягкий glow-эффект на фото",
+        "model": ImageModel.NANO_BANANA_PRO,
+        "mode": "image",
+    },
+    "cinematic": {
+        "title": "🎬 Кино и стиль",
+        "description": "Фэнтези, fashion, постер, сцена",
+        "model": ImageModel.WAN_27_PRO,
+        "mode": "text",
     },
 }
 
@@ -398,7 +434,7 @@ def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
 
 def image_scenarios_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for scenario_key in ("fast", "edit"):
+    for scenario_key in ("fast", "quality", "avatar", "glow", "hot_wan", "hot_seedream", "edit", "cinematic"):
         scenario = IMAGE_SCENARIOS[scenario_key]
         builder.row(
             InlineKeyboardButton(
@@ -406,6 +442,7 @@ def image_scenarios_kb() -> InlineKeyboardMarkup:
                 callback_data=f"img_scn:{scenario_key}",
             )
         )
+    builder.row(InlineKeyboardButton(text="📸 Фото → Промпт", callback_data="img:photo2prompt"))
     builder.row(InlineKeyboardButton(text="🧠 Все модели", callback_data="img_menu:advanced"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
@@ -482,6 +519,9 @@ def image_active_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🔁 Ещё вариант", callback_data="img_variation"),
     )
     builder.row(
+        InlineKeyboardButton(text="📸 Фото → Промпт", callback_data="img:photo2prompt"),
+    )
+    builder.row(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_settings"),
     )
     builder.row(
@@ -507,6 +547,9 @@ def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
             InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}"),
         )
+    builder.row(
+        InlineKeyboardButton(text="📸 Фото → Промпт", callback_data="img:photo2prompt"),
+    )
     builder.row(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_settings"),
     )

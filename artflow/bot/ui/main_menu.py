@@ -56,7 +56,6 @@ def render_main_menu(context: MainMenuContext) -> ScreenRender:
     )
     builder.row(
         InlineKeyboardButton(text="🔥 Лента", callback_data="menu:feed"),
-        InlineKeyboardButton(text="📸 Фото → Промпт", callback_data="img:photo2prompt"),
     )
     builder.row(
         InlineKeyboardButton(text="🧠 Midjourney", callback_data="menu:mj"),
