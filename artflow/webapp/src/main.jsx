@@ -1103,7 +1103,7 @@ function PhotoPromptTool({ setScreen, generatedPhotoPrompt, setGeneratedPhotoPro
   );
 }
 
-function Prompts({ prompts, loading, setScreen }) {
+function Prompts({ prompts, loading, setScreen, generatedPhotoPrompt, setGeneratedPhotoPrompt }) {
   const [category, setCategory] = useState("all");
   const cats = [["all","Все"], ["image","Фото"], ["other","Другое"]];
   const filtered = category === "all" ? prompts : prompts.filter(p => p.category === category);
@@ -1112,7 +1112,8 @@ function Prompts({ prompts, loading, setScreen }) {
 
   return (
     <>
-      <h1>Библиотека промптов</h1>\n      <PhotoPromptTool setScreen={setScreen} generatedPhotoPrompt={generatedPhotoPrompt} setGeneratedPhotoPrompt={setGeneratedPhotoPrompt} />
+      <h1>Библиотека промптов</h1>
+      <PhotoPromptTool setScreen={setScreen} generatedPhotoPrompt={generatedPhotoPrompt} setGeneratedPhotoPrompt={setGeneratedPhotoPrompt} />
       <div className="chips top" style={{ marginBottom: 16 }}>
         {cats.map(([k, l]) => (
           <button key={k} className={category === k ? "active" : ""} onClick={() => setCategory(k)}>{l}</button>
@@ -1287,7 +1288,7 @@ function App() {
     music: <Music user={user} musicGen={musicGen} onGenerateMusic={generateMusic} setTopup={setTopupOpen} />,
     history: <History history={history.data} loading={history.loading} />,
     profile: <Profile user={user} history={history.data} setScreen={setScreen} setTopup={setTopupOpen} />,
-    prompts: <Prompts prompts={prompts.data} loading={prompts.loading} setScreen={setScreen} />,
+    prompts:<Prompts prompts={prompts.data} loading={prompts.loading} setScreen={setScreen} generatedPhotoPrompt={generatedPhotoPrompt} setGeneratedPhotoPrompt={setGeneratedPhotoPrompt}/>,
   };
 
   return (
