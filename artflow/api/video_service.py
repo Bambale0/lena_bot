@@ -119,6 +119,7 @@ async def generate_video(
 ) -> VideoResult:
     if model in _VEO_MODELS:
         return await _veo_generate(model, prompt, image_url, aspect_ratio,
+                                       resolution=resolution,
                                        callback_url=callback_url,
                                        enable_fallback=enable_fallback)
     return await _kieai_generate(
@@ -193,6 +194,7 @@ async def _veo_generate(
     prompt: str,
     image_url: str | None,
     aspect_ratio: str | None,
+    resolution: str | None = None,
     callback_url: str | None = None,
     enable_fallback: bool = False,
 ) -> VideoResult:
@@ -203,6 +205,8 @@ async def _veo_generate(
         "enableTranslation": True,
         "enableFallback": enable_fallback,
     }
+    if resolution:
+        payload["resolution"] = resolution
     if callback_url:
         payload["callBackUrl"] = callback_url
     if image_url:
@@ -251,9 +255,9 @@ async def poll_kieai_status(task_id: str) -> str | None:
 async def poll_veo_status(video_id: str) -> str | None:
     resp = await kieai_client.get_veo_status(video_id)
     data = resp.get("data", {})
-    state = str(data.get("state", "")).lower()
+    success_flag = data.get("successFlag")
 
-    if state == "success":
+    if success_flag is True or success_flag in (1, "1", "true", "success"):
         url = data.get("videoUrl")
         if not url:
             result_urls = data.get("resultUrls", [])
@@ -262,7 +266,7 @@ async def poll_veo_status(video_id: str) -> str | None:
             return url
         raise RuntimeError("Veo3: success but no videoUrl")
 
-    if state == "fail":
+    if success_flag is False or success_flag in ("fail", "failed", "error"):
         raise RuntimeError(f"Veo3 failed: {data.get('failMsg', 'unknown error')}")
 
     return None
@@ -294,9 +298,9 @@ async def poll_veo_4k_status(task_id: str) -> str | None:
     """Poll 4K enhancement status. Returns video URL when done."""
     resp = await kieai_client.get_veo_4k_status(task_id)
     data = resp.get("data", {})
-    state = str(data.get("state", "")).lower()
+    success_flag = data.get("successFlag")
 
-    if state in ("success", "1"):
+    if success_flag is True or success_flag in (1, "1", "true", "success"):
         info = data.get("info") or {}
         result_urls = info.get("resultUrls") or data.get("resultUrls") or []
         if result_urls:
@@ -306,7 +310,7 @@ async def poll_veo_4k_status(task_id: str) -> str | None:
             return url
         raise RuntimeError("Veo3 4K: success but no videoUrl in response")
 
-    if state in ("fail", "failed", "error", "2", "500"):
+    if success_flag is False or success_flag in ("fail", "failed", "error"):
         raise RuntimeError(f"Veo3 4K failed: {data.get('msg', data.get('errorMessage', 'unknown error'))}")
 
     return None

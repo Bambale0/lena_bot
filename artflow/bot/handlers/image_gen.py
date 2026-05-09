@@ -56,10 +56,17 @@ async def _telegram_file_url(bot: Bot, file_id: str | None) -> str | None:
     return await mirror_telegram_file(bot, file_id)
 
 
+def get_image_model_label(model_key: str) -> str:
+    """Возвращает человекочитаемое имя модели."""
+    from bot.keyboards.models import IMAGE_MODEL_DESC
+    return IMAGE_MODEL_DESC.get(model_key, model_key)
+
+
 def _supports_img2img(model_key: str) -> bool:
     caps = IMAGE_CAPS.get(model_key, {})
     spec = IMAGE_SPECS.get(model_key)
     return "image" in caps.get("modes", []) or bool(spec and spec.remix_model)
+
 
 
 def _safe_image_model(model_key: str) -> ImageModel | None:
@@ -728,7 +735,7 @@ async def cb_image_model(call: CallbackQuery, state: FSMContext) -> None:
         image_mode=default_mode,
     )
 
-    model_title = get_image_model_label(model_key) if "get_image_model_label" in globals() else model_key
+    model_title = get_image_model_label(model_key)
 
     text = (
         f"🎛 <b>{model_title}</b>\n\n"
@@ -753,7 +760,7 @@ async def cb_image_mode(call: CallbackQuery, state: FSMContext) -> None:
         image_mode=mode,
     )
 
-    model_title = get_image_model_label(model_key) if "get_image_model_label" in globals() else model_key
+    model_title = get_image_model_label(model_key)
     mode_label = "Референс → изображение" if mode == "image" else "Текст → изображение"
 
     text = (

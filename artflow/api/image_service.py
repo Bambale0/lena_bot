@@ -48,6 +48,11 @@ class ImageModel(StrEnum):
     QWEN_EDIT     = "qwen/image-edit"
     QWEN2_T2I     = "qwen2/text-to-image"
     QWEN2_EDIT    = "qwen2/image-edit"
+    # OpenRouter
+    OPENROUTER_FREE = "openrouter/free"
+    # GPT Image 2
+    GPT_IMAGE_2_T2I = "gpt-image-2-text-to-image"
+    GPT_IMAGE_2_I2I = "gpt-image-2-image-to-image"
 
 
 # Models that support image input
@@ -61,6 +66,8 @@ _SUPPORTS_IMG2IMG: set[ImageModel] = {
 _QUALITY_MODELS: set[ImageModel] = {
     ImageModel.SEEDREAM_45,
     ImageModel.SEEDREAM_45_EDIT,
+    ImageModel.GPT_IMAGE_2_T2I,
+    ImageModel.GPT_IMAGE_2_I2I,
 }
 
 # Models with count support
@@ -81,6 +88,9 @@ MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.QWEN_T2I:         ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
     ImageModel.QWEN_I2I:         ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
     ImageModel.QWEN2_T2I:        ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+    ImageModel.OPENROUTER_FREE:  ["1:1", "1:1"],
+    ImageModel.GPT_IMAGE_2_T2I:  ["auto", "1:1", "9:16", "16:9", "4:3", "3:4"],
+    ImageModel.GPT_IMAGE_2_I2I:  ["auto", "1:1", "9:16", "16:9", "4:3", "3:4"],
 }
 
 
@@ -151,12 +161,12 @@ def _build_input(
 
     quality_value = quality
     resolution_value = None
-    if model in {ImageModel.WAN_27_PRO, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}:
+    if model in {ImageModel.WAN_27_PRO, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I}:
         resolution_value = quality_value if quality_value in {"1K", "2K", "4K"} else None
 
     if model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} and quality_value not in {"1K", "2K", "4K"}:
         quality_value = "1K" if model == ImageModel.NANO_BANANA_2 else "2K"
-    elif model not in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} and quality_value in {"1K", "2K", "4K"}:
+    elif model not in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I} and quality_value in {"1K", "2K", "4K"}:
         quality_value = "basic"
 
     return build_kie_input(

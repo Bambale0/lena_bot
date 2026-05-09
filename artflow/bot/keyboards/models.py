@@ -226,6 +226,23 @@ IMAGE_CAPS: dict[str, dict] = {
         "counts": [1],
         "max_refs": 4,
     },
+    ImageModel.GPT_IMAGE_2_T2I: {
+        "modes": ["text"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.GPT_IMAGE_2_T2I, []),
+        "aspect_ratio_modes": ["text"],
+        "counts": [1],
+        "quality_options": [("2K", "🔷 2K (стандарт)"), ("4K", "💎 4K (высокое)")],
+        "has_quality": True,
+    },
+    ImageModel.GPT_IMAGE_2_I2I: {
+        "modes": ["image"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.GPT_IMAGE_2_I2I, []),
+        "aspect_ratio_modes": ["image"],
+        "counts": [1],
+        "max_refs": 1,
+        "quality_options": [("2K", "🔷 2K (стандарт)"), ("4K", "💎 4K (высокое)")],
+        "has_quality": True,
+    },
 }
 
 # ── Model descriptions ────────────────────────────────────────────────────────
@@ -237,11 +254,14 @@ IMAGE_MODEL_DESC: dict[str, str] = {
     "wan-2.7":         "🎭 WAN · кино-стиль · персонажи · фэнтези",
     "wan-2.7-pro":     "💎 WAN Pro · kie.ai · высокое разрешение · async",
     "gpt-image-1":     "🤖 GPT Image · понимает сложные описания · творчество",
+    "openrouter/free": "🆓 OpenRouter Free · универсальная модель",
     ImageModel.QWEN_T2I:  "🟣 Qwen T2I · реалистично · детали · текст→изображение",
     ImageModel.QWEN_I2I:  "🟣 Qwen I2I · трансформация по референсу",
     ImageModel.QWEN_EDIT: "🟣 Qwen Edit · редактирование по референсу",
     ImageModel.QWEN2_T2I: "🟣 Qwen2 T2I · улучшенная генерация · v2",
     ImageModel.QWEN2_EDIT:"🟣 Qwen2 Edit · продвинутое редактирование · v2",
+    ImageModel.GPT_IMAGE_2_T2I:  "🤖 GPT Image 2 · T2I · высокое качество",
+    ImageModel.GPT_IMAGE_2_I2I:  "🤖 GPT Image 2 · I2I · трансформация по референсу",
 }
 
 HIDDEN_IMAGE_MODELS = {

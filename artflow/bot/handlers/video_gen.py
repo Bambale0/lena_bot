@@ -259,7 +259,7 @@ async def handle_video_upload(
         return
 
     # Mirror video to public storage for KIE API
-    video_url = await mirror_telegram_file(bot, file_id)
+    video_url = await mirror_telegram_file(bot, file_id, is_video=True)
 
     await state.update_data(
         reference_video_url=video_url,

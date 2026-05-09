@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import html
+import io
 import logging
 
+import aiohttp
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InputMediaPhoto, Message
+from aiogram.types import CallbackQuery, BufferedInputFile, InputMediaPhoto, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.feed import empty_feed_kb, feed_card_kb
@@ -54,14 +56,10 @@ def _author_label(card: FeedGenerationCard) -> str:
 def _feed_caption(card: FeedGenerationCard, *, position: int | None = None) -> str:
     gen = card.generation
     prefix = f"👑 <b>#{position}</b>\n\n" if position else ""
-    prompt = html.escape(gen.prompt[:220])
-    if len(gen.prompt) > 220:
-        prompt += "..."
     ratio = f"\n📐 {html.escape(card.aspect_ratio)}" if card.aspect_ratio else ""
     return (
         f"{prefix}👤 <b>{_author_label(card)}</b>\n"
         f"🎨 <b>{html.escape(_model_label(gen.model))}</b>{ratio}\n\n"
-        f"<i>{prompt}</i>\n\n"
         f"❤️ <b>{gen.likes_count}</b>\n"
         f"📤 <b>{gen.shares_count}</b>\n"
         f"────────────"
@@ -126,6 +124,17 @@ async def _show_feed_card(
 
     if result_url:
         try:
+            # Download image and send as file to ensure preview works
+            async with aiohttp.ClientSession() as http:
+                async with http.get(result_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status == 200:
+                        data = await resp.read()
+                        ext = result_url.split("?")[0].rsplit(".", 1)[-1] if "." in result_url.split("?")[0].rsplit("/", 1)[-1] else "jpg"
+                        filename = f"gen_{card.generation.id}.{ext}"
+                        photo = BufferedInputFile(data, filename=filename)
+                        await holder.answer_photo(photo, caption=caption, reply_markup=reply_markup)
+                        return
+            # Fallback: try direct URL
             await holder.answer_photo(result_url, caption=caption, reply_markup=reply_markup)
             return
         except TelegramBadRequest as e:
@@ -140,7 +149,6 @@ async def _show_feed_card(
                 reply_markup=reply_markup,
             )
             return
-
         except Exception as e:
             logger.warning(
                 "Feed photo unexpected fallback gen=%s url=%s error=%s",

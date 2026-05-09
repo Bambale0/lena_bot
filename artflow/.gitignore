@@ -15,9 +15,13 @@ redisdata/
 venv/static/upload/*
 logs/
 .logs/
-
+.patch_*
 static/
 venv/
+
+# Backup files
+*.bak
+*.bak2
 
 .bin
 .log

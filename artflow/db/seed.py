@@ -57,6 +57,9 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "veo3_fast",                 "display_name": "🎬 Veo 3 Fast",            "gen_type": GenerationType.video, "credits": 50},
     {"model_key": "veo3",                      "display_name": "🎬 Veo 3",                 "gen_type": GenerationType.video, "credits": 70},
     {"model_key": "veo3_lite",                 "display_name": "🎬 Veo 3 Lite",            "gen_type": GenerationType.video, "credits": 35},
+    # ── GPT Image 2 ─────────────────────────────────────────────────────────
+    {"model_key": "gpt-image-2-text-to-image",   "display_name": "🤖 GPT Image 2 T2I",                 "gen_type": GenerationType.image, "credits": 4},
+    {"model_key": "gpt-image-2-image-to-image", "display_name": "🤖 GPT Image 2 I2I",                 "gen_type": GenerationType.image, "credits": 4},
     # ── Midjourney ────────────────────────────────────────────────────────────
     {"model_key": "midjourney-imagine",  "display_name": "🖌️ MJ Imagine",  "gen_type": GenerationType.image, "credits": 10},
     {"model_key": "midjourney-action",   "display_name": "🖌️ MJ Action",   "gen_type": GenerationType.image, "credits": 3},

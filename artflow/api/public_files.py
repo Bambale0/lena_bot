@@ -60,6 +60,33 @@ def detect_image_extension(data: bytes, content_type: str | None = None) -> str:
     return ".jpg"
 
 
+def detect_video_extension(data: bytes, content_type: str | None = None) -> str:
+    """Return KIE-friendly video extension based on content type or magic bytes."""
+    ct = (content_type or "").lower()
+
+    if "mp4" in ct or "mpeg" in ct:
+        return ".mp4"
+    if "webm" in ct:
+        return ".webm"
+    if "mov" in ct or "quicktime" in ct:
+        return ".mov"
+    if "ogg" in ct or "ogv" in ct:
+        return ".ogg"
+
+    # Telegram video files are typically mp4
+    if data[:4] == b"ftyp":
+        return ".mp4"
+    if data[:4] == b"RIFF":
+        return ".webm"
+
+    return ".mp4"
+
+
+def is_video_content_type(content_type: str | None) -> bool:
+    ct = (content_type or "").lower()
+    return any(kw in ct for kw in ("video", "mp4", "webm", "mov", "ogg", "quicktime"))
+
+
 def ensure_public_image_url(url: str | None) -> str | None:
     """
     Return a Telegram/KIE-friendly public image URL.
@@ -104,12 +131,26 @@ async def mirror_url(url: str) -> str:
     return url
 
 
-async def mirror_telegram_file(bot, file_id: str) -> str:
+async def mirror_telegram_file(bot, file_id: str, is_video: bool = False) -> str:
     """
     Download Telegram file and mirror it to public static upload directory.
-    Returns KIE-compatible public URL with real image extension.
+    Returns KIE-compatible public URL with real image/video extension.
     """
     file = await bot.get_file(file_id)
     downloaded = await bot.download_file(file.file_path)
     data = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
+
+    # Detect if this is actually a video file based on content
+    if not is_video and is_video_content_type(file.mime_type):
+        is_video = True
+
+    if is_video:
+        upload_dir = get_static_upload_directory()
+        ext = detect_video_extension(data, file.mime_type)
+        digest = hashlib.sha256(data).hexdigest()[:32]
+        filename = f"{digest}{ext}"
+        video_path = upload_dir / filename
+        video_path.write_bytes(data)
+        return public_upload_url(filename)
+
     return save_public_file(data)

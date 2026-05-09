@@ -114,8 +114,6 @@ def _kling_30_params(params: dict[str, Any]) -> dict[str, Any]:
 
 def _kling_motion_params(params: dict[str, Any]) -> dict[str, Any]:
     mode = params.get("resolution")
-    if params.get("model") == "kling-3.0/motion-control":
-        mode = "pro" if mode == "1080p" else "std"
     return {"mode": mode or "720p"}
 
 
@@ -228,6 +226,30 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
         reference_type=KieReferenceType.LIST,
         optional_params={"aspect_ratio": "aspect_ratio"},
         defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+    ),
+    "openrouter/free": KieModelSpec(
+        model="openrouter/free",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("text",),
+        optional_params={"aspect_ratio": "aspect_ratio"},
+        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+    ),
+    # GPT Image 2
+    "gpt-image-2-text-to-image": KieModelSpec(
+        model="gpt-image-2-text-to-image",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("text",),
+        optional_params={"aspect_ratio": "aspect_ratio", "resolution": "resolution"},
+        defaults={"aspect_ratio": "auto", "nsfw_checker": False},
+    ),
+    "gpt-image-2-image-to-image": KieModelSpec(
+        model="gpt-image-2-image-to-image",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("image",),
+        reference_field="input_urls",
+        reference_type=KieReferenceType.LIST,
+        optional_params={"aspect_ratio": "aspect_ratio", "resolution": "resolution"},
+        defaults={"aspect_ratio": "auto", "nsfw_checker": False},
     ),
 }
 
