@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     BOT_USERNAME: str = "APIXBot"
     WEBHOOK_URL: str = "https://testapi.chillcreative.ru"
     WEBHOOK_PATH: str = "/webhook/telegram"
-    WEBHOOK_SECRET: str = "change_me_secret"
+    WEBHOOK_SECRET: str = ""
 
     # Admin
     ADMIN_IDS: list[int] = []
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
 
     # DB
-    DATABASE_URL: str = "postgresql+asyncpg://bot:password@postgres:5432/artflow"
+    DATABASE_URL: str = ""
     REDIS_URL: str = "redis://redis:6379"
 
     # CometAPI (Kling, Seedream, Gemini, Grok, Seedance, Veo, WAN)
