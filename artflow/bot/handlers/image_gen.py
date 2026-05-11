@@ -233,14 +233,15 @@ def _session_settings_text(image_session: ImageSession) -> str:
     quality_label = _quality_label(image_session.model, image_session.quality) if caps.get("has_quality") else "фиксированное"
     count_label = str(image_session.count) if len(caps.get("counts", [1])) > 1 else "фиксированное"
     ratio_label = image_session.aspect_ratio or ("по умолчанию" if ratios else "не используется")
+    mode_label = "Референс → изображение" if image_session.mode == "image" else "Текст → изображение"
     return (
         "⚙️ <b>Настройки активной серии</b>\n\n"
         f"Модель: <code>{image_session.model}</code>\n"
-        f"Режим: <code>{image_session.mode}</code>\n"
-        f"Формат: <b>{ratio_label}</b>\n"
-        f"Качество: <b>{quality_label}</b>\n"
-        f"Количество: <b>{count_label}</b>\n\n"
-        "Показываю только настройки, которые поддерживает эта модель."
+        f"Режим: <b>{mode_label}</b>\n"
+        f"Формат кадра: <b>{ratio_label}</b>\n"
+        f"Детализация: <b>{quality_label}</b>\n"
+        f"Вариантов за запуск: <b>{count_label}</b>\n\n"
+        "Показываю только те настройки, которые реально работают у этой модели."
     )
 
 
@@ -253,11 +254,11 @@ def _active_image_session_text(image_session: ImageSession) -> str:
     return (
         "🎨 <b>Активная серия изображений</b>\n\n"
         f"Модель: <code>{image_session.model}</code>\n"
-        f"Формат: <b>{ratio_label}</b>\n"
-        f"Качество: <b>{quality_label}</b>\n"
-        f"Количество: <b>{count_label}</b>\n\n"
+        f"Формат кадра: <b>{ratio_label}</b>\n"
+        f"Детализация: <b>{quality_label}</b>\n"
+        f"Вариантов за запуск: <b>{count_label}</b>\n\n"
         "Просто отправь новый prompt или фото.\n"
-        "Настройки уже сохранены."
+        "Все настройки уже сохранены."
     )
 
 
@@ -823,7 +824,7 @@ async def cb_image_model(call: CallbackQuery, state: FSMContext, session: AsyncS
     model_title = get_image_model_label(model_key)
     text = (
         f"🎛 <b>{model_title}</b>\n\n"
-        "Я покажу только настройки, которые реально поддерживает эта модель.\n"
+        "Покажу только те настройки, которые реально работают у этой модели.\n"
         "Выбери параметры или нажми «Продолжить»."
     )
 
@@ -851,7 +852,7 @@ async def cb_image_mode(call: CallbackQuery, state: FSMContext) -> None:
     text = (
         f"🎛 <b>{model_title}</b>\n\n"
         f"Режим: <b>{mode_label}</b>\n\n"
-        "Теперь доступны только подходящие настройки."
+        "Теперь доступны только подходящие настройки для этого режима."
     )
 
     await call.message.edit_text(
@@ -881,14 +882,15 @@ async def cb_image_ratio(
         await state.set_state(ImageGenFSM.count_select)
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
-            f"✅ <b>{display_name}</b> · {ratio}\n\n💎 Качество:",
+            f"✅ <b>{display_name}</b> · {ratio}\n\n💎 <b>Выбери детализацию</b>\n"
+            "2K обычно быстрее, 4K даёт больше деталей.",
             reply_markup=image_quality_kb(model_key),
         )
     elif len(caps.get("counts", [1])) > 1:
         await state.set_state(ImageGenFSM.count_select)
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
-            f"✅ <b>{display_name}</b> · {ratio}\n\n🔢 Количество изображений:",
+            f"✅ <b>{display_name}</b> · {ratio}\n\n🔢 <b>Сколько вариантов создать?</b>",
             reply_markup=image_count_kb(model_key),
         )
     else:
@@ -1067,19 +1069,21 @@ async def _after_ref_upload(
     if _should_select_aspect_ratio(model_key, data.get("mode", "image")) and not data.get("aspect_ratio"):
         await state.set_state(ImageGenFSM.aspect_ratio_select)
         await message.answer(
-            f"✅ Референс загружен!\n\n📐 Формат · <b>{display_name}</b>:",
+            f"✅ Референс загружен!\n\n📐 <b>Выбери формат кадра</b> · {display_name}\n"
+            "Квадрат, вертикаль или горизонталь.",
             reply_markup=image_aspect_ratio_kb(model_key),
         )
     elif caps.get("has_quality"):
         await state.set_state(ImageGenFSM.count_select)
         await message.answer(
-            f"✅ Референс загружен!\n\n💎 Качество · <b>{display_name}</b>:",
+            f"✅ Референс загружен!\n\n💎 <b>Выбери детализацию</b> · {display_name}\n"
+            "2K обычно быстрее, 4K даёт больше деталей.",
             reply_markup=image_quality_kb(model_key),
         )
     elif len(caps.get("counts", [1])) > 1:
         await state.set_state(ImageGenFSM.count_select)
         await message.answer(
-            f"✅ Референс загружен!\n\n🔢 Количество изображений · <b>{display_name}</b>:",
+            f"✅ Референс загружен!\n\n🔢 <b>Сколько вариантов создать?</b> · {display_name}",
             reply_markup=image_count_kb(model_key),
         )
     else:
@@ -1548,7 +1552,8 @@ async def cb_image_settings_ratio(
 
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "📐 <b>Выбери формат для активной серии</b>",
+        "📐 <b>Выбери формат кадра для активной серии</b>\n"
+        "Квадрат, вертикаль или горизонталь.",
         reply_markup=_session_ratio_choices_kb(image_session),
     )
     await call.answer()
@@ -1615,7 +1620,8 @@ async def cb_image_settings_quality(
 
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "💎 <b>Выбери качество для активной серии</b>",
+        "💎 <b>Выбери детализацию для активной серии</b>\n"
+        "2K обычно быстрее, 4K даёт больше деталей.",
         reply_markup=_session_quality_choices_kb(image_session),
     )
     await call.answer()
@@ -1683,7 +1689,7 @@ async def cb_image_settings_count(
 
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "🔢 <b>Выбери количество изображений для серии</b>",
+        "🔢 <b>Сколько вариантов создавать за один запуск?</b>",
         reply_markup=_session_count_choices_kb(image_session),
     )
     await call.answer()

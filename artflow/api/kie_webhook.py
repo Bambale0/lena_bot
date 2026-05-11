@@ -78,7 +78,7 @@ def extract_error(payload: dict[str, Any]) -> str:
             value = source.get(key)
             if value:
                 return str(value)
-    return "KIE generation failed"
+    return "Generation failed"
 
 
 def extract_result_urls(payload: dict[str, Any]) -> list[str]:

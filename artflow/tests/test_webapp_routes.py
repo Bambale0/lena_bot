@@ -176,6 +176,10 @@ async def test_topup_stars_returns_invoice_link(client, monkeypatch) -> None:
         AsyncMock(return_value=SimpleNamespace(key="credits_15", label="мини", credits=15, price_rub=150.0, price_stars=100)),
     )
     monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_transaction_by_external_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
         "api.miniapp_routes.repo.create_transaction",
         AsyncMock(return_value=SimpleNamespace(id=901)),
     )
@@ -699,3 +703,46 @@ async def test_music_generation_uses_model_cost_from_db(client, monkeypatch) -> 
 
     assert response.status_code == 202
     assert response.json()["credits_spent"] == 37
+
+
+@pytest.mark.asyncio
+async def test_topup_stars_reuses_pending_transaction(client, monkeypatch) -> None:
+    pending_tx = SimpleNamespace(
+        id=902,
+        user_id=1,
+        provider="telegram_stars",
+        status="pending",
+    )
+    pending_tx.provider = __import__("db.models", fromlist=["PaymentProvider"]).PaymentProvider.telegram_stars
+    pending_tx.status = __import__("db.models", fromlist=["TransactionStatus"]).TransactionStatus.pending
+
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_price_plan_by_key",
+        AsyncMock(return_value=SimpleNamespace(key="credits_15", label="мини", credits=15, price_rub=150.0, price_stars=100)),
+    )
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_transaction_by_external_id",
+        AsyncMock(return_value=pending_tx),
+    )
+    create_transaction = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.create_transaction", create_transaction)
+    monkeypatch.setattr(
+        "main.bot",
+        SimpleNamespace(create_invoice_link=AsyncMock(return_value="https://t.me/invoice/test-stars-link-2")),
+    )
+
+    response = await client.post("/api/v1/topup/stars", json={"plan_key": "credits_15"})
+
+    assert response.status_code == 200
+    assert response.json()["transaction_id"] == 902
+    create_transaction.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prompt_improve_music_uses_music_template(client) -> None:
+    response = await client.post("/api/v1/prompt/improve", json={"kind": "music", "prompt": "lofi rain"})
+
+    assert response.status_code == 200
+    improved = response.json()["prompt"]
+    assert "Original music track" in improved
+    assert "Premium detailed image" not in improved

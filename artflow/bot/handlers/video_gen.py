@@ -107,6 +107,15 @@ def _params_summary(data: dict) -> str:
     return " · ".join(parts) if parts else "по умолчанию"
 
 
+def _video_params_hint(model_key: str, data: dict) -> str:
+    parts = ["Нажимай кнопки ниже: ✅ показывает выбранные параметры."]
+    if data.get("mode") == "image" and not _video_ref_count(data) and model_key == VideoModel.GROK_I2V:
+        parts.append("Формат кадра появится после загрузки нужного количества референсов.")
+    else:
+        parts.append("Когда всё готово, нажми <b>Далее</b>.")
+    return " ".join(parts)
+
+
 def _video_ref_count(data: dict) -> int:
     if data.get("mode") != "image":
         return 0
@@ -344,7 +353,7 @@ async def handle_image_upload(
         await state.set_state(VideoGenFSM.params_select)
         await message.answer(
             f"✅ Фото загружено!\n\n⚙️ <b>Параметры</b> · {display_name}\n"
-            "Нажимай кнопки (✅ = выбрано), потом <b>Далее</b>:",
+            f"{_video_params_hint(model_key, updated)}",
             reply_markup=video_params_kb(
                 model_key, updated.get("duration"),
                 updated.get("aspect_ratio"), updated.get("resolution"), updated.get("grok_mode"),
@@ -367,7 +376,7 @@ async def _go_to_params_or_prompt(
         await state.set_state(VideoGenFSM.params_select)
         await call.message.edit_text(  # type: ignore[union-attr]
             f"⚙️ <b>Параметры</b> · {display_name}\n"
-            "Нажимай кнопки (✅ = выбрано), потом <b>Далее</b>:",
+            f"{_video_params_hint(model_key, data)}",
             reply_markup=video_params_kb(
                 model_key, data.get("duration"),
                 data.get("aspect_ratio"), data.get("resolution"), data.get("grok_mode"),
@@ -529,7 +538,8 @@ async def handle_video_prompt(
             updated = await state.get_data()
             await state.set_state(VideoGenFSM.params_select)
             await message.answer(
-                f"✅ Ссылка сохранена!\n\n⚙️ <b>Параметры</b> · {display_name}:",
+                f"✅ Ссылка сохранена!\n\n⚙️ <b>Параметры</b> · {display_name}\n"
+                f"{_video_params_hint(model_key, updated)}",
                 reply_markup=video_params_kb(
                     model_key, updated.get("duration"),
                     updated.get("aspect_ratio"), updated.get("resolution"), updated.get("grok_mode"),
@@ -613,7 +623,7 @@ async def handle_video_prompt(
     if result.provider == "kieai":
         await status_msg.edit_text(
             "⏳ <b>Видео-задача запущена.</b>\n"
-            "Пришлю результат автоматически, когда KIE отправит webhook."
+            "Пришлю результат автоматически, как только видео будет готово."
         )
         await state.clear()
         return

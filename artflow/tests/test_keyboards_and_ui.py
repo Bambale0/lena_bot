@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from bot.handlers.start import _help_text
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import video_params_kb
 from bot.keyboards.payment import topup_kb
@@ -45,6 +46,18 @@ def test_video_params_kb_hides_grok_i2v_ratio_for_single_ref() -> None:
         )
     )
     assert all(button.callback_data != "vpar_ratio:16:9" for button in buttons)
+
+
+def test_help_text_contains_chillcreative_link() -> None:
+    text = _help_text("ru")
+    assert "https://t.me/Chillcreative" in text
+
+
+def test_help_text_explains_settings_plainly() -> None:
+    text = _help_text("ru")
+    assert "Что означают настройки" in text
+    assert "Формат" in text
+    assert "Референс" in text
 
 
 def test_topup_keyboard_keeps_decimal_price() -> None:

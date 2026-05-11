@@ -46,6 +46,29 @@ from db.session import AsyncSessionLocal
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_provider_error(raw: str | None, *, fallback: str = "Ошибка на стороне генератора") -> str:
+    text = (raw or "").strip()
+    if not text:
+        return fallback
+
+    replacements = {
+        "KIE.AI": "генератор",
+        "KIE AI": "генератор",
+        "KIE": "генератор",
+        "webhook": "сигнал о готовности",
+        "callback": "ответ сервиса",
+        "createTask": "запуск",
+        "taskId": "id задачи",
+        "resultUrls": "ссылки на результат",
+        "result urls": "ссылки на результат",
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+
+    normalized = text.strip(" .\n")
+    return normalized or fallback
+
+
 async def _set_bot_commands(bot: Bot) -> None:
     commands = [
         BotCommand(command="start", description="Главное меню"),
@@ -372,13 +395,14 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
 
         if not is_success(payload):
             err = extract_error(payload)
+            user_err = _sanitize_provider_error(err)
             await repo.fail_generation(session, gen.id, err)
             await repo.add_credits(session, gen.user_id, gen.credits_spent)
             if bot:
                 try:
                     await bot.send_message(
                         user.tg_id,
-                        f"❌ Генерация не удалась.\nКредиты возвращены.\n\n<code>{err[:500]}</code>",
+                        f"❌ Генерация не удалась.\nКредиты возвращены.\n\n<code>{user_err[:500]}</code>",
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
@@ -387,12 +411,13 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
 
         urls = extract_result_urls(payload)
         if not urls:
-            err = "KIE callback success but no result urls"
+            err = "Provider callback success but no result urls"
+            user_err = "Результат готов, но ссылка на файл не пришла"
             await repo.fail_generation(session, gen.id, err)
             await repo.add_credits(session, gen.user_id, gen.credits_spent)
             if bot:
                 try:
-                    await bot.send_message(user.tg_id, f"❌ {err}. Кредиты возвращены.", reply_markup=back_to_menu_kb())
+                    await bot.send_message(user.tg_id, f"❌ {user_err}. Кредиты возвращены.", reply_markup=back_to_menu_kb())
                 except Exception as e:
                     logger.warning("Failed to notify empty KIE result user=%s: %s", user.tg_id, e)
             return {"ok": True}
@@ -576,6 +601,7 @@ async def kie_music_webhook(request: Request) -> dict:
 
     if looks_failed or (not audio_urls and not explicit_success and not is_success(payload)):
         err = extracted_error or msg or f"Music generation failed: {status}"
+        user_err = _sanitize_provider_error(err, fallback="Ошибка при генерации музыки")
         logger.warning("KIE music failed task_id=%s status=%s: %s", task_id, status, err)
         if generation_id:
             async with AsyncSessionLocal() as session:
@@ -587,7 +613,7 @@ async def kie_music_webhook(request: Request) -> dict:
             try:
                 await bot.send_message(
                     tg_id,
-                    f"❌ Ошибка генерации музыки:\n{err}",
+                    f"❌ Ошибка генерации музыки:\n{user_err}",
                     reply_markup=back_to_menu_kb(),
                 )
             except Exception as e:

@@ -32,10 +32,18 @@ def language_kb(current_lang: str) -> InlineKeyboardBuilder:
 @router.callback_query(F.data == "menu:settings")
 async def cb_settings(call: CallbackQuery, db_user: User) -> None:
     lang = db_user.language or "ru"
-    text = (
-        t("settings_title", lang) + "\n\n"
-        + t("settings_language", lang) + f": {('🇷🇺 Русский' if lang == 'ru' else '🇬🇧 English')}"
-    )
+    if lang == "ru":
+        text = (
+            "⚙️ <b>Настройки</b>\n\n"
+            "Здесь можно изменить язык интерфейса.\n\n"
+            f"🌍 Язык: {('🇷🇺 Русский' if lang == 'ru' else '🇬🇧 English')}"
+        )
+    else:
+        text = (
+            "⚙️ <b>Settings</b>\n\n"
+            "Here you can change the interface language.\n\n"
+            f"🌍 Language: {('🇷🇺 Russian' if lang == 'ru' else '🇬🇧 English')}"
+        )
     await call.message.edit_text(text, reply_markup=language_kb(lang))  # type: ignore[union-attr]
     await call.answer()
 

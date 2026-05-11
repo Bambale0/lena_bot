@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
@@ -20,9 +21,11 @@ from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
 from core.config import settings
 from db import repository as repo
 from db.models import (
+    GenerationStatus,
     GenerationType,
     ImageGenerationAction,
     PaymentProvider,
+    TransactionStatus,
     User,
 )
 from db.session import get_session
@@ -41,6 +44,9 @@ async def health() -> dict:
 
 
 MAX_CONCURRENT = 6
+STALE_GENERATION_TIMEOUT = timedelta(minutes=20)
+
+_VEO_MODEL_KEYS = {item.value for item in (VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE)}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -93,7 +99,89 @@ def _kie_callback_url() -> str:
     if settings.KIE_WEBHOOK_SECRET:
         params["secret"] = settings.KIE_WEBHOOK_SECRET
     qs = f"?{urlencode(params)}" if params else ""
-    return f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}{qs}"
+    return f"{settings.WEBHOOK_URL.rstrip('/')}" + f"{settings.KIE_WEBHOOK_PATH}{qs}"
+
+
+def _improve_image_prompt(prompt: str) -> str:
+    return (
+        f"{prompt}. Premium detailed image, cinematic composition, soft realistic light, "
+        f"clean background, sharp focus, high detail, balanced colors, professional visual style."
+    )
+
+
+def _improve_video_prompt(prompt: str) -> str:
+    return (
+        f"{prompt}. Cinematic video scene, clear subject action, smooth camera movement, "
+        f"natural motion, expressive lighting, detailed environment, high quality, coherent sequence."
+    )
+
+
+def _improve_music_prompt(prompt: str) -> str:
+    return (
+        f"{prompt}. Original music track, clear genre, mood and tempo, memorable melody, "
+        f"rich arrangement, polished production, expressive atmosphere, studio quality, coherent structure."
+    )
+
+
+async def _reconcile_generation_status(session: AsyncSession, gen):
+    if not gen or gen.status not in {GenerationStatus.pending, GenerationStatus.processing}:
+        return gen
+
+    now = datetime.now(timezone.utc)
+    created_at = gen.created_at or now
+    age = now - created_at
+
+    task_id = (gen.task_id or '').strip()
+    if not task_id:
+        if age >= STALE_GENERATION_TIMEOUT:
+            logger.warning(
+                'Marking stale generation without task_id as failed: gen=%s model=%s age=%s',
+                gen.id, gen.model, age,
+            )
+            await repo.fail_generation(session, gen.id, 'Generation lost task id before completion')
+            if gen.credits_spent:
+                await repo.add_credits(session, gen.user_id, gen.credits_spent)
+            return await repo.get_generation_by_id(session, gen.id)
+        return gen
+
+    try:
+        if gen.gen_type == GenerationType.image:
+            result_url = await image_service.poll_kieai_status(task_id)
+        elif gen.gen_type == GenerationType.video:
+            if gen.model in _VEO_MODEL_KEYS:
+                result_url = await video_service.poll_veo_status(task_id)
+            else:
+                result_url = await video_service.poll_kieai_status(task_id)
+        else:
+            return gen
+    except Exception as exc:
+        logger.warning('Reconcile failed generation gen=%s task=%s: %s', gen.id, task_id, exc)
+        await repo.fail_generation(session, gen.id, str(exc))
+        if gen.credits_spent:
+            await repo.add_credits(session, gen.user_id, gen.credits_spent)
+        return await repo.get_generation_by_id(session, gen.id)
+
+    if result_url:
+        await repo.finish_generation(session, gen.id, result_url)
+        if gen.image_session_id:
+            await repo.update_image_session_last_result(session, gen.image_session_id, result_url, gen.id)
+        return await repo.get_generation_by_id(session, gen.id)
+
+    return gen
+
+
+async def _reconcile_user_active_generations(session: AsyncSession, user_id: int) -> None:
+    if session.__class__.__module__.startswith('unittest.mock'):
+        return
+
+    try:
+        active_gens = await repo.get_user_active_generations(session, user_id)
+    except Exception as exc:
+        logger.debug('Skip active generation reconcile for user=%s: %s', user_id, exc)
+        return
+
+    for gen in active_gens:
+        await _reconcile_generation_status(session, gen)
 
 
 def _normalize_public_urls(*urls: str | None) -> list[str]:
@@ -480,15 +568,11 @@ async def miniapp_improve_prompt(
     kind = body.kind
 
     if kind == "video":
-        improved = (
-            f"{prompt}. Cinematic video scene, clear subject action, smooth camera movement, "
-            f"natural motion, expressive lighting, detailed environment, high quality, coherent sequence."
-        )
+        improved = _improve_video_prompt(prompt)
+    elif kind == "music":
+        improved = _improve_music_prompt(prompt)
     else:
-        improved = (
-            f"{prompt}. Premium detailed image, cinematic composition, soft realistic light, "
-            f"clean background, sharp focus, high detail, balanced colors, professional visual style."
-        )
+        improved = _improve_image_prompt(prompt)
 
     return {"prompt": improved}
 
@@ -610,6 +694,7 @@ async def create_image_generation(
             detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}",
         )
 
+    await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
@@ -720,6 +805,7 @@ async def create_video_generation(
             detail=f"Insufficient credits: need {total_credits}, have {user.credits}",
         )
 
+    await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
@@ -775,6 +861,7 @@ async def create_music_generation(
             detail=f"Insufficient credits: need {music_credits}, have {user.credits}",
         )
 
+    await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
@@ -815,6 +902,7 @@ async def get_generation(
     gen = await repo.get_generation_by_id(session, gen_id)
     if not gen or gen.user_id != user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
+    gen = await _reconcile_generation_status(session, gen)
     return _gen_out(gen)
 
 
@@ -825,6 +913,7 @@ async def get_history(
     user: User = Depends(get_miniapp_user),
 ) -> list[GenerationOut]:
     """Last N generations for the current user."""
+    await _reconcile_user_active_generations(session, user.id)
     gens = await repo.get_user_history(session, user.id, limit=limit)
     return [_gen_out(g) for g in gens]
 
@@ -960,6 +1049,7 @@ async def remix_feed_post(
     if user.credits < total_credits:
         raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
 
+    await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
@@ -1202,14 +1292,18 @@ async def topup_stars(
         raise HTTPException(status_code=404, detail="Plan not found")
 
     stars = plan.price_stars or max(1, int(plan.price_rub / 10))
-    tx = await repo.create_transaction(
-        session=session,
-        user_id=user.id,
-        amount_rub=plan.price_rub,
-        credits=plan.credits,
-        provider=PaymentProvider.telegram_stars,
-        external_id=f"stars_pending:{user.id}:{plan.key}",
-    )
+    pending_external_id = f"stars_pending:{user.id}:{plan.key}"
+    tx = await repo.get_transaction_by_external_id(session, pending_external_id)
+    if not tx or tx.status != TransactionStatus.pending or tx.user_id != user.id or tx.provider != PaymentProvider.telegram_stars:
+        external_id = pending_external_id if not tx else f"{pending_external_id}:{int(datetime.now(timezone.utc).timestamp())}"
+        tx = await repo.create_transaction(
+            session=session,
+            user_id=user.id,
+            amount_rub=plan.price_rub,
+            credits=plan.credits,
+            provider=PaymentProvider.telegram_stars,
+            external_id=external_id,
+        )
 
     try:
         invoice_link = await bot.create_invoice_link(

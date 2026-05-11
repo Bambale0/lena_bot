@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import secrets
 import logging
+from inspect import isawaitable
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
@@ -29,6 +30,8 @@ from db.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+ACTIVE_GENERATION_WINDOW = timedelta(minutes=45)
 
 
 @dataclass(frozen=True)
@@ -819,13 +822,30 @@ async def get_user_history(
     return list(result.scalars().all())
 
 
+async def get_user_active_generations(session: AsyncSession, user_id: int) -> list[Generation]:
+    result = await session.execute(
+        select(Generation)
+        .where(
+            Generation.user_id == user_id,
+            Generation.status.in_([GenerationStatus.pending, GenerationStatus.processing]),
+        )
+        .order_by(desc(Generation.created_at), desc(Generation.id))
+    )
+    items = result.scalars().all()
+    if isawaitable(items):
+        items = await items
+    return list(items)
+
+
 async def count_user_active_generations(session: AsyncSession, user_id: int) -> float:
+    cutoff = datetime.now(timezone.utc) - ACTIVE_GENERATION_WINDOW
     result = await session.execute(
         select(func.count())
         .select_from(Generation)
         .where(
             Generation.user_id == user_id,
             Generation.status.in_([GenerationStatus.pending, GenerationStatus.processing]),
+            Generation.created_at >= cutoff,
         )
     )
     return result.scalar_one()
@@ -843,6 +863,14 @@ async def count_generations_today(session: AsyncSession) -> float:
 
 
 # ─── Transactions ─────────────────────────────────────────────────────────────
+
+async def get_transaction_by_external_id(
+    session: AsyncSession,
+    external_id: str,
+) -> Transaction | None:
+    result = await session.execute(select(Transaction).where(Transaction.external_id == external_id))
+    return result.scalar_one_or_none()
+
 
 async def create_transaction(
     session: AsyncSession,

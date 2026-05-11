@@ -166,9 +166,12 @@ artflow/
 
 | Провайдер | Webhook URL | Валюта |
 |---|---|---|
+| Telegram Stars | Telegram native flow | XTR |
 | ЮКасса | `/webhook/yookassa` | RUB |
 | Т-Банк (Тинькофф) | `/webhook/tbank` | RUB |
 | CryptoBot | `/webhook/cryptobot` | Крипта |
+
+Подробная инструкция по Stars: `docs/telegram_stars_setup.md`
 
 Все вебхуки верифицируются подписью перед обработкой. Транзакции идемпотентны — повторный вебхук не начисляет кредиты дважды.
 

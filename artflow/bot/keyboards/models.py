@@ -584,15 +584,15 @@ def image_session_settings_kb(
     setting_buttons: list[InlineKeyboardButton] = []
     if has_ratio:
         setting_buttons.append(
-            InlineKeyboardButton(text="📐 Формат", callback_data=f"img_sset:ratio:{image_session_id}")
+            InlineKeyboardButton(text="📐 Формат кадра", callback_data=f"img_sset:ratio:{image_session_id}")
         )
     if has_quality:
         setting_buttons.append(
-            InlineKeyboardButton(text="💎 Качество", callback_data=f"img_sset:quality:{image_session_id}")
+            InlineKeyboardButton(text="💎 Детализация", callback_data=f"img_sset:quality:{image_session_id}")
         )
     if has_count:
         setting_buttons.append(
-            InlineKeyboardButton(text="🔢 Количество", callback_data=f"img_sset:count:{image_session_id}")
+            InlineKeyboardButton(text="🔢 Варианты", callback_data=f"img_sset:count:{image_session_id}")
         )
 
     for i in range(0, len(setting_buttons), 2):
@@ -873,13 +873,13 @@ def image_dynamic_settings_kb(model_key: str, mode: str | None = None) -> Inline
         builder.button(text="🖼 Референс", callback_data=f"img_dyn:reference:{model_key}")
 
     if "aspect_ratio" in settings:
-        builder.button(text="📐 Формат", callback_data=f"img_dyn:ratio:{model_key}")
+        builder.button(text="📐 Формат кадра", callback_data=f"img_dyn:ratio:{model_key}")
 
     if "quality" in settings:
-        builder.button(text="💎 Качество", callback_data=f"img_dyn:quality:{model_key}")
+        builder.button(text="💎 Детализация", callback_data=f"img_dyn:quality:{model_key}")
 
     if "count" in settings:
-        builder.button(text="🔢 Количество", callback_data=f"img_dyn:count:{model_key}")
+        builder.button(text="🔢 Варианты", callback_data=f"img_dyn:count:{model_key}")
 
     if "prompt_enhance" in settings:
         builder.button(text="✨ Улучшить промпт", callback_data=f"img_dyn:enhance:{model_key}")
