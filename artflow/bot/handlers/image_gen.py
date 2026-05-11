@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import hashlib
 from urllib.parse import urlencode
@@ -142,11 +143,6 @@ async def _resolve_image_session(
     data = await state.get_data()
     image_session_id = data.get("image_session_id")
 
-    if image_session_id:
-        image_session = await repo.get_image_session(session, image_session_id, db_user.id)
-        if image_session:
-            return image_session, gen_id
-
     if gen_id:
         gen = await repo.get_generation_by_id(session, gen_id)
         if gen and gen.user_id == db_user.id and gen.image_session_id:
@@ -154,8 +150,23 @@ async def _resolve_image_session(
             if image_session:
                 return image_session, gen.id
 
+    if image_session_id:
+        image_session = await repo.get_image_session(session, image_session_id, db_user.id)
+        if image_session:
+            return image_session, gen_id
+
     image_session = await repo.get_active_image_session(session, db_user.id)
     return image_session, gen_id
+
+
+def _stored_reference_file_ids(image_session: ImageSession) -> list[str]:
+    if not image_session.reference_file_ids:
+        return []
+    try:
+        parsed = json.loads(image_session.reference_file_ids)
+    except (TypeError, ValueError):
+        return []
+    return [item for item in parsed if isinstance(item, str) and item]
 
 
 async def _session_reference_url(
@@ -190,6 +201,17 @@ async def _session_reference_url(
             return urls if urls else None
         if len(ref_file_ids) == 1:
             return await _telegram_file_url(bot, ref_file_ids[0])
+
+    stored_file_ids = _stored_reference_file_ids(image_session)
+    if len(stored_file_ids) > 1:
+        urls = []
+        for fid in stored_file_ids:
+            url = await _telegram_file_url(bot, fid)
+            if url:
+                urls.append(url)
+        return urls if urls else None
+    if len(stored_file_ids) == 1:
+        return await _telegram_file_url(bot, stored_file_ids[0])
 
     if image_session.reference_file_id:
         return await _telegram_file_url(bot, image_session.reference_file_id)
@@ -243,8 +265,10 @@ async def _sync_state_with_image_session(state: FSMContext, image_session: Image
         count=image_session.count,
         quality=image_session.quality,
         image_file_id=image_session.reference_file_id,
+        ref_file_ids=_stored_reference_file_ids(image_session),
         remix_mode=False,
         remix_parent_generation_id=None,
+        remix_reference_url=None,
     )
 
 
@@ -307,6 +331,7 @@ async def _ensure_active_image_session_from_state(
         count=data.get("count", 1),
         base_prompt=None,
         reference_file_id=data.get("image_file_id"),
+        reference_file_ids=list(data.get("ref_file_ids", [])),
     )
     return image_session
 
@@ -737,27 +762,51 @@ async def cb_image_dynamic_continue(call: CallbackQuery, state: FSMContext) -> N
     await safe_answer_callback(call)
 
 
-@router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_model:"))
-async def cb_image_model(call: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(F.data.startswith("img_model:"))
+async def cb_image_model(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     model_key = call.data.removeprefix("img_model:")
+    current_state = await state.get_state()
+
+    if current_state == ImageGenFSM.photo_to_prompt_model.state:
+        model_cost = await repo.get_model_cost(session, model_key)
+        display_name = model_cost.display_name if model_cost else model_key
+
+        await state.set_state(ImageGenFSM.photo_to_prompt)
+        await state.update_data(p2p_model_key=model_key, p2p_model_name=display_name)
+
+        data = await state.get_data()
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            _p2p_prompt_text(ref_file_id=data.get("p2p_ref_file_id"), model_name=display_name),
+            reply_markup=_p2p_result_kb(
+                ref_file_id=data.get("p2p_ref_file_id"),
+                model_key=model_key,
+                model_name=display_name,
+            ),
+        )
+        await call.answer(f"Модель: {display_name}")
+        return
+
     caps = IMAGE_CAPS.get(model_key, {})
     modes = caps.get("modes", ["text"])
     default_mode = "text" if "text" in modes else modes[0]
 
     await state.update_data(
+        model_key=model_key,
         image_model=model_key,
+        mode=default_mode,
         image_mode=default_mode,
     )
 
     model_title = get_image_model_label(model_key)
-
     text = (
         f"🎛 <b>{model_title}</b>\n\n"
         "Я покажу только настройки, которые реально поддерживает эта модель.\n"
         "Выбери параметры или нажми «Продолжить»."
     )
 
-    await call.message.edit_text(
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
         text,
         reply_markup=image_dynamic_settings_kb(model_key, default_mode),
     )
@@ -1141,12 +1190,14 @@ async def handle_session_prompt(
     is_remix = bool(data.get("remix_mode"))
     parent_id = data.get("remix_parent_generation_id") or image_session.last_generation_id
 
-    reference_url = await _session_reference_url(
-        bot,
-        image_session,
-        prefer_last_result=is_remix,
-        state=state,
-    )
+    reference_url = data.get("remix_reference_url") if is_remix else None
+    if not reference_url:
+        reference_url = await _session_reference_url(
+            bot,
+            image_session,
+            prefer_last_result=is_remix,
+            state=state,
+        )
 
     current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
 
@@ -1192,8 +1243,12 @@ async def handle_session_photo(
         return
 
     best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
-    await repo.update_image_session_reference(session, image_session.id, best[0].file_id)
-    await state.update_data(image_file_id=best[0].file_id, image_session_id=image_session.id)
+    await repo.update_image_session_references(session, image_session.id, [best[0].file_id])
+    await state.update_data(
+        image_file_id=best[0].file_id,
+        ref_file_ids=[best[0].file_id],
+        image_session_id=image_session.id,
+    )
 
     await message.answer(
         "✅ Новый референс сохранён для активной серии. Теперь напиши, что изменить.",
@@ -1221,11 +1276,32 @@ async def cb_image_session_remix(
         await call.answer("Активная серия не найдена", show_alert=True)
         return
 
+    if not _supports_img2img(image_session.model):
+        await call.answer("Эта модель не поддерживает ремикс по изображению", show_alert=True)
+        return
+
+    remix_reference_url = image_session.last_result_url
+    if parent_id:
+        parent_gen = await repo.get_generation_by_id(session, parent_id)
+        if parent_gen and parent_gen.user_id == db_user.id and parent_gen.result_url:
+            remix_reference_url = parent_gen.result_url
+
+    if not remix_reference_url:
+        await call.answer("Не нашёл изображение для ремикса", show_alert=True)
+        return
+
+    image_session.mode = "image"
+    image_session.reference_url = remix_reference_url
+    await session.commit()
+
     await state.set_state(ImageGenFSM.session_active)
     await state.update_data(
         image_session_id=image_session.id,
+        mode="image",
+        image_mode="image",
         remix_mode=True,
         remix_parent_generation_id=parent_id or image_session.last_generation_id,
+        remix_reference_url=remix_reference_url,
     )
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
@@ -1655,6 +1731,7 @@ async def cb_regen_image(
         count=prev_session.count if prev_session else 1,
         base_prompt=None,
         reference_file_id=prev_session.reference_file_id if prev_session else None,
+        reference_file_ids=_stored_reference_file_ids(prev_session) if prev_session else None,
         reference_url=prev_session.reference_url if prev_session else None,
     )
     reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False)
@@ -1835,33 +1912,6 @@ async def cb_p2p_model(
         reply_markup=screen.reply_markup,
     )
     await safe_answer_callback(call)
-
-
-@router.callback_query(ImageGenFSM.photo_to_prompt_model, F.data.startswith("img_model:"))
-async def cb_p2p_model_selected(
-    call: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-) -> None:
-    model_key = call.data.split(":")[1]  # type: ignore[union-attr]
-    model_cost = await repo.get_model_cost(session, model_key)
-    display_name = model_cost.display_name if model_cost else model_key
-
-    await state.set_state(ImageGenFSM.photo_to_prompt)
-    await state.update_data(p2p_model_key=model_key, p2p_model_name=display_name)
-
-    data = await state.get_data()
-    prompt = data.get("generated_prompt", "")
-    await safe_edit_message(
-        call.message,  # type: ignore[arg-type]
-        _p2p_prompt_text(ref_file_id=data.get("p2p_ref_file_id"), model_name=display_name),
-        reply_markup=_p2p_result_kb(
-            ref_file_id=data.get("p2p_ref_file_id"),
-            model_key=model_key,
-            model_name=display_name,
-        ),
-    )
-    await call.answer(f"Модель: {display_name}")
 
 
 # ── p2p: generate ─────────────────────────────────────────────────────────────

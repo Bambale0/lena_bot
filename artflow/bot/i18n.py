@@ -24,10 +24,10 @@ _RU = {
     ),
     "main_menu_with_session": (
         "👋 <b>APIX</b>\n\n"
-        "🎨 <b>Активная серия изображений</b>\n"
-        "<code>{model}</code>\n"
-        "{ratio} · {quality} · {count} фото\n\n"
-        "Продолжай текущую серию или начни новую."
+        "🎨 <b>Текущая серия изображений</b>\n"
+        "<b>{model}</b>\n"
+        "{ratio} · {quality} · {count}\n\n"
+        "Можешь продолжить эту серию или начать новую."
     ),
     "choose_language": "🌍 <b>Выбери язык</b>\n\nChoose your language:",
     "language_changed": "✅ Язык изменён на русский!",
@@ -35,16 +35,15 @@ _RU = {
 
     # Баланс
     "balance_title": "💎 <b>Твой баланс</b>",
-    "balance_credits": "cr: {credits}",
+    "balance_credits": "💋: {credits}",
     "balance_subscription": "Подписка: {status}",
     "balance_sub_active": "✅ До {date}",
     "balance_sub_inactive": "❌ Не активна",
-    "balance_costs": (
-        "<b>Стоимость генерации:</b>\n"
-        "• Изображение: 1–12 cr\n"
-        "• Видео: 3–70 cr\n"
-        "• Midjourney: 3–15 cr"
-    ),
+    "balance_costs_title": "<b>Стоимость генерации:</b>",
+    "balance_costs_image": "• Изображения: {amount}",
+    "balance_costs_video": "• Видео: {amount}",
+    "balance_costs_music": "• Музыка: {amount}",
+    "balance_costs_midjourney": "• Midjourney: {amount}",
     "balance_topup_hint": "💳 Пополнить баланс можно прямо здесь.",
 
     # Пополнение
@@ -71,6 +70,8 @@ _RU = {
         "• L3: <b>{l3}</b>"
     ),
     "referral_earned": "💰 <b>Заработано: {amount:.2f}₽</b>",
+    "referral_available": "💸 <b>Доступно к выводу: {amount:.2f}₽</b>",
+    "referral_pending_withdrawals": "⏳ В ожидании вывода: {amount:.2f}₽",
     "referral_conditions": (
         "<b>Условия:</b>\n"
         "• Бонус за реферала: +{bonus} cr\n"
@@ -89,9 +90,15 @@ _RU = {
 
     # Вывод
     "withdraw_title": "💸 <b>Заявка на вывод</b>",
-    "withdraw_amount_prompt": "Введи сумму в рублях, которую нужно вывести.\nНапример: <code>1500</code>",
+    "withdraw_amount_prompt": (
+        "Введи сумму в рублях, которую нужно вывести.\n"
+        "Сейчас доступно: <b>{available:.2f}₽</b>\n"
+        "Например: <code>1500</code>"
+    ),
     "withdraw_amount_invalid": "Введи сумму числом, например: <code>1500</code>",
     "withdraw_amount_zero": "Сумма должна быть больше нуля.",
+    "withdraw_amount_exceeds": "Недостаточно доступного реферального баланса. Сейчас доступно: <b>{available:.2f}₽</b>.",
+    "withdraw_unavailable": "Сейчас вывод недоступен: на реферальном балансе нет свободных средств.",
     "withdraw_details_prompt": "Теперь отправь реквизиты для выплаты одним сообщением.\n\nНапример: банк + номер телефона / карта / USDT-кошелёк.",
     "withdraw_details_short": "Реквизиты слишком короткие. Отправь банк/номер/кошелёк подробнее.",
     "withdraw_created": (
@@ -210,10 +217,10 @@ _EN = {
     ),
     "main_menu_with_session": (
         "👋 <b>APIX</b>\n\n"
-        "🎨 <b>Active image session</b>\n"
-        "<code>{model}</code>\n"
-        "{ratio} · {quality} · {count} photos\n\n"
-        "Continue the current session or start a new one."
+        "🎨 <b>Current image session</b>\n"
+        "<b>{model}</b>\n"
+        "{ratio} · {quality} · {count}\n\n"
+        "Continue this session or start a new one."
     ),
     "choose_language": "🌍 <b>Choose language</b>\n\nВыбери язык:",
     "language_changed": "✅ Language changed to Russian!",
@@ -221,16 +228,15 @@ _EN = {
 
     # Balance
     "balance_title": "💎 <b>Your Balance</b>",
-    "balance_credits": "cr: {credits}",
+    "balance_credits": "💋: {credits}",
     "balance_subscription": "Subscription: {status}",
     "balance_sub_active": "✅ Until {date}",
     "balance_sub_inactive": "❌ Inactive",
-    "balance_costs": (
-        "<b>Generation cost:</b>\n"
-        "• Image: 1–12 cr\n"
-        "• Video: 3–70 cr\n"
-        "• Midjourney: 3–15 cr"
-    ),
+    "balance_costs_title": "<b>Generation cost:</b>",
+    "balance_costs_image": "• Images: {amount}",
+    "balance_costs_video": "• Video: {amount}",
+    "balance_costs_music": "• Music: {amount}",
+    "balance_costs_midjourney": "• Midjourney: {amount}",
     "balance_topup_hint": "💳 Top up your balance right here.",
 
     # Top-up
@@ -257,6 +263,8 @@ _EN = {
         "• L3: <b>{l3}</b>"
     ),
     "referral_earned": "💰 <b>Earned: {amount:.2f}₽</b>",
+    "referral_available": "💸 <b>Available to withdraw: {amount:.2f}₽</b>",
+    "referral_pending_withdrawals": "⏳ Pending withdrawals: {amount:.2f}₽",
     "referral_conditions": (
         "<b>Terms:</b>\n"
         "• Bonus per referral: +{bonus} cr\n"
@@ -275,9 +283,15 @@ _EN = {
 
     # Withdrawal
     "withdraw_title": "💸 <b>Withdrawal Request</b>",
-    "withdraw_amount_prompt": "Enter the amount in rubles you want to withdraw.\nExample: <code>1500</code>",
+    "withdraw_amount_prompt": (
+        "Enter the amount in rubles you want to withdraw.\n"
+        "Available now: <b>{available:.2f}₽</b>\n"
+        "Example: <code>1500</code>"
+    ),
     "withdraw_amount_invalid": "Please enter a number, e.g. <code>1500</code>",
     "withdraw_amount_zero": "Amount must be greater than zero.",
+    "withdraw_amount_exceeds": "Not enough available referral balance. Available now: <b>{available:.2f}₽</b>.",
+    "withdraw_unavailable": "Withdrawal is unavailable right now: there are no free referral funds on your balance.",
     "withdraw_details_prompt": "Now send your payout details in one message.\n\nExample: bank + phone number / card / USDT wallet.",
     "withdraw_details_short": "Details are too short. Please provide bank/account/wallet info.",
     "withdraw_created": (

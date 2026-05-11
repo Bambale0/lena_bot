@@ -59,7 +59,7 @@ _MJ_ACTION_MODEL = "midjourney-action"
 # SUBMENU
 # ═══════════════════════════════════════════════════════════════════
 
-@router.callback_query(F.data == "menu:mj")
+@router.callback_query(F.data.in_({"menu:mj", "midjourney"}))
 async def cb_mj_menu(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await call.message.edit_text(  # type: ignore[union-attr]

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 
@@ -6,29 +6,28 @@ const API_BASE = "/api/v1";
 
 // ── fallbacks ────────────────────────────────────────────────────────────────
 
-const fallbackUser = { username: "demo", full_name: "Demo User", credits: 100, referral_balance: 0, referral_code: "DEMO" };
+const fallbackUser = {
+  username: null,
+  full_name: null,
+  credits: 0,
+  referral_balance: 0,
+  referral_code: "",
+  referral_link: "",
+};
 
-const fallbackImageModels = [
-  { key: "nano-banana-pro", display_name: "NanoBanana Pro", credits: 10, aspect_ratios: ["9:16","1:1","16:9"], quality_options: [{value:"2K",label:"2K"},{value:"4K",label:"4K"}], counts: [1,2,4,6], has_quality: true, modes: ["text","image"] },
-  { key: "wan/2-7-image-pro", display_name: "WAN 2.7 Pro", credits: 8, aspect_ratios: ["1:1","16:9","9:16","4:3","3:4"], quality_options: [{value:"1K",label:"1K"},{value:"2K",label:"2K"},{value:"4K",label:"4K"}], counts: [1,2,4,6], has_quality: true, modes: ["text","image"] },
-  { key: "seedream/4.5-text-to-image", display_name: "Seedream 4.5", credits: 2, aspect_ratios: ["9:16","1:1","16:9","4:3"], quality_options: [{value:"basic",label:"2K"},{value:"high",label:"4K"}], counts: [1], has_quality: true, modes: ["text"] },
-];
+const fallbackImageModels = [];
 
-const fallbackVideoModels = [
-  { key: "kling-3.0/video", display_name: "Kling 3.0", credits: 8, aspect_ratios: ["9:16","16:9","1:1"], modes: ["text","image"], durations: [5,10], resolutions: ["2K","4K"], has_quality: true },
-  { key: "bytedance/seedance-2-fast", display_name: "Seedance 2 Fast", credits: 15, aspect_ratios: ["16:9","9:16","1:1"], modes: ["text","image"], durations: [3,5,8], resolutions: ["480p","720p"], has_quality: true },
-];
+const fallbackVideoModels = [];
 
-const fallbackFeed = [
-  { id:500, model:"NanoBanana Pro", prompt:"white cat in blooming lilac flowers", likes_count:116, result_url:null },
-  { id:501, model:"Seedream 4.5", prompt:"perfume bottle in pink flowers", likes_count:281, result_url:null },
-];
+const fallbackFeed = [];
 
-const fallbackPlans = [
-  { key:"starter", title:"Старт", credits:100, price_rub:199, price_usdt:2.21 },
-  { key:"basic",   title:"Базовый", credits:300, price_rub:499, price_usdt:5.54 },
-  { key:"pro",     title:"Про", credits:700, price_rub:999, price_usdt:11.10 },
-  { key:"ultra",   title:"Ультра", credits:2000, price_rub:2490, price_usdt:27.67 },
+const fallbackPlans = [];
+const THEME_STORAGE_KEY = "apix-miniapp-theme";
+const THEME_OPTIONS = [
+  { value: "system", label: "Системная" },
+  { value: "dark", label: "Темная" },
+  { value: "light", label: "Светлая" },
+  { value: "mintpink", label: "Салатово-розовая" },
 ];
 
 // ── Telegram WebApp helpers ──────────────────────────────────────────────────
@@ -36,6 +35,29 @@ const fallbackPlans = [
 function tg() { return window.Telegram?.WebApp || null; }
 function tgUser() { return tg()?.initDataUnsafe?.user || null; }
 function initData() { return tg()?.initData || ""; }
+
+function readStoredTheme() {
+  const value = window.localStorage.getItem(THEME_STORAGE_KEY);
+  return THEME_OPTIONS.some((theme) => theme.value === value) ? value : "system";
+}
+
+function detectSystemTheme() {
+  const telegramTheme = tg()?.colorScheme;
+  if (telegramTheme === "light" || telegramTheme === "dark") return telegramTheme;
+  return window.matchMedia?.("(prefers-color-scheme: light)")?.matches ? "light" : "dark";
+}
+
+function resolveTheme(theme) {
+  return theme === "system" ? detectSystemTheme() : theme;
+}
+
+function themeLabel(theme) {
+  return {
+    dark: "темная",
+    light: "светлая",
+    mintpink: "салатово-розовая",
+  }[theme] || "темная";
+}
 
 // ── API client ───────────────────────────────────────────────────────────────
 
@@ -81,6 +103,18 @@ async function api(path, options = {}) {
 
 function items(x) { return Array.isArray(x) ? x : Array.isArray(x?.items) ? x.items : []; }
 
+function isMiniappVideoModelSupported(model) {
+  const modes = model?.modes || [];
+  return modes.includes("text") || modes.includes("image");
+}
+
+function modelModesLabel(model) {
+  const modes = model?.modes || ["text"];
+  if (modes.includes("text") && modes.includes("image")) return "текст + фото";
+  if (modes.includes("image")) return "по фото";
+  return "текст";
+}
+
 function useApi(loader, fallback, deps = []) {
   const [data, setData] = useState(fallback);
   const [loading, setLoading] = useState(true);
@@ -112,6 +146,16 @@ function Avatar({ name = "?" }) {
 
 function Spinner() {
   return <div className="spinner" />;
+}
+
+function NoticeBar({ notice, onClose }) {
+  if (!notice?.message) return null;
+  return (
+    <div className={`noticeBar ${notice.type || "info"}`}>
+      <span>{notice.message}</span>
+      <button onClick={onClose}>×</button>
+    </div>
+  );
 }
 
 function MediaThumb({ url, type, idx = 0, className = "" }) {
@@ -174,20 +218,51 @@ function Nav({ screen, setScreen }) {
 // ── TopUp modal ──────────────────────────────────────────────────────────────
 
 function TopupModal({ onClose }) {
-  const { data: plans, loading } = useApi(() => api("/plans"), fallbackPlans);
+  const { data: plans, loading, reload: reloadPlans } = useApi(
+    () => api(`/plans?_=${Date.now()}`, { cache: "no-store" }),
+    fallbackPlans,
+  );
   const [selected, setSelected] = useState(null);
-  const [method, setMethod] = useState("tbank");
+  const [method, setMethod] = useState("stars");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      reloadPlans();
+    }, 15000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        reloadPlans();
+      }
+    };
+
+    window.addEventListener("focus", reloadPlans);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", reloadPlans);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [reloadPlans]);
+
+  const formatRub = (plan) => {
+    if (plan?.price_rub_display) return plan.price_rub_display;
+    const value = Number(plan?.price_rub || 0);
+    return `${String(value.toFixed(2)).replace(/\.?0+$/, "")}₽`;
+  };
 
   async function handlePay() {
     if (!selected) return;
     setBusy(true); setErr(null);
     try {
-      const endpoint = method === "crypto" ? "/topup/crypto" : "/topup/tbank";
+      const endpoint = method === "crypto" ? "/topup/crypto" : method === "stars" ? "/topup/stars" : "/topup/tbank";
       const res = await api(endpoint, { method: "POST", body: JSON.stringify({ plan_key: selected }) });
-      const url = res.pay_url;
-      if (tg()) tg().openLink(url);
+      const url = res.invoice_link || res.pay_url;
+      if (!url) throw new Error("Платёжная ссылка не получена");
+      if (method === "stars" && tg()?.openInvoice) tg().openInvoice(url, () => {});
+      else if (tg()) tg().openLink(url);
       else window.open(url, "_blank");
       onClose();
     } catch (e) {
@@ -213,15 +288,16 @@ function TopupModal({ onClose }) {
                 className={`planCard ${selected === p.key ? "active" : ""}`}
                 onClick={() => setSelected(p.key)}
               >
-                <b>{p.title}</b>
+                <b>{p.title || p.label}</b>
                 <span>{p.credits} 💋</span>
-                <em>{p.price_rub} ₽</em>
+                <em>{formatRub(p)}</em>
               </button>
             ))}
           </div>
         )}
 
         <div className="tabs" style={{ marginTop: 16 }}>
+          <button className={method === "stars" ? "active" : ""} onClick={() => setMethod("stars")}>⭐ Stars</button>
           <button className={method === "tbank" ? "active" : ""} onClick={() => setMethod("tbank")}>💳 Т-Банк</button>
           <button className={method === "crypto" ? "active" : ""} onClick={() => setMethod("crypto")}>₮ Крипто</button>
         </div>
@@ -306,9 +382,12 @@ function Home({ user, feed, prompts, historyCount, setScreen, setTopup }) {
         </div>
         <div className="grid">
           {feed.slice(0, 4).map((f, i) => (
-            <button key={f.id || i} className="feedCard" onClick={() => f.result_url ? setViewer(f) : setScreen("feed")}>
+            <button key={f.id || i} className="feedCard" onClick={() => setScreen("feed")}>
               <MediaThumb url={f.result_url} type="image" idx={i} />
-              <div><span>{f.model}</span><p>{f.prompt}</p></div>
+              <div>
+                <span>{f.model}</span>
+                <p>@{f.author || "anon"} · ♥ {f.likes_count || 0} · 🔁 {f.remixes || 0}</p>
+              </div>
             </button>
           ))}
         </div>
@@ -319,7 +398,7 @@ function Home({ user, feed, prompts, historyCount, setScreen, setTopup }) {
 
 // ── Feed screen ───────────────────────────────────────────────────────────────
 
-function FeedCard({ item, idx, onRemix }) {
+function FeedCard({ item, idx, onRemix, onNotice }) {
   const [liked, setLiked] = useState(false);
   const [likes, setLikes] = useState(item.likes_count || 0);
   const [busy, setBusy] = useState(false);
@@ -348,7 +427,7 @@ function FeedCard({ item, idx, onRemix }) {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     } catch (e) {
-      alert(e.message || "Ошибка");
+      onNotice?.({ type: "error", message: e.message || "Не удалось получить ссылку" });
     }
   }
 
@@ -369,14 +448,14 @@ function FeedCard({ item, idx, onRemix }) {
           <button
             className="remixBtn"
             onClick={() => onRemix && onRemix(item)}
-            style={{ flex: 1, padding: "8px 12px", borderRadius: 10, background: "rgba(124,58,237,.2)", border: "1px solid rgba(124,58,237,.4)", color: "#c4b5fd", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            style={{ flex: 1, padding: "8px 12px", borderRadius: 10, background: "var(--accent-soft)", border: "1px solid var(--accent-border)", color: "var(--accent-text)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
           >
             🔁 Повторить
           </button>
           {item.is_mine && (
             <button
               onClick={handleCopyLink}
-              style={{ padding: "8px 10px", borderRadius: 10, background: linkCopied ? "rgba(74,222,128,.15)" : "rgba(255,255,255,.07)", border: `1px solid ${linkCopied ? "rgba(74,222,128,.4)" : "rgba(255,255,255,.15)"}`, color: linkCopied ? "#4ade80" : "rgba(255,255,255,.7)", fontSize: 13, cursor: "pointer" }}
+              style={{ padding: "8px 10px", borderRadius: 10, background: linkCopied ? "var(--success-soft)" : "var(--surface-2)", border: `1px solid ${linkCopied ? "var(--success-border)" : "var(--border-strong)"}`, color: linkCopied ? "var(--success)" : "var(--text-soft)", fontSize: 13, cursor: "pointer" }}
             >
               {linkCopied ? "✅" : "🔗"}
             </button>
@@ -387,7 +466,7 @@ function FeedCard({ item, idx, onRemix }) {
   );
 }
 
-function Feed({ feed, feedLoading, prompts, setScreen, onRemix }) {
+function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice }) {
   const filtered = feed;
 
   return (
@@ -396,8 +475,8 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix }) {
       <PromptFeed prompts={prompts} setScreen={setScreen} />
       {feedLoading ? <Spinner /> : (
         <div className="feedList">
-          {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} />)}
-          {filtered.length === 0 && <p style={{ color: "rgba(255,255,255,.4)", textAlign: "center", marginTop: 32 }}>Пусто</p>}
+          {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} onNotice={onNotice} />)}
+          {filtered.length === 0 && <p style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 32 }}>Пусто</p>}
         </div>
       )}
     </>
@@ -406,7 +485,7 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix }) {
 
 // ── Post-generation share buttons ────────────────────────────────────────────
 
-function GenShareButtons({ genId, initialFeed = false, initialLib = false }) {
+function GenShareButtons({ genId, initialFeed = false, initialLib = false, onNotice }) {
   const [inFeed, setInFeed] = useState(initialFeed);
   const [inLib, setInLib] = useState(initialLib);
   const [busyFeed, setBusyFeed] = useState(false);
@@ -419,7 +498,7 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false }) {
       await api(`/generations/${genId}/share`, { method: "POST" });
       setInFeed(true);
       tg()?.HapticFeedback?.notificationOccurred("success");
-    } catch (e) { alert(e.message); }
+    } catch (e) { onNotice?.({ type: "error", message: e.message || "Не удалось опубликовать" }); }
     finally { setBusyFeed(false); }
   }
 
@@ -430,7 +509,7 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false }) {
       await api(`/generations/${genId}/share-library`, { method: "POST" });
       setInLib(true);
       tg()?.HapticFeedback?.notificationOccurred("success");
-    } catch (e) { alert(e.message); }
+    } catch (e) { onNotice?.({ type: "error", message: e.message || "Не удалось опубликовать" }); }
     finally { setBusyLib(false); }
   }
 
@@ -440,13 +519,13 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false }) {
     <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
       <button
         onClick={handleFeed} disabled={busyFeed || inFeed}
-        style={{ ...btnBase, background: inFeed ? "rgba(74,222,128,.15)" : "rgba(255,255,255,.07)", border: `1px solid ${inFeed ? "rgba(74,222,128,.4)" : "rgba(255,255,255,.15)"}`, color: inFeed ? "#4ade80" : "rgba(255,255,255,.8)" }}
+        style={{ ...btnBase, background: inFeed ? "var(--success-soft)" : "var(--surface-2)", border: `1px solid ${inFeed ? "var(--success-border)" : "var(--border-strong)"}`, color: inFeed ? "var(--success)" : "var(--text-muted)" }}
       >
         {inFeed ? "✅ В ленте" : busyFeed ? "..." : "📤 В ленту"}
       </button>
       <button
         onClick={handleLib} disabled={busyLib || inLib}
-        style={{ ...btnBase, background: inLib ? "rgba(167,139,250,.15)" : "rgba(255,255,255,.07)", border: `1px solid ${inLib ? "rgba(167,139,250,.5)" : "rgba(255,255,255,.15)"}`, color: inLib ? "#c4b5fd" : "rgba(255,255,255,.8)" }}
+        style={{ ...btnBase, background: inLib ? "var(--accent-soft)" : "var(--surface-2)", border: `1px solid ${inLib ? "var(--accent-border)" : "var(--border-strong)"}`, color: inLib ? "var(--accent-text)" : "var(--text-muted)" }}
       >
         {inLib ? "✅ В библиотеке" : busyLib ? "..." : "📚 В библиотеку"}
       </button>
@@ -459,7 +538,7 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false }) {
 function SettingsRow({ label, children }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 6, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</div>
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 6, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</div>
       {children}
     </div>
   );
@@ -504,9 +583,6 @@ function getImageScenario(model) {
 function getVideoScenario(model) {
   const key = String(model?.key || "").toLowerCase();
   const modes = model?.modes || ["text"];
-  const motion = model?.motion_controls || [];
-
-  if (motion.length || key.includes("motion") || key.includes("camera")) return "motion";
   if (modes.includes("image")) return "i2v";
   if (key.includes("fast") || key.includes("turbo")) return "fast";
   return "quality";
@@ -531,42 +607,50 @@ function normalizeQualityOptions(model) {
   });
 }
 
-function normalizeMotionControls(model) {
-  const raw = model?.motion_controls || model?.camera_controls || [];
-  if (raw.length) return raw;
-
-  const key = String(model?.key || "").toLowerCase();
-  if (key.includes("grok")) return ["normal", "motion", "cinematic"];
-  if (key.includes("kling")) return ["auto", "pan_left", "pan_right", "zoom_in", "zoom_out", "orbit"];
-  if (key.includes("veo")) return ["auto", "dolly_in", "dolly_out", "handheld"];
-  return ["auto"];
+function normalizeModeOptions(model) {
+  const raw = model?.mode_options || [];
+  return raw.map((value) => ({ value, label: modeOptionLabel(value) }));
 }
 
-function motionLabel(x) {
+function normalizeAbsoluteUrl(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isAbsoluteHttpUrl(value) {
+  try {
+    const url = new URL(normalizeAbsoluteUrl(value));
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function modeOptionLabel(x) {
   return {
-    auto: "Авто",
+    fun: "Fun",
     normal: "Normal",
-    motion: "Motion",
-    cinematic: "Кино",
-    pan_left: "Pan ←",
-    pan_right: "Pan →",
-    zoom_in: "Zoom +",
-    zoom_out: "Zoom −",
-    orbit: "Orbit",
-    dolly_in: "Dolly +",
-    dolly_out: "Dolly −",
-    handheld: "Handheld",
+    spicy: "Spicy",
   }[x] || x;
 }
 
-function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, generation, setTopup, remixSource, clearRemix }) {
+function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, generation, setTopup, remixSource, clearRemix, onNotice }) {
   const isRemix = !!remixSource;
+  const supportedVideoModels = useMemo(
+    () => (videoModels || []).filter(isMiniappVideoModelSupported),
+    [videoModels],
+  );
 
   const [kind, setKind] = useState(remixSource?.gen_type === "video" ? "video" : "image");
   const [scenario, setScenario] = useState("fast");
 
-  const sourceModels = kind === "image" ? imageModels : videoModels;
-  const scenarioModels = getScenarioModels(kind, scenario, imageModels, videoModels);
+  const sourceModels = useMemo(
+    () => (kind === "image" ? imageModels : supportedVideoModels),
+    [kind, imageModels, supportedVideoModels],
+  );
+  const scenarioModels = useMemo(
+    () => getScenarioModels(kind, scenario, imageModels, supportedVideoModels),
+    [kind, scenario, imageModels, supportedVideoModels],
+  );
   const visibleModels = scenarioModels.length ? scenarioModels : sourceModels;
 
   const [model, setModel] = useState(visibleModels[0]?.key || "");
@@ -579,21 +663,54 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
   const [count, setCount] = useState(1);
   const [duration, setDuration] = useState(5);
   const [resolution, setResolution] = useState("720p");
-  const [motion, setMotion] = useState("auto");
-  const [refUrl, setRefUrl] = useState("");
+  const [modeOption, setModeOption] = useState("normal");
+  const [refUrls, setRefUrls] = useState([]);
+  const [refError, setRefError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [improvingPrompt, setImprovingPrompt] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => {
-    if (kind === "image") setScenario("fast");
-    else setScenario("fast");
-  }, [kind]);
+    if (isRemix && remixSource?.gen_type === "image" && kind === "image") {
+      setScenario("edit");
+      return;
+    }
+    if (isRemix && remixSource?.gen_type === "video" && kind === "video") {
+      setScenario("fast");
+      return;
+    }
+    setScenario("fast");
+  }, [kind, isRemix, remixSource?.gen_type]);
 
   useEffect(() => {
-    const list = getScenarioModels(kind, scenario, imageModels, videoModels);
-    const models = list.length ? list : (kind === "image" ? imageModels : videoModels);
-    setModel(models[0]?.key || "");
-  }, [kind, scenario, imageModels, videoModels]);
+    if (!remixSource) {
+      setRefUrls([]);
+      setRefError("");
+      return;
+    }
+    setKind(remixSource.gen_type === "video" ? "video" : "image");
+    if (remixSource.gen_type === "image") {
+      setScenario("edit");
+      const nextRefUrl = normalizeAbsoluteUrl(remixSource.result_url || "");
+      setRefUrls(nextRefUrl ? [nextRefUrl] : []);
+      setRefError(nextRefUrl && !isAbsoluteHttpUrl(nextRefUrl) ? "Для ремикса нужна полная ссылка вида https://..." : "");
+      return;
+    }
+    setScenario("fast");
+    setRefUrls([]);
+    setRefError("");
+  }, [remixSource?.gen_id, remixSource?.gen_type, remixSource?.result_url]);
+
+  useEffect(() => {
+    if (!visibleModels.length) {
+      if (model) setModel("");
+      return;
+    }
+    const stillVisible = visibleModels.some((item) => item.key === model);
+    if (!stillVisible) {
+      setModel(visibleModels[0]?.key || "");
+    }
+  }, [visibleModels, model]);
 
   useEffect(() => {
     if (!current) return;
@@ -609,7 +726,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
     setCount((current.counts || [1])[0] || 1);
     setDuration((current.durations || current.duration_options || [5])[0] || 5);
     setResolution((current.resolutions || ["720p"])[0] || "720p");
-    setMotion(normalizeMotionControls(current)[0] || "auto");
+    setModeOption((current.mode_options || [])[0] || "normal");
   }, [current?.key, scenario]);
 
   async function handleFileUpload(e) {
@@ -617,6 +734,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
     if (!file) return;
 
     setUploading(true);
+    setRefError("");
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -627,16 +745,48 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
         body: fd,
       });
 
-      if (!res.ok) throw new Error("Upload failed");
+      if (!res.ok) {
+        let detail = "Не удалось загрузить файл";
+        try {
+          const raw = await res.text();
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              detail = parsed?.detail || parsed?.message || raw || detail;
+            } catch {
+              detail = raw;
+            }
+          }
+        } catch {}
+        if (res.status === 413) {
+          detail = "Файл слишком большой. Максимум 20 МБ.";
+        }
+        throw new Error(detail);
+      }
       const data = await res.json();
-      setRefUrl(data.url);
-    } catch {
-      setRefUrl(URL.createObjectURL(file));
+      const uploadedUrl = normalizeAbsoluteUrl(data.url);
+      if (!isAbsoluteHttpUrl(uploadedUrl)) {
+        throw new Error("Сервер вернул неполную ссылку на референс");
+      }
+      setRefUrls((prev) => {
+        const cleaned = prev.filter((url) => normalizeAbsoluteUrl(url) !== uploadedUrl);
+        if ((Number(current?.max_refs || 1) || 1) <= 1) return [uploadedUrl];
+        return [...cleaned, uploadedUrl].slice(0, Number(current?.max_refs || 1) || 1);
+      });
+    } catch (error) {
+      setRefError(error?.message || "Не удалось получить полную ссылку на референс");
     } finally {
       setUploading(false);
+      e.target.value = "";
     }
   }
 
+  const normalizedRefUrls = refUrls
+    .map((value) => normalizeAbsoluteUrl(value))
+    .filter(Boolean);
+  const normalizedRefUrl = normalizedRefUrls[0] || "";
+  const maxRefs = Math.max(1, Number(current?.max_refs || 1) || 1);
+  const hasValidRefUrl = normalizedRefUrls.every((value) => isAbsoluteHttpUrl(value));
   const isPerSecond = Boolean(current?.is_per_second);
   const perSec = Number(current?.credits_per_sec || current?.credits || 0);
   const baseCost = Number(current?.credits || 0);
@@ -644,27 +794,59 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
 
   const modes = current?.modes || ["text"];
   const qualityOptions = normalizeQualityOptions(current);
-  const motionOptions = normalizeMotionControls(current);
+  const modeOptions = normalizeModeOptions(current);
   const durations = current?.durations || current?.duration_options || [];
   const resolutions = current?.resolutions || [];
   const counts = current?.counts || [1];
 
   const canUseReference = modes.includes("image");
+  const requiresReference = mode === "image" && canUseReference;
   const showMode = modes.length > 1;
   const showRatio = (current?.aspect_ratios || []).length > 1;
   const showQuality = kind === "image" && qualityOptions.length > 1;
   const showCount = kind === "image" && counts.length > 1;
   const showDuration = kind === "video" && durations.length > 0;
   const showResolution = kind === "video" && resolutions.length > 1;
-  const showMotion = kind === "video" && (scenario === "motion" || motionOptions.length > 1);
+  const showModeOption = kind === "video" && modeOptions.length > 1;
+
+  async function handleImprovePrompt() {
+    if (!prompt.trim() || improvingPrompt) return;
+    setImprovingPrompt(true);
+    try {
+      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind: "music" }) });
+      setPrompt(result.prompt || prompt);
+      tg()?.HapticFeedback?.notificationOccurred("success");
+      onNotice?.({ type: "success", message: "Идея для трека усилена" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось улучшить описание трека" });
+    } finally {
+      setImprovingPrompt(false);
+    }
+  }
 
   function handleGenerate() {
     if (!current) return;
+
+    if (requiresReference && !normalizedRefUrls.length && !(isRemix && remixSource?.gen_type === "image" && remixSource?.result_url)) {
+      setRefError("Укажи полную ссылку на референс вида https://...");
+      return;
+    }
+
+    if (!hasValidRefUrl) {
+      setRefError("Референс должен быть полной ссылкой и начинаться с http:// или https://");
+      return;
+    }
 
     if (user.credits < estimatedCost) {
       setTopup(true);
       return;
     }
+
+    const remixRefUrl = isRemix && remixSource?.gen_type === "image" ? normalizeAbsoluteUrl(remixSource?.result_url || "") : "";
+    const effectiveRefUrls = mode === "image"
+      ? (normalizedRefUrls.length ? normalizedRefUrls.slice(0, maxRefs) : remixRefUrl ? [remixRefUrl] : [])
+      : [];
+    const effectiveRefUrl = effectiveRefUrls[0] || null;
 
     const payload = {
       model,
@@ -675,9 +857,10 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
       count,
       duration,
       resolution,
-      grok_mode: motion,
-      image_url: mode === "image" ? refUrl || null : null,
-      reference_url: mode === "image" ? refUrl || null : null,
+      grok_mode: modeOptions.length ? modeOption : undefined,
+      image_url: effectiveRefUrl,
+      reference_url: effectiveRefUrl,
+      reference_urls: effectiveRefUrls.slice(1),
     };
 
     if (isRemix) onRemixGenerate(remixSource.gen_id, payload);
@@ -694,7 +877,6 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
         ["fast", "⚡", "Быстро", "короткий ролик"],
         ["quality", "🎬", "Кино", "лучшее качество"],
         ["i2v", "🖼", "Фото → видео", "оживить кадр"],
-        ["motion", "🎥", "Motion", "камера и движение"],
         ["all", "☰", "Все", "ручной выбор"],
       ];
 
@@ -703,7 +885,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
       <div className="studioHead">
         <div>
           <h1>{isRemix ? "🔁 Повтор из ленты" : "Студия"}</h1>
-          <p>{kind === "image" ? "Создай изображение или ремикс по фото" : "Создай видео, оживи фото или настрой камеру"}</p>
+          <p>{kind === "image" ? "Создай изображение или ремикс по фото" : "Создай видео или оживи фото"}</p>
         </div>
         <button className="balanceBtn" onClick={() => setTopup(true)}>{user.credits} 💋</button>
       </div>
@@ -745,7 +927,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
               <span>
                 <b>{m.display_name}</b>
                 <small>
-                  {(m.modes || ["text"]).includes("image") ? "text + photo" : "text"}
+                  {modelModesLabel(m)}
                   {" · "}
                   {m.is_per_second ? `${m.credits_per_sec || m.credits} 💋/сек` : `${m.credits} 💋`}
                 </small>
@@ -760,7 +942,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
           <div className="tabs soft">
             {modes.map((m) => (
               <button key={m} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>
-                {m === "text" ? "Text" : m === "image" ? "Image / reference" : m}
+                {m === "text" ? "Текст" : m === "image" ? "По фото" : m}
               </button>
             ))}
           </div>
@@ -770,17 +952,49 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
       {mode === "image" && canUseReference && (
         <SettingsRow label="Референс">
           <div className="refBlock">
-            {refUrl ? (
-              <div className="refPreview">
-                <img src={refUrl} alt="reference" />
-                <button className="refRemove" onClick={() => setRefUrl("")}>×</button>
+            {normalizedRefUrls.length > 0 && (
+              <div className="refGallery">
+                {normalizedRefUrls.map((url, index) => (
+                  <div key={`${url}-${index}`} className="refPreview">
+                    <img src={url} alt={`reference-${index + 1}`} />
+                    <button
+                      className="refRemove"
+                      onClick={() => {
+                        setRefUrls((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+                        setRefError("");
+                      }}
+                    >×</button>
+                  </div>
+                ))}
               </div>
-            ) : (
+            )}
+            {normalizedRefUrls.length < maxRefs && (
               <button className="refUpload" onClick={() => fileRef.current?.click()} disabled={uploading}>
-                {uploading ? "Загрузка..." : "📎 Загрузить фото"}
+                {uploading ? "Загрузка..." : normalizedRefUrls.length ? `📎 Добавить ещё (${normalizedRefUrls.length}/${maxRefs})` : "📎 Загрузить фото"}
               </button>
             )}
             <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFileUpload} />
+            <input
+              type="url"
+              value={refUrls[0] || ""}
+              onChange={(e) => {
+                const nextValue = e.target.value;
+                setRefUrls((prev) => {
+                  const rest = prev.slice(1, maxRefs);
+                  return nextValue ? [nextValue, ...rest] : rest;
+                });
+                if (refError) setRefError("");
+              }}
+              placeholder="Полная публичная ссылка на изображение"
+              spellCheck={false}
+              autoCapitalize="none"
+              autoCorrect="off"
+            />
+            <small style={{ color: "var(--text-faint)", lineHeight: 1.4 }}>
+              Нужна полная публичная ссылка на изображение. После загрузки она подставится сюда автоматически.
+              {maxRefs > 1 ? ` Эта модель принимает до ${maxRefs} референсов.` : ""}
+            </small>
+            {refError && <div className="warn">{refError}</div>}
           </div>
         </SettingsRow>
       )}
@@ -816,9 +1030,9 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
           </SettingsRow>
         )}
 
-        {showMotion && (
-          <SettingsRow label="Motion control">
-            <ChipGroup options={motionOptions.map((m) => ({ value: m, label: motionLabel(m) }))} value={motion} onChange={setMotion} />
+        {showModeOption && (
+          <SettingsRow label="Режим модели">
+            <ChipGroup options={modeOptions} value={modeOption} onChange={setModeOption} />
           </SettingsRow>
         )}
       </div>
@@ -834,12 +1048,14 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
       )}
 
       <div className="studioActions">
-        <button className="secondaryBtn">✨ Улучшить промпт</button>
+        <button className="secondaryBtn" disabled={!prompt.trim() || improvingPrompt || isRemix} onClick={handleImprovePrompt}>
+          {improvingPrompt ? "⏳ Улучшаю..." : "✨ Улучшить промпт"}
+        </button>
       </div>
 
       <button
         className="primary studioGenerate"
-        disabled={!current || (!isRemix && !prompt.trim())}
+        disabled={!current || (!isRemix && !prompt.trim()) || (requiresReference && !normalizedRefUrl) || !hasValidRefUrl}
         onClick={handleGenerate}
       >
         {kind === "video" ? "Создать видео" : "Сгенерировать"}
@@ -859,13 +1075,29 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
 
 // ── Music screen ──────────────────────────────────────────────────────────────
 
-function Music({ user, musicGen, onGenerateMusic, setTopup }) {
+function Music({ user, musicGen, onGenerateMusic, setTopup, onNotice }) {
   const [prompt, setPrompt] = useState("");
   const [instrumental, setInstrumental] = useState(false);
+  const [improvingPrompt, setImprovingPrompt] = useState(false);
 
   const MUSIC_CREDITS = 20;
   const genStatus = musicGen?.status;
   const statusColor = genStatus === "done" ? "#4ade80" : genStatus === "failed" ? "#f87171" : "#facc15";
+
+  async function handleImprovePrompt() {
+    if (!prompt.trim() || improvingPrompt) return;
+    setImprovingPrompt(true);
+    try {
+      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind }) });
+      setPrompt(result.prompt || prompt);
+      tg()?.HapticFeedback?.notificationOccurred("success");
+      onNotice?.({ type: "success", message: "Промпт улучшен" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось улучшить промпт" });
+    } finally {
+      setImprovingPrompt(false);
+    }
+  }
 
   function handleGenerate() {
     if (!prompt.trim()) return;
@@ -880,8 +1112,9 @@ function Music({ user, musicGen, onGenerateMusic, setTopup }) {
         <button className="balanceBtn" onClick={() => setTopup(true)}>{user.credits} 💋</button>
       </div>
 
-      <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 14, background: "rgba(124,58,237,.1)", border: "1px solid rgba(124,58,237,.2)", fontSize: 13, color: "rgba(255,255,255,.7)", lineHeight: 1.5 }}>
+      <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 14, background: "var(--accent-soft)", border: "1px solid var(--accent-border)", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
         Генерация песни с помощью Suno AI. Описывай жанр, настроение, инструменты и тематику.
+        <div style={{ marginTop: 8, fontWeight: 700, color: "var(--text)" }}>Стоимость: {MUSIC_CREDITS} 💋 за трек.</div>
       </div>
 
       <SettingsRow label="Режим">
@@ -903,8 +1136,13 @@ function Music({ user, musicGen, onGenerateMusic, setTopup }) {
         />
       </SettingsRow>
 
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,.35)", marginBottom: 10 }}>
-        💡 Промпт лучше писать на английском. Генерация занимает ~1–2 мин.
+      <div style={{ display: "grid", gap: 10, marginBottom: 10 }}>
+        <button className="ghost" onClick={handleImprovePrompt} disabled={!prompt.trim() || improvingPrompt}>
+          {improvingPrompt ? "⏳ Улучшаю описание..." : "✨ Улучшить описание трека"}
+        </button>
+        <div style={{ fontSize: 12, color: "var(--text-ghost)" }}>
+          💡 Промпт лучше писать на английском. Генерация занимает ~1–2 мин.
+        </div>
       </div>
 
       <button
@@ -923,7 +1161,7 @@ function Music({ user, musicGen, onGenerateMusic, setTopup }) {
             <span style={{ color: statusColor, fontSize: 13 }}>{musicGen.status}</span>
           </div>
           {musicGen.status === "pending" && (
-            <p style={{ color: "rgba(255,255,255,.5)", fontSize: 12, margin: "8px 0 0" }}>
+            <p style={{ color: "var(--text-soft)", fontSize: 12, margin: "8px 0 0" }}>
               Ожидай ~1–2 минуты. Результат придёт в Telegram и появится здесь автоматически.
             </p>
           )}
@@ -932,7 +1170,7 @@ function Music({ user, musicGen, onGenerateMusic, setTopup }) {
               <audio controls src={musicGen.result_url} style={{ width: "100%", borderRadius: 10 }} />
             </div>
           )}
-          {musicGen.error && <p style={{ color: "#f87171", margin: "8px 0 0", fontSize: 12 }}>{musicGen.error}</p>}
+          {musicGen.error && <p style={{ color: "var(--danger)", margin: "8px 0 0", fontSize: 12 }}>{musicGen.error}</p>}
         </div>
       )}
     </section>
@@ -941,13 +1179,13 @@ function Music({ user, musicGen, onGenerateMusic, setTopup }) {
 
 // ── History screen ────────────────────────────────────────────────────────────
 
-function History({ history, loading }) {
+function History({ history, loading, onNotice }) {
   if (loading) return <Spinner />;
   return (
     <>
       <h1>История</h1>
       {history.length === 0
-        ? <p style={{ color: "rgba(255,255,255,.4)", textAlign: "center", marginTop: 40 }}>Генераций пока нет. Создайте первую в Студии!</p>
+        ? <p style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 40 }}>Генераций пока нет. Создайте первую в Студии!</p>
         : <div className="historyList">
             {history.map((g, i) => (
               <div key={g.id} className="historyCard">
@@ -964,11 +1202,11 @@ function History({ history, loading }) {
                     <audio controls src={g.result_url} style={{ width: "100%", borderRadius: 8, marginTop: 6 }} />
                   )}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
-                    <small style={{ color: "rgba(255,255,255,.35)", fontSize: 11 }}>{formatDate(g.created_at)}</small>
-                    <small style={{ color: "#a78bfa", fontSize: 11 }}>−{g.credits_spent} 💋</small>
+                    <small style={{ color: "var(--text-ghost)", fontSize: 11 }}>{formatDate(g.created_at)}</small>
+                    <small style={{ color: "var(--accent-text)", fontSize: 11 }}>−{g.credits_spent} 💋</small>
                   </div>
                   {g.status === "done" && g.gen_type !== "music" && (
-                    <GenShareButtons genId={g.id} initialFeed={g.is_public_feed} initialLib={g.is_prompt_library} />
+                    <GenShareButtons genId={g.id} initialFeed={g.is_public_feed} initialLib={g.is_prompt_library} onNotice={onNotice} />
                   )}
                 </div>
               </div>
@@ -993,7 +1231,32 @@ function formatDate(iso) {
 
 // ── Profile screen ────────────────────────────────────────────────────────────
 
-function Profile({ user, history, setScreen, setTopup }) {
+function ThemePicker({ value, onChange, resolvedTheme }) {
+  return (
+    <div className="themeCard">
+      <div className="themeCardHead">
+        <div>
+          <b>Тема интерфейса</b>
+          <p>Сохраняется на этом устройстве. Сейчас активна: {themeLabel(resolvedTheme)}.</p>
+        </div>
+      </div>
+      <div className="themeOptions">
+        {THEME_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            className={value === option.value ? "active" : ""}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolvedTheme }) {
+  const referralLink = user.referral_link || `https://t.me/apix_ai_bot?start=${user.referral_code || ""}`;
   const menuItems = [
     ["studio", "⌘", "Студия генераций"],
     ["music", "♫", "Музыка (Suno)"],
@@ -1008,9 +1271,9 @@ function Profile({ user, history, setScreen, setTopup }) {
         <Avatar photoUrl={user.photo_url} name={user.full_name || user.username} />
         <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{user.full_name || user.username}</h2>
-          <p style={{ margin: "2px 0 0", color: "rgba(255,255,255,.42)", fontSize: 13 }}>@{user.username || "user"}</p>
+          <p style={{ margin: "2px 0 0", color: "var(--text-faint)", fontSize: 13 }}>@{user.username || "user"}</p>
         </div>
-        <span style={{ fontSize: 11, background: "rgba(124,58,237,.3)", border: "1px solid rgba(124,58,237,.5)", borderRadius: 999, padding: "4px 10px", color: "#c4b5fd" }}>
+        <span style={{ fontSize: 11, background: "var(--accent-soft-2)", border: "1px solid var(--accent-border)", borderRadius: 999, padding: "4px 10px", color: "var(--accent-text)" }}>
           {user.credits} 💋
         </span>
       </section>
@@ -1029,18 +1292,20 @@ function Profile({ user, history, setScreen, setTopup }) {
         💳 Пополнить баланс
       </button>
 
-      <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 14, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", fontSize: 13 }}>
-        <span style={{ color: "rgba(255,255,255,.5)" }}>Реферальный код: </span>
+      <ThemePicker value={theme} onChange={setTheme} resolvedTheme={resolvedTheme} />
+
+      <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 13 }}>
+        <span style={{ color: "var(--text-soft)" }}>Реферальная ссылка: </span>
         <b
-          style={{ color: "#a78bfa", cursor: "pointer" }}
+          style={{ color: "var(--accent-text)", cursor: "pointer", wordBreak: "break-all" }}
           onClick={() => {
             if (tg()) tg().HapticFeedback?.notificationOccurred("success");
-            navigator.clipboard?.writeText(user.referral_code).catch(() => {});
+            navigator.clipboard?.writeText(referralLink).catch(() => {});
           }}
         >
-          {user.referral_code}
+          {referralLink}
         </b>
-        <span style={{ color: "rgba(255,255,255,.35)", marginLeft: 8 }}>— нажмите для копирования</span>
+        <span style={{ color: "var(--text-ghost)", marginLeft: 8 }}>— нажмите для копирования</span>
       </div>
 
       <div className="menu" style={{ marginTop: 16 }}>
@@ -1199,10 +1464,10 @@ function Prompts({ prompts, loading, setScreen }) {
               : <Art type={["a","b","c","d"][i % 4]} />}
             <div className="promptListInfo">
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{p.title}</h3>
-              <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(255,255,255,.5)", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-soft)", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
                 {p.description || p.prompt_text}
               </p>
-              <footer style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+              <footer style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11, color: "var(--text-ghost)" }}>
                 <span>{p.model || "Any"}</span>
                 <span>♥ {p.likes || 0}  ·  {p.uses_count || 0} исп</span>
               </footer>
@@ -1210,7 +1475,7 @@ function Prompts({ prompts, loading, setScreen }) {
           </button>
         ))}
         {filtered.length === 0 && (
-          <p style={{ color: "rgba(255,255,255,.4)", textAlign: "center", marginTop: 32 }}>Промпты не найдены</p>
+          <p style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 32 }}>Промпты не найдены</p>
         )}
       </div>
     </>
@@ -1245,6 +1510,8 @@ function App() {
   const [musicPollId, setMusicPollId] = useState(null);
   const [topupOpen, setTopupOpen] = useState(false);
   const [remixSource, setRemixSource] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [theme, setTheme] = useState(() => readStoredTheme());
   const poll = useRef(null);
   const musicPoll = useRef(null);
 
@@ -1256,9 +1523,59 @@ function App() {
   const prompts = useApi(() => api("/prompts?limit=30").then(items), []);
 
   const user = me.data;
-  const isDemo = me.error || imageModels.error;
+  const isDemo = me.error || imageModels.error || videoModels.error;
+  const resolvedTheme = resolveTheme(theme);
+
+  useEffect(() => {
+    if (!notice?.message) return undefined;
+    const timer = setTimeout(() => setNotice(null), 3200);
+    return () => clearTimeout(timer);
+  }, [notice?.message]);
 
   useEffect(() => { tg()?.ready?.(); tg()?.expand?.(); }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const apply = () => {
+      const nextTheme = resolveTheme(theme);
+      root.dataset.theme = nextTheme;
+
+      const webApp = tg();
+      if (webApp) {
+        const bg = nextTheme === "light"
+          ? "#f4f1fb"
+          : nextTheme === "mintpink"
+            ? "#f4ffe3"
+            : "#050507";
+        const head = nextTheme === "light"
+          ? "#ffffff"
+          : nextTheme === "mintpink"
+            ? "#fff2f8"
+            : "#050507";
+        webApp.setBackgroundColor?.(bg);
+        webApp.setHeaderColor?.(head);
+        webApp.setBottomBarColor?.(bg);
+      }
+    };
+
+    apply();
+
+    const media = window.matchMedia?.("(prefers-color-scheme: light)");
+    const handleChange = () => {
+      if (theme === "system") apply();
+    };
+
+    media?.addEventListener?.("change", handleChange);
+    tg()?.onEvent?.("themeChanged", handleChange);
+    return () => {
+      media?.removeEventListener?.("change", handleChange);
+      tg()?.offEvent?.("themeChanged", handleChange);
+    };
+  }, [theme]);
 
   // Poll image/video generation
   useEffect(() => {
@@ -1322,7 +1639,7 @@ function App() {
   async function remixGenerate(genId, payload) {
     setGeneration({ id: 0, status: "pending" });
     try {
-      const body = { model: payload.model, prompt: "", mode: payload.mode || "text", duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, grok_mode: payload.grok_mode, quality: payload.quality };
+      const body = { model: payload.model, prompt: "", mode: payload.mode || "text", duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, grok_mode: payload.grok_mode, quality: payload.quality, count: payload.count };
       const g = await api(`/feed/${genId}/remix`, { method: "POST", body: JSON.stringify(body) });
       setGeneration(g);
       setPollId(g.id);
@@ -1348,18 +1665,23 @@ function App() {
   }
 
   function handleRemix(feedItem) {
-    setRemixSource({ gen_id: feedItem.id, model: feedItem.model, gen_type: feedItem.gen_type || "image" });
+    setRemixSource({
+      gen_id: feedItem.id,
+      model: feedItem.model,
+      gen_type: feedItem.gen_type || "image",
+      result_url: feedItem.result_url || null,
+    });
     setGeneration(null);
     setScreen("studio");
   }
 
   const screens = {
     home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={setScreen} setTopup={setTopupOpen} />,
-    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={setScreen} onRemix={handleRemix} />,
-    studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} />,
-    music: <Music user={user} musicGen={musicGen} onGenerateMusic={generateMusic} setTopup={setTopupOpen} />,
-    history: <History history={history.data} loading={history.loading} />,
-    profile: <Profile user={user} history={history.data} setScreen={setScreen} setTopup={setTopupOpen} />,
+    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={setScreen} onRemix={handleRemix} onNotice={setNotice} />,
+    studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} />,
+    music: <Music user={user} musicGen={musicGen} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,
+    history: <History history={history.data} loading={history.loading} onNotice={setNotice} />,
+    profile: <Profile user={user} history={history.data} setScreen={setScreen} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} />,
     prompts:<Prompts prompts={prompts.data} loading={prompts.loading} setScreen={setScreen}/>,
   };
 
@@ -1368,6 +1690,7 @@ function App() {
       <div className="bg" />
       <div className="wrap">
         <Header screen={screen} setScreen={setScreen} user={user} setTopup={setTopupOpen} />
+        <NoticeBar notice={notice} onClose={() => setNotice(null)} />
         {isDemo && (
           <div className="warn">
             Demo-режим: API недоступен или нет Telegram initData. Данные — заглушки.

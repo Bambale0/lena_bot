@@ -17,7 +17,7 @@ def get_main_menu_keyboard(balance: int = 0) -> InlineKeyboardMarkup:
         ],
 
         [
-            InlineKeyboardButton(text="🧠 Midjourney", callback_data="midjourney")
+            InlineKeyboardButton(text="🧠 Midjourney", callback_data="menu:mj")
         ],
 
         [
@@ -26,7 +26,7 @@ def get_main_menu_keyboard(balance: int = 0) -> InlineKeyboardMarkup:
         ],
 
         [
-            InlineKeyboardButton(text="👥 Рефералы", callback_data="referrals"),
+            InlineKeyboardButton(text="👥 Рефералы", callback_data="menu:referral"),
             InlineKeyboardButton(text="❓ Помощь", callback_data="help"),
         ],
     ])

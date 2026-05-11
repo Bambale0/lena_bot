@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     KIE_PHOTO_PROMPT_MODEL: str = "gpt-5-2"
     KIE_PHOTO_PROMPT_FALLBACK: str = "gpt-5-5"
 
+    # KIE.AI text assistant
+    KIE_ASSISTANT_MODEL: str = "gpt-5-4"
+    KIE_ASSISTANT_FALLBACK: str = "gpt-5-4"
+
     # Feature flags
     SUBSCRIPTION_ENABLED: bool = False
 

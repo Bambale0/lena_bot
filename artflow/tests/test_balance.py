@@ -28,10 +28,20 @@ async def test_cb_balance_shows_screen(db_user) -> None:
     call = make_callback(data="menu:balance")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    await balance.cb_balance(call, db_user)
+    mock_costs = [
+        SimpleNamespace(gen_type=GenerationType.image, model_key="nano-banana-2", credits=1.0),
+        SimpleNamespace(gen_type=GenerationType.image, model_key="midjourney-blend", credits=12.0),
+        SimpleNamespace(gen_type=GenerationType.video, model_key="grok-imagine/text-to-video", credits=3.0),
+        SimpleNamespace(gen_type=GenerationType.video, model_key="veo3", credits=70.0),
+        SimpleNamespace(gen_type=GenerationType.music, model_key="suno/v4.5", credits=20.0),
+    ]
+    with patch("bot.handlers.balance.repo", AsyncMock(get_all_model_costs=AsyncMock(return_value=mock_costs))):
+        await balance.cb_balance(call, db_user, AsyncMock())
     call.message.edit_text.assert_awaited_once()
-    args = call.message.edit_text.call_args
-    assert "cr" in args[0][0]
+    text = call.message.edit_text.call_args[0][0]
+    assert "1–12 💋" in text
+    assert "3–70 💋" in text
+    assert "20 💋" in text
 
 
 # ── menu:referral ────────────────────────────────────────────────────────────
@@ -43,7 +53,13 @@ async def test_cb_referral_shows_screen(db_user) -> None:
     call.answer = AsyncMock()
     mock_bot = AsyncMock()
     mock_bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
-    with patch("bot.handlers.balance.repo", AsyncMock(count_user_referrals=AsyncMock(return_value=(1, 2, 3)))):
+    with patch("bot.handlers.balance.repo", AsyncMock(
+        count_user_referrals=AsyncMock(return_value=(1, 2, 3)),
+        get_user_withdrawal_requests=AsyncMock(return_value=[]),
+        get_user_referral_balance_snapshot=AsyncMock(
+            return_value=SimpleNamespace(total_earned=10.5, available_to_withdraw=10.5, pending_withdrawals=0.0)
+        ),
+    )):
         await balance.cb_referral(call, db_user, mock_bot, AsyncMock())
     call.message.edit_text.assert_awaited_once()
     assert "Реферальная программа" in call.message.edit_text.call_args[0][0]
@@ -57,7 +73,13 @@ async def test_cb_referral_withdraw(db_user) -> None:
     call.message.answer = AsyncMock()
     call.answer = AsyncMock()
     mock_state = AsyncMock()
-    await balance.cb_referral_withdraw(call, mock_state, db_user)
+    mock_session = AsyncMock()
+    with patch("bot.handlers.balance.repo", AsyncMock(
+        get_user_referral_balance_snapshot=AsyncMock(
+            return_value=SimpleNamespace(total_earned=10.5, available_to_withdraw=10.5, pending_withdrawals=0.0)
+        ),
+    )):
+        await balance.cb_referral_withdraw(call, mock_state, db_user, mock_session)
     mock_state.set_state.assert_called_with(balance.WithdrawalFSM.amount)
 
 
@@ -68,7 +90,13 @@ async def test_handle_withdraw_amount_valid(db_user) -> None:
     msg = make_message(text="1500")
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
-    await balance.handle_withdraw_amount(msg, mock_state, db_user)
+    mock_session = AsyncMock()
+    with patch("bot.handlers.balance.repo", AsyncMock(
+        get_user_referral_balance_snapshot=AsyncMock(
+            return_value=SimpleNamespace(total_earned=2000.0, available_to_withdraw=2000.0, pending_withdrawals=0.0)
+        ),
+    )):
+        await balance.handle_withdraw_amount(msg, mock_state, db_user, mock_session)
     mock_state.update_data.assert_awaited_once()
     mock_state.set_state.assert_called_with(balance.WithdrawalFSM.details)
 
@@ -78,7 +106,7 @@ async def test_handle_withdraw_amount_invalid(db_user) -> None:
     msg = make_message(text="abc")
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
-    await balance.handle_withdraw_amount(msg, mock_state, db_user)
+    await balance.handle_withdraw_amount(msg, mock_state, db_user, AsyncMock())
     msg.answer.assert_awaited_once()
     assert "числом" in msg.answer.call_args[0][0].lower()
 
@@ -88,9 +116,26 @@ async def test_handle_withdraw_amount_zero(db_user) -> None:
     msg = make_message(text="0")
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
-    await balance.handle_withdraw_amount(msg, mock_state, db_user)
+    await balance.handle_withdraw_amount(msg, mock_state, db_user, AsyncMock())
     msg.answer.assert_awaited_once()
     assert "больше нуля" in msg.answer.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_handle_withdraw_amount_exceeds_available(db_user) -> None:
+    msg = make_message(text="1500")
+    msg.answer = AsyncMock()
+    mock_state = AsyncMock()
+    mock_session = AsyncMock()
+    with patch("bot.handlers.balance.repo", AsyncMock(
+        get_user_referral_balance_snapshot=AsyncMock(
+            return_value=SimpleNamespace(total_earned=500.0, available_to_withdraw=120.0, pending_withdrawals=380.0)
+        ),
+    )):
+        await balance.handle_withdraw_amount(msg, mock_state, db_user, mock_session)
+    msg.answer.assert_awaited_once()
+    assert "доступно" in msg.answer.call_args[0][0].lower()
+    mock_state.set_state.assert_not_called()
 
 
 # ── WithdrawalFSM.details ────────────────────────────────────────────────────
@@ -127,6 +172,27 @@ async def test_handle_withdraw_details_success(db_user) -> None:
 
     msg.answer.assert_awaited_once()
     assert "Заявка на вывод" in msg.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_handle_withdraw_details_insufficient_balance(db_user) -> None:
+    msg = make_message(text="Сбербанк +79991234567")
+    msg.answer = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, username="testuser", tg_id=123456, full_name="Test", language="ru")
+    mock_state = AsyncMock()
+    mock_state.get_data = AsyncMock(return_value={"withdraw_amount": 1500.0})
+    mock_bot = AsyncMock()
+    mock_session = AsyncMock()
+
+    with patch("bot.handlers.balance.repo", AsyncMock(
+        create_withdrawal_request=AsyncMock(
+            side_effect=balance.InsufficientReferralBalanceError(120.0)
+        ),
+    )):
+        await balance.handle_withdraw_details(msg, mock_state, mock_session, mock_db_user, mock_bot)
+
+    msg.answer.assert_awaited_once()
+    assert "доступно" in msg.answer.call_args[0][0].lower()
 
 
 # ── menu:history ──────────────────────────────────────────────────────────────

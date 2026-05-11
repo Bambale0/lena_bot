@@ -226,6 +226,24 @@ async def test_cb_withdrawal_reject() -> None:
     assert "отклонена" in text
 
 
+@pytest.mark.asyncio
+async def test_cb_withdrawal_approve_insufficient_referral_balance() -> None:
+    call = make_callback(data="adm:wd:approve:1")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    with patch("bot.handlers.admin.repo", AsyncMock(
+        set_withdrawal_status=AsyncMock(
+            side_effect=admin.InsufficientReferralBalanceError(50.0)
+        )
+    )):
+        await admin.cb_withdrawal_decide(call, mock_session, bot=mock_bot)
+
+    call.answer.assert_awaited_once()
+    assert "недостаточно" in call.answer.call_args.args[0].lower()
+
+
 # ── adm:price ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

@@ -64,3 +64,7 @@ class MusicFSM(StatesGroup):
 class PromptUseFSM(StatesGroup):
     model_select = State()
     reference_upload = State()
+
+
+class AssistantFSM(StatesGroup):
+    waiting_message = State()

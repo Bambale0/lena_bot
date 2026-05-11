@@ -5,13 +5,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aiogram.types import CallbackQuery, Message
 
 from bot.handlers import video_gen
 from bot.states import VideoGenFSM
 from db.models import GenerationType
 from tests.factories import make_callback, make_message
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -249,10 +247,49 @@ async def test_handle_video_prompt_generates() -> None:
         fail_generation=AsyncMock(),
         add_credits=AsyncMock(),
     )):
-        with patch("bot.handlers.video_gen.video_service", AsyncMock(
-            generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_abc", provider="direct"))
+        with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_abc", provider="direct")),
+            get_poll_fn=MagicMock(return_value=MagicMock()),
         )):
-            with patch("bot.handlers.video_gen.polling", AsyncMock()):
+            with patch("bot.handlers.video_gen.polling", new=SimpleNamespace(poll_until_done=AsyncMock())):
                 await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
 
-    mock_state.set_state.assert_called_with(VideoGenFSM.generating)
+    mock_state.set_state.assert_awaited_once_with(VideoGenFSM.generating)
+
+
+@pytest.mark.asyncio
+async def test_handle_video_prompt_motion_control_keeps_user_prompt() -> None:
+    msg = make_message(text="camera push in")
+    msg.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test", is_banned=False)
+    mock_state = _fake_state(
+        model_key="kling-2.6/motion-control",
+        duration=5,
+        resolution="720p",
+        mode="motion",
+        credits=7,
+        motion_step="prompt",
+        image_url="https://example.test/person.jpg",
+        reference_video_url="https://example.test/ref.mp4",
+    )
+    mock_cost = _make_video_model_cost("kling-2.6/motion-control", 7, "Kling 2.6 Motion")
+    mock_gen = SimpleNamespace(id=101, task_id=None, model="kling-2.6/motion-control")
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )) as mock_repo:
+        with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_motion", provider="kieai")),
+            get_poll_fn=MagicMock(),
+        )) as mock_video_service:
+            await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
+
+    assert mock_repo.create_generation.await_args.args[4] == "camera push in"
+    assert mock_video_service.generate_video.await_args.args[1] == "camera push in"

@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,8 @@ def _welcome_text(lang: str) -> str:
         t("welcome", lang, name="{name}") + "\n\n"
         "🎨 <b>" + ("Изображения" if lang == "ru" else "Images") + "</b> — Gemini, WAN, GPT Image, Seedream\n"
         "🎬 <b>" + ("Видео" if lang == "ru" else "Video") + "</b> — Kling, Veo, Grok, Seedance\n"
-        "🖌️ <b>Midjourney</b> — Imagine, Blend, Describe, Video\n\n"
+        "🖌️ <b>Midjourney</b> — Imagine, Blend, Describe, Video\n"
+        "🤖 <b>AI-ассистент</b> — идеи, промпты, помощь по боту\n\n"
         + t("balance_credits", lang, credits="{credits}")
         .replace("Kisses", "cr")
         .replace("Поцелуи", "cr")
@@ -38,52 +39,48 @@ def _help_text(lang: str) -> str:
     if lang == "en":
         return (
             "❓ <b>Help — How to use APIX</b>\n\n"
+            "📱 <b>Open App</b> — the fastest way to work with references, feed, themes and payments.\n"
+            "In chat, you can also use the bot menus below.\n\n"
             "🎨 <b>Images</b>\n"
-            "Pick a model → add reference (optional) → enter prompt → get result.\n"
-            "Write prompts in <b>English</b> for best results.\n\n"
+            "Choose a model → add a reference if needed → send a prompt → get the result.\n\n"
             "🎬 <b>Video</b>\n"
-            "Pick a model → mode (text or image) → prompt → wait 1–5 min.\n\n"
+            "Choose a model → text or image mode → send a prompt → wait 1–5 min.\n\n"
+            "🎵 <b>Music</b>\n"
+            "Suno AI creates a track from your description. Cost: <b>20 💋</b>.\n\n"
             "🖌️ <b>Midjourney</b>\n"
-            "• <b>Imagine</b> — generate 4 image variations\n"
-            "• <b>Blend</b> — mix 2–5 photos\n"
-            "• <b>Describe</b> — get prompt from photo\n"
-            "• <b>Video</b> — animate image\n\n"
-            "💡 <b>Prompt tips:</b>\n"
-            "• Add style: <i>cinematic, anime, oil painting</i>\n"
-            "• Mention lighting: <i>golden hour, neon glow, studio light</i>\n"
-            "• Mention quality: <i>8k, sharp focus, highly detailed</i>\n\n"
-            "📌 <b>Cost:</b>\n"
-            "• Image: 1–12 cr\n"
-            "• Video: 3–70 cr\n"
-            "• Midjourney: 3–15 cr\n\n"
-            f"👥 <b>Referral program:</b>\n"
-            f"• Bonus per referral: +{settings.REFERRAL_L1_CREDITS} cr\n"
-            f"• Commission: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
+            "Imagine, Blend, Describe and Video are available from the menu.\n\n"
+            "🤖 <b>AI Assistant</b>\n"
+            "Use /assistant for prompt ideas, content planning and quick bot help.\n\n"
+            "💳 <b>Top up</b>\n"
+            "Available methods: Telegram Stars, T-Bank and CryptoBot.\n\n"
+            "💡 <b>Prompt tips</b>\n"
+            "Best results usually come from English prompts with style, lighting and composition details.\n\n"
+            f"👥 <b>Referral program</b>\n"
+            f"• Bonus per referral: +{settings.REFERRAL_L1_CREDITS} 💋\n"
+            f"• Payment commissions: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
             f"{int(settings.REFERRAL_COMMISSION_L2 * 100)}% / "
             f"{int(settings.REFERRAL_COMMISSION_L3 * 100)}%"
         )
     return (
         "❓ <b>Помощь — как пользоваться APIX</b>\n\n"
-        "🎨 <b>Изображение</b>\n"
-        "Выбери модель → добавь референс (опционально) → введи промпт → получи результат.\n"
-        "Пиши промпты на <b>английском</b> — так лучше работают все модели.\n\n"
+        "📱 <b>Открыть приложение</b> — самый удобный способ работать с референсами, лентой, темами и оплатой.\n"
+        "Но и через меню в боте тоже можно всё основное.\n\n"
+        "🎨 <b>Изображения</b>\n"
+        "Выбери модель → при необходимости добавь референс → отправь промпт → получи результат.\n\n"
         "🎬 <b>Видео</b>\n"
-        "Выбери модель → реж (текст или с изображением) → промпт → жди 1–5 мин.\n\n"
+        "Выбери модель → режим текст/изображение → отправь промпт → жди 1–5 минут.\n\n"
+        "🎵 <b>Музыка</b>\n"
+        "Suno AI делает трек по описанию. Стоимость: <b>20 💋</b>.\n\n"
         "🖌️ <b>Midjourney</b>\n"
-        "• <b>Imagine</b> — генерация 4 вариантов изображения\n"
-        "• <b>Blend</b> — смешивание 2–5 фотографий\n"
-        "• <b>Describe</b> — получить промпт по фото\n"
-        "• <b>Video</b> — оживить изображение\n\n"
-        "💡 <b>Советы по промптам:</b>\n"
-        "• Добавляй стиль: <i>cinematic, anime, oil painting</i>\n"
-        "• Указывай освещение: <i>golden hour, neon glow, studio light</i>\n"
-        "• Упоминай качество: <i>8k, sharp focus, highly detailed</i>\n\n"
-        "📌 <b>Стоимость:</b>\n"
-        "• Изображение: 1–12 cr\n"
-        "• Видео: 3–70 cr\n"
-        "• Midjourney: 3–15 cr\n\n"
-        f"👥 <b>Реферальная программа:</b>\n"
-        f"• Бонус за реферала: +{settings.REFERRAL_L1_CREDITS} cr\n"
+        "В меню доступны Imagine, Blend, Describe и Video.\n\n"
+        "🤖 <b>AI-ассистент</b>\n"
+        "Команда /assistant помогает с идеями, промптами и быстрыми вопросами по боту.\n\n"
+        "💳 <b>Пополнение</b>\n"
+        "Доступны Telegram Stars, T-Bank и CryptoBot.\n\n"
+        "💡 <b>Совет по промптам</b>\n"
+        "Обычно лучший результат дают промпты на английском с указанием стиля, света и композиции.\n\n"
+        f"👥 <b>Реферальная программа</b>\n"
+        f"• Бонус за реферала: +{settings.REFERRAL_L1_CREDITS} 💋\n"
         f"• Комиссия с оплат: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
         f"{int(settings.REFERRAL_COMMISSION_L2 * 100)}% / "
         f"{int(settings.REFERRAL_COMMISSION_L3 * 100)}%"
@@ -109,6 +106,19 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, session:
             return
     screen = await render_screen(screen="main", session=session, db_user=db_user)
     await message.answer(screen.text, reply_markup=screen.reply_markup)
+
+
+@router.message(Command("menu"))
+async def cmd_menu(message: Message, db_user: User, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    screen = await render_screen(screen="main", session=session, db_user=db_user)
+    await message.answer(screen.text, reply_markup=screen.reply_markup)
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    await message.answer(_help_text(lang), reply_markup=back_to_menu_kb())
 
 
 @router.callback_query(F.data == "menu:main")

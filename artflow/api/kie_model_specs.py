@@ -67,6 +67,76 @@ def _str_duration(params: dict[str, Any]) -> dict[str, Any]:
     return {"duration": str(duration)} if duration is not None else {}
 
 
+def _qwen_legacy_size(value: str | None, *, default: str) -> str:
+    mapping = {
+        "1:1": "square_hd",
+        "3:4": "portrait_4_3",
+        "2:3": "portrait_4_3",
+        "9:16": "portrait_16_9",
+        "4:3": "landscape_4_3",
+        "3:2": "landscape_4_3",
+        "16:9": "landscape_16_9",
+        "21:9": "landscape_16_9",
+        "square": "square",
+        "square_hd": "square_hd",
+        "portrait_4_3": "portrait_4_3",
+        "portrait_16_9": "portrait_16_9",
+        "landscape_4_3": "landscape_4_3",
+        "landscape_16_9": "landscape_16_9",
+    }
+    if not value:
+        return default
+    return mapping.get(str(value), default)
+
+
+def _qwen_image_size_params(params: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "image_size": _qwen_legacy_size(params.get("aspect_ratio"), default="square_hd"),
+        "output_format": "png",
+        "nsfw_checker": False,
+    }
+
+
+def _qwen_edit_size_params(params: dict[str, Any]) -> dict[str, Any]:
+    out = {
+        "image_size": _qwen_legacy_size(params.get("aspect_ratio"), default="landscape_4_3"),
+        "output_format": "png",
+        "nsfw_checker": False,
+    }
+    if params.get("n") is not None:
+        out["num_images"] = str(max(1, min(4, int(params.get("n") or 1))))
+    return out
+
+
+def _qwen2_size_params(params: dict[str, Any], *, default: str = "16:9") -> dict[str, Any]:
+    allowed = {"1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "21:9"}
+    value = str(params.get("aspect_ratio") or default)
+    if value not in allowed:
+        value = default
+    return {
+        "image_size": value,
+        "output_format": "png",
+        "nsfw_checker": False,
+    }
+
+
+def _qwen2_text_params(params: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"1:1", "3:4", "4:3", "9:16", "16:9"}
+    value = str(params.get("aspect_ratio") or "16:9")
+    if value not in allowed:
+        if value == "2:3":
+            value = "3:4"
+        elif value in {"3:2", "21:9"}:
+            value = "16:9"
+        else:
+            value = "16:9"
+    return {
+        "image_size": value,
+        "output_format": "png",
+        "nsfw_checker": False,
+    }
+
+
 def _wan_image_params(params: dict[str, Any]) -> dict[str, Any]:
     out = {
         "resolution": params.get("resolution") or "2K",
@@ -93,14 +163,41 @@ def _seedance_params(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _grok_duration(value: Any, *, default: int = 6) -> str:
+    try:
+        duration = int(value)
+    except (TypeError, ValueError):
+        duration = default
+    duration = max(6, min(30, duration))
+    return str(duration)
+
+
+def _grok_mode(value: Any, *, allow_spicy: bool) -> str:
+    mode = str(value or "normal")
+    allowed = {"fun", "normal", "spicy" if allow_spicy else "normal"}
+    if mode not in allowed:
+        return "normal"
+    if mode == "spicy" and not allow_spicy:
+        return "normal"
+    return mode
+
+
+def _grok_t2v_params(params: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "duration": _grok_duration(params.get("duration"), default=6),
+        "mode": _grok_mode(params.get("grok_mode"), allow_spicy=True),
+    }
+
+
 def _grok_i2v_params(params: dict[str, Any]) -> dict[str, Any]:
+    refs_count = int(params.get("refs_count") or 0)
     out = {
-        "mode": params.get("grok_mode") or "normal",
-        "duration": str(params.get("duration") or 6),
+        "mode": _grok_mode(params.get("grok_mode"), allow_spicy=False),
+        "duration": _grok_duration(params.get("duration"), default=6),
         "resolution": params.get("resolution") or "480p",
         "nsfw_checker": False,
     }
-    if params.get("aspect_ratio"):
+    if params.get("aspect_ratio") and refs_count > 1:
         out["aspect_ratio"] = params["aspect_ratio"]
     return out
 
@@ -119,8 +216,9 @@ def _kling_30_params(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _kling_motion_params(params: dict[str, Any]) -> dict[str, Any]:
-    mode = params.get("resolution")
-    return {"mode": mode or "720p"}
+    mode = params.get("resolution") or params.get("mode_quality") or "std"
+    mode_map = {"720p": "std", "1080p": "pro", "std": "std", "pro": "pro", "4K": "4K"}
+    return {"mode": mode_map.get(str(mode), str(mode))}
 
 
 IMAGE_SPECS: dict[str, KieModelSpec] = {
@@ -194,44 +292,39 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
         model="qwen/text-to-image",
         media_type=KieMediaType.IMAGE,
         supported_modes=("text",),
-        optional_params={"aspect_ratio": "aspect_ratio"},
-        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+        param_builder=_qwen_image_size_params,
         remix_model="qwen/image-to-image",
     ),
     "qwen/image-to-image": KieModelSpec(
         model="qwen/image-to-image",
         media_type=KieMediaType.IMAGE,
         supported_modes=("image",),
-        reference_field="image_urls",
-        reference_type=KieReferenceType.LIST,
-        optional_params={"aspect_ratio": "aspect_ratio"},
-        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+        reference_field="image_url",
+        reference_type=KieReferenceType.SINGLE,
+        param_builder=_qwen_image_size_params,
     ),
     "qwen/image-edit": KieModelSpec(
         model="qwen/image-edit",
         media_type=KieMediaType.IMAGE,
         supported_modes=("image",),
-        reference_field="image_urls",
-        reference_type=KieReferenceType.LIST,
-        optional_params={"aspect_ratio": "aspect_ratio"},
-        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+        reference_field="image_url",
+        reference_type=KieReferenceType.SINGLE,
+        param_builder=_qwen_edit_size_params,
     ),
     "qwen2/text-to-image": KieModelSpec(
         model="qwen2/text-to-image",
         media_type=KieMediaType.IMAGE,
         supported_modes=("text",),
-        optional_params={"aspect_ratio": "aspect_ratio"},
-        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+        param_builder=_qwen2_text_params,
         remix_model="qwen2/image-edit",
     ),
     "qwen2/image-edit": KieModelSpec(
         model="qwen2/image-edit",
         media_type=KieMediaType.IMAGE,
         supported_modes=("image",),
-        reference_field="image_urls",
-        reference_type=KieReferenceType.LIST,
-        optional_params={"aspect_ratio": "aspect_ratio"},
-        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
+        reference_field="image_url",
+        reference_type=KieReferenceType.SINGLE,
+        param_builder=_qwen2_size_params,
     ),
     "openrouter/free": KieModelSpec(
         model="openrouter/free",
@@ -339,8 +432,9 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         model="grok-imagine/text-to-video",
         media_type=KieMediaType.VIDEO,
         supported_modes=("text",),
-        optional_params={"aspect_ratio": "aspect_ratio", "duration": "duration", "resolution": "resolution", "grok_mode": "mode"},
+        optional_params={"aspect_ratio": "aspect_ratio", "resolution": "resolution"},
         defaults={"aspect_ratio": "2:3", "duration": "6", "resolution": "480p", "mode": "normal", "nsfw_checker": False},
+        param_builder=_grok_t2v_params,
         remix_model="grok-imagine/image-to-video",
     ),
     "grok-imagine/image-to-video": KieModelSpec(
@@ -456,6 +550,7 @@ def build_kie_input(
 
     p = dict(params or {})
     p["has_reference"] = bool(urls)
+    p["refs_count"] = len(urls)
     p["model"] = resolved_model
 
     inp: dict[str, Any] = {"prompt": prompt}

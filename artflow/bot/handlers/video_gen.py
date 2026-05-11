@@ -11,16 +11,15 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import polling, video_service
-from api.video_service import VideoModel
 from api.public_files import mirror_telegram_file
+from api.video_service import VideoModel
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     VIDEO_CAPS,
     VIDEO_GROUP_TITLES,
     after_generation_kb,
-    video_model_groups_kb,
     video_mode_kb,
-    video_model_info,
+    video_model_groups_kb,
     video_models_kb,
     video_params_kb,
 )
@@ -77,7 +76,7 @@ _DEFAULT_RES: dict[str, str] = {
     VideoModel.HAPPYHORSE_I2V: "1080p",
     VideoModel.KLING_30: "pro",
     VideoModel.KLING_26_MOTION: "720p",
-    VideoModel.KLING_30_MOTION: "720p",
+    VideoModel.KLING_30_MOTION: "pro",
 }
 _MOTION_MODELS = {VideoModel.KLING_26_MOTION, VideoModel.KLING_30_MOTION}
 
@@ -414,7 +413,8 @@ async def cb_vpar_next(call: CallbackQuery, state: FSMContext, session: AsyncSes
     total_creds = cps * duration_val
     await state.update_data(credits=cps)
     await state.set_state(VideoGenFSM.prompt_input)
-    await call.message.edit_text(  # type: ignore[union-attr]
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
         f"✅ <b>{display_name}</b> ({cps} кр/сек × {duration_val} сек = {total_creds} кр)"
         f" · <code>{summary}</code>\n\n✍️ Введи промпт:",
         reply_markup=back_to_menu_kb(),
@@ -457,7 +457,6 @@ async def handle_video_prompt(
 ) -> None:
     data = await state.get_data()
     model_key: str = data["model_key"]
-    mode: str = data.get("mode", "text")
     motion_step: str | None = data.get("motion_step")
     image_file_id: str | None = data.get("image_file_id")
     duration: int = data.get("duration", 5)
@@ -493,9 +492,8 @@ async def handle_video_prompt(
 
     # Motion Control: optional prompt step
     if motion_step == "prompt":
-        await state.update_data(motion_prompt=prompt if prompt != "-" else "")
-        await state.update_data(motion_step="done")
-        prompt = data.get("motion_prompt") or ""
+        prompt = prompt if prompt != "-" else ""
+        await state.update_data(motion_prompt=prompt, motion_step="done")
 
     image_url = (
         await mirror_telegram_file(bot, image_file_id)

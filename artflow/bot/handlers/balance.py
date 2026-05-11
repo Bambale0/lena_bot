@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb, balance_screen_kb
+from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db import repository as repo
-from db.models import GenerationType, User
+from db.repository import InsufficientReferralBalanceError
+from db.models import GenerationType, ModelCost, User
 
 logger = logging.getLogger(__name__)
 router = Router(name="balance")
@@ -41,9 +43,41 @@ def withdrawal_request_admin_kb(request_id: int):
     return builder.as_markup()
 
 
+def _format_credit_amount(value: float) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def _format_cost_range(costs: list[float]) -> str:
+    values = sorted({_format_credit_amount(float(cost)) for cost in costs}, key=lambda item: float(item))
+    if not values:
+        return "—"
+    if len(values) == 1:
+        return f"{values[0]} 💋"
+    return f"{values[0]}–{values[-1]} 💋"
+
+
+def _build_balance_costs_text(lang: str, model_costs: list[ModelCost]) -> str:
+    image_costs = [float(mc.credits) for mc in model_costs if mc.gen_type == GenerationType.image]
+    video_costs = [float(mc.credits) for mc in model_costs if mc.gen_type == GenerationType.video]
+    music_costs = [float(mc.credits) for mc in model_costs if mc.gen_type == GenerationType.music]
+    midjourney_costs = [float(mc.credits) for mc in model_costs if mc.model_key.startswith("midjourney-")]
+
+    lines = [t("balance_costs_title", lang)]
+    if image_costs:
+        lines.append(t("balance_costs_image", lang, amount=_format_cost_range(image_costs)))
+    if video_costs:
+        lines.append(t("balance_costs_video", lang, amount=_format_cost_range(video_costs)))
+    if music_costs:
+        lines.append(t("balance_costs_music", lang, amount=_format_cost_range(music_costs)))
+    if midjourney_costs:
+        lines.append(t("balance_costs_midjourney", lang, amount=_format_cost_range(midjourney_costs)))
+    return "\n".join(lines)
+
+
 @router.callback_query(F.data == "menu:balance")
-async def cb_balance(call: CallbackQuery, db_user: User) -> None:
+async def cb_balance(call: CallbackQuery, db_user: User, session: AsyncSession) -> None:
     lang = db_user.language or "ru"
+    model_costs = await repo.get_all_model_costs(session)
     sub_status = (
         t("balance_sub_active", lang, date=db_user.subscription_until.strftime("%d.%m.%Y"))
         if db_user.is_subscribed and db_user.subscription_until
@@ -53,32 +87,39 @@ async def cb_balance(call: CallbackQuery, db_user: User) -> None:
         t("balance_title", lang) + "\n\n"
         + t("balance_credits", lang, credits=db_user.credits) + "\n"
         + t("balance_subscription", lang, status=sub_status) + "\n\n"
-        + t("balance_costs", lang) + "\n\n"
+        + _build_balance_costs_text(lang, model_costs) + "\n\n"
         + t("balance_topup_hint", lang)
     )
-    await call.message.edit_text(text, reply_markup=balance_screen_kb())  # type: ignore[union-attr]
-    await call.answer()
+    await safe_edit_message(call.message, text, reply_markup=balance_screen_kb())  # type: ignore[arg-type]
+    await safe_answer_callback(call)
 
 
 @router.callback_query(F.data == "menu:referral")
+@router.callback_query(F.data == "referrals")
 async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: AsyncSession) -> None:
     lang = db_user.language or "ru"
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start={db_user.referral_code}"
     l1, l2, l3 = await repo.count_user_referrals(session, db_user.id)
     withdrawals = await repo.get_user_withdrawal_requests(session, db_user.id, limit=3)
+    balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
     withdrawal_lines = []
     for request in withdrawals:
         withdrawal_lines.append(
             f"• #{request.id}: {request.amount_rub:.0f}₽ · {request.status.value}"
         )
 
-    earned = db_user.referral_balance
+    earned = balance_snapshot.total_earned if balance_snapshot else float(db_user.referral_balance or 0.0)
+    available = balance_snapshot.available_to_withdraw if balance_snapshot else earned
+    pending = balance_snapshot.pending_withdrawals if balance_snapshot else 0.0
     text = (
         t("referral_title", lang) + "\n\n"
         + t("referral_link", lang, link=ref_link) + "\n\n"
         + t("referral_stats", lang, l1=l1, l2=l2, l3=l3) + "\n\n"
-        + t("referral_earned", lang, amount=earned) + "\n\n"
+        + t("referral_earned", lang, amount=earned) + "\n"
+        + t("referral_available", lang, amount=available)
+        + (("\n" + t("referral_pending_withdrawals", lang, amount=pending)) if pending > 0 else "")
+        + "\n\n"
         + t("referral_conditions", lang,
             bonus=settings.REFERRAL_L1_CREDITS,
             l1_pct=int(settings.REFERRAL_COMMISSION_L1 * 100),
@@ -87,23 +128,42 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
     )
     if withdrawal_lines:
         text += "\n\n💸 <b>" + ("Последние заявки на вывод" if lang == "ru" else "Recent withdrawal requests") + ":</b>\n" + "\n".join(withdrawal_lines)
-    await call.message.edit_text(text, reply_markup=referral_screen_kb(lang))  # type: ignore[union-attr]
-    await call.answer()
+    await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
+    await safe_answer_callback(call)
 
 
 @router.callback_query(F.data == "referral:withdraw")
-async def cb_referral_withdraw(call: CallbackQuery, state: FSMContext, db_user: User) -> None:
+async def cb_referral_withdraw(
+    call: CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    session: AsyncSession,
+) -> None:
     lang = db_user.language or "ru"
+    balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
+    available = balance_snapshot.available_to_withdraw if balance_snapshot else 0.0
+    if available <= 0:
+        await call.message.answer(  # type: ignore[union-attr]
+            t("withdraw_unavailable", lang),
+            reply_markup=back_to_menu_kb(),
+        )
+        await call.answer()
+        return
     await state.set_state(WithdrawalFSM.amount)
     await call.message.answer(  # type: ignore[union-attr]
-        t("withdraw_title", lang) + "\n\n" + t("withdraw_amount_prompt", lang),
+        t("withdraw_title", lang) + "\n\n" + t("withdraw_amount_prompt", lang, available=available),
         reply_markup=back_to_menu_kb(),
     )
     await call.answer()
 
 
 @router.message(WithdrawalFSM.amount, F.text)
-async def handle_withdraw_amount(message: Message, state: FSMContext, db_user: User) -> None:
+async def handle_withdraw_amount(
+    message: Message,
+    state: FSMContext,
+    db_user: User,
+    session: AsyncSession,
+) -> None:
     lang = db_user.language or "ru"
     raw = (message.text or "").strip().replace(",", ".")
     try:
@@ -113,6 +173,14 @@ async def handle_withdraw_amount(message: Message, state: FSMContext, db_user: U
         return
     if amount <= 0:
         await message.answer(t("withdraw_amount_zero", lang), reply_markup=back_to_menu_kb())
+        return
+    balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
+    available = balance_snapshot.available_to_withdraw if balance_snapshot else 0.0
+    if amount > available + 1e-9:
+        await message.answer(
+            t("withdraw_amount_exceeds", lang, available=available),
+            reply_markup=back_to_menu_kb(),
+        )
         return
     await state.update_data(withdraw_amount=amount)
     await state.set_state(WithdrawalFSM.details)
@@ -137,12 +205,20 @@ async def handle_withdraw_details(
         return
     data = await state.get_data()
     amount = float(data["withdraw_amount"])
-    request = await repo.create_withdrawal_request(
-        session,
-        user_id=db_user.id,
-        amount_rub=amount,
-        payout_details=details,
-    )
+    try:
+        request = await repo.create_withdrawal_request(
+            session,
+            user_id=db_user.id,
+            amount_rub=amount,
+            payout_details=details,
+        )
+    except InsufficientReferralBalanceError as exc:
+        await state.clear()
+        await message.answer(
+            t("withdraw_amount_exceeds", lang, available=exc.available_amount),
+            reply_markup=back_to_menu_kb(),
+        )
+        return
     await state.clear()
     await message.answer(
         t("withdraw_created", lang, id=request.id, amount=amount),
@@ -193,7 +269,7 @@ async def cb_history(
         lines.append(
             f"{i}. {icon} {status_icon} <code>{gen.model}</code>\n"
             f"   <i>{gen.prompt[:60]}{'...' if len(gen.prompt) > 60 else ''}</i>\n"
-            f"   -{gen.credits_spent} cr"
+            f"   -{gen.credits_spent} 💋"
         )
 
     await call.message.edit_text(  # type: ignore[union-attr]

@@ -13,6 +13,43 @@ from bot.keyboards.models import (
 from bot.ui.common import ScreenRender
 
 
+_IMAGE_MODEL_LABELS = {
+    "grok-imagine/text-to-image": "Grok Imagine",
+    "grok-imagine/image-to-image": "Grok Imagine Edit",
+    "qwen/text-to-image": "Qwen",
+    "qwen/image-to-image": "Qwen Edit",
+    "qwen/image-edit": "Qwen Edit Pro",
+    "qwen2/text-to-image": "Qwen2",
+    "qwen2/image-edit": "Qwen2 Edit",
+    "seedream/4.5-text-to-image": "Seedream 4.5",
+    "seedream/4.5-edit": "Seedream 4.5 Edit",
+    "wan/2-7-image-pro": "WAN 2.7 Pro",
+    "gpt-image-2-text-to-image": "GPT Image 2",
+    "gpt-image-2-image-to-image": "GPT Image 2 Edit",
+    "google/nano-banana": "Nano Banana",
+    "nano-banana-pro": "Nano Banana Pro",
+    "nano-banana-2": "Nano Banana 2",
+}
+
+
+def _pretty_image_model(model_key: str) -> str:
+    return _IMAGE_MODEL_LABELS.get(model_key, model_key.replace('-', ' ').replace('/', ' · ').title())
+
+
+def _pretty_ratio(value: str | None) -> str:
+    if not value or value in {"default", "auto"}:
+        return "Авто"
+    return value
+
+
+def _pretty_quality(value: str | None) -> str:
+    if not value or value == "basic":
+        return "Стандарт"
+    if value == "high":
+        return "Высокое"
+    return value.upper() if value.lower() in {"1k", "2k", "4k"} else value
+
+
 def render_image_scenarios() -> ScreenRender:
     scenario_lines = "\n".join(
         f"{scenario['title']} — {scenario['description']}"
@@ -40,7 +77,7 @@ def render_image_advanced_menu(model_costs: list[ModelCost]) -> ScreenRender:
 
 
 def render_active_image_session(image_session: ImageSession) -> ScreenRender:
-    ratio = image_session.aspect_ratio or "auto"
+    ratio = _pretty_ratio(image_session.aspect_ratio)
     count = image_session.count or 1
 
     reference_count = 0
@@ -54,15 +91,16 @@ def render_active_image_session(image_session: ImageSession) -> ScreenRender:
         reference_count = 1
 
     reference_label = f"{reference_count} шт" if reference_count else "нет"
-    model_label = image_session.model.replace("-", " ").title()
+    model_label = _pretty_image_model(image_session.model)
+    quality_label = _pretty_quality(image_session.quality)
     count_label = f"{count} фото" if count > 1 else "1 фото"
 
     text = (
         "🎨 <b>Активная серия</b>\n\n"
         f"🍌 <b>{model_label}</b>\n"
-        f"📐 {ratio} · {count_label}\n"
+        f"📐 {ratio} · {quality_label} · {count_label}\n"
         f"📎 Референс: <b>{reference_label}</b>\n\n"
-        "Отправь текст или фото — бот продолжит генерацию."
+        "Отправь новый текст или фото — я продолжу серию в том же стиле."
     )
     return ScreenRender(
         text=text,

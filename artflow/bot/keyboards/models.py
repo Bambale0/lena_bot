@@ -4,7 +4,7 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from api.image_service import ImageModel, MODEL_ASPECT_RATIOS, _SUPPORTS_IMG2IMG
+from api.image_service import MODEL_ASPECT_RATIOS, ImageModel
 from api.video_service import MotionDirection, VideoModel
 from db.models import ModelCost
 
@@ -18,12 +18,14 @@ VIDEO_CAPS: dict[str, dict] = {
         "duration_options": [5, 10],
         "aspect_ratios": ["1:1", "16:9", "9:16"],
         "has_resolution": False,
+        "billing_mode": "per_second",
     },
     "kling-2.6/image-to-video": {
         "modes": ["image"],
         "duration_options": [5, 10],
         "aspect_ratios": [],
         "has_resolution": False,
+        "billing_mode": "per_second",
     },
     "kling-2.6/motion-control": {
         "modes": ["motion"],
@@ -31,20 +33,25 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": [],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
+        "billing_mode": "per_second",
     },
     "kling-3.0/video": {
         "modes": ["text", "image"],
         "duration_options": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         "aspect_ratios": ["16:9", "9:16", "1:1"],
         "has_resolution": True,
-        "resolutions": ["2K", "4K"],
+        "resolutions": ["std", "pro", "4K"],
+        "resolution_labels": {"std": "std · 720p", "pro": "pro · 1080p", "4K": "4K · 2160p"},
+        "billing_mode": "per_second",
     },
     "kling-3.0/motion-control": {
         "modes": ["motion"],
         "duration_options": [],
         "aspect_ratios": [],
         "has_resolution": True,
-        "resolutions": ["720p", "1080p"],
+        "resolutions": ["std", "pro", "4K"],
+        "resolution_labels": {"std": "std · 720p", "pro": "pro · 1080p", "4K": "4K · 2160p"},
+        "billing_mode": "per_second",
     },
     "wan/2-7-text-to-video": {
         "modes": ["text"],
@@ -158,7 +165,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "aspect_ratios": [],
         "aspect_ratio_modes": [],
         "counts": [1],
-        "max_refs": 4,
+        "max_refs": 1,
     },
     ImageModel.WAN_27_PRO: {
         "modes": ["text", "image"],
@@ -179,7 +186,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "modes": ["text", "image"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_2, []),
         "aspect_ratio_modes": ["text", "image"],
-        "counts": [1, 2, 4, 6],
+        "counts": [1],
         "has_quality": True,
         "quality_options": [("2K", "2K"), ("4K", "4K")],
         "max_refs": 4,
@@ -188,7 +195,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "modes": ["text", "image"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_PRO, []),
         "aspect_ratio_modes": ["text", "image"],
-        "counts": [1, 2, 4, 6],
+        "counts": [1],
         "has_quality": True,
         "quality_options": [("2K", "2K"), ("4K", "4K")],
         "max_refs": 4,
@@ -201,17 +208,17 @@ IMAGE_CAPS: dict[str, dict] = {
     },
     ImageModel.QWEN_I2I: {
         "modes": ["image"],
-        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.QWEN_I2I, []),
-        "aspect_ratio_modes": ["image"],
+        "aspect_ratios": [],
+        "aspect_ratio_modes": [],
         "counts": [1],
-        "max_refs": 4,
+        "max_refs": 1,
     },
     ImageModel.QWEN_EDIT: {
         "modes": ["image"],
         "aspect_ratios": [],
         "aspect_ratio_modes": [],
         "counts": [1],
-        "max_refs": 4,
+        "max_refs": 1,
     },
     ImageModel.QWEN2_T2I: {
         "modes": ["text"],
@@ -224,7 +231,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "aspect_ratios": [],
         "aspect_ratio_modes": [],
         "counts": [1],
-        "max_refs": 4,
+        "max_refs": 1,
     },
     ImageModel.GPT_IMAGE_2_T2I: {
         "modes": ["text"],
@@ -380,7 +387,7 @@ _KLING_BASE_RATE: dict[str, int] = {k: min(v.values()) for k, v in _KLING_PER_SE
 
 def _model_button(mc: ModelCost, prefix: str) -> InlineKeyboardButton:
     base_rate = _KLING_BASE_RATE.get(mc.model_key)
-    price_txt = f"от {base_rate} cr/сек" if base_rate else f"{mc.credits} cr"
+    price_txt = f"от {base_rate} 💋/сек" if base_rate else f"{mc.credits} 💋"
     return InlineKeyboardButton(
         text=f"{mc.display_name} · {price_txt}",
         callback_data=f"{prefix}:{mc.model_key}",
@@ -403,8 +410,7 @@ def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
             and mc.model_key in IMAGE_CAPS
             and mc.model_key not in HIDDEN_IMAGE_MODELS
         ):
-            desc = IMAGE_MODEL_DESC.get(mc.model_key, "")
-            label = f"{mc.display_name} · {mc.credits} cr"
+            label = f"{mc.display_name} · {mc.credits} 💋"
             builder.row(
                 InlineKeyboardButton(
                     text=label,
@@ -514,9 +520,11 @@ def image_active_kb() -> InlineKeyboardMarkup:
 
 def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    remix_cb = f"img_session:remix:{gen_id}" if gen_id else "img_remix"
+    repeat_cb = f"img_session:repeat:{gen_id}" if gen_id else "img_variation"
     builder.row(
-        InlineKeyboardButton(text="✨ Ремикс", callback_data="img_remix"),
-        InlineKeyboardButton(text="🔁 Ещё вариант", callback_data="img_variation"),
+        InlineKeyboardButton(text="✨ Ремикс", callback_data=remix_cb),
+        InlineKeyboardButton(text="🔁 Ещё вариант", callback_data=repeat_cb),
     )
     if gen_id:
         builder.row(
@@ -702,10 +710,10 @@ def video_params_kb(
     kling_rates = _KLING_PER_SEC.get(model_key, {})
     if kling_rates and dur and res and res in kling_rates:
         rate = kling_rates[res]
-        next_text = f"▶️ Далее · {dur} сек × {rate} = {dur * rate} cr"
+        next_text = f"▶️ Далее · {dur} сек × {rate} = {dur * rate} 💋"
     elif kling_rates and dur:
         rate = min(kling_rates.values())
-        next_text = f"▶️ Далее · {dur} сек × от {rate} = от {dur * rate} cr"
+        next_text = f"▶️ Далее · {dur} сек × от {rate} = от {dur * rate} 💋"
     else:
         next_text = "▶️ Далее: Промпт"
 
@@ -845,10 +853,3 @@ def image_dynamic_settings_kb(model_key: str, mode: str | None = None) -> Inline
     builder.button(text="← Назад", callback_data="img_menu:advanced")
     builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
-    if len(caps.get("counts") or [1]) > 1:
-        settings.append("count")
-
-    if caps.get("supports_prompt_enhance", True):
-        settings.append("prompt_enhance")
-
-    return settings

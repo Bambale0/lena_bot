@@ -5,12 +5,25 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aiogram.types import CallbackQuery, Message
 
-from api.midjourney_service import MJTaskStatus, MJBotType, MJSpeed
+from api.midjourney_service import MJBotType, MJSpeed
 from bot.handlers import midjourney
 from bot.states import MidjourneyFSM
 from tests.factories import make_callback, make_message
+
+
+def _fake_state(**initial: object):
+    real_data = dict(initial)
+
+    async def _do_update(**kwargs: object) -> None:
+        real_data.update(kwargs)
+
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value=real_data)
+    state.update_data = AsyncMock(side_effect=_do_update)
+    state.set_state = AsyncMock()
+    state.clear = AsyncMock()
+    return state
 
 
 # ── menu:mj ───────────────────────────────────────────────────────────────────
@@ -31,9 +44,9 @@ async def test_cb_mj_menu_shows_submenu() -> None:
 @pytest.mark.asyncio
 async def test_cb_imagine_start() -> None:
     call = make_callback(data="mj:imagine")
-    mock_state = AsyncMock()
+    mock_state = _fake_state()
     await midjourney.cb_imagine_start(call, mock_state)
-    mock_state.set_state.assert_called_with(MidjourneyFSM.bot_type_select)
+    mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.bot_type_select)
 
 
 # ── mj_bt ─────────────────────────────────────────────────────────────────────
@@ -43,10 +56,10 @@ async def test_cb_bot_type() -> None:
     call = make_callback(data="mj_bt:niji")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    mock_state = AsyncMock()
+    mock_state = _fake_state()
     await midjourney.cb_bot_type(call, mock_state)
     mock_state.update_data.assert_awaited_once()
-    mock_state.set_state.assert_called_with(MidjourneyFSM.speed_select)
+    mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.speed_select)
 
 
 # ── mj_sp: speed select ───────────────────────────────────────────────────────
@@ -71,10 +84,10 @@ async def test_cb_speed_sufficient_credits() -> None:
     call.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     mock_cost = SimpleNamespace(credits=10, display_name="MJ Standard")
-    mock_state = AsyncMock()
+    mock_state = _fake_state()
     with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
         await midjourney.cb_speed(call, mock_state, AsyncMock(), mock_db_user)
-    mock_state.set_state.assert_called_with(MidjourneyFSM.reference_upload)
+    mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.reference_upload)
 
 
 # ── mj_ref:skip ───────────────────────────────────────────────────────────────
@@ -84,10 +97,10 @@ async def test_cb_mj_ref_skip() -> None:
     call = make_callback(data="mj_ref:skip")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    mock_state = AsyncMock()
+    mock_state = _fake_state()
     await midjourney.cb_mj_ref_skip(call, mock_state)
-    mock_state.update_data.assert_awaited_with(reference_b64=None)
-    mock_state.set_state.assert_called_with(MidjourneyFSM.prompt_input)
+    mock_state.update_data.assert_awaited_once_with(reference_b64=None)
+    mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.prompt_input)
 
 
 # ── handle_mj_reference_photo ─────────────────────────────────────────────────
@@ -108,8 +121,7 @@ async def test_handle_mj_reference_photo() -> None:
     buf = io.BytesIO(b"\xff\xd8\xff\xe0test")
     mock_bot.download_file = AsyncMock(return_value=buf)
 
-    mock_state = AsyncMock()
-    mock_state.get_data = AsyncMock(return_value={"credits": 10})
+    mock_state = _fake_state(credits=10)
     await midjourney.handle_mj_reference_photo(msg, mock_state, mock_bot)
 
     mock_state.update_data.assert_awaited_once()
@@ -125,14 +137,12 @@ async def test_handle_imagine_prompt_success() -> None:
     msg = make_message(text="/imagine a beautiful cat")
     msg.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test")
-    mock_state = AsyncMock()
-    mock_state.get_data = AsyncMock(return_value={
-        "bot_type": MJBotType.MIDJOURNEY,
-        "speed": MJSpeed.FAST,
-        "credits": 10,
-        "reference_b64": None,
-    })
-    mock_state.set_state = AsyncMock()
+    mock_state = _fake_state(
+        bot_type=MJBotType.MIDJOURNEY,
+        speed=MJSpeed.FAST,
+        credits=10,
+        reference_b64=None,
+    )
 
     mock_gen = SimpleNamespace(id=100, task_id=None)
 
@@ -145,7 +155,7 @@ async def test_handle_imagine_prompt_success() -> None:
             with patch("bot.handlers.midjourney.polling", AsyncMock()):
                 await midjourney.handle_imagine_prompt(msg, mock_state, AsyncMock(), mock_db_user, AsyncMock())
 
-    mock_state.set_state.assert_called_with(MidjourneyFSM.generating)
+    mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.generating)
 
 
 @pytest.mark.asyncio
@@ -153,8 +163,7 @@ async def test_handle_imagine_prompt_insufficient_credits() -> None:
     msg = make_message(text="/imagine a cat")
     msg.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
-    mock_state = AsyncMock()
-    mock_state.get_data = AsyncMock(return_value={"credits": 10})
+    mock_state = _fake_state(credits=10)
     with patch("bot.handlers.midjourney.repo", AsyncMock(spend_credits=AsyncMock(return_value=False))):
         await midjourney.handle_imagine_prompt(msg, mock_state, AsyncMock(), mock_db_user, AsyncMock())
     msg.answer.assert_awaited_once()
@@ -167,8 +176,7 @@ async def test_handle_imagine_prompt_insufficient_credits() -> None:
 async def test_cb_mj_action_invalid_index() -> None:
     call = make_callback(data="mj_btn:999")
     call.answer = AsyncMock()
-    mock_state = AsyncMock()
-    mock_state.get_data = AsyncMock(return_value={"task_id": "task_abc", "buttons": [{"custom_id": "1", "label": "U1", "emoji": "1️⃣", "clicked": False}]})
+    mock_state = _fake_state(task_id="task_abc", buttons=[{"custom_id": "1", "label": "U1", "emoji": "1️⃣", "clicked": False}])
     await midjourney.cb_mj_action(call, mock_state, AsyncMock(), SimpleNamespace(id=42), AsyncMock())
     call.answer.assert_awaited_once()
 
@@ -216,7 +224,7 @@ async def test_handle_blend_photo() -> None:
     mock_bot.get_file = AsyncMock(return_value=mock_file)
     mock_bot.download_file = AsyncMock(return_value=io.BytesIO(b"\xff\xd8\xff\xe0test"))
 
-    mock_state = AsyncMock()
+    mock_state = _fake_state()
     mock_state.get_data = AsyncMock(return_value={"blend_images": [], "blend_credits": 12})
     mock_state.update_data = AsyncMock()
 
@@ -284,7 +292,7 @@ async def test_cb_video_motion() -> None:
     call = make_callback(data="mj_vmot:high")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    mock_state = AsyncMock()
+    mock_state = _fake_state()
     await midjourney.cb_video_motion(call, mock_state)
     mock_state.update_data.assert_awaited_once()
     mock_state.set_state.assert_called_with(MidjourneyFSM.video_prompt)
@@ -296,7 +304,7 @@ async def test_cb_video_motion() -> None:
 async def test_cb_video_skip_prompt() -> None:
     call = make_callback(data="mj_skip_prompt")
     call.answer = AsyncMock()
-    mock_state = AsyncMock()
+    mock_state = _fake_state()
     mock_state.get_data = AsyncMock(return_value={"video_credits": 15, "video_image_url": "https://img.test/1.png"})
     with patch("bot.handlers.midjourney._submit_mj_video", new_callable=AsyncMock) as mock_submit:
         await midjourney.cb_video_skip_prompt(call, mock_state, AsyncMock(), SimpleNamespace(id=42, credits=500, language="ru"), AsyncMock())
@@ -310,7 +318,7 @@ async def test_cb_modal_skip_smoke() -> None:
     """Smoke test: cb_modal_skip calls _submit_modal and answers the callback."""
     call = make_callback(data="mj_skip_prompt")
     call.answer = AsyncMock()
-    mock_state = AsyncMock()
+    mock_state = _fake_state()
     mock_state.get_data = AsyncMock(return_value={"modal_task_id": "task_modal_123", "task_id": "task_abc"})
     mock_bot = AsyncMock()
 
@@ -328,7 +336,7 @@ async def test_handle_video_prompt_text() -> None:
     """Test that text message in video_prompt state triggers _submit_mj_video."""
     msg = make_message(text="gentle wind")
     msg.answer = AsyncMock()
-    mock_state = AsyncMock()
+    mock_state = _fake_state()
     mock_state.get_data = AsyncMock(return_value={"video_credits": 15, "video_image_url": "https://img.test/1.png"})
     mock_bot = AsyncMock()
     mock_session = AsyncMock()

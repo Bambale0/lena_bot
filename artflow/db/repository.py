@@ -5,7 +5,7 @@ import json
 import secrets
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import Date, cast, select, update, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,6 +67,19 @@ class ReferralChildStats:
 class WithdrawalRequestView:
     request: ReferralWithdrawalRequest
     user: User
+
+
+@dataclass(frozen=True)
+class ReferralBalanceSnapshot:
+    total_earned: float
+    pending_withdrawals: float
+    available_to_withdraw: float
+
+
+class InsufficientReferralBalanceError(ValueError):
+    def __init__(self, available_amount: float):
+        super().__init__(f"Insufficient referral balance: available={available_amount:.2f}")
+        self.available_amount = available_amount
 
 
 # ─── User ────────────────────────────────────────────────────────────────────
@@ -166,6 +179,51 @@ async def count_users(session: AsyncSession) -> float:
 
 async def get_all_user_ids(session: AsyncSession) -> list[int]:
     result = await session.execute(select(User.tg_id).where(User.is_banned == False))
+    return list(result.scalars().all())
+
+
+async def get_broadcast_recipient_ids(session: AsyncSession, segment: str = "all") -> list[int]:
+    base = select(User.tg_id).where(User.is_banned == False)
+
+    if segment == "all":
+        result = await session.execute(base)
+        return list(result.scalars().all())
+
+    if segment == "paid":
+        stmt = (
+            select(User.tg_id)
+            .join(Transaction, Transaction.user_id == User.id)
+            .where(
+                User.is_banned == False,
+                Transaction.status == TransactionStatus.paid,
+            )
+            .distinct()
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    if segment == "new":
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        stmt = base.where(User.created_at >= cutoff)
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    if segment == "active":
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        recent_generation_users = select(Generation.user_id).where(Generation.created_at >= cutoff)
+        recent_paid_users = select(Transaction.user_id).where(
+            Transaction.created_at >= cutoff,
+            Transaction.status == TransactionStatus.paid,
+        )
+        stmt = base.where(
+            (User.id.in_(recent_generation_users))
+            | (User.id.in_(recent_paid_users))
+            | (User.created_at >= cutoff)
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    result = await session.execute(base)
     return list(result.scalars().all())
 
 
@@ -817,6 +875,30 @@ async def confirm_transaction(
     return tx
 
 
+async def confirm_transaction_by_id(
+    session: AsyncSession,
+    tx_id: int,
+    *,
+    external_id: str | None = None,
+) -> Transaction | None:
+    values: dict[str, object] = {"status": TransactionStatus.paid}
+    if external_id is not None:
+        values["external_id"] = external_id
+
+    result = await session.execute(
+        update(Transaction)
+        .where(
+            Transaction.id == tx_id,
+            Transaction.status == TransactionStatus.pending,
+        )
+        .values(**values)
+        .returning(Transaction)
+    )
+    tx = result.scalar_one_or_none()
+    await session.commit()
+    return tx
+
+
 async def get_last_tbank_transaction(
     session: AsyncSession,
     user_id: int,
@@ -879,6 +961,12 @@ async def create_withdrawal_request(
     amount_rub: float,
     payout_details: str,
 ) -> ReferralWithdrawalRequest:
+    snapshot = await get_user_referral_balance_snapshot(session, user_id, lock_user=True)
+    if snapshot is None:
+        raise ValueError(f"User {user_id} not found")
+    if amount_rub > snapshot.available_to_withdraw + 1e-9:
+        raise InsufficientReferralBalanceError(snapshot.available_to_withdraw)
+
     request = ReferralWithdrawalRequest(
         user_id=user_id,
         amount_rub=amount_rub,
@@ -937,6 +1025,41 @@ async def get_user_withdrawal_requests(
     return list(result.scalars().all())
 
 
+async def get_user_pending_withdrawal_total(session: AsyncSession, user_id: int) -> float:
+    result = await session.execute(
+        select(func.coalesce(func.sum(ReferralWithdrawalRequest.amount_rub), 0.0))
+        .where(
+            ReferralWithdrawalRequest.user_id == user_id,
+            ReferralWithdrawalRequest.status == WithdrawalStatus.pending,
+        )
+    )
+    return float(result.scalar_one())
+
+
+async def get_user_referral_balance_snapshot(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    lock_user: bool = False,
+) -> ReferralBalanceSnapshot | None:
+    query = select(User).where(User.id == user_id)
+    if lock_user:
+        query = query.with_for_update()
+
+    user = (await session.execute(query)).scalar_one_or_none()
+    if user is None:
+        return None
+
+    pending_withdrawals = await get_user_pending_withdrawal_total(session, user_id)
+    total_earned = float(user.referral_balance or 0.0)
+    available_to_withdraw = max(0.0, total_earned - pending_withdrawals)
+    return ReferralBalanceSnapshot(
+        total_earned=total_earned,
+        pending_withdrawals=pending_withdrawals,
+        available_to_withdraw=available_to_withdraw,
+    )
+
+
 async def set_withdrawal_status(
     session: AsyncSession,
     request_id: int,
@@ -945,24 +1068,36 @@ async def set_withdrawal_status(
     admin_tg_id: int,
     admin_note: str | None = None,
 ) -> WithdrawalRequestView | None:
-    result = await session.execute(
-        update(ReferralWithdrawalRequest)
-        .where(
-            ReferralWithdrawalRequest.id == request_id,
-            ReferralWithdrawalRequest.status == WithdrawalStatus.pending,
+    request = (
+        await session.execute(
+            select(ReferralWithdrawalRequest)
+            .where(
+                ReferralWithdrawalRequest.id == request_id,
+                ReferralWithdrawalRequest.status == WithdrawalStatus.pending,
+            )
+            .with_for_update()
         )
-        .values(
-            status=status,
-            admin_tg_id=admin_tg_id,
-            admin_note=admin_note,
-            reviewed_at=datetime.now(timezone.utc),
-        )
-        .returning(ReferralWithdrawalRequest.id)
-    )
-    changed_id = result.scalar_one_or_none()
-    await session.commit()
-    if changed_id is None:
+    ).scalar_one_or_none()
+    if request is None:
         return None
+
+    if status == WithdrawalStatus.approved:
+        user = (
+            await session.execute(
+                select(User).where(User.id == request.user_id).with_for_update()
+            )
+        ).scalar_one()
+        available_balance = float(user.referral_balance or 0.0)
+        if request.amount_rub > available_balance + 1e-9:
+            raise InsufficientReferralBalanceError(available_balance)
+        user.referral_balance = available_balance - request.amount_rub
+
+    request.status = status
+    request.admin_tg_id = admin_tg_id
+    request.admin_note = admin_note
+    request.reviewed_at = datetime.now(timezone.utc)
+
+    await session.commit()
     return await get_withdrawal_request(session, request_id)
 
 

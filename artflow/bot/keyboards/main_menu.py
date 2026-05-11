@@ -28,6 +28,10 @@ def main_menu_kb(
     )
     builder.row(
         InlineKeyboardButton(text="🎵 Песня", callback_data="menu:music"),
+        InlineKeyboardButton(text="🖌️ Midjourney", callback_data="menu:mj"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🤖 AI-ассистент", callback_data="menu:assistant"),
     )
     builder.row(
         InlineKeyboardButton(text="🔥 Лента", callback_data="menu:feed"),

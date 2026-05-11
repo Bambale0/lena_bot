@@ -16,7 +16,7 @@ from bot.keyboards.feed import empty_feed_kb, feed_card_kb
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.models import IMAGE_CAPS
 from bot.keyboards.prompts import prompt_use_model_kb
-from bot.states import PromptUseFSM
+from bot.states import ImageGenFSM, PromptUseFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import User
@@ -283,6 +283,151 @@ async def cb_feed_use(
     )
     await safe_answer_callback(call)
 
+
+
+@router.callback_query(F.data.startswith("feed:again:"))
+async def cb_feed_again(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    import json
+
+    from bot.handlers.image_gen import _launch_session_generation, _session_reference_url
+    from db.models import ImageGenerationAction
+
+    gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
+    gen = await repo.get_generation_by_id(session, gen_id)
+    if not gen or gen.user_id != db_user.id or not gen.prompt:
+        await call.answer("Генерация не найдена", show_alert=True)
+        return
+
+    source_session = None
+    if gen.image_session_id:
+        source_session = await repo.get_image_session(session, gen.image_session_id, db_user.id)
+
+    mode = source_session.mode if source_session else "text"
+    aspect_ratio = source_session.aspect_ratio if source_session else getattr(gen, "aspect_ratio", None)
+    quality = source_session.quality if source_session else _default_quality_for_model(gen.model)
+    count = source_session.count if source_session else _default_count_for_model(gen.model, 1)
+    reference_file_id = source_session.reference_file_id if source_session else None
+    reference_file_ids: list[str] = []
+    if source_session and source_session.reference_file_ids:
+        try:
+            reference_file_ids = [item for item in json.loads(source_session.reference_file_ids) if isinstance(item, str) and item]
+        except (TypeError, ValueError):
+            reference_file_ids = []
+    reference_url = source_session.reference_url if source_session else None
+    effective_reference_url = None
+    if source_session and mode == "image":
+        effective_reference_url = await _session_reference_url(bot, source_session, prefer_last_result=False)
+        if isinstance(effective_reference_url, str) and effective_reference_url:
+            reference_url = effective_reference_url
+
+    image_session = await repo.create_image_session(
+        session=session,
+        user_id=db_user.id,
+        model=gen.model,
+        mode=mode,
+        aspect_ratio=aspect_ratio,
+        quality=quality,
+        count=count,
+        base_prompt=gen.prompt,
+        reference_file_id=reference_file_id,
+        reference_file_ids=reference_file_ids,
+        reference_url=reference_url if isinstance(reference_url, str) else None,
+    )
+
+    await state.set_state(ImageGenFSM.session_active)
+    await state.update_data(
+        image_session_id=image_session.id,
+        model_key=image_session.model,
+        mode=mode,
+        image_mode=mode,
+        aspect_ratio=image_session.aspect_ratio,
+        quality=image_session.quality,
+        count=image_session.count,
+        image_file_id=reference_file_id,
+        ref_file_ids=reference_file_ids,
+        remix_mode=False,
+        remix_parent_generation_id=None,
+        remix_reference_url=None,
+    )
+
+    await _launch_session_generation(
+        source_message=call.message,  # type: ignore[arg-type]
+        state=state,
+        session=session,
+        db_user=db_user,
+        image_session=image_session,
+        prompt=gen.prompt,
+        action_type=ImageGenerationAction.repeat,
+        reference_url=effective_reference_url,
+        parent_generation_id=gen.id,
+        launching_text="🔁 <b>Готовлю ещё вариант...</b>",
+        queued_text="⏳ <b>Ещё вариант запущен.</b> Результат придёт сюда автоматически.",
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data.startswith("feed:remix:"))
+async def cb_feed_remix(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext,
+) -> None:
+    from bot.keyboards.image_session import image_session_kb
+    from bot.handlers.image_gen import _supports_img2img
+
+    gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
+    gen = await repo.get_generation_by_id(session, gen_id)
+    if not gen or not gen.result_url:
+        await call.answer("Результат для ремикса не найден", show_alert=True)
+        return
+
+    if not _supports_img2img(gen.model):
+        await call.answer("Эта модель не поддерживает ремикс по изображению", show_alert=True)
+        return
+
+    await repo.archive_active_image_sessions(session, db_user.id)
+    image_session = await repo.create_image_session(
+        session=session,
+        user_id=db_user.id,
+        model=gen.model,
+        mode="image",
+        aspect_ratio=getattr(gen, "aspect_ratio", None),
+        quality=_default_quality_for_model(gen.model),
+        count=_default_count_for_model(gen.model, 1),
+        base_prompt=gen.prompt,
+        reference_file_id=None,
+        reference_url=gen.result_url,
+    )
+
+    await state.set_state(ImageGenFSM.session_active)
+    await state.update_data(
+        image_session_id=image_session.id,
+        model_key=image_session.model,
+        mode="image",
+        image_mode="image",
+        aspect_ratio=image_session.aspect_ratio,
+        quality=image_session.quality,
+        count=image_session.count,
+        image_file_id=None,
+        ref_file_ids=[],
+        remix_mode=True,
+        remix_parent_generation_id=gen.id,
+    )
+
+    await call.message.answer(  # type: ignore[union-attr]
+        "✨ <b>Ремикс готов</b>\n\n"
+        "Референс из выбранной генерации сохранён.\n"
+        "Теперь напиши, что изменить.",
+        reply_markup=image_session_kb(gen.id),
+    )
+    await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("feed:publish:"))

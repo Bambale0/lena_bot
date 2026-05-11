@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -20,7 +22,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.filters.admin import IsAdmin
+from bot.services.broadcasts import SEGMENT_LABELS, deliver_broadcast, get_recipient_ids
+from core.broadcast_scheduler import schedule_broadcast_job
 from db import repository as repo
+from db.repository import InsufficientReferralBalanceError
 from db.models import PricePlan, User, WithdrawalStatus
 
 logger = logging.getLogger(__name__)
@@ -53,6 +58,10 @@ class AdminFSM(StatesGroup):
     await_ban_tg_id = State()
     # Broadcast
     await_broadcast_text = State()
+    await_broadcast_segment = State()
+    await_broadcast_schedule = State()
+    await_broadcast_datetime = State()
+    confirm_broadcast = State()
 
 
 def admin_menu_kb():
@@ -106,6 +115,96 @@ def _admin_back_kb():
     builder = InlineKeyboardBuilder()
     builder.button(text="← Админ-панель", callback_data="adm:back")
     return builder.as_markup()
+
+
+BROADCAST_TZ = ZoneInfo("Europe/Moscow")
+
+
+def _broadcast_preview_kb(*, scheduled: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📅 Запланировать" if scheduled else "✅ Запустить", callback_data="adm:broadcast:send")
+    builder.button(text="❌ Отмена", callback_data="adm:broadcast:cancel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _broadcast_entry_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отмена", callback_data="adm:broadcast:cancel")
+    return builder.as_markup()
+
+
+def _broadcast_segment_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👥 Все", callback_data="adm:broadcast:segment:all")
+    builder.button(text="💳 Платившие", callback_data="adm:broadcast:segment:paid")
+    builder.button(text="🆕 Новые 7д", callback_data="adm:broadcast:segment:new")
+    builder.button(text="⚡ Активные 14д", callback_data="adm:broadcast:segment:active")
+    builder.button(text="❌ Отмена", callback_data="adm:broadcast:cancel")
+    builder.adjust(2, 2, 1)
+    return builder.as_markup()
+
+
+def _broadcast_schedule_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🚀 Сейчас", callback_data="adm:broadcast:when:now")
+    builder.button(text="⏰ Через 10 мин", callback_data="adm:broadcast:when:delay:10")
+    builder.button(text="⏰ Через 1 час", callback_data="adm:broadcast:when:delay:60")
+    builder.button(text="🗓 Указать время", callback_data="adm:broadcast:when:custom")
+    builder.button(text="❌ Отмена", callback_data="adm:broadcast:cancel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _format_broadcast_datetime(dt: datetime) -> str:
+    return dt.astimezone(BROADCAST_TZ).strftime("%d.%m.%Y %H:%M MSK")
+
+
+def _parse_broadcast_datetime(raw: str) -> datetime | None:
+    raw = raw.strip()
+    now = datetime.now(BROADCAST_TZ)
+    for fmt in ("%d.%m.%Y %H:%M", "%d.%m %H:%M"):
+        try:
+            parsed = datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+        if fmt == "%d.%m %H:%M":
+            parsed = parsed.replace(year=now.year)
+        parsed = parsed.replace(tzinfo=BROADCAST_TZ)
+        if parsed <= now and fmt == "%d.%m %H:%M":
+            parsed = parsed.replace(year=now.year + 1)
+        if parsed <= now:
+            return None
+        return parsed
+    return None
+
+
+async def _show_broadcast_preview(target: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    segment = str(data.get("broadcast_segment", "all"))
+    recipients = int(data.get("broadcast_recipient_count", 0))
+    scheduled_for_iso = data.get("broadcast_scheduled_for")
+    scheduled = bool(scheduled_for_iso)
+
+    text = (
+        "👀 Предпросмотр рассылки\n"
+        f"Сегмент: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
+        f"Получателей: <b>{recipients}</b>\n"
+    )
+    if scheduled_for_iso:
+        text += f"Время: <b>{_format_broadcast_datetime(datetime.fromisoformat(str(scheduled_for_iso)))}</b>\n"
+    text += "\nНиже — сообщение как его увидят пользователи."
+
+    await target.answer(text)
+    await target.bot.copy_message(
+        chat_id=target.chat.id,
+        from_chat_id=int(data["broadcast_source_chat_id"]),
+        message_id=int(data["broadcast_source_message_id"]),
+    )
+    await target.answer(
+        "Если всё ок — подтверждай.",
+        reply_markup=_broadcast_preview_kb(scheduled=scheduled),
+    )
 
 
 # ─── Статистика ───────────────────────────────────────────────────────────────
@@ -302,12 +401,19 @@ async def cb_withdrawal_decide(call: CallbackQuery, session: AsyncSession, bot: 
     action = parts[2]
     request_id = int(parts[3])
     status = WithdrawalStatus.approved if action == "approve" else WithdrawalStatus.rejected
-    view = await repo.set_withdrawal_status(
-        session,
-        request_id,
-        status=status,
-        admin_tg_id=call.from_user.id,
-    )
+    try:
+        view = await repo.set_withdrawal_status(
+            session,
+            request_id,
+            status=status,
+            admin_tg_id=call.from_user.id,
+        )
+    except InsufficientReferralBalanceError as exc:
+        await call.answer(
+            f"Недостаточно реферального баланса у пользователя: доступно {exc.available_amount:.2f}₽",
+            show_alert=True,
+        )
+        return
     if not view:
         await call.answer("Заявка уже обработана или не найдена", show_alert=True)
         return
@@ -576,12 +682,18 @@ def _models_kb(costs: list, page: int) -> "InlineKeyboardMarkup":
     builder = InlineKeyboardBuilder()
     for mc in chunk:
         # Use gen_type emoji prefix
-        prefix = "🖼" if str(mc.gen_type) in ("image", "GenerationType.image") else "🎬"
+        gen_type_value = getattr(mc.gen_type, "value", str(mc.gen_type))
+        if gen_type_value in ("image", "GenerationType.image"):
+            prefix = "🖼"
+        elif gen_type_value in ("music", "GenerationType.music"):
+            prefix = "🎵"
+        else:
+            prefix = "🎬"
         label = mc.display_name[:30]
         
         # Для видео-моделей всегда показываем кр/сек
         # Если в model_key есть resolution, добавляем пометку в скобках
-        if str(mc.gen_type) not in ("image", "GenerationType.image"):
+        if gen_type_value in ("video", "GenerationType.video"):
             # Парсим resolution из ключа если есть
             res_match = re.search(r'__resolution=(\w+)', mc.model_key)
             if res_match:
@@ -804,32 +916,159 @@ async def handle_ban(message: Message, state: FSMContext, session: AsyncSession)
 @router.callback_query(F.data == "adm:broadcast")
 async def cb_broadcast(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AdminFSM.await_broadcast_text)
-    await call.message.answer(
-        "📢 Введи текст рассылки (поддерживается HTML):\n"
-        "<i>Для отмены: /cancel</i>"
+    await call.message.answer(  # type: ignore[union-attr]
+        "📢 Отправь сообщение для рассылки.\n\n"
+        "Можно текст, фото, видео, документ и подпись. Потом выберешь сегмент и время отправки.",
+        reply_markup=_broadcast_entry_kb(),
     )
     await call.answer()
 
 
-@router.message(AdminFSM.await_broadcast_text, F.text)
-async def handle_broadcast(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    text = message.text  # type: ignore[union-attr]
-    tg_ids = await repo.get_all_user_ids(session)
+@router.callback_query(F.data == "adm:broadcast:cancel")
+async def cb_broadcast_cancel(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
+    await call.message.answer("❌ Рассылка отменена.", reply_markup=admin_menu_kb())  # type: ignore[union-attr]
+    await call.answer()
 
-    status_msg = await message.answer(f"📢 Отправляю {len(tg_ids)} пользователям...")
 
-    sent, failed = 0, 0
-    from aiogram import Bot
-    bot: Bot = message.bot  # type: ignore[assignment]
-    for tg_id in tg_ids:
-        try:
-            await bot.send_message(tg_id, text)
-            sent += 1
-        except Exception:
-            failed += 1
+@router.message(Command("cancel"))
+async def cmd_cancel_admin_flow(message: Message, state: FSMContext) -> None:
+    current_state = await state.get_state()
+    if not current_state:
+        await message.answer("Нечего отменять.")
+        return
+    await state.clear()
+    await message.answer("❌ Действие отменено.", reply_markup=admin_menu_kb())
 
-    await status_msg.edit_text(
-        f"✅ Рассылка завершена\n"
+
+@router.message(AdminFSM.await_broadcast_text)
+async def handle_broadcast(message: Message, state: FSMContext) -> None:
+    await state.update_data(
+        broadcast_source_chat_id=message.chat.id,
+        broadcast_source_message_id=message.message_id,
+    )
+    await state.set_state(AdminFSM.await_broadcast_segment)
+    await message.answer(
+        "Выбери аудиторию для рассылки:",
+        reply_markup=_broadcast_segment_kb(),
+    )
+
+
+@router.callback_query(AdminFSM.await_broadcast_segment, F.data.startswith("adm:broadcast:segment:"))
+async def cb_broadcast_segment(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    segment = str(call.data).split(":")[-1]
+    tg_ids = await get_recipient_ids(session, segment)
+    await state.update_data(
+        broadcast_segment=segment,
+        broadcast_recipient_count=len(tg_ids),
+    )
+    await state.set_state(AdminFSM.await_broadcast_schedule)
+    await call.message.answer(  # type: ignore[union-attr]
+        f"Аудитория: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
+        f"Получателей сейчас: <b>{len(tg_ids)}</b>\n\n"
+        "Когда отправить?",
+        reply_markup=_broadcast_schedule_kb(),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminFSM.await_broadcast_schedule, F.data == "adm:broadcast:when:now")
+async def cb_broadcast_when_now(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(broadcast_scheduled_for=None)
+    await state.set_state(AdminFSM.confirm_broadcast)
+    await _show_broadcast_preview(call.message, state)  # type: ignore[arg-type]
+    await call.answer()
+
+
+@router.callback_query(AdminFSM.await_broadcast_schedule, F.data.startswith("adm:broadcast:when:delay:"))
+async def cb_broadcast_when_delay(call: CallbackQuery, state: FSMContext) -> None:
+    minutes = int(str(call.data).split(":")[-1])
+    scheduled_for = datetime.now(BROADCAST_TZ) + timedelta(minutes=minutes)
+    await state.update_data(broadcast_scheduled_for=scheduled_for.isoformat())
+    await state.set_state(AdminFSM.confirm_broadcast)
+    await _show_broadcast_preview(call.message, state)  # type: ignore[arg-type]
+    await call.answer()
+
+
+@router.callback_query(AdminFSM.await_broadcast_schedule, F.data == "adm:broadcast:when:custom")
+async def cb_broadcast_when_custom(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(AdminFSM.await_broadcast_datetime)
+    await call.message.answer(  # type: ignore[union-attr]
+        "Введи дату и время по Москве.\n"
+        "Формат: <code>12.05.2026 21:30</code> или <code>12.05 21:30</code>",
+        reply_markup=_broadcast_entry_kb(),
+    )
+    await call.answer()
+
+
+@router.message(AdminFSM.await_broadcast_datetime, F.text)
+async def handle_broadcast_datetime(message: Message, state: FSMContext) -> None:
+    parsed = _parse_broadcast_datetime(message.text or "")
+    if not parsed:
+        await message.answer(
+            "Не смог понять дату. Используй формат <code>12.05.2026 21:30</code> или <code>12.05 21:30</code>.",
+            reply_markup=_broadcast_entry_kb(),
+        )
+        return
+    await state.update_data(broadcast_scheduled_for=parsed.isoformat())
+    await state.set_state(AdminFSM.confirm_broadcast)
+    await _show_broadcast_preview(message, state)
+
+
+@router.callback_query(AdminFSM.confirm_broadcast, F.data == "adm:broadcast:send")
+async def cb_broadcast_send(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    data = await state.get_data()
+    source_chat_id = data.get("broadcast_source_chat_id")
+    source_message_id = data.get("broadcast_source_message_id")
+    segment = str(data.get("broadcast_segment", "all"))
+    scheduled_for_iso = data.get("broadcast_scheduled_for")
+
+    if not source_chat_id or not source_message_id:
+        await state.clear()
+        await call.message.answer("❌ Не удалось запустить рассылку. Попробуй заново.", reply_markup=admin_menu_kb())  # type: ignore[union-attr]
+        await call.answer()
+        return
+
+    if scheduled_for_iso:
+        job_id = await schedule_broadcast_job(
+            source_chat_id=int(source_chat_id),
+            source_message_id=int(source_message_id),
+            segment=segment,
+            scheduled_for=datetime.fromisoformat(str(scheduled_for_iso)),
+            created_by_chat_id=call.from_user.id,
+        )
+        await state.clear()
+        await call.message.answer(  # type: ignore[union-attr]
+            "✅ Рассылка запланирована.\n"
+            f"ID: <code>{job_id}</code>\n"
+            f"Сегмент: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
+            f"Время: <b>{_format_broadcast_datetime(datetime.fromisoformat(str(scheduled_for_iso)))}</b>",
+            reply_markup=admin_menu_kb(),
+        )
+        await call.answer()
+        return
+
+    tg_ids = await get_recipient_ids(session, segment)
+    await state.clear()
+    status_msg = await call.message.answer(  # type: ignore[union-attr]
+        f"📢 Отправляю {len(tg_ids)} пользователям..."
+    )
+
+    sent, failed, errors = await deliver_broadcast(
+        bot=call.bot,
+        tg_ids=tg_ids,
+        source_chat_id=int(source_chat_id),
+        source_message_id=int(source_message_id),
+        status_msg=status_msg,
+    )
+
+    report = (
+        "✅ Рассылка завершена\n"
+        f"Сегмент: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
         f"Доставлено: {sent} · Ошибок: {failed}"
     )
+    if errors:
+        report += "\n\nПервые ошибки:\n" + "\n".join(f"• {item}" for item in errors)
+
+    await status_msg.edit_text(report, reply_markup=admin_menu_kb())
+    await call.answer()

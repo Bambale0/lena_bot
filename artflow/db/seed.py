@@ -60,6 +60,8 @@ DEFAULT_MODEL_COSTS = [
     # ── GPT Image 2 ─────────────────────────────────────────────────────────
     {"model_key": "gpt-image-2-text-to-image",   "display_name": "🤖 GPT Image 2 T2I",                 "gen_type": GenerationType.image, "credits": 4},
     {"model_key": "gpt-image-2-image-to-image", "display_name": "🤖 GPT Image 2 I2I",                 "gen_type": GenerationType.image, "credits": 4},
+    # ── Музыка ────────────────────────────────────────────────────────────────
+    {"model_key": "suno/v4.5",                  "display_name": "🎵 Suno v4.5",                        "gen_type": GenerationType.music, "credits": 20},
     # ── Midjourney ────────────────────────────────────────────────────────────
     {"model_key": "midjourney-imagine",  "display_name": "🖌️ MJ Imagine",  "gen_type": GenerationType.image, "credits": 10},
     {"model_key": "midjourney-action",   "display_name": "🖌️ MJ Action",   "gen_type": GenerationType.image, "credits": 3},

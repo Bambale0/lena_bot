@@ -2,29 +2,33 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from aiogram.types import LabeledPrice
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, video_service
 from api.image_service import ImageModel
 from api.miniapp_auth import get_miniapp_user
+from api.photo_prompt_service import generate_prompt_from_photo
 from api.video_service import VideoModel
-from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS, _KLING_PER_SEC
+from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
 from core.config import settings
 from db import repository as repo
-from api.photo_prompt_service import generate_prompt_from_photo
 from db.models import (
     GenerationType,
     ImageGenerationAction,
+    PaymentProvider,
     User,
 )
-
-MUSIC_CREDITS = 20  # cost per music generation
 from db.session import get_session
+
+MUSIC_MODEL_KEY = "suno/v4.5"
+DEFAULT_MUSIC_CREDITS = 20
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +45,268 @@ MAX_CONCURRENT = 6
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+def _fmt_amount(value: float) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def _clean_model_name(value: str) -> str:
+    cleaned = re.sub(r"^[^\wА-Яа-я]+\s*", "", value or "")
+    cleaned = re.sub(r"\s*·\s*(?:1K|2K|4K|720p|1080p|2160p|за сек)$", "", cleaned).strip()
+    return cleaned
+
+
+def _landing_models_payload(model_costs: list[Any]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {"image": [], "video": [], "music": []}
+    seen: dict[str, set[str]] = {"image": set(), "video": set(), "music": set()}
+    image_keys = {m.value for m in ImageModel}
+    video_keys = {m.value for m in VideoModel}
+
+    for mc in model_costs:
+        if mc.model_key in image_keys:
+            bucket = "image"
+        elif mc.model_key in video_keys:
+            bucket = "video"
+        elif getattr(mc, "gen_type", None) == GenerationType.music or mc.model_key == MUSIC_MODEL_KEY:
+            bucket = "music"
+        else:
+            continue
+        name = _clean_model_name(getattr(mc, "display_name", "") or getattr(mc, "model_key", ""))
+        if name and name not in seen[bucket]:
+            seen[bucket].add(name)
+            grouped[bucket].append(name)
+
+    if not grouped["music"]:
+        grouped["music"].append("Suno v4.5")
+
+    return grouped
+
+
+async def _resolve_music_credits(session: AsyncSession) -> float:
+    model_cost = await repo.get_model_cost(session, MUSIC_MODEL_KEY)
+    if model_cost and getattr(model_cost, "is_active", True):
+        return float(model_cost.credits)
+    return float(DEFAULT_MUSIC_CREDITS)
+
+
 def _kie_callback_url() -> str:
     params = {}
     if settings.KIE_WEBHOOK_SECRET:
         params["secret"] = settings.KIE_WEBHOOK_SECRET
     qs = f"?{urlencode(params)}" if params else ""
     return f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}{qs}"
+
+
+def _normalize_public_urls(*urls: str | None) -> list[str]:
+    normalized: list[str] = []
+    for raw in urls:
+        if not raw:
+            continue
+        if raw.startswith("blob:") or not raw.startswith("http"):
+            raise HTTPException(status_code=422, detail="Invalid reference URL — upload the image first")
+        normalized.append(raw)
+    return normalized
+
+
+def _normalize_mode(requested_mode: str | None, supported_modes: list[str]) -> str:
+    if not supported_modes:
+        return requested_mode or "text"
+    if requested_mode in supported_modes:
+        return requested_mode
+    if len(supported_modes) == 1:
+        return supported_modes[0]
+    raise HTTPException(
+        status_code=422,
+        detail=f"Unsupported mode for selected model. Allowed: {', '.join(supported_modes)}",
+    )
+
+
+def _normalize_choice(
+    value: str | None,
+    allowed: list[str],
+    *,
+    field_name: str,
+    default: str | None = None,
+) -> str | None:
+    if not allowed:
+        return None
+    if value is None:
+        return default or allowed[0]
+    if value not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported {field_name} for selected model. Allowed: {', '.join(allowed)}",
+        )
+    return value
+
+
+def _normalize_int_choice(
+    value: int | None,
+    allowed: list[int],
+    *,
+    field_name: str,
+    default: int | None = None,
+) -> int:
+    if not allowed:
+        return value if value is not None else (default or 0)
+    if value is None:
+        return default if default is not None else allowed[0]
+    if value not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported {field_name} for selected model. Allowed: {', '.join(str(item) for item in allowed)}",
+        )
+    return value
+
+
+def _normalize_video_resolution(model_key: str, resolution: str | None) -> str | None:
+    if resolution is None:
+        return None
+    if model_key == "kling-3.0/video":
+        aliases = {
+            "2K": "pro",
+            "720p": "std",
+            "1080p": "pro",
+            "2160p": "4K",
+        }
+        return aliases.get(resolution, resolution)
+    return resolution
+
+
+def _normalize_image_request(
+    *,
+    model_key: str,
+    reference_urls: list[str],
+    aspect_ratio: str | None,
+    quality: str | None,
+) -> tuple[str | None, str]:
+    caps: dict[str, Any] = IMAGE_CAPS.get(model_key, {})
+    modes = caps.get("modes", ["text"])
+    has_reference = bool(reference_urls)
+
+    if has_reference and "image" not in modes:
+        raise HTTPException(status_code=422, detail="Selected model does not support reference images")
+    if not has_reference and "text" not in modes:
+        raise HTTPException(status_code=422, detail="Selected model requires at least one reference image")
+
+    ratio_modes = caps.get("aspect_ratio_modes", modes)
+    allowed_ratios = caps.get("aspect_ratios", [])
+    normalized_ratio = aspect_ratio
+    if allowed_ratios:
+        uses_ratio = ("image" if has_reference else "text") in ratio_modes
+        if uses_ratio:
+            normalized_ratio = _normalize_choice(
+                aspect_ratio,
+                allowed_ratios,
+                field_name="aspect_ratio",
+            )
+        else:
+            normalized_ratio = None
+
+    quality_options = [value for value, _label in caps.get("quality_options", [])]
+    normalized_quality = quality or "basic"
+    if quality_options:
+        legacy_quality_aliases = {
+            "basic": "2K" if "2K" in quality_options else quality_options[0],
+            "high": "4K" if "4K" in quality_options else quality_options[-1],
+        }
+        normalized_quality = legacy_quality_aliases.get(normalized_quality, normalized_quality)
+        normalized_quality = str(
+            _normalize_choice(
+                normalized_quality,
+                quality_options,
+                field_name="quality",
+                default=quality_options[0],
+            )
+        )
+
+    return normalized_ratio, normalized_quality
+
+
+def _normalize_video_request(
+    *,
+    model_key: str,
+    mode: str,
+    duration: int,
+    aspect_ratio: str | None,
+    resolution: str | None,
+    image_url: str | None,
+    grok_mode: str | None,
+) -> dict[str, Any]:
+    caps: dict[str, Any] = VIDEO_CAPS.get(model_key, {})
+    supported_modes = caps.get("modes", ["text"])
+    normalized_mode = _normalize_mode(mode, supported_modes)
+    normalized_image_url = image_url if normalized_mode == "image" else None
+    if normalized_image_url:
+        _normalize_public_urls(normalized_image_url)
+    elif normalized_mode == "image":
+        raise HTTPException(status_code=422, detail="Selected mode requires image_url")
+
+    normalized_duration = _normalize_int_choice(
+        duration,
+        caps.get("duration_options", []),
+        field_name="duration",
+        default=duration,
+    )
+    normalized_resolution_input = _normalize_video_resolution(model_key, resolution)
+    normalized_resolution = _normalize_choice(
+        normalized_resolution_input,
+        caps.get("resolutions", []) if caps.get("has_resolution") else [],
+        field_name="resolution",
+    )
+    normalized_aspect_ratio = _normalize_choice(
+        aspect_ratio,
+        caps.get("aspect_ratios", []),
+        field_name="aspect_ratio",
+    )
+    mode_options = caps.get("mode_options", [])
+    normalized_grok_mode = grok_mode or "normal"
+    if mode_options:
+        normalized_grok_mode = str(
+            _normalize_choice(
+                normalized_grok_mode,
+                mode_options,
+                field_name="mode option",
+                default="normal" if "normal" in mode_options else mode_options[0],
+            )
+        )
+    else:
+        normalized_grok_mode = "normal"
+
+    return {
+        "mode": normalized_mode,
+        "duration": normalized_duration,
+        "aspect_ratio": normalized_aspect_ratio,
+        "resolution": normalized_resolution,
+        "image_url": normalized_image_url,
+        "grok_mode": normalized_grok_mode,
+    }
+
+
+def _is_per_second_video_model(caps: dict[str, Any]) -> bool:
+    return caps.get("billing_mode") == "per_second"
+
+
+def _video_total_credits(duration: int, rate_or_flat: float, *, is_per_second: bool) -> float:
+    if is_per_second:
+        return rate_or_flat * duration
+    return rate_or_flat
+
+
+async def _video_model_rate_info(
+    session: AsyncSession,
+    model_key: str,
+    caps: dict[str, Any],
+    fallback_credits: float,
+) -> tuple[bool, int | None]:
+    is_per_second = _is_per_second_video_model(caps)
+    if not is_per_second:
+        return False, None
+
+    resolutions = caps.get("resolutions") or []
+    reference_resolution = resolutions[0] if resolutions else None
+    variant_cost = await repo.resolve_video_model_cost(session, model_key, resolution=reference_resolution)
+    credits_per_sec = variant_cost.credits if variant_cost else fallback_credits
+    return True, int(credits_per_sec)
 
 
 # ── schemas ───────────────────────────────────────────────────────────────────
@@ -58,6 +318,7 @@ class UserProfile(BaseModel):
     full_name: str | None
     credits: int
     referral_code: str
+    referral_link: str
     referral_balance: float
 
 
@@ -68,6 +329,7 @@ class ModelInfo(BaseModel):
     modes: list[str]
     aspect_ratios: list[str]
     quality_options: list[dict[str, str]]
+    max_refs: int = 1
     counts: list[int]
     has_quality: bool
     is_per_second: bool = False
@@ -75,6 +337,7 @@ class ModelInfo(BaseModel):
     durations: list[int] = []
     resolutions: list[str] = []
     motion_controls: list[str] = []
+    mode_options: list[str] = []
 
 
 class GenerationOut(BaseModel):
@@ -158,6 +421,7 @@ async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
         full_name=user.full_name,
         credits=user.credits,
         referral_code=user.referral_code,
+        referral_link=f"https://t.me/{settings.BOT_USERNAME}?start={user.referral_code}",
         referral_balance=user.referral_balance,
     )
 
@@ -232,9 +496,10 @@ async def list_image_models(
             credits=mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
-            quality_options=[{"value": v, "label": l} for v, l in quality_raw],
+            quality_options=[{"value": value, "label": label} for value, label in quality_raw],
             counts=caps.get("counts", [1]),
             has_quality=bool(caps.get("has_quality")),
+            max_refs=int(caps.get("max_refs", 1) or 1),
         ))
     return result
 
@@ -252,16 +517,14 @@ async def list_video_models(
         if mc.model_key not in video_keys:
             continue
         caps: dict[str, Any] = VIDEO_CAPS.get(mc.model_key, {})
-        kling_rates = _KLING_PER_SEC.get(mc.model_key, {})
-        is_per_sec = bool(kling_rates)
-        credits_per_sec = min(kling_rates.values()) if kling_rates else None
+        is_per_sec, credits_per_sec = await _video_model_rate_info(session, mc.model_key, caps, mc.credits)
         result.append(ModelInfo(
             key=mc.model_key,
             display_name=mc.display_name,
-            credits=credits_per_sec if is_per_sec else mc.credits,
+            credits=credits_per_sec if is_per_sec and credits_per_sec is not None else mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
-            quality_options=[{"value": r, "label": r} for r in (caps.get("resolutions") or [])],
+            quality_options=[{"value": r, "label": (caps.get("resolution_labels", {}) or {}).get(r, r)} for r in (caps.get("resolutions") or [])],
             counts=[],
             has_quality=bool(caps.get("has_resolution")),
             is_per_second=is_per_sec,
@@ -269,8 +532,19 @@ async def list_video_models(
             durations=caps.get("duration_options", []),
             resolutions=caps.get("resolutions") or [],
             motion_controls=caps.get("motion_controls", []),
+            mode_options=caps.get("mode_options", []),
+            max_refs=int(caps.get("max_refs", 1) or 1),
         ))
     return result
+
+
+@router.get("/public/models")
+async def public_models_summary(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, list[str]]:
+    """Public model summary for the landing page."""
+    model_costs = await repo.get_all_model_costs(session)
+    return _landing_models_payload(model_costs)
 
 
 # ── image generation ──────────────────────────────────────────────────────────
@@ -292,9 +566,24 @@ async def create_image_generation(
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Unknown image model: {body.model!r}")
 
-    model_cost = await repo.resolve_image_model_cost(session, body.model, quality=body.quality)
+    all_refs = _normalize_public_urls(body.reference_url, *body.reference_urls)
+    caps: dict[str, Any] = IMAGE_CAPS.get(model.value, {})
+    normalized_ratio, normalized_quality = _normalize_image_request(
+        model_key=model.value,
+        reference_urls=all_refs,
+        aspect_ratio=body.aspect_ratio,
+        quality=body.quality,
+    )
+    model_cost = await repo.resolve_image_model_cost(session, body.model, quality=normalized_quality)
     if not model_cost:
         raise HTTPException(status_code=422, detail="Model not available")
+
+    max_refs = int(caps.get("max_refs", 1) or 1)
+    if len(all_refs) > max_refs:
+        raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
+    if body.count not in (caps.get("counts") or [1]):
+        raise HTTPException(status_code=422, detail="Unsupported count for selected model")
+    has_ref = bool(all_refs)
 
     if user.credits < model_cost.credits:
         raise HTTPException(
@@ -310,22 +599,18 @@ async def create_image_generation(
     if not ok:
         raise HTTPException(status_code=402, detail="Failed to spend credits")
 
-    if body.reference_url and (body.reference_url.startswith("blob:") or not body.reference_url.startswith("http")):
-        raise HTTPException(status_code=422, detail="Invalid reference URL — upload the image first")
-
     # Determine mode from reference presence
-    has_ref = bool(body.reference_url)
     image_session = await repo.create_image_session(
         session=session,
         user_id=user.id,
         model=body.model,
         mode="image" if has_ref else "text",
-        aspect_ratio=body.aspect_ratio,
-        quality=body.quality,
+        aspect_ratio=normalized_ratio,
+        quality=normalized_quality,
         count=body.count,
         base_prompt=body.prompt,
         reference_file_id=None,
-        reference_url=body.reference_url,
+        reference_url=all_refs[0] if all_refs else None,
     )
 
     gen = await repo.create_generation(
@@ -335,9 +620,7 @@ async def create_image_generation(
         action_type=ImageGenerationAction.initial,
     )
 
-    # Merge reference_url + reference_urls into a single list
     ref_urls: str | list[str] | None = None
-    all_refs = [u for u in ([body.reference_url] if body.reference_url else []) + list(body.reference_urls) if u and u.startswith("http")]
     if len(all_refs) == 1:
         ref_urls = all_refs[0]
     elif len(all_refs) > 1:
@@ -348,9 +631,9 @@ async def create_image_generation(
             model,
             body.prompt,
             image_url=ref_urls,
-            aspect_ratio=body.aspect_ratio,
+            aspect_ratio=normalized_ratio,
             n=body.count,
-            quality=body.quality,
+            quality=normalized_quality,
             callback_url=_kie_callback_url(),
         )
     except Exception as exc:
@@ -385,50 +668,66 @@ async def create_video_generation(
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Unknown video model: {body.model!r}")
 
+    normalized = _normalize_video_request(
+        model_key=body.model,
+        mode=body.mode,
+        duration=body.duration,
+        aspect_ratio=body.aspect_ratio,
+        resolution=body.resolution,
+        image_url=body.image_url,
+        grok_mode=body.grok_mode,
+    )
     model_cost = await repo.resolve_video_model_cost(
-        session, body.model, duration=body.duration, resolution=body.resolution,
+        session,
+        body.model,
+        duration=normalized["duration"],
+        resolution=normalized["resolution"],
     )
     if not model_cost:
         raise HTTPException(status_code=422, detail="Model not available")
 
-    if user.credits < model_cost.credits:
+    caps: dict[str, Any] = VIDEO_CAPS.get(body.model, {})
+    total_credits = _video_total_credits(
+        normalized["duration"],
+        model_cost.credits,
+        is_per_second=_is_per_second_video_model(caps),
+    )
+    image_url = normalized["image_url"]
+
+    if user.credits < total_credits:
         raise HTTPException(
             status_code=402,
-            detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}",
+            detail=f"Insufficient credits: need {total_credits}, have {user.credits}",
         )
 
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-    ok = await repo.spend_credits(session, user.id, model_cost.credits)
+    ok = await repo.spend_credits(session, user.id, total_credits)
     if not ok:
         raise HTTPException(status_code=402, detail="Failed to spend credits")
 
     gen = await repo.create_generation(
         session, user.id, body.model, GenerationType.video,
-        body.prompt, model_cost.credits,
+        body.prompt, total_credits,
     )
-
-    image_url = body.image_url if body.mode == "image" else None
-    if image_url and (image_url.startswith("blob:") or not image_url.startswith("http")):
-        raise HTTPException(status_code=422, detail="Invalid image URL — upload the image first")
 
     try:
         result = await video_service.generate_video(
             model,
             body.prompt,
             image_url=image_url,
-            duration=body.duration,
-            aspect_ratio=body.aspect_ratio,
-            resolution=body.resolution,
-            grok_mode=body.grok_mode,
+            duration=normalized["duration"],
+            aspect_ratio=normalized["aspect_ratio"],
+            resolution=normalized["resolution"],
+            grok_mode=normalized["grok_mode"],
             callback_url=_kie_callback_url(),
         )
     except Exception as exc:
         logger.error("miniapp video gen error user=%s: %s", user.id, exc)
         await repo.fail_generation(session, gen.id, str(exc))
-        await repo.add_credits(session, user.id, model_cost.credits)
+        await repo.add_credits(session, user.id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
@@ -448,23 +747,25 @@ async def create_music_generation(
     """Start Suno music generation. Returns immediately; poll /generations/{id}."""
     from api.music_service import create_music_task, register_miniapp_task
 
-    if user.credits < MUSIC_CREDITS:
+    music_credits = await _resolve_music_credits(session)
+
+    if user.credits < music_credits:
         raise HTTPException(
             status_code=402,
-            detail=f"Insufficient credits: need {MUSIC_CREDITS}, have {user.credits}",
+            detail=f"Insufficient credits: need {music_credits}, have {user.credits}",
         )
 
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-    ok = await repo.spend_credits(session, user.id, MUSIC_CREDITS)
+    ok = await repo.spend_credits(session, user.id, music_credits)
     if not ok:
         raise HTTPException(status_code=402, detail="Failed to spend credits")
 
     gen = await repo.create_generation(
-        session, user.id, "suno/v4.5", GenerationType.music,
-        body.prompt, MUSIC_CREDITS,
+        session, user.id, MUSIC_MODEL_KEY, GenerationType.music,
+        body.prompt, music_credits,
     )
 
     try:
@@ -472,7 +773,7 @@ async def create_music_generation(
     except Exception as exc:
         logger.error("miniapp music gen error user=%s: %s", user.id, exc)
         await repo.fail_generation(session, gen.id, str(exc))
-        await repo.add_credits(session, user.id, MUSIC_CREDITS)
+        await repo.add_credits(session, user.id, music_credits)
         raise HTTPException(status_code=502, detail="Music generation service error")
 
     await repo.update_generation_task(session, gen.id, task_id)
@@ -585,51 +886,119 @@ async def remix_feed_post(
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Unknown model: {body.model!r}")
 
-    model_cost = await repo.resolve_video_model_cost(session, body.model, duration=body.duration, resolution=body.resolution) \
-        if gen_type == "video" else await repo.resolve_image_model_cost(session, body.model, quality=body.quality or "basic")
+    normalized_video: dict[str, Any] | None = None
+    normalized_image_url: str | None = None
+    normalized_ratio = body.aspect_ratio
+    normalized_quality = body.quality or "basic"
+
+    if gen_type == "video":
+        fallback_image_url = body.image_url
+        if body.mode == "image" and not fallback_image_url:
+            fallback_image_url = source.result_url
+        normalized_video = _normalize_video_request(
+            model_key=body.model,
+            mode=body.mode,
+            duration=body.duration,
+            aspect_ratio=body.aspect_ratio,
+            resolution=body.resolution,
+            image_url=fallback_image_url,
+            grok_mode=body.grok_mode,
+        )
+        model_cost = await repo.resolve_video_model_cost(
+            session,
+            body.model,
+            duration=normalized_video["duration"],
+            resolution=normalized_video["resolution"],
+        )
+    else:
+        normalized_image_url = body.image_url
+        if body.mode == "image" and not normalized_image_url:
+            normalized_image_url = source.result_url
+        refs = _normalize_public_urls(normalized_image_url) if normalized_image_url else []
+        normalized_ratio, normalized_quality = _normalize_image_request(
+            model_key=body.model,
+            reference_urls=refs,
+            aspect_ratio=body.aspect_ratio,
+            quality=body.quality or "basic",
+        )
+        model_cost = await repo.resolve_image_model_cost(session, body.model, quality=normalized_quality)
+
     if not model_cost:
         raise HTTPException(status_code=422, detail="Model not available")
 
-    if user.credits < model_cost.credits:
-        raise HTTPException(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}")
+    total_credits = (
+        _video_total_credits(
+            normalized_video["duration"],
+            model_cost.credits,
+            is_per_second=_is_per_second_video_model(VIDEO_CAPS.get(body.model, {})),
+        )
+        if gen_type == "video"
+        else model_cost.credits
+    )
+
+    if user.credits < total_credits:
+        raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
 
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-    ok = await repo.spend_credits(session, user.id, model_cost.credits)
+    ok = await repo.spend_credits(session, user.id, total_credits)
     if not ok:
         raise HTTPException(status_code=402, detail="Failed to spend credits")
+
+    image_session_id: int | None = None
+    if gen_type == "image":
+        image_session = await repo.create_image_session(
+            session=session,
+            user_id=user.id,
+            model=body.model,
+            mode="image" if normalized_image_url else "text",
+            aspect_ratio=normalized_ratio,
+            quality=normalized_quality,
+            count=body.count,
+            base_prompt=source.prompt,
+            reference_url=normalized_image_url,
+        )
+        image_session_id = image_session.id
 
     from db.models import GenerationType as GT
     gen_type_enum = GT.video if gen_type == "video" else GT.image
     gen = await repo.create_generation(
         session, user.id, body.model, gen_type_enum,
-        source.prompt, model_cost.credits,
+        source.prompt, total_credits,
+        image_session_id=image_session_id,
+        parent_generation_id=source.id if gen_type == "image" else None,
+        action_type=ImageGenerationAction.remix if gen_type == "image" else None,
         source_feed_gen_id=gen_id,
     )
 
     try:
         if gen_type == "video":
             result = await video_service.generate_video(
-                model, source.prompt,
-                image_url=body.image_url if body.mode == "image" else None,
-                duration=body.duration, aspect_ratio=body.aspect_ratio,
-                resolution=body.resolution, grok_mode=body.grok_mode,
+                model,
+                source.prompt,
+                image_url=normalized_video["image_url"],
+                duration=normalized_video["duration"],
+                aspect_ratio=normalized_video["aspect_ratio"],
+                resolution=normalized_video["resolution"],
+                grok_mode=normalized_video["grok_mode"],
                 callback_url=_kie_callback_url(),
             )
         else:
             result = await image_service.generate_image(
-                img_model, source.prompt,
-                image_url=body.image_url if body.mode == "image" else None,
-                aspect_ratio=body.aspect_ratio, n=body.count,
-                quality=body.quality or "basic",
+                img_model,
+                source.prompt,
+                image_url=normalized_image_url,
+                aspect_ratio=normalized_ratio,
+                n=body.count,
+                quality=normalized_quality,
                 callback_url=_kie_callback_url(),
             )
     except Exception as exc:
         logger.error("feed remix error user=%s gen=%s: %s", user.id, gen_id, exc)
         await repo.fail_generation(session, gen.id, str(exc))
-        await repo.add_credits(session, user.id, model_cost.credits)
+        await repo.add_credits(session, user.id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
@@ -645,13 +1014,11 @@ async def get_feed_share_link(
     user: User = Depends(get_miniapp_user),
 ) -> dict:
     """Returns a shareable Telegram deeplink for this public post. Only the author can get it."""
-    from db.models import GenerationStatus
     gen = await repo.get_generation_by_id(session, gen_id)
     if not gen or gen.user_id != user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
     if not gen.is_public_feed:
         raise HTTPException(status_code=400, detail="Generation is not public yet — share to feed first")
-    from core.config import settings
     bot_username = settings.BOT_USERNAME if hasattr(settings, "BOT_USERNAME") else "apixbot"
     link = f"https://t.me/{bot_username}?start=feed_{gen_id}"
     return {"link": link, "gen_id": gen_id}
@@ -681,8 +1048,8 @@ async def list_prompts(
     _: User = Depends(get_miniapp_user),
 ) -> dict:
     """Paginated list of approved prompts. Optionally filter by category."""
-    from db.prompt_repository import get_approved_prompts, count_approved_prompts
     from db.models import PromptCategory
+    from db.prompt_repository import count_approved_prompts, get_approved_prompts
 
     cat = None
     if category:
@@ -722,8 +1089,8 @@ async def submit_prompt(
     user: User = Depends(get_miniapp_user),
 ) -> dict:
     """Submit a new prompt for moderation."""
-    from db.prompt_repository import create_prompt
     from db.models import PromptCategory
+    from db.prompt_repository import create_prompt
 
     try:
         cat = PromptCategory(body.category)
@@ -745,17 +1112,23 @@ async def submit_prompt(
 
 @router.get("/plans")
 async def list_plans(
+    response: Response,
     session: AsyncSession = Depends(get_session),
-    _: User = Depends(get_miniapp_user),
 ) -> list[dict]:
     """Active price plans."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     plans = await repo.get_active_price_plans(session)
     return [
         {
             "key": p.key,
-            "title": p.title,
+            "label": p.label,
+            "title": p.label,
             "credits": p.credits,
             "price_rub": p.price_rub,
+            "price_rub_display": f"{_fmt_amount(p.price_rub)}₽",
+            "price_stars": getattr(p, "price_stars", None) or max(1, int(p.price_rub / 10)),
             "price_usdt": round(p.price_rub / 90, 2),  # approximate
         }
         for p in plans
@@ -769,8 +1142,8 @@ async def topup_tbank(
     user: User = Depends(get_miniapp_user),
 ) -> dict:
     """Create a T-Bank payment invoice. Returns `pay_url` to redirect the user."""
-    from payments.tbank import create_payment as tbank_create_payment
     from db.models import PaymentProvider
+    from payments.tbank import create_payment as tbank_create_payment
 
     plan = await repo.get_price_plan_by_key(session, body.plan_key)
     if not plan:
@@ -794,6 +1167,51 @@ async def topup_tbank(
     return {"pay_url": payment.payment_url, "transaction_id": tx.id, "credits": plan.credits, "amount_rub": plan.price_rub}
 
 
+@router.post("/topup/stars")
+async def topup_stars(
+    body: TopupRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Create a Telegram Stars invoice link for the mini app."""
+    from main import bot
+
+    plan = await repo.get_price_plan_by_key(session, body.plan_key)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    stars = plan.price_stars or max(1, int(plan.price_rub / 10))
+    tx = await repo.create_transaction(
+        session=session,
+        user_id=user.id,
+        amount_rub=plan.price_rub,
+        credits=plan.credits,
+        provider=PaymentProvider.telegram_stars,
+        external_id=f"stars_pending:{user.id}:{plan.key}",
+    )
+
+    try:
+        invoice_link = await bot.create_invoice_link(
+            title=f"⭐ {plan.label}",
+            description=f"Пополнение {plan.label} · {plan.credits} 💋 · {stars} ⭐",
+            payload=f"stars:{tx.id}:{plan.key}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label=f"{plan.credits} credits", amount=stars)],
+        )
+    except Exception as exc:
+        logger.error("Stars invoice error user=%s: %s", user.id, exc)
+        raise HTTPException(status_code=502, detail="Payment service error")
+
+    return {
+        "invoice_link": invoice_link,
+        "transaction_id": tx.id,
+        "credits": plan.credits,
+        "amount_stars": stars,
+        "amount_rub": plan.price_rub,
+    }
+
+
 @router.post("/topup/crypto")
 async def topup_crypto(
     body: TopupRequest,
@@ -801,8 +1219,8 @@ async def topup_crypto(
     user: User = Depends(get_miniapp_user),
 ) -> dict:
     """Create a CryptoBot invoice. Returns `pay_url` to open in CryptoBot."""
-    from payments.cryptobot import create_invoice as crypto_create_invoice
     from db.models import PaymentProvider
+    from payments.cryptobot import create_invoice as crypto_create_invoice
 
     plan = await repo.get_price_plan_by_key(session, body.plan_key)
     if not plan:

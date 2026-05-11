@@ -5,13 +5,12 @@ import logging
 
 from aiogram import F, Router, Bot
 from aiogram.types import CallbackQuery, Message, LabeledPrice, PreCheckoutQuery
-from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb
 from db import repository as repo
-from db.models import PaymentProvider, Transaction, TransactionStatus, User
+from db.models import PaymentProvider, User
 
 logger = logging.getLogger(__name__)
 router = Router(name="stars_payment")
@@ -94,16 +93,13 @@ async def on_successful_payment(
     tx_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
     if not tx_id:
         return
-    await session.execute(
-        update(Transaction).where(Transaction.id == tx_id).values(
-            status=TransactionStatus.paid,
-            external_id=payment.telegram_payment_charge_id,
-        )
+    tx = await repo.confirm_transaction_by_id(
+        session,
+        tx_id,
+        external_id=payment.telegram_payment_charge_id,
     )
-    await session.commit()
-    tx = await repo.get_transaction_by_id(session, tx_id)
     if not tx:
-        await message.answer(t("error_generic", lang))
+        logger.info("Stars payment already processed or missing tx_id=%s", tx_id)
         return
     new_balance = await repo.add_credits(session, db_user.id, tx.credits)
     from main import _accrue_referral_commissions
