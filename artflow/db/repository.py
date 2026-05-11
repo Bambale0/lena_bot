@@ -8,8 +8,9 @@ from inspect import isawaitable
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import Date, cast, select, update, desc, func
+from sqlalchemy import Date, cast, select, update, desc, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from core.model_pricing import image_pricing_keys, video_pricing_keys
 from db.models import (
@@ -1069,6 +1070,26 @@ async def get_user_pending_withdrawal_total(session: AsyncSession, user_id: int)
         .where(
             ReferralWithdrawalRequest.user_id == user_id,
             ReferralWithdrawalRequest.status == WithdrawalStatus.pending,
+        )
+    )
+    return float(result.scalar_one())
+
+
+async def get_user_feed_remix_reward_credits(session: AsyncSession, user_id: int) -> float:
+    source_gen = aliased(Generation)
+    royalty_base = func.round(Generation.credits_spent * 0.05)
+    royalty_expr = case((royalty_base < 1, 1), else_=royalty_base)
+
+    result = await session.execute(
+        select(func.coalesce(func.sum(royalty_expr), 0.0))
+        .select_from(Generation)
+        .join(source_gen, Generation.source_feed_gen_id == source_gen.id)
+        .where(
+            source_gen.user_id == user_id,
+            Generation.status == GenerationStatus.done,
+            Generation.source_feed_gen_id.is_not(None),
+            Generation.user_id != user_id,
+            Generation.credits_spent > 0,
         )
     )
     return float(result.scalar_one())

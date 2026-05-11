@@ -35,6 +35,44 @@ def _welcome_text(lang: str) -> str:
     )
 
 
+def _stars_help_text(lang: str) -> str:
+    if lang == "en":
+        return (
+            "⭐ <b>Telegram Stars — quick setup</b>\n\n"
+            "• Stars work natively inside Telegram\n"
+            "• No separate bank/provider token is needed for Stars\n"
+            "• The bot must have a valid <code>BOT_TOKEN</code> and working webhook\n"
+            "• Invoices must be created in <code>XTR</code>\n\n"
+            "<b>Project files</b>\n"
+            "• full guide: <code>docs/telegram_stars_setup.md</code>\n"
+            "• deploy checklist: <code>docs/telegram_stars_deploy_checklist.md</code>\n"
+            "• smoke test: <code>scripts/smoke_stars.py</code>\n\n"
+            "<b>Quick flow</b>\n"
+            "1. Create/check bot in @BotFather\n"
+            "2. Set <code>BOT_TOKEN</code>\n"
+            "3. Raise webhook\n"
+            "4. Open top-up → Stars\n"
+            "5. Check invoice opens and credits arrive"
+        )
+    return (
+        "⭐ <b>Telegram Stars — быстрая инструкция</b>\n\n"
+        "• Stars работают прямо внутри Telegram\n"
+        "• Отдельный банк и provider token для Stars не нужны\n"
+        "• У бота должны быть валидный <code>BOT_TOKEN</code> и рабочий webhook\n"
+        "• Invoice должен создаваться в <code>XTR</code>\n\n"
+        "<b>Файлы проекта</b>\n"
+        "• полная инструкция: <code>docs/telegram_stars_setup.md</code>\n"
+        "• deploy-checklist: <code>docs/telegram_stars_deploy_checklist.md</code>\n"
+        "• smoke-проверка: <code>scripts/smoke_stars.py</code>\n\n"
+        "<b>Короткий путь</b>\n"
+        "1. Проверь бота в @BotFather\n"
+        "2. Укажи <code>BOT_TOKEN</code>\n"
+        "3. Подними webhook\n"
+        "4. Открой пополнение → Stars\n"
+        "5. Проверь, что invoice открывается, а 💋 начисляются"
+    )
+
+
 def _help_text(lang: str) -> str:
     if lang == "en":
         return (
@@ -137,6 +175,12 @@ async def cmd_menu(message: Message, db_user: User, state: FSMContext, session: 
 async def cmd_help(message: Message, db_user: User) -> None:
     lang = db_user.language or "ru"
     await message.answer(_help_text(lang), reply_markup=back_to_menu_kb())
+
+
+@router.message(Command("starshelp"))
+async def cmd_stars_help(message: Message, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    await message.answer(_stars_help_text(lang), reply_markup=back_to_menu_kb())
 
 
 @router.callback_query(F.data == "menu:main")

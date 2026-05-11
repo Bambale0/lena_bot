@@ -20,15 +20,32 @@ def _as_dict(value: Any) -> dict[str, Any]:
 def _nested_dicts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     data = _as_dict(payload.get("data"))
     info = _as_dict(payload.get("info"))
+    response = _as_dict(payload.get("response"))
     nested_payload = _as_dict(payload.get("payload"))
     data_payload = _as_dict(data.get("payload"))
     data_result = _as_dict(data.get("resultJson"))
     data_info = _as_dict(data.get("info"))          # Veo3.1: data.info.resultUrls
+    data_response = _as_dict(data.get("response"))  # Some image APIs: data.response.resultImageUrl
     info_result = _as_dict(info.get("resultJson"))
+    response_result = _as_dict(response.get("resultJson"))
     data_info_result = _as_dict(data_info.get("resultJson"))
+    data_response_result = _as_dict(data_response.get("resultJson"))
     payload_result = _as_dict(payload.get("resultJson"))
-    return [data, info, nested_payload, data_payload, data_result, data_info,
-            info_result, data_info_result, payload_result]
+    return [
+        data,
+        info,
+        response,
+        nested_payload,
+        data_payload,
+        data_result,
+        data_info,
+        data_response,
+        info_result,
+        response_result,
+        data_info_result,
+        data_response_result,
+        payload_result,
+    ]
 
 
 def extract_task_id(payload: dict[str, Any]) -> str | None:
@@ -89,6 +106,7 @@ def extract_result_urls(payload: dict[str, Any]) -> list[str]:
             [
                 source.get("result_urls"),
                 source.get("resultUrls"),
+                source.get("resultImageUrls"),
                 source.get("video_urls"),
                 source.get("videoUrls"),
                 source.get("image_urls"),
@@ -104,7 +122,17 @@ def extract_result_urls(payload: dict[str, Any]) -> list[str]:
             urls.append(item)
 
     for source in sources:
-        for key in ("video_url", "videoUrl", "image_url", "imageUrl", "url"):
+        for key in (
+            "result_url",
+            "resultUrl",
+            "result_image_url",
+            "resultImageUrl",
+            "video_url",
+            "videoUrl",
+            "image_url",
+            "imageUrl",
+            "url",
+        ):
             value = source.get(key)
             if isinstance(value, str) and value:
                 urls.append(value)

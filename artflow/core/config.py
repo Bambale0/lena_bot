@@ -65,7 +65,8 @@ class Settings(BaseSettings):
 
     # Credits
     WELCOME_BONUS_CREDITS: int = 15
-    REFERRAL_L1_CREDITS: int = 3   # бонус кредитами при регистрации реферала
+    REFERRAL_L1_CREDITS: int = 5   # бонус кредитами при регистрации реферала
+    REFERRAL_WITHDRAW_MIN_RUB: float = 1000.0
 
     # Реферальные комиссии с оплат (%)
     REFERRAL_COMMISSION_L1: float = 0.30

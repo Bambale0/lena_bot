@@ -103,6 +103,7 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
     l1, l2, l3 = await repo.count_user_referrals(session, db_user.id)
     withdrawals = await repo.get_user_withdrawal_requests(session, db_user.id, limit=3)
     balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
+    feed_remix_rewards = await repo.get_user_feed_remix_reward_credits(session, db_user.id)
     withdrawal_lines = []
     for request in withdrawals:
         withdrawal_lines.append(
@@ -117,7 +118,9 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
         + t("referral_link", lang, link=ref_link) + "\n\n"
         + t("referral_stats", lang, l1=l1, l2=l2, l3=l3) + "\n\n"
         + t("referral_earned", lang, amount=earned) + "\n"
-        + t("referral_available", lang, amount=available)
+        + t("referral_available", lang, amount=available) + "\n"
+        + t("referral_withdraw_min", lang, amount=settings.REFERRAL_WITHDRAW_MIN_RUB) + "\n"
+        + t("referral_feed_remix_rewards", lang, amount=feed_remix_rewards)
         + (("\n" + t("referral_pending_withdrawals", lang, amount=pending)) if pending > 0 else "")
         + "\n\n"
         + t("referral_conditions", lang,
@@ -142,16 +145,17 @@ async def cb_referral_withdraw(
     lang = db_user.language or "ru"
     balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
     available = balance_snapshot.available_to_withdraw if balance_snapshot else 0.0
-    if available <= 0:
+    min_amount = settings.REFERRAL_WITHDRAW_MIN_RUB
+    if available + 1e-9 < min_amount:
         await call.message.answer(  # type: ignore[union-attr]
-            t("withdraw_unavailable", lang),
+            t("withdraw_unavailable", lang, min_amount=min_amount),
             reply_markup=back_to_menu_kb(),
         )
         await call.answer()
         return
     await state.set_state(WithdrawalFSM.amount)
     await call.message.answer(  # type: ignore[union-attr]
-        t("withdraw_title", lang) + "\n\n" + t("withdraw_amount_prompt", lang, available=available),
+        t("withdraw_title", lang) + "\n\n" + t("withdraw_amount_prompt", lang, available=available, min_amount=min_amount),
         reply_markup=back_to_menu_kb(),
     )
     await call.answer()
@@ -173,6 +177,10 @@ async def handle_withdraw_amount(
         return
     if amount <= 0:
         await message.answer(t("withdraw_amount_zero", lang), reply_markup=back_to_menu_kb())
+        return
+    min_amount = settings.REFERRAL_WITHDRAW_MIN_RUB
+    if amount + 1e-9 < min_amount:
+        await message.answer(t("withdraw_amount_min", lang, min_amount=min_amount), reply_markup=back_to_menu_kb())
         return
     balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
     available = balance_snapshot.available_to_withdraw if balance_snapshot else 0.0

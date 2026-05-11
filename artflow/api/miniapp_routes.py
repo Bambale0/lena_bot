@@ -422,6 +422,7 @@ class UserProfile(BaseModel):
     referral_code: str
     referral_link: str
     referral_balance: float
+    referral_withdraw_min_rub: float
 
 
 class ModelInfo(BaseModel):
@@ -528,6 +529,7 @@ async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
         referral_code=user.referral_code,
         referral_link=f"https://t.me/{settings.BOT_USERNAME}?start={user.referral_code}",
         referral_balance=user.referral_balance,
+        referral_withdraw_min_rub=settings.REFERRAL_WITHDRAW_MIN_RUB,
     )
 
 
@@ -1021,13 +1023,18 @@ async def remix_feed_post(
             resolution=normalized_video["resolution"],
         )
     else:
-        normalized_image_url = body.image_url
-        if body.mode == "image" and not normalized_image_url:
-            normalized_image_url = source.result_url
-        refs = _normalize_public_urls(normalized_image_url) if normalized_image_url else []
+        image_refs = _normalize_public_urls(
+            source.result_url if body.mode == "image" else None,
+            body.image_url,
+            *(body.reference_urls or []),
+        )
+        if image_refs:
+            normalized_image_url = image_refs[0] if len(image_refs) == 1 else image_refs
+        else:
+            normalized_image_url = None
         normalized_ratio, normalized_quality = _normalize_image_request(
             model_key=body.model,
-            reference_urls=refs,
+            reference_urls=image_refs,
             aspect_ratio=body.aspect_ratio,
             quality=body.quality or "basic",
         )

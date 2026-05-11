@@ -61,23 +61,31 @@ _RU = {
     "topup_crypto_desc": "Тариф: {label}\nСумма: <b>{amount} USDT</b>\n\nНажми кнопку для оплаты в CryptoBot.\n<i>После оплаты 💋 зачислятся автоматически.</i>",
 
     # Рефералы
-    "referral_title": "👥 <b>Реферальная программа</b>",
-    "referral_link": "Твоя ссылка:\n<code>{link}</code>",
+    "referral_title": "👥 <b>Партнёрская программа</b>",
+    "referral_link": "Вот твоя ссылка — можешь просто отправить её друзьям:\n<code>{link}</code>",
     "referral_stats": (
-        "<b>Твои рефералы:</b>\n"
-        "• L1 прямые: <b>{l1}</b>\n"
-        "• L2: <b>{l2}</b>\n"
-        "• L3: <b>{l3}</b>"
+        "<b>Сейчас по приглашениям:</b>\n"
+        "• Прямые друзья (L1): <b>{l1}</b>\n"
+        "• Второй уровень (L2): <b>{l2}</b>\n"
+        "• Третий уровень (L3): <b>{l3}</b>"
     ),
-    "referral_earned": "💰 <b>Заработано: {amount:.2f}₽</b>",
-    "referral_available": "💸 <b>Доступно к выводу: {amount:.2f}₽</b>",
-    "referral_pending_withdrawals": "⏳ В ожидании вывода: {amount:.2f}₽",
+    "referral_earned": "💰 <b>Всего заработано: {amount:.2f}₽</b>",
+    "referral_available": "💸 <b>Можно вывести сейчас: {amount:.2f}₽</b>",
+    "referral_feed_remix_rewards": "✨ <b>С повторов из ленты заработано: {amount:.0f} 💋</b>",
+    "referral_withdraw_min": "🏦 <b>Минимальный вывод: {amount:.0f}₽</b>",
+    "referral_pending_withdrawals": "⏳ Уже в обработке на вывод: {amount:.2f}₽",
     "referral_conditions": (
-        "<b>Условия:</b>\n"
-        "• Бонус за реферала: +{bonus} 💋\n"
-        "• Комиссия с оплат L1: {l1_pct}%\n"
-        "• Комиссия с оплат L2: {l2_pct}%\n"
-        "• Комиссия с оплат L3: {l3_pct}%"
+        "<b>Как это работает:</b>\n"
+        "• Отправляешь другу свою ссылку приглашения\n"
+        "• Когда человек впервые приходит по ней в бота — ты получаешь +{bonus} 💋\n"
+        "• L1 — это люди, которых пригласил лично ты\n"
+        "• L2 — люди, которых пригласили твои L1\n"
+        "• L3 — люди, которых пригласили твои L2\n"
+        "• Если кто-то из этой цепочки пополняет баланс, тебе приходит комиссия:\n"
+        "  — {l1_pct}% с оплат друзей L1\n"
+        "  — {l2_pct}% с оплат друзей L2\n"
+        "  — {l3_pct}% с оплат друзей L3\n"
+        "• Эти деньги копятся отдельно на партнёрском балансе — потом их можно вывести"
     ),
     "referral_bonus_received": (
         "🎉 По твоей ссылке пришёл новый пользователь!\n"
@@ -92,13 +100,15 @@ _RU = {
     "withdraw_title": "💸 <b>Заявка на вывод</b>",
     "withdraw_amount_prompt": (
         "Введи сумму в рублях, которую нужно вывести.\n"
+        "Минимальная сумма вывода: <b>{min_amount:.0f}₽</b>\n"
         "Сейчас доступно: <b>{available:.2f}₽</b>\n"
         "Например: <code>1500</code>"
     ),
     "withdraw_amount_invalid": "Введи сумму числом, например: <code>1500</code>",
     "withdraw_amount_zero": "Сумма должна быть больше нуля.",
     "withdraw_amount_exceeds": "Недостаточно доступного реферального баланса. Сейчас доступно: <b>{available:.2f}₽</b>.",
-    "withdraw_unavailable": "Сейчас вывод недоступен: на реферальном балансе нет свободных средств.",
+    "withdraw_amount_min": "Минимальная сумма вывода — <b>{min_amount:.0f}₽</b>.",
+    "withdraw_unavailable": "Сейчас вывод недоступен: для заявки нужно минимум <b>{min_amount:.0f}₽</b> на реферальном балансе.",
     "withdraw_details_prompt": "Теперь отправь реквизиты для выплаты одним сообщением.\n\nНапример: банк + номер телефона / карта / USDT-кошелёк.",
     "withdraw_details_short": "Реквизиты слишком короткие. Отправь банк/номер/кошелёк подробнее.",
     "withdraw_created": (
@@ -254,23 +264,31 @@ _EN = {
     "topup_crypto_desc": "Plan: {label}\nAmount: <b>{amount} USDT</b>\n\nTap the button to pay via CryptoBot.\n<i>will be added automatically after payment.</i>",
 
     # Referrals
-    "referral_title": "👥 <b>Referral Program</b>",
-    "referral_link": "Your link:\n<code>{link}</code>",
+    "referral_title": "👥 <b>Partner Program</b>",
+    "referral_link": "Here is your link — you can just send it to friends:\n<code>{link}</code>",
     "referral_stats": (
-        "<b>Your referrals:</b>\n"
-        "• L1 direct: <b>{l1}</b>\n"
-        "• L2: <b>{l2}</b>\n"
-        "• L3: <b>{l3}</b>"
+        "<b>Your invite stats:</b>\n"
+        "• Direct friends (L1): <b>{l1}</b>\n"
+        "• Second level (L2): <b>{l2}</b>\n"
+        "• Third level (L3): <b>{l3}</b>"
     ),
-    "referral_earned": "💰 <b>Earned: {amount:.2f}₽</b>",
-    "referral_available": "💸 <b>Available to withdraw: {amount:.2f}₽</b>",
-    "referral_pending_withdrawals": "⏳ Pending withdrawals: {amount:.2f}₽",
+    "referral_earned": "💰 <b>Total earned: {amount:.2f}₽</b>",
+    "referral_available": "💸 <b>Ready to withdraw: {amount:.2f}₽</b>",
+    "referral_feed_remix_rewards": "✨ <b>Earned from feed reuses: {amount:.0f} 💋</b>",
+    "referral_withdraw_min": "🏦 <b>Minimum withdrawal: {amount:.0f}₽</b>",
+    "referral_pending_withdrawals": "⏳ Already being processed: {amount:.2f}₽",
     "referral_conditions": (
-        "<b>Terms:</b>\n"
-        "• Bonus per referral: +{bonus} 💋\n"
-        "• L1 payment commission: {l1_pct}%\n"
-        "• L2 payment commission: {l2_pct}%\n"
-        "• L3 payment commission: {l3_pct}%"
+        "<b>How it works:</b>\n"
+        "• You send your invite link to a friend\n"
+        "• When a person opens the bot through it for the first time, you get +{bonus} 💋\n"
+        "• L1 = people invited directly by you\n"
+        "• L2 = people invited by your L1\n"
+        "• L3 = people invited by your L2\n"
+        "• If someone in this chain tops up, you receive a commission:\n"
+        "  — {l1_pct}% from L1 friends' payments\n"
+        "  — {l2_pct}% from L2 friends' payments\n"
+        "  — {l3_pct}% from L3 friends' payments\n"
+        "• This money is stored separately in your partner balance and can be withdrawn later"
     ),
     "referral_bonus_received": (
         "🎉 A new user joined via your link!\n"
@@ -285,13 +303,15 @@ _EN = {
     "withdraw_title": "💸 <b>Withdrawal Request</b>",
     "withdraw_amount_prompt": (
         "Enter the amount in rubles you want to withdraw.\n"
+        "Minimum withdrawal amount: <b>{min_amount:.0f}₽</b>\n"
         "Available now: <b>{available:.2f}₽</b>\n"
         "Example: <code>1500</code>"
     ),
     "withdraw_amount_invalid": "Please enter a number, e.g. <code>1500</code>",
     "withdraw_amount_zero": "Amount must be greater than zero.",
     "withdraw_amount_exceeds": "Not enough available referral balance. Available now: <b>{available:.2f}₽</b>.",
-    "withdraw_unavailable": "Withdrawal is unavailable right now: there are no free referral funds on your balance.",
+    "withdraw_amount_min": "Minimum withdrawal amount is <b>{min_amount:.0f}₽</b>.",
+    "withdraw_unavailable": "Withdrawal is unavailable right now: you need at least <b>{min_amount:.0f}₽</b> on your referral balance.",
     "withdraw_details_prompt": "Now send your payout details in one message.\n\nExample: bank + phone number / card / USDT wallet.",
     "withdraw_details_short": "Details are too short. Please provide bank/account/wallet info.",
     "withdraw_created": (

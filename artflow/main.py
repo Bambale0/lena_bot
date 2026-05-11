@@ -74,6 +74,7 @@ async def _set_bot_commands(bot: Bot) -> None:
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="menu", description="Открыть меню"),
         BotCommand(command="help", description="Помощь"),
+        BotCommand(command="starshelp", description="Telegram Stars"),
         BotCommand(command="assistant", description="AI-ассистент"),
         BotCommand(command="feed", description="Лента работ"),
         BotCommand(command="prompts", description="Библиотека промптов"),

@@ -13,6 +13,31 @@ def test_extract_result_urls_deduplicates_ordered_urls() -> None:
     assert extract_result_urls(payload) == ["https://a.test/1.png", "https://a.test/2.png"]
 
 
+def test_extract_result_urls_supports_result_image_url_callback_shape() -> None:
+    payload = {
+        "code": 200,
+        "data": {
+            "taskId": "task_seedream_1",
+            "info": {
+                "originImageUrl": "https://a.test/original.png",
+                "resultImageUrl": "https://a.test/result.png",
+            },
+        },
+    }
+    assert extract_result_urls(payload) == ["https://a.test/result.png"]
+
+
+def test_is_success_true_for_result_image_url_callback_shape() -> None:
+    payload = {
+        "code": 200,
+        "data": {
+            "taskId": "task_seedream_1",
+            "info": {"resultImageUrl": "https://a.test/result.png"},
+        },
+    }
+    assert is_success(payload) is True
+
+
 def test_is_success_false_for_failed_state() -> None:
     assert is_success({"code": 200, "data": {"state": "failed"}}) is False
 

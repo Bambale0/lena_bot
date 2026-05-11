@@ -13,6 +13,7 @@ const fallbackUser = {
   referral_balance: 0,
   referral_code: "",
   referral_link: "",
+  referral_withdraw_min_rub: 1000,
 };
 
 const fallbackImageModels = [];
@@ -348,6 +349,7 @@ function ProfileStrip({ user, historyCount, setScreen, setTopup }) {
         </div>
         <div><b>{historyCount}</b><span>работ</span></div>
         <div><b>{user.referral_balance || 0}</b><span>реф ₽</span></div>
+        <div><b>{user.referral_withdraw_min_rub || 1000}₽</b><span>мин. вывод</span></div>
         <div onClick={() => setTopup(true)} style={{ cursor: "pointer" }}>
           <b>+</b><span>пополнить</span>
         </div>
@@ -1321,6 +1323,11 @@ function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolved
         <div><b>{user.credits}</b><span>токены</span></div>
         <div><b>{history.length}</b><span>работ</span></div>
         <div><b>{user.referral_balance || 0}</b><span>реф ₽</span></div>
+      </div>
+
+      <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 13, lineHeight: 1.45 }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>👥 Партнёрка</div>
+        <div style={{ color: "var(--text-soft)" }}>Минимальная сумма вывода: <b style={{ color: "var(--text-main)" }}>{user.referral_withdraw_min_rub || 1000}₽</b></div>
       </div>
 
       <button
