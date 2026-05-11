@@ -13,68 +13,68 @@ from db.models import ModelCost
 DEFAULT_MOTION_CONTROLS = ["auto", "pan_left", "pan_right", "zoom_in", "zoom_out", "orbit", "dolly_in", "dolly_out", "handheld", "cinematic"]
 
 VIDEO_CAPS: dict[str, dict] = {
-    VideoModel.KLING_26_T2V: {
+    "kling-2.6/text-to-video": {
         "modes": ["text"],
         "duration_options": [5, 10],
         "aspect_ratios": ["1:1", "16:9", "9:16"],
         "has_resolution": False,
     },
-    VideoModel.KLING_26_I2V: {
+    "kling-2.6/image-to-video": {
         "modes": ["image"],
         "duration_options": [5, 10],
         "aspect_ratios": [],
         "has_resolution": False,
     },
-    VideoModel.KLING_26_MOTION: {
+    "kling-2.6/motion-control": {
         "modes": ["motion"],
         "duration_options": [],
         "aspect_ratios": [],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
     },
-    VideoModel.KLING_30: {
+    "kling-3.0/video": {
         "modes": ["text", "image"],
         "duration_options": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         "aspect_ratios": ["16:9", "9:16", "1:1"],
         "has_resolution": True,
         "resolutions": ["2K", "4K"],
     },
-    VideoModel.KLING_30_MOTION: {
+    "kling-3.0/motion-control": {
         "modes": ["motion"],
         "duration_options": [],
         "aspect_ratios": [],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
     },
-    VideoModel.WAN_27_T2V: {
+    "wan/2-7-text-to-video": {
         "modes": ["text"],
         "duration_options": [2, 3, 5, 8, 10, 12, 15],
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
     },
-    VideoModel.WAN_27_I2V: {
+    "wan/2-7-image-to-video": {
         "modes": ["image"],
         "duration_options": [2, 3, 5, 8, 10, 12, 15],
         "aspect_ratios": [],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
     },
-    VideoModel.SEEDANCE_2: {
+    "bytedance/seedance-2": {
         "modes": ["text", "image"],
         "duration_options": [3, 5, 8, 10, 15],
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
         "has_resolution": True,
         "resolutions": ["480p", "720p", "1080p"],
     },
-    VideoModel.SEEDANCE_2_FAST: {
+    "bytedance/seedance-2-fast": {
         "modes": ["text", "image"],
         "duration_options": [3, 5, 8, 10, 15],
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
         "has_resolution": True,
         "resolutions": ["480p", "720p"],
     },
-    VideoModel.GROK_T2V: {
+    "grok-imagine/text-to-video": {
         "modes": ["text"],
         "duration_options": [6, 10, 15, 20, 30],
         "aspect_ratios": ["2:3", "3:2", "1:1", "16:9", "9:16"],
@@ -82,7 +82,7 @@ VIDEO_CAPS: dict[str, dict] = {
         "resolutions": ["480p", "720p"],
         "mode_options": ["fun", "normal", "spicy"],
     },
-    VideoModel.GROK_I2V: {
+    "grok-imagine/image-to-video": {
         "modes": ["image"],
         "duration_options": [6, 10, 15, 20, 30],
         "aspect_ratios": ["2:3", "3:2", "1:1", "16:9", "9:16"],
@@ -90,35 +90,35 @@ VIDEO_CAPS: dict[str, dict] = {
         "resolutions": ["480p", "720p"],
         "mode_options": ["fun", "normal"],
     },
-    VideoModel.HAPPYHORSE_T2V: {
+    "happyhorse/text-to-video": {
         "modes": ["text"],
         "duration_options": [3, 5, 8, 10, 12, 15],
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
     },
-    VideoModel.HAPPYHORSE_I2V: {
+    "happyhorse/image-to-video": {
         "modes": ["image"],
         "duration_options": [3, 5, 8, 10, 12, 15],
         "aspect_ratios": [],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
     },
-    VideoModel.VEO_3_FAST: {
+    "veo3_fast": {
         "modes": ["text", "image"],
         "duration_options": [5, 10, 15],
         "aspect_ratios": ["16:9", "9:16"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
     },
-    VideoModel.VEO_3: {
+    "veo3": {
         "modes": ["text", "image"],
         "duration_options": [5, 10, 15],
         "aspect_ratios": ["16:9", "9:16"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
     },
-    VideoModel.VEO_3_LITE: {
+    "veo3_lite": {
         "modes": ["text", "image"],
         "duration_options": [5, 10, 15],
         "aspect_ratios": ["16:9", "9:16"],
@@ -369,18 +369,18 @@ VIDEO_GROUP_TITLES: dict[str, str] = {
 
 # Per-second rates for Kling models (cheapest resolution first)
 _KLING_PER_SEC: dict[str, dict[str, int]] = {
-    VideoModel.KLING_26_T2V:    {"720p": 5, "1080p": 7},
-    VideoModel.KLING_26_I2V:    {"720p": 6, "1080p": 8},
-    VideoModel.KLING_26_MOTION: {"720p": 7, "1080p": 9},
-    VideoModel.KLING_30:        {"2K": 8, "4K": 10},
-    VideoModel.KLING_30_MOTION: {"2K": 9, "4K": 11},
+    "kling-2.6/text-to-video":    {"720p": 5, "1080p": 7},
+    "kling-2.6/image-to-video":    {"720p": 6, "1080p": 8},
+    "kling-2.6/motion-control": {"720p": 7, "1080p": 9},
+    "kling-3.0/video":        {"2K": 8, "4K": 10},
+    "kling-3.0/motion-control": {"2K": 9, "4K": 11},
 }
 _KLING_BASE_RATE: dict[str, int] = {k: min(v.values()) for k, v in _KLING_PER_SEC.items()}
 
 
 def _model_button(mc: ModelCost, prefix: str) -> InlineKeyboardButton:
     base_rate = _KLING_BASE_RATE.get(mc.model_key)
-    price_txt = f"от {base_rate} 💋/сек" if base_rate else f"{mc.credits} 💋"
+    price_txt = f"от {base_rate} cr/сек" if base_rate else f"{mc.credits} cr"
     return InlineKeyboardButton(
         text=f"{mc.display_name} · {price_txt}",
         callback_data=f"{prefix}:{mc.model_key}",
@@ -404,7 +404,7 @@ def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
             and mc.model_key not in HIDDEN_IMAGE_MODELS
         ):
             desc = IMAGE_MODEL_DESC.get(mc.model_key, "")
-            label = f"{mc.display_name} · {mc.credits} 💋"
+            label = f"{mc.display_name} · {mc.credits} cr"
             builder.row(
                 InlineKeyboardButton(
                     text=label,
@@ -702,10 +702,10 @@ def video_params_kb(
     kling_rates = _KLING_PER_SEC.get(model_key, {})
     if kling_rates and dur and res and res in kling_rates:
         rate = kling_rates[res]
-        next_text = f"▶️ Далее · {dur} сек × {rate} = {dur * rate} 💋"
+        next_text = f"▶️ Далее · {dur} сек × {rate} = {dur * rate} cr"
     elif kling_rates and dur:
         rate = min(kling_rates.values())
-        next_text = f"▶️ Далее · {dur} сек × от {rate} = от {dur * rate} 💋"
+        next_text = f"▶️ Далее · {dur} сек × от {rate} = от {dur * rate} cr"
     else:
         next_text = "▶️ Далее: Промпт"
 

@@ -16,7 +16,7 @@ def main_menu_kb(
     )
     if balance is not None:
         builder.row(
-            InlineKeyboardButton(text=f"💋 Баланс: {balance}", callback_data="menu:balance"),
+            InlineKeyboardButton(text=f"Баланс: {balance}", callback_data="menu:balance"),
         )
     if has_active_image_session:
         builder.row(
@@ -31,13 +31,9 @@ def main_menu_kb(
     )
     builder.row(
         InlineKeyboardButton(text="🔥 Лента", callback_data="menu:feed"),
-        InlineKeyboardButton(text="👑 Топ дня", callback_data="menu:top_day"),
+        InlineKeyboardButton(text="📚 Библиотека", callback_data="menu:prompts"),
     )
     builder.row(
-        InlineKeyboardButton(text="🧠 Midjourney", callback_data="menu:mj"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="📚 Библиотека промптов", callback_data="menu:prompts"),
         InlineKeyboardButton(text="📋 История", callback_data="menu:history"),
     )
     builder.row(
@@ -49,6 +45,7 @@ def main_menu_kb(
     )
     if is_admin:
         builder.row(InlineKeyboardButton(text="👑 Админ", callback_data="menu:admin"))
+    builder.row(InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu:settings"))
     return builder.as_markup()
 
 

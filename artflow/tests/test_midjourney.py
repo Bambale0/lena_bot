@@ -55,7 +55,7 @@ async def test_cb_bot_type() -> None:
 async def test_cb_speed_insufficient_credits() -> None:
     call = make_callback(data="mj_sp:fast")
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=5)
+    mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_cost = SimpleNamespace(credits=10, display_name="MJ Standard")
     with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
         await midjourney.cb_speed(call, AsyncMock(), AsyncMock(), mock_db_user)
@@ -69,7 +69,7 @@ async def test_cb_speed_sufficient_credits() -> None:
     call = make_callback(data="mj_sp:fast")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=500)
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     mock_cost = SimpleNamespace(credits=10, display_name="MJ Standard")
     mock_state = AsyncMock()
     with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
@@ -124,7 +124,7 @@ async def test_handle_mj_reference_photo() -> None:
 async def test_handle_imagine_prompt_success() -> None:
     msg = make_message(text="/imagine a beautiful cat")
     msg.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=500, username="test", full_name="Test")
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test")
     mock_state = AsyncMock()
     mock_state.get_data = AsyncMock(return_value={
         "bot_type": MJBotType.MIDJOURNEY,
@@ -152,7 +152,7 @@ async def test_handle_imagine_prompt_success() -> None:
 async def test_handle_imagine_prompt_insufficient_credits() -> None:
     msg = make_message(text="/imagine a cat")
     msg.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=5)
+    mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_state = AsyncMock()
     mock_state.get_data = AsyncMock(return_value={"credits": 10})
     with patch("bot.handlers.midjourney.repo", AsyncMock(spend_credits=AsyncMock(return_value=False))):
@@ -179,7 +179,7 @@ async def test_cb_mj_action_invalid_index() -> None:
 async def test_cb_blend_start_insufficient_credits() -> None:
     call = make_callback(data="mj:blend")
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=5)
+    mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_cost = SimpleNamespace(credits=15, display_name="MJ Blend")
     with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
         await midjourney.cb_blend_start(call, AsyncMock(), AsyncMock(), mock_db_user)
@@ -193,7 +193,7 @@ async def test_cb_blend_start_sufficient() -> None:
     call = make_callback(data="mj:blend")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=500)
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     mock_cost = SimpleNamespace(credits=12, display_name="MJ Blend")
     with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
         await midjourney.cb_blend_start(call, AsyncMock(), AsyncMock(), mock_db_user)
@@ -232,7 +232,7 @@ async def test_cb_describe_start_success() -> None:
     assert call.message is not None
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=500)
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     mock_cost = SimpleNamespace(credits=5, display_name="MJ Describe")
     with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
         await midjourney.cb_describe_start(call, AsyncMock(), AsyncMock(), mock_db_user)
@@ -258,7 +258,7 @@ async def test_cb_mj_video_start_success() -> None:
     assert call.message is not None
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=500)
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     mock_cost = SimpleNamespace(credits=15, display_name="MJ Video")
     with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
         await midjourney.cb_mj_video_start(call, AsyncMock(), AsyncMock(), mock_db_user)
@@ -270,7 +270,7 @@ async def test_cb_mj_video_start_success() -> None:
 async def test_cb_mj_video_start_insufficient_credits() -> None:
     call = make_callback(data="mj:video")
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=5)
+    mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_cost = SimpleNamespace(credits=15, display_name="MJ Video")
     with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
         await midjourney.cb_mj_video_start(call, AsyncMock(), AsyncMock(), mock_db_user)
@@ -299,7 +299,7 @@ async def test_cb_video_skip_prompt() -> None:
     mock_state = AsyncMock()
     mock_state.get_data = AsyncMock(return_value={"video_credits": 15, "video_image_url": "https://img.test/1.png"})
     with patch("bot.handlers.midjourney._submit_mj_video", new_callable=AsyncMock) as mock_submit:
-        await midjourney.cb_video_skip_prompt(call, mock_state, AsyncMock(), SimpleNamespace(id=42, credits=500), AsyncMock())
+        await midjourney.cb_video_skip_prompt(call, mock_state, AsyncMock(), SimpleNamespace(id=42, credits=500, language="ru"), AsyncMock())
         mock_submit.assert_awaited_once()
 
 
@@ -334,5 +334,5 @@ async def test_handle_video_prompt_text() -> None:
     mock_session = AsyncMock()
 
     with patch("bot.handlers.midjourney._submit_mj_video", new_callable=AsyncMock) as mock_submit:
-        await midjourney.handle_video_prompt(msg, mock_state, mock_session, SimpleNamespace(id=42, credits=500), mock_bot)
+        await midjourney.handle_video_prompt(msg, mock_state, mock_session, SimpleNamespace(id=42, credits=500, language="ru"), mock_bot)
         mock_submit.assert_awaited_once()

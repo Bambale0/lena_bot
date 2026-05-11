@@ -17,7 +17,7 @@ def db_user() -> SimpleNamespace:
         id=42, tg_id=123456, credits=500, username="testuser",
         full_name="Test User", is_subscribed=True,
         subscription_until=MagicMock(),
-        referral_code="abc123", referral_balance=10.5,
+        referral_code="abc123", referral_balance=10.5, language="ru",
     )
 
 
@@ -31,7 +31,7 @@ async def test_cb_balance_shows_screen(db_user) -> None:
     await balance.cb_balance(call, db_user)
     call.message.edit_text.assert_awaited_once()
     args = call.message.edit_text.call_args
-    assert "Поцелуи" in args[0][0]
+    assert "cr" in args[0][0]
 
 
 # ── menu:referral ────────────────────────────────────────────────────────────
@@ -52,43 +52,43 @@ async def test_cb_referral_shows_screen(db_user) -> None:
 # ── referral:withdraw ────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_cb_referral_withdraw() -> None:
+async def test_cb_referral_withdraw(db_user) -> None:
     call = make_callback(data="referral:withdraw")
     call.message.answer = AsyncMock()
     call.answer = AsyncMock()
     mock_state = AsyncMock()
-    await balance.cb_referral_withdraw(call, mock_state)
+    await balance.cb_referral_withdraw(call, mock_state, db_user)
     mock_state.set_state.assert_called_with(balance.WithdrawalFSM.amount)
 
 
 # ── WithdrawalFSM.amount ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_handle_withdraw_amount_valid() -> None:
+async def test_handle_withdraw_amount_valid(db_user) -> None:
     msg = make_message(text="1500")
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
-    await balance.handle_withdraw_amount(msg, mock_state)
+    await balance.handle_withdraw_amount(msg, mock_state, db_user)
     mock_state.update_data.assert_awaited_once()
     mock_state.set_state.assert_called_with(balance.WithdrawalFSM.details)
 
 
 @pytest.mark.asyncio
-async def test_handle_withdraw_amount_invalid() -> None:
+async def test_handle_withdraw_amount_invalid(db_user) -> None:
     msg = make_message(text="abc")
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
-    await balance.handle_withdraw_amount(msg, mock_state)
+    await balance.handle_withdraw_amount(msg, mock_state, db_user)
     msg.answer.assert_awaited_once()
     assert "числом" in msg.answer.call_args[0][0].lower()
 
 
 @pytest.mark.asyncio
-async def test_handle_withdraw_amount_zero() -> None:
+async def test_handle_withdraw_amount_zero(db_user) -> None:
     msg = make_message(text="0")
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
-    await balance.handle_withdraw_amount(msg, mock_state)
+    await balance.handle_withdraw_amount(msg, mock_state, db_user)
     msg.answer.assert_awaited_once()
     assert "больше нуля" in msg.answer.call_args[0][0].lower()
 
@@ -96,23 +96,23 @@ async def test_handle_withdraw_amount_zero() -> None:
 # ── WithdrawalFSM.details ────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_handle_withdraw_details_too_short() -> None:
+async def test_handle_withdraw_details_too_short(db_user) -> None:
     msg = make_message(text="ab")
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
     mock_state.get_data = AsyncMock(return_value={"withdraw_amount": 100.0})
     mock_bot = AsyncMock()
     mock_session = AsyncMock()
-    await balance.handle_withdraw_details(msg, mock_state, mock_session, SimpleNamespace(id=42), mock_bot)
+    await balance.handle_withdraw_details(msg, mock_state, mock_session, SimpleNamespace(id=42, language="ru"), mock_bot)
     msg.answer.assert_awaited_once()
     assert "короткие" in msg.answer.call_args[0][0].lower()
 
 
 @pytest.mark.asyncio
-async def test_handle_withdraw_details_success() -> None:
+async def test_handle_withdraw_details_success(db_user) -> None:
     msg = make_message(text="Сбербанк +79991234567")
     msg.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, username="testuser", tg_id=123456, full_name="Test")
+    mock_db_user = SimpleNamespace(id=42, username="testuser", tg_id=123456, full_name="Test", language="ru")
     mock_state = AsyncMock()
     mock_state.get_data = AsyncMock(return_value={"withdraw_amount": 1500.0})
     mock_bot = AsyncMock()
@@ -137,7 +137,7 @@ async def test_cb_history_empty() -> None:
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
     with patch("bot.handlers.balance.repo", AsyncMock(get_user_history=AsyncMock(return_value=[]))):
-        await balance.cb_history(call, AsyncMock(), SimpleNamespace(id=42))
+        await balance.cb_history(call, AsyncMock(), SimpleNamespace(id=42, language="ru"))
     call.message.edit_text.assert_awaited_once()
     assert "История пуста" in call.message.edit_text.call_args[0][0]
 
@@ -154,5 +154,5 @@ async def test_cb_history_with_items() -> None:
     mock_gen.prompt = "a beautiful cat"
     mock_gen.credits_spent = 5
     with patch("bot.handlers.balance.repo", AsyncMock(get_user_history=AsyncMock(return_value=[mock_gen]))):
-        await balance.cb_history(call, AsyncMock(), SimpleNamespace(id=42))
+        await balance.cb_history(call, AsyncMock(), SimpleNamespace(id=42, language="ru"))
     call.message.edit_text.assert_awaited_once()

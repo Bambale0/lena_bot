@@ -38,7 +38,7 @@ async def test_throttling_skips_repeated_message() -> None:
 
 @pytest.mark.asyncio
 async def test_auth_middleware_passes_existing_user(monkeypatch) -> None:
-    db_user = SimpleNamespace(id=1, tg_id=111, is_banned=False)
+    db_user = SimpleNamespace(id=1, tg_id=111, is_banned=False, language="ru")
     monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_tg_id", AsyncMock(return_value=db_user))
     handler = AsyncMock(return_value="handled")
 
@@ -51,7 +51,7 @@ async def test_auth_middleware_passes_existing_user(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_auth_middleware_ignores_banned_user(monkeypatch) -> None:
-    db_user = SimpleNamespace(id=1, tg_id=111, is_banned=True)
+    db_user = SimpleNamespace(id=1, tg_id=111, is_banned=True, language="ru")
     monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_tg_id", AsyncMock(return_value=db_user))
     handler = AsyncMock()
 

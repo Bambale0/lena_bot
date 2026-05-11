@@ -343,7 +343,7 @@ async def cb_price_list(call: CallbackQuery, session: AsyncSession) -> None:
     for plan in all_plans:
         status = "✅" if plan.is_active else "❌"
         builder.button(
-            text=f"{status} {plan.label} — {_fmt_price(plan.price_rub)}₽ / {plan.credits} 💋",
+            text=f"{status} {plan.label} — {_fmt_price(plan.price_rub)}₽ / {plan.credits} cr",
             callback_data=f"adm:price_edit:{plan.key}",
         )
     builder.button(text="➕ Новый тариф", callback_data="adm:price_new")
@@ -412,7 +412,7 @@ async def cb_price_new_start(call: CallbackQuery, state: FSMContext) -> None:
 @router.message(AdminFSM.new_price_credits)
 async def handle_new_price_credits(message: Message, state: FSMContext) -> None:
     try:
-        credits = int((message.text or "").strip())
+        credits = float((message.text or "").strip().replace(",", "."))
     except ValueError:
         await message.answer("Введи целое число кредитов, например: <code>500</code>")
         return
@@ -442,7 +442,7 @@ async def handle_new_price_rub(message: Message, session: AsyncSession, state: F
         return
 
     data = await state.get_data()
-    credits = int(data["new_price_credits"])
+    credits = float(data["new_price_credits"])
     base_key = f"credits_{credits}"
     plan_key = base_key
     candidate = await repo.get_price_plan_by_key(session, plan_key)
@@ -459,7 +459,7 @@ async def handle_new_price_rub(message: Message, session: AsyncSession, state: F
     plan = await repo.upsert_price_plan(
         session,
         key=plan_key,
-        label=f"{credits} 💋",
+        label=f"{credits} cr",
         credits=credits,
         price_rub=price_rub,
         sort_order=sort_order,
@@ -520,7 +520,7 @@ async def cb_price_set_label_start(call: CallbackQuery, state: FSMContext) -> No
     await state.update_data(edit_plan_key=plan_key)
     await call.message.answer(
         "Введи новое название тарифа.\n"
-        "Например: <code>10 сек · Pro</code> или <code>500 💋</code>"
+        "Например: <code>10 сек · Pro</code> или <code>500 cr</code>"
     )
     await call.answer()
 
@@ -528,7 +528,7 @@ async def cb_price_set_label_start(call: CallbackQuery, state: FSMContext) -> No
 @router.message(AdminFSM.edit_price_credits)
 async def handle_price_credits(message: Message, session: AsyncSession, state: FSMContext) -> None:
     try:
-        new_credits = int(message.text.strip())  # type: ignore[union-attr]
+        new_credits = float(message.text.strip().replace(",", "."))  # type: ignore[union-attr]
     except ValueError:
         await message.answer("Введи целое число")
         return
@@ -685,7 +685,7 @@ async def cb_model_set_name_start(call: CallbackQuery, state: FSMContext) -> Non
 @router.message(AdminFSM.edit_model_credits)
 async def handle_model_credits(message: Message, session: AsyncSession, state: FSMContext) -> None:
     try:
-        new_credits = int(message.text.strip())  # type: ignore[union-attr]
+        new_credits = float(message.text.strip().replace(",", "."))  # type: ignore[union-attr]
     except ValueError:
         await message.answer("Введи целое число")
         return
@@ -753,7 +753,7 @@ async def handle_credits_tg_id(message: Message, state: FSMContext, session: Asy
 @router.message(AdminFSM.await_credits_amount)
 async def handle_credits_amount(message: Message, state: FSMContext, session: AsyncSession) -> None:
     try:
-        amount = int(message.text.strip())  # type: ignore[union-attr]
+        amount = float(message.text.strip().replace(",", "."))  # type: ignore[union-attr]
     except ValueError:
         await message.answer("Введи целое число")
         return

@@ -52,7 +52,7 @@ class ReferralLeader:
     l3_count: int
 
     @property
-    def total_count(self) -> int:
+    def total_count(self) -> float:
         return self.l1_count + self.l2_count + self.l3_count
 
 
@@ -91,10 +91,11 @@ async def create_user(
     tg_id: int,
     username: str | None,
     full_name: str | None,
-    welcome_credits: int,
+    welcome_credits: float,
     referrer: User | None = None,
     referrer_l2: User | None = None,
     referrer_l3: User | None = None,
+    language: str = "ru",
 ) -> User:
     user = User(
         tg_id=tg_id,
@@ -105,6 +106,7 @@ async def create_user(
         referrer_id=referrer.id if referrer else None,
         referrer_l2_id=referrer_l2.id if referrer_l2 else None,
         referrer_l3_id=referrer_l3.id if referrer_l3 else None,
+        language=language,
     )
     session.add(user)
     await session.commit()
@@ -113,7 +115,16 @@ async def create_user(
     return user
 
 
-async def add_credits(session: AsyncSession, user_id: int, amount: int) -> int:
+async def set_user_language(session: AsyncSession, user_id: int, language: str) -> None:
+    await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(language=language)
+    )
+    await session.commit()
+
+
+async def add_credits(session: AsyncSession, user_id: int, amount: float) -> float:
     result = await session.execute(
         update(User)
         .where(User.id == user_id)
@@ -135,7 +146,7 @@ async def add_referral_balance(session: AsyncSession, user_id: int, amount_rub: 
     return result.scalar_one()
 
 
-async def spend_credits(session: AsyncSession, user_id: int, amount: int) -> bool:
+async def spend_credits(session: AsyncSession, user_id: int, amount: float) -> bool:
     """Atomically deduct credits. Returns False if not enough credits."""
     result = await session.execute(
         update(User)
@@ -147,7 +158,7 @@ async def spend_credits(session: AsyncSession, user_id: int, amount: int) -> boo
     return result.scalar_one_or_none() is not None
 
 
-async def count_users(session: AsyncSession) -> int:
+async def count_users(session: AsyncSession) -> float:
     from sqlalchemy import func
     result = await session.execute(select(func.count()).select_from(User))
     return result.scalar_one()
@@ -740,7 +751,7 @@ async def get_user_history(
     return list(result.scalars().all())
 
 
-async def count_user_active_generations(session: AsyncSession, user_id: int) -> int:
+async def count_user_active_generations(session: AsyncSession, user_id: int) -> float:
     result = await session.execute(
         select(func.count())
         .select_from(Generation)
@@ -752,7 +763,7 @@ async def count_user_active_generations(session: AsyncSession, user_id: int) -> 
     return result.scalar_one()
 
 
-async def count_generations_today(session: AsyncSession) -> int:
+async def count_generations_today(session: AsyncSession) -> float:
     from sqlalchemy import func, cast, Date
     today = datetime.now(timezone.utc).date()
     result = await session.execute(
@@ -769,7 +780,7 @@ async def create_transaction(
     session: AsyncSession,
     user_id: int,
     amount_rub: float,
-    credits: int,
+    credits: float,
     provider: PaymentProvider,
     external_id: str | None = None,
 ) -> Transaction:
@@ -988,7 +999,7 @@ async def upsert_price_plan(
     session: AsyncSession,
     key: str,
     label: str,
-    credits: int,
+    credits: float,
     price_rub: float,
     sort_order: int = 0,
 ) -> PricePlan:
@@ -1067,7 +1078,7 @@ async def resolve_video_model_cost(
     )
 
 
-async def set_model_cost(session: AsyncSession, model_key: str, credits: int) -> bool:
+async def set_model_cost(session: AsyncSession, model_key: str, credits: float) -> bool:
     result = await session.execute(
         update(ModelCost)
         .where(ModelCost.model_key == model_key)

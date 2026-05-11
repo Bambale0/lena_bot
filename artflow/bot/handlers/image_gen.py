@@ -402,7 +402,7 @@ async def _launch_session_generation(
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
+        await source_message.answer("❌ Недостаточно cr.", reply_markup=main_menu_kb())
         return False
 
     gen = await repo.create_generation(
@@ -436,7 +436,7 @@ async def _launch_session_generation(
         await repo.fail_generation(session, gen.id, str(e))
         await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
-            "❌ Ошибка генерации. 💋 возвращены.",
+            "❌ Ошибка генерации. cr возвращены.",
             reply_markup=image_session_kb(parent_generation_id),
         )
         return False
@@ -486,7 +486,7 @@ async def _start_image_model_flow(
 
     if db_user.credits < model_cost.credits:
         await call.answer(
-            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно cr! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         return
@@ -1385,7 +1385,7 @@ async def cb_image_session_animate(
         return
     if db_user.credits < model_cost.credits:
         await call.answer(
-            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно cr! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         return

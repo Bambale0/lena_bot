@@ -243,7 +243,7 @@ async def _launch_prompt_generation(
         return
     if db_user.credits < model_cost.credits:
         await call.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно cr. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         return
@@ -288,11 +288,11 @@ async def _launch_prompt_generation(
         author = await repo.get_user_by_id(session, prompt.author_id)
         if author:
             try:
-                parts = [f"+{rewards['author']} 💋 автору"]
+                parts = [f"+{rewards['author']} cr автору"]
                 if rewards["l2"] > 0:
-                    parts.append(f"+{rewards['l2']} 💋 lvl2")
+                    parts.append(f"+{rewards['l2']} cr lvl2")
                 if rewards["l3"] > 0:
-                    parts.append(f"+{rewards['l3']} 💋 lvl3")
+                    parts.append(f"+{rewards['l3']} cr lvl3")
                 await bot.send_message(
                     author.tg_id,
                     f"💰 Промпт «<b>{prompt.title}</b>» использовали.\n" + " · ".join(parts),
@@ -470,7 +470,7 @@ async def cb_prompt_skip_ref(
             return
         if db_user.credits < model_cost.credits:
             await call.answer(
-                f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+                f"Недостаточно cr. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
                 show_alert=True,
             )
             await state.clear()
@@ -523,7 +523,7 @@ async def cb_prompt_skip_ref(
         return
     if db_user.credits < model_cost.credits:
         await call.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно cr. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         await state.clear()
@@ -560,11 +560,11 @@ async def cb_prompt_skip_ref(
         author = await repo.get_user_by_id(session, prompt.author_id)
         if author:
             try:
-                parts = [f"+{rewards['author']} 💋 автору"]
+                parts = [f"+{rewards['author']} cr автору"]
                 if rewards["l2"] > 0:
-                    parts.append(f"+{rewards['l2']} 💋 lvl2")
+                    parts.append(f"+{rewards['l2']} cr lvl2")
                 if rewards["l3"] > 0:
-                    parts.append(f"+{rewards['l3']} 💋 lvl3")
+                    parts.append(f"+{rewards['l3']} cr lvl3")
                 await bot.send_message(
                     author.tg_id,
                     f"💰 Промпт «<b>{prompt.title}</b>» использовали.\n" + " · ".join(parts),
@@ -605,7 +605,7 @@ async def fsm_prompt_use_reference(
             return
         if db_user.credits < model_cost.credits:
             await message.answer(
-                f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+                f"Недостаточно cr. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
                 reply_markup=back_to_menu_kb(),
             )
             await state.clear()
@@ -666,7 +666,7 @@ async def fsm_prompt_use_reference(
         return
     if db_user.credits < model_cost.credits:
         await message.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно cr. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             reply_markup=back_to_menu_kb(),
         )
         await state.clear()
@@ -703,11 +703,11 @@ async def fsm_prompt_use_reference(
         author = await repo.get_user_by_id(session, prompt.author_id)
         if author:
             try:
-                parts = [f"+{rewards['author']} 💋 автору"]
+                parts = [f"+{rewards['author']} cr автору"]
                 if rewards["l2"] > 0:
-                    parts.append(f"+{rewards['l2']} 💋 lvl2")
+                    parts.append(f"+{rewards['l2']} cr lvl2")
                 if rewards["l3"] > 0:
-                    parts.append(f"+{rewards['l3']} 💋 lvl3")
+                    parts.append(f"+{rewards['l3']} cr lvl3")
                 await bot.send_message(
                     author.tg_id,
                     f"💰 Промпт «<b>{prompt.title}</b>» использовали.\n" + " · ".join(parts),

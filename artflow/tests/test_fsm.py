@@ -48,15 +48,17 @@ async def test_image_gen_fsm_generating_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_image_gen_fsm_settings_state() -> None:
-    """Проверка что settings стейт существует."""
-    assert hasattr(ImageGenFSM, 'settings')
+async def test_image_gen_fsm_session_active_state() -> None:
+    """Проверка что session_active стейт существует."""
+    assert hasattr(ImageGenFSM, 'session_active')
 
 
 @pytest.mark.asyncio
-async def test_image_gen_fsm_viewing_result() -> None:
-    """Проверка что viewing_result стейт существует."""
-    assert hasattr(ImageGenFSM, 'viewing_result')
+async def test_image_gen_fsm_photo_to_prompt_states() -> None:
+    """Проверка что photo_to_prompt стейты существуют."""
+    assert hasattr(ImageGenFSM, 'photo_to_prompt')
+    assert hasattr(ImageGenFSM, 'photo_to_prompt_ref')
+    assert hasattr(ImageGenFSM, 'photo_to_prompt_model')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -220,23 +222,18 @@ async def test_midjourney_fsm_modal_flow() -> None:
 async def test_music_fsm_states_exist() -> None:
     """Все стейты MusicFSM должны существовать."""
     expected = [
-        'prompt_input', 'image_upload', 'generating',
-        'viewing_result', 'action_polling', 'waiting_modal_input',
-        'blend_collecting', 'blend_generating',
-        'describe_upload', 'describe_polling',
-        'video_upload', 'video_speed_select', 'video_prompt', 'video_generating',
+        'prompt_input',
     ]
     for state_name in expected:
         assert hasattr(MusicFSM, state_name), f"MusicFSM не имеет стейта {state_name}"
 
 
 @pytest.mark.asyncio
-async def test_music_fsm_prompt_to_generating() -> None:
-    """prompt_input → generating."""
+async def test_music_fsm_prompt_input_exists() -> None:
+    """prompt_input стейт существует."""
     state = AsyncMock()
     await state.set_state(MusicFSM.prompt_input)
-    await state.set_state(MusicFSM.generating)
-    state.set_state.assert_called_with(MusicFSM.generating)
+    state.set_state.assert_called_with(MusicFSM.prompt_input)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -246,30 +243,18 @@ async def test_music_fsm_prompt_to_generating() -> None:
 @pytest.mark.asyncio
 async def test_prompt_use_fsm_states_exist() -> None:
     """Все стейты PromptUseFSM должны существовать."""
-    expected = ['model_select', 'params_select', 'generating']
+    expected = ['model_select', 'reference_upload']
     for state_name in expected:
         assert hasattr(PromptUseFSM, state_name), f"PromptUseFSM не имеет стейта {state_name}"
 
 
 @pytest.mark.asyncio
 async def test_prompt_use_fsm_transitions() -> None:
-    """model_select → params_select → generating."""
+    """model_select → reference_upload."""
     state = AsyncMock()
     await state.set_state(PromptUseFSM.model_select)
-    await state.set_state(PromptUseFSM.params_select)
-    await state.set_state(PromptUseFSM.generating)
-    assert state.set_state.call_count == 3
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Ban functionality (in AdminFSM)
-# ═══════════════════════════════════════════════════════════════════════════
-
-@pytest.mark.asyncio
-async def test_ban_in_admin_fsm() -> None:
-    """Ban-функционал реализован через AdminFSM.await_ban_tg_id."""
-    from bot.handlers import admin
-    assert hasattr(admin.AdminFSM, 'await_ban_tg_id'), "AdminFSM не имеет await_ban_tg_id"
+    await state.set_state(PromptUseFSM.reference_upload)
+    assert state.set_state.call_count == 2
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -277,8 +262,16 @@ async def test_ban_in_admin_fsm() -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
+async def test_admin_fsm_importable() -> None:
+    """AdminFSM импортируется из bot.handlers.admin."""
+    from bot.handlers import admin
+    assert hasattr(admin, 'AdminFSM')
+
+
+@pytest.mark.asyncio
 async def test_admin_fsm_states_exist() -> None:
     """Все стейты AdminFSM должны существовать."""
+    from bot.handlers import admin
     expected = [
         'edit_price_label', 'edit_price_key', 'edit_price_credits', 'edit_price_rub',
         'new_price_credits', 'new_price_rub',
@@ -294,6 +287,7 @@ async def test_admin_fsm_states_exist() -> None:
 @pytest.mark.asyncio
 async def test_admin_fsm_credit_flow_transitions() -> None:
     """await_credits_tg_id → await_credits_amount."""
+    from bot.handlers import admin
     state = AsyncMock()
     await state.set_state(admin.AdminFSM.await_credits_tg_id)
     await state.set_state(admin.AdminFSM.await_credits_amount)
@@ -303,6 +297,7 @@ async def test_admin_fsm_credit_flow_transitions() -> None:
 @pytest.mark.asyncio
 async def test_admin_fsm_price_new_flow() -> None:
     """new_price_credits → new_price_rub."""
+    from bot.handlers import admin
     state = AsyncMock()
     await state.set_state(admin.AdminFSM.new_price_credits)
     await state.set_state(admin.AdminFSM.new_price_rub)
@@ -312,6 +307,7 @@ async def test_admin_fsm_price_new_flow() -> None:
 @pytest.mark.asyncio
 async def test_admin_fsm_price_edit_flow() -> None:
     """Цепочка редактирования тарифа."""
+    from bot.handlers import admin
     state = AsyncMock()
     await state.set_state(admin.AdminFSM.edit_price_rub)
     await state.set_state(admin.AdminFSM.edit_price_credits)

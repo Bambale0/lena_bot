@@ -19,10 +19,11 @@ async def render_screen(
     extra: dict | None = None,
 ) -> ScreenRender:
     payload = extra or {}
+    lang = db_user.language or "ru"
 
     if screen == "main":
         context = await get_main_menu_context(session, user_id=db_user.id, balance=db_user.credits)
-        return render_main_menu(context)
+        return render_main_menu(context, lang=lang)
 
     if screen == "image_active":
         image_session = payload.get("image_session") or await repo.get_active_image_session(session, db_user.id)

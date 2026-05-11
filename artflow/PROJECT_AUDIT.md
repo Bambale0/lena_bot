@@ -1,47 +1,76 @@
-# Project Audit
+# ArtFlow Audit Report
 
-Date: 2026-05-06
-Branch: `miniapp-mvp`
+## Дата: 2026-05-11
 
-## Scope
+## Результаты тестов
+- **Всего тестов:** 188
+- **Пройдено:** 188 ✅
+- **Упавших:** 0
 
-Audited the current FastAPI, aiogram bot, webapp API, prompt marketplace preview handling, and testing setup. Added a pytest baseline that covers every major layer with smoke and unit tests.
+## Найденные и исправленные проблемы
 
-## Added Test Coverage
+### 1. VIDEO_CAPS — ключи словаря (Критично)
+- **Проблема:** `VIDEO_CAPS` в `bot/keyboards/models.py` использовал `VideoModel` enum как ключи, но lookup выполнялся по строкам (`VIDEO_CAPS.get(model_key, {})`). Из-за разницы в хешировании StrEnum vs str, lookup возвращал пустой dict.
+- **Последствия:** `_has_params()` всегда возвращал `False`, из-за чего видео-модели пропускали экран параметров и шли сразу к промпту.
+- **Исправление:** Все ключи `VIDEO_CAPS` заменены на строковые значения.
 
-- Telegram object factories: `tests/factories.py`
-- WebApp auth HMAC validation: `tests/test_webapp_auth.py`
-- WebApp API smoke and protected endpoint behavior: `tests/test_webapp_routes.py`
-- Prompt preview fallback and local file resolution: `tests/test_marketplace_previews.py`
-- Public upload URL normalization for legacy `.bin` images: `tests/test_public_files.py`
-- KIE webhook parsing helpers: `tests/test_kie_webhook.py`
-- Prompt repository pure logic: `tests/test_prompt_repository.py`
-- Auth and throttling middlewares: `tests/test_middlewares.py`
-- Keyboards and approved main menu WebApp button: `tests/test_keyboards_and_ui.py`
-- `bot_tester.py` behavior and `bot-tester.skill` archive presence: `tests/test_bot_tester.py`, `tests/test_project_smoke.py`
-- Whole-project Python compile smoke: `tests/test_project_smoke.py`
+### 2. Тесты FSM — устаревшие состояния
+- **Проблема:** Тесты `tests/test_fsm.py` проверяли состояния (`settings`, `viewing_result` для ImageGenFSM; `generating` для MusicFSM; `params_select` для PromptUseFSM), которых больше нет в текущей реализации.
+- **Исправление:** Тесты обновлены в соответствии с актуальными FSM.
 
-## Current Test Result
+### 3. Тест video_gen — перепутаны аргументы
+- **Проблема:** В `test_cb_video_model_single_mode` аргументы `session` и `state` были перепутаны при вызове хендлера.
+- **Исправление:** Порядок аргументов исправлен.
 
-```bash
-./venv/bin/pytest
-# 34 passed
+### 4. Legacy меню не соответствовало UI
+- **Проблема:** `main_menu_kb()` содержал кнопки "Топ дня" и "Midjourney", которых нет в новом UI `render_main_menu()`.
+- **Исправление:** Legacy меню синхронизировано с UI.
 
-./venv/bin/pytest --cov=api --cov=bot --cov=db --cov-report=term-missing
-# 34 passed, total line coverage: 33%
-```
+## Проверка моделей
 
-## Findings
+### Видео-модели (БД)
+- **Всего:** 27 моделей
+- **Активных:** 25 (2 неактивных: kling-2.6 motion control 1080p/720p)
+- **Соответствие API specs:** ✅ Все активные модели есть в `VIDEO_SPECS`
 
-1. The project previously had no pytest baseline. This made regressions in Telegram auth, bot keyboards, and preview handling easy to miss.
-2. Several production flows depend on external APIs or Telegram side effects. They need contract-style mocks before line coverage can be pushed much higher safely.
-3. Some modules are very large, especially image/video/admin handlers. They are testable, but need sliced tests around helpers and FSM transitions rather than one huge integration test.
-4. `bot/handlers/admin.py` has pre-existing local changes in the working tree. I did not modify or stage them.
-5. `bot_tester.py` uses long polling and should remain a manual/debug tool. It is now smoke-tested but should not run during production service startup.
+### Модели изображений (БД)
+- **Всего:** 38 моделей
+- **Активных:** 28
+- **Соответствие API specs:** ✅ Все активные базовые модели есть в `IMAGE_SPECS`
+- **Варианты качества/разрешения:** Создаются динамически через `pricing_variant_key()` — это ожидаемое поведение
 
-## Recommended Next Steps
+### Midjourney модели
+- Обрабатываются отдельным сервисом (`midjourney_service.py`), не через KIE API
 
-- Add tests for image generation FSM transitions with mocked KIE client.
-- Add tests for payment webhook idempotency and transaction state transitions.
-- Add repository tests against a disposable PostgreSQL database or testcontainers.
-- Add CI command: `./venv/bin/python -m compileall api bot db main.py && ./venv/bin/pytest`.
+### Специальные случаи
+- `openrouter/free` есть в `IMAGE_SPECS`, но отсутствует в БД — не критично, модель неактивна
+
+## Проверка API интеграции
+
+### KIE Model Specs
+- `build_kie_input()` корректно строит payload для всех типов моделей:
+  - ✅ Seedream (aspect_ratio, quality)
+  - ✅ Kling 3.0 (mode, sound, duration, aspect_ratio, multi_shots)
+  - ✅ WAN (duration, resolution, prompt_extend, watermark)
+  - ✅ Grok (mode, duration, resolution)
+  - ✅ Veo3 (aspect_ratio, duration, enableTranslation, enableFallback)
+
+### Webhook обработка
+- `kie_webhook.py` корректно обрабатывает различные форматы ответов:
+  - ✅ Извлечение task_id
+  - ✅ Определение успеха/ошибки
+  - ✅ Извлечение result_urls (поддержка разных ключей: result_urls, resultUrls, video_urls и т.д.)
+
+## Документация API
+- Основная документация: https://docs.kie.ai
+- Актуальные модели подтверждены документацией:
+  - ✅ Seedream 4.5
+  - ✅ Kling 3.0
+  - ✅ Veo 3
+  - ✅ WAN 2.7
+  - ✅ Grok Imagine
+
+## Рекомендации
+1. Добавить `openrouter/free` в БД, если планируется использовать
+2. Рассмотреть добавление новых моделей из документации KIE (например, Seedream 5.0 Lite, Flux-2, Ideogram V3)
+3. Мониторить вебхуки на предмет изменений формата ответов KIE API

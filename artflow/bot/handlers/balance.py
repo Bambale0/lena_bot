@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb, balance_screen_kb
 from core.config import settings
 from db import repository as repo
@@ -24,10 +25,10 @@ class WithdrawalFSM(StatesGroup):
     details = State()
 
 
-def referral_screen_kb():
+def referral_screen_kb(lang: str = "ru"):
     builder = InlineKeyboardBuilder()
-    builder.button(text="💸 Запросить вывод", callback_data="referral:withdraw")
-    builder.button(text="🏠 Главное меню", callback_data="menu:main")
+    builder.button(text="💸 " + ("Запросить вывод" if lang == "ru" else "Request withdrawal"), callback_data="referral:withdraw")
+    builder.button(text=t("btn_main_menu", lang), callback_data="menu:main")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -42,20 +43,18 @@ def withdrawal_request_admin_kb(request_id: int):
 
 @router.callback_query(F.data == "menu:balance")
 async def cb_balance(call: CallbackQuery, db_user: User) -> None:
+    lang = db_user.language or "ru"
     sub_status = (
-        f"✅ До {db_user.subscription_until.strftime('%d.%m.%Y')}"
+        t("balance_sub_active", lang, date=db_user.subscription_until.strftime("%d.%m.%Y"))
         if db_user.is_subscribed and db_user.subscription_until
-        else "❌ Не активна"
+        else t("balance_sub_inactive", lang)
     )
     text = (
-        f"💎 <b>Твой баланс</b>\n\n"
-        f"💋 Поцелуи: <b>{db_user.credits}</b>\n"
-        f"Подписка: {sub_status}\n\n"
-        f"<b>Стоимость генерации:</b>\n"
-        f"• Изображение: 2–10 💋\n"
-        f"• Видео: 20–50 💋\n"
-        f"• Midjourney: 5–15 💋\n\n"
-        f"💳 Пополнить баланс можно прямо здесь."
+        t("balance_title", lang) + "\n\n"
+        + t("balance_credits", lang, credits=db_user.credits) + "\n"
+        + t("balance_subscription", lang, status=sub_status) + "\n\n"
+        + t("balance_costs", lang) + "\n\n"
+        + t("balance_topup_hint", lang)
     )
     await call.message.edit_text(text, reply_markup=balance_screen_kb())  # type: ignore[union-attr]
     await call.answer()
@@ -63,6 +62,7 @@ async def cb_balance(call: CallbackQuery, db_user: User) -> None:
 
 @router.callback_query(F.data == "menu:referral")
 async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: AsyncSession) -> None:
+    lang = db_user.language or "ru"
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start={db_user.referral_code}"
     l1, l2, l3 = await repo.count_user_referrals(session, db_user.id)
@@ -75,54 +75,49 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
 
     earned = db_user.referral_balance
     text = (
-        f"👥 <b>Реферальная программа</b>\n\n"
-        f"Твоя ссылка:\n"
-        f"<code>{ref_link}</code>\n\n"
-        f"<b>Твои рефералы:</b>\n"
-        f"• L1 прямые: <b>{l1}</b>\n"
-        f"• L2: <b>{l2}</b>\n"
-        f"• L3: <b>{l3}</b>\n\n"
-        f"💰 <b>Заработано комиссий: {earned:.2f}₽</b>\n\n"
-        f"<b>Условия:</b>\n"
-        f"• Бонус за реферала: +{settings.REFERRAL_L1_CREDITS} 💋\n"
-        f"• Комиссия с оплат L1: {int(settings.REFERRAL_COMMISSION_L1 * 100)}%\n"
-        f"• Комиссия с оплат L2: {int(settings.REFERRAL_COMMISSION_L2 * 100)}%\n"
-        f"• Комиссия с оплат L3: {int(settings.REFERRAL_COMMISSION_L3 * 100)}%"
+        t("referral_title", lang) + "\n\n"
+        + t("referral_link", lang, link=ref_link) + "\n\n"
+        + t("referral_stats", lang, l1=l1, l2=l2, l3=l3) + "\n\n"
+        + t("referral_earned", lang, amount=earned) + "\n\n"
+        + t("referral_conditions", lang,
+            bonus=settings.REFERRAL_L1_CREDITS,
+            l1_pct=int(settings.REFERRAL_COMMISSION_L1 * 100),
+            l2_pct=int(settings.REFERRAL_COMMISSION_L2 * 100),
+            l3_pct=int(settings.REFERRAL_COMMISSION_L3 * 100))
     )
     if withdrawal_lines:
-        text += "\n\n💸 <b>Последние заявки на вывод:</b>\n" + "\n".join(withdrawal_lines)
-    await call.message.edit_text(text, reply_markup=referral_screen_kb())  # type: ignore[union-attr]
+        text += "\n\n💸 <b>" + ("Последние заявки на вывод" if lang == "ru" else "Recent withdrawal requests") + ":</b>\n" + "\n".join(withdrawal_lines)
+    await call.message.edit_text(text, reply_markup=referral_screen_kb(lang))  # type: ignore[union-attr]
     await call.answer()
 
 
 @router.callback_query(F.data == "referral:withdraw")
-async def cb_referral_withdraw(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_referral_withdraw(call: CallbackQuery, state: FSMContext, db_user: User) -> None:
+    lang = db_user.language or "ru"
     await state.set_state(WithdrawalFSM.amount)
     await call.message.answer(  # type: ignore[union-attr]
-        "💸 <b>Заявка на ручной вывод</b>\n\n"
-        "Введи сумму в рублях, которую нужно вывести.\n"
-        "Например: <code>1500</code>",
+        t("withdraw_title", lang) + "\n\n" + t("withdraw_amount_prompt", lang),
         reply_markup=back_to_menu_kb(),
     )
     await call.answer()
 
 
 @router.message(WithdrawalFSM.amount, F.text)
-async def handle_withdraw_amount(message: Message, state: FSMContext) -> None:
+async def handle_withdraw_amount(message: Message, state: FSMContext, db_user: User) -> None:
+    lang = db_user.language or "ru"
     raw = (message.text or "").strip().replace(",", ".")
     try:
         amount = float(raw)
     except ValueError:
-        await message.answer("Введи сумму числом, например: <code>1500</code>", reply_markup=back_to_menu_kb())
+        await message.answer(t("withdraw_amount_invalid", lang), reply_markup=back_to_menu_kb())
         return
     if amount <= 0:
-        await message.answer("Сумма должна быть больше нуля.", reply_markup=back_to_menu_kb())
+        await message.answer(t("withdraw_amount_zero", lang), reply_markup=back_to_menu_kb())
         return
     await state.update_data(withdraw_amount=amount)
     await state.set_state(WithdrawalFSM.details)
     await message.answer(
-        "Теперь отправь реквизиты для выплаты одним сообщением.\n\n"
-        "Например: банк + номер телефона / карта / USDT-кошелёк.",
+        t("withdraw_details_prompt", lang),
         reply_markup=back_to_menu_kb(),
     )
 
@@ -135,9 +130,10 @@ async def handle_withdraw_details(
     db_user: User,
     bot: Bot,
 ) -> None:
+    lang = db_user.language or "ru"
     details = (message.text or "").strip()
     if len(details) < 5:
-        await message.answer("Реквизиты слишком короткие. Отправь банк/номер/кошелёк подробнее.", reply_markup=back_to_menu_kb())
+        await message.answer(t("withdraw_details_short", lang), reply_markup=back_to_menu_kb())
         return
     data = await state.get_data()
     amount = float(data["withdraw_amount"])
@@ -149,18 +145,18 @@ async def handle_withdraw_details(
     )
     await state.clear()
     await message.answer(
-        f"✅ Заявка на вывод #{request.id} создана.\n"
-        f"Сумма: <b>{amount:.2f}₽</b>\n\n"
-        "Админ получит запрос на подтверждение в чат.",
+        t("withdraw_created", lang, id=request.id, amount=amount),
         reply_markup=back_to_menu_kb(),
     )
 
-    admin_text = (
-        f"💸 <b>Новая заявка на вывод #{request.id}</b>\n\n"
-        f"Пользователь: @{db_user.username or '—'} · <code>{db_user.tg_id}</code>\n"
-        f"Имя: <b>{db_user.full_name or '—'}</b>\n"
-        f"Сумма: <b>{amount:.2f}₽</b>\n\n"
-        f"<b>Реквизиты:</b>\n<code>{details}</code>"
+    admin_text = t(
+        "withdraw_admin_notify", lang,
+        id=request.id,
+        username=db_user.username or "—",
+        tg_id=db_user.tg_id,
+        full_name=db_user.full_name or "—",
+        amount=amount,
+        details=details,
     )
     for admin_id in settings.ADMIN_IDS:
         try:
@@ -177,17 +173,18 @@ async def handle_withdraw_details(
 async def cb_history(
     call: CallbackQuery, session: AsyncSession, db_user: User
 ) -> None:
+    lang = db_user.language or "ru"
     history = await repo.get_user_history(session, db_user.id, limit=10)
 
     if not history:
         await call.message.edit_text(  # type: ignore[union-attr]
-            "📋 История пуста. Сделай первую генерацию!",
+            t("history_empty", lang),
             reply_markup=back_to_menu_kb(),
         )
         await call.answer()
         return
 
-    lines = ["📋 <b>Последние генерации:</b>\n"]
+    lines = [t("history_title", lang) + "\n"]
     for i, gen in enumerate(history, 1):
         icon = "🎨" if gen.gen_type == GenerationType.image else "🎬"
         status_icon = {"done": "✅", "pending": "⏳", "failed": "❌", "processing": "🔄"}.get(
@@ -196,7 +193,7 @@ async def cb_history(
         lines.append(
             f"{i}. {icon} {status_icon} <code>{gen.model}</code>\n"
             f"   <i>{gen.prompt[:60]}{'...' if len(gen.prompt) > 60 else ''}</i>\n"
-            f"   -{gen.credits_spent} 💋"
+            f"   -{gen.credits_spent} cr"
         )
 
     await call.message.edit_text(  # type: ignore[union-attr]

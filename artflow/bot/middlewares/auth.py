@@ -82,7 +82,7 @@ class AuthMiddleware(BaseMiddleware):
                     bot,
                     referrer.tg_id,
                     "🎉 По твоей ссылке пришёл новый пользователь!\n"
-                    f"+{settings.REFERRAL_L1_CREDITS} 💋 начислено.",
+                    f"+{settings.REFERRAL_L1_CREDITS} cr начислено.",
                 )
 
         elif db_user.is_banned:

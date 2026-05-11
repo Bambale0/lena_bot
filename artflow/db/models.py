@@ -77,7 +77,7 @@ class User(Base):
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     username: Mapped[str | None] = mapped_column(String(64))
     full_name: Mapped[str | None] = mapped_column(String(256))
-    credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    credits: Mapped[float] = mapped_column(Float, default=0, nullable=False)
 
     # Subscription (prepared, not active in v1)
     is_subscribed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -89,6 +89,8 @@ class User(Base):
     referrer_l3_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     referral_code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     referral_balance: Mapped[float] = mapped_column(Float, default=0.0, nullable=False, server_default="0")
+
+    language: Mapped[str] = mapped_column(String(8), default="ru", nullable=False, server_default="ru")
 
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -130,7 +132,7 @@ class Generation(Base):
     )
     likes_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     shares_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    credits_spent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    credits_spent: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     status: Mapped[GenerationStatus] = mapped_column(
         Enum(GenerationStatus), default=GenerationStatus.pending, nullable=False
     )
@@ -187,7 +189,7 @@ class Transaction(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     amount_rub: Mapped[float] = mapped_column(Float, nullable=False)
-    credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    credits: Mapped[float] = mapped_column(Float, nullable=False)
     provider: Mapped[PaymentProvider] = mapped_column(Enum(PaymentProvider), nullable=False)
     external_id: Mapped[str | None] = mapped_column(String(256), unique=True)  # payment provider id
     status: Mapped[TransactionStatus] = mapped_column(
@@ -227,8 +229,9 @@ class PricePlan(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)  # e.g. "credits_100"
     label: Mapped[str] = mapped_column(String(128), nullable=False)            # "100 кредитов"
-    credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    credits: Mapped[float] = mapped_column(Float, nullable=False)
     price_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    price_stars: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
@@ -242,7 +245,7 @@ class ModelCost(Base):
     model_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
     gen_type: Mapped[GenerationType] = mapped_column(Enum(GenerationType), nullable=False)
-    credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    credits: Mapped[float] = mapped_column(Float, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 

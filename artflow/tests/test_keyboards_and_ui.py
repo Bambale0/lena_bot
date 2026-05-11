@@ -15,7 +15,7 @@ def test_main_menu_keyboard_keeps_core_buttons() -> None:
     buttons = flatten_buttons(main_menu_kb(balance=100, has_active_image_session=True, is_admin=True))
     texts = [button.text for button in buttons]
     assert "🎨 Изображение" in texts
-    assert "📚 Библиотека промптов" in texts
+    assert "📚 Библиотека" in texts
     assert "👑 Админ" in texts
 
 
@@ -28,7 +28,7 @@ def test_render_main_menu_active_session_text() -> None:
     session = SimpleNamespace(model="nano-banana-pro", quality="2K", aspect_ratio="9:16", count=3)
     context = SimpleNamespace(balance=1003, active_image_session=session, is_admin=False)
     render = render_main_menu(context)
-    assert "Активная серия найдена" in render.text
+    assert "Активная серия изображений" in render.text
 def test_topup_keyboard_keeps_decimal_price() -> None:
     plans = [SimpleNamespace(label="10 сек · Pro", price_rub=199.5, key="p1")]
     buttons = flatten_buttons(topup_kb(plans))

@@ -76,7 +76,7 @@ async def test_cb_video_group_shows_models() -> None:
 async def test_cb_video_model_insufficient_credits() -> None:
     call = make_callback(data="vid_model:kling-3.0/video")
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=5)
+    mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_cost = _make_video_model_cost("kling-3.0/video", credits=8)
     with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=mock_cost))):
         await video_gen.cb_video_model(call, AsyncMock(), AsyncMock(), mock_db_user)
@@ -88,7 +88,7 @@ async def test_cb_video_model_insufficient_credits() -> None:
 async def test_cb_video_model_no_cost_found() -> None:
     call = make_callback(data="vid_model:unknown_model")
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=500)
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=None))):
         await video_gen.cb_video_model(call, AsyncMock(), AsyncMock(), mock_db_user)
     call.answer.assert_awaited_once()
@@ -100,7 +100,7 @@ async def test_cb_video_model_single_mode() -> None:
     call = make_callback(data="vid_model:kling-2.6/text-to-video")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=500)
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     mock_cost = _make_video_model_cost("kling-2.6/text-to-video", credits=5, display_name="Kling 2.6 T2V")
     mock_state = _fake_state(
         model_key="kling-2.6/text-to-video", duration=5,
@@ -108,7 +108,7 @@ async def test_cb_video_model_single_mode() -> None:
     )
     with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=mock_cost))):
         with patch("bot.handlers.video_gen.video_params_kb", return_value=MagicMock()):
-            await video_gen.cb_video_model(call, mock_state, AsyncMock(), mock_db_user)
+            await video_gen.cb_video_model(call, AsyncMock(), mock_state, mock_db_user)
     mock_state.set_state.assert_called_once_with(VideoGenFSM.params_select)
 
 
@@ -143,7 +143,7 @@ async def test_handle_video_upload_wrong_step() -> None:
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
     mock_state.get_data = AsyncMock(return_value={"motion_step": "person", "model_key": "kling-2.6/motion-control"})
-    await video_gen.handle_video_upload(msg, mock_state, AsyncMock(), SimpleNamespace(id=42, credits=500), AsyncMock())
+    await video_gen.handle_video_upload(msg, mock_state, AsyncMock(), SimpleNamespace(id=42, credits=500, language="ru"), AsyncMock())
     msg.answer.assert_awaited_once()
 
 
@@ -156,7 +156,7 @@ async def test_handle_video_upload_insufficient_credits() -> None:
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
     mock_state.get_data = AsyncMock(return_value={"motion_step": "video_url", "model_key": "kling-3.0/video", "credits": 10})
-    mock_db_user = SimpleNamespace(id=42, credits=50)
+    mock_db_user = SimpleNamespace(id=42, credits=50, language="ru")
     mock_cost = _make_video_model_cost("kling-3.0/video", credits=10)
     with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=mock_cost))):
         await video_gen.handle_video_upload(msg, mock_state, AsyncMock(), mock_db_user, AsyncMock())
@@ -219,7 +219,7 @@ async def test_handle_video_prompt_insufficient_credits() -> None:
     msg.answer = AsyncMock()
     mock_state = AsyncMock()
     mock_state.get_data = AsyncMock(return_value={"model_key": "kling-3.0/video", "duration": 5, "credits": 10})
-    mock_db_user = SimpleNamespace(id=42, credits=3)
+    mock_db_user = SimpleNamespace(id=42, credits=3, language="ru")
     with patch("bot.handlers.video_gen.repo", AsyncMock(spend_credits=AsyncMock(return_value=False))):
         await video_gen.handle_video_prompt(msg, mock_state, AsyncMock(), mock_db_user, AsyncMock())
     msg.answer.assert_awaited_once()
@@ -232,7 +232,7 @@ async def test_handle_video_prompt_generates() -> None:
     msg.answer = AsyncMock()
     mock_session = AsyncMock()
     mock_bot = AsyncMock()
-    mock_db_user = SimpleNamespace(id=42, credits=500, username="test", full_name="Test", is_banned=False)
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test", is_banned=False)
     mock_state = _fake_state(
         model_key="kling-3.0/video", duration=5,
         aspect_ratio="16:9", resolution="1080p",

@@ -98,7 +98,7 @@ def prompt_use_model_kb(prompt_id: int, model_costs: list[ModelCost]) -> InlineK
         ):
             builder.row(
                 InlineKeyboardButton(
-                    text=f"{mc.display_name} · {mc.credits} 💋",
+                    text=f"{mc.display_name} · {mc.credits} cr",
                     callback_data=f"prompt_pick_model:{prompt_id}:{mc.model_key}",
                 )
             )

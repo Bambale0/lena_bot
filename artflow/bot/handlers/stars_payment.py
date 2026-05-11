@@ -1,0 +1,114 @@
+"""Telegram Stars payment integration."""
+from __future__ import annotations
+
+import logging
+
+from aiogram import F, Router, Bot
+from aiogram.types import CallbackQuery, Message, LabeledPrice, PreCheckoutQuery
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.i18n import t
+from bot.keyboards.main_menu import back_to_menu_kb
+from db import repository as repo
+from db.models import PaymentProvider, Transaction, TransactionStatus, User
+
+logger = logging.getLogger(__name__)
+router = Router(name="stars_payment")
+
+
+@router.callback_query(F.data == "topup:stars")
+async def cb_topup_stars(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    plans = await repo.get_active_price_plans(session)
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    for plan in plans:
+        stars = plan.price_stars or max(1, int(plan.price_rub / 10))
+        builder.button(
+            text=f"⭐ {plan.label} — {stars} ⭐",
+            callback_data=f"topup:stars_plan:{plan.key}",
+        )
+    builder.button(text=t("btn_back", lang), callback_data="menu:topup")
+    builder.adjust(1)
+    await call.message.edit_text(
+        t("topup_stars_title", lang) + "\n\n" + t("topup_select_plan", lang),
+        reply_markup=builder.as_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("topup:stars_plan:"))
+async def cb_stars_plan(
+    call: CallbackQuery, session: AsyncSession, db_user: User, bot: Bot
+) -> None:
+    """Create Telegram Stars invoice."""
+    lang = db_user.language or "ru"
+    plan_key = call.data.split(":")[-1]
+    plan = await repo.get_price_plan_by_key(session, plan_key)
+
+    if not plan:
+        await call.answer(t("error_not_found", lang), show_alert=True)
+        return
+
+    stars = plan.price_stars or max(1, int(plan.price_rub / 10))
+
+    tx = await repo.create_transaction(
+        session,
+        user_id=db_user.id,
+        amount_rub=plan.price_rub,
+        credits=plan.credits,
+        provider=PaymentProvider.telegram_stars,
+        external_id=f"stars_pending:{db_user.id}:{plan_key}",
+    )
+
+    await bot.send_invoice(
+        chat_id=call.from_user.id,
+        title=f"⭐ {plan.label}",
+        description=t("topup_stars_desc", lang, label=plan.label, stars=stars),
+        payload=f"stars:{tx.id}:{plan_key}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=f"{plan.credits} credits", amount=stars)],
+    )
+    await call.answer()
+
+
+@router.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery) -> None:
+    await query.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def on_successful_payment(
+    message: Message, session: AsyncSession, db_user: User, bot: Bot
+) -> None:
+    lang = db_user.language or "ru"
+    payment = message.successful_payment
+    if not payment or payment.currency != "XTR":
+        return
+    parts = payment.invoice_payload.split(":")
+    if len(parts) < 2 or parts[0] != "stars":
+        logger.warning("Unknown Stars payload: %s", payment.invoice_payload)
+        return
+    tx_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+    if not tx_id:
+        return
+    await session.execute(
+        update(Transaction).where(Transaction.id == tx_id).values(
+            status=TransactionStatus.paid,
+            external_id=payment.telegram_payment_charge_id,
+        )
+    )
+    await session.commit()
+    tx = await repo.get_transaction_by_id(session, tx_id)
+    if not tx:
+        await message.answer(t("error_generic", lang))
+        return
+    new_balance = await repo.add_credits(session, db_user.id, tx.credits)
+    from main import _accrue_referral_commissions
+    await _accrue_referral_commissions(session, db_user, tx.amount_rub, bot)
+    await message.answer(
+        t("topup_success", lang, credits=tx.credits, balance=new_balance),
+        reply_markup=back_to_menu_kb(),
+    )

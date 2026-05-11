@@ -24,7 +24,8 @@ from api.miniapp_routes import router as miniapp_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 from api.music_service import extract_music_urls, pop_task
 from api.public_files import UPLOAD_ROOT, mirror_url, save_public_file
-from bot.handlers import admin, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen
+from bot.handlers import admin, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen, stars_payment
+from bot.handlers import settings as settings_handler
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.feed import get_generation_result_keyboard
 from bot.middlewares.auth import AuthMiddleware
@@ -108,6 +109,8 @@ async def lifespan(app: FastAPI):
     dp.include_router(admin.router)
     dp.include_router(marketplace.router)
     dp.include_router(marketplace.mod_router)
+    dp.include_router(settings_handler.router)
+    dp.include_router(stars_payment.router)
 
     await run_seed()
 
@@ -220,7 +223,7 @@ async def cryptobot_webhook(request: Request) -> dict:
             new_balance = await repo.add_credits(session, tx.user_id, tx.credits)
             user = await repo.get_user_by_id(session, tx.user_id)
             if user:
-                await _accrue_referral_commissions(session, user, tx.amount_rub)
+                await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
                 if bot:
                     try:
                         await bot.send_message(
@@ -264,7 +267,7 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
                 new_balance = await repo.add_credits(session, tx.user_id, tx.credits)
                 user = await repo.get_user_by_id(session, tx.user_id)
                 if user:
-                    await _accrue_referral_commissions(session, user, tx.amount_rub)
+                    await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
                     if bot:
                         try:
                             await bot.send_message(

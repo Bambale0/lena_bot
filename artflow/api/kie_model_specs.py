@@ -48,6 +48,12 @@ def _clean(value: Any) -> Any:
     return value
 
 
+def _singular_reference_field(field: str) -> str | None:
+    if field.endswith("_urls"):
+        return field[:-1]
+    return None
+
+
 def _refs(reference_urls: str | list[str] | None) -> list[str]:
     if not reference_urls:
         return []
@@ -484,5 +490,12 @@ def build_kie_input(
     elif spec.reference_type == KieReferenceType.KLING_MOTION:
         inp["input_urls"] = urls
         inp["video_urls"] = [p["reference_video_url"]] if p.get("reference_video_url") else []
+
+    if spec.reference_field and spec.reference_field.endswith("_urls"):
+        urls_value = inp.get(spec.reference_field)
+        if isinstance(urls_value, list) and urls_value:
+            singular_field = _singular_reference_field(spec.reference_field)
+            if singular_field:
+                inp.setdefault(singular_field, urls_value[0])
 
     return resolved_model, _clean(inp)
