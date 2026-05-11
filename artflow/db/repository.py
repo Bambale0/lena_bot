@@ -89,6 +89,16 @@ async def get_user_by_tg_id(session: AsyncSession, tg_id: int) -> User | None:
     return result.scalar_one_or_none()
 
 
+async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
+    cleaned = username.strip().lstrip("@")
+    if not cleaned:
+        return None
+    result = await session.execute(
+        select(User).where(func.lower(User.username) == cleaned.lower())
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
     result = await session.execute(select(User).where(User.id == user_id))
     return result.scalar_one_or_none()

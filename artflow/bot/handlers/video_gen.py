@@ -59,7 +59,6 @@ _DEFAULT_RATIO: dict[str, str] = {
     VideoModel.SEEDANCE_2: "16:9",
     VideoModel.SEEDANCE_2_FAST: "16:9",
     VideoModel.GROK_T2V: "2:3",
-    VideoModel.GROK_I2V: "16:9",
     VideoModel.HAPPYHORSE_T2V: "16:9",
     VideoModel.VEO_3_FAST: "16:9",
     VideoModel.VEO_3: "16:9",
@@ -81,6 +80,23 @@ _DEFAULT_RES: dict[str, str] = {
 _MOTION_MODELS = {VideoModel.KLING_26_MOTION, VideoModel.KLING_30_MOTION}
 
 
+def _is_per_second_video_model(model_key: str) -> bool:
+    return VIDEO_CAPS.get(model_key, {}).get("billing_mode") == "per_second"
+
+
+def _video_total_credits(model_key: str, duration: int, rate_or_flat: float) -> float:
+    if _is_per_second_video_model(model_key):
+        return rate_or_flat * duration
+    return rate_or_flat
+
+
+def _video_price_text(model_key: str, duration: int, rate_or_flat: float) -> str:
+    total = _video_total_credits(model_key, duration, rate_or_flat)
+    if _is_per_second_video_model(model_key):
+        return f"{rate_or_flat:g} 💋/сек × {duration} сек = {total:g} 💋"
+    return f"{total:g} 💋"
+
+
 def _params_summary(data: dict) -> str:
     parts = [p for p in [
         data.get("aspect_ratio"),
@@ -89,6 +105,24 @@ def _params_summary(data: dict) -> str:
         data.get("grok_mode"),
     ] if p]
     return " · ".join(parts) if parts else "по умолчанию"
+
+
+def _video_ref_count(data: dict) -> int:
+    if data.get("mode") != "image":
+        return 0
+    image_url = data.get("image_url")
+    if isinstance(image_url, list):
+        return len([item for item in image_url if item])
+    if image_url or data.get("image_file_id"):
+        return 1
+    return 0
+
+
+def _normalize_aspect_ratio_for_state(model_key: str, mode: str | None, aspect_ratio: str | None, ref_count: int) -> str | None:
+    min_refs = int(VIDEO_CAPS.get(model_key, {}).get("aspect_ratio_min_refs", 0) or 0)
+    if min_refs and mode == "image" and ref_count < min_refs:
+        return None
+    return aspect_ratio
 
 
 def _has_params(model_key: str) -> bool:
@@ -150,17 +184,17 @@ async def cb_video_model(
     if not model_cost:
         await call.answer("Модель недоступна", show_alert=True)
         return
-    min_credits = model_cost.credits * default_duration
+    min_credits = _video_total_credits(model_key, default_duration, model_cost.credits)
     if db_user.credits < min_credits:
         await call.answer(
-            f"Недостаточно кредитов! Нужно минимум {min_credits} (за {default_duration} сек), у тебя {db_user.credits}.",
+            f"Недостаточно 💋! Нужно минимум {_video_price_text(model_key, default_duration, model_cost.credits)}, у тебя {db_user.credits:g} 💋.",
             show_alert=True,
         )
         return
 
     await state.update_data(
         model_key=model_key,
-        credits=model_cost.credits,  # per-second rate
+        credits=model_cost.credits,
         duration=default_duration,
         aspect_ratio=_DEFAULT_RATIO.get(model_key),
         resolution=default_resolution,
@@ -177,7 +211,7 @@ async def cb_video_model(
         await state.set_state(VideoGenFSM.mode_select)
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
-            f"✅ <b>{model_cost.display_name}</b> ({model_cost.credits} кр/сек)\n\nВыбери режим:",
+            f"✅ <b>{model_cost.display_name}</b> ({_video_price_text(model_key, default_duration, model_cost.credits)})\n\nВыбери режим:",
             reply_markup=video_mode_kb(model_key),
         )
     await safe_answer_callback(call)
@@ -243,16 +277,16 @@ async def handle_video_upload(
     model_key: str = data["model_key"]
     resolution: str | None = data.get("resolution")
 
-    # Calculate cost based on video duration and per-second rate
+    # Motion Control currently uses Kling, but keep the pricing logic generic.
     model_cost = await repo.resolve_video_model_cost(session, model_key, resolution=resolution)
-    credits_per_sec = model_cost.credits if model_cost else int(data.get("credits", 8))
-    total_credits = credits_per_sec * video_duration
+    rate_or_flat = model_cost.credits if model_cost else int(data.get("credits", 8))
+    total_credits = _video_total_credits(model_key, video_duration, rate_or_flat)
 
     if db_user.credits < total_credits:
         await message.answer(
-            f"❌ Недостаточно кредитов!\n"
-            f"Видео: {video_duration} сек × {credits_per_sec} кр/сек = {total_credits} кр\n"
-            f"Баланс: {db_user.credits} кр.",
+            f"❌ Недостаточно 💋!\n"
+            f"Видео: {_video_price_text(model_key, video_duration, rate_or_flat)}\n"
+            f"Баланс: {db_user.credits:g} 💋.",
             reply_markup=back_to_menu_kb(),
         )
         return
@@ -264,7 +298,7 @@ async def handle_video_upload(
         reference_video_url=video_url,
         motion_duration=video_duration,
         motion_credits=total_credits,
-        credits=credits_per_sec,
+        credits=rate_or_flat,
         motion_step="prompt",
     )
     await state.set_state(VideoGenFSM.prompt_input)
@@ -272,7 +306,7 @@ async def handle_video_upload(
     model_cost_obj = await repo.get_model_cost(session, model_key)
     display_name = model_cost_obj.display_name if model_cost_obj else model_key
     await message.answer(
-        f"✅ Видео загружено! ({video_duration} сек × {credits_per_sec} кр/сек = <b>{total_credits} кр</b>)\n\n"
+        f"✅ Видео загружено! (<b>{_video_price_text(model_key, video_duration, rate_or_flat)}</b>)\n\n"
         f"✅ <b>{display_name}</b>\n\n"
         "✍️ Введи промпт (или отправь <code>-</code> для пропуска):",
         reply_markup=back_to_menu_kb(),
@@ -314,6 +348,8 @@ async def handle_image_upload(
             reply_markup=video_params_kb(
                 model_key, updated.get("duration"),
                 updated.get("aspect_ratio"), updated.get("resolution"), updated.get("grok_mode"),
+                selected_mode=updated.get("mode"),
+                ref_count=_video_ref_count(updated),
             ),
         )
     else:
@@ -335,6 +371,8 @@ async def _go_to_params_or_prompt(
             reply_markup=video_params_kb(
                 model_key, data.get("duration"),
                 data.get("aspect_ratio"), data.get("resolution"), data.get("grok_mode"),
+                selected_mode=data.get("mode"),
+                ref_count=_video_ref_count(data),
             ),
         )
     else:
@@ -351,7 +389,11 @@ async def cb_vpar_dur(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(duration=dur)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(data["model_key"], dur, data.get("aspect_ratio"), data.get("resolution"), data.get("grok_mode"))
+        reply_markup=video_params_kb(
+            data["model_key"], dur, data.get("aspect_ratio"), data.get("resolution"), data.get("grok_mode"),
+            selected_mode=data.get("mode"),
+            ref_count=_video_ref_count(data),
+        )
     )
     await call.answer(f"{dur} сек")
 
@@ -362,7 +404,11 @@ async def cb_vpar_ratio(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(aspect_ratio=ratio)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(data["model_key"], data.get("duration"), ratio, data.get("resolution"), data.get("grok_mode"))
+        reply_markup=video_params_kb(
+            data["model_key"], data.get("duration"), ratio, data.get("resolution"), data.get("grok_mode"),
+            selected_mode=data.get("mode"),
+            ref_count=_video_ref_count(data),
+        )
     )
     await call.answer(ratio)
 
@@ -373,7 +419,11 @@ async def cb_vpar_res(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(resolution=res)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(data["model_key"], data.get("duration"), data.get("aspect_ratio"), res, data.get("grok_mode"))
+        reply_markup=video_params_kb(
+            data["model_key"], data.get("duration"), data.get("aspect_ratio"), res, data.get("grok_mode"),
+            selected_mode=data.get("mode"),
+            ref_count=_video_ref_count(data),
+        )
     )
     await call.answer(res)
 
@@ -390,6 +440,8 @@ async def cb_vpar_mode(call: CallbackQuery, state: FSMContext) -> None:
             data.get("aspect_ratio"),
             data.get("resolution"),
             mode,
+            selected_mode=data.get("mode"),
+            ref_count=_video_ref_count(data),
         )
     )
     await call.answer(mode)
@@ -409,13 +461,12 @@ async def cb_vpar_next(call: CallbackQuery, state: FSMContext, session: AsyncSes
         await state.update_data(credits=model_cost.credits)
     summary = _params_summary(data)
     duration_val = data.get("duration", 5)
-    cps = model_cost.credits if model_cost else data.get("credits", 0)
-    total_creds = cps * duration_val
-    await state.update_data(credits=cps)
+    rate_or_flat = float(model_cost.credits if model_cost else data.get("credits", 0))
+    await state.update_data(credits=rate_or_flat)
     await state.set_state(VideoGenFSM.prompt_input)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        f"✅ <b>{display_name}</b> ({cps} кр/сек × {duration_val} сек = {total_creds} кр)"
+        f"✅ <b>{display_name}</b> ({_video_price_text(data['model_key'], duration_val, rate_or_flat)})"
         f" · <code>{summary}</code>\n\n✍️ Введи промпт:",
         reply_markup=back_to_menu_kb(),
     )
@@ -460,7 +511,10 @@ async def handle_video_prompt(
     motion_step: str | None = data.get("motion_step")
     image_file_id: str | None = data.get("image_file_id")
     duration: int = data.get("duration", 5)
-    aspect_ratio: str | None = data.get("aspect_ratio")
+    stored_aspect_ratio: str | None = data.get("aspect_ratio")
+    aspect_ratio = _normalize_aspect_ratio_for_state(model_key, data.get("mode"), stored_aspect_ratio, _video_ref_count(data))
+    if aspect_ratio != stored_aspect_ratio:
+        await state.update_data(aspect_ratio=aspect_ratio)
     resolution: str | None = data.get("resolution")
     grok_mode: str = data.get("grok_mode", "normal")
     prompt = message.text.strip()  # type: ignore[union-attr]
@@ -479,6 +533,8 @@ async def handle_video_prompt(
                 reply_markup=video_params_kb(
                     model_key, updated.get("duration"),
                     updated.get("aspect_ratio"), updated.get("resolution"), updated.get("grok_mode"),
+                    selected_mode=updated.get("mode"),
+                    ref_count=_video_ref_count(updated),
                 ),
             )
         else:
@@ -507,17 +563,16 @@ async def handle_video_prompt(
         duration=duration,
         resolution=resolution,
     )
-    # Per-second pricing: credits = rate_per_sec × duration
     motion_credits = data.get("motion_credits")  # pre-calculated for motion control
     if motion_credits is not None:
         credits = int(motion_credits)
     else:
-        credits_per_sec = model_cost.credits if model_cost else int(data.get("credits", 0))
-        credits = credits_per_sec * duration
+        rate_or_flat = model_cost.credits if model_cost else int(data.get("credits", 0))
+        credits = int(_video_total_credits(model_key, duration, rate_or_flat))
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await message.answer("❌ Недостаточно cr.", reply_markup=main_menu_kb())
+        await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
@@ -550,7 +605,7 @@ async def handle_video_prompt(
         logger.error("Video generation error: %s", e)
         await repo.fail_generation(session, gen.id, str(e))
         await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text("❌ Ошибка запуска генерации. cr возвращены.\n\nПопробуй другую модель или повтори через минуту.", reply_markup=main_menu_kb())
+        await status_msg.edit_text("❌ Ошибка запуска генерации. 💋 возвращены.\n\nПопробуй другую модель или повтори через минуту.", reply_markup=main_menu_kb())
         await state.clear()
         return
 

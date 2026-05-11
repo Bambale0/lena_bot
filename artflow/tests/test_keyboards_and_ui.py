@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
+from bot.keyboards.models import video_params_kb
 from bot.keyboards.payment import topup_kb
 from bot.ui.main_menu import render_main_menu
 
@@ -28,7 +29,24 @@ def test_render_main_menu_active_session_text() -> None:
     session = SimpleNamespace(model="nano-banana-pro", quality="2K", aspect_ratio="9:16", count=3)
     context = SimpleNamespace(balance=1003, active_image_session=session, is_admin=False)
     render = render_main_menu(context)
-    assert "Активная серия изображений" in render.text
+    assert "Текущая серия изображений" in render.text
+
+
+def test_video_params_kb_hides_grok_i2v_ratio_for_single_ref() -> None:
+    buttons = flatten_buttons(
+        video_params_kb(
+            "grok-imagine/image-to-video",
+            6,
+            None,
+            "480p",
+            "normal",
+            selected_mode="image",
+            ref_count=1,
+        )
+    )
+    assert all(button.callback_data != "vpar_ratio:16:9" for button in buttons)
+
+
 def test_topup_keyboard_keeps_decimal_price() -> None:
     plans = [SimpleNamespace(label="10 сек · Pro", price_rub=199.5, key="p1")]
     buttons = flatten_buttons(topup_kb(plans))

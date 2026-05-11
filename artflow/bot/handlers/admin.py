@@ -117,6 +117,46 @@ def _admin_back_kb():
     return builder.as_markup()
 
 
+def _price_done_kb():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💳 К прайс-листу", callback_data="adm:price")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _models_done_kb():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⚙️ К моделям", callback_data="adm:models")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _credits_done_kb():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💰 Ещё начислить", callback_data="adm:add_credits")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _ban_done_kb():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🚫 Ещё бан / разбан", callback_data="adm:ban")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _withdrawal_done_kb():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💸 К заявкам", callback_data="adm:withdrawals")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 BROADCAST_TZ = ZoneInfo("Europe/Moscow")
 
 
@@ -425,7 +465,7 @@ async def cb_withdrawal_decide(call: CallbackQuery, session: AsyncSession, bot: 
         f"✅ Заявка #{req.id} {status_text}.\n\n"
         f"Пользователь: {_user_label(user)}\n"
         f"Сумма: <b>{req.amount_rub:.2f}₽</b>",
-        reply_markup=_admin_back_kb(),
+        reply_markup=_withdrawal_done_kb(),
     )
     try:
         await bot.send_message(
@@ -577,6 +617,7 @@ async def handle_new_price_rub(message: Message, session: AsyncSession, state: F
         f"Название: <b>{plan.label}</b>\n"
         f"Кредиты: <b>{plan.credits}</b>\n"
         f"Цена: <b>{_fmt_price(plan.price_rub)}₽</b>",
+        reply_markup=_price_done_kb(),
     )
 
 
@@ -607,7 +648,10 @@ async def handle_price_rub(message: Message, session: AsyncSession, state: FSMCo
         plan.price_rub = new_price
         await session.commit()
     await state.clear()
-    await message.answer(f"✅ Цена тарифа <code>{plan_key}</code> обновлена: {_fmt_price(new_price)}₽")
+    await message.answer(
+        f"✅ Цена тарифа <code>{plan_key}</code> обновлена: {_fmt_price(new_price)}₽",
+        reply_markup=_price_done_kb(),
+    )
 
 
 @router.callback_query(F.data.startswith("adm:price_set_cr:"))
@@ -646,7 +690,10 @@ async def handle_price_credits(message: Message, session: AsyncSession, state: F
         plan.credits = new_credits
         await session.commit()
     await state.clear()
-    await message.answer(f"✅ Кредиты тарифа <code>{plan_key}</code> обновлены: {new_credits}")
+    await message.answer(
+        f"✅ Кредиты тарифа <code>{plan_key}</code> обновлены: {new_credits}",
+        reply_markup=_price_done_kb(),
+    )
 
 
 @router.message(AdminFSM.edit_price_label)
@@ -663,7 +710,10 @@ async def handle_price_label(message: Message, session: AsyncSession, state: FSM
         plan.label = new_label
         await session.commit()
     await state.clear()
-    await message.answer(f"✅ Название тарифа <code>{plan_key}</code> обновлено: <b>{new_label}</b>")
+    await message.answer(
+        f"✅ Название тарифа <code>{plan_key}</code> обновлено: <b>{new_label}</b>",
+        reply_markup=_price_done_kb(),
+    )
 
 
 # ─── Стоимость моделей ────────────────────────────────────────────────────────
@@ -807,7 +857,10 @@ async def handle_model_credits(message: Message, session: AsyncSession, state: F
     ok = await repo.set_model_cost(session, model_key, new_credits)
     await state.clear()
     if ok:
-        await message.answer(f"✅ Стоимость <code>{model_key}</code> обновлена: {new_credits} кр")
+        await message.answer(
+            f"✅ Стоимость <code>{model_key}</code> обновлена: {new_credits} кр",
+            reply_markup=_models_done_kb(),
+        )
     else:
         await message.answer("❌ Модель не найдена")
 
@@ -830,7 +883,10 @@ async def handle_model_display_name(message: Message, session: AsyncSession, sta
     model_cost.display_name = new_name
     await session.commit()
     await state.clear()
-    await message.answer(f"✅ Название <code>{model_key}</code> обновлено: <b>{new_name}</b>")
+    await message.answer(
+        f"✅ Название <code>{model_key}</code> обновлено: <b>{new_name}</b>",
+        reply_markup=_models_done_kb(),
+    )
 
 
 # ─── Кредиты ─────────────────────────────────────────────────────────────────
@@ -874,8 +930,9 @@ async def handle_credits_amount(message: Message, state: FSMContext, session: As
     new_balance = await repo.add_credits(session, data["target_user_id"], amount)
     await state.clear()
     await message.answer(
-        f"✅ Начислено <b>{amount}</b> кр пользователю {data['target_tg_id']}\n"
-        f"Новый баланс: <b>{new_balance}</b> кр"
+        f"✅ Начислено <b>{amount}</b> 💋 пользователю {data['target_tg_id']}\n"
+        f"Новый баланс: <b>{new_balance}</b> 💋",
+        reply_markup=_credits_done_kb(),
     )
 
 
@@ -904,10 +961,16 @@ async def handle_ban(message: Message, state: FSMContext, session: AsyncSession)
     unban = len(parts) > 1 and parts[1].lower() == "unban"
     if unban:
         ok = await repo.unban_user(session, tg_id)
-        await message.answer(f"✅ Разбан {tg_id}" if ok else "❌ Пользователь не найден")
+        await message.answer(
+            f"✅ Разбан {tg_id}" if ok else "❌ Пользователь не найден",
+            reply_markup=_ban_done_kb() if ok else None,
+        )
     else:
         ok = await repo.ban_user(session, tg_id)
-        await message.answer(f"🚫 Забанен {tg_id}" if ok else "❌ Пользователь не найден")
+        await message.answer(
+            f"🚫 Забанен {tg_id}" if ok else "❌ Пользователь не найден",
+            reply_markup=_ban_done_kb() if ok else None,
+        )
     await state.clear()
 
 
@@ -942,7 +1005,7 @@ async def cmd_cancel_admin_flow(message: Message, state: FSMContext) -> None:
 
 
 @router.message(AdminFSM.await_broadcast_text)
-async def handle_broadcast(message: Message, state: FSMContext) -> None:
+async def handle_broadcast(message: Message, state: FSMContext, session: AsyncSession | None = None) -> None:
     await state.update_data(
         broadcast_source_chat_id=message.chat.id,
         broadcast_source_message_id=message.message_id,

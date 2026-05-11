@@ -13,7 +13,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service
-from api.image_service import ImageModel
+from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
 from api.public_files import mirror_telegram_file
@@ -103,6 +103,11 @@ def _quality_label(model_key: str, quality: str | None) -> str:
         for value, label in _quality_options(model_key)
     }
     return clean_labels.get(quality or "", quality or "по умолчанию")
+
+
+def _normalize_session_quality(model_key: str, aspect_ratio: str | None, quality: str | None) -> str:
+    normalized = normalize_quality_for_aspect_ratio(model_key, aspect_ratio, quality)
+    return str(normalized or quality or "basic")
 
 
 def _detect_image_ext(raw: bytes) -> str:
@@ -321,13 +326,20 @@ async def _ensure_active_image_session_from_state(
     if existing:
         return existing
 
+    aspect_ratio = data.get("aspect_ratio")
+    quality = _normalize_session_quality(
+        data["model_key"],
+        aspect_ratio,
+        data.get("quality", "basic"),
+    )
+
     image_session = await repo.create_image_session(
         session=session,
         user_id=db_user.id,
         model=data["model_key"],
         mode=data.get("mode", "text"),
-        aspect_ratio=data.get("aspect_ratio"),
-        quality=data.get("quality", "basic"),
+        aspect_ratio=aspect_ratio,
+        quality=quality,
         count=data.get("count", 1),
         base_prompt=None,
         reference_file_id=data.get("image_file_id"),
@@ -393,10 +405,20 @@ async def _launch_session_generation(
     launching_text: str,
     queued_text: str,
 ) -> bool:
+    normalized_quality = _normalize_session_quality(
+        image_session.model,
+        image_session.aspect_ratio,
+        image_session.quality,
+    )
+    if normalized_quality != image_session.quality:
+        image_session.quality = normalized_quality
+        await session.commit()
+        await state.update_data(quality=normalized_quality)
+
     model_cost = await repo.resolve_image_model_cost(
         session,
         image_session.model,
-        quality=image_session.quality,
+        quality=normalized_quality,
     )
     credits = model_cost.credits if model_cost else 1
 
@@ -427,7 +449,7 @@ async def _launch_session_generation(
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await source_message.answer("❌ Недостаточно cr.", reply_markup=main_menu_kb())
+        await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         return False
 
     gen = await repo.create_generation(
@@ -453,7 +475,7 @@ async def _launch_session_generation(
             image_url=reference_url,
             aspect_ratio=image_session.aspect_ratio,
             n=image_session.count,
-            quality=image_session.quality,
+            quality=normalized_quality,
             callback_url=_kie_callback_url(),
         )
     except Exception as e:
@@ -461,7 +483,7 @@ async def _launch_session_generation(
         await repo.fail_generation(session, gen.id, str(e))
         await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
-            "❌ Ошибка генерации. cr возвращены.",
+            "❌ Ошибка генерации. 💋 возвращены.",
             reply_markup=image_session_kb(parent_generation_id),
         )
         return False
@@ -511,7 +533,7 @@ async def _start_image_model_flow(
 
     if db_user.credits < model_cost.credits:
         await call.answer(
-            f"Недостаточно cr! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         return
@@ -911,11 +933,14 @@ async def cb_image_quality(
     await state.update_data(quality=quality)
     data = await state.get_data()
     model_key = data["model_key"]
-    model_cost = await repo.resolve_image_model_cost(session, model_key, quality=quality)
-    display_name = model_cost.display_name if model_cost else model_key
     ratio = data.get("aspect_ratio")
-    q_label = _quality_label(model_key, quality)
+    normalized_quality = _normalize_session_quality(model_key, ratio, quality)
+    model_cost = await repo.resolve_image_model_cost(session, model_key, quality=normalized_quality)
+    display_name = model_cost.display_name if model_cost else model_key
+    q_label = _quality_label(model_key, normalized_quality)
     await state.update_data(credits=model_cost.credits if model_cost else data.get("credits"))
+    if normalized_quality != quality:
+        await state.update_data(quality=normalized_quality, image_quality=normalized_quality)
     summary = " · ".join(part for part in (display_name, ratio, q_label) if part)
 
     if len(IMAGE_CAPS.get(model_key, {}).get("counts", [1])) > 1:
@@ -928,6 +953,9 @@ async def cb_image_quality(
     else:
         image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
         await _show_active_image_session_callback(call, state, session, db_user, image_session)
+    if normalized_quality != quality:
+        await call.answer("Для формата 1:1 доступно только 2K")
+        return
     await call.answer(q_label)
 
 
@@ -1447,7 +1475,7 @@ async def cb_image_session_animate(
 
     model_key = VideoModel.GROK_I2V
     duration = _DEFAULT_DURATION.get(model_key, 6)
-    aspect_ratio = _DEFAULT_RATIO.get(model_key, "16:9")
+    aspect_ratio = _DEFAULT_RATIO.get(model_key)
     resolution = _DEFAULT_RES.get(model_key, "480p")
     grok_mode = "normal" if VIDEO_CAPS.get(model_key, {}).get("mode_options") else None
     model_cost = await repo.resolve_video_model_cost(
@@ -1461,7 +1489,7 @@ async def cb_image_session_animate(
         return
     if db_user.credits < model_cost.credits:
         await call.answer(
-            f"Недостаточно cr! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
         )
         return
@@ -1486,7 +1514,15 @@ async def cb_image_session_animate(
         f"🎬 <b>Оживляем изображение</b>\n\n"
         f"Модель: <code>{model_cost.display_name}</code>\n\n"
         "⚙️ Настрой параметры и нажми <b>Далее →</b>",
-        reply_markup=video_params_kb(model_key, duration, aspect_ratio, resolution, grok_mode),
+        reply_markup=video_params_kb(
+            model_key,
+            duration,
+            aspect_ratio,
+            resolution,
+            grok_mode,
+            selected_mode="image",
+            ref_count=1,
+        ),
     )
     await safe_answer_callback(call)
 
@@ -1536,14 +1572,28 @@ async def cb_image_settings_ratio_set(
         await call.answer("Этот формат недоступен для модели", show_alert=True)
         return
 
+    previous_quality = image_session.quality
     image_session.aspect_ratio = ratio
+    normalized_quality = _normalize_session_quality(image_session.model, ratio, image_session.quality)
+    if normalized_quality != image_session.quality:
+        image_session.quality = normalized_quality
     await session.commit()
-    await state.update_data(image_session_id=image_session.id, aspect_ratio=ratio)
+    model_cost = await repo.resolve_image_model_cost(session, image_session.model, quality=image_session.quality)
+    await state.update_data(
+        image_session_id=image_session.id,
+        aspect_ratio=ratio,
+        quality=image_session.quality,
+        image_quality=image_session.quality,
+        credits=model_cost.credits if model_cost else None,
+    )
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         _session_settings_text(image_session),
         reply_markup=image_session_settings_kb(image_session.id, image_session.model, image_session.mode),
     )
+    if previous_quality != image_session.quality:
+        await call.answer("Формат обновлён, качество снижено до 2K для 1:1")
+        return
     await call.answer("Формат обновлён")
 
 
@@ -1593,12 +1643,14 @@ async def cb_image_settings_quality_set(
         await call.answer("Это качество недоступно для модели", show_alert=True)
         return
 
-    image_session.quality = quality
+    normalized_quality = _normalize_session_quality(image_session.model, image_session.aspect_ratio, quality)
+    image_session.quality = normalized_quality
     await session.commit()
-    model_cost = await repo.resolve_image_model_cost(session, image_session.model, quality=quality)
+    model_cost = await repo.resolve_image_model_cost(session, image_session.model, quality=normalized_quality)
     await state.update_data(
         image_session_id=image_session.id,
-        quality=quality,
+        quality=normalized_quality,
+        image_quality=normalized_quality,
         credits=model_cost.credits if model_cost else None,
     )
     await safe_edit_message(
@@ -1606,6 +1658,9 @@ async def cb_image_settings_quality_set(
         _session_settings_text(image_session),
         reply_markup=image_session_settings_kb(image_session.id, image_session.model, image_session.mode),
     )
+    if normalized_quality != quality:
+        await call.answer("Для формата 1:1 доступно только 2K")
+        return
     await call.answer("Качество обновлено")
 
 

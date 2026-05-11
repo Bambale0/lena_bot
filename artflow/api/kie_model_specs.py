@@ -158,7 +158,7 @@ def _seedance_params(params: dict[str, Any]) -> dict[str, Any]:
         "aspect_ratio": params.get("aspect_ratio") or "16:9",
         "duration": params.get("duration") or 5,
         "return_last_frame": bool(params.get("return_last_frame", False)),
-        "generate_audio": bool(params.get("generate_audio", False)),
+        "generate_audio": bool(params.get("generate_audio", True)),
         "nsfw_checker": False,
     }
 
@@ -207,7 +207,7 @@ def _kling_30_params(params: dict[str, Any]) -> dict[str, Any]:
     raw_res = params.get("mode_quality") or params.get("resolution") or "pro"
     return {
         "mode": _RES_MAP.get(raw_res, raw_res),
-        "sound": False,
+        "sound": bool(params.get("sound", True)),
         "duration": str(params.get("duration") or 5),
         "aspect_ratio": params.get("aspect_ratio") or "16:9",
         "multi_shots": bool(params.get("multi_shots", False)),
@@ -359,7 +359,7 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         media_type=KieMediaType.VIDEO,
         supported_modes=("text",),
         optional_params={"aspect_ratio": "aspect_ratio"},
-        defaults={"aspect_ratio": "16:9", "sound": False},
+        defaults={"aspect_ratio": "16:9", "sound": True},
         param_builder=_str_duration,
         remix_model="kling-2.6/image-to-video",
     ),
@@ -369,7 +369,7 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         supported_modes=("image",),
         reference_field="image_urls",
         reference_type=KieReferenceType.LIST,
-        defaults={"sound": False},
+        defaults={"sound": True},
         param_builder=_str_duration,
     ),
     "kling-2.6/motion-control": KieModelSpec(
@@ -416,16 +416,16 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         model="bytedance/seedance-2",
         media_type=KieMediaType.VIDEO,
         supported_modes=("text", "image"),
-        reference_field="first_frame_url",
-        reference_type=KieReferenceType.FIRST_LAST,
+        reference_field="reference_image_urls",
+        reference_type=KieReferenceType.LIST,
         param_builder=_seedance_params,
     ),
     "bytedance/seedance-2-fast": KieModelSpec(
         model="bytedance/seedance-2-fast",
         media_type=KieMediaType.VIDEO,
         supported_modes=("text", "image"),
-        reference_field="first_frame_url",
-        reference_type=KieReferenceType.FIRST_LAST,
+        reference_field="reference_image_urls",
+        reference_type=KieReferenceType.LIST,
         param_builder=_seedance_params,
     ),
     "grok-imagine/text-to-video": KieModelSpec(

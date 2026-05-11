@@ -54,11 +54,11 @@ _RU = {
     "topup_select_plan": "Выбери тариф:",
     "topup_stars_title": "⭐ <b>Оплата Telegram Stars</b>",
     "topup_stars_desc": "Тариф: {label}\nСтоимость: <b>{stars} ⭐</b>\n\nНажми кнопку ниже для оплаты.",
-    "topup_success": "✅ Оплата подтверждена!\nЗачислено: <b>+{credits} cr</b>\nБаланс: <b>{balance} cr</b>",
+    "topup_success": "✅ Оплата подтверждена!\nЗачислено: <b>+{credits} 💋</b>\nБаланс: <b>{balance} 💋</b>",
     "topup_tbank_title": "🏦 <b>Оплата через T-Bанк</b>",
-    "topup_tbank_desc": "Тариф: {label}\nСумма: <b>{amount} ₽</b>\n\nОткрой ссылку для оплаты картой или через СБП.\n<i>После успешной оплаты cr зачислятся автоматически.</i>",
+    "topup_tbank_desc": "Тариф: {label}\nСумма: <b>{amount} ₽</b>\n\nОткрой ссылку для оплаты картой или через СБП.\n<i>После успешной оплаты 💋 зачислятся автоматически.</i>",
     "topup_crypto_title": "🪙 <b>Оплата криптой</b>",
-    "topup_crypto_desc": "Тариф: {label}\nСумма: <b>{amount} USDT</b>\n\nНажми кнопку для оплаты в CryptoBot.\n<i>После оплаты cr зачислятся автоматически.</i>",
+    "topup_crypto_desc": "Тариф: {label}\nСумма: <b>{amount} USDT</b>\n\nНажми кнопку для оплаты в CryptoBot.\n<i>После оплаты 💋 зачислятся автоматически.</i>",
 
     # Рефералы
     "referral_title": "👥 <b>Реферальная программа</b>",
@@ -74,14 +74,14 @@ _RU = {
     "referral_pending_withdrawals": "⏳ В ожидании вывода: {amount:.2f}₽",
     "referral_conditions": (
         "<b>Условия:</b>\n"
-        "• Бонус за реферала: +{bonus} cr\n"
+        "• Бонус за реферала: +{bonus} 💋\n"
         "• Комиссия с оплат L1: {l1_pct}%\n"
         "• Комиссия с оплат L2: {l2_pct}%\n"
         "• Комиссия с оплат L3: {l3_pct}%"
     ),
     "referral_bonus_received": (
         "🎉 По твоей ссылке пришёл новый пользователь!\n"
-        "+{bonus} cr начислено."
+        "+{bonus} 💋 начислено."
     ),
     "referral_commission": (
         "💰 Реферальная комиссия: <b>+{amount:.2f}₽</b>\n"
@@ -124,7 +124,7 @@ _RU = {
     "image_generating": "⏳ Генерирую изображение...\nЭто займёт несколько секунд.",
     "image_done": "✅ Готово! Вот твоё изображение:",
     "image_error": "❌ Что-то пошло не так при генерации.\nПопробуй ещё раз или выбери другую модель.",
-    "image_not_enough_credits": "😔 Недостаточно cr для генерации.\nНужно: <b>{needed}</b>, у тебя: <b>{has}</b>\n\nПополни баланс в меню 💳",
+    "image_not_enough_credits": "😔 Недостаточно 💋 для генерации.\nНужно: <b>{needed}</b>, у тебя: <b>{has}</b>\n\nПополни баланс в меню 💳",
 
     # Видео
     "video_menu": "🎬 <b>Генерация видео</b>\n\nВыбери модель:",
@@ -163,14 +163,14 @@ _RU = {
 
     # Промпты
     "prompts_title": "📚 <b>Библиотека промптов</b>",
-    "prompts_empty": "Пока нет промптов.\nСкоро добавим!",
+    "prompts_empty": "Пока тут пусто.\nОпубликуй первый промпт или загляни позже.",
     "prompt_use": "🎯 Использовать",
     "prompt_like": "❤️ {count}",
 
     # История
     "history_title": "📋 <b>История генераций</b>",
     "history_empty": "📋 История пуста. Сделай первую генерацию!",
-    "history_item": "{icon} {status} <code>{model}</code>\n   <i>{prompt}</i>\n   -{credits} cr",
+    "history_item": "{icon} {status} <code>{model}</code>\n   <i>{prompt}</i>\n   -{credits} 💋",
 
     # Админ
     "admin_title": "👑 <b>Панель администратора</b>",
@@ -247,7 +247,7 @@ _EN = {
     "topup_select_plan": "Choose a plan:",
     "topup_stars_title": "⭐ <b>Pay with Telegram Stars</b>",
     "topup_stars_desc": "Plan: {label}\nCost: <b>{stars} ⭐</b>\n\nTap the button below to pay.",
-    "topup_success": "✅ Payment confirmed!\nAdded: <b>+{credits} cr</b>\nBalance: <b>{balance} cr</b>",
+    "topup_success": "✅ Payment confirmed!\nAdded: <b>+{credits} 💋</b>\nBalance: <b>{balance} 💋</b>",
     "topup_tbank_title": "🏦 <b>Pay via T-Bank</b>",
     "topup_tbank_desc": "Plan: {label}\nAmount: <b>{amount} ₽</b>\n\nOpen the link to pay by card or SBP.\n<i>will be added automatically after successful payment.</i>",
     "topup_crypto_title": "🪙 <b>Pay with Crypto</b>",
@@ -267,14 +267,14 @@ _EN = {
     "referral_pending_withdrawals": "⏳ Pending withdrawals: {amount:.2f}₽",
     "referral_conditions": (
         "<b>Terms:</b>\n"
-        "• Bonus per referral: +{bonus} cr\n"
+        "• Bonus per referral: +{bonus} 💋\n"
         "• L1 payment commission: {l1_pct}%\n"
         "• L2 payment commission: {l2_pct}%\n"
         "• L3 payment commission: {l3_pct}%"
     ),
     "referral_bonus_received": (
         "🎉 A new user joined via your link!\n"
-        "+{bonus} cr added."
+        "+{bonus} 💋 added."
     ),
     "referral_commission": (
         "💰 Referral commission: <b>+{amount:.2f}₽</b>\n"
@@ -317,7 +317,7 @@ _EN = {
     "image_generating": "⏳ Generating image...\nThis will take a few seconds.",
     "image_done": "✅ Done! Here's your image:",
     "image_error": "❌ Something went wrong during generation.\nTry again or pick another model.",
-    "image_not_enough_credits": "😔 Not enough cr for generation.\nNeed: <b>{needed}</b>, you have: <b>{has}</b>\n\nTop up your balance 💳",
+    "image_not_enough_credits": "😔 Not enough 💋 for generation.\nNeed: <b>{needed}</b>, you have: <b>{has}</b>\n\nTop up your balance 💳",
 
     # Video
     "video_menu": "🎬 <b>Video Generation</b>\n\nChoose a model:",
@@ -356,14 +356,14 @@ _EN = {
 
     # Prompts
     "prompts_title": "📚 <b>Prompt Library</b>",
-    "prompts_empty": "No prompts yet.\nComing soon!",
+    "prompts_empty": "Nothing here yet.\nPublish the first prompt or check back later.",
     "prompt_use": "🎯 Use",
     "prompt_like": "❤️ {count}",
 
     # History
     "history_title": "📋 <b>Generation History</b>",
     "history_empty": "📋 History is empty. Make your first generation!",
-    "history_item": "{icon} {status} <code>{model}</code>\n   <i>{prompt}</i>\n   -{credits} cr",
+    "history_item": "{icon} {status} <code>{model}</code>\n   <i>{prompt}</i>\n   -{credits} 💋",
 
     # Admin
     "admin_title": "👑 <b>Admin Panel</b>",

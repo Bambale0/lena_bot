@@ -207,6 +207,9 @@ async def test_cb_withdrawal_approve() -> None:
     call.message.edit_text.assert_awaited_once()
     text = call.message.edit_text.call_args[0][0].lower()
     assert "подтверждена" in text
+    reply_markup = call.message.edit_text.await_args.kwargs["reply_markup"]
+    callback_data = [button.callback_data for row in reply_markup.inline_keyboard for button in row]
+    assert callback_data == ["adm:withdrawals", "adm:back"]
 
 
 @pytest.mark.asyncio
@@ -224,6 +227,9 @@ async def test_cb_withdrawal_reject() -> None:
     call.message.edit_text.assert_awaited_once()
     text = call.message.edit_text.call_args[0][0].lower()
     assert "отклонена" in text
+    reply_markup = call.message.edit_text.await_args.kwargs["reply_markup"]
+    callback_data = [button.callback_data for row in reply_markup.inline_keyboard for button in row]
+    assert callback_data == ["adm:withdrawals", "adm:back"]
 
 
 @pytest.mark.asyncio
@@ -356,6 +362,8 @@ async def test_handle_new_price_rub_valid() -> None:
         await admin.handle_new_price_rub(msg, mock_session, mock_state)
     msg.answer.assert_awaited_once()
     assert "Новый тариф создан" in msg.answer.call_args[0][0]
+    callback_data = [button.callback_data for row in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for button in row]
+    assert callback_data == ["adm:price", "adm:back"]
 
 
 # ── handle_price_rub ──────────────────────────────────────────────────────────
@@ -371,6 +379,8 @@ async def test_handle_price_rub_valid() -> None:
     with patch("bot.handlers.admin.repo", AsyncMock(get_price_plan_by_key=AsyncMock(return_value=mock_plan))):
         await admin.handle_price_rub(msg, mock_session, mock_state)
     msg.answer.assert_awaited_once()
+    callback_data = [button.callback_data for row in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for button in row]
+    assert callback_data == ["adm:price", "adm:back"]
 
 
 # ── handle_price_credits ─────────────────────────────────────────────────────
@@ -386,6 +396,8 @@ async def test_handle_price_credits_valid() -> None:
     with patch("bot.handlers.admin.repo", AsyncMock(get_price_plan_by_key=AsyncMock(return_value=mock_plan))):
         await admin.handle_price_credits(msg, mock_session, mock_state)
     msg.answer.assert_awaited_once()
+    callback_data = [button.callback_data for row in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for button in row]
+    assert callback_data == ["adm:price", "adm:back"]
 
 
 # ── handle_price_label ────────────────────────────────────────────────────────
@@ -401,6 +413,8 @@ async def test_handle_price_label_valid() -> None:
     with patch("bot.handlers.admin.repo", AsyncMock(get_price_plan_by_key=AsyncMock(return_value=mock_plan))):
         await admin.handle_price_label(msg, mock_session, mock_state)
     msg.answer.assert_awaited_once()
+    callback_data = [button.callback_data for row in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for button in row]
+    assert callback_data == ["adm:price", "adm:back"]
 
 
 # ── adm:models ────────────────────────────────────────────────────────────────
@@ -414,6 +428,39 @@ async def test_cb_models() -> None:
     with patch("bot.handlers.admin.repo", AsyncMock(get_all_model_costs=AsyncMock(return_value=[mock_cost]))):
         await admin.cb_models(call, AsyncMock())
     call.message.edit_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_model_credits_success_shows_navigation_buttons() -> None:
+    msg = make_message(text="12")
+    msg.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_state = AsyncMock()
+    mock_state.get_data = AsyncMock(return_value={"edit_model_key": "sdxl"})
+
+    with patch("bot.handlers.admin.repo", AsyncMock(set_model_cost=AsyncMock(return_value=True))):
+        await admin.handle_model_credits(msg, mock_session, mock_state)
+
+    msg.answer.assert_awaited_once()
+    callback_data = [button.callback_data for row in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for button in row]
+    assert callback_data == ["adm:models", "adm:back"]
+
+
+@pytest.mark.asyncio
+async def test_handle_model_display_name_success_shows_navigation_buttons() -> None:
+    msg = make_message(text="SDXL Ultra")
+    msg.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_state = AsyncMock()
+    mock_state.get_data = AsyncMock(return_value={"edit_model_key": "sdxl"})
+    mock_model = SimpleNamespace(model_key="sdxl", display_name="SDXL")
+
+    with patch("bot.handlers.admin.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_model))):
+        await admin.handle_model_display_name(msg, mock_session, mock_state)
+
+    msg.answer.assert_awaited_once()
+    callback_data = [button.callback_data for row in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for button in row]
+    assert callback_data == ["adm:models", "adm:back"]
 
 
 # ── adm:model_edit: ──────────────────────────────────────────────────────────
@@ -463,6 +510,8 @@ async def test_handle_ban() -> None:
     with patch("bot.handlers.admin.repo", AsyncMock(ban_user=AsyncMock(return_value=True))):
         await admin.handle_ban(msg, mock_state, AsyncMock())
     msg.answer.assert_awaited_once()
+    callback_data = [button.callback_data for row in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for button in row]
+    assert callback_data == ["adm:ban", "adm:back"]
 
 
 @pytest.mark.asyncio
@@ -473,6 +522,8 @@ async def test_handle_unban() -> None:
     with patch("bot.handlers.admin.repo", AsyncMock(unban_user=AsyncMock(return_value=True))):
         await admin.handle_ban(msg, mock_state, AsyncMock())
     msg.answer.assert_awaited_once()
+    callback_data = [button.callback_data for row in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for button in row]
+    assert callback_data == ["adm:ban", "adm:back"]
 
 
 # ── broadcast ─────────────────────────────────────────────────────────────────
@@ -490,19 +541,14 @@ async def test_cb_broadcast() -> None:
 @pytest.mark.asyncio
 async def test_handle_broadcast() -> None:
     msg = make_message(text="Hello!")
-    # status_msg — это AsyncMock, который вернёт message.answer()
-    status_msg = AsyncMock()
-    status_msg.edit_text = AsyncMock()
-    msg.answer = AsyncMock(return_value=status_msg)
+    msg.answer = AsyncMock()
     mock_state = AsyncMock()
-    mock_bot = AsyncMock()
     mock_session = AsyncMock()
-    with patch("bot.handlers.admin.repo", AsyncMock(get_all_user_ids=AsyncMock(return_value=[100, 200]))):
-        await admin.handle_broadcast(msg, mock_state, mock_session)
-    # Финальный edit_text вызывается на status_msg
-    status_msg.edit_text.assert_awaited_once()
-    text = status_msg.edit_text.call_args[0][0]
-    assert "Рассылка завершена" in text
+    await admin.handle_broadcast(msg, mock_state, mock_session)
+    mock_state.set_state.assert_called_with(admin.AdminFSM.await_broadcast_segment)
+    msg.answer.assert_awaited_once()
+    text = msg.answer.call_args[0][0]
+    assert "Выбери аудиторию" in text
 
 
 # ── handle_credits_tg_id ─────────────────────────────────────────────────────
@@ -545,6 +591,10 @@ async def test_handle_credits_amount() -> None:
     with patch("bot.handlers.admin.repo", AsyncMock(add_credits=AsyncMock(return_value=600))):
         await admin.handle_credits_amount(msg, mock_state, mock_session)
     msg.answer.assert_awaited_once()
+    assert "💋" in msg.answer.await_args.args[0]
+    reply_markup = msg.answer.await_args.kwargs["reply_markup"]
+    callback_data = [button.callback_data for row in reply_markup.inline_keyboard for button in row]
+    assert callback_data == ["adm:add_credits", "adm:back"]
 
 
 # ── Utility functions ─────────────────────────────────────────────────────────

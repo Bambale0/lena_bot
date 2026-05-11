@@ -115,6 +115,20 @@ function modelModesLabel(model) {
   return "текст";
 }
 
+function formatGenerationStatus(status) {
+  if (status === "done") return "Готово";
+  if (status === "failed") return "Ошибка";
+  if (status === "processing") return "В обработке";
+  if (status === "pending") return "В очереди";
+  return status || "В работе";
+}
+
+function generationStatusTone(status) {
+  if (status === "done") return "success";
+  if (status === "failed") return "danger";
+  return "warning";
+}
+
 function useApi(loader, fallback, deps = []) {
   const [data, setData] = useState(fallback);
   const [loading, setLoading] = useState(true);
@@ -161,7 +175,7 @@ function NoticeBar({ notice, onClose }) {
 function MediaThumb({ url, type, idx = 0, className = "" }) {
   if (url) {
     if (type === "video" || /\.(mp4|webm|mov)/i.test(url))
-      return <video src={url} className={className || undefined} muted playsInline loop />;
+      return <video src={url} className={className || undefined} controls playsInline preload="metadata" />;
     if (type === "music" || /\.(mp3|ogg|wav)/i.test(url))
       return <div className={`musicThumb ${className}`}>🎵</div>;
     return <img src={url} className={className || undefined} />;
@@ -730,49 +744,72 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
   }, [current?.key, scenario]);
 
   async function handleFileUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
 
     setUploading(true);
     setRefError("");
     try {
-      const fd = new FormData();
-      fd.append("file", file);
+      const limit = Math.max(1, Number(current?.max_refs || 1) || 1);
+      const existing = normalizedRefUrls.length;
+      const availableSlots = Math.max(0, limit - existing);
+      const queue = limit <= 1 ? files.slice(0, 1) : files.slice(0, availableSlots);
 
-      const res = await fetch("/upload", {
-        method: "POST",
-        headers: { "X-Telegram-Init-Data": initData() },
-        body: fd,
-      });
+      if (!queue.length) {
+        throw new Error(`У этой модели уже максимум ${limit} референс(ов)`);
+      }
 
-      if (!res.ok) {
-        let detail = "Не удалось загрузить файл";
-        try {
-          const raw = await res.text();
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw);
-              detail = parsed?.detail || parsed?.message || raw || detail;
-            } catch {
-              detail = raw;
+      const uploadedUrls = [];
+      for (const file of queue) {
+        const fd = new FormData();
+        fd.append("file", file);
+
+        const res = await fetch("/upload", {
+          method: "POST",
+          headers: { "X-Telegram-Init-Data": initData() },
+          body: fd,
+        });
+
+        if (!res.ok) {
+          let detail = "Не удалось загрузить файл";
+          try {
+            const raw = await res.text();
+            if (raw) {
+              try {
+                const parsed = JSON.parse(raw);
+                detail = parsed?.detail || parsed?.message || raw || detail;
+              } catch {
+                detail = raw;
+              }
             }
+          } catch {}
+          if (res.status === 413) {
+            detail = "Файл слишком большой. Максимум 20 МБ.";
           }
-        } catch {}
-        if (res.status === 413) {
-          detail = "Файл слишком большой. Максимум 20 МБ.";
+          throw new Error(detail);
         }
-        throw new Error(detail);
+        const data = await res.json();
+        const uploadedUrl = normalizeAbsoluteUrl(data.url);
+        if (!isAbsoluteHttpUrl(uploadedUrl)) {
+          throw new Error("Сервер вернул неполную ссылку на референс");
+        }
+        uploadedUrls.push(uploadedUrl);
       }
-      const data = await res.json();
-      const uploadedUrl = normalizeAbsoluteUrl(data.url);
-      if (!isAbsoluteHttpUrl(uploadedUrl)) {
-        throw new Error("Сервер вернул неполную ссылку на референс");
-      }
+
       setRefUrls((prev) => {
-        const cleaned = prev.filter((url) => normalizeAbsoluteUrl(url) !== uploadedUrl);
-        if ((Number(current?.max_refs || 1) || 1) <= 1) return [uploadedUrl];
-        return [...cleaned, uploadedUrl].slice(0, Number(current?.max_refs || 1) || 1);
+        const seen = new Set();
+        const merged = [...prev, ...uploadedUrls].filter((url) => {
+          const normalized = normalizeAbsoluteUrl(url);
+          if (!normalized || seen.has(normalized)) return false;
+          seen.add(normalized);
+          return true;
+        });
+        return merged.slice(0, limit);
       });
+
+      if (files.length > queue.length) {
+        onNotice?.({ type: "warning", message: `Добавил ${queue.length}. Лимит модели — ${limit} референсов.` });
+      }
     } catch (error) {
       setRefError(error?.message || "Не удалось получить полную ссылку на референс");
     } finally {
@@ -973,7 +1010,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
                 {uploading ? "Загрузка..." : normalizedRefUrls.length ? `📎 Добавить ещё (${normalizedRefUrls.length}/${maxRefs})` : "📎 Загрузить фото"}
               </button>
             )}
-            <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFileUpload} />
+            <input ref={fileRef} type="file" accept="image/*" multiple={maxRefs > 1} hidden onChange={handleFileUpload} />
             <input
               type="url"
               value={refUrls[0] || ""}
@@ -1063,9 +1100,11 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
       </button>
 
       {generation && (
-        <div className="status">
-          <b>Генерация #{generation.id}</b>
-          <span>{generation.status}</span>
+        <div className={`status status-${generationStatusTone(generation.status)}`}>
+          <div className="statusHead">
+            <b>Генерация #{generation.id}</b>
+            <span className={`statusBadge ${generationStatusTone(generation.status)}`}>{formatGenerationStatus(generation.status)}</span>
+          </div>
           {generation.error && <p>{generation.error}</p>}
         </div>
       )}
@@ -1624,7 +1663,7 @@ function App() {
     try {
       const endpoint = kind === "video" ? "/generate/video" : "/generate/image";
       const body = kind === "video"
-        ? { model: payload.model, prompt: payload.prompt, mode: payload.mode, duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, grok_mode: payload.grok_mode }
+        ? { model: payload.model, prompt: payload.prompt, mode: payload.mode, duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, reference_urls: payload.reference_urls || [], grok_mode: payload.grok_mode }
         : { model: payload.model, prompt: payload.prompt, aspect_ratio: payload.aspect_ratio, quality: payload.quality, count: payload.count, reference_url: payload.reference_url };
       const g = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
       setGeneration(g);
@@ -1639,7 +1678,7 @@ function App() {
   async function remixGenerate(genId, payload) {
     setGeneration({ id: 0, status: "pending" });
     try {
-      const body = { model: payload.model, prompt: "", mode: payload.mode || "text", duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, grok_mode: payload.grok_mode, quality: payload.quality, count: payload.count };
+      const body = { model: payload.model, prompt: "", mode: payload.mode || "text", duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, reference_urls: payload.reference_urls || [], grok_mode: payload.grok_mode, quality: payload.quality, count: payload.count };
       const g = await api(`/feed/${genId}/remix`, { method: "POST", body: JSON.stringify(body) });
       setGeneration(g);
       setPollId(g.id);

@@ -83,6 +83,20 @@ async def test_cb_video_model_insufficient_credits() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cb_video_model_grok_uses_per_second_price() -> None:
+    call = make_callback(data="vid_model:grok-imagine/text-to-video")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=300, language="ru")
+    mock_cost = _make_video_model_cost("grok-imagine/text-to-video", credits=35, display_name="Grok T2V")
+    mock_state = _fake_state()
+    with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=mock_cost))):
+        with patch("bot.handlers.video_gen.video_params_kb", return_value=MagicMock()):
+            await video_gen.cb_video_model(call, AsyncMock(), mock_state, mock_db_user)
+    mock_state.set_state.assert_called_once_with(VideoGenFSM.params_select)
+
+
+@pytest.mark.asyncio
 async def test_cb_video_model_no_cost_found() -> None:
     call = make_callback(data="vid_model:unknown_model")
     call.answer = AsyncMock()
@@ -255,6 +269,40 @@ async def test_handle_video_prompt_generates() -> None:
                 await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
 
     mock_state.set_state.assert_awaited_once_with(VideoGenFSM.generating)
+
+
+@pytest.mark.asyncio
+async def test_handle_video_prompt_grok_spends_per_second_price() -> None:
+    msg = make_message(text="dramatic storm over sea")
+    msg.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=100, language="ru", username="test", full_name="Test", is_banned=False)
+    mock_state = _fake_state(
+        model_key="grok-imagine/text-to-video", duration=6,
+        aspect_ratio="16:9", resolution="480p",
+        mode="text", credits=35, grok_mode="normal",
+    )
+    mock_cost = _make_video_model_cost("grok-imagine/text-to-video", 35, "Grok T2V")
+    mock_gen = SimpleNamespace(id=101, task_id=None, model="grok-imagine/text-to-video")
+    spend_credits = AsyncMock(return_value=True)
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(
+        spend_credits=spend_credits,
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )):
+        with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_grok", provider="direct")),
+            get_poll_fn=MagicMock(return_value=MagicMock()),
+        )):
+            with patch("bot.handlers.video_gen.polling", new=SimpleNamespace(poll_until_done=AsyncMock())):
+                await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
+
+    assert spend_credits.await_args.args[1:] == (42, 210)
 
 
 @pytest.mark.asyncio

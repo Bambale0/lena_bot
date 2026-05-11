@@ -75,6 +75,13 @@ _COUNT_MODELS: set[ImageModel] = {
     ImageModel.WAN_27_PRO,
 }
 
+_SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
+    ImageModel.NANO_BANANA_2,
+    ImageModel.NANO_BANANA_PRO,
+    ImageModel.GPT_IMAGE_2_T2I,
+    ImageModel.GPT_IMAGE_2_I2I,
+}
+
 # Aspect ratio options per model
 MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.SEEDREAM_45:      ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"],
@@ -101,6 +108,21 @@ class ImageResult:
     url: str | None = None
     image_bytes: bytes | None = None
     mime_type: str = "image/png"
+
+
+def normalize_quality_for_aspect_ratio(
+    model: ImageModel | str,
+    aspect_ratio: str | None,
+    quality: str | None,
+) -> str | None:
+    try:
+        image_model = model if isinstance(model, ImageModel) else ImageModel(model)
+    except ValueError:
+        return quality
+
+    if image_model in _SQUARE_4K_UNSUPPORTED_MODELS and aspect_ratio == "1:1" and quality == "4K":
+        return "2K"
+    return quality
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -169,10 +191,17 @@ def _build_input(
     elif model not in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I} and quality_value in {"1K", "2K", "4K"}:
         quality_value = "basic"
 
-    if model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I} and ratio_value == "1:1" and quality_value == "4K":
-        logger.warning("Downgrading %s quality from 4K to 2K for unsupported aspect ratio 1:1", model.value)
-        quality_value = "2K"
-        resolution_value = "2K"
+    normalized_quality = normalize_quality_for_aspect_ratio(model, ratio_value, quality_value)
+    if normalized_quality != quality_value:
+        logger.info(
+            "Adjusting %s quality from %s to %s for unsupported aspect ratio %s",
+            model.value,
+            quality_value,
+            normalized_quality,
+            ratio_value,
+        )
+        quality_value = normalized_quality
+        resolution_value = normalized_quality if normalized_quality in {"1K", "2K", "4K"} else resolution_value
 
     return build_kie_input(
         model=model.value,

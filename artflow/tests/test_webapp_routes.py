@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from api.miniapp_auth import get_miniapp_user
+from api.miniapp_routes import _normalize_video_request
 from db.models import GenerationStatus, GenerationType, ImageGenerationAction
 from db.session import get_session
 from main import app
@@ -92,9 +93,43 @@ async def test_webapp_video_models_include_mode_options(client, monkeypatch) -> 
             ),
         ]),
     )
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.resolve_video_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=35)),
+    )
     response = await client.get("/api/v1/models/video")
     assert response.status_code == 200
     assert response.json()[0]["mode_options"] == ["fun", "normal", "spicy"]
+
+
+def test_normalize_video_request_drops_grok_i2v_ratio_for_single_ref() -> None:
+    normalized = _normalize_video_request(
+        model_key="grok-imagine/image-to-video",
+        mode="image",
+        duration=6,
+        aspect_ratio="16:9",
+        resolution="480p",
+        image_url="https://example.test/ref-1.jpg",
+        reference_urls=[],
+        grok_mode="normal",
+    )
+
+    assert normalized["aspect_ratio"] is None
+
+
+def test_normalize_video_request_keeps_grok_i2v_ratio_for_multi_ref() -> None:
+    normalized = _normalize_video_request(
+        model_key="grok-imagine/image-to-video",
+        mode="image",
+        duration=6,
+        aspect_ratio="16:9",
+        resolution="480p",
+        image_url="https://example.test/ref-1.jpg",
+        reference_urls=["https://example.test/ref-2.jpg"],
+        grok_mode="normal",
+    )
+
+    assert normalized["aspect_ratio"] == "16:9"
 
 
 @pytest.mark.asyncio
@@ -249,6 +284,50 @@ async def test_generate_image_passes_multiple_reference_urls(client, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_generate_image_normalizes_square_4k_before_pricing(client, monkeypatch) -> None:
+    resolve_image_model_cost = AsyncMock(return_value=SimpleNamespace(credits=4))
+    create_image_session = AsyncMock(return_value=SimpleNamespace(id=78))
+    update_generation_task = AsyncMock()
+    update_image_session_last_prompt = AsyncMock()
+    image_generate = AsyncMock(return_value=SimpleNamespace(task_id="img_task_square"))
+
+    async def fake_create_generation(*args, **kwargs):
+        return SimpleNamespace(
+            id=502,
+            model="nano-banana-pro",
+            gen_type=GenerationType.image,
+            prompt="cat portrait",
+            status=GenerationStatus.processing,
+            result_url=None,
+            credits_spent=4,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+        )
+
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_image_model_cost", resolve_image_model_cost)
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", AsyncMock(return_value=True))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_image_session", create_image_session)
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", update_generation_task)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_image_session_last_prompt", update_image_session_last_prompt)
+    monkeypatch.setattr("api.miniapp_routes.image_service.generate_image", image_generate)
+
+    response = await client.post(
+        "/api/v1/generate/image",
+        json={
+            "model": "nano-banana-pro",
+            "prompt": "cat portrait",
+            "aspect_ratio": "1:1",
+            "quality": "4K",
+        },
+    )
+
+    assert response.status_code == 202
+    assert resolve_image_model_cost.await_args.kwargs["quality"] == "2K"
+    assert create_image_session.await_args.kwargs["quality"] == "2K"
+    assert image_generate.await_args.kwargs["quality"] == "2K"
 
 
 @pytest.mark.asyncio
@@ -339,6 +418,50 @@ async def test_generate_video_uses_total_duration_cost(client, monkeypatch) -> N
     assert spend_credits.await_count == 1
     assert spend_credits.await_args.args[1:] == (1, 40)
     assert response.json()["credits_spent"] == 40
+
+
+@pytest.mark.asyncio
+async def test_generate_video_grok_uses_per_second_cost(client, monkeypatch) -> None:
+    spend_credits = AsyncMock(return_value=True)
+    update_generation_task = AsyncMock()
+    video_generate = AsyncMock(return_value=SimpleNamespace(task_id="vid_task_grok", provider="kieai"))
+
+    async def fake_create_generation(_session, _user_id, model, gen_type, prompt, credits_spent, **_kwargs):
+        return SimpleNamespace(
+            id=602,
+            model=model,
+            gen_type=gen_type,
+            prompt=prompt,
+            status=GenerationStatus.processing,
+            result_url=None,
+            credits_spent=credits_spent,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+        )
+
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_video_model_cost", AsyncMock(return_value=SimpleNamespace(credits=35)))
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend_credits)
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", update_generation_task)
+    monkeypatch.setattr("api.miniapp_routes.video_service.generate_video", video_generate)
+
+    response = await client.post(
+        "/api/v1/generate/video",
+        json={
+            "model": "grok-imagine/text-to-video",
+            "prompt": "rainy city",
+            "mode": "text",
+            "duration": 6,
+            "resolution": "480p",
+        },
+    )
+
+    assert response.status_code == 202
+    assert spend_credits.await_count == 1
+    assert spend_credits.await_args.args[1:] == (1, 210)
+    assert response.json()["credits_spent"] == 210
 
 
 @pytest.mark.asyncio
@@ -503,6 +626,48 @@ async def test_webapp_video_models_expose_kling_caps_and_per_second_pricing(clie
         {"value": "pro", "label": "pro · 1080p"},
         {"value": "4K", "label": "4K · 2160p"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_webapp_video_models_expose_grok_as_per_second(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_all_model_costs",
+        AsyncMock(return_value=[
+            SimpleNamespace(model_key="grok-imagine/text-to-video", display_name="Grok T2V", credits=35),
+        ]),
+    )
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.resolve_video_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=35)),
+    )
+
+    response = await client.get("/api/v1/models/video")
+
+    assert response.status_code == 200
+    payload = {item["key"]: item for item in response.json()}
+    assert payload["grok-imagine/text-to-video"]["is_per_second"] is True
+    assert payload["grok-imagine/text-to-video"]["credits"] == 35
+    assert payload["grok-imagine/text-to-video"]["credits_per_sec"] == 35
+
+
+@pytest.mark.asyncio
+async def test_webapp_video_models_expose_grok_i2v_ratio_min_refs(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_all_model_costs",
+        AsyncMock(return_value=[
+            SimpleNamespace(model_key="grok-imagine/image-to-video", display_name="Grok I2V", credits=35),
+        ]),
+    )
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.resolve_video_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=35)),
+    )
+
+    response = await client.get("/api/v1/models/video")
+
+    assert response.status_code == 200
+    payload = {item["key"]: item for item in response.json()}
+    assert payload["grok-imagine/image-to-video"]["aspect_ratio_min_refs"] == 2
 
 
 @pytest.mark.asyncio

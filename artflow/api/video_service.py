@@ -103,7 +103,7 @@ SUPPORTS_I2V.update({VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_L
 async def generate_video(
     model: VideoModel,
     prompt: str,
-    image_url: str | None = None,
+    image_url: str | list[str] | None = None,
     last_frame_url: str | None = None,
     image_bytes: bytes | None = None,   # not used by kie.ai (kept for signature compat)
     motion: MotionDirection | None = None,
@@ -141,7 +141,7 @@ async def generate_video(
 async def _kieai_generate(
     model: VideoModel,
     prompt: str,
-    image_url: str | None,
+    image_url: str | list[str] | None,
     last_frame_url: str | None,
     motion: MotionDirection | None,
     duration: int,
@@ -192,7 +192,7 @@ async def _kieai_generate(
 async def _veo_generate(
     model: VideoModel,
     prompt: str,
-    image_url: str | None,
+    image_url: str | list[str] | None,
     aspect_ratio: str | None,
     resolution: str | None = None,
     callback_url: str | None = None,
@@ -210,7 +210,7 @@ async def _veo_generate(
     if callback_url:
         payload["callBackUrl"] = callback_url
     if image_url:
-        payload["imageUrls"] = [image_url]
+        payload["imageUrls"] = image_url if isinstance(image_url, list) else [image_url]
         payload["generationType"] = "REFERENCE_2_VIDEO"
     else:
         payload["generationType"] = "TEXT_2_VIDEO"

@@ -21,8 +21,59 @@ _SYSTEM_PROMPT = (
     "Держи ответы компактными, но полезными."
 )
 
+_ADMIN_SYSTEM_PROMPT = (
+    "Пользователь может быть администратором APIX. "
+    "Если он спрашивает про модерацию, жалобы, баны, выплаты, промпты на проверке или админские сценарии, "
+    "отвечай как опытный модератор и операционный помощник. "
+    "Не обещай, что уже выполнил действие, если из контекста не видно результата."
+)
 
-async def generate_assistant_reply(messages: list[dict[str, str]]) -> str:
+_PROMPT_MODERATION_SYSTEM_PROMPT = (
+    "Ты — AI-модератор Telegram-бота APIX и витрины пользовательских промптов. "
+    "Твоя задача — дать рекомендацию модератору по конкретному промпту. "
+    "Оцени текст на предмет спама, мошенничества, агрессии, незаконного или опасного контента, "
+    "явно сексуального контента, бессмысленного мусора, очень низкого качества и попыток обмана пользователей. "
+    "Если данных недостаточно или случай спорный, выбирай ручную проверку, а не категоричный отказ. "
+    "Ответ верни на русском, компактно, в формате:\n"
+    "Вердикт: ...\n"
+    "Причины: ...\n"
+    "Риск: низкий/средний/высокий\n"
+    "Рекомендация: ..."
+)
+
+
+async def generate_assistant_reply(messages: list[dict[str, str]], *, admin_mode: bool = False) -> str:
+    system_prompt = _SYSTEM_PROMPT
+    if admin_mode:
+        system_prompt = f"{system_prompt} {_ADMIN_SYSTEM_PROMPT}"
+    return await _generate_text_reply(messages, system_prompt=system_prompt)
+
+
+async def generate_prompt_moderation_review(
+    *,
+    prompt_id: int,
+    title: str,
+    description: str,
+    prompt_text: str,
+    tags: list[str] | None,
+    model: str | None,
+) -> str:
+    details = [
+        f"ID: {prompt_id}",
+        f"Название: {title or '—'}",
+        f"Описание: {description or '—'}",
+        f"Модель: {model or '—'}",
+        f"Теги: {', '.join(tags or []) or '—'}",
+        "Текст промпта:",
+        prompt_text or "—",
+    ]
+    return await _generate_text_reply(
+        [{"role": "user", "content": "\n".join(details)}],
+        system_prompt=_PROMPT_MODERATION_SYSTEM_PROMPT,
+    )
+
+
+async def _generate_text_reply(messages: list[dict[str, str]], *, system_prompt: str) -> str:
     seen: set[str] = set()
     models: list[str] = []
     for model in (settings.KIE_ASSISTANT_MODEL, settings.KIE_ASSISTANT_FALLBACK, "gpt-5-5"):
@@ -32,21 +83,21 @@ async def generate_assistant_reply(messages: list[dict[str, str]]) -> str:
 
     for model in models:
         try:
-            return await _call_kie_responses(model, messages)
+            return await _call_kie_responses(model, messages, system_prompt=system_prompt)
         except Exception as exc:
             logger.warning("assistant: %s responses failed — %s", model, exc)
         try:
-            return await _call_kie_chat(model, messages)
+            return await _call_kie_chat(model, messages, system_prompt=system_prompt)
         except Exception as exc:
             logger.warning("assistant: %s chat fallback failed — %s", model, exc)
     raise RuntimeError("Assistant models are unavailable right now.")
 
 
-def _to_input_messages(messages: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _to_input_messages(messages: list[dict[str, str]], *, system_prompt: str) -> list[dict[str, Any]]:
     input_messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": [{"type": "input_text", "text": _SYSTEM_PROMPT}],
+            "content": [{"type": "input_text", "text": system_prompt}],
         }
     ]
     for item in messages[-12:]:
@@ -97,12 +148,12 @@ def _extract_chat_output_text(data: dict[str, Any]) -> str:
     raise RuntimeError(f"Assistant chat response did not contain text: {data!r}")
 
 
-async def _call_kie_responses(model: str, messages: list[dict[str, str]]) -> str:
+async def _call_kie_responses(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
     url = f"{_KIE_BASE}/codex/v1/responses"
     payload = {
         "model": model,
         "stream": False,
-        "input": _to_input_messages(messages),
+        "input": _to_input_messages(messages, system_prompt=system_prompt),
         "reasoning": {"effort": "medium"},
     }
 
@@ -119,11 +170,11 @@ async def _call_kie_responses(model: str, messages: list[dict[str, str]]) -> str
         return _extract_output_text(resp.json())
 
 
-async def _call_kie_chat(model: str, messages: list[dict[str, str]]) -> str:
+async def _call_kie_chat(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
     url = f"{_KIE_BASE}/{model}/v1/chat/completions"
     payload = {
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             *[
                 {
                     "role": (item.get("role") or "user") if (item.get("role") or "user") in {"user", "assistant", "system"} else "user",

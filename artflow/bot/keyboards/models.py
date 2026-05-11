@@ -59,6 +59,7 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
+        "billing_mode": "per_second",
     },
     "wan/2-7-image-to-video": {
         "modes": ["image"],
@@ -66,6 +67,7 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": [],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
+        "billing_mode": "per_second",
     },
     "bytedance/seedance-2": {
         "modes": ["text", "image"],
@@ -73,6 +75,8 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
         "has_resolution": True,
         "resolutions": ["480p", "720p", "1080p"],
+        "max_refs": 9,
+        "billing_mode": "per_second",
     },
     "bytedance/seedance-2-fast": {
         "modes": ["text", "image"],
@@ -80,6 +84,8 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
         "has_resolution": True,
         "resolutions": ["480p", "720p"],
+        "max_refs": 9,
+        "billing_mode": "per_second",
     },
     "grok-imagine/text-to-video": {
         "modes": ["text"],
@@ -88,14 +94,18 @@ VIDEO_CAPS: dict[str, dict] = {
         "has_resolution": True,
         "resolutions": ["480p", "720p"],
         "mode_options": ["fun", "normal", "spicy"],
+        "billing_mode": "per_second",
     },
     "grok-imagine/image-to-video": {
         "modes": ["image"],
         "duration_options": [6, 10, 15, 20, 30],
         "aspect_ratios": ["2:3", "3:2", "1:1", "16:9", "9:16"],
+        "aspect_ratio_min_refs": 2,
         "has_resolution": True,
         "resolutions": ["480p", "720p"],
         "mode_options": ["fun", "normal"],
+        "max_refs": 7,
+        "billing_mode": "per_second",
     },
     "happyhorse/text-to-video": {
         "modes": ["text"],
@@ -103,6 +113,7 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
+        "billing_mode": "per_second",
     },
     "happyhorse/image-to-video": {
         "modes": ["image"],
@@ -110,6 +121,7 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": [],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
+        "billing_mode": "per_second",
     },
     "veo3_fast": {
         "modes": ["text", "image"],
@@ -117,6 +129,8 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": ["16:9", "9:16"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
+        "max_refs": 3,
+        "billing_mode": "per_second",
     },
     "veo3": {
         "modes": ["text", "image"],
@@ -124,6 +138,8 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": ["16:9", "9:16"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
+        "max_refs": 3,
+        "billing_mode": "per_second",
     },
     "veo3_lite": {
         "modes": ["text", "image"],
@@ -131,6 +147,8 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": ["16:9", "9:16"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
+        "max_refs": 3,
+        "billing_mode": "per_second",
     },
 }
 
@@ -386,8 +404,13 @@ _KLING_BASE_RATE: dict[str, int] = {k: min(v.values()) for k, v in _KLING_PER_SE
 
 
 def _model_button(mc: ModelCost, prefix: str) -> InlineKeyboardButton:
+    is_per_second = VIDEO_CAPS.get(mc.model_key, {}).get("billing_mode") == "per_second"
     base_rate = _KLING_BASE_RATE.get(mc.model_key)
-    price_txt = f"от {base_rate} 💋/сек" if base_rate else f"{mc.credits} 💋"
+    if is_per_second:
+        shown_rate = base_rate if base_rate is not None else mc.credits
+        price_txt = f"от {shown_rate} 💋/сек" if base_rate is not None else f"{shown_rate} 💋/сек"
+    else:
+        price_txt = f"{mc.credits} 💋"
     return InlineKeyboardButton(
         text=f"{mc.display_name} · {price_txt}",
         callback_data=f"{prefix}:{mc.model_key}",
@@ -651,12 +674,24 @@ def video_mode_kb(model_key: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def video_aspect_ratios(model_key: str, *, selected_mode: str | None = None, ref_count: int | None = None) -> list[str]:
+    caps = VIDEO_CAPS.get(model_key, {})
+    ratios = list(caps.get("aspect_ratios", []))
+    min_refs = int(caps.get("aspect_ratio_min_refs", 0) or 0)
+    if min_refs and selected_mode == "image" and (ref_count is None or ref_count < min_refs):
+        return []
+    return ratios
+
+
 def video_params_kb(
     model_key: str,
     dur: int | None,
     ratio: str | None,
     res: str | None,
     mode: str | None = None,
+    *,
+    selected_mode: str | None = None,
+    ref_count: int | None = None,
 ) -> InlineKeyboardMarkup:
     caps = VIDEO_CAPS.get(model_key, {})
     builder = InlineKeyboardBuilder()
@@ -673,7 +708,7 @@ def video_params_kb(
         for i in range(0, len(dur_buttons), 4):
             builder.row(*dur_buttons[i:i+4])
 
-    aspect_ratios = caps.get("aspect_ratios", [])
+    aspect_ratios = video_aspect_ratios(model_key, selected_mode=selected_mode, ref_count=ref_count)
     if aspect_ratios:
         ratio_buttons = [
             InlineKeyboardButton(

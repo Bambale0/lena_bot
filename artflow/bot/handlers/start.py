@@ -28,8 +28,8 @@ def _welcome_text(lang: str) -> str:
         "🖌️ <b>Midjourney</b> — Imagine, Blend, Describe, Video\n"
         "🤖 <b>AI-ассистент</b> — идеи, промпты, помощь по боту\n\n"
         + t("balance_credits", lang, credits="{credits}")
-        .replace("Kisses", "cr")
-        .replace("Поцелуи", "cr")
+        .replace("Kisses", "💋")
+        .replace("Поцелуи", "💋")
         + "\n\n"
         + ("Выбери, что хочешь создать:" if lang == "ru" else "Choose what to create:")
     )

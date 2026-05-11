@@ -168,3 +168,26 @@ def test_build_kie_input_grok_i2v_keeps_aspect_ratio_for_multi_ref() -> None:
     assert inp["duration"] == "10"
     assert inp["mode"] == "fun"
     assert inp["aspect_ratio"] == "16:9"
+
+
+def test_build_kie_input_kling_t2v_enables_sound_by_default() -> None:
+    resolved_model, inp = build_kie_input(
+        model="kling-2.6/text-to-video",
+        prompt="city night drive",
+        params={"duration": 5, "aspect_ratio": "16:9"},
+    )
+
+    assert resolved_model == "kling-2.6/text-to-video"
+    assert inp["sound"] is True
+    assert inp["duration"] == "5"
+
+
+def test_build_kie_input_seedance_enables_audio_by_default() -> None:
+    resolved_model, inp = build_kie_input(
+        model="bytedance/seedance-2",
+        prompt="fashion ad",
+        params={"duration": 5, "aspect_ratio": "16:9", "resolution": "720p"},
+    )
+
+    assert resolved_model == "bytedance/seedance-2"
+    assert inp["generate_audio"] is True

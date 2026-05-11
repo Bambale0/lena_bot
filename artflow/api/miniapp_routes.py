@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, video_service
-from api.image_service import ImageModel
+from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.miniapp_auth import get_miniapp_user
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.video_service import VideoModel
@@ -218,6 +218,9 @@ def _normalize_image_request(
                 default=quality_options[0],
             )
         )
+        normalized_quality = str(
+            normalize_quality_for_aspect_ratio(model_key, normalized_ratio, normalized_quality) or normalized_quality
+        )
 
     return normalized_ratio, normalized_quality
 
@@ -230,16 +233,23 @@ def _normalize_video_request(
     aspect_ratio: str | None,
     resolution: str | None,
     image_url: str | None,
+    reference_urls: list[str] | None,
     grok_mode: str | None,
 ) -> dict[str, Any]:
     caps: dict[str, Any] = VIDEO_CAPS.get(model_key, {})
     supported_modes = caps.get("modes", ["text"])
     normalized_mode = _normalize_mode(mode, supported_modes)
-    normalized_image_url = image_url if normalized_mode == "image" else None
-    if normalized_image_url:
-        _normalize_public_urls(normalized_image_url)
+    all_refs = _normalize_public_urls(image_url, *(reference_urls or [])) if normalized_mode == "image" else []
+    max_refs = int(caps.get("max_refs", 1) or 1)
+    if len(all_refs) > max_refs:
+        raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
+    normalized_image_url: str | list[str] | None
+    if all_refs:
+        normalized_image_url = all_refs[0] if len(all_refs) == 1 else all_refs
     elif normalized_mode == "image":
         raise HTTPException(status_code=422, detail="Selected mode requires image_url")
+    else:
+        normalized_image_url = None
 
     normalized_duration = _normalize_int_choice(
         duration,
@@ -253,9 +263,13 @@ def _normalize_video_request(
         caps.get("resolutions", []) if caps.get("has_resolution") else [],
         field_name="resolution",
     )
+    aspect_ratio_allowed = caps.get("aspect_ratios", [])
+    aspect_ratio_min_refs = int(caps.get("aspect_ratio_min_refs", 0) or 0)
+    if aspect_ratio_min_refs and normalized_mode == "image" and len(all_refs) < aspect_ratio_min_refs:
+        aspect_ratio_allowed = []
     normalized_aspect_ratio = _normalize_choice(
         aspect_ratio,
-        caps.get("aspect_ratios", []),
+        aspect_ratio_allowed,
         field_name="aspect_ratio",
     )
     mode_options = caps.get("mode_options", [])
@@ -328,6 +342,7 @@ class ModelInfo(BaseModel):
     credits: int
     modes: list[str]
     aspect_ratios: list[str]
+    aspect_ratio_min_refs: int = 0
     quality_options: list[dict[str, str]]
     max_refs: int = 1
     counts: list[int]
@@ -371,6 +386,7 @@ class VideoGenRequest(BaseModel):
     aspect_ratio: str | None = None
     resolution: str | None = None
     image_url: str | None = None
+    reference_urls: list[str] = []
     grok_mode: str = "normal"
 
 
@@ -381,6 +397,7 @@ class FeedRemixRequest(BaseModel):
     aspect_ratio: str | None = None
     resolution: str | None = None
     image_url: str | None = None
+    reference_urls: list[str] = []
     grok_mode: str = "normal"
     quality: str = "basic"
     count: int = Field(default=1, ge=1, le=6)
@@ -496,6 +513,7 @@ async def list_image_models(
             credits=mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
+            aspect_ratio_min_refs=int(caps.get("aspect_ratio_min_refs", 0) or 0),
             quality_options=[{"value": value, "label": label} for value, label in quality_raw],
             counts=caps.get("counts", [1]),
             has_quality=bool(caps.get("has_quality")),
@@ -524,6 +542,7 @@ async def list_video_models(
             credits=credits_per_sec if is_per_sec and credits_per_sec is not None else mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
+            aspect_ratio_min_refs=int(caps.get("aspect_ratio_min_refs", 0) or 0),
             quality_options=[{"value": r, "label": (caps.get("resolution_labels", {}) or {}).get(r, r)} for r in (caps.get("resolutions") or [])],
             counts=[],
             has_quality=bool(caps.get("has_resolution")),
@@ -675,6 +694,7 @@ async def create_video_generation(
         aspect_ratio=body.aspect_ratio,
         resolution=body.resolution,
         image_url=body.image_url,
+        reference_urls=body.reference_urls,
         grok_mode=body.grok_mode,
     )
     model_cost = await repo.resolve_video_model_cost(
@@ -902,6 +922,7 @@ async def remix_feed_post(
             aspect_ratio=body.aspect_ratio,
             resolution=body.resolution,
             image_url=fallback_image_url,
+            reference_urls=body.reference_urls,
             grok_mode=body.grok_mode,
         )
         model_cost = await repo.resolve_video_model_cost(
