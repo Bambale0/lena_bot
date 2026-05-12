@@ -76,12 +76,18 @@ async def generate_prompt_moderation_review(
 async def _generate_text_reply(messages: list[dict[str, str]], *, system_prompt: str) -> str:
     seen: set[str] = set()
     models: list[str] = []
-    for model in (settings.KIE_ASSISTANT_MODEL, settings.KIE_ASSISTANT_FALLBACK, "gpt-5-5"):
+    for model in (settings.KIE_ASSISTANT_MODEL, settings.KIE_ASSISTANT_FALLBACK, "claude-sonnet-4-5"):
         if model and model not in seen:
             seen.add(model)
             models.append(model)
 
     for model in models:
+        if model.startswith("claude-"):
+            try:
+                return await _call_kie_claude(model, messages, system_prompt=system_prompt)
+            except Exception as exc:
+                logger.warning("assistant: %s claude fallback failed — %s", model, exc)
+            continue
         try:
             return await _call_kie_responses(model, messages, system_prompt=system_prompt)
         except Exception as exc:
@@ -168,6 +174,50 @@ async def _call_kie_responses(model: str, messages: list[dict[str, str]], *, sys
         )
         resp.raise_for_status()
         return _extract_output_text(resp.json())
+
+
+async def _call_kie_claude(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
+    url = f"{_KIE_BASE}/claude/v1/messages"
+    payload = {
+        "model": model,
+        "messages": [
+            *[
+                {
+                    "role": (item.get("role") or "user") if (item.get("role") or "user") in {"user", "assistant"} else "user",
+                    "content": item.get("content", ""),
+                }
+                for item in messages[-12:]
+            ]
+        ],
+        "thinkingFlag": True,
+        "stream": False,
+        "max_tokens": 4096,
+    }
+    if system_prompt:
+        payload["messages"] = [{"role": "user", "content": system_prompt}, *payload["messages"]]
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        resp = await client.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {settings.KIE_AI_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("error"):
+            raise RuntimeError(f"{data!r}")
+        content = data.get("content") or []
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text"):
+                parts.append(str(item["text"]).strip())
+        text_out = "\n".join(part for part in parts if part).strip()
+        if text_out:
+            return text_out
+        raise RuntimeError(f"Assistant claude response did not contain text: {data!r}")
 
 
 async def _call_kie_chat(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:

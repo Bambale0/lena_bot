@@ -153,11 +153,10 @@ async def cb_video_menu(call: CallbackQuery, session: AsyncSession, state: FSMCo
         call.message,  # type: ignore[arg-type]
         "🎬 <b>Генерация видео</b>\n\n"
         "Модели разложены по типу задачи, чтобы не искать нужную среди всего списка:\n\n"
-        "• <b>⚡ Быстрый старт</b> — для коротких и понятных роликов\n"
-        "• <b>🎬 Кино и качество</b> — для более сильной картинки\n"
+        "• <b>⚡ Быстрый старт</b> — текст в видео и универсальные модели\n"
         "• <b>🖼️ Из изображения в видео</b> — если хочешь оживить фото\n"
-        "• <b>🕺 Управление камерой</b> — если нужен pan/zoom/orbit\n\n"
-        "⏱ Генерация занимает <b>1–5 минут</b> — бот пришлёт видео, когда готово.\n\n"
+        "• <b>🕺 Управление камерой</b> — если нужно движение камеры и ракурсы\n\n"
+        "⏱ Генерация обычно занимает <b>1–5 минут</b> — бот пришлёт видео, когда оно будет готово.\n\n"
         "👇 <b>Сначала выбери категорию:</b>",
         reply_markup=video_model_groups_kb(),
     )
@@ -234,7 +233,7 @@ async def _handle_mode(
         await state.set_state(VideoGenFSM.image_upload)
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
-            f"✅ <b>{display_name}</b> · i2v\n\n🖼️ Загрузи первый кадр:",
+            f"✅ <b>{display_name}</b> · анимация по фото\n\n🖼️ Загрузи первый кадр:",
             reply_markup=back_to_menu_kb(),
         )
     elif mode == "motion":
@@ -242,7 +241,7 @@ async def _handle_mode(
         await state.update_data(motion_step="person")
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
-            f"✅ <b>{display_name}</b> · Motion Control\n\n"
+            f"✅ <b>{display_name}</b> · управление камерой\n\n"
             "👤 <b>Шаг 1/2:</b> Загрузи фото персонажа\n"
             "<i>(голова, плечи, торс; JPEG/PNG; ≤10 МБ)</i>",
             reply_markup=back_to_menu_kb(),
@@ -277,7 +276,7 @@ async def handle_video_upload(
     motion_step: str | None = data.get("motion_step")
 
     if motion_step != "video_url":
-        await message.answer("Пожалуйста, загрузи видео только на шаге 2 Motion Control.", reply_markup=back_to_menu_kb())
+        await message.answer("Пожалуйста, загрузи видео только на шаге 2 управления камерой.", reply_markup=back_to_menu_kb())
         return
 
     video = message.video  # type: ignore[union-attr]
@@ -594,7 +593,7 @@ async def handle_video_prompt(
     summary = _params_summary(data)
     status_msg = await message.answer(
         f"⏳ <b>Генерирую видео...</b>\n"
-        f"<code>{model_key}</code>"
+        f"<b>{model_cost.display_name if model_cost else model_key}</b>"
         + (f" · <i>{summary}</i>" if summary != "по умолчанию" else "") +
         "\n\nЭто займёт 2–10 минут."
     )
@@ -613,8 +612,8 @@ async def handle_video_prompt(
         )
     except Exception as e:
         logger.error("Video generation error: %s", e)
-        await repo.fail_generation(session, gen.id, str(e))
-        await repo.add_credits(session, db_user.id, credits)
+        if await repo.fail_generation(session, gen.id, str(e)):
+            await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text("❌ Ошибка запуска генерации. 💋 возвращены.\n\nПопробуй другую модель или повтори через минуту.", reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -645,8 +644,8 @@ async def handle_video_prompt(
         )
 
     async def on_failure(err: str) -> None:
-        await repo.fail_generation(session, gen.id, err)
-        await repo.add_credits(session, db_user.id, credits)
+        if await repo.fail_generation(session, gen.id, err):
+            await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
             f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb()
         )

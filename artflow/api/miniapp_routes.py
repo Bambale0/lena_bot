@@ -9,15 +9,18 @@ from urllib.parse import urlencode
 
 from aiogram.types import LabeledPrice
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+import httpx
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import image_service, video_service
+from api import image_service, midjourney_service, video_service
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.miniapp_auth import get_miniapp_user
 from api.photo_prompt_service import generate_prompt_from_photo
+from api.midjourney_service import MJDimensions, MJTaskStatus, MJVideoMotion
 from api.video_service import VideoModel
 from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
+from bot.utils.deep_links import build_start_payload
 from core.config import settings
 from db import repository as repo
 from db.models import (
@@ -47,6 +50,90 @@ MAX_CONCURRENT = 6
 STALE_GENERATION_TIMEOUT = timedelta(minutes=20)
 
 _VEO_MODEL_KEYS = {item.value for item in (VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE)}
+_MIDJOURNEY_IMAGE_MODEL_KEYS = {"midjourney-imagine", "midjourney-blend", "midjourney-action"}
+_MIDJOURNEY_VIDEO_MODEL_KEYS = {"midjourney-video"}
+_MJ_STUDIO_IMAGE_MODELS = {"midjourney-imagine", "midjourney-blend"}
+_MJ_VIDEO_MODELS = {"midjourney-video"}
+_MJ_ALL_MODELS = _MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS | {"midjourney-describe", "midjourney-action"}
+_MJ_BLEND_DIMENSIONS = {"1:1": "SQUARE", "2:3": "PORTRAIT", "3:2": "LANDSCAPE"}
+_MJ_IMAGE_CAPS: dict[str, dict[str, Any]] = {
+    "midjourney-imagine": {"modes": ["text", "image"], "aspect_ratios": ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"], "counts": [1], "max_refs": 1, "has_quality": False},
+    "midjourney-blend": {"modes": ["image"], "aspect_ratios": ["1:1", "2:3", "3:2"], "aspect_ratio_min_refs": 2, "counts": [1], "max_refs": 5, "has_quality": False},
+}
+_MJ_VIDEO_CAPS: dict[str, dict[str, Any]] = {
+    "midjourney-video": {"modes": ["image"], "duration_options": [5], "mode_options": ["low", "high"], "max_refs": 1},
+}
+
+_FRIENDLY_MODEL_NAMES: dict[str, str] = {
+    "seedream/4.5-text-to-image": "Seedream 4.5",
+    "seedream/4.5-edit": "Seedream 4.5 Edit",
+    "grok-imagine/text-to-image": "Grok Imagine",
+    "grok-imagine/image-to-image": "Grok Imagine Edit",
+    "wan/2-7-image": "WAN 2.7",
+    "wan/2-7-image-pro": "WAN 2.7 Pro",
+    "google/nano-banana": "Nano Banana",
+    "nano-banana-2": "Nano Banana 2",
+    "nano-banana-pro": "Nano Banana Pro",
+    "qwen/text-to-image": "Qwen",
+    "qwen/image-to-image": "Qwen Edit",
+    "qwen/image-edit": "Qwen Edit Pro",
+    "qwen2/text-to-image": "Qwen 2",
+    "qwen2/image-edit": "Qwen 2 Edit",
+    "gpt-image-2-text-to-image": "GPT Image 2",
+    "gpt-image-2-image-to-image": "GPT Image 2 Edit",
+    "kling-2.6/text-to-video": "Kling 2.6",
+    "kling-2.6/image-to-video": "Kling 2.6 Animate",
+    "kling-2.6/motion-control": "Kling Motion",
+    "kling-3.0/video": "Kling 3.0",
+    "kling-3.0/motion-control": "Kling 3.0 Motion",
+    "wan/2-7-text-to-video": "WAN Video",
+    "wan/2-7-image-to-video": "WAN Animate",
+    "bytedance/seedance-2": "Seedance 2",
+    "bytedance/seedance-2-fast": "Seedance 2 Fast",
+    "grok-imagine/text-to-video": "Grok Video",
+    "grok-imagine/image-to-video": "Grok Animate",
+    "happyhorse/text-to-video": "HappyHorse Video",
+    "happyhorse/image-to-video": "HappyHorse Animate",
+    "veo3_fast": "Veo Fast",
+    "veo3": "Veo",
+    "veo3_lite": "Veo Lite",
+    "suno/v4.5": "Suno",
+    "midjourney-imagine": "Midjourney Imagine",
+    "midjourney-action": "Midjourney Action",
+    "midjourney-blend": "Midjourney Blend",
+    "midjourney-describe": "Midjourney Describe",
+    "midjourney-video": "Midjourney Video",
+}
+
+
+def _friendly_model_name(model_key: str, display_name: str | None = None) -> str:
+    if model_key in _FRIENDLY_MODEL_NAMES:
+        return _FRIENDLY_MODEL_NAMES[model_key]
+    cleaned = re.sub(r"^[^\wА-Яа-я]+\s*", "", display_name or model_key)
+    cleaned = re.sub(r"(?:T2I|I2I|T2V|I2V)", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s*·\s*(?:1K|2K|4K|720p|1080p|2160p|за сек)$", "", cleaned).strip()
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip(" ·") or model_key
+
+
+
+def _is_admin_user(user: User | None) -> bool:
+    tg_id = getattr(user, "tg_id", None)
+    return bool(tg_id and tg_id in settings.ADMIN_IDS)
+
+
+def _is_midjourney_model(model_key: str) -> bool:
+    return model_key in _MJ_ALL_MODELS
+
+def _telegram_bot_username() -> str:
+    return str(getattr(settings, "BOT_USERNAME", "") or "").strip().lstrip("@")
+
+
+def _telegram_start_link(start_param: str) -> str:
+    username = _telegram_bot_username()
+    if not username:
+        return ""
+    return f"https://t.me/{username}?start={start_param}"
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -56,16 +143,14 @@ def _fmt_amount(value: float) -> str:
 
 
 def _clean_model_name(value: str) -> str:
-    cleaned = re.sub(r"^[^\wА-Яа-я]+\s*", "", value or "")
-    cleaned = re.sub(r"\s*·\s*(?:1K|2K|4K|720p|1080p|2160p|за сек)$", "", cleaned).strip()
-    return cleaned
+    return _friendly_model_name(value, value)
 
 
 def _landing_models_payload(model_costs: list[Any]) -> dict[str, list[str]]:
     grouped: dict[str, list[str]] = {"image": [], "video": [], "music": []}
     seen: dict[str, set[str]] = {"image": set(), "video": set(), "music": set()}
-    image_keys = {m.value for m in ImageModel}
-    video_keys = {m.value for m in VideoModel}
+    image_keys = {m.value for m in ImageModel} | _MJ_STUDIO_IMAGE_MODELS
+    video_keys = {m.value for m in VideoModel} | _MJ_VIDEO_MODELS
 
     for mc in model_costs:
         if mc.model_key in image_keys:
@@ -138,17 +223,22 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 'Marking stale generation without task_id as failed: gen=%s model=%s age=%s',
                 gen.id, gen.model, age,
             )
-            await repo.fail_generation(session, gen.id, 'Generation lost task id before completion')
-            if gen.credits_spent:
-                await repo.add_credits(session, gen.user_id, gen.credits_spent)
+            if await repo.fail_generation(session, gen.id, 'Generation lost task id before completion'):
+                if gen.credits_spent:
+                    await repo.add_credits(session, gen.user_id, gen.credits_spent)
             return await repo.get_generation_by_id(session, gen.id)
         return gen
 
     try:
         if gen.gen_type == GenerationType.image:
-            result_url = await image_service.poll_kieai_status(task_id)
+            if gen.model in _MIDJOURNEY_IMAGE_MODEL_KEYS:
+                result_url = await midjourney_service.poll_mj_image(task_id)
+            else:
+                result_url = await image_service.poll_kieai_status(task_id)
         elif gen.gen_type == GenerationType.video:
-            if gen.model in _VEO_MODEL_KEYS:
+            if gen.model in _MIDJOURNEY_VIDEO_MODEL_KEYS:
+                result_url = await midjourney_service.poll_mj_video(task_id)
+            elif gen.model in _VEO_MODEL_KEYS:
                 result_url = await video_service.poll_veo_status(task_id)
             else:
                 result_url = await video_service.poll_kieai_status(task_id)
@@ -156,9 +246,9 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             return gen
     except Exception as exc:
         logger.warning('Reconcile failed generation gen=%s task=%s: %s', gen.id, task_id, exc)
-        await repo.fail_generation(session, gen.id, str(exc))
-        if gen.credits_spent:
-            await repo.add_credits(session, gen.user_id, gen.credits_spent)
+        if await repo.fail_generation(session, gen.id, str(exc)):
+            if gen.credits_spent:
+                await repo.add_credits(session, gen.user_id, gen.credits_spent)
         return await repo.get_generation_by_id(session, gen.id)
 
     if result_url:
@@ -182,6 +272,32 @@ async def _reconcile_user_active_generations(session: AsyncSession, user_id: int
 
     for gen in active_gens:
         await _reconcile_generation_status(session, gen)
+
+
+async def _data_uri_from_url(url: str) -> str:
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Failed to fetch reference image: {exc}")
+
+    content_type = resp.headers.get("content-type", "image/jpeg").split(";", 1)[0].strip() or "image/jpeg"
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=422, detail="Reference URL must point to an image")
+
+    import base64
+    return f"data:{content_type};base64,{base64.b64encode(resp.content).decode()}"
+
+
+def _mj_catalog_item(mc: Any) -> MidjourneyCatalogItem:
+    return MidjourneyCatalogItem(
+        key=mc.model_key,
+        display_name=_friendly_model_name(mc.model_key, mc.display_name),
+        credits=float(mc.credits),
+        gen_type=getattr(mc.gen_type, "value", str(mc.gen_type)),
+        available_in_studio=mc.model_key in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS),
+    )
 
 
 def _normalize_public_urls(*urls: str | None) -> list[str]:
@@ -255,6 +371,14 @@ def _normalize_video_resolution(model_key: str, resolution: str | None) -> str |
             "720p": "std",
             "1080p": "pro",
             "2160p": "4K",
+        }
+        return aliases.get(resolution, resolution)
+    if model_key == "kling-3.0/motion-control":
+        aliases = {
+            "std": "720p",
+            "pro": "1080p",
+            "2K": "1080p",
+            "4K": "1080p",
         }
         return aliases.get(resolution, resolution)
     return resolution
@@ -418,17 +542,25 @@ class UserProfile(BaseModel):
     tg_id: int
     username: str | None
     full_name: str | None
-    credits: int
+    credits: float
     referral_code: str
     referral_link: str
     referral_balance: float
     referral_withdraw_min_rub: float
 
 
+class MidjourneyCatalogItem(BaseModel):
+    key: str
+    display_name: str
+    credits: float
+    gen_type: str
+    available_in_studio: bool = False
+
+
 class ModelInfo(BaseModel):
     key: str
     display_name: str
-    credits: int
+    credits: float
     modes: list[str]
     aspect_ratios: list[str]
     aspect_ratio_min_refs: int = 0
@@ -437,7 +569,7 @@ class ModelInfo(BaseModel):
     counts: list[int]
     has_quality: bool
     is_per_second: bool = False
-    credits_per_sec: int | None = None
+    credits_per_sec: float | None = None
     durations: list[int] = []
     resolutions: list[str] = []
     motion_controls: list[str] = []
@@ -451,7 +583,7 @@ class GenerationOut(BaseModel):
     prompt: str
     status: str
     result_url: str | None
-    credits_spent: int
+    credits_spent: float
     created_at: str
     is_public_feed: bool = False
     is_prompt_library: bool = False
@@ -527,7 +659,7 @@ async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
         full_name=user.full_name,
         credits=user.credits,
         referral_code=user.referral_code,
-        referral_link=f"https://t.me/{settings.BOT_USERNAME}?start={user.referral_code}",
+        referral_link=_telegram_start_link(user.referral_code),
         referral_balance=user.referral_balance,
         referral_withdraw_min_rub=settings.REFERRAL_WITHDRAW_MIN_RUB,
     )
@@ -582,20 +714,22 @@ async def miniapp_improve_prompt(
 @router.get("/models/image", response_model=list[ModelInfo])
 async def list_image_models(
     session: AsyncSession = Depends(get_session),
-    _: User = Depends(get_miniapp_user),
+    user: User = Depends(get_miniapp_user),
 ) -> list[ModelInfo]:
     """All active image models with costs and capabilities."""
     model_costs = await repo.get_all_model_costs(session)
-    image_keys = {m.value for m in ImageModel}
+    image_keys = {m.value for m in ImageModel} | _MJ_STUDIO_IMAGE_MODELS
     result = []
     for mc in model_costs:
         if mc.model_key not in image_keys:
             continue
-        caps: dict[str, Any] = IMAGE_CAPS.get(mc.model_key, {})
+        if _is_midjourney_model(mc.model_key) and not _is_admin_user(user):
+            continue
+        caps: dict[str, Any] = IMAGE_CAPS.get(mc.model_key, _MJ_IMAGE_CAPS.get(mc.model_key, {}))
         quality_raw = caps.get("quality_options", [])
         result.append(ModelInfo(
             key=mc.model_key,
-            display_name=mc.display_name,
+            display_name=_friendly_model_name(mc.model_key, mc.display_name),
             credits=mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
@@ -611,20 +745,22 @@ async def list_image_models(
 @router.get("/models/video", response_model=list[ModelInfo])
 async def list_video_models(
     session: AsyncSession = Depends(get_session),
-    _: User = Depends(get_miniapp_user),
+    user: User = Depends(get_miniapp_user),
 ) -> list[ModelInfo]:
     """All active video models with costs and capabilities."""
     model_costs = await repo.get_all_model_costs(session)
-    video_keys = {m.value for m in VideoModel}
+    video_keys = {m.value for m in VideoModel} | _MJ_VIDEO_MODELS
     result = []
     for mc in model_costs:
         if mc.model_key not in video_keys:
             continue
-        caps: dict[str, Any] = VIDEO_CAPS.get(mc.model_key, {})
+        if _is_midjourney_model(mc.model_key) and not _is_admin_user(user):
+            continue
+        caps: dict[str, Any] = VIDEO_CAPS.get(mc.model_key, _MJ_VIDEO_CAPS.get(mc.model_key, {}))
         is_per_sec, credits_per_sec = await _video_model_rate_info(session, mc.model_key, caps, mc.credits)
         result.append(ModelInfo(
             key=mc.model_key,
-            display_name=mc.display_name,
+            display_name=_friendly_model_name(mc.model_key, mc.display_name),
             credits=credits_per_sec if is_per_sec and credits_per_sec is not None else mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
@@ -643,13 +779,21 @@ async def list_video_models(
     return result
 
 
+@router.get("/public/midjourney", response_model=list[MidjourneyCatalogItem])
+async def public_midjourney_models(
+    session: AsyncSession = Depends(get_session),
+) -> list[MidjourneyCatalogItem]:
+    return []
+
+
 @router.get("/public/models")
 async def public_models_summary(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, list[str]]:
     """Public model summary for the landing page."""
     model_costs = await repo.get_all_model_costs(session)
-    return _landing_models_payload(model_costs)
+    public_model_costs = [mc for mc in model_costs if not _is_midjourney_model(mc.model_key)]
+    return _landing_models_payload(public_model_costs)
 
 
 # ── image generation ──────────────────────────────────────────────────────────
@@ -666,12 +810,56 @@ async def create_image_generation(
     Returns immediately with `status: pending` and the generation `id`.
     Poll `GET /api/v1/generations/{id}` until `status` is `done` or `failed`.
     """
+    all_refs = _normalize_public_urls(body.reference_url, *body.reference_urls)
+    if body.model in _MJ_STUDIO_IMAGE_MODELS:
+        if not _is_admin_user(user):
+            raise HTTPException(status_code=403, detail="Model not available")
+        caps: dict[str, Any] = _MJ_IMAGE_CAPS.get(body.model, {})
+        normalized_ratio = _normalize_choice(body.aspect_ratio, caps.get("aspect_ratios", []), field_name="aspect ratio")
+        model_cost = await repo.get_model_cost(session, body.model)
+        if not model_cost or not getattr(model_cost, "is_active", True):
+            raise HTTPException(status_code=422, detail="Model not available")
+        max_refs = int(caps.get("max_refs", 1) or 1)
+        if len(all_refs) > max_refs:
+            raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
+        if body.model == "midjourney-blend" and len(all_refs) < 2:
+            raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
+        if body.model == "midjourney-imagine" and not body.prompt.strip():
+            raise HTTPException(status_code=422, detail="Prompt is required")
+        if user.credits < model_cost.credits:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}")
+        await _reconcile_user_active_generations(session, user.id)
+        active = await repo.count_user_active_generations(session, user.id)
+        if active >= MAX_CONCURRENT:
+            raise HTTPException(status_code=429, detail="Too many concurrent generations")
+        ok = await repo.spend_credits(session, user.id, model_cost.credits)
+        if not ok:
+            raise HTTPException(status_code=402, detail="Failed to spend credits")
+        gen_prompt = body.prompt.strip() or f"blend:{len(all_refs)}"
+        image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None)
+        gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, model_cost.credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial)
+        try:
+            if body.model == "midjourney-imagine":
+                submitted_prompt = f"{all_refs[0]} {body.prompt.strip()}".strip() if all_refs else body.prompt.strip()
+                task_id = await midjourney_service.imagine(submitted_prompt, reference_url=all_refs[0] if all_refs else None)
+            else:
+                blend_images = [await _data_uri_from_url(url) for url in all_refs]
+                task_id = await midjourney_service.blend(blend_images, dimensions=MJDimensions(_MJ_BLEND_DIMENSIONS.get(normalized_ratio or "1:1", "SQUARE")))
+        except Exception as exc:
+            logger.error("miniapp Midjourney image error user=%s model=%s: %s", user.id, body.model, exc)
+            if await repo.fail_generation(session, gen.id, str(exc)):
+                await repo.add_credits(session, user.id, model_cost.credits)
+            raise HTTPException(status_code=502, detail="Generation service error")
+        await repo.update_generation_task(session, gen.id, task_id)
+        await repo.update_image_session_last_prompt(session, image_session.id, gen_prompt)
+        await session.refresh(gen)
+        return _gen_out(gen)
+
     try:
         model = ImageModel(body.model)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Unknown image model: {body.model!r}")
 
-    all_refs = _normalize_public_urls(body.reference_url, *body.reference_urls)
     caps: dict[str, Any] = IMAGE_CAPS.get(model.value, {})
     normalized_ratio, normalized_quality = _normalize_image_request(
         model_key=model.value,
@@ -744,8 +932,8 @@ async def create_image_generation(
         )
     except Exception as exc:
         logger.error("miniapp image gen error user=%s: %s", user.id, exc)
-        await repo.fail_generation(session, gen.id, str(exc))
-        await repo.add_credits(session, user.id, model_cost.credits)
+        if await repo.fail_generation(session, gen.id, str(exc)):
+            await repo.add_credits(session, user.id, model_cost.credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
@@ -769,6 +957,38 @@ async def create_video_generation(
     Returns immediately with `status: pending`.
     Poll `GET /api/v1/generations/{id}` until done.
     """
+    if body.model in _MJ_VIDEO_MODELS:
+        if not _is_admin_user(user):
+            raise HTTPException(status_code=403, detail="Model not available")
+        image_urls = _normalize_public_urls(body.image_url, *body.reference_urls)
+        if not image_urls:
+            raise HTTPException(status_code=422, detail="Midjourney Video requires a reference image")
+        motion_value = body.grok_mode if body.grok_mode in {"low", "high"} else "low"
+        model_cost = await repo.get_model_cost(session, body.model)
+        if not model_cost or not getattr(model_cost, "is_active", True):
+            raise HTTPException(status_code=422, detail="Model not available")
+        if user.credits < model_cost.credits:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}")
+        await _reconcile_user_active_generations(session, user.id)
+        active = await repo.count_user_active_generations(session, user.id)
+        if active >= MAX_CONCURRENT:
+            raise HTTPException(status_code=429, detail="Too many concurrent generations")
+        ok = await repo.spend_credits(session, user.id, model_cost.credits)
+        if not ok:
+            raise HTTPException(status_code=402, detail="Failed to spend credits")
+        prompt = body.prompt.strip()
+        gen = await repo.create_generation(session, user.id, body.model, GenerationType.video, prompt or "mj-video", model_cost.credits)
+        try:
+            task_id = await midjourney_service.submit_video(image=image_urls[0], motion=MJVideoMotion(motion_value), prompt=prompt)
+        except Exception as exc:
+            logger.error("miniapp Midjourney video error user=%s: %s", user.id, exc)
+            if await repo.fail_generation(session, gen.id, str(exc)):
+                await repo.add_credits(session, user.id, model_cost.credits)
+            raise HTTPException(status_code=502, detail="Generation service error")
+        await repo.update_generation_task(session, gen.id, task_id)
+        await session.refresh(gen)
+        return _gen_out(gen)
+
     try:
         model = VideoModel(body.model)
     except ValueError:
@@ -834,8 +1054,8 @@ async def create_video_generation(
         )
     except Exception as exc:
         logger.error("miniapp video gen error user=%s: %s", user.id, exc)
-        await repo.fail_generation(session, gen.id, str(exc))
-        await repo.add_credits(session, user.id, total_credits)
+        if await repo.fail_generation(session, gen.id, str(exc)):
+            await repo.add_credits(session, user.id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
@@ -881,8 +1101,8 @@ async def create_music_generation(
         task_id = await create_music_task(body.prompt, body.instrumental)
     except Exception as exc:
         logger.error("miniapp music gen error user=%s: %s", user.id, exc)
-        await repo.fail_generation(session, gen.id, str(exc))
-        await repo.add_credits(session, user.id, music_credits)
+        if await repo.fail_generation(session, gen.id, str(exc)):
+            await repo.add_credits(session, user.id, music_credits)
         raise HTTPException(status_code=502, detail="Music generation service error")
 
     await repo.update_generation_task(session, gen.id, task_id)
@@ -956,6 +1176,19 @@ async def share_generation(
     gen = await repo.share_to_feed(session, gen_id, user.id)
     if not gen:
         raise HTTPException(status_code=404, detail="Generation not found or not ready")
+    return {"id": gen.id, "is_public_feed": gen.is_public_feed}
+
+
+@router.post("/feed/{gen_id}/remove", status_code=200)
+async def remove_feed_post(
+    gen_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Remove own generation from the public feed."""
+    gen = await repo.remove_from_feed(session, gen_id, user.id)
+    if not gen:
+        raise HTTPException(status_code=404, detail="Post not found or not yours")
     return {"id": gen.id, "is_public_feed": gen.is_public_feed}
 
 
@@ -1115,8 +1348,8 @@ async def remix_feed_post(
             )
     except Exception as exc:
         logger.error("feed remix error user=%s gen=%s: %s", user.id, gen_id, exc)
-        await repo.fail_generation(session, gen.id, str(exc))
-        await repo.add_credits(session, user.id, total_credits)
+        if await repo.fail_generation(session, gen.id, str(exc)):
+            await repo.add_credits(session, user.id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
@@ -1137,8 +1370,7 @@ async def get_feed_share_link(
         raise HTTPException(status_code=404, detail="Generation not found")
     if not gen.is_public_feed:
         raise HTTPException(status_code=400, detail="Generation is not public yet — share to feed first")
-    bot_username = settings.BOT_USERNAME if hasattr(settings, "BOT_USERNAME") else "apixbot"
-    link = f"https://t.me/{bot_username}?start=feed_{gen_id}"
+    link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="feed", target_id=gen_id))
     return {"link": link, "gen_id": gen_id}
 
 
@@ -1293,6 +1525,9 @@ async def topup_stars(
 ) -> dict:
     """Create a Telegram Stars invoice link for the mini app."""
     from main import bot
+
+    if not settings.TELEGRAM_STARS_ENABLED:
+        raise HTTPException(status_code=404, detail="Telegram Stars are not enabled")
 
     plan = await repo.get_price_plan_by_key(session, body.plan_key)
     if not plan:

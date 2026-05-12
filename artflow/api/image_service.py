@@ -36,7 +36,8 @@ class ImageModel(StrEnum):
     # Grok Imagine
     GROK_T2I = "grok-imagine/text-to-image"
     GROK_I2I = "grok-imagine/image-to-image"
-    # WAN 2.7 Image Pro
+    # WAN 2.7 Image
+    WAN_27 = "wan/2-7-image"
     WAN_27_PRO = "wan/2-7-image-pro"
     # Nano Banana
     NANO_BANANA   = "google/nano-banana"
@@ -72,6 +73,7 @@ _QUALITY_MODELS: set[ImageModel] = {
 
 # Models with count support
 _COUNT_MODELS: set[ImageModel] = {
+    ImageModel.WAN_27,
     ImageModel.WAN_27_PRO,
 }
 
@@ -82,12 +84,17 @@ _SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
     ImageModel.GPT_IMAGE_2_I2I,
 }
 
+_PROMPT_MAX_LENGTH_BY_MODEL: dict[str, int] = {
+    ImageModel.QWEN_EDIT.value: 2000,
+}
+
 # Aspect ratio options per model
 MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.SEEDREAM_45:      ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"],
     ImageModel.SEEDREAM_45_EDIT: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"],
     ImageModel.GROK_T2I:         ["1:1", "2:3", "3:2", "16:9", "9:16"],
     ImageModel.GROK_I2I:         ["1:1", "2:3", "3:2", "16:9", "9:16"],
+    ImageModel.WAN_27:           ["1:1", "16:9", "4:3", "21:9", "3:4", "9:16", "8:1", "1:8"],
     ImageModel.WAN_27_PRO:       ["1:1", "16:9", "4:3", "21:9", "3:4", "9:16", "8:1", "1:8"],
     ImageModel.NANO_BANANA:      ["auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"],
     ImageModel.NANO_BANANA_2:    ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
@@ -96,8 +103,8 @@ MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.QWEN_I2I:         ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
     ImageModel.QWEN2_T2I:        ["1:1", "16:9", "9:16", "4:3", "3:4"],
     ImageModel.OPENROUTER_FREE:  ["1:1", "1:1"],
-    ImageModel.GPT_IMAGE_2_T2I:  ["auto", "1:1", "9:16", "16:9", "4:3", "3:4"],
-    ImageModel.GPT_IMAGE_2_I2I:  ["auto", "1:1", "9:16", "16:9", "4:3", "3:4"],
+    ImageModel.GPT_IMAGE_2_T2I:  ["1:1", "9:16", "16:9", "4:3", "3:4"],
+    ImageModel.GPT_IMAGE_2_I2I:  ["1:1", "9:16", "16:9", "4:3", "3:4"],
 }
 
 
@@ -108,6 +115,22 @@ class ImageResult:
     url: str | None = None
     image_bytes: bytes | None = None
     mime_type: str = "image/png"
+
+
+def _normalize_prompt_for_model(model: ImageModel | str, prompt: str) -> str:
+    model_key = model.value if isinstance(model, ImageModel) else str(model)
+    max_length = _PROMPT_MAX_LENGTH_BY_MODEL.get(model_key)
+    if not max_length or len(prompt) <= max_length:
+        return prompt
+
+    trimmed = prompt[:max_length].rstrip()
+    logger.warning(
+        "Truncating prompt for %s from %s to %s chars to satisfy provider limit",
+        model_key,
+        len(prompt),
+        len(trimmed),
+    )
+    return trimmed
 
 
 def normalize_quality_for_aspect_ratio(
@@ -171,6 +194,11 @@ def _build_input(
     quality: str,
 ) -> tuple[str, dict[str, Any]]:
     ratio_value = aspect_ratio
+    if model in {ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I} and ratio_value == "auto":
+        # KIE's GPT Image 2 docs show `auto`, but in practice our paid 2K/4K
+        # flow can fail on that combo. Treat stale `auto` input as "unspecified"
+        # so we don't force an invalid provider fallback.
+        ratio_value = None
     resolved_for_validation = resolve_model_for_reference(model.value) if image_url else model.value
     try:
         ratio_model = ImageModel(resolved_for_validation)
@@ -183,7 +211,7 @@ def _build_input(
 
     quality_value = quality
     resolution_value = None
-    if model in {ImageModel.WAN_27_PRO, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I}:
+    if model in {ImageModel.WAN_27, ImageModel.WAN_27_PRO, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I}:
         resolution_value = quality_value if quality_value in {"1K", "2K", "4K"} else None
 
     if model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} and quality_value not in {"1K", "2K", "4K"}:
@@ -203,9 +231,11 @@ def _build_input(
         quality_value = normalized_quality
         resolution_value = normalized_quality if normalized_quality in {"1K", "2K", "4K"} else resolution_value
 
+    normalized_prompt = _normalize_prompt_for_model(resolved_for_validation, prompt)
+
     return build_kie_input(
         model=model.value,
-        prompt=prompt,
+        prompt=normalized_prompt,
         reference_urls=image_url,
         params={
             "aspect_ratio": ratio_value,

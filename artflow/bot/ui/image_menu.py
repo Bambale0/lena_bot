@@ -23,6 +23,7 @@ _IMAGE_MODEL_LABELS = {
     "qwen2/image-edit": "Qwen2 Edit",
     "seedream/4.5-text-to-image": "Seedream 4.5",
     "seedream/4.5-edit": "Seedream 4.5 Edit",
+    "wan/2-7-image": "WAN 2.7",
     "wan/2-7-image-pro": "WAN 2.7 Pro",
     "gpt-image-2-text-to-image": "GPT Image 2",
     "gpt-image-2-image-to-image": "GPT Image 2 Edit",
@@ -61,7 +62,7 @@ def render_image_scenarios() -> ScreenRender:
 
     text = (
         "🎨 <b>Изображения</b>\n\n"
-        "Выбери сценарий. Полный ручной контроль — во вкладке <b>Все модели</b>.\n\n"
+        "Выбери сценарий. Полный ручной контроль — во вкладке <b>Все нейросети</b>.\n\n"
         f"{scenario_lines}"
     )
     return ScreenRender(text=text, reply_markup=image_scenarios_kb())
@@ -69,7 +70,7 @@ def render_image_scenarios() -> ScreenRender:
 
 def render_image_advanced_menu(model_costs: list[ModelCost]) -> ScreenRender:
     text = (
-        "🧠 <b>Все модели изображений</b>\n\n"
+        "🧠 <b>Все нейросети изображений</b>\n\n"
         "Ручной режим: модель, формат, качество, количество и референсы.\n"
         "Доступные кнопки зависят от возможностей выбранной модели."
     )

@@ -34,6 +34,22 @@ async def close_client() -> None:
         await _client.aclose()
 
 
+def _extract_success_payload(resp: httpx.Response) -> dict[str, Any] | None:
+    """Comet MJ endpoints may return business success in JSON even with non-2xx HTTP."""
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    code = payload.get("code")
+    result = payload.get("result")
+    success_codes = {1, "1", 200, "200", 0, "0"}
+    if result and (code in success_codes or 200 <= resp.status_code < 300):
+        return payload
+    return None
+
+
 async def _request_with_retry(
     method: str,
     path: str,
@@ -49,6 +65,18 @@ async def _request_with_retry(
     for attempt in range(retries):
         try:
             resp = await client.request(method, path, json=json, data=data, files=files)
+            success_payload = _extract_success_payload(resp)
+            if success_payload is not None:
+                if not (200 <= resp.status_code < 300):
+                    logger.warning(
+                        "CometAPI business-success on HTTP %s: %s (attempt %d, code=%s, result=%s)",
+                        resp.status_code,
+                        path,
+                        attempt + 1,
+                        success_payload.get("code"),
+                        success_payload.get("result"),
+                    )
+                return success_payload
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as e:

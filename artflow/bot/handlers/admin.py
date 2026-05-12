@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.filters.admin import IsAdmin
 from bot.services.broadcasts import SEGMENT_LABELS, deliver_broadcast, get_recipient_ids
+from bot.keyboards.models import model_cost_display_text
 from core.broadcast_scheduler import schedule_broadcast_job
 from db import repository as repo
 from db.repository import InsufficientReferralBalanceError
@@ -276,6 +277,7 @@ async def cb_referrals(call: CallbackQuery, session: AsyncSession) -> None:
     builder = InlineKeyboardBuilder()
 
     if not leaders:
+        builder.button(text="📋 Все приглашённые", callback_data="adm:ref_all")
         builder.button(text="← Назад", callback_data="adm:back")
         await call.message.edit_text(  # type: ignore[union-attr]
             "👥 <b>Рефералы</b>\n\nПока нет пользователей с рефералами.",
@@ -297,6 +299,7 @@ async def cb_referrals(call: CallbackQuery, session: AsyncSession) -> None:
             callback_data=f"adm:ref_user:{user.id}",
         )
 
+    builder.button(text="📋 Все приглашённые", callback_data="adm:ref_all")
     builder.button(text="← Назад", callback_data="adm:back")
     builder.adjust(1)
     await call.message.edit_text("\n".join(lines), reply_markup=builder.as_markup())  # type: ignore[union-attr]
@@ -371,6 +374,36 @@ async def cb_referral_level(call: CallbackQuery, session: AsyncSession) -> None:
         )
 
     await call.message.edit_text("\n".join(lines), reply_markup=builder.as_markup())  # type: ignore[union-attr]
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm:ref_all")
+async def cb_referrals_all(call: CallbackQuery, session: AsyncSession) -> None:
+    items = await repo.get_all_referral_bindings(session, limit=100)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="← К рефералам", callback_data="adm:referrals")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+
+    if not items:
+        await call.message.edit_text(  # type: ignore[union-attr]
+            "👥 <b>Все приглашённые</b>\n\nПока нет ни одного зафиксированного реферала.",
+            reply_markup=builder.as_markup(),
+        )
+        await call.answer()
+        return
+
+    lines = ["👥 <b>Все приглашённые</b>\n"]
+    for i, item in enumerate(items, 1):
+        parent = _user_label(item.referrer) if item.referrer else "—"
+        lines.append(
+            f"{i}. {_user_label(item.user)}\n"
+            f"   Имя: {item.user.full_name or '—'}\n"
+            f"   Пригласил: {parent}\n"
+            f"   Генераций: <b>{item.generations_count}</b> · оплат: <b>{item.paid_rub:.0f}₽</b>"
+        )
+
+    await call.message.edit_text("\n".join(lines), reply_markup=builder.as_markup())  # type: ignore[arg-type]
     await call.answer()
 
 
@@ -721,8 +754,59 @@ async def handle_price_label(message: Message, session: AsyncSession, state: FSM
 _MODELS_PAGE_SIZE = 12
 
 
+def _model_family_key(model_key: str) -> str:
+    return model_key.split("__", 1)[0]
+
+
+def _variant_label(model_key: str) -> str:
+    if "__" not in model_key:
+        return "база"
+    suffix = model_key.split("__", 1)[1]
+    parts: list[str] = []
+    for part in suffix.split("__"):
+        if "=" in part:
+            key, value = part.split("=", 1)
+            if key in {"resolution", "quality"}:
+                parts.append(value)
+            elif key == "duration":
+                parts.append(f"{value}с")
+            else:
+                parts.append(f"{key}={value}")
+        else:
+            parts.append(part)
+    return " · ".join(parts)
+
+
+def _model_kind_label(model_key: str) -> str:
+    return "вариант" if "__" in model_key else "базовая"
+
+
+def _sort_model_costs_for_admin(costs: list) -> list:
+    def sort_key(mc):
+        gen_type_value = getattr(mc.gen_type, "value", str(mc.gen_type))
+        return (gen_type_value, _model_family_key(mc.model_key), 1 if "__" in mc.model_key else 0, mc.model_key)
+    return sorted(costs, key=sort_key)
+
+
+def _related_costs(costs: list, model_key: str) -> list:
+    family_key = _model_family_key(model_key)
+    related = [mc for mc in costs if _model_family_key(mc.model_key) == family_key]
+    return _sort_model_costs_for_admin(related)
+
+
+def _related_costs_text(costs: list, current_key: str) -> str:
+    lines: list[str] = []
+    for item in _related_costs(costs, current_key):
+        marker = "👉 " if item.model_key == current_key else "• "
+        label = _variant_label(item.model_key)
+        price = model_cost_display_text(item).replace("💋", "кр")
+        lines.append(f"{marker}<code>{label}</code> — <b>{price}</b>")
+    return "\n".join(lines)
+
+
 def _models_kb(costs: list, page: int) -> "InlineKeyboardMarkup":
     """Build paginated model costs keyboard."""
+    costs = _sort_model_costs_for_admin(costs)
     total = len(costs)
     total_pages = max(1, (total + _MODELS_PAGE_SIZE - 1) // _MODELS_PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
@@ -739,25 +823,17 @@ def _models_kb(costs: list, page: int) -> "InlineKeyboardMarkup":
             prefix = "🎵"
         else:
             prefix = "🎬"
-        label = mc.display_name[:30]
-        
-        # Для видео-моделей всегда показываем кр/сек
-        # Если в model_key есть resolution, добавляем пометку в скобках
+        label = mc.display_name[:24]
+        variant_label = _variant_label(mc.model_key)
+
         if gen_type_value in ("video", "GenerationType.video"):
-            # Парсим resolution из ключа если есть
-            res_match = re.search(r'__resolution=(\w+)', mc.model_key)
-            if res_match:
-                resolution = res_match.group(1)
-                # Убираем " · за сек" из названия, если есть
-                label = label.replace(" · за сек", "").replace(f" · {resolution}", "")
-                cred_label = f"{mc.credits} кр/сек ({resolution})"
-            else:
-                cred_label = f"{mc.credits} кр/сек"
+            cred_label = model_cost_display_text(mc).replace("💋", "кр")
         else:
-            cred_label = f"{mc.credits} кр"
-            
+            cred_label = f"{mc.credits:g} кр"
+
+        item_label = f"{label} · {variant_label}"
         builder.button(
-            text=f"{prefix} {label} — {cred_label}",
+            text=f"{prefix} {item_label} — {cred_label}",
             callback_data=f"adm:model_edit:{mc.model_key}",
         )
     builder.adjust(1)
@@ -778,12 +854,15 @@ async def cb_models(call: CallbackQuery, session: AsyncSession) -> None:
     # Filter: only show clean model keys (no "::" legacy separator)
     all_costs = await repo.get_all_model_costs(session)
     costs = [mc for mc in all_costs if "::" not in mc.model_key]
+    base_count = sum(1 for mc in costs if "__" not in mc.model_key)
+    variant_count = len(costs) - base_count
     await call.message.edit_text(
-        f"⚙️ <b>Стоимость моделей</b> ({len(costs)} активных)\n\nНажми для изменения:",
+        f"⚙️ <b>Стоимость моделей</b> ({len(costs)} активных)\n"
+        f"Базовых: <b>{base_count}</b> · вариантов: <b>{variant_count}</b>\n\n"
+        f"Нажми для изменения:",
         reply_markup=_models_kb(costs, 0),
     )
     await call.answer()
-
 
 @router.callback_query(F.data.startswith("adm:models_pg:"))
 async def cb_models_page(call: CallbackQuery, session: AsyncSession) -> None:
@@ -801,11 +880,16 @@ async def cb_noop(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("adm:model_edit:"))
 async def cb_model_edit(call: CallbackQuery, session: AsyncSession) -> None:
-    model_key = call.data.split(":")[2]  # type: ignore[union-attr]
+    model_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
     model_cost = await repo.get_model_cost(session, model_key)
     if not model_cost:
         await call.answer("Модель не найдена", show_alert=True)
         return
+
+    all_costs = await repo.get_all_model_costs(session)
+    costs = [mc for mc in all_costs if "::" not in mc.model_key]
+    related_text = _related_costs_text(costs, model_key)
+    price_text = model_cost_display_text(model_cost).replace("💋", "кр")
 
     builder = InlineKeyboardBuilder()
     builder.button(text="✏️ Изменить стоимость", callback_data=f"adm:model_set_cr:{model_key}")
@@ -815,13 +899,15 @@ async def cb_model_edit(call: CallbackQuery, session: AsyncSession) -> None:
 
     await call.message.edit_text(  # type: ignore[union-attr]
         f"⚙️ <b>Редактирование стоимости модели</b>\n\n"
+        f"Тип: <b>{_model_kind_label(model_cost.model_key)}</b>\n"
+        f"Вариант: <code>{_variant_label(model_cost.model_key)}</code>\n"
         f"Ключ: <code>{model_cost.model_key}</code>\n"
         f"Название: <b>{model_cost.display_name}</b>\n"
-        f"Стоимость: <b>{model_cost.credits}</b> кр",
+        f"Стоимость: <b>{price_text}</b>\n\n"
+        f"Связанные цены:\n{related_text}",
         reply_markup=builder.as_markup(),
     )
     await call.answer()
-
 
 @router.callback_query(F.data.startswith("adm:model_set_cr:"))
 async def cb_model_set_credits_start(call: CallbackQuery, state: FSMContext) -> None:

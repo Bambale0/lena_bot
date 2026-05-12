@@ -59,10 +59,45 @@ async def test_cb_referral_shows_screen(db_user) -> None:
         get_user_referral_balance_snapshot=AsyncMock(
             return_value=SimpleNamespace(total_earned=10.5, available_to_withdraw=10.5, pending_withdrawals=0.0)
         ),
+        get_user_feed_remix_reward_credits=AsyncMock(return_value=0.0),
     )):
         await balance.cb_referral(call, db_user, mock_bot, AsyncMock())
     call.message.edit_text.assert_awaited_once()
-    assert "Реферальная программа" in call.message.edit_text.call_args[0][0]
+    assert "Партнёрская программа" in call.message.edit_text.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cb_referral_list_empty(db_user) -> None:
+    call = make_callback(data="referral:list")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    with patch("bot.handlers.balance.repo", AsyncMock(get_referral_children=AsyncMock(return_value=[]))):
+        await balance.cb_referral_list(call, db_user, AsyncMock())
+    call.message.edit_text.assert_awaited_once()
+    text = call.message.edit_text.call_args[0][0]
+    assert "Мои приглашённые" in text
+    assert "не был зарегистрирован раньше" in text
+
+
+@pytest.mark.asyncio
+async def test_cb_referral_list_with_children(db_user) -> None:
+    call = make_callback(data="referral:list")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    child_user = SimpleNamespace(
+        tg_id=777888999,
+        username="friend_one",
+        full_name="Friend One",
+        created_at=MagicMock(strftime=MagicMock(return_value="12.05.2026")),
+    )
+    child = SimpleNamespace(user=child_user, generations_count=3, paid_rub=500.0)
+    with patch("bot.handlers.balance.repo", AsyncMock(get_referral_children=AsyncMock(return_value=[child]))):
+        await balance.cb_referral_list(call, db_user, AsyncMock())
+    call.message.edit_text.assert_awaited_once()
+    text = call.message.edit_text.call_args[0][0]
+    assert "@friend_one" in text
+    assert "777888999" in text
+    assert "500₽" in text
 
 
 # ── referral:withdraw ────────────────────────────────────────────────────────
@@ -74,9 +109,10 @@ async def test_cb_referral_withdraw(db_user) -> None:
     call.answer = AsyncMock()
     mock_state = AsyncMock()
     mock_session = AsyncMock()
+    db_user.referral_balance = 1500.0
     with patch("bot.handlers.balance.repo", AsyncMock(
         get_user_referral_balance_snapshot=AsyncMock(
-            return_value=SimpleNamespace(total_earned=10.5, available_to_withdraw=10.5, pending_withdrawals=0.0)
+            return_value=SimpleNamespace(total_earned=1500.0, available_to_withdraw=1500.0, pending_withdrawals=0.0)
         ),
     )):
         await balance.cb_referral_withdraw(call, mock_state, db_user, mock_session)

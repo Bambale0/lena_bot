@@ -236,7 +236,7 @@ def _session_settings_text(image_session: ImageSession) -> str:
     mode_label = "Референс → изображение" if image_session.mode == "image" else "Текст → изображение"
     return (
         "⚙️ <b>Настройки активной серии</b>\n\n"
-        f"Модель: <code>{image_session.model}</code>\n"
+        f"Модель: <b>{get_image_model_label(image_session.model)}</b>\n"
         f"Режим: <b>{mode_label}</b>\n"
         f"Формат кадра: <b>{ratio_label}</b>\n"
         f"Детализация: <b>{quality_label}</b>\n"
@@ -253,7 +253,7 @@ def _active_image_session_text(image_session: ImageSession) -> str:
     ratio_label = image_session.aspect_ratio or ("по умолчанию" if ratios else "не используется")
     return (
         "🎨 <b>Активная серия изображений</b>\n\n"
-        f"Модель: <code>{image_session.model}</code>\n"
+        f"Модель: <b>{get_image_model_label(image_session.model)}</b>\n"
         f"Формат кадра: <b>{ratio_label}</b>\n"
         f"Детализация: <b>{quality_label}</b>\n"
         f"Вариантов за запуск: <b>{count_label}</b>\n\n"
@@ -403,6 +403,7 @@ async def _launch_session_generation(
     action_type: ImageGenerationAction,
     reference_url: str | list[str] | None,
     parent_generation_id: int | None,
+    source_feed_gen_id: int | None = None,
     launching_text: str,
     queued_text: str,
 ) -> bool:
@@ -463,6 +464,7 @@ async def _launch_session_generation(
         image_session_id=image_session.id,
         parent_generation_id=parent_generation_id,
         action_type=action_type,
+        source_feed_gen_id=source_feed_gen_id,
     )
     await repo.update_image_session_last_prompt(session, image_session.id, prompt)
     image_session.last_prompt = prompt
@@ -481,8 +483,8 @@ async def _launch_session_generation(
         )
     except Exception as e:
         logger.error("Session image generation error: %s", e)
-        await repo.fail_generation(session, gen.id, str(e))
-        await repo.add_credits(session, db_user.id, credits)
+        if await repo.fail_generation(session, gen.id, str(e)):
+            await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
             "❌ Ошибка генерации. 💋 возвращены.",
             reply_markup=image_session_kb(parent_generation_id),
@@ -491,7 +493,7 @@ async def _launch_session_generation(
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
     await _sync_state_with_image_session(state, image_session)
-    await state.update_data(credits=credits)
+    await state.update_data(credits=credits, source_feed_gen_id=source_feed_gen_id)
     await status_msg.edit_text(queued_text, reply_markup=image_session_kb(gen.id))
     return True
 
@@ -812,14 +814,27 @@ async def cb_image_model(call: CallbackQuery, state: FSMContext, session: AsyncS
 
     caps = IMAGE_CAPS.get(model_key, {})
     modes = caps.get("modes", ["text"])
-    default_mode = "text" if "text" in modes else modes[0]
+    data = await state.get_data()
+    carryover_mode = data.get("carryover_mode")
+    if carryover_mode in modes:
+        default_mode = carryover_mode
+    else:
+        default_mode = "text" if "text" in modes else modes[0]
 
-    await state.update_data(
-        model_key=model_key,
-        image_model=model_key,
-        mode=default_mode,
-        image_mode=default_mode,
-    )
+    updates = {
+        "model_key": model_key,
+        "image_model": model_key,
+        "mode": default_mode,
+        "image_mode": default_mode,
+    }
+    if data.get("carryover_image_file_id"):
+        updates["image_file_id"] = data.get("carryover_image_file_id")
+    if data.get("carryover_ref_file_ids"):
+        updates["ref_file_ids"] = list(data.get("carryover_ref_file_ids") or [])
+    if data.get("carryover_reference_url"):
+        updates["remix_reference_url"] = data.get("carryover_reference_url")
+
+    await state.update_data(**updates)
 
     model_title = get_image_model_label(model_key)
     text = (
@@ -1132,14 +1147,27 @@ async def cb_image_reference_skip(
     display_name = model_cost.display_name if model_cost else model_key
     caps = IMAGE_CAPS.get(model_key, {})
     modes = caps.get("modes", ["text"])
-    default_mode = "text" if "text" in modes else modes[0]
+    data = await state.get_data()
+    carryover_mode = data.get("carryover_mode")
+    if carryover_mode in modes:
+        default_mode = carryover_mode
+    else:
+        default_mode = "text" if "text" in modes else modes[0]
 
-    await state.update_data(
-        model_key=model_key,
-        image_model=model_key,
-        mode=default_mode,
-        image_mode=default_mode,
-    )
+    updates = {
+        "model_key": model_key,
+        "image_model": model_key,
+        "mode": default_mode,
+        "image_mode": default_mode,
+    }
+    if data.get("carryover_image_file_id"):
+        updates["image_file_id"] = data.get("carryover_image_file_id")
+    if data.get("carryover_ref_file_ids"):
+        updates["ref_file_ids"] = list(data.get("carryover_ref_file_ids") or [])
+    if data.get("carryover_reference_url"):
+        updates["remix_reference_url"] = data.get("carryover_reference_url")
+
+    await state.update_data(**updates)
 
     text = (
         f"🎛 <b>{display_name}</b>\n\n"
@@ -1195,7 +1223,7 @@ async def handle_prompt(
         action_type=ImageGenerationAction.initial,
         reference_url=reference_url,
         parent_generation_id=None,
-        launching_text=f"⏳ <b>Запускаю генерацию...</b>\n<code>{image_session.model}</code>",
+        launching_text=f"⏳ <b>Запускаю генерацию...</b>\n<b>{get_image_model_label(image_session.model)}</b>",
         queued_text="⏳ <b>Задача запущена.</b> Пришлю результат, когда генерация будет готова.",
     )
 
@@ -1221,6 +1249,7 @@ async def handle_session_prompt(
     prompt = message.text.strip()
     is_remix = bool(data.get("remix_mode"))
     parent_id = data.get("remix_parent_generation_id") or image_session.last_generation_id
+    source_feed_gen_id = data.get("source_feed_gen_id")
 
     reference_url = data.get("remix_reference_url") if is_remix else None
     if not reference_url:
@@ -1255,7 +1284,8 @@ async def handle_session_prompt(
         action_type=ImageGenerationAction.remix if is_remix else ImageGenerationAction.initial,
         reference_url=reference_url,
         parent_generation_id=parent_id,
-        launching_text=f"⏳ <b>Генерирую в активной серии...</b>\n<code>{image_session.model}</code>",
+        source_feed_gen_id=source_feed_gen_id,
+        launching_text=f"⏳ <b>Генерирую в активной серии...</b>\n<b>{get_image_model_label(image_session.model)}</b>",
         queued_text="⏳ <b>Задача запущена.</b> Результат придёт сюда автоматически.",
     )
 
@@ -1369,6 +1399,8 @@ async def cb_image_session_repeat(
         await call.answer("Нечего повторять", show_alert=True)
         return
 
+    data = await state.get_data()
+    source_feed_gen_id = data.get("source_feed_gen_id") or getattr(last_gen, "source_feed_gen_id", None)
     reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
 
     await _launch_session_generation(
@@ -1381,6 +1413,7 @@ async def cb_image_session_repeat(
         action_type=ImageGenerationAction.repeat,
         reference_url=reference_url,
         parent_generation_id=parent_id or last_gen.id,
+        source_feed_gen_id=source_feed_gen_id,
         launching_text="🔁 <b>Повторяю последнюю генерацию...</b>",
         queued_text="⏳ <b>Повтор запущен.</b> Результат придёт сюда автоматически.",
     )
@@ -1489,7 +1522,7 @@ async def cb_image_session_animate(
         resolution=resolution,
     )
     if not model_cost:
-        await call.answer("Модель Grok I2V недоступна", show_alert=True)
+        await call.answer("Модель Grok Animate недоступна", show_alert=True)
         return
     if db_user.credits < model_cost.credits:
         await call.answer(
@@ -1732,8 +1765,29 @@ async def cb_image_settings_model(
     state: FSMContext,
     db_user: User,
 ) -> None:
+    image_session, _ = await _resolve_image_session(session, db_user, state)
+    carryover_ref_file_ids: list[str] = []
+    carryover_image_file_id: str | None = None
+    carryover_reference_url: str | None = None
+    carryover_mode: str | None = None
+
+    if image_session:
+        carryover_ref_file_ids = _stored_reference_file_ids(image_session)
+        carryover_image_file_id = image_session.reference_file_id or (carryover_ref_file_ids[0] if carryover_ref_file_ids else None)
+        carryover_reference_url = image_session.reference_url or image_session.last_result_url
+        if carryover_ref_file_ids or carryover_image_file_id or carryover_reference_url:
+            carryover_mode = "image"
+        elif image_session.mode:
+            carryover_mode = image_session.mode
+
     await repo.archive_active_image_sessions(session, db_user.id)
     await state.clear()
+    await state.update_data(
+        carryover_mode=carryover_mode,
+        carryover_image_file_id=carryover_image_file_id,
+        carryover_ref_file_ids=carryover_ref_file_ids,
+        carryover_reference_url=carryover_reference_url,
+    )
     await _open_image_model_select(call, session, state, db_user)
     await safe_answer_callback(call)
 
@@ -1806,6 +1860,7 @@ async def cb_regen_image(
         action_type=ImageGenerationAction.repeat,
         reference_url=reference_url,
         parent_generation_id=prev.id,
+        source_feed_gen_id=getattr(prev, "source_feed_gen_id", None),
         launching_text="🔁 <b>Повторяю генерацию...</b>",
         queued_text="⏳ <b>Задача запущена.</b> Результат придёт сюда автоматически.",
     )

@@ -1,4 +1,5 @@
 # core/config.py
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,8 +25,10 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379"
 
     # CometAPI (Kling, Seedream, Gemini, Grok, Seedance, Veo, WAN)
-    COMET_API_KEY: str
+    COMET_API_KEY: str = Field(validation_alias=AliasChoices("COMET_API_KEY", "COMET_KEY"))
     COMET_BASE_URL: str = "https://api.cometapi.com"
+    MIDJOURNEY_WEBHOOK_PATH: str = "/webhook/comet/midjourney"
+    MIDJOURNEY_WEBHOOK_SECRET: str = ""
 
     # aivideoapi.ai (HappyHorse)
     AIVIDEOAPI_KEY: str = ""
@@ -58,10 +61,11 @@ class Settings(BaseSettings):
 
     # KIE.AI text assistant
     KIE_ASSISTANT_MODEL: str = "gpt-5-4"
-    KIE_ASSISTANT_FALLBACK: str = "gpt-5-4"
+    KIE_ASSISTANT_FALLBACK: str = "claude-sonnet-4-5"
 
     # Feature flags
     SUBSCRIPTION_ENABLED: bool = False
+    TELEGRAM_STARS_ENABLED: bool = False
 
     # Credits
     WELCOME_BONUS_CREDITS: int = 15

@@ -6,6 +6,7 @@ import secrets
 import logging
 from inspect import isawaitable
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import Date, cast, select, update, desc, func, case
@@ -33,6 +34,14 @@ from db.models import (
 logger = logging.getLogger(__name__)
 
 ACTIVE_GENERATION_WINDOW = timedelta(minutes=45)
+
+
+def feed_remix_royalty_credits(credits_spent: float | int) -> float:
+    value = Decimal(str(credits_spent or 0))
+    if value <= 0:
+        return 0.0
+    royalty = (value * Decimal("0.05")).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+    return float(royalty)
 
 
 @dataclass(frozen=True)
@@ -63,6 +72,16 @@ class ReferralLeader:
 @dataclass(frozen=True)
 class ReferralChildStats:
     user: User
+    generations_count: int
+    paid_rub: float
+
+
+@dataclass(frozen=True)
+class ReferralBindingView:
+    user: User
+    referrer: User | None
+    referrer_l2: User | None
+    referrer_l3: User | None
     generations_count: int
     paid_rub: float
 
@@ -140,6 +159,33 @@ async def create_user(
     await session.refresh(user)
     logger.info("User created: tg_id=%s", tg_id)
     return user
+
+
+async def bind_user_referrer_once(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    referrer: User,
+    referrer_l2: User | None = None,
+    referrer_l3: User | None = None,
+) -> bool:
+    result = await session.execute(
+        update(User)
+        .where(
+            User.id == user_id,
+            User.referrer_id.is_(None),
+            User.referrer_l2_id.is_(None),
+            User.referrer_l3_id.is_(None),
+        )
+        .values(
+            referrer_id=referrer.id,
+            referrer_l2_id=referrer_l2.id if referrer_l2 else None,
+            referrer_l3_id=referrer_l3.id if referrer_l3 else None,
+        )
+        .returning(User.id)
+    )
+    await session.commit()
+    return result.scalar_one_or_none() is not None
 
 
 async def set_user_language(session: AsyncSession, user_id: int, language: str) -> None:
@@ -334,6 +380,60 @@ async def get_referral_children(
     ]
 
 
+async def get_all_referral_bindings(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+) -> list[ReferralBindingView]:
+    ref1 = aliased(User)
+    ref2 = aliased(User)
+    ref3 = aliased(User)
+    gens = (
+        select(Generation.user_id.label("user_id"), func.count(Generation.id).label("count"))
+        .group_by(Generation.user_id)
+        .subquery()
+    )
+    revenue = (
+        select(Transaction.user_id.label("user_id"), func.coalesce(func.sum(Transaction.amount_rub), 0).label("rub"))
+        .where(Transaction.status == TransactionStatus.paid)
+        .group_by(Transaction.user_id)
+        .subquery()
+    )
+    result = await session.execute(
+        select(
+            User,
+            ref1,
+            ref2,
+            ref3,
+            func.coalesce(gens.c.count, 0),
+            func.coalesce(revenue.c.rub, 0),
+        )
+        .outerjoin(ref1, ref1.id == User.referrer_id)
+        .outerjoin(ref2, ref2.id == User.referrer_l2_id)
+        .outerjoin(ref3, ref3.id == User.referrer_l3_id)
+        .outerjoin(gens, gens.c.user_id == User.id)
+        .outerjoin(revenue, revenue.c.user_id == User.id)
+        .where(
+            (User.referrer_id.is_not(None))
+            | (User.referrer_l2_id.is_not(None))
+            | (User.referrer_l3_id.is_not(None))
+        )
+        .order_by(desc(User.created_at))
+        .limit(limit)
+    )
+    return [
+        ReferralBindingView(
+            user=user,
+            referrer=referrer,
+            referrer_l2=referrer_l2,
+            referrer_l3=referrer_l3,
+            generations_count=int(gens_count or 0),
+            paid_rub=float(paid_rub or 0),
+        )
+        for user, referrer, referrer_l2, referrer_l3, gens_count, paid_rub in result.all()
+    ]
+
+
 async def ban_user(session: AsyncSession, tg_id: int) -> bool:
     result = await session.execute(
         update(User).where(User.tg_id == tg_id).values(is_banned=True).returning(User.id)
@@ -397,40 +497,97 @@ async def finish_generation(
     session: AsyncSession,
     gen_id: int,
     result_url: str,
-) -> None:
-    await session.execute(
+) -> Generation | None:
+    result = await session.execute(
         update(Generation)
-        .where(Generation.id == gen_id)
+        .where(
+            Generation.id == gen_id,
+            Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
+        )
         .values(
             status=GenerationStatus.done,
             result_url=result_url,
             finished_at=datetime.now(timezone.utc),
         )
+        .returning(Generation)
     )
+    gen = result.scalar_one_or_none()
     await session.commit()
 
+    # Already finalized elsewhere; do not double-credit royalties.
+    if not gen:
+        return None
+
     # Pay 5% royalty to the author of the source feed post (if remixed from feed)
-    gen = await get_generation_by_id(session, gen_id)
-    if gen and gen.source_feed_gen_id:
-        source = await get_generation_by_id(session, gen.source_feed_gen_id)
-        if source and source.user_id != gen.user_id and gen.credits_spent > 0:
-            royalty = max(1, round(gen.credits_spent * 0.05))
-            await add_credits(session, source.user_id, royalty)
+
+    if not gen.source_feed_gen_id:
+        return
+
+    source = await get_generation_by_id(session, gen.source_feed_gen_id)
+    if not source:
+        logger.info(
+            "Feed remix royalty skipped: reason=source_generation_not_found source_generation=%s generation=%s remixer=%s credits_spent=%s",
+            gen.source_feed_gen_id,
+            gen.id,
+            gen.user_id,
+            gen.credits_spent,
+        )
+        return
+
+    if source.user_id == gen.user_id:
+        logger.info(
+            "Feed remix royalty skipped: reason=self_remix source_user=%s remixer=%s source_generation=%s generation=%s credits_spent=%s",
+            source.user_id,
+            gen.user_id,
+            source.id,
+            gen.id,
+            gen.credits_spent,
+        )
+        return
+
+    if gen.credits_spent <= 0:
+        logger.info(
+            "Feed remix royalty skipped: reason=non_positive_credits source_user=%s remixer=%s source_generation=%s generation=%s credits_spent=%s",
+            source.user_id,
+            gen.user_id,
+            source.id,
+            gen.id,
+            gen.credits_spent,
+        )
+        return
+
+    royalty = feed_remix_royalty_credits(gen.credits_spent)
+    await add_credits(session, source.user_id, royalty)
+    logger.info(
+        "Feed remix royalty credited: source_user=%s remixer=%s credits_spent=%s royalty=%s source_generation=%s generation=%s",
+        source.user_id,
+        gen.user_id,
+        gen.credits_spent,
+        royalty,
+        source.id,
+        gen.id,
+    )
 
 
 async def fail_generation(
     session: AsyncSession, gen_id: int, error: str
-) -> None:
-    await session.execute(
+) -> bool:
+    result = await session.execute(
         update(Generation)
-        .where(Generation.id == gen_id)
+        .where(
+            Generation.id == gen_id,
+            Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
+        )
         .values(
             status=GenerationStatus.failed,
             error_msg=error,
             finished_at=datetime.now(timezone.utc),
         )
+        .returning(Generation.id)
     )
+    updated = result.scalar_one_or_none() is not None
     await session.commit()
+    return updated
 
 async def get_generation_by_id(session: AsyncSession, gen_id: int) -> Generation | None:
     result = await session.execute(select(Generation).where(Generation.id == gen_id))
@@ -588,6 +745,20 @@ async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Gen
     return await get_generation_by_id(session, gen_id)
 
 
+async def remove_from_feed(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
+    await session.execute(
+        update(Generation)
+        .where(
+            Generation.id == gen_id,
+            Generation.user_id == user_id,
+            Generation.is_public_feed.is_(True),
+        )
+        .values(is_public_feed=False)
+    )
+    await session.commit()
+    return await get_generation_by_id(session, gen_id)
+
+
 async def share_to_library(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
     await session.execute(
         update(Generation)
@@ -676,6 +847,9 @@ async def create_image_session(
     normalized_reference_file_ids = [item for item in (reference_file_ids or []) if item]
     if reference_file_id and reference_file_id not in normalized_reference_file_ids:
         normalized_reference_file_ids.insert(0, reference_file_id)
+
+    if isinstance(reference_url, list):
+        reference_url = next((str(item) for item in reference_url if item), None)
 
     image_session = ImageSession(
         user_id=user_id,
@@ -1075,13 +1249,40 @@ async def get_user_pending_withdrawal_total(session: AsyncSession, user_id: int)
     return float(result.scalar_one())
 
 
-async def get_user_feed_remix_reward_credits(session: AsyncSession, user_id: int) -> float:
-    source_gen = aliased(Generation)
-    royalty_base = func.round(Generation.credits_spent * 0.05)
-    royalty_expr = case((royalty_base < 1, 1), else_=royalty_base)
-
+async def _active_price_plan_rub_per_credit(session: AsyncSession) -> float:
     result = await session.execute(
-        select(func.coalesce(func.sum(royalty_expr), 0.0))
+        select(PricePlan)
+        .where(
+            PricePlan.is_active.is_(True),
+            PricePlan.credits > 0,
+            PricePlan.price_rub > 0,
+        )
+        .order_by(desc(PricePlan.credits), desc(PricePlan.sort_order), desc(PricePlan.id))
+    )
+    plans = list(result.scalars().all())
+    if not plans:
+        return 0.0
+    rub_per_credit = min(
+        (Decimal(str(plan.price_rub)) / Decimal(str(plan.credits)))
+        for plan in plans
+        if float(plan.credits or 0) > 0 and float(plan.price_rub or 0) > 0
+    )
+    return float(rub_per_credit)
+
+
+def feed_remix_royalty_rub(credits_spent: float | int, rub_per_credit: float | int) -> float:
+    credits_value = Decimal(str(credits_spent or 0))
+    rub_rate = Decimal(str(rub_per_credit or 0))
+    if credits_value <= 0 or rub_rate <= 0:
+        return 0.0
+    royalty = (credits_value * rub_rate * Decimal("0.05")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return float(royalty)
+
+
+async def get_user_feed_remix_reward_rub(session: AsyncSession, user_id: int) -> float:
+    source_gen = aliased(Generation)
+    result = await session.execute(
+        select(Generation.credits_spent)
         .select_from(Generation)
         .join(source_gen, Generation.source_feed_gen_id == source_gen.id)
         .where(
@@ -1092,7 +1293,8 @@ async def get_user_feed_remix_reward_credits(session: AsyncSession, user_id: int
             Generation.credits_spent > 0,
         )
     )
-    return float(result.scalar_one())
+    rub_per_credit = await _active_price_plan_rub_per_credit(session)
+    return float(sum(feed_remix_royalty_rub(value, rub_per_credit) for value in result.scalars().all()))
 
 
 async def get_user_referral_balance_snapshot(

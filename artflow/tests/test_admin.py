@@ -617,3 +617,31 @@ def test_user_label_no_username() -> None:
     user = SimpleNamespace(username=None, tg_id=123)
     result = admin._user_label(user)
     assert "без username" in result
+
+
+@pytest.mark.asyncio
+async def test_cb_referrals_all_empty() -> None:
+    call = make_callback(data="adm:ref_all")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    with patch("bot.handlers.admin.repo", AsyncMock(get_all_referral_bindings=AsyncMock(return_value=[]))):
+        await admin.cb_referrals_all(call, AsyncMock())
+    call.message.edit_text.assert_awaited_once()
+    assert "нет ни одного" in call.message.edit_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_cb_referrals_all_with_items() -> None:
+    call = make_callback(data="adm:ref_all")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    invited = SimpleNamespace(username="kid", tg_id=300, full_name="Kid Name")
+    parent = SimpleNamespace(username="leader", tg_id=200, full_name="Leader")
+    item = SimpleNamespace(user=invited, referrer=parent, referrer_l2=None, referrer_l3=None, generations_count=5, paid_rub=700.0)
+    with patch("bot.handlers.admin.repo", AsyncMock(get_all_referral_bindings=AsyncMock(return_value=[item]))):
+        await admin.cb_referrals_all(call, AsyncMock())
+    call.message.edit_text.assert_awaited_once()
+    out = call.message.edit_text.call_args[0][0]
+    assert "@kid" in out
+    assert "@leader" in out
+    assert "700₽" in out

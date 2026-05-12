@@ -64,6 +64,15 @@ async def test_webapp_me_returns_verified_user(client, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_webapp_me_normalizes_bot_username_for_referral_link(client, monkeypatch) -> None:
+    monkeypatch.setattr("api.miniapp_routes.repo.get_active_image_session", AsyncMock(return_value=None))
+    monkeypatch.setattr("api.miniapp_routes.settings.BOT_USERNAME", "@TestBot")
+    response = await client.get("/api/v1/me")
+    assert response.status_code == 200
+    assert response.json()["referral_link"] == "https://t.me/TestBot?start=REF"
+
+
+@pytest.mark.asyncio
 async def test_webapp_feed_returns_items(client, monkeypatch) -> None:
     generation = SimpleNamespace(
         id=5,
@@ -100,6 +109,25 @@ async def test_webapp_video_models_include_mode_options(client, monkeypatch) -> 
     response = await client.get("/api/v1/models/video")
     assert response.status_code == 200
     assert response.json()[0]["mode_options"] == ["fun", "normal", "spicy"]
+
+
+@pytest.mark.asyncio
+async def test_webapp_image_models_allow_fractional_credits(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_all_model_costs",
+        AsyncMock(return_value=[
+            SimpleNamespace(
+                model_key="nano-banana-2",
+                display_name="Nano Banana 2",
+                credits=2.5,
+            ),
+        ]),
+    )
+
+    response = await client.get("/api/v1/models/image")
+
+    assert response.status_code == 200
+    assert response.json()[0]["credits"] == 2.5
 
 
 def test_normalize_video_request_drops_grok_i2v_ratio_for_single_ref() -> None:
@@ -381,6 +409,18 @@ async def test_image_models_include_max_refs_and_single_count_for_nano_banana_2(
     assert payload["max_refs"] == 4
 
 
+@pytest.mark.asyncio
+async def test_image_models_include_updated_wan_reference_limit(client, monkeypatch) -> None:
+    model_costs = [SimpleNamespace(model_key="wan/2-7-image-pro", display_name="WAN 2.7 Pro", credits=4)]
+    monkeypatch.setattr("api.miniapp_routes.repo.get_all_model_costs", AsyncMock(return_value=model_costs))
+
+    response = await client.get("/api/v1/models/image")
+
+    assert response.status_code == 200
+    payload = response.json()[0]
+    assert payload["max_refs"] == 9
+
+
 async def test_generate_video_uses_total_duration_cost(client, monkeypatch) -> None:
     spend_credits = AsyncMock(return_value=True)
     update_generation_task = AsyncMock()
@@ -581,6 +621,7 @@ async def test_webapp_image_models_expose_single_ref_caps_and_no_false_count(cli
         AsyncMock(return_value=[
             SimpleNamespace(model_key="qwen/image-edit", display_name="Qwen Edit", credits=7),
             SimpleNamespace(model_key="grok-imagine/image-to-image", display_name="Grok I2I", credits=9),
+            SimpleNamespace(model_key="gpt-image-2-image-to-image", display_name="GPT Image 2 Edit", credits=8),
             SimpleNamespace(model_key="nano-banana-pro", display_name="Nano Banana Pro", credits=11),
         ]),
     )
@@ -593,6 +634,7 @@ async def test_webapp_image_models_expose_single_ref_caps_and_no_false_count(cli
     assert payload["qwen/image-edit"]["aspect_ratios"] == []
     assert payload["grok-imagine/image-to-image"]["counts"] == [1]
     assert payload["grok-imagine/image-to-image"]["aspect_ratios"] == []
+    assert payload["gpt-image-2-image-to-image"]["aspect_ratios"] == ["1:1", "9:16", "16:9", "4:3", "3:4"]
     assert payload["nano-banana-pro"]["counts"] == [1]
     assert payload["nano-banana-pro"]["quality_options"] == [
         {"value": "2K", "label": "2K"},
@@ -625,11 +667,26 @@ async def test_webapp_video_models_expose_kling_caps_and_per_second_pricing(clie
     assert payload["kling-3.0/video"]["resolutions"] == ["std", "pro", "4K"]
     assert payload["kling-3.0/motion-control"]["modes"] == ["motion"]
     assert payload["kling-3.0/motion-control"]["is_per_second"] is True
+    assert payload["kling-3.0/motion-control"]["resolutions"] == ["720p", "1080p"]
     assert payload["kling-3.0/motion-control"]["quality_options"] == [
-        {"value": "std", "label": "std · 720p"},
-        {"value": "pro", "label": "pro · 1080p"},
-        {"value": "4K", "label": "4K · 2160p"},
+        {"value": "720p", "label": "720p"},
+        {"value": "1080p", "label": "1080p"},
     ]
+
+
+def test_normalize_video_request_maps_legacy_kling_30_motion_aliases() -> None:
+    normalized = _normalize_video_request(
+        model_key="kling-3.0/motion-control",
+        mode="motion",
+        duration=5,
+        aspect_ratio=None,
+        resolution="pro",
+        image_url="https://example.test/ref-1.jpg",
+        reference_urls=["https://example.test/ref-2.mp4"],
+        grok_mode="normal",
+    )
+
+    assert normalized["resolution"] == "1080p"
 
 
 @pytest.mark.asyncio

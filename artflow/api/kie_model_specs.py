@@ -49,8 +49,12 @@ def _clean(value: Any) -> Any:
 
 
 def _singular_reference_field(field: str) -> str | None:
-    if field.endswith("_urls"):
-        return field[:-1]
+    # Only expose aliases that we know are accepted and useful.
+    # Wan and several other models document list-only fields such as
+    # `input_urls` / `reference_image_urls`; sending a made-up singular key can
+    # cause the provider to prefer the first image or ignore the full list.
+    if field == "image_urls":
+        return "image_url"
     return None
 
 
@@ -216,9 +220,32 @@ def _kling_30_params(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _kling_motion_params(params: dict[str, Any]) -> dict[str, Any]:
-    mode = params.get("resolution") or params.get("mode_quality") or "std"
-    mode_map = {"720p": "std", "1080p": "pro", "std": "std", "pro": "pro", "4K": "4K"}
-    return {"mode": mode_map.get(str(mode), str(mode))}
+    raw_mode = str(params.get("resolution") or params.get("mode_quality") or "").strip()
+    model = str(params.get("model") or "")
+
+    if model == "kling-2.6/motion-control":
+        mode_map = {
+            "720p": "720p",
+            "1080p": "1080p",
+            # Backward-compatible aliases if old UI/state still sends them.
+            "std": "720p",
+            "pro": "1080p",
+        }
+        return {"mode": mode_map.get(raw_mode or "720p", raw_mode or "720p")}
+
+    if model == "kling-3.0/motion-control":
+        mode_map = {
+            "720p": "720p",
+            "1080p": "1080p",
+            "4K": "4K",
+            # Accept legacy/internal aliases and normalize to current provider values.
+            "std": "720p",
+            "pro": "1080p",
+            "2K": "1080p",
+        }
+        return {"mode": mode_map.get(raw_mode or "720p", raw_mode or "720p")}
+
+    return {"mode": raw_mode or "720p"}
 
 
 IMAGE_SPECS: dict[str, KieModelSpec] = {
@@ -254,6 +281,14 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
         reference_field="image_urls",
         reference_type=KieReferenceType.LIST,
         defaults={"nsfw_checker": False},
+    ),
+    "wan/2-7-image": KieModelSpec(
+        model="wan/2-7-image",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("text", "image"),
+        reference_field="input_urls",
+        reference_type=KieReferenceType.LIST,
+        param_builder=_wan_image_params,
     ),
     "wan/2-7-image-pro": KieModelSpec(
         model="wan/2-7-image-pro",
@@ -339,7 +374,7 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
         media_type=KieMediaType.IMAGE,
         supported_modes=("text",),
         optional_params={"aspect_ratio": "aspect_ratio", "resolution": "resolution"},
-        defaults={"aspect_ratio": "auto", "nsfw_checker": False},
+        defaults={"nsfw_checker": False},
     ),
     "gpt-image-2-image-to-image": KieModelSpec(
         model="gpt-image-2-image-to-image",
@@ -348,7 +383,7 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
         reference_field="input_urls",
         reference_type=KieReferenceType.LIST,
         optional_params={"aspect_ratio": "aspect_ratio", "resolution": "resolution"},
-        defaults={"aspect_ratio": "auto", "nsfw_checker": False},
+        defaults={"nsfw_checker": False},
     ),
 }
 
@@ -377,7 +412,7 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         media_type=KieMediaType.VIDEO,
         supported_modes=("motion",),
         reference_type=KieReferenceType.KLING_MOTION,
-        defaults={"character_orientation": "video"},
+        defaults={"character_orientation": "image"},
         param_builder=_kling_motion_params,
     ),
     "kling-3.0/video": KieModelSpec(
@@ -393,6 +428,7 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         media_type=KieMediaType.VIDEO,
         supported_modes=("motion",),
         reference_type=KieReferenceType.KLING_MOTION,
+        defaults={"character_orientation": "image", "background_source": "input_video"},
         param_builder=_kling_motion_params,
     ),
     "wan/2-7-text-to-video": KieModelSpec(
@@ -586,7 +622,7 @@ def build_kie_input(
         inp["input_urls"] = urls
         inp["video_urls"] = [p["reference_video_url"]] if p.get("reference_video_url") else []
 
-    if spec.reference_field and spec.reference_field.endswith("_urls"):
+    if spec.reference_field in {"image_urls"}:
         urls_value = inp.get(spec.reference_field)
         if isinstance(urls_value, list) and urls_value:
             singular_field = _singular_reference_field(spec.reference_field)

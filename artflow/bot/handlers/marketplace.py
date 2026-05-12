@@ -27,6 +27,7 @@ from bot.keyboards.prompts import (
 )
 from bot.states.prompt import PromptModerateFSM, PromptUploadFSM
 from bot.states import PromptUseFSM
+from bot.utils.deep_links import build_start_payload
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import PromptStatus, User, UserPrompt
@@ -392,7 +393,8 @@ async def cb_prompt_share(call: CallbackQuery, session: AsyncSession, db_user: U
         await call.answer("Промпт не найден", show_alert=True)
         return
     bot_info = await bot.get_me()
-    share_link = f"https://t.me/{bot_info.username}?start=prompt_{prompt.id}"
+    share_payload = build_start_payload(ref_code=db_user.referral_code, target_kind="prompt", target_id=prompt.id)
+    share_link = f"https://t.me/{bot_info.username}?start={share_payload}"
     await call.message.answer(
         f"📤 Поделись промптом «<b>{prompt.title}</b>»:\n{share_link}\n\n"
         f"Твоя реферальная ссылка: https://t.me/{bot_info.username}?start={db_user.referral_code}",
@@ -461,6 +463,7 @@ async def cb_prompt_skip_ref(
     # Feed use flow: prompt comes from state directly
     if data.get("feed_use_prompt") is not None:
         prompt_text: str = data["feed_use_prompt"]
+        source_feed_gen_id = data.get("feed_use_gen_id")
         model_cost = await repo.resolve_image_model_cost(
             session, model_key, quality=_default_quality_for_model(model_key),
         )
@@ -498,6 +501,7 @@ async def cb_prompt_skip_ref(
             action_type=ImageGenerationAction.initial,
             reference_url=None,
             parent_generation_id=None,
+            source_feed_gen_id=source_feed_gen_id,
             launching_text="⏳ <b>Запускаю генерацию...</b>",
             queued_text="⏳ <b>Генерация запущена.</b> Результат придёт сюда автоматически.",
         )
@@ -595,6 +599,7 @@ async def fsm_prompt_use_reference(
     # Feed use flow
     if data.get("feed_use_prompt") is not None:
         prompt_text: str = data["feed_use_prompt"]
+        source_feed_gen_id = data.get("feed_use_gen_id")
         mode = "image" if reference_url and _supports_img2img(model_key) else "text"
         model_cost = await repo.resolve_image_model_cost(
             session, model_key, quality=_default_quality_for_model(model_key),
@@ -633,6 +638,7 @@ async def fsm_prompt_use_reference(
             action_type=ImageGenerationAction.initial,
             reference_url=reference_url if mode == "image" else None,
             parent_generation_id=None,
+            source_feed_gen_id=source_feed_gen_id,
             launching_text="⏳ <b>Запускаю генерацию...</b>",
             queued_text="⏳ <b>Генерация запущена.</b> Результат придёт сюда автоматически.",
         )

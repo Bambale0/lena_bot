@@ -33,7 +33,9 @@ async def test_cb_mj_menu_shows_submenu() -> None:
     call = make_callback(data="menu:mj")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    await midjourney.cb_mj_menu(call, AsyncMock())
+    repo_mock = AsyncMock(get_model_cost=AsyncMock(return_value=SimpleNamespace(credits=10)))
+    with patch("bot.handlers.midjourney.repo", repo_mock):
+        await midjourney.cb_mj_menu(call, AsyncMock(), AsyncMock())
     call.message.edit_text.assert_awaited_once()
     args = call.message.edit_text.call_args
     assert "Midjourney" in args[0][0]
@@ -99,7 +101,7 @@ async def test_cb_mj_ref_skip() -> None:
     call.answer = AsyncMock()
     mock_state = _fake_state()
     await midjourney.cb_mj_ref_skip(call, mock_state)
-    mock_state.update_data.assert_awaited_once_with(reference_b64=None)
+    mock_state.update_data.assert_awaited_once_with(reference_b64=None, reference_url=None)
     mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.prompt_input)
 
 
@@ -120,13 +122,16 @@ async def test_handle_mj_reference_photo() -> None:
     import io
     buf = io.BytesIO(b"\xff\xd8\xff\xe0test")
     mock_bot.download_file = AsyncMock(return_value=buf)
+    mock_bot.get_file = AsyncMock(return_value=mock_file)
 
     mock_state = _fake_state(credits=10)
-    await midjourney.handle_mj_reference_photo(msg, mock_state, mock_bot)
+    with patch("bot.handlers.midjourney.mirror_telegram_file", AsyncMock(return_value="https://example.test/ref.jpg")):
+        await midjourney.handle_mj_reference_photo(msg, mock_state, mock_bot)
 
     mock_state.update_data.assert_awaited_once()
     call_data = mock_state.update_data.call_args[1]
     assert "reference_b64" in call_data
+    assert call_data["reference_url"] == "https://example.test/ref.jpg"
     assert call_data["reference_b64"].startswith("data:image/jpeg;base64,")
 
 
@@ -136,6 +141,7 @@ async def test_handle_mj_reference_photo() -> None:
 async def test_handle_imagine_prompt_success() -> None:
     msg = make_message(text="/imagine a beautiful cat")
     msg.answer = AsyncMock()
+    status_msg = SimpleNamespace(message_id=777)
     mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test")
     mock_state = _fake_state(
         bot_type=MJBotType.MIDJOURNEY,
@@ -143,6 +149,7 @@ async def test_handle_imagine_prompt_success() -> None:
         credits=10,
         reference_b64=None,
     )
+    msg.answer = AsyncMock(return_value=status_msg)
 
     mock_gen = SimpleNamespace(id=100, task_id=None)
 
@@ -152,10 +159,40 @@ async def test_handle_imagine_prompt_success() -> None:
         update_generation_task=AsyncMock(),
     )):
         with patch("bot.handlers.midjourney.mj", AsyncMock(imagine=AsyncMock(return_value="task_abc_123"))):
+            await midjourney.handle_imagine_prompt(msg, mock_state, AsyncMock(), mock_db_user, AsyncMock())
+
+    mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.generating)
+    assert mock_state.update_data.await_args.kwargs["mj_status_message_id"] == 777
+
+
+@pytest.mark.asyncio
+async def test_handle_imagine_prompt_prepends_reference_url() -> None:
+    msg = make_message(text="a beautiful cat")
+    msg.answer = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test")
+    mock_state = _fake_state(
+        bot_type=MJBotType.MIDJOURNEY,
+        speed=MJSpeed.FAST,
+        credits=10,
+        reference_b64="data:image/jpeg;base64,abc",
+        reference_url="https://example.test/ref.jpg",
+    )
+
+    mock_gen = SimpleNamespace(id=100, task_id=None)
+    imagine_mock = AsyncMock(return_value="task_abc_123")
+
+    with patch("bot.handlers.midjourney.repo", AsyncMock(
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+    )):
+        with patch("bot.handlers.midjourney.mj", AsyncMock(imagine=imagine_mock)):
             with patch("bot.handlers.midjourney.polling", AsyncMock()):
                 await midjourney.handle_imagine_prompt(msg, mock_state, AsyncMock(), mock_db_user, AsyncMock())
 
-    mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.generating)
+    assert imagine_mock.await_args.args[0] == "https://example.test/ref.jpg a beautiful cat"
+    assert imagine_mock.await_args.kwargs["base64_array"] == ["data:image/jpeg;base64,abc"]
+    assert imagine_mock.await_args.kwargs["reference_url"] == "https://example.test/ref.jpg"
 
 
 @pytest.mark.asyncio
@@ -206,6 +243,31 @@ async def test_cb_blend_start_sufficient() -> None:
     with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
         await midjourney.cb_blend_start(call, AsyncMock(), AsyncMock(), mock_db_user)
     call.message.edit_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cb_blend_submit_stores_status_message_for_webhook_completion() -> None:
+    call = make_callback(data="mj_blend:submit")
+    call.answer = AsyncMock()
+    status_msg = SimpleNamespace(message_id=888, edit_text=AsyncMock(), delete=AsyncMock())
+    call.message.answer = AsyncMock(return_value=status_msg)
+    mock_state = _fake_state(blend_images=["https://example.test/1.jpg", "https://example.test/2.jpg"], blend_credits=12)
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
+    mock_gen = SimpleNamespace(id=99)
+
+    with (
+        patch("bot.handlers.midjourney.repo", AsyncMock(
+            spend_credits=AsyncMock(return_value=True),
+            create_generation=AsyncMock(return_value=mock_gen),
+            update_generation_task=AsyncMock(),
+        )),
+        patch("bot.handlers.midjourney.mj", AsyncMock(blend=AsyncMock(return_value="task_blend_1"), poll_mj_image=AsyncMock())),
+    ):
+        await midjourney.cb_blend_submit(call, mock_state, AsyncMock(), mock_db_user, AsyncMock())
+
+    mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.blend_generating)
+    mock_state.clear.assert_not_awaited()
+    assert mock_state.update_data.await_args.kwargs["mj_status_message_id"] == 888
 
 
 # ── handle_blend_photo ────────────────────────────────────────────────────────

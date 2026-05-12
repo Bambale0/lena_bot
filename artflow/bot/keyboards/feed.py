@@ -10,6 +10,7 @@ def feed_card_kb(
     index: int,
     source: str = "feed",
     has_next: bool = True,
+    can_delete: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -23,6 +24,10 @@ def feed_card_kb(
     builder.row(
         InlineKeyboardButton(text="🔁 Повторить", callback_data=f"feed:use:{gen_id}"),
     )
+    if can_delete:
+        builder.row(
+            InlineKeyboardButton(text="🗑 Удалить из ленты", callback_data=f"feed:remove:{gen_id}:{source}:{index}"),
+        )
     builder.row(
         InlineKeyboardButton(text="📚 Библиотека промптов", callback_data="menu:prompts"),
         InlineKeyboardButton(text="🏠 Главная", callback_data="menu:main"),

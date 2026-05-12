@@ -7,15 +7,16 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from api.midjourney_service import MJBotType, MJButton, MJDimensions, MJSpeed, MJVideoMotion
 
 
-def mj_submenu_kb() -> InlineKeyboardMarkup:
+def mj_submenu_kb(prices: dict[str, str] | None = None) -> InlineKeyboardMarkup:
+    prices = prices or {}
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="🎨 Imagine", callback_data="mj:imagine"),
-        InlineKeyboardButton(text="🖼️ Blend", callback_data="mj:blend"),
+        InlineKeyboardButton(text=f"🎨 Imagine{prices.get('imagine', '')}", callback_data="mj:imagine"),
+        InlineKeyboardButton(text=f"🖼️ Blend{prices.get('blend', '')}", callback_data="mj:blend"),
     )
     builder.row(
-        InlineKeyboardButton(text="🔍 Describe", callback_data="mj:describe"),
-        InlineKeyboardButton(text="🎞️ Video", callback_data="mj:video"),
+        InlineKeyboardButton(text=f"🔍 Describe{prices.get('describe', '')}", callback_data="mj:describe"),
+        InlineKeyboardButton(text=f"🎞️ Video{prices.get('video', '')}", callback_data="mj:video"),
     )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()

@@ -19,6 +19,7 @@ _IMAGE_MODEL_LABELS = {
     "qwen2/image-edit": "Qwen2 Edit",
     "seedream/4.5-text-to-image": "Seedream 4.5",
     "seedream/4.5-edit": "Seedream 4.5 Edit",
+    "wan/2-7-image": "WAN 2.7",
     "wan/2-7-image-pro": "WAN 2.7 Pro",
     "gpt-image-2-text-to-image": "GPT Image 2",
     "gpt-image-2-image-to-image": "GPT Image 2 Edit",
@@ -54,7 +55,7 @@ def _pretty_count(value: int, lang: str) -> str:
     return f"{value} фото"
 
 
-def render_main_menu(context: MainMenuContext, lang: str = "ru") -> ScreenRender:
+def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_text: bool = False) -> ScreenRender:
     builder = InlineKeyboardBuilder()
 
     builder.row(
@@ -85,8 +86,17 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru") -> ScreenRender
             ),
         )
 
-        text = t("main_menu_with_session", lang,
-                 model=_pretty_image_model(session.model), ratio=ratio, quality=quality, count=_pretty_count(count, lang))
+        if force_main_text:
+            text = t("main_menu", lang)
+        else:
+            text = t(
+                "main_menu_with_session",
+                lang,
+                model=_pretty_image_model(session.model),
+                ratio=ratio,
+                quality=quality,
+                count=_pretty_count(count, lang),
+            )
     else:
         text = t("main_menu", lang)
 
@@ -95,10 +105,15 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru") -> ScreenRender
         InlineKeyboardButton(text="🎨 " + ("Фото" if lang == "ru" else "Photo"), callback_data="menu:image"),
         InlineKeyboardButton(text="🎬 " + ("Видео" if lang == "ru" else "Video"), callback_data="menu:video"),
     )
-    builder.row(
-        InlineKeyboardButton(text="🎵 " + ("Песня" if lang == "ru" else "Song"), callback_data="menu:music"),
-        InlineKeyboardButton(text="🖌️ Midjourney", callback_data="menu:mj"),
-    )
+    if context.is_admin:
+        builder.row(
+            InlineKeyboardButton(text="🎵 " + ("Песня" if lang == "ru" else "Song"), callback_data="menu:music"),
+            InlineKeyboardButton(text="🖌️ Midjourney", callback_data="menu:mj"),
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="🎵 " + ("Песня" if lang == "ru" else "Song"), callback_data="menu:music"),
+        )
     builder.row(
         InlineKeyboardButton(text="🤖 " + ("AI-ассистент" if lang == "ru" else "AI Assistant"), callback_data="menu:assistant"),
     )

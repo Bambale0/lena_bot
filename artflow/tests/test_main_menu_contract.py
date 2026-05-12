@@ -36,7 +36,7 @@ def test_main_menu_has_no_unstable_top_day_or_midjourney_entrypoints():
     cb = callbacks(render_main_menu(ctx).reply_markup)
 
     assert "menu:top_day" not in cb
-    assert "menu:mj" not in cb
+    assert "menu:mj" in cb
 
 
 def test_main_menu_core_callbacks():
@@ -53,6 +53,8 @@ def test_main_menu_core_callbacks():
         "menu:image",
         "menu:video",
         "menu:music",
+        "menu:mj",
+        "menu:assistant",
         "menu:feed",
         "menu:prompts",
         "menu:history",

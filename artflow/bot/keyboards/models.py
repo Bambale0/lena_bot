@@ -49,8 +49,8 @@ VIDEO_CAPS: dict[str, dict] = {
         "duration_options": [],
         "aspect_ratios": [],
         "has_resolution": True,
-        "resolutions": ["std", "pro", "4K"],
-        "resolution_labels": {"std": "std · 720p", "pro": "pro · 1080p", "4K": "4K · 2160p"},
+        "resolutions": ["720p", "1080p"],
+        "resolution_labels": {"720p": "720p", "1080p": "1080p"},
         "billing_mode": "per_second",
     },
     "wan/2-7-text-to-video": {
@@ -185,6 +185,15 @@ IMAGE_CAPS: dict[str, dict] = {
         "counts": [1],
         "max_refs": 1,
     },
+    ImageModel.WAN_27: {
+        "modes": ["text", "image"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.WAN_27, []),
+        "aspect_ratio_modes": ["text"],
+        "counts": [1, 2, 4],
+        "has_quality": True,
+        "quality_options": [("1K", "1K"), ("2K", "2K")],
+        "max_refs": 1,
+    },
     ImageModel.WAN_27_PRO: {
         "modes": ["text", "image"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.WAN_27_PRO, []),
@@ -192,7 +201,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "counts": [1, 2, 4, 6],
         "has_quality": True,
         "quality_options": [("1K", "1K"), ("2K", "2K"), ("4K", "4K")],
-        "max_refs": 4,
+        "max_refs": 9,
     },
     ImageModel.NANO_BANANA: {
         "modes": ["text"],
@@ -273,20 +282,22 @@ IMAGE_CAPS: dict[str, dict] = {
 # ── Model descriptions ────────────────────────────────────────────────────────
 
 IMAGE_MODEL_DESC: dict[str, str] = {
-    "seedream-4.5":    "🌟 Топ качество · реализм · детали · медленнее",
-    "nano-banano-pro": "⚡ Gemini Pro · точное следование промпту · img2img",
-    "nano-banano-2":   "🚀 Gemini Flash · быстро · стиль · иллюстрации",
-    "wan-2.7":         "🎭 WAN · кино-стиль · персонажи · фэнтези",
-    "wan-2.7-pro":     "💎 WAN Pro · kie.ai · высокое разрешение · async",
-    "gpt-image-1":     "🤖 GPT Image · понимает сложные описания · творчество",
-    "openrouter/free": "🆓 OpenRouter Free · универсальная модель",
-    ImageModel.QWEN_T2I:  "🟣 Qwen T2I · реалистично · детали · текст→изображение",
-    ImageModel.QWEN_I2I:  "🟣 Qwen I2I · трансформация по референсу",
-    ImageModel.QWEN_EDIT: "🟣 Qwen Edit · редактирование по референсу",
-    ImageModel.QWEN2_T2I: "🟣 Qwen2 T2I · улучшенная генерация · v2",
-    ImageModel.QWEN2_EDIT:"🟣 Qwen2 Edit · продвинутое редактирование · v2",
-    ImageModel.GPT_IMAGE_2_T2I:  "🤖 GPT Image 2 · T2I · высокое качество",
-    ImageModel.GPT_IMAGE_2_I2I:  "🤖 GPT Image 2 · I2I · трансформация по референсу",
+    ImageModel.SEEDREAM_45: "🌟 Seedream 4.5 · реализм · детали",
+    ImageModel.SEEDREAM_45_EDIT: "🌟 Seedream 4.5 Edit · редактирование по фото",
+    ImageModel.NANO_BANANA: "🍌 Nano Banana · быстрые изображения",
+    ImageModel.NANO_BANANA_PRO: "🍌 Nano Banana Pro · точное следование промпту · работа по референсу",
+    ImageModel.NANO_BANANA_2: "🍌 Nano Banana 2 · быстрый стиль · иллюстрации",
+    ImageModel.WAN_27: "🌊 WAN 2.7 · базовая версия",
+    ImageModel.WAN_27_PRO: "🎭 WAN 2.7 Pro · выразительный стиль · персонажи",
+    ImageModel.QWEN_T2I: "🟣 Qwen · реализм · детали",
+    ImageModel.QWEN_I2I: "🟣 Qwen Edit · мягкие правки по фото",
+    ImageModel.QWEN_EDIT: "🟣 Qwen Edit Pro · точечные правки по фото",
+    ImageModel.QWEN2_T2I: "🟣 Qwen 2 · чище детали",
+    ImageModel.QWEN2_EDIT: "🟣 Qwen 2 Edit · аккуратное редактирование по фото",
+    ImageModel.GROK_T2I: "⚡ Grok Imagine · выразительные сцены",
+    ImageModel.GROK_I2I: "⚡ Grok Imagine Edit · переработка по фото",
+    ImageModel.GPT_IMAGE_2_T2I: "🤖 GPT Image 2 · точные сцены",
+    ImageModel.GPT_IMAGE_2_I2I: "🤖 GPT Image 2 Edit · переработка по фото",
 }
 
 HIDDEN_IMAGE_MODELS = {
@@ -309,14 +320,22 @@ IMAGE_SCENARIOS: dict[str, dict[str, str]] = {
 }
 
 VIDEO_MODEL_DESC: dict[str, str] = {
-    "kling-3.0":               "🎬 Kling 3.0 · плавное движение · text & img2video",
-    "kling-2.6-motion":        "🎥 Kling Motion · управление камерой (pan/zoom/tilt)",
-    "grok-video":              "⚡ Grok · быстрая генерация · реализм",
-    "grok-imagine-video":      "✨ Grok Imagine · творческие сцены",
-    "doubao-seedance-2-0":     "🌊 Seedance 2.0 · плавная анимация · текст→видео",
-    "veo3.1-pro":              "🏆 Veo 3.1 Pro · Google · высшее качество · img2video",
-    "happyhorse-1.0-text-to-video":  "🐎 HappyHorse · text2video · быстро",
-    "happyhorse-1.0-image-to-video": "🐎 HappyHorse · img2video · анимация фото",
+    VideoModel.KLING_30: "🎬 Kling 3.0 · плавное движение · текст и фото",
+    VideoModel.KLING_26_T2V: "🎬 Kling 2.6 · текст в видео",
+    VideoModel.KLING_26_I2V: "🖼️ Kling 2.6 Animate · оживление фото",
+    VideoModel.KLING_26_MOTION: "🎥 Kling Motion · движение камеры и ракурсы",
+    VideoModel.KLING_30_MOTION: "🎥 Kling 3.0 Motion · движение камеры и ракурсы",
+    VideoModel.WAN_27_T2V: "🎭 WAN Video · выразительные сцены",
+    VideoModel.WAN_27_I2V: "🖼️ WAN Animate · анимация по фото",
+    VideoModel.SEEDANCE_2: "🌊 Seedance 2 · плавная анимация",
+    VideoModel.SEEDANCE_2_FAST: "🌊 Seedance 2 Fast · быстрая анимация",
+    VideoModel.GROK_T2V: "⚡ Grok Video · быстрые ролики",
+    VideoModel.GROK_I2V: "⚡ Grok Animate · оживление фото",
+    VideoModel.HAPPYHORSE_T2V: "🐎 HappyHorse Video · легко начать",
+    VideoModel.HAPPYHORSE_I2V: "🐎 HappyHorse Animate · оживление фото",
+    VideoModel.VEO_3: "🏆 Veo · высокое качество",
+    VideoModel.VEO_3_FAST: "🏆 Veo Fast · быстрее",
+    VideoModel.VEO_3_LITE: "🏆 Veo Lite · быстрый старт",
 }
 
 
@@ -392,25 +411,36 @@ VIDEO_GROUP_TITLES: dict[str, str] = {
 }
 
 
-# Per-second rates for Kling models (cheapest resolution first)
-_KLING_PER_SEC: dict[str, dict[str, int]] = {
-    "kling-2.6/text-to-video":    {"720p": 5, "1080p": 7},
-    "kling-2.6/image-to-video":    {"720p": 6, "1080p": 8},
-    "kling-2.6/motion-control": {"720p": 7, "1080p": 9},
-    "kling-3.0/video":        {"2K": 8, "4K": 10},
-    "kling-3.0/motion-control": {"2K": 9, "4K": 11},
-}
-_KLING_BASE_RATE: dict[str, int] = {k: min(v.values()) for k, v in _KLING_PER_SEC.items()}
+def _variant_costs(model_costs: list[ModelCost], model_key: str) -> list[float]:
+    prefix = f"{model_key}__"
+    rates: list[float] = []
+    for item in model_costs:
+        if item.model_key == model_key or item.model_key.startswith(prefix):
+            try:
+                rates.append(float(item.credits))
+            except (TypeError, ValueError):
+                continue
+    return rates
 
 
-def _model_button(mc: ModelCost, prefix: str) -> InlineKeyboardButton:
+def model_cost_display_text(mc: ModelCost, *, model_costs: list[ModelCost] | None = None) -> str:
     is_per_second = VIDEO_CAPS.get(mc.model_key, {}).get("billing_mode") == "per_second"
-    base_rate = _KLING_BASE_RATE.get(mc.model_key)
+    credits = float(mc.credits)
     if is_per_second:
-        shown_rate = base_rate if base_rate is not None else mc.credits
-        price_txt = f"от {shown_rate} 💋/сек" if base_rate is not None else f"{shown_rate} 💋/сек"
-    else:
-        price_txt = f"{mc.credits} 💋"
+        if model_costs:
+            rates = _variant_costs(model_costs, mc.model_key)
+            if rates:
+                min_rate = min(rates)
+                max_rate = max(rates)
+                if min_rate != max_rate:
+                    return f"от {min_rate:g} 💋/сек"
+                return f"{min_rate:g} 💋/сек"
+        return f"{credits:g} 💋/сек"
+    return f"{credits:g} 💋"
+
+
+def _model_button(mc: ModelCost, prefix: str, model_costs: list[ModelCost]) -> InlineKeyboardButton:
+    price_txt = model_cost_display_text(mc, model_costs=model_costs)
     return InlineKeyboardButton(
         text=f"{mc.display_name} · {price_txt}",
         callback_data=f"{prefix}:{mc.model_key}",
@@ -454,7 +484,7 @@ def image_scenarios_kb() -> InlineKeyboardMarkup:
                 callback_data=f"img_scn:{scenario_key}",
             )
         )
-    builder.row(InlineKeyboardButton(text="🧠 Все модели", callback_data="img_menu:advanced"))
+    builder.row(InlineKeyboardButton(text="🧠 Все нейросети", callback_data="img_menu:advanced"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
 
@@ -629,7 +659,7 @@ def video_models_kb(
     if group_key:
         keys = dict(_VIDEO_GROUPS).get(group_key, [])
         for mc in _sorted_models([mc for mc in model_costs if mc.model_key in supported_video_keys], keys):
-            builder.row(_model_button(mc, "vid_model"))
+            builder.row(_model_button(mc, "vid_model", model_costs))
         builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
         return builder.as_markup()
 
@@ -645,7 +675,7 @@ def video_models_kb(
         and mc.model_key not in {m.model_key for m in ordered}
     ]
     for mc in ordered + remaining:
-        builder.row(_model_button(mc, "vid_model"))
+        builder.row(_model_button(mc, "vid_model", model_costs))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()
 
@@ -668,7 +698,7 @@ def video_mode_kb(model_key: str) -> InlineKeyboardMarkup:
         )
     if "motion" in modes:
         builder.row(
-            InlineKeyboardButton(text="🕺 Motion Control", callback_data=f"vid_mode:motion:{model_key}"),
+            InlineKeyboardButton(text="🕺 Управление камерой", callback_data=f"vid_mode:motion:{model_key}"),
         )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
     return builder.as_markup()
@@ -742,17 +772,7 @@ def video_params_kb(
         ]
         builder.row(*mode_buttons)
 
-    kling_rates = _KLING_PER_SEC.get(model_key, {})
-    if kling_rates and dur and res and res in kling_rates:
-        rate = kling_rates[res]
-        next_text = f"▶️ Далее · {dur} сек × {rate} = {dur * rate} 💋"
-    elif kling_rates and dur:
-        rate = min(kling_rates.values())
-        next_text = f"▶️ Далее · {dur} сек × от {rate} = от {dur * rate} 💋"
-    else:
-        next_text = "▶️ Далее: Промпт"
-
-    builder.row(InlineKeyboardButton(text=next_text, callback_data="vpar_next"))
+    builder.row(InlineKeyboardButton(text="▶️ Далее: Промпт", callback_data="vpar_next"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="vpar_back"))
     return builder.as_markup()
 

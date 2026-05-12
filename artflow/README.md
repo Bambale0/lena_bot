@@ -269,7 +269,7 @@ React-SPA, встроенное в Telegram WebApp. Доступно по `/app`
 ```dotenv
 # Telegram
 BOT_TOKEN=...
-BOT_USERNAME=APIXBot
+BOT_USERNAME=apix_ai_bot
 WEBHOOK_URL=https://yourdomain.com
 WEBHOOK_SECRET=change_me_secret
 ADMIN_IDS=[123456789]

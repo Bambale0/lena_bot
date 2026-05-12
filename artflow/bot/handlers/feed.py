@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import io
 import logging
+import re
 
 import aiohttp
 from aiogram import Bot, F, Router
@@ -17,6 +18,7 @@ from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.models import IMAGE_CAPS
 from bot.keyboards.prompts import prompt_use_model_kb
 from bot.states import ImageGenFSM, PromptUseFSM
+from bot.utils.deep_links import build_start_payload
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import User
@@ -27,8 +29,37 @@ router = Router(name="feed")
 
 
 def _model_label(model_key: str) -> str:
+    labels = {
+        "grok-imagine/text-to-image": "Grok Imagine",
+        "grok-imagine/image-to-image": "Grok Imagine Edit",
+        "qwen/text-to-image": "Qwen",
+        "qwen/image-to-image": "Qwen Edit",
+        "qwen/image-edit": "Qwen Edit Pro",
+        "qwen2/text-to-image": "Qwen 2",
+        "qwen2/image-edit": "Qwen 2 Edit",
+        "google/nano-banana": "Nano Banana",
+        "nano-banana-pro": "Nano Banana Pro",
+        "nano-banana-2": "Nano Banana 2",
+        "seedream/4.5-text-to-image": "Seedream 4.5",
+        "seedream/4.5-edit": "Seedream 4.5 Edit",
+        "wan/2-7-image": "WAN",
+        "wan/2-7-image-pro": "WAN Pro",
+        "gpt-image-2-text-to-image": "GPT Image 2",
+        "gpt-image-2-image-to-image": "GPT Image 2 Edit",
+        "bytedance/seedance-2": "Seedance 2",
+        "bytedance/seedance-2-fast": "Seedance 2 Fast",
+        "grok-imagine/text-to-video": "Grok Video",
+        "grok-imagine/image-to-video": "Grok Animate",
+        "veo3": "Veo",
+        "veo3_fast": "Veo Fast",
+        "veo3_lite": "Veo Lite",
+    }
+    if model_key in labels:
+        return labels[model_key]
     clean = model_key.split("/")[-1].replace("-", " ").replace("_", " ")
-    return clean.title().replace("Nano Banana", "Nano Banana")
+    clean = re.sub(r"\b(?:text to image|image to image|text to video|image to video|t2i|i2i|t2v|i2v)\b", "", clean, flags=re.I)
+    clean = re.sub(r"\s{2,}", " ", clean).strip()
+    return clean.title().strip()
 
 
 def _default_quality_for_model(model_key: str, fallback: str | None = None) -> str:
@@ -98,6 +129,7 @@ async def _show_feed_card(
     source: str,
     index: int,
     total: int,
+    viewer_user_id: int | None = None,
 ) -> None:
     caption = _feed_caption(card, position=index + 1 if source == "top" else None)
     reply_markup = feed_card_kb(
@@ -105,6 +137,7 @@ async def _show_feed_card(
         index=index,
         source=source,
         has_next=total > 1,
+        can_delete=bool(viewer_user_id and card.generation.user_id == viewer_user_id),
     )
     result_url = card.generation.result_url
 
@@ -171,6 +204,7 @@ async def show_feed_from_source(
     session: AsyncSession,
     source: str,
     index: int = 0,
+    viewer_user_id: int | None = None,
 ) -> None:
     cards = await _cards_for_source(session, source)
     if not cards:
@@ -183,6 +217,7 @@ async def show_feed_from_source(
         source=source,
         index=idx,
         total=len(cards),
+        viewer_user_id=viewer_user_id,
     )
 
 
@@ -191,46 +226,48 @@ async def show_feed_card_by_id(
     message: Message,
     session: AsyncSession,
     gen_id: int,
+    viewer_user_id: int | None = None,
 ) -> None:
     card = await repo.get_feed_generation_card(session, gen_id)
     if not card:
         await message.answer("Пост не найден или уже скрыт.", reply_markup=empty_feed_kb())
         return
-    await _show_feed_card(holder=message, card=card, source="feed", index=0, total=1)
+    await _show_feed_card(holder=message, card=card, source="feed", index=0, total=1, viewer_user_id=viewer_user_id)
 
 
 @router.message(Command("feed"))
 @router.callback_query(F.data == "menu:feed")
-async def open_feed(event: Message | CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
+async def open_feed(event: Message | CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User) -> None:
     await state.clear()
     holder = event.message if isinstance(event, CallbackQuery) else event
-    await show_feed_from_source(holder=holder, session=session, source="feed", index=0)  # type: ignore[arg-type]
+    await show_feed_from_source(holder=holder, session=session, source="feed", index=0, viewer_user_id=db_user.id)  # type: ignore[arg-type]
     if isinstance(event, CallbackQuery):
         await safe_answer_callback(event)
 
 
 @router.callback_query(F.data == "menu:top_day")
 @router.callback_query(F.data == "feed:top")
-async def open_top_day(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
+async def open_top_day(call: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User) -> None:
     await state.clear()
-    await show_feed_from_source(holder=call.message, session=session, source="top", index=0)  # type: ignore[arg-type]
+    await show_feed_from_source(holder=call.message, session=session, source="top", index=0, viewer_user_id=db_user.id)  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("feed:next:"))
-async def cb_feed_next(call: CallbackQuery, session: AsyncSession) -> None:
+async def cb_feed_next(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     _, _, source, index_raw = call.data.split(":", 3)  # type: ignore[union-attr]
     await show_feed_from_source(
         holder=call.message,  # type: ignore[arg-type]
         session=session,
         source=source,
         index=int(index_raw),
+        viewer_user_id=db_user.id,
     )
     await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("feed:like:"))
-async def cb_feed_like(call: CallbackQuery, session: AsyncSession) -> None:
+async def cb_feed_like(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     _, _, gen_id_raw, source, index_raw = call.data.split(":", 4)  # type: ignore[union-attr]
     await repo.like_feed_generation(session, int(gen_id_raw))
     await show_feed_from_source(
@@ -238,6 +275,7 @@ async def cb_feed_like(call: CallbackQuery, session: AsyncSession) -> None:
         session=session,
         source=source,
         index=int(index_raw),
+        viewer_user_id=db_user.id,
     )
     await safe_answer_callback(call, "Лайк сохранён ❤️")
 
@@ -251,7 +289,8 @@ async def cb_feed_share(call: CallbackQuery, session: AsyncSession, db_user: Use
         return
 
     bot_info = await bot.get_me()
-    share_link = f"https://t.me/{bot_info.username}?start=feed_{gen.id}"
+    share_payload = build_start_payload(ref_code=db_user.referral_code, target_kind="feed", target_id=gen.id)
+    share_link = f"https://t.me/{bot_info.username}?start={share_payload}"
     await call.message.answer(
         f"📤 <b>Ссылка на пост</b>\n{share_link}\n\n"
         f"👥 Твоя реферальная ссылка:\nhttps://t.me/{bot_info.username}?start={db_user.referral_code}",
@@ -340,6 +379,8 @@ async def cb_feed_again(
         reference_url=reference_url if isinstance(reference_url, str) else None,
     )
 
+    source_feed_gen_id = gen.id if gen.is_public_feed else getattr(gen, "source_feed_gen_id", None)
+
     await state.set_state(ImageGenFSM.session_active)
     await state.update_data(
         image_session_id=image_session.id,
@@ -354,6 +395,7 @@ async def cb_feed_again(
         remix_mode=False,
         remix_parent_generation_id=None,
         remix_reference_url=None,
+        source_feed_gen_id=source_feed_gen_id,
     )
 
     await _launch_session_generation(
@@ -366,6 +408,7 @@ async def cb_feed_again(
         action_type=ImageGenerationAction.repeat,
         reference_url=effective_reference_url,
         parent_generation_id=gen.id,
+        source_feed_gen_id=source_feed_gen_id,
         launching_text="🔁 <b>Готовлю ещё вариант...</b>",
         queued_text="⏳ <b>Ещё вариант запущен.</b> Результат придёт сюда автоматически.",
     )
@@ -419,6 +462,7 @@ async def cb_feed_remix(
         ref_file_ids=[],
         remix_mode=True,
         remix_parent_generation_id=gen.id,
+        source_feed_gen_id=gen.id,
     )
 
     await call.message.answer(  # type: ignore[union-attr]
@@ -444,3 +488,41 @@ async def cb_publish_generation(call: CallbackQuery, session: AsyncSession) -> N
     await session.commit()
 
     await call.answer("Добавлено в библиотеку промптов ✨", show_alert=False)
+
+
+@router.callback_query(F.data.startswith("feed:remove:"))
+async def cb_feed_remove(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    parts = call.data.split(":")  # type: ignore[union-attr]
+    if len(parts) >= 5 and parts[2] == "confirm":
+        gen_id = int(parts[3])
+        source = parts[4]
+        index = int(parts[5]) if len(parts) > 5 else 0
+        gen = await repo.remove_from_feed(session, gen_id, db_user.id)
+        if not gen:
+            await call.answer("Можно удалить только свой пост", show_alert=True)
+            return
+        await call.answer("Пост удалён из ленты")
+        await show_feed_from_source(holder=call.message, session=session, source=source, index=index, viewer_user_id=db_user.id)  # type: ignore[arg-type]
+        return
+
+    if len(parts) < 5:
+        await call.answer("Некорректный запрос", show_alert=True)
+        return
+    gen_id = int(parts[2])
+    source = parts[3]
+    index = int(parts[4])
+    gen = await repo.get_generation_by_id(session, gen_id)
+    if not gen or gen.user_id != db_user.id or not gen.is_public_feed:
+        await call.answer("Можно удалить только свой пост", show_alert=True)
+        return
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, удалить", callback_data=f"feed:remove:confirm:{gen_id}:{source}:{index}")
+    builder.button(text="↩️ Назад", callback_data=f"feed:next:{source}:{index}")
+    builder.adjust(1)
+    await safe_edit_message(
+        call.message,
+        "🗑 <b>Удалить пост из ленты?</b>\n\nОн исчезнет из общей ленты и больше не будет участвовать в повторах.",
+        reply_markup=builder.as_markup(),
+    )
+    await safe_answer_callback(call)

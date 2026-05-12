@@ -19,8 +19,9 @@ _RU = {
     "welcome_back": "👋 <b>С возвращением, {name}!</b>\n\nРад тебя видеть снова ✨",
     "main_menu": (
         "👋 <b>APIX</b>\n\n"
-        "Создавай фото, видео, музыку и промпты в одном месте.\n"
-        "Выбери раздел:"
+        "Твоя AI-студия для фото, видео, музыки и сильных промптов.\n"
+        "Создавай, тестируй идеи и собирай результат в одном месте.\n\n"
+        "Выбирай, что запустить:"
     ),
     "main_menu_with_session": (
         "👋 <b>APIX</b>\n\n"
@@ -36,6 +37,7 @@ _RU = {
     # Баланс
     "balance_title": "💎 <b>Твой баланс</b>",
     "balance_credits": "💋: {credits}",
+    "user_tg_id": "🆔 ID: <code>{tg_id}</code>",
     "balance_subscription": "Подписка: {status}",
     "balance_sub_active": "✅ До {date}",
     "balance_sub_inactive": "❌ Не активна",
@@ -71,7 +73,7 @@ _RU = {
     ),
     "referral_earned": "💰 <b>Всего заработано: {amount:.2f}₽</b>",
     "referral_available": "💸 <b>Можно вывести сейчас: {amount:.2f}₽</b>",
-    "referral_feed_remix_rewards": "✨ <b>С повторов из ленты заработано: {amount:.0f} 💋</b>",
+    "referral_feed_remix_rewards": "✨ <b>С повторов из ленты заработано: {amount:.2f}₽</b>",
     "referral_withdraw_min": "🏦 <b>Минимальный вывод: {amount:.0f}₽</b>",
     "referral_pending_withdrawals": "⏳ Уже в обработке на вывод: {amount:.2f}₽",
     "referral_conditions": (
@@ -85,6 +87,7 @@ _RU = {
         "  — {l1_pct}% с оплат друзей L1\n"
         "  — {l2_pct}% с оплат друзей L2\n"
         "  — {l3_pct}% с оплат друзей L3\n"
+        "• С повторов из ленты ты получаешь 5% от стоимости генерации в рублях\n"
         "• Эти деньги копятся отдельно на партнёрском балансе — потом их можно вывести"
     ),
     "referral_bonus_received": (
@@ -194,7 +197,7 @@ _RU = {
     "error_generic": "😔 Что-то пошло не так. Попробуй ещё раз позже.",
     "error_not_found": "🤷 Ничего не найдено.",
     "error_forbidden": "🚫 У тебя нет доступа к этой функции.",
-    "error_banned": "🚫 Твой аккаунт заблокирован.\nОбратись в поддержку, если считаешь это ошибкой.",
+    "error_banned": "🚫 Твой аккаунт заблокирован.\nЕсли это ошибка, напиши в саппорт: @LeLu88",
 
     # Кнопки общие
     "btn_back": "← Назад",
@@ -222,8 +225,9 @@ _EN = {
     "welcome_back": "👋 <b>Welcome back, {name}!</b>\n\nGreat to see you again ✨",
     "main_menu": (
         "👋 <b>APIX</b>\n\n"
-        "Create photos, videos, music, and prompts — all in one place.\n"
-        "Pick a section:"
+        "Your AI studio for images, video, music, and high-performing prompts.\n"
+        "Create, explore ideas, and ship results in one place.\n\n"
+        "Choose what to launch:"
     ),
     "main_menu_with_session": (
         "👋 <b>APIX</b>\n\n"
@@ -239,6 +243,7 @@ _EN = {
     # Balance
     "balance_title": "💎 <b>Your Balance</b>",
     "balance_credits": "💋: {credits}",
+    "user_tg_id": "🆔 ID: <code>{tg_id}</code>",
     "balance_subscription": "Subscription: {status}",
     "balance_sub_active": "✅ Until {date}",
     "balance_sub_inactive": "❌ Inactive",
@@ -274,7 +279,7 @@ _EN = {
     ),
     "referral_earned": "💰 <b>Total earned: {amount:.2f}₽</b>",
     "referral_available": "💸 <b>Ready to withdraw: {amount:.2f}₽</b>",
-    "referral_feed_remix_rewards": "✨ <b>Earned from feed reuses: {amount:.0f} 💋</b>",
+    "referral_feed_remix_rewards": "✨ <b>Earned from feed reuses: {amount:.2f}₽</b>",
     "referral_withdraw_min": "🏦 <b>Minimum withdrawal: {amount:.0f}₽</b>",
     "referral_pending_withdrawals": "⏳ Already being processed: {amount:.2f}₽",
     "referral_conditions": (
@@ -397,7 +402,7 @@ _EN = {
     "error_generic": "😔 Something went wrong. Please try again later.",
     "error_not_found": "🤷 Nothing found.",
     "error_forbidden": "🚫 You don't have access to this feature.",
-    "error_banned": "🚫 Your account is blocked.\nContact support if you think this is a mistake.",
+    "error_banned": "🚫 Your account is blocked.\nIf this is a mistake, contact support: @LeLu88",
 
     # Buttons
     "btn_back": "← Back",

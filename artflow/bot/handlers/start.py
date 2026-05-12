@@ -7,11 +7,13 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.ui.router import render_screen
+from bot.utils.deep_links import parse_start_payload
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db.models import User
@@ -23,9 +25,9 @@ router = Router(name="start")
 def _welcome_text(lang: str) -> str:
     return (
         t("welcome", lang, name="{name}") + "\n\n"
-        "🎨 <b>" + ("Изображения" if lang == "ru" else "Images") + "</b> — Gemini, WAN, GPT Image, Seedream\n"
+        "🎨 <b>" + ("Изображения" if lang == "ru" else "Images") + "</b> — Nano Banana, WAN, GPT Image, Seedream, Qwen\n"
         "🎬 <b>" + ("Видео" if lang == "ru" else "Video") + "</b> — Kling, Veo, Grok, Seedance\n"
-        "🖌️ <b>Midjourney</b> — Imagine, Blend, Describe, Video\n"
+        "🖌️ <b>Midjourney</b> — Imagine, Blend, Describe, Action, Video\n"
         "🤖 <b>AI-ассистент</b> — идеи, промпты, помощь по боту\n\n"
         + t("balance_credits", lang, credits="{credits}")
         .replace("Kisses", "💋")
@@ -36,40 +38,29 @@ def _welcome_text(lang: str) -> str:
 
 
 def _stars_help_text(lang: str) -> str:
+    if not settings.TELEGRAM_STARS_ENABLED:
+        if lang == "en":
+            return (
+                "⭐ <b>Telegram Stars</b>\n\n"
+                "Stars top-up is not available yet. Please use T-Bank or CryptoBot for now."
+            )
+        return (
+            "⭐ <b>Telegram Stars</b>\n\n"
+            "Пополнение через Stars пока недоступно. Сейчас используй T-Bank или CryptoBot."
+        )
+
     if lang == "en":
         return (
-            "⭐ <b>Telegram Stars — quick setup</b>\n\n"
-            "• Stars work natively inside Telegram\n"
-            "• No separate bank/provider token is needed for Stars\n"
-            "• The bot must have a valid <code>BOT_TOKEN</code> and working webhook\n"
-            "• Invoices must be created in <code>XTR</code>\n\n"
-            "<b>Project files</b>\n"
-            "• full guide: <code>docs/telegram_stars_setup.md</code>\n"
-            "• deploy checklist: <code>docs/telegram_stars_deploy_checklist.md</code>\n"
-            "• smoke test: <code>scripts/smoke_stars.py</code>\n\n"
-            "<b>Quick flow</b>\n"
-            "1. Create/check bot in @BotFather\n"
-            "2. Set <code>BOT_TOKEN</code>\n"
-            "3. Raise webhook\n"
-            "4. Open top-up → Stars\n"
-            "5. Check invoice opens and credits arrive"
+            "⭐ <b>Telegram Stars</b>\n\n"
+            "Top up opens directly inside Telegram.\n"
+            "Choose <b>Top up → Telegram Stars</b>, select a pack and confirm payment.\n\n"
+            "If payment succeeds, credits arrive automatically."
         )
     return (
-        "⭐ <b>Telegram Stars — быстрая инструкция</b>\n\n"
-        "• Stars работают прямо внутри Telegram\n"
-        "• Отдельный банк и provider token для Stars не нужны\n"
-        "• У бота должны быть валидный <code>BOT_TOKEN</code> и рабочий webhook\n"
-        "• Invoice должен создаваться в <code>XTR</code>\n\n"
-        "<b>Файлы проекта</b>\n"
-        "• полная инструкция: <code>docs/telegram_stars_setup.md</code>\n"
-        "• deploy-checklist: <code>docs/telegram_stars_deploy_checklist.md</code>\n"
-        "• smoke-проверка: <code>scripts/smoke_stars.py</code>\n\n"
-        "<b>Короткий путь</b>\n"
-        "1. Проверь бота в @BotFather\n"
-        "2. Укажи <code>BOT_TOKEN</code>\n"
-        "3. Подними webhook\n"
-        "4. Открой пополнение → Stars\n"
-        "5. Проверь, что invoice открывается, а 💋 начисляются"
+        "⭐ <b>Telegram Stars</b>\n\n"
+        "Пополнение открывается прямо внутри Telegram.\n"
+        "Выбери <b>Пополнение → Telegram Stars</b>, укажи пакет и подтверди оплату.\n\n"
+        "Если платёж прошёл успешно, 💋 начислятся автоматически."
     )
 
 
@@ -77,7 +68,7 @@ def _help_text(lang: str) -> str:
     if lang == "en":
         return (
             "❓ <b>Help — How to use APIX</b>\n\n"
-            "📱 <b>Open App</b> — the fastest way to work with references, feed, themes and payments.\n"
+            "📱 <b>Open App</b> — the fastest way to work with references, feed and payments.\n"
             "In chat, you can also use the bot menus below.\n\n"
             "🎨 <b>Images</b>\n"
             "Choose a model → add a reference if needed → send a prompt → get the result.\n\n"
@@ -86,22 +77,20 @@ def _help_text(lang: str) -> str:
             "🎵 <b>Music</b>\n"
             "Suno AI creates a track from your description. Cost: <b>20 💋</b>.\n\n"
             "🖌️ <b>Midjourney</b>\n"
-            "Imagine, Blend, Describe and Video are available from the menu.\n\n"
+            "Imagine, Blend, Describe, Action and Video are available from the menu.\n\n"
             "🤖 <b>AI Assistant</b>\n"
             "Use /assistant for prompt ideas, content planning and quick bot help.\n\n"
             "💳 <b>Top up</b>\n"
-            "Available methods: Telegram Stars, T-Bank and CryptoBot.\n"
-            "⭐ Stars work natively inside Telegram — no separate bank or cashier setup is required.\n"
-            "If you need project setup steps, see docs/telegram_stars_setup.md.\n\n"
+            + (
+                "Available methods: Telegram Stars, T-Bank and CryptoBot.\n"
+                "⭐ Stars open directly inside Telegram.\n\n"
+                if settings.TELEGRAM_STARS_ENABLED
+                else "Available methods: T-Bank and CryptoBot.\n\n"
+            )
             "💡 <b>Prompt tips</b>\n"
-            "Best results usually come from English prompts with style, lighting and composition details.\n\n"
-            "⚙️ <b>How settings work</b>\n"
-            "• Format = image/video shape: square, vertical or horizontal\n"
-            "• Quality / resolution = level of detail\n"
-            "• Count = how many image variants to create in one run\n"
-            "• Reference = image that sets style, pose or composition\n\n"
-            "💬 <b>Community & help</b>\n"
-            "Join: https://t.me/Chillcreative\n\n"
+            "Short, clear prompts usually work best. If a model supports extra options, the bot will show them in the flow.\n\n"
+            "💬 <b>Support</b>\n"
+            "Contact: @LeLu88\n\n"
             f"👥 <b>Referral program</b>\n"
             f"• Bonus per referral: +{settings.REFERRAL_L1_CREDITS} 💋\n"
             f"• Payment commissions: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
@@ -110,7 +99,7 @@ def _help_text(lang: str) -> str:
         )
     return (
         "❓ <b>Помощь — как пользоваться APIX</b>\n\n"
-        "📱 <b>Открыть приложение</b> — самый удобный способ работать с референсами, лентой, темами и оплатой.\n"
+        "📱 <b>Открыть приложение</b> — самый удобный способ работать с референсами, лентой и оплатой.\n"
         "Но и через меню в боте тоже можно всё основное.\n\n"
         "🎨 <b>Изображения</b>\n"
         "Выбери модель → при необходимости добавь референс → отправь промпт → получи результат.\n\n"
@@ -119,22 +108,20 @@ def _help_text(lang: str) -> str:
         "🎵 <b>Музыка</b>\n"
         "Suno AI делает трек по описанию. Стоимость: <b>20 💋</b>.\n\n"
         "🖌️ <b>Midjourney</b>\n"
-        "В меню доступны Imagine, Blend, Describe и Video.\n\n"
+        "В меню доступны Imagine, Blend, Describe, Action и Video.\n\n"
         "🤖 <b>AI-ассистент</b>\n"
         "Команда /assistant помогает с идеями, промптами и быстрыми вопросами по боту.\n\n"
         "💳 <b>Пополнение</b>\n"
-        "Доступны Telegram Stars, T-Bank и CryptoBot.\n"
-        "⭐ Stars подключаются прямо в Telegram: отдельный банк или касса для них не нужны.\n"
-        "Если нужно настроить это на проекте — см. docs/telegram_stars_setup.md.\n\n"
+        + (
+            "Доступны Telegram Stars, T-Bank и CryptoBot.\n"
+            "⭐ Stars открываются прямо внутри Telegram.\n\n"
+            if settings.TELEGRAM_STARS_ENABLED
+            else "Сейчас доступны T-Bank и CryptoBot.\n\n"
+        )
         "💡 <b>Совет по промптам</b>\n"
-        "Обычно лучший результат дают промпты на английском с указанием стиля, света и композиции.\n\n"
-        "⚙️ <b>Что означают настройки</b>\n"
-        "• Формат — форма кадра: квадрат, вертикаль или горизонталь\n"
-        "• Качество / resolution — уровень детализации\n"
-        "• Количество — сколько вариантов создать за один запуск\n"
-        "• Референс — изображение, которое задаёт стиль, позу или композицию\n\n"
-        "💬 <b>Сообщество и помощь</b>\n"
-        "Канал: https://t.me/Chillcreative\n\n"
+        "Обычно лучше всего работают короткие и понятные промпты. Если у модели есть дополнительные настройки, бот сам покажет их по ходу выбора.\n\n"
+        "💬 <b>Поддержка</b>\n"
+        "Саппорт: @LeLu88\n\n"
         f"👥 <b>Реферальная программа</b>\n"
         f"• Бонус за реферала: +{settings.REFERRAL_L1_CREDITS} 💋\n"
         f"• Комиссия с оплат: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
@@ -148,18 +135,15 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, session:
     await state.clear()
     lang = db_user.language or "ru"
     parts = (message.text or "").split(maxsplit=1)
-    if len(parts) == 2 and parts[1].startswith("feed_"):
-        gen_id_raw = parts[1].split("_", 1)[1]
-        if gen_id_raw.isdigit():
-            from bot.handlers.feed import show_feed_card_by_id
-            await show_feed_card_by_id(message=message, session=session, gen_id=int(gen_id_raw))
-            return
-    if len(parts) == 2 and parts[1].startswith("prompt_"):
-        prompt_id_raw = parts[1].split("_", 1)[1]
-        if prompt_id_raw.isdigit():
-            from bot.handlers.marketplace import show_prompt_card_by_id
-            await show_prompt_card_by_id(message=message, session=session, prompt_id=int(prompt_id_raw))
-            return
+    start_payload = parse_start_payload(parts[1] if len(parts) == 2 else None)
+    if start_payload.target_kind == "feed" and start_payload.target_id is not None:
+        from bot.handlers.feed import show_feed_card_by_id
+        await show_feed_card_by_id(message=message, session=session, gen_id=start_payload.target_id)
+        return
+    if start_payload.target_kind == "prompt" and start_payload.target_id is not None:
+        from bot.handlers.marketplace import show_prompt_card_by_id
+        await show_prompt_card_by_id(message=message, session=session, prompt_id=start_payload.target_id)
+        return
     screen = await render_screen(screen="main", session=session, db_user=db_user)
     await message.answer(screen.text, reply_markup=screen.reply_markup)
 
@@ -191,8 +175,26 @@ async def cb_main_menu(
     session: AsyncSession,
 ) -> None:
     await state.clear()
-    screen = await render_screen(screen="main", session=session, db_user=db_user)
-    await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)  # type: ignore[arg-type]
+    screen = await render_screen(
+        screen="main",
+        session=session,
+        db_user=db_user,
+        extra={"force_main_text": True},
+    )
+    message = call.message
+    if message is not None and any((
+        getattr(message, "photo", None),
+        getattr(message, "video", None),
+        getattr(message, "animation", None),
+        getattr(message, "document", None),
+        getattr(message, "sticker", None),
+    )):
+        await message.answer(screen.text, reply_markup=screen.reply_markup)
+    else:
+        try:
+            await safe_edit_message(message, screen.text, reply_markup=screen.reply_markup)  # type: ignore[arg-type]
+        except TelegramBadRequest:
+            await message.answer(screen.text, reply_markup=screen.reply_markup)  # type: ignore[union-attr]
     await safe_answer_callback(call)
 
 

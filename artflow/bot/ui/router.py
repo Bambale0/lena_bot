@@ -23,7 +23,7 @@ async def render_screen(
 
     if screen == "main":
         context = await get_main_menu_context(session, user_id=db_user.id, balance=db_user.credits)
-        return render_main_menu(context, lang=lang)
+        return render_main_menu(context, lang=lang, force_main_text=bool(payload.get("force_main_text")))
 
     if screen == "image_active":
         image_session = payload.get("image_session") or await repo.get_active_image_session(session, db_user.id)

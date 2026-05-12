@@ -23,20 +23,23 @@ import redis.asyncio as aioredis
 from api.comet_client import close_client, get_client
 from api.miniapp_routes import router as miniapp_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
+from api.midjourney_service import MJButton, MJTaskResult
 from api.music_service import extract_music_urls, pop_task
 from api.public_files import UPLOAD_ROOT, mirror_url, save_public_file
 from bot.handlers import admin, assistant, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen, stars_payment
 from bot.handlers import settings as settings_handler
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.feed import get_generation_result_keyboard
+from bot.keyboards.midjourney import mj_action_buttons_kb
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
+from bot.states import MidjourneyFSM
 from bot.utils.telegram_ui import is_benign_telegram_error
 from core.broadcast_scheduler import run_broadcast_scheduler
 from core.config import settings
 from core.logger import setup_logging
-from db.models import GenerationType, TransactionStatus
+from db.models import Generation, GenerationType, TransactionStatus
 from payments.cryptobot import verify_webhook_signature
 from payments.tbank import verify_notification_token
 from db import repository as repo
@@ -44,6 +47,10 @@ from db.seed import run_seed
 from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+
+_MJ_IMAGE_MODELS = {"midjourney-imagine", "midjourney-blend", "midjourney-action"}
+_MJ_DESCRIBE_MODEL = "midjourney-describe"
+_MJ_VIDEO_MODEL = "midjourney-video"
 
 
 def _sanitize_provider_error(raw: str | None, *, fallback: str = "Ошибка на стороне генератора") -> str:
@@ -69,16 +76,137 @@ def _sanitize_provider_error(raw: str | None, *, fallback: str = "Ошибка �
     return normalized or fallback
 
 
+def _midjourney_webhook_secret() -> str:
+    return (settings.MIDJOURNEY_WEBHOOK_SECRET or settings.WEBHOOK_SECRET).strip()
+
+
+def _midjourney_button_state(buttons: list[MJButton]) -> list[dict[str, str]]:
+    return [
+        {"custom_id": button.custom_id, "label": button.label, "emoji": button.emoji}
+        for button in buttons
+    ]
+
+
+async def _get_midjourney_context(user_tg_id: int):
+    if not bot or not dp:
+        return None
+    return dp.fsm.get_context(bot=bot, chat_id=user_tg_id, user_id=user_tg_id)
+
+
+async def _delete_midjourney_status_message(user_tg_id: int, message_id: int | None) -> None:
+    if not bot or not message_id:
+        return
+    try:
+        await bot.delete_message(chat_id=user_tg_id, message_id=message_id)
+    except TelegramBadRequest as exc:
+        if is_benign_telegram_error(exc):
+            return
+        logger.debug("Failed to delete MJ status message chat=%s message=%s: %s", user_tg_id, message_id, exc)
+    except Exception as exc:
+        logger.debug("Failed to delete MJ status message chat=%s message=%s: %s", user_tg_id, message_id, exc)
+
+
+async def _mark_midjourney_failed(
+    session,
+    gen: Generation,
+    user_tg_id: int,
+    error_text: str,
+    *,
+    state_ctx=None,
+) -> None:
+    if await repo.fail_generation(session, gen.id, error_text):
+        await repo.add_credits(session, gen.user_id, gen.credits_spent)
+    if state_ctx is not None:
+        data = await state_ctx.get_data()
+        await _delete_midjourney_status_message(user_tg_id, data.get("mj_status_message_id"))
+        await state_ctx.clear()
+
+
+async def _finish_midjourney_image_generation(
+    gen: Generation,
+    user_tg_id: int,
+    task_result: MJTaskResult,
+    *,
+    state_ctx=None,
+) -> None:
+    if state_ctx is not None:
+        data = await state_ctx.get_data()
+        await _delete_midjourney_status_message(user_tg_id, data.get("mj_status_message_id"))
+        await state_ctx.update_data(
+            task_id=task_result.task_id,
+            buttons=_midjourney_button_state(task_result.buttons),
+            mj_status_message_id=None,
+        )
+        await state_ctx.set_state(MidjourneyFSM.viewing_result)
+
+    caption = "✅ Blend готово!" if gen.model == "midjourney-blend" else f"✅ Готово!\n\n<i>{gen.prompt[:200]}</i>"
+    reply_markup = mj_action_buttons_kb(task_result.buttons) if task_result.buttons else main_menu_kb()
+    await bot.send_photo(  # type: ignore[union-attr]
+        chat_id=user_tg_id,
+        photo=URLInputFile(task_result.image_url, filename="image.jpg"),
+        caption=caption,
+        reply_markup=reply_markup,
+    )
+    await bot.send_document(  # type: ignore[union-attr]
+        chat_id=user_tg_id,
+        document=URLInputFile(task_result.image_url, filename="image.jpg"),
+    )
+
+
+async def _finish_midjourney_describe_generation(
+    gen: Generation,
+    user_tg_id: int,
+    task_result: MJTaskResult,
+    *,
+    state_ctx=None,
+) -> None:
+    if state_ctx is not None:
+        data = await state_ctx.get_data()
+        await _delete_midjourney_status_message(user_tg_id, data.get("mj_status_message_id"))
+        await state_ctx.clear()
+
+    prompts_text = task_result.prompt or "Промпт не получен"
+    await bot.send_message(  # type: ignore[union-attr]
+        chat_id=user_tg_id,
+        text=f"🔍 <b>Описание изображения:</b>\n\n{prompts_text}",
+        reply_markup=main_menu_kb(),
+    )
+
+
+async def _finish_midjourney_video_generation(
+    gen: Generation,
+    user_tg_id: int,
+    task_result: MJTaskResult,
+    *,
+    state_ctx=None,
+) -> None:
+    if state_ctx is not None:
+        data = await state_ctx.get_data()
+        await _delete_midjourney_status_message(user_tg_id, data.get("mj_status_message_id"))
+        await state_ctx.clear()
+
+    await bot.send_video(  # type: ignore[union-attr]
+        chat_id=user_tg_id,
+        video=URLInputFile(
+            task_result.video_url or (task_result.video_urls[0] if task_result.video_urls else "") or task_result.image_url,
+            filename="video.mp4",
+        ),
+        caption="✅ MJ Видео готово!",
+        reply_markup=main_menu_kb(),
+    )
+
+
 async def _set_bot_commands(bot: Bot) -> None:
     commands = [
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="menu", description="Открыть меню"),
         BotCommand(command="help", description="Помощь"),
-        BotCommand(command="starshelp", description="Telegram Stars"),
         BotCommand(command="assistant", description="AI-ассистент"),
         BotCommand(command="feed", description="Лента работ"),
         BotCommand(command="prompts", description="Библиотека промптов"),
     ]
+    if settings.TELEGRAM_STARS_ENABLED:
+        commands.insert(3, BotCommand(command="starshelp", description="Telegram Stars"))
     if settings.ADMIN_IDS:
         commands.append(BotCommand(command="admin", description="Админ-панель"))
     await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
@@ -265,6 +393,103 @@ async def telegram_webhook(
     return {"ok": True}
 
 
+@app.post(settings.MIDJOURNEY_WEBHOOK_PATH)
+async def midjourney_webhook(request: Request, secret: str | None = None) -> dict:
+    expected_secret = _midjourney_webhook_secret()
+    if expected_secret and secret != expected_secret:
+        raise HTTPException(status_code=403, detail="Invalid Midjourney webhook secret")
+
+    payload = await request.json()
+    task_result = MJTaskResult.from_dict(payload)
+    if not task_result.task_id:
+        logger.warning("Midjourney webhook without task_id: %s", payload)
+        return {"ok": True}
+
+    if not task_result.is_done:
+        logger.info(
+            "Midjourney webhook ignoring non-terminal status task=%s status=%s",
+            task_result.task_id,
+            task_result.status,
+        )
+        return {"ok": True}
+
+    async with AsyncSessionLocal() as session:
+        gen = await repo.get_generation_by_task_id(session, task_result.task_id)
+        if not gen:
+            logger.warning("Midjourney webhook for unknown task_id=%s", task_result.task_id)
+            return {"ok": True}
+        if gen.status.value in {"done", "failed"}:
+            return {"ok": True}
+
+        user = await repo.get_user_by_id(session, gen.user_id)
+        if not user:
+            logger.warning("Midjourney webhook user not found for generation=%s", gen.id)
+            return {"ok": True}
+
+        state_ctx = await _get_midjourney_context(user.tg_id)
+
+        if not task_result.is_success:
+            err = task_result.fail_reason or payload.get("description") or "Midjourney task failed"
+            await _mark_midjourney_failed(session, gen, user.tg_id, err, state_ctx=state_ctx)
+            if bot:
+                await bot.send_message(
+                    user.tg_id,
+                    f"❌ Ошибка Midjourney: <code>{_sanitize_provider_error(err)[:500]}</code>\n💋 возвращены.",
+                    reply_markup=main_menu_kb(),
+                )
+            return {"ok": True}
+
+        if gen.model in _MJ_IMAGE_MODELS:
+            if not task_result.image_url:
+                await _mark_midjourney_failed(
+                    session, gen, user.tg_id, "Midjourney callback success but no imageUrl", state_ctx=state_ctx
+                )
+                if bot:
+                    await bot.send_message(
+                        user.tg_id,
+                        "❌ Midjourney вернул успех, но без изображения. 💋 возвращены.",
+                        reply_markup=main_menu_kb(),
+                    )
+                return {"ok": True}
+
+            await repo.finish_generation(session, gen.id, task_result.image_url)
+            if bot:
+                await _finish_midjourney_image_generation(gen, user.tg_id, task_result, state_ctx=state_ctx)
+            return {"ok": True}
+
+        if gen.model == _MJ_DESCRIBE_MODEL:
+            await repo.finish_generation(session, gen.id, task_result.task_id)
+            if bot:
+                await _finish_midjourney_describe_generation(gen, user.tg_id, task_result, state_ctx=state_ctx)
+            return {"ok": True}
+
+        if gen.model == _MJ_VIDEO_MODEL:
+            resolved_video_url = (
+                task_result.video_url
+                or (task_result.video_urls[0] if task_result.video_urls else "")
+                or task_result.image_url
+            )
+            if not resolved_video_url:
+                await _mark_midjourney_failed(
+                    session, gen, user.tg_id, "Midjourney callback success but no videoUrl", state_ctx=state_ctx
+                )
+                if bot:
+                    await bot.send_message(
+                        user.tg_id,
+                        "❌ Midjourney вернул успех, но без видео. 💋 возвращены.",
+                        reply_markup=main_menu_kb(),
+                    )
+                return {"ok": True}
+
+            await repo.finish_generation(session, gen.id, resolved_video_url)
+            if bot:
+                await _finish_midjourney_video_generation(gen, user.tg_id, task_result, state_ctx=state_ctx)
+            return {"ok": True}
+
+        logger.info("Midjourney webhook ignored unsupported model=%s task=%s", gen.model, task_result.task_id)
+        return {"ok": True}
+
+
 # ── CryptoBot Webhook ─────────────────────────────────────────────────────────
 
 @app.post("/webhook/cryptobot")
@@ -397,8 +622,8 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
         if not is_success(payload):
             err = extract_error(payload)
             user_err = _sanitize_provider_error(err)
-            await repo.fail_generation(session, gen.id, err)
-            await repo.add_credits(session, gen.user_id, gen.credits_spent)
+            if await repo.fail_generation(session, gen.id, err):
+                await repo.add_credits(session, gen.user_id, gen.credits_spent)
             if bot:
                 try:
                     await bot.send_message(
@@ -414,8 +639,8 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
         if not urls:
             err = "Provider callback success but no result urls"
             user_err = "Результат готов, но ссылка на файл не пришла"
-            await repo.fail_generation(session, gen.id, err)
-            await repo.add_credits(session, gen.user_id, gen.credits_spent)
+            if await repo.fail_generation(session, gen.id, err):
+                await repo.add_credits(session, gen.user_id, gen.credits_spent)
             if bot:
                 try:
                     await bot.send_message(user.tg_id, f"❌ {user_err}. Кредиты возвращены.", reply_markup=back_to_menu_kb())
@@ -608,8 +833,8 @@ async def kie_music_webhook(request: Request) -> dict:
             async with AsyncSessionLocal() as session:
                 gen = await repo.get_generation_by_id(session, generation_id)
                 if gen:
-                    await repo.fail_generation(session, gen.id, err)
-                    await repo.add_credits(session, gen.user_id, gen.credits_spent)
+                    if await repo.fail_generation(session, gen.id, err):
+                        await repo.add_credits(session, gen.user_id, gen.credits_spent)
         if tg_id and bot:
             try:
                 await bot.send_message(

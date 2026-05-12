@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb
+from core.config import settings
 from db import repository as repo
 from db.models import PaymentProvider, User
 
@@ -19,16 +20,20 @@ router = Router(name="stars_payment")
 @router.callback_query(F.data == "topup:stars")
 async def cb_topup_stars(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     lang = db_user.language or "ru"
+    if not settings.TELEGRAM_STARS_ENABLED:
+        await call.answer(t("error_not_available", lang), show_alert=True)
+        return
+
     plans = await repo.get_active_price_plans(session)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
     for plan in plans:
         stars = plan.price_stars or max(1, int(plan.price_rub / 10))
         builder.button(
-            text=f"⭐ {plan.label} — {stars} ⭐",
+            text=f"⭐ {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else plan.credits} 💋 · {stars} ⭐",
             callback_data=f"topup:stars_plan:{plan.key}",
         )
-    builder.button(text=t("btn_back", lang), callback_data="menu:topup")
+    builder.button(text="← " + ("Назад" if lang == "ru" else "Back"), callback_data="menu:topup")
     builder.adjust(1)
     await call.message.edit_text(
         t("topup_stars_title", lang) + "\n\n" + t("topup_select_plan", lang),
@@ -43,6 +48,10 @@ async def cb_stars_plan(
 ) -> None:
     """Create Telegram Stars invoice."""
     lang = db_user.language or "ru"
+    if not settings.TELEGRAM_STARS_ENABLED:
+        await call.answer(t("error_not_available", lang), show_alert=True)
+        return
+
     plan_key = call.data.split(":")[-1]
     plan = await repo.get_price_plan_by_key(session, plan_key)
 
@@ -83,6 +92,10 @@ async def on_successful_payment(
     message: Message, session: AsyncSession, db_user: User, bot: Bot
 ) -> None:
     lang = db_user.language or "ru"
+    if not settings.TELEGRAM_STARS_ENABLED:
+        logger.warning("Stars successful_payment ignored while feature is disabled")
+        return
+
     payment = message.successful_payment
     if not payment or payment.currency != "XTR":
         return

@@ -26,10 +26,15 @@ def main_menu_kb(
         InlineKeyboardButton(text="🎨 Изображение", callback_data="menu:image"),
         InlineKeyboardButton(text="🎬 Видео", callback_data="menu:video"),
     )
-    builder.row(
-        InlineKeyboardButton(text="🎵 Песня", callback_data="menu:music"),
-        InlineKeyboardButton(text="🖌️ Midjourney", callback_data="menu:mj"),
-    )
+    if is_admin:
+        builder.row(
+            InlineKeyboardButton(text="🎵 Песня", callback_data="menu:music"),
+            InlineKeyboardButton(text="🖌️ Midjourney", callback_data="menu:mj"),
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="🎵 Песня", callback_data="menu:music"),
+        )
     builder.row(
         InlineKeyboardButton(text="🤖 AI-ассистент", callback_data="menu:assistant"),
     )

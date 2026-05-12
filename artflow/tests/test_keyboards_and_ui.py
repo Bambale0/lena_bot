@@ -33,6 +33,15 @@ def test_render_main_menu_active_session_text() -> None:
     assert "Текущая серия изображений" in render.text
 
 
+def test_render_main_menu_force_main_text_even_with_active_session() -> None:
+    session = SimpleNamespace(model="nano-banana-pro", quality="2K", aspect_ratio="9:16", count=3)
+    context = SimpleNamespace(balance=1003, active_image_session=session, is_admin=False)
+    render = render_main_menu(context, force_main_text=True)
+    assert "Твоя AI-студия" in render.text
+    assert "Выбирай, что запустить:" in render.text
+    assert "Текущая серия изображений" not in render.text
+
+
 def test_video_params_kb_hides_grok_i2v_ratio_for_single_ref() -> None:
     buttons = flatten_buttons(
         video_params_kb(
@@ -48,16 +57,15 @@ def test_video_params_kb_hides_grok_i2v_ratio_for_single_ref() -> None:
     assert all(button.callback_data != "vpar_ratio:16:9" for button in buttons)
 
 
-def test_help_text_contains_chillcreative_link() -> None:
+def test_help_text_contains_support_contact() -> None:
     text = _help_text("ru")
-    assert "https://t.me/Chillcreative" in text
+    assert "@LeLu88" in text
 
 
 def test_help_text_explains_settings_plainly() -> None:
     text = _help_text("ru")
-    assert "Что означают настройки" in text
-    assert "Формат" in text
-    assert "Референс" in text
+    assert "короткие и понятные промпты" in text
+    assert "бот сам покажет их по ходу выбора" in text
 
 
 def test_topup_keyboard_keeps_decimal_price() -> None:

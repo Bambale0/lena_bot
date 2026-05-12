@@ -1,10 +1,10 @@
 # bot/handlers/midjourney.py
 """
 Midjourney handler — полный flow:
-  Imagine → Poll → Buttons (U/V/🔄) → Action → Poll [→ Modal → Poll]
-  Blend → Poll
-  Describe → Poll
-  Video → Poll
+  Imagine → Webhook → Buttons (U/V/🔄) → Action → Poll [→ Modal → Poll]
+  Blend → Webhook
+  Describe → Webhook
+  Video → Webhook
 """
 from __future__ import annotations
 
@@ -42,11 +42,16 @@ from bot.keyboards.midjourney import (
     mj_video_speed_kb,
 )
 from bot.states import MidjourneyFSM
+from core.config import settings
 from db import repository as repo
 from db.models import GenerationType, User
 
 logger = logging.getLogger(__name__)
 router = Router(name="midjourney")
+
+
+def _ensure_admin_access(tg_id: int) -> bool:
+    return tg_id in settings.ADMIN_IDS
 
 _MJ_IMAGINE_MODEL = "midjourney-imagine"
 _MJ_BLEND_MODEL = "midjourney-blend"
@@ -55,30 +60,54 @@ _MJ_VIDEO_MODEL = "midjourney-video"
 _MJ_ACTION_MODEL = "midjourney-action"
 
 
+def _mj_price_tag(credits: float | int | None) -> str:
+    return f" · {float(credits):g} 💋" if credits is not None else ""
+
+
+async def _mj_menu_prices(session: AsyncSession) -> tuple[dict[str, str], str]:
+    mapping = {
+        "imagine": _MJ_IMAGINE_MODEL,
+        "blend": _MJ_BLEND_MODEL,
+        "describe": _MJ_DESCRIBE_MODEL,
+        "video": _MJ_VIDEO_MODEL,
+    }
+    prices: dict[str, str] = {}
+    for key, model_key in mapping.items():
+        model_cost = await repo.get_model_cost(session, model_key)
+        prices[key] = _mj_price_tag(model_cost.credits if model_cost else None)
+    action_cost = await repo.get_model_cost(session, _MJ_ACTION_MODEL)
+    action_price = _mj_price_tag(action_cost.credits if action_cost else 3)
+    return prices, action_price
+
+
 # ═══════════════════════════════════════════════════════════════════
 # SUBMENU
 # ═══════════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.in_({"menu:mj", "midjourney"}))
-async def cb_mj_menu(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_mj_menu(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    if not _ensure_admin_access(call.from_user.id):
+        await call.answer("Раздел временно доступен только администраторам", show_alert=True)
+        return
     await state.clear()
+    prices, action_price = await _mj_menu_prices(session)
     await call.message.edit_text(  # type: ignore[union-attr]
         "🖌️ <b>Midjourney</b>\n\n"
         "Мощнейший AI для генерации изображений и видео. Что умеет:\n\n"
-        "🎨 <b>Imagine</b> — создать изображение по текстовому промпту "
+        f"🎨 <b>Imagine</b>{prices.get('imagine', '')} — создать изображение по текстовому промпту "
         "(+ референс-фото опционально). Получаешь 4 варианта с кнопками U (upscale), "
         "V (variation), 🔄 (reroll) и другими действиями.\n\n"
-        "🖼️ <b>Blend</b> — смешать от 2 до 5 изображений в одно. "
+        f"🖼️ <b>Blend</b>{prices.get('blend', '')} — смешать от 2 до 5 изображений в одно. "
         "Отлично для создания уникальных стилей.\n\n"
-        "🔍 <b>Describe</b> — загрузи любое фото и получи готовый промпт, "
+        f"🔍 <b>Describe</b>{prices.get('describe', '')} — загрузи любое фото и получи готовый промпт, "
         "который его описывает. Удобно для изучения стилей.\n\n"
-        "🎞️ <b>Video</b> — оживи изображение, превратив его в видео "
+        f"🎞️ <b>Video</b>{prices.get('video', '')} — оживи изображение, превратив его в видео "
         "с настраиваемой интенсивностью движения.\n\n"
+        f"✨ Действия после генерации: <b>{action_price.strip(' ·')}</b>\n\n"
         "👇 Выбери действие:",
-        reply_markup=mj_submenu_kb(),
+        reply_markup=mj_submenu_kb(prices),
     )
     await call.answer()
-
 
 # ═══════════════════════════════════════════════════════════════════
 # IMAGINE FLOW
@@ -136,7 +165,7 @@ async def cb_speed(call: CallbackQuery, state: FSMContext, session: AsyncSession
         f"📎 <b>Референс-изображение</b> (опционально) · {credits} 💋\n\n"
         "Если хочешь, чтобы Midjourney ориентировался на стиль конкретного изображения, "
         "загрузи его сейчас. Ссылка будет добавлена в начало промпта автоматически.\n\n"
-        "Или нажми «Без референса» и просто введи промпт.",
+        "Или просто сразу напиши промпт сообщением — референс можно пропустить.",
         reply_markup=mj_reference_upload_kb(),
     )
     await call.answer()
@@ -144,7 +173,7 @@ async def cb_speed(call: CallbackQuery, state: FSMContext, session: AsyncSession
 
 @router.callback_query(MidjourneyFSM.reference_upload, F.data == "mj_ref:skip")
 async def cb_mj_ref_skip(call: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(reference_b64=None)
+    await state.update_data(reference_b64=None, reference_url=None)
     await state.set_state(MidjourneyFSM.prompt_input)
     data = await state.get_data()
     credits: int = data.get("credits", 10)
@@ -171,17 +200,31 @@ async def handle_mj_reference_photo(message: Message, state: FSMContext, bot: Bo
     buf = await bot.download_file(file.file_path)
     raw = buf.read() if hasattr(buf, "read") else bytes(buf)
     b64 = "data:image/jpeg;base64," + base64.b64encode(raw).decode()
-    await state.update_data(reference_b64=b64)
+    reference_url = await mirror_telegram_file(bot, photo.file_id)
+    await state.update_data(reference_b64=b64, reference_url=reference_url)
     await state.set_state(MidjourneyFSM.prompt_input)
     data = await state.get_data()
     credits: int = data.get("credits", 10)
     await message.answer(
         f"✅ Референс получен! · {credits} 💋\n\n"
-        "✏️ <b>Введи промпт</b> — изображение будет добавлено как стиль-референс.\n\n"
-        "Можно указать вес референса: <code>image.jpg::1.5</code> (чем выше, тем сильнее влияние)\n\n"
+        "✏️ <b>Введи промпт</b> — публичная ссылка на изображение будет добавлена в начало prompt автоматически.\n\n"
+        "Если хочешь усилить влияние референса, добавь в prompt параметр <code>--iw 1.5</code>.\n\n"
         "<i>Пример: same style portrait, cinematic, studio light --ar 3:4</i>",
         reply_markup=back_to_menu_kb(),
     )
+
+
+@router.message(MidjourneyFSM.reference_upload, F.text)
+async def handle_mj_prompt_without_reference(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    bot: Bot,
+) -> None:
+    await state.update_data(reference_b64=None, reference_url=None)
+    await state.set_state(MidjourneyFSM.prompt_input)
+    await handle_imagine_prompt(message, state, session, db_user, bot)
 
 
 @router.message(MidjourneyFSM.prompt_input, F.text)
@@ -198,7 +241,9 @@ async def handle_imagine_prompt(
     speed = MJSpeed(data.get("speed", MJSpeed.FAST))
     credits: int = data.get("credits", 10)
     reference_b64: str | None = data.get("reference_b64")
+    reference_url: str | None = data.get("reference_url")
     base64_array = [reference_b64] if reference_b64 else None
+    submitted_prompt = f"{reference_url} {prompt}".strip() if reference_url else prompt
 
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
@@ -216,70 +261,24 @@ async def handle_imagine_prompt(
     )
 
     try:
-        task_id = await mj.imagine(prompt, bot_type=bot_type, speed=speed, base64_array=base64_array)
+        task_id = await mj.imagine(
+            submitted_prompt,
+            bot_type=bot_type,
+            speed=speed,
+            base64_array=base64_array,
+            reference_url=reference_url,
+        )
     except Exception as e:
         logger.error("MJ imagine submit error: %s", e)
-        await repo.fail_generation(session, gen.id, str(e))
-        await repo.add_credits(session, db_user.id, credits)
+        if await repo.fail_generation(session, gen.id, str(e)):
+            await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text("❌ Ошибка при отправке запроса. 💋 возвращены.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
     await repo.update_generation_task(session, gen.id, task_id)
 
-    async def on_success(url: str) -> None:
-        try:
-            task_result = await mj.fetch_task(task_id)
-        except Exception:
-            task_result = MJTaskResult(task_id=task_id, status=MJTaskStatus.SUCCESS, image_url=url)
-
-        await repo.finish_generation(session, gen.id, task_result.image_url or url)
-        await state.update_data(
-            task_id=task_id,
-            buttons=[{"custom_id": b.custom_id, "label": b.label, "emoji": b.emoji} for b in task_result.buttons],
-        )
-        await state.set_state(MidjourneyFSM.viewing_result)
-
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
-
-        caption = f"✅ Готово!\n\n<i>{prompt[:200]}</i>"
-        _mj_photo_url = task_result.image_url or url
-        await bot.send_photo(
-            chat_id=message.chat.id,
-            photo=URLInputFile(_mj_photo_url, filename="image.jpg"),
-            caption=caption,
-            reply_markup=mj_action_buttons_kb(task_result.buttons),
-        )
-        await bot.send_document(
-            chat_id=message.chat.id,
-            document=URLInputFile(_mj_photo_url, filename="image.jpg"),
-        )
-
-    async def on_failure(err: str) -> None:
-        if err == "__MODAL__":
-            await state.set_state(MidjourneyFSM.waiting_modal_input)
-            await status_msg.edit_text(
-                "🖌 Midjourney запрашивает дополнительный ввод.\n"
-                "Введи уточняющий промпт (или нажми 'Без промпта'):",
-                reply_markup=mj_skip_prompt_kb(),
-            )
-            await state.update_data(modal_task_id=task_id)
-            return
-
-        await repo.fail_generation(session, gen.id, err)
-        await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text(
-            f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb()
-        )
-        await state.clear()
-
-    asyncio.create_task(
-        polling.poll_until_done(task_id, mj.poll_mj_image, on_success, on_failure)
-    )
-    await state.clear()
+    await state.update_data(mj_status_message_id=status_msg.message_id)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -552,54 +551,15 @@ async def cb_blend_submit(
     try:
         task_id = await mj.blend(images)
     except Exception as e:
-        await repo.fail_generation(session, gen.id, str(e))
-        await repo.add_credits(session, db_user.id, credits)
+        if await repo.fail_generation(session, gen.id, str(e)):
+            await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(f"❌ Ошибка: {e}", reply_markup=main_menu_kb())
         await state.clear()
         return
 
     await repo.update_generation_task(session, gen.id, task_id)
 
-    async def on_success(url: str) -> None:
-        try:
-            task_result = await mj.fetch_task(task_id)
-        except Exception:
-            task_result = MJTaskResult(task_id=task_id, status=MJTaskStatus.SUCCESS, image_url=url)
-
-        await repo.finish_generation(session, gen.id, task_result.image_url or url)
-        await state.update_data(
-            task_id=task_id,
-            buttons=[{"custom_id": b.custom_id, "label": b.label, "emoji": b.emoji} for b in task_result.buttons],
-        )
-        await state.set_state(MidjourneyFSM.viewing_result)
-
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
-
-        _blend_url = task_result.image_url or url
-        await bot.send_photo(
-            chat_id=call.message.chat.id,  # type: ignore[union-attr]
-            photo=URLInputFile(_blend_url, filename="image.jpg"),
-            caption="✅ Blend готово!",
-            reply_markup=mj_action_buttons_kb(task_result.buttons),
-        )
-        await bot.send_document(
-            chat_id=call.message.chat.id,  # type: ignore[union-attr]
-            document=URLInputFile(_blend_url, filename="image.jpg"),
-        )
-
-    async def on_failure(err: str) -> None:
-        await repo.fail_generation(session, gen.id, err)
-        await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text(f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb())
-        await state.clear()
-
-    asyncio.create_task(
-        polling.poll_until_done(task_id, mj.poll_mj_image, on_success, on_failure)
-    )
-    await state.clear()
+    await state.update_data(mj_status_message_id=status_msg.message_id)
 
 
 @router.callback_query(MidjourneyFSM.blend_collecting, F.data == "mj_blend:add")
@@ -667,46 +627,15 @@ async def handle_describe_photo(
     try:
         task_id = await mj.describe(base64=b64)
     except Exception as e:
-        await repo.fail_generation(session, gen.id, str(e))
-        await repo.add_credits(session, db_user.id, credits)
+        if await repo.fail_generation(session, gen.id, str(e)):
+            await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(f"❌ Ошибка: {e}", reply_markup=main_menu_kb())
         await state.clear()
         return
 
     await repo.update_generation_task(session, gen.id, task_id)
 
-    async def on_success(url: str) -> None:
-        try:
-            task_result = await mj.fetch_task(task_id)
-        except Exception:
-            task_result = MJTaskResult(task_id=task_id, status=MJTaskStatus.SUCCESS)
-
-        await repo.finish_generation(session, gen.id, task_id)
-        await state.clear()
-
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
-
-        # describe возвращает промпты в поле prompt
-        prompts_text = task_result.prompt or "Промпт не получен"
-        await bot.send_message(
-            chat_id=message.chat.id,
-            text=f"🔍 <b>Описание изображения:</b>\n\n{prompts_text}",
-            reply_markup=main_menu_kb(),
-        )
-
-    async def on_failure(err: str) -> None:
-        await repo.fail_generation(session, gen.id, err)
-        await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text(f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb())
-        await state.clear()
-
-    asyncio.create_task(
-        polling.poll_until_done(task_id, mj.poll_mj_image, on_success, on_failure)
-    )
-    await state.clear()
+    await state.update_data(mj_status_message_id=status_msg.message_id)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -813,37 +742,12 @@ async def _submit_mj_video(
     try:
         task_id = await mj.submit_video(image=image_url, motion=motion, prompt=prompt)
     except Exception as e:
-        await repo.fail_generation(session, gen.id, str(e))
-        await repo.add_credits(session, db_user.id, credits)
+        if await repo.fail_generation(session, gen.id, str(e)):
+            await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(f"❌ Ошибка: {e}", reply_markup=main_menu_kb())
         await state.clear()
         return
 
     await repo.update_generation_task(session, gen.id, task_id)
 
-    async def on_success(url: str) -> None:
-        await repo.finish_generation(session, gen.id, url)
-        await state.clear()
-
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
-
-        await bot.send_video(
-            chat_id=message.chat.id,
-            video=URLInputFile(url, filename="video.mp4"),
-            caption="✅ MJ Видео готово!",
-            reply_markup=main_menu_kb(),
-        )
-
-    async def on_failure(err: str) -> None:
-        await repo.fail_generation(session, gen.id, err)
-        await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text(f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb())
-        await state.clear()
-
-    asyncio.create_task(
-        polling.poll_until_done(task_id, mj.poll_mj_video, on_success, on_failure)
-    )
-    await state.clear()
+    await state.update_data(mj_status_message_id=status_msg.message_id)

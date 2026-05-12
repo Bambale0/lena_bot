@@ -8,6 +8,11 @@ import pytest
 from bot.services import assistant_moderator
 
 
+@pytest.fixture(autouse=True)
+def _allow_admin_access(monkeypatch) -> None:
+    monkeypatch.setattr(assistant_moderator, "is_admin_tg_id", lambda _tg_id: True)
+
+
 @pytest.mark.asyncio
 async def test_try_handle_admin_request_stats() -> None:
     with patch.object(
@@ -106,6 +111,19 @@ async def test_try_handle_admin_request_reject_prompt_requires_reason() -> None:
 
     assert outcome is not None
     assert "укажи причину" in outcome.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_try_handle_admin_request_ignores_non_admin() -> None:
+    with patch.object(assistant_moderator, "is_admin_tg_id", return_value=False):
+        outcome = await assistant_moderator.try_handle_admin_request(
+            "проверь промпт 42",
+            session=AsyncMock(),
+            bot=AsyncMock(),
+            admin_tg_id=999,
+        )
+
+    assert outcome is None
 
 
 @pytest.mark.asyncio

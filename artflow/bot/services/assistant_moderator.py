@@ -71,6 +71,10 @@ async def try_handle_admin_request(
     bot: Bot,
     admin_tg_id: int,
 ) -> AdminAssistantOutcome | None:
+    if not is_admin_tg_id(admin_tg_id):
+        logger.warning("assistant moderator access denied for tg_id=%s", admin_tg_id)
+        return None
+
     source = " ".join((text or "").strip().replace("ё", "е").split())
     normalized = _normalize_text(text)
     if not normalized:

@@ -3,16 +3,17 @@
 Midjourney через CometAPI — полный набор операций.
 
 Workflow:
-  imagine  → fetch (poll) → action → fetch (poll) [→ modal → fetch]
-  blend    → fetch (poll)
-  describe → fetch (poll)
-  video    → fetch (poll)
+  imagine  → webhook/fetch → action → fetch (poll) [→ modal → fetch]
+  blend    → webhook/fetch
+  describe → webhook/fetch
+  video    → webhook/fetch
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
+from urllib.parse import urlencode
 
 try:
     from enum import StrEnum
@@ -21,9 +22,25 @@ except ImportError:
         pass
 from typing import Any
 
+import httpx
+
 from api import comet_client
+from core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _midjourney_notify_hook() -> str:
+    base_url = settings.WEBHOOK_URL.rstrip("/")
+    path = settings.MIDJOURNEY_WEBHOOK_PATH.strip()
+    secret = (settings.MIDJOURNEY_WEBHOOK_SECRET or settings.WEBHOOK_SECRET).strip()
+    if not base_url or not path:
+        return ""
+
+    url = f"{base_url}{path if path.startswith('/') else '/' + path}"
+    if not secret:
+        return url
+    return f"{url}?{urlencode({'secret': secret})}"
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -105,7 +122,9 @@ class MJTaskResult:
     status: MJTaskStatus
     progress: str = ""
     image_url: str = ""
+    image_urls: list[str] = field(default_factory=list)
     video_url: str = ""
+    video_urls: list[str] = field(default_factory=list)
     prompt: str = ""
     fail_reason: str = ""
     buttons: list[MJButton] = field(default_factory=list)
@@ -124,15 +143,23 @@ class MJTaskResult:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "MJTaskResult":
+        raw_status = str(d.get("status") or "").strip().upper()
+        if raw_status not in MJTaskStatus._value2member_map_:
+            if raw_status:
+                logger.warning("Unknown MJ task status %r for task %s; fallback to PENDING", raw_status, d.get("id", ""))
+            raw_status = MJTaskStatus.PENDING
+        raw_buttons = d.get("buttons") or []
         return cls(
             task_id=str(d.get("id", "")),
-            status=MJTaskStatus(d.get("status", "PENDING")),
+            status=MJTaskStatus(raw_status),
             progress=d.get("progress", ""),
             image_url=d.get("imageUrl", ""),
+            image_urls=[url for url in (d.get("image_urls") or []) if isinstance(url, str) and url],
             video_url=d.get("videoUrl", ""),
+            video_urls=[url for url in (d.get("video_urls") or []) if isinstance(url, str) and url],
             prompt=d.get("prompt", ""),
             fail_reason=d.get("failReason", ""),
-            buttons=[MJButton.from_dict(b) for b in d.get("buttons", []) if b.get("customId")],
+            buttons=[MJButton.from_dict(b) for b in raw_buttons if isinstance(b, dict) and b.get("customId")],
         )
 
 
@@ -143,6 +170,7 @@ async def imagine(
     bot_type: MJBotType = MJBotType.MIDJOURNEY,
     speed: MJSpeed = MJSpeed.FAST,
     base64_array: list[str] | None = None,
+    reference_url: str | None = None,
     state: str | None = None,
 ) -> str:
     """Submit imagine task. Returns task_id."""
@@ -152,12 +180,34 @@ async def imagine(
         "prompt": prompt,
         "accountFilter": {"modes": [speed.value]},
     }
+    notify_hook = _midjourney_notify_hook()
+    if notify_hook:
+        payload["notifyHook"] = notify_hook
     if base64_array:
         payload["base64Array"] = base64_array
     if state:
         payload["state"] = state
 
-    resp = await comet_client.post(f"{prefix}/mj/submit/imagine", payload)
+    try:
+        resp = await comet_client.post(f"{prefix}/mj/submit/imagine", payload)
+    except httpx.HTTPStatusError as exc:
+        should_retry_without_base64 = (
+            bool(base64_array)
+            and bool(reference_url)
+            and exc.response.status_code in {400, 401, 403, 404, 422}
+        )
+        if not should_retry_without_base64:
+            raise
+
+        fallback_payload = dict(payload)
+        fallback_payload.pop("base64Array", None)
+        logger.warning(
+            "MJ imagine rejected image reference payload, retrying with URL-only prompt: status=%s reference_url=%s",
+            exc.response.status_code,
+            reference_url,
+        )
+        resp = await comet_client.post(f"{prefix}/mj/submit/imagine", fallback_payload)
+
     task_id = str(resp["result"])
     logger.info("MJ imagine submitted: task_id=%s, prompt=%.60s", task_id, prompt)
     return task_id
@@ -219,6 +269,9 @@ async def blend(
         "base64Array": base64_array,
         "dimensions": dimensions.value,
     }
+    notify_hook = _midjourney_notify_hook()
+    if notify_hook:
+        payload["notifyHook"] = notify_hook
     resp = await comet_client.post("/mj/submit/blend", payload)
     task_id = str(resp["result"])
     logger.info("MJ blend submitted: task_id=%s, images=%d", task_id, len(base64_array))
@@ -232,6 +285,9 @@ async def describe(
 ) -> str:
     """Describe image → get prompt candidates. Returns task_id."""
     payload: dict[str, Any] = {"botType": bot_type.value}
+    notify_hook = _midjourney_notify_hook()
+    if notify_hook:
+        payload["notifyHook"] = notify_hook
     if base64:
         payload["base64"] = base64
     elif link:
@@ -257,6 +313,9 @@ async def submit_video(
         "motion": motion.value,
         "videoType": video_type,
     }
+    notify_hook = _midjourney_notify_hook()
+    if notify_hook:
+        payload["notifyHook"] = notify_hook
     if prompt:
         payload["prompt"] = prompt
 
@@ -296,7 +355,7 @@ async def poll_mj_video(task_id: str) -> str | None:
     """Polling для видео-задачи MJ."""
     result = await fetch_task(task_id)
     if result.status == MJTaskStatus.SUCCESS:
-        return result.video_url or result.image_url or "done"
+        return result.video_url or (result.video_urls[0] if result.video_urls else "") or result.image_url or "done"
     if result.status == MJTaskStatus.FAILURE:
         raise RuntimeError(result.fail_reason or "MJ video task failed")
     return None

@@ -29,6 +29,7 @@ class WithdrawalFSM(StatesGroup):
 
 def referral_screen_kb(lang: str = "ru"):
     builder = InlineKeyboardBuilder()
+    builder.button(text="👥 " + ("Мои приглашённые" if lang == "ru" else "My referrals"), callback_data="referral:list")
     builder.button(text="💸 " + ("Запросить вывод" if lang == "ru" else "Request withdrawal"), callback_data="referral:withdraw")
     builder.button(text=t("btn_main_menu", lang), callback_data="menu:main")
     builder.adjust(1)
@@ -86,6 +87,7 @@ async def cb_balance(call: CallbackQuery, db_user: User, session: AsyncSession) 
     text = (
         t("balance_title", lang) + "\n\n"
         + t("balance_credits", lang, credits=db_user.credits) + "\n"
+        + t("user_tg_id", lang, tg_id=db_user.tg_id) + "\n"
         + t("balance_subscription", lang, status=sub_status) + "\n\n"
         + _build_balance_costs_text(lang, model_costs) + "\n\n"
         + t("balance_topup_hint", lang)
@@ -103,7 +105,7 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
     l1, l2, l3 = await repo.count_user_referrals(session, db_user.id)
     withdrawals = await repo.get_user_withdrawal_requests(session, db_user.id, limit=3)
     balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
-    feed_remix_rewards = await repo.get_user_feed_remix_reward_credits(session, db_user.id)
+    feed_remix_rewards = await repo.get_user_feed_remix_reward_rub(session, db_user.id)
     withdrawal_lines = []
     for request in withdrawals:
         withdrawal_lines.append(
@@ -131,6 +133,57 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
     )
     if withdrawal_lines:
         text += "\n\n💸 <b>" + ("Последние заявки на вывод" if lang == "ru" else "Recent withdrawal requests") + ":</b>\n" + "\n".join(withdrawal_lines)
+    await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data == "referral:list")
+async def cb_referral_list(call: CallbackQuery, db_user: User, session: AsyncSession) -> None:
+    lang = db_user.language or "ru"
+    children = await repo.get_referral_children(session, db_user.id, level=1, limit=30)
+
+    if not children:
+        text = (
+            "👥 <b>Мои приглашённые</b>\n\n"
+            "Пока здесь пусто.\n\n"
+            "Реферал появится в списке, если человек:\n"
+            "• открыл бота именно по твоей ссылке\n"
+            "• запустил бота через <code>/start</code> с твоим кодом\n"
+            "• не был зарегистрирован раньше\n\n"
+            "Если человек уже был в боте до этого, новым рефералом он не станет."
+        ) if lang == "ru" else (
+            "👥 <b>My referrals</b>\n\n"
+            "Nothing here yet.\n\n"
+            "A person appears here if they:\n"
+            "• open the bot using your referral link\n"
+            "• start the bot with your <code>/start</code> code\n"
+            "• were not registered before\n\n"
+            "If they had already used the bot earlier, they will not count as a new referral."
+        )
+        await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
+        await safe_answer_callback(call)
+        return
+
+    lines: list[str] = []
+    for child in children:
+        user = child.user
+        name = f"@{user.username}" if user.username else (user.full_name or f"ID {user.tg_id}")
+        joined = user.created_at.strftime("%d.%m.%Y") if user.created_at else "—"
+        if child.paid_rub > 0:
+            status = f"💳 оплатил {child.paid_rub:.0f}₽" if lang == "ru" else f"💳 paid {child.paid_rub:.0f}₽"
+        elif child.generations_count > 0:
+            status = f"🎨 активен · {child.generations_count} генерац." if lang == "ru" else f"🎨 active · {child.generations_count} generations"
+        else:
+            status = "👋 зашёл в бота" if lang == "ru" else "👋 opened the bot"
+        lines.append(
+            f"• <b>{name}</b>\n"
+            f"  <code>{user.tg_id}</code> · {joined}\n"
+            f"  {status}"
+        )
+
+    title = "👥 <b>Мои приглашённые</b>" if lang == "ru" else "👥 <b>My referrals</b>"
+    hint = "\n\nПоказываю прямых рефералов по твоей ссылке." if lang == "ru" else "\n\nShowing direct referrals from your link."
+    text = title + "\n\n" + "\n\n".join(lines) + hint
     await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
     await safe_answer_callback(call)
 

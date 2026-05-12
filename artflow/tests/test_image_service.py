@@ -24,3 +24,17 @@ def test_build_input_uses_2k_for_square_4k_request() -> None:
     )
 
     assert payload["resolution"] == "2K"
+
+
+def test_build_input_omits_gpt_image_2_auto_aspect_ratio() -> None:
+    _resolved_model, payload = _build_input(
+        ImageModel.GPT_IMAGE_2_I2I,
+        prompt="edit this image",
+        image_url="https://example.test/ref.jpg",
+        aspect_ratio="auto",
+        n=1,
+        quality="2K",
+    )
+
+    assert payload["resolution"] == "2K"
+    assert "aspect_ratio" not in payload

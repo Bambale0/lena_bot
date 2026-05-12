@@ -110,7 +110,10 @@ function isMiniappVideoModelSupported(model) {
 }
 
 function modelModesLabel(model) {
+  const key = String(model?.key || "").toLowerCase();
   const modes = model?.modes || ["text"];
+  if (key === "midjourney-blend") return "2–5 фото";
+  if (key === "midjourney-video") return "анимация фото";
   if (modes.includes("text") && modes.includes("image")) return "текст + фото";
   if (modes.includes("image")) return "по фото";
   return "текст";
@@ -215,7 +218,7 @@ function Nav({ screen, setScreen }) {
     ["home", "⌂", "Главная"],
     ["feed", "◷", "Лента"],
     ["studio", "⌘", "Студия"],
-    ["music", "♫", "Музыка"],
+    ["music", "🎶", "Музыка"],
     ["history", "☰", "История"],
     ["profile", "♙", "Профиль"],
   ];
@@ -386,11 +389,35 @@ function PromptFeed({ prompts, setScreen }) {
   );
 }
 
-function Home({ user, feed, prompts, historyCount, setScreen, setTopup }) {
+function Home({ user, feed, prompts, historyCount, setScreen, setTopup, midjourneyItems = [], openStudioPreset }) {
   return (
     <>
       <ProfileStrip user={user} historyCount={historyCount} setScreen={setScreen} setTopup={setTopup} />
       <PromptFeed prompts={prompts} setScreen={setScreen} />
+      {!!midjourneyItems.length && (
+        <section className="block">
+          <div className="title">
+            <div><h2>Midjourney</h2><p>Цены из текущих моделей</p></div>
+            <button onClick={() => setScreen("studio")}>В студию</button>
+          </div>
+          <div className="grid">
+            {midjourneyItems.map((item, i) => (
+              <button
+                key={item.key || i}
+                className="feedCard"
+                onClick={() => item.available_in_studio && openStudioPreset ? openStudioPreset(item) : undefined}
+                style={{ textAlign: "left", cursor: item.available_in_studio ? "pointer" : "default" }}
+              >
+                <div>
+                  <span>{item.display_name}</span>
+                  <p>{item.credits} 💋 · {item.gen_type === "video" ? "video" : "image"}{item.available_in_studio ? " · открыть" : ""}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="block">
         <div className="title">
           <h2>Публичные работы</h2>
@@ -414,10 +441,11 @@ function Home({ user, feed, prompts, historyCount, setScreen, setTopup }) {
 
 // ── Feed screen ───────────────────────────────────────────────────────────────
 
-function FeedCard({ item, idx, onRemix, onNotice }) {
+function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   const [liked, setLiked] = useState(false);
   const [likes, setLikes] = useState(item.likes_count || 0);
   const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
   async function handleLike() {
@@ -447,6 +475,24 @@ function FeedCard({ item, idx, onRemix, onNotice }) {
     }
   }
 
+  async function handleRemove() {
+    if (!item.is_mine || removing) return;
+    const ok = window.confirm("Удалить этот пост из ленты? Он исчезнет из общей ленты.");
+    if (!ok) return;
+    setRemoving(true);
+    try {
+      await api(`/feed/${item.id}/remove`, { method: "POST" });
+      tg()?.HapticFeedback?.notificationOccurred("success");
+      onNotice?.({ type: "success", message: "Пост удалён из ленты" });
+      onRemoved?.(item.id);
+    } catch (e) {
+      tg()?.HapticFeedback?.notificationOccurred("error");
+      onNotice?.({ type: "error", message: e.message || "Не удалось удалить пост" });
+    } finally {
+      setRemoving(false);
+    }
+  }
+
   return (
     <div className="feedFullCard">
       <div className="feedFullMedia">
@@ -469,12 +515,21 @@ function FeedCard({ item, idx, onRemix, onNotice }) {
             🔁 Повторить
           </button>
           {item.is_mine && (
-            <button
-              onClick={handleCopyLink}
-              style={{ padding: "8px 10px", borderRadius: 10, background: linkCopied ? "var(--success-soft)" : "var(--surface-2)", border: `1px solid ${linkCopied ? "var(--success-border)" : "var(--border-strong)"}`, color: linkCopied ? "var(--success)" : "var(--text-soft)", fontSize: 13, cursor: "pointer" }}
-            >
-              {linkCopied ? "✅" : "🔗"}
-            </button>
+            <>
+              <button
+                onClick={handleCopyLink}
+                style={{ padding: "8px 10px", borderRadius: 10, background: linkCopied ? "var(--success-soft)" : "var(--surface-2)", border: `1px solid ${linkCopied ? "var(--success-border)" : "var(--border-strong)"}`, color: linkCopied ? "var(--success)" : "var(--text-soft)", fontSize: 13, cursor: "pointer" }}
+              >
+                {linkCopied ? "✅" : "🔗"}
+              </button>
+              <button
+                onClick={handleRemove}
+                disabled={removing}
+                style={{ padding: "8px 10px", borderRadius: 10, background: "rgba(255, 107, 107, 0.12)", border: "1px solid rgba(255, 107, 107, 0.35)", color: "#ff6b6b", fontSize: 13, cursor: removing ? "default" : "pointer", opacity: removing ? 0.7 : 1 }}
+              >
+                {removing ? "…" : "🗑"}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -482,7 +537,7 @@ function FeedCard({ item, idx, onRemix, onNotice }) {
   );
 }
 
-function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice }) {
+function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemoved }) {
   const filtered = feed;
 
   return (
@@ -491,7 +546,7 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice }) {
       <PromptFeed prompts={prompts} setScreen={setScreen} />
       {feedLoading ? <Spinner /> : (
         <div className="feedList">
-          {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} onNotice={onNotice} />)}
+          {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} onNotice={onNotice} onRemoved={onRemoved} />)}
           {filtered.length === 0 && <p style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 32 }}>Пусто</p>}
         </div>
       )}
@@ -589,6 +644,8 @@ function getImageScenario(model) {
   const key = String(model?.key || "").toLowerCase();
   const modes = model?.modes || ["text"];
 
+  if (key.includes("midjourney-imagine")) return "fast";
+  if (key.includes("midjourney-blend")) return "edit";
   if (modes.includes("image")) return "edit";
   if (key.includes("seedream")) return "fast";
   if (key.includes("wan")) return "fast";
@@ -599,6 +656,7 @@ function getImageScenario(model) {
 function getVideoScenario(model) {
   const key = String(model?.key || "").toLowerCase();
   const modes = model?.modes || ["text"];
+  if (key.includes("midjourney-video")) return "i2v";
   if (modes.includes("image")) return "i2v";
   if (key.includes("fast") || key.includes("turbo")) return "fast";
   return "quality";
@@ -641,15 +699,26 @@ function isAbsoluteHttpUrl(value) {
   }
 }
 
+function isTelegramDeepLink(value) {
+  try {
+    const url = new URL(normalizeAbsoluteUrl(value));
+    return (url.protocol === "https:" || url.protocol === "http:") && url.hostname === "t.me" && url.pathname.length > 1;
+  } catch {
+    return false;
+  }
+}
+
 function modeOptionLabel(x) {
   return {
     fun: "Fun",
     normal: "Normal",
     spicy: "Spicy",
+    low: "🐢 Low",
+    high: "🏎 High",
   }[x] || x;
 }
 
-function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, generation, setTopup, remixSource, clearRemix, onNotice }) {
+function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, generation, setTopup, remixSource, clearRemix, onNotice, preset }) {
   const isRemix = !!remixSource;
   const supportedVideoModels = useMemo(
     () => (videoModels || []).filter(isMiniappVideoModelSupported),
@@ -727,6 +796,19 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
       setModel(visibleModels[0]?.key || "");
     }
   }, [visibleModels, model]);
+
+  useEffect(() => {
+    if (preset?.modelKey) {
+      setKind(preset.kind === "video" ? "video" : "image");
+      setScenario("all");
+    }
+  }, [preset?.modelKey, preset?.kind]);
+
+  useEffect(() => {
+    if (preset?.modelKey && visibleModels.some((item) => item.key === preset.modelKey)) {
+      setModel(preset.modelKey);
+    }
+  }, [preset?.modelKey, visibleModels]);
 
   useEffect(() => {
     if (!current) return;
@@ -827,6 +909,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
   const maxRefs = Math.max(1, Number(current?.max_refs || 1) || 1);
   const hasValidRefUrl = normalizedRefUrls.every((value) => isAbsoluteHttpUrl(value));
   const isPerSecond = Boolean(current?.is_per_second);
+  const requiresPrompt = current?.key !== "midjourney-blend";
   const perSec = Number(current?.credits_per_sec || current?.credits || 0);
   const baseCost = Number(current?.credits || 0);
   const estimatedCost = kind === "video" && isPerSecond ? duration * perSec : baseCost;
@@ -852,12 +935,12 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
     if (!prompt.trim() || improvingPrompt) return;
     setImprovingPrompt(true);
     try {
-      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind: "music" }) });
+      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind }) });
       setPrompt(result.prompt || prompt);
       tg()?.HapticFeedback?.notificationOccurred("success");
-      onNotice?.({ type: "success", message: "Идея для трека усилена" });
+      onNotice?.({ type: "success", message: kind === "video" ? "Промпт для видео улучшен" : "Промпт улучшен" });
     } catch (e) {
-      onNotice?.({ type: "error", message: e.message || "Не удалось улучшить описание трека" });
+      onNotice?.({ type: "error", message: e.message || "Не удалось улучшить промпт" });
     } finally {
       setImprovingPrompt(false);
     }
@@ -1087,14 +1170,14 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
       )}
 
       <div className="studioActions">
-        <button className="secondaryBtn" disabled={!prompt.trim() || improvingPrompt || isRemix} onClick={handleImprovePrompt}>
+        <button className="secondaryBtn" disabled={!prompt.trim() || improvingPrompt || isRemix || !requiresPrompt} onClick={handleImprovePrompt}>
           {improvingPrompt ? "⏳ Улучшаю..." : "✨ Улучшить промпт"}
         </button>
       </div>
 
       <button
         className="primary studioGenerate"
-        disabled={!current || (!isRemix && !prompt.trim()) || (requiresReference && !normalizedRefUrl) || !hasValidRefUrl}
+        disabled={!current || (!isRemix && requiresPrompt && !prompt.trim()) || (requiresReference && !normalizedRefUrl) || !hasValidRefUrl}
         onClick={handleGenerate}
       >
         {kind === "video" ? "Создать видео" : "Сгенерировать"}
@@ -1297,10 +1380,12 @@ function ThemePicker({ value, onChange, resolvedTheme }) {
 }
 
 function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolvedTheme }) {
-  const referralLink = user.referral_link || `https://t.me/apix_ai_bot?start=${user.referral_code || ""}`;
+  const referralLink = isTelegramDeepLink(user.referral_link)
+    ? user.referral_link
+    : `https://t.me/apix_ai_bot?start=${user.referral_code || ""}`;
   const menuItems = [
     ["studio", "⌘", "Студия генераций"],
-    ["music", "♫", "Музыка (Suno)"],
+    ["music", "🎶", "Музыка (Suno)"],
     ["history", "☰", "Мои генерации"],
     ["feed", "◷", "Публичная лента"],
     ["prompts", "📚", "Библиотека промптов"],
@@ -1558,6 +1643,7 @@ function App() {
   const [remixSource, setRemixSource] = useState(null);
   const [notice, setNotice] = useState(null);
   const [theme, setTheme] = useState(() => readStoredTheme());
+  const [studioPreset, setStudioPreset] = useState(null);
   const poll = useRef(null);
   const musicPoll = useRef(null);
 
@@ -1567,6 +1653,7 @@ function App() {
   const feed = useApi(() => api("/feed?limit=30").then(items), fallbackFeed);
   const history = useApi(() => api("/history?limit=50").then(items), []);
   const prompts = useApi(() => api("/prompts?limit=30").then(items), []);
+  const midjourneyItems = useApi(() => api("/public/midjourney").then(items), []);
 
   const user = me.data;
   const isDemo = me.error || imageModels.error || videoModels.error;
@@ -1670,8 +1757,8 @@ function App() {
     try {
       const endpoint = kind === "video" ? "/generate/video" : "/generate/image";
       const body = kind === "video"
-        ? { model: payload.model, prompt: payload.prompt, mode: payload.mode, duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, reference_urls: payload.reference_urls || [], grok_mode: payload.grok_mode }
-        : { model: payload.model, prompt: payload.prompt, aspect_ratio: payload.aspect_ratio, quality: payload.quality, count: payload.count, reference_url: payload.reference_url };
+        ? { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-video" ? "mj-video" : ""), mode: payload.mode, duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, reference_urls: payload.reference_urls || [], grok_mode: payload.grok_mode }
+        : { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-blend" ? "mj-blend" : ""), aspect_ratio: payload.aspect_ratio, quality: payload.quality, count: payload.count, reference_url: payload.reference_url, reference_urls: payload.reference_urls || [] };
       const g = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
       setGeneration(g);
       setPollId(g.id);
@@ -1710,6 +1797,11 @@ function App() {
     }
   }
 
+  function openStudioPreset(item) {
+    setStudioPreset({ modelKey: item.key, kind: item.gen_type });
+    setScreen("studio");
+  }
+
   function handleRemix(feedItem) {
     setRemixSource({
       gen_id: feedItem.id,
@@ -1722,9 +1814,9 @@ function App() {
   }
 
   const screens = {
-    home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={setScreen} setTopup={setTopupOpen} />,
+    home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={setScreen} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} />,
     feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={setScreen} onRemix={handleRemix} onNotice={setNotice} />,
-    studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} />,
+    studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} />,
     music: <Music user={user} musicGen={musicGen} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,
     history: <History history={history.data} loading={history.loading} onNotice={setNotice} />,
     profile: <Profile user={user} history={history.data} setScreen={setScreen} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} />,

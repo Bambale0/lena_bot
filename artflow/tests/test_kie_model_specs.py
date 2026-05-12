@@ -114,6 +114,22 @@ def test_build_kie_input_grok_imagine_i2i_keeps_single_image_url_alias_for_first
     assert inp["image_url"] == "https://example.test/grok-1.jpg"
 
 
+def test_build_kie_input_wan_multi_ref_uses_input_urls_without_singular_alias() -> None:
+    resolved_model, inp = build_kie_input(
+        model="wan/2-7-image-pro",
+        prompt="Blend the face from the first ref with the outfit from the second ref",
+        reference_urls=["https://example.test/wan-1.jpg", "https://example.test/wan-2.jpg"],
+        params={"resolution": "2K"},
+    )
+
+    assert resolved_model == "wan/2-7-image-pro"
+    assert inp["input_urls"] == [
+        "https://example.test/wan-1.jpg",
+        "https://example.test/wan-2.jpg",
+    ]
+    assert "input_url" not in inp
+
+
 def test_build_kie_input_nano_banana_variants_do_not_send_count() -> None:
     for model in ("nano-banana-2", "nano-banana-pro"):
         resolved_model, inp = build_kie_input(
@@ -191,3 +207,116 @@ def test_build_kie_input_seedance_enables_audio_by_default() -> None:
 
     assert resolved_model == "bytedance/seedance-2"
     assert inp["generate_audio"] is True
+
+
+def test_build_kie_input_wan_multiref_keeps_input_urls_without_singular_alias() -> None:
+    resolved_model, inp = build_kie_input(
+        model="wan/2-7-image-pro",
+        prompt="Replace the background and keep the subject",
+        reference_urls=[
+            "https://example.test/wan-1.jpg",
+            "https://example.test/wan-2.jpg",
+        ],
+        params={"resolution": "2K", "n": 1},
+    )
+
+    assert resolved_model == "wan/2-7-image-pro"
+    assert inp["input_urls"] == [
+        "https://example.test/wan-1.jpg",
+        "https://example.test/wan-2.jpg",
+    ]
+    assert "input_url" not in inp
+
+
+def test_build_kie_input_gpt_image_2_multiref_keeps_input_urls_without_singular_alias() -> None:
+    resolved_model, inp = build_kie_input(
+        model="gpt-image-2-image-to-image",
+        prompt="Use both references",
+        reference_urls=[
+            "https://example.test/gpt-1.jpg",
+            "https://example.test/gpt-2.jpg",
+        ],
+        params={"aspect_ratio": "16:9", "resolution": "2K"},
+    )
+
+    assert resolved_model == "gpt-image-2-image-to-image"
+    assert inp["input_urls"] == [
+        "https://example.test/gpt-1.jpg",
+        "https://example.test/gpt-2.jpg",
+    ]
+    assert "input_url" not in inp
+
+
+def test_build_kie_input_seedance_multiref_keeps_reference_image_urls_without_alias() -> None:
+    resolved_model, inp = build_kie_input(
+        model="bytedance/seedance-2",
+        prompt="Animate this concept",
+        reference_urls=[
+            "https://example.test/seedance-1.jpg",
+            "https://example.test/seedance-2.jpg",
+        ],
+        params={"duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
+    )
+
+    assert resolved_model == "bytedance/seedance-2"
+    assert inp["reference_image_urls"] == [
+        "https://example.test/seedance-1.jpg",
+        "https://example.test/seedance-2.jpg",
+    ]
+    assert "reference_image_url" not in inp
+
+
+def test_build_kie_input_happyhorse_multiref_keeps_image_url_alias() -> None:
+    resolved_model, inp = build_kie_input(
+        model="happyhorse/image-to-video",
+        prompt="Animate both angles",
+        reference_urls=[
+            "https://example.test/hh-1.jpg",
+            "https://example.test/hh-2.jpg",
+        ],
+        params={"duration": 5, "resolution": "720p"},
+    )
+
+    assert resolved_model == "happyhorse/image-to-video"
+    assert inp["image_urls"] == [
+        "https://example.test/hh-1.jpg",
+        "https://example.test/hh-2.jpg",
+    ]
+    assert inp["image_url"] == "https://example.test/hh-1.jpg"
+
+
+def test_build_kie_input_kling_26_motion_uses_provider_mode_values() -> None:
+    resolved_model, inp = build_kie_input(
+        model="kling-2.6/motion-control",
+        prompt="Character follows the motion video",
+        reference_urls=["https://example.test/person.jpg"],
+        params={
+            "resolution": "720p",
+            "reference_video_url": "https://example.test/motion.mp4",
+        },
+    )
+
+    assert resolved_model == "kling-2.6/motion-control"
+    assert inp["input_urls"] == ["https://example.test/person.jpg"]
+    assert inp["video_urls"] == ["https://example.test/motion.mp4"]
+    assert inp["mode"] == "720p"
+    assert inp["character_orientation"] == "image"
+
+
+def test_build_kie_input_kling_30_motion_maps_legacy_pro_to_1080p() -> None:
+    resolved_model, inp = build_kie_input(
+        model="kling-3.0/motion-control",
+        prompt="Character follows the motion video",
+        reference_urls=["https://example.test/person.jpg"],
+        params={
+            "resolution": "pro",
+            "reference_video_url": "https://example.test/motion.mp4",
+        },
+    )
+
+    assert resolved_model == "kling-3.0/motion-control"
+    assert inp["input_urls"] == ["https://example.test/person.jpg"]
+    assert inp["video_urls"] == ["https://example.test/motion.mp4"]
+    assert inp["mode"] == "1080p"
+    assert inp["character_orientation"] == "image"
+    assert inp["background_source"] == "input_video"

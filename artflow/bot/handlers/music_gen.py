@@ -101,8 +101,8 @@ async def music_prompt(msg: Message, state: FSMContext, session: AsyncSession, d
             reply_markup=back_to_menu_kb(),
         )
     except Exception as e:
-        await repo.fail_generation(session, gen.id, str(e))
-        await repo.add_credits(session, db_user.id, music_cost)
+        if await repo.fail_generation(session, gen.id, str(e)):
+            await repo.add_credits(session, db_user.id, music_cost)
         await msg.answer(f"❌ Ошибка: {e}", reply_markup=back_to_menu_kb())
 
     await state.clear()
