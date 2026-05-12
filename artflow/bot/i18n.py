@@ -196,6 +196,7 @@ _RU = {
     # Ошибки
     "error_generic": "😔 Что-то пошло не так. Попробуй ещё раз позже.",
     "error_not_found": "🤷 Ничего не найдено.",
+    "error_not_available": "Эта функция пока недоступна.",
     "error_forbidden": "🚫 У тебя нет доступа к этой функции.",
     "error_banned": "🚫 Твой аккаунт заблокирован.\nЕсли это ошибка, напиши в саппорт: @LeLu88",
 
@@ -401,6 +402,7 @@ _EN = {
     # Errors
     "error_generic": "😔 Something went wrong. Please try again later.",
     "error_not_found": "🤷 Nothing found.",
+    "error_not_available": "This feature is not available yet.",
     "error_forbidden": "🚫 You don't have access to this feature.",
     "error_banned": "🚫 Your account is blocked.\nIf this is a mistake, contact support: @LeLu88",
 

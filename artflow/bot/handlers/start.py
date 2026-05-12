@@ -87,15 +87,15 @@ def _help_text(lang: str) -> str:
                 if settings.TELEGRAM_STARS_ENABLED
                 else "Available methods: T-Bank and CryptoBot.\n\n"
             )
-            "💡 <b>Prompt tips</b>\n"
-            "Short, clear prompts usually work best. If a model supports extra options, the bot will show them in the flow.\n\n"
-            "💬 <b>Support</b>\n"
-            "Contact: @LeLu88\n\n"
-            f"👥 <b>Referral program</b>\n"
-            f"• Bonus per referral: +{settings.REFERRAL_L1_CREDITS} 💋\n"
-            f"• Payment commissions: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
-            f"{int(settings.REFERRAL_COMMISSION_L2 * 100)}% / "
-            f"{int(settings.REFERRAL_COMMISSION_L3 * 100)}%"
+            + "💡 <b>Prompt tips</b>\n"
+            + "Short, clear prompts usually work best. If a model supports extra options, the bot will show them in the flow.\n\n"
+            + "💬 <b>Support</b>\n"
+            + "Contact: @LeLu88\n\n"
+            + f"👥 <b>Referral program</b>\n"
+            + f"• Bonus per referral: +{settings.REFERRAL_L1_CREDITS} 💋\n"
+            + f"• Payment commissions: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
+            + f"{int(settings.REFERRAL_COMMISSION_L2 * 100)}% / "
+            + f"{int(settings.REFERRAL_COMMISSION_L3 * 100)}%"
         )
     return (
         "❓ <b>Помощь — как пользоваться APIX</b>\n\n"
@@ -118,15 +118,15 @@ def _help_text(lang: str) -> str:
             if settings.TELEGRAM_STARS_ENABLED
             else "Сейчас доступны T-Bank и CryptoBot.\n\n"
         )
-        "💡 <b>Совет по промптам</b>\n"
-        "Обычно лучше всего работают короткие и понятные промпты. Если у модели есть дополнительные настройки, бот сам покажет их по ходу выбора.\n\n"
-        "💬 <b>Поддержка</b>\n"
-        "Саппорт: @LeLu88\n\n"
-        f"👥 <b>Реферальная программа</b>\n"
-        f"• Бонус за реферала: +{settings.REFERRAL_L1_CREDITS} 💋\n"
-        f"• Комиссия с оплат: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
-        f"{int(settings.REFERRAL_COMMISSION_L2 * 100)}% / "
-        f"{int(settings.REFERRAL_COMMISSION_L3 * 100)}%"
+        + "💡 <b>Совет по промптам</b>\n"
+        + "Обычно лучше всего работают короткие и понятные промпты. Если у модели есть дополнительные настройки, бот сам покажет их по ходу выбора.\n\n"
+        + "💬 <b>Поддержка</b>\n"
+        + "Саппорт: @LeLu88\n\n"
+        + f"👥 <b>Реферальная программа</b>\n"
+        + f"• Бонус за реферала: +{settings.REFERRAL_L1_CREDITS} 💋\n"
+        + f"• Комиссия с оплат: {int(settings.REFERRAL_COMMISSION_L1 * 100)}% / "
+        + f"{int(settings.REFERRAL_COMMISSION_L2 * 100)}% / "
+        + f"{int(settings.REFERRAL_COMMISSION_L3 * 100)}%"
     )
 
 

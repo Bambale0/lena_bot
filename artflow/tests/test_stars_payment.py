@@ -11,6 +11,8 @@ from db.models import PaymentProvider
 
 @pytest.mark.asyncio
 async def test_stars_plan_creates_xtr_invoice(monkeypatch) -> None:
+    monkeypatch.setattr("bot.handlers.stars_payment.settings.TELEGRAM_STARS_ENABLED", True)
+
     call = SimpleNamespace(
         data="topup:stars_plan:credits_100",
         from_user=SimpleNamespace(id=12345),
@@ -39,6 +41,8 @@ async def test_stars_plan_creates_xtr_invoice(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_successful_stars_payment_is_idempotent(monkeypatch) -> None:
+    monkeypatch.setattr("bot.handlers.stars_payment.settings.TELEGRAM_STARS_ENABLED", True)
+
     payment = SimpleNamespace(
         currency="XTR",
         invoice_payload="stars:55:credits_100",
@@ -65,3 +69,22 @@ async def test_successful_stars_payment_is_idempotent(monkeypatch) -> None:
     add_credits.assert_awaited_once_with(session, db_user.id, tx.credits)
     accrue.assert_awaited_once_with(session, db_user, tx.amount_rub, bot)
     message.answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stars_plan_is_blocked_when_feature_disabled(monkeypatch) -> None:
+    monkeypatch.setattr("bot.handlers.stars_payment.settings.TELEGRAM_STARS_ENABLED", False)
+    create_transaction = AsyncMock()
+    monkeypatch.setattr("bot.handlers.stars_payment.repo.create_transaction", create_transaction)
+
+    call = SimpleNamespace(
+        data="topup:stars_plan:credits_100",
+        from_user=SimpleNamespace(id=12345),
+        answer=AsyncMock(),
+    )
+
+    await stars_payment.cb_stars_plan(call, AsyncMock(), SimpleNamespace(id=7, language="ru"), AsyncMock())
+
+    create_transaction.assert_not_awaited()
+    call.answer.assert_awaited_once()
+    assert call.answer.await_args.kwargs["show_alert"] is True

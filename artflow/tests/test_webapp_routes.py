@@ -199,6 +199,7 @@ async def test_webapp_plans_use_label_as_title(client, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_topup_stars_returns_invoice_link(client, monkeypatch) -> None:
+    monkeypatch.setattr("api.miniapp_routes.settings.TELEGRAM_STARS_ENABLED", True)
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_price_plan_by_key",
         AsyncMock(return_value=SimpleNamespace(key="credits_15", label="мини", credits=15, price_rub=150.0, price_stars=100)),
@@ -764,6 +765,7 @@ async def test_music_generation_uses_model_cost_from_db(client, monkeypatch) -> 
 
 @pytest.mark.asyncio
 async def test_topup_stars_reuses_pending_transaction(client, monkeypatch) -> None:
+    monkeypatch.setattr("api.miniapp_routes.settings.TELEGRAM_STARS_ENABLED", True)
     pending_tx = SimpleNamespace(
         id=902,
         user_id=1,

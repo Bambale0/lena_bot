@@ -69,6 +69,12 @@ def test_help_text_explains_settings_plainly() -> None:
 
 
 def test_topup_keyboard_keeps_decimal_price() -> None:
-    plans = [SimpleNamespace(label="10 сек · Pro", price_rub=199.5, key="p1")]
+    plans = [SimpleNamespace(label="10 сек · Pro", credits=10, price_rub=199.5, key="p1")]
     buttons = flatten_buttons(topup_kb(plans))
-    assert buttons[0].text == "💳 10 сек · Pro — 199.5₽"
+    assert buttons[0].text == "💳 10 сек · Pro — 10 💋 · 199.5₽"
+
+
+def test_topup_keyboard_hides_stars_by_default() -> None:
+    plans = [SimpleNamespace(label="15 💋", credits=15, price_rub=150.0, key="credits_15")]
+    buttons = flatten_buttons(topup_kb(plans))
+    assert all(button.callback_data != "topup:stars" for button in buttons)

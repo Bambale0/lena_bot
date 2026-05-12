@@ -241,7 +241,7 @@ function TopupModal({ onClose }) {
     fallbackPlans,
   );
   const [selected, setSelected] = useState(null);
-  const [method, setMethod] = useState("stars");
+  const [method, setMethod] = useState("tbank");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -275,12 +275,11 @@ function TopupModal({ onClose }) {
     if (!selected) return;
     setBusy(true); setErr(null);
     try {
-      const endpoint = method === "crypto" ? "/topup/crypto" : method === "stars" ? "/topup/stars" : "/topup/tbank";
+      const endpoint = method === "crypto" ? "/topup/crypto" : "/topup/tbank";
       const res = await api(endpoint, { method: "POST", body: JSON.stringify({ plan_key: selected }) });
       const url = res.invoice_link || res.pay_url;
       if (!url) throw new Error("Платёжная ссылка не получена");
-      if (method === "stars" && tg()?.openInvoice) tg().openInvoice(url, () => {});
-      else if (tg()) tg().openLink(url);
+      if (tg()) tg().openLink(url);
       else window.open(url, "_blank");
       onClose();
     } catch (e) {
@@ -315,7 +314,6 @@ function TopupModal({ onClose }) {
         )}
 
         <div className="tabs" style={{ marginTop: 16 }}>
-          <button className={method === "stars" ? "active" : ""} onClick={() => setMethod("stars")}>⭐ Stars</button>
           <button className={method === "tbank" ? "active" : ""} onClick={() => setMethod("tbank")}>💳 Т-Банк</button>
           <button className={method === "crypto" ? "active" : ""} onClick={() => setMethod("crypto")}>₮ Крипто</button>
         </div>
