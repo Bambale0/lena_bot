@@ -201,6 +201,20 @@ class Transaction(Base):
     user: Mapped[User] = relationship(back_populates="transactions", lazy="noload")
 
 
+class CreditLedgerEntry(Base):
+    __tablename__ = "credit_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    delta: Mapped[float] = mapped_column(Float, nullable=False)
+    balance_after: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_type: Mapped[str | None] = mapped_column(String(64), index=True)
+    source_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class ReferralWithdrawalRequest(Base):
     __tablename__ = "referral_withdrawal_requests"
 
@@ -294,6 +308,12 @@ class UserPrompt(Base):
         Enum(PromptStatus), default=PromptStatus.pending, nullable=False, index=True
     )
     reject_reason: Mapped[str | None] = mapped_column(String(500))
+    ai_moderation_decision: Mapped[str | None] = mapped_column(String(32))
+    ai_moderation_risk: Mapped[str | None] = mapped_column(String(16))
+    ai_moderation_reason: Mapped[str | None] = mapped_column(String(500))
+    ai_moderation_recommendation: Mapped[str | None] = mapped_column(String(500))
+    ai_moderation_raw: Mapped[str | None] = mapped_column(Text)
+    ai_moderated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     uses_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -42,6 +44,28 @@ _PROMPT_MODERATION_SYSTEM_PROMPT = (
 )
 
 
+_PROMPT_MODERATION_DECISION_SYSTEM_PROMPT = (
+    "Ты — автоматический AI-модератор Telegram-бота APIX. "
+    "Тебе нужно принять решение по пользовательскому промпту для публикации в витрине. "
+    "Проверяй спам, мошенничество, манипуляции, незаконный и опасный контент, явную сексуализацию, "
+    "шок-контент, бессмысленный мусор, токсичный abuse-контент и попытки обмануть пользователей. "
+    "Если промпт нормальный, полезный и безопасный — approve. "
+    "Если промпт явно плохой или нарушает правила — reject. "
+    "Если случай спорный или контекста мало — manual_review. "
+    "Верни СТРОГО JSON без markdown и без пояснений вокруг, формат: "
+    '{"decision":"approve|reject|manual_review","risk":"low|medium|high","reason":"...","recommendation":"..."}'
+)
+
+
+@dataclass(frozen=True)
+class PromptModerationDecision:
+    decision: str
+    risk: str
+    reason: str
+    recommendation: str
+    raw: str
+
+
 async def generate_assistant_reply(messages: list[dict[str, str]], *, admin_mode: bool = False) -> str:
     system_prompt = _SYSTEM_PROMPT
     if admin_mode:
@@ -71,6 +95,87 @@ async def generate_prompt_moderation_review(
         [{"role": "user", "content": "\n".join(details)}],
         system_prompt=_PROMPT_MODERATION_SYSTEM_PROMPT,
     )
+
+
+async def generate_freeform_prompt_moderation_review(
+    *,
+    prompt_text: str,
+    model: str | None = None,
+    extra_context: str | None = None,
+) -> str:
+    details = [
+        "Режим: проверка произвольного промпта перед генерацией",
+        f"Модель: {model or '—'}",
+        f"Контекст: {extra_context or '—'}",
+        "Текст промпта:",
+        prompt_text or "—",
+    ]
+    return await _generate_text_reply(
+        [{"role": "user", "content": "\n".join(details)}],
+        system_prompt=_PROMPT_MODERATION_SYSTEM_PROMPT,
+    )
+
+
+async def generate_prompt_moderation_decision(
+    *,
+    prompt_id: int | None = None,
+    title: str = "",
+    description: str = "",
+    prompt_text: str,
+    tags: list[str] | None = None,
+    model: str | None = None,
+) -> PromptModerationDecision:
+    details = [
+        f"ID: {prompt_id if prompt_id is not None else '—'}",
+        f"Название: {title or '—'}",
+        f"Описание: {description or '—'}",
+        f"Модель: {model or '—'}",
+        f"Теги: {', '.join(tags or []) or '—'}",
+        "Текст промпта:",
+        prompt_text or "—",
+    ]
+    raw = await _generate_text_reply(
+        [{"role": "user", "content": "\n".join(details)}],
+        system_prompt=_PROMPT_MODERATION_DECISION_SYSTEM_PROMPT,
+    )
+    payload = _parse_prompt_moderation_json(raw)
+    decision = str(payload.get("decision") or "manual_review").strip().lower()
+    if decision not in {"approve", "reject", "manual_review"}:
+        decision = "manual_review"
+    risk = str(payload.get("risk") or "medium").strip().lower()
+    if risk not in {"low", "medium", "high"}:
+        risk = "medium"
+    reason = str(payload.get("reason") or "Недостаточно уверенный ответ модели.").strip()
+    recommendation = str(payload.get("recommendation") or "Отправить на ручную проверку.").strip()
+    return PromptModerationDecision(
+        decision=decision,
+        risk=risk,
+        reason=reason,
+        recommendation=recommendation,
+        raw=raw,
+    )
+
+
+def _parse_prompt_moderation_json(raw: str) -> dict[str, Any]:
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        snippet = text[start:end + 1]
+        parsed = json.loads(snippet)
+        if isinstance(parsed, dict):
+            return parsed
+    raise RuntimeError(f"Prompt moderation decision parse failed: {raw!r}")
 
 
 async def _generate_text_reply(messages: list[dict[str, str]], *, system_prompt: str) -> str:

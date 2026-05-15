@@ -407,7 +407,7 @@ async def test_image_models_include_max_refs_and_single_count_for_nano_banana_2(
     assert response.status_code == 200
     payload = response.json()[0]
     assert payload["counts"] == [1]
-    assert payload["max_refs"] == 4
+    assert payload["max_refs"] == 8
 
 
 @pytest.mark.asyncio

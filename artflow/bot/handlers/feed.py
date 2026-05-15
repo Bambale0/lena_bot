@@ -293,7 +293,7 @@ async def cb_feed_share(call: CallbackQuery, session: AsyncSession, db_user: Use
     share_link = f"https://t.me/{bot_info.username}?start={share_payload}"
     await call.message.answer(
         f"📤 <b>Ссылка на пост</b>\n{share_link}\n\n"
-        f"👥 Твоя реферальная ссылка:\nhttps://t.me/{bot_info.username}?start={db_user.referral_code}",
+        f"👥 Твоя партнёрская ссылка:\nhttps://t.me/{bot_info.username}?start={db_user.referral_code}",
         reply_markup=back_to_menu_kb(),
     )
     await safe_answer_callback(call, "Ссылка готова")

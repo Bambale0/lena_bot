@@ -29,6 +29,7 @@ from db.models import (
     TransactionStatus,
     User,
     WithdrawalStatus,
+    CreditLedgerEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,28 @@ async def get_user_by_referral_code(session: AsyncSession, code: str) -> User | 
     return result.scalar_one_or_none()
 
 
+async def _insert_credit_ledger(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    delta: float,
+    balance_after: float,
+    entry_type: str,
+    source_type: str | None = None,
+    source_id: str | None = None,
+    note: str | None = None,
+) -> None:
+    session.add(CreditLedgerEntry(
+        user_id=user_id,
+        delta=delta,
+        balance_after=balance_after,
+        entry_type=entry_type,
+        source_type=source_type,
+        source_id=source_id,
+        note=note,
+    ))
+
+
 async def create_user(
     session: AsyncSession,
     tg_id: int,
@@ -155,6 +178,18 @@ async def create_user(
         language=language,
     )
     session.add(user)
+    await session.flush()
+    if welcome_credits:
+        await _insert_credit_ledger(
+            session,
+            user_id=user.id,
+            delta=welcome_credits,
+            balance_after=welcome_credits,
+            entry_type="welcome_bonus",
+            source_type="user",
+            source_id=str(tg_id),
+            note="Welcome bonus credits on signup",
+        )
     await session.commit()
     await session.refresh(user)
     logger.info("User created: tg_id=%s", tg_id)
@@ -197,15 +232,35 @@ async def set_user_language(session: AsyncSession, user_id: int, language: str) 
     await session.commit()
 
 
-async def add_credits(session: AsyncSession, user_id: int, amount: float) -> float:
+async def add_credits(
+    session: AsyncSession,
+    user_id: int,
+    amount: float,
+    *,
+    entry_type: str = "adjustment",
+    source_type: str | None = None,
+    source_id: str | None = None,
+    note: str | None = None,
+) -> float:
     result = await session.execute(
         update(User)
         .where(User.id == user_id)
         .values(credits=User.credits + amount)
         .returning(User.credits)
     )
+    new_balance = result.scalar_one()
+    await _insert_credit_ledger(
+        session,
+        user_id=user_id,
+        delta=amount,
+        balance_after=new_balance,
+        entry_type=entry_type,
+        source_type=source_type,
+        source_id=source_id,
+        note=note,
+    )
     await session.commit()
-    return result.scalar_one()
+    return new_balance
 
 
 async def add_referral_balance(session: AsyncSession, user_id: int, amount_rub: float) -> float:
@@ -219,16 +274,39 @@ async def add_referral_balance(session: AsyncSession, user_id: int, amount_rub: 
     return result.scalar_one()
 
 
-async def spend_credits(session: AsyncSession, user_id: int, amount: float) -> bool:
+async def spend_credits(
+    session: AsyncSession,
+    user_id: int,
+    amount: float,
+    *,
+    entry_type: str = "spend",
+    source_type: str | None = None,
+    source_id: str | None = None,
+    note: str | None = None,
+) -> bool:
     """Atomically deduct credits. Returns False if not enough credits."""
     result = await session.execute(
         update(User)
         .where(User.id == user_id, User.credits >= amount)
         .values(credits=User.credits - amount)
-        .returning(User.id)
+        .returning(User.credits)
+    )
+    new_balance = result.scalar_one_or_none()
+    if new_balance is None:
+        await session.commit()
+        return False
+    await _insert_credit_ledger(
+        session,
+        user_id=user_id,
+        delta=-amount,
+        balance_after=new_balance,
+        entry_type=entry_type,
+        source_type=source_type,
+        source_id=source_id,
+        note=note,
     )
     await session.commit()
-    return result.scalar_one_or_none() is not None
+    return True
 
 
 async def count_users(session: AsyncSession) -> float:
@@ -557,7 +635,7 @@ async def finish_generation(
         return
 
     royalty = feed_remix_royalty_credits(gen.credits_spent)
-    await add_credits(session, source.user_id, royalty)
+    await add_credits(session, source.user_id, royalty, entry_type="feed_remix_royalty", source_type="generation", source_id=str(gen.id), note=f"Royalty from remix of feed post {source.id}")
     logger.info(
         "Feed remix royalty credited: source_user=%s remixer=%s credits_spent=%s royalty=%s source_generation=%s generation=%s",
         source.user_id,
@@ -672,7 +750,7 @@ async def _feed_cards_from_stmt(session: AsyncSession, stmt) -> list[FeedGenerat
 async def get_feed_generations(
     session: AsyncSession,
     *,
-    limit: int = 30,
+    limit: int = 100,
 ) -> list[FeedGenerationCard]:
     stmt = (
         select(Generation)

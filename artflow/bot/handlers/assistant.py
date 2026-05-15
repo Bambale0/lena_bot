@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -10,7 +11,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.assistant_service import generate_assistant_reply
+from api.assistant_service import generate_assistant_reply, generate_freeform_prompt_moderation_review
 from bot.services.assistant_moderator import is_admin_tg_id, try_handle_admin_request
 from bot.states import AssistantFSM
 from bot.ui.router import render_screen
@@ -19,6 +20,23 @@ from db.models import User
 
 logger = logging.getLogger(__name__)
 router = Router(name="assistant")
+
+
+_PROMPT_MODERATION_PATTERNS = (
+    re.compile(r"^\s*(?:проверь|проверить|оцени|оцени|разбери|check|moderate)\s+(?:этот\s+)?(?:промпт|prompt)(?:\s+на\s+модерацию)?\s*[:\-]\s*(.+)$", re.I | re.S),
+    re.compile(r"^\s*(?:проверь|проверить|оцени|оценить|разбери|check|moderate)\s+на\s+модерацию\s*[:\-]\s*(.+)$", re.I | re.S),
+)
+
+
+def _extract_prompt_for_moderation(text: str) -> str | None:
+    source = (text or "").strip()
+    for pattern in _PROMPT_MODERATION_PATTERNS:
+        match = pattern.match(source)
+        if not match:
+            continue
+        prompt_text = (match.group(1) or "").strip()
+        return prompt_text or None
+    return None
 
 
 def assistant_kb(*, is_admin: bool = False):
@@ -41,11 +59,12 @@ def _intro_text(*, is_admin: bool = False) -> str:
             "Я могу не только отвечать на вопросы, но и помогать модерировать бот: "
             "показывать статистику, очередь промптов, заявки на вывод, искать пользователей, "
             "банить, разбанивать, начислять 💋 и разбирать спорные промпты.\n\n"
-            "Примеры: <code>статистика</code>, <code>забань 123456789</code>, <code>проверь промпт 42</code>."
+            "Примеры: <code>статистика</code>, <code>забань 123456789</code>, <code>проверь промпт 42</code>, <code>проверь промпт на модерацию: a cinematic portrait...</code>."
         )
     return (
         "🤖 <b>AI-ассистент</b>\n\n"
         "Можешь писать сюда вопросы по боту, промптам, идеям для контента, сценариям генерации, референсам, оплатам и вообще любые рабочие вопросы.\n\n"
+        "Ещё я умею быстро проверять текст промпта на модерационные риски. Формат: <code>проверь промпт на модерацию: ...</code>.\n\n"
         "Я держу короткий контекст диалога и отвечаю прямо в чате."
     )
 
@@ -112,15 +131,22 @@ async def handle_assistant_message(
 
     wait = await message.answer("🤔 Думаю...")
     try:
+        moderation_prompt = _extract_prompt_for_moderation(user_text)
         admin_outcome = None
-        if is_admin:
-            admin_outcome = await try_handle_admin_request(
-                user_text,
-                session=session,
-                bot=bot,
-                admin_tg_id=db_user.tg_id,
-            )
-        reply = admin_outcome.text if admin_outcome else await generate_assistant_reply(history, admin_mode=is_admin)
+        if moderation_prompt:
+            if len(moderation_prompt) < 8:
+                reply = "Пришли промпт целиком после двоеточия — сейчас текста слишком мало для проверки."
+            else:
+                reply = await generate_freeform_prompt_moderation_review(prompt_text=moderation_prompt)
+        else:
+            if is_admin:
+                admin_outcome = await try_handle_admin_request(
+                    user_text,
+                    session=session,
+                    bot=bot,
+                    admin_tg_id=db_user.tg_id,
+                )
+            reply = admin_outcome.text if admin_outcome else await generate_assistant_reply(history, admin_mode=is_admin)
     except Exception as exc:
         logger.exception("assistant reply error: %s", exc)
         await wait.edit_text(

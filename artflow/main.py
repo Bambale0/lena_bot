@@ -11,7 +11,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, Update, URLInputFile
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, FSInputFile, Update, URLInputFile
+from aiogram.exceptions import TelegramEntityTooLarge
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -196,6 +197,32 @@ async def _finish_midjourney_video_generation(
     )
 
 
+async def _download_url_to_tempfile(url: str, suffix: str = ".bin") -> str | None:
+    tmp_path = None
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        }
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"download failed: {resp.status}")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp_path = tmp.name
+                    async for chunk in resp.content.iter_chunked(1024 * 256):
+                        if chunk:
+                            tmp.write(chunk)
+        return tmp_path
+    except Exception as e:
+        logger.warning("Failed to download remote media %s: %s", url, e)
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        return None
+
+
 async def _set_bot_commands(bot: Bot) -> None:
     commands = [
         BotCommand(command="start", description="Главное меню"),
@@ -214,6 +241,9 @@ async def _set_bot_commands(bot: Bot) -> None:
 
 async def _accrue_referral_commissions(session, user: "User", amount_rub: float, bot_instance: Bot | None = None) -> None:
     """Начисляет реферальные комиссии с платежа по трём линиям."""
+    if settings.REFERRAL_FREEZE:
+        logger.warning("Referral freeze active: skip commission accrual for user_id=%s amount=%.2f", getattr(user, "id", None), amount_rub)
+        return
     active_bot = bot_instance or bot
     pairs = [
         (user.referrer_id, settings.REFERRAL_COMMISSION_L1),
@@ -236,6 +266,21 @@ async def _accrue_referral_commissions(session, user: "User", amount_rub: float,
             except Exception:
                 pass
         logger.info("Referral commission %.2f₽ -> user_id=%s (%.0f%%)", commission, ref_id, pct * 100)
+
+
+async def _reverse_referral_commissions(session, user: "User", amount_rub: float) -> None:
+    """Откатывает реферальные комиссии по возврату/реверсу платежа."""
+    pairs = [
+        (user.referrer_id, settings.REFERRAL_COMMISSION_L1),
+        (user.referrer_l2_id, settings.REFERRAL_COMMISSION_L2),
+        (user.referrer_l3_id, settings.REFERRAL_COMMISSION_L3),
+    ]
+    for ref_id, pct in pairs:
+        if not ref_id or pct <= 0:
+            continue
+        commission = round(amount_rub * pct, 2)
+        await repo.add_referral_balance(session, ref_id, -commission)
+        logger.info("Referral commission reversed %.2f₽ -> user_id=%s (%.0f%%)", commission, ref_id, pct * 100)
 
 
 # ── Global instances ──────────────────────────────────────────────────────────
@@ -510,7 +555,7 @@ async def cryptobot_webhook(request: Request) -> dict:
     async with AsyncSessionLocal() as session:
         tx = await repo.confirm_transaction(session, external_id)
         if tx:
-            new_balance = await repo.add_credits(session, tx.user_id, tx.credits)
+            new_balance = await repo.add_credits(session, tx.user_id, tx.credits, entry_type="payment_credit", source_type="transaction", source_id=str(tx.id), note=f"Payment confirmed via {tx.provider}")
             user = await repo.get_user_by_id(session, tx.user_id)
             if user:
                 await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
@@ -565,7 +610,7 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
         if status == "CONFIRMED":
             tx = await repo.confirm_transaction(session, external_id)
             if tx:
-                new_balance = await repo.add_credits(session, tx.user_id, tx.credits)
+                new_balance = await repo.add_credits(session, tx.user_id, tx.credits, entry_type="payment_credit", source_type="transaction", source_id=str(tx.id), note=f"Payment confirmed via {tx.provider}")
                 user = await repo.get_user_by_id(session, tx.user_id)
                 if user:
                     await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
@@ -583,7 +628,12 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
         elif status in {"CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL"}:
             await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
         elif status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
-            await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
+            tx = await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
+            if tx and tx.status == TransactionStatus.paid:
+                await repo.add_credits(session, tx.user_id, -tx.credits, entry_type="payment_refund", source_type="transaction", source_id=str(tx.id), note=f"Refund/reversal via {tx.provider}")
+                user = await repo.get_user_by_id(session, tx.user_id)
+                if user:
+                    await _reverse_referral_commissions(session, user, tx.amount_rub)
         else:
             logger.info("Unhandled T-Bank status acknowledged: payment_id=%s status=%s", external_id, status)
 
@@ -707,12 +757,85 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                         reply_markup=image_session_kb(gen.id),
                     )
                 else:
-                    await bot.send_video(
-                        chat_id=user.tg_id,
-                        video=URLInputFile(result_url, filename="video.mp4"),
-                        caption=caption,
-                        reply_markup=after_generation_kb(gen.id, "video"),
-                    )
+                    video_sent = False
+                    video_too_large = False
+                    try:
+                        await bot.send_video(
+                            chat_id=user.tg_id,
+                            video=URLInputFile(result_url, filename="video.mp4"),
+                            caption=caption,
+                            reply_markup=after_generation_kb(gen.id, "video"),
+                        )
+                        video_sent = True
+                    except TelegramEntityTooLarge as video_url_err:
+                        video_too_large = True
+                        logger.warning(
+                            "Video URL send too large user=%s gen=%s url=%s err=%s",
+                            user.tg_id, gen.id, result_url, video_url_err,
+                        )
+                    except Exception as video_url_err:
+                        logger.warning(
+                            "Video URL send failed user=%s gen=%s url=%s err=%s",
+                            user.tg_id, gen.id, result_url, video_url_err,
+                        )
+                        tmp_video = await _download_url_to_tempfile(result_url, suffix=".mp4")
+                        if tmp_video:
+                            try:
+                                await bot.send_video(
+                                    chat_id=user.tg_id,
+                                    video=FSInputFile(tmp_video, filename=f"video_{gen.id}.mp4"),
+                                    caption=caption,
+                                    reply_markup=after_generation_kb(gen.id, "video"),
+                                )
+                                video_sent = True
+                            except TelegramEntityTooLarge as video_file_err:
+                                video_too_large = True
+                                logger.warning(
+                                    "Video file send too large user=%s gen=%s url=%s err=%s",
+                                    user.tg_id, gen.id, result_url, video_file_err,
+                                )
+                            except Exception as video_file_err:
+                                logger.warning(
+                                    "Video file send failed user=%s gen=%s url=%s err=%s",
+                                    user.tg_id, gen.id, result_url, video_file_err,
+                                )
+                            finally:
+                                try:
+                                    Path(tmp_video).unlink(missing_ok=True)
+                                except Exception:
+                                    pass
+                    if not video_sent:
+                        if video_too_large:
+                            try:
+                                await bot.send_document(
+                                    chat_id=user.tg_id,
+                                    document=URLInputFile(result_url, filename=f"video_{gen.id}.mp4"),
+                                    caption="📎 <b>Видео готово файлом</b>",
+                                    reply_markup=after_generation_kb(gen.id, "video"),
+                                )
+                                video_sent = True
+                            except Exception as video_doc_err:
+                                logger.warning(
+                                    "Video document fallback failed user=%s gen=%s url=%s err=%s",
+                                    user.tg_id, gen.id, result_url, video_doc_err,
+                                )
+                        if not video_sent:
+                            fallback_text = (
+                                f"✅ <b>Видео готово</b>\n\n"
+                                f"Если Telegram не принял ролик, вот прямая ссылка:\n{result_url}"
+                            )
+                            if video_too_large:
+                                fallback_text = (
+                                    f"✅ <b>Видео готово</b>\n\n"
+                                    f"Ролик слишком большой для отправки ботом в Telegram.\n"
+                                    f"Вот прямая ссылка на видео:\n{result_url}"
+                                )
+                            await bot.send_message(
+                                chat_id=user.tg_id,
+                                text=fallback_text,
+                                reply_markup=after_generation_kb(gen.id, "video"),
+                            )
+                            logger.info("Video link fallback sent user=%s gen=%s", user.tg_id, gen.id)
             except Exception as e:
                 logger.warning("Failed to send KIE result user=%s gen=%s: %s", user.tg_id, gen.id, e)
 
@@ -783,6 +906,9 @@ async def kie_music_webhook(request: Request) -> dict:
         "insufficient",
         "unauthorized",
         "invalid",
+        "don't reference specific artists",
+        "do not reference specific artists",
+        "contains artist name",
     )
     looks_failed = (
         status in {"CREATE_TASK_FAILED", "GENERATE_AUDIO_FAILED", "CALLBACK_EXCEPTION", "SENSITIVE_WORD_ERROR"}
@@ -870,6 +996,16 @@ async def kie_music_webhook(request: Request) -> dict:
                 )
         except Exception as e:
             logger.warning("Failed to send music result tg_id=%s: %s", tg_id, e)
+            try:
+                links = "\n".join(audio_urls)
+                await bot.send_message(
+                    tg_id,
+                    f"🎵 <b>Трек готов</b>\n\nTelegram не принял аудио напрямую. Вот ссылка на результат:\n{links}",
+                    reply_markup=back_to_menu_kb(),
+                )
+                logger.info("Music link fallback sent tg_id=%s task_id=%s", tg_id, task_id)
+            except Exception as fallback_err:
+                logger.warning("Failed to send music link fallback tg_id=%s: %s", tg_id, fallback_err)
 
     return {"ok": True}
 

@@ -1013,7 +1013,7 @@ async def handle_credits_amount(message: Message, state: FSMContext, session: As
         return
 
     data = await state.get_data()
-    new_balance = await repo.add_credits(session, data["target_user_id"], amount)
+    new_balance = await repo.add_credits(session, data["target_user_id"], amount, entry_type="admin_adjustment", source_type="admin", source_id=str(message.from_user.id), note="Manual admin balance adjustment")
     await state.clear()
     await message.answer(
         f"✅ Начислено <b>{amount}</b> 💋 пользователю {data['target_tg_id']}\n"

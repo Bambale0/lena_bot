@@ -1,40 +1,49 @@
 .env
+.env.*
+!.env.example
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 .coverage
 htmlcov/
-.mypy_cache/
-dist/
-!webapp/dist/
-!webapp/dist/**
 *.egg-info/
-pgdata/
-redisdata/
-venv/static/upload/*
-logs/
-.logs/
-.patch_*
-static/
 venv/
 
-# Backup files
+# Local runtime data
+*.db
+*.sqlite
+*.sqlite3
+pgdata/
+redisdata/
+static/upload/*
+logs/
+.logs/*
+!.logs/.gitkeep
+
+# Temporary and backup files
 *.bak
 *.bak2
-
-.bin
-.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-*.zip
+*.bak_*
+tmp_*.py
+backups/
+.patch_*
 .tmp_apix_archive/
+
+# Frontend
+webapp/dist/
 webapp/node_modules/
 webapp/.vite/
 webapp/tsconfig.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# miniapp build
-webapp/dist/
-webapp/node_modules/
-.patch_*
+# Archives and local binaries
+*.zip
+.bin
+.log

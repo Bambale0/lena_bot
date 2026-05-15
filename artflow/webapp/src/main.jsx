@@ -104,6 +104,28 @@ async function api(path, options = {}) {
 
 function items(x) { return Array.isArray(x) ? x : Array.isArray(x?.items) ? x.items : []; }
 
+function formatCredits(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return "0";
+  return String(Number.isInteger(num) ? num : Number(num.toFixed(2))).replace(/\.0+$/, "");
+}
+
+async function copyText(value) {
+  if (!value) return false;
+  try {
+    await navigator.clipboard?.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function openExternalUrl(url) {
+  if (!url) return;
+  if (tg()) tg().openLink(url);
+  else window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function isMiniappVideoModelSupported(model) {
   const modes = model?.modes || [];
   return modes.includes("text") || modes.includes("image");
@@ -182,7 +204,7 @@ function MediaThumb({ url, type, idx = 0, className = "" }) {
       return <video src={url} className={className || undefined} controls playsInline preload="metadata" />;
     if (type === "music" || /\.(mp3|ogg|wav)/i.test(url))
       return <div className={`musicThumb ${className}`}>🎵</div>;
-    return <img src={url} className={className || undefined} />;
+    return <img src={url} className={className || undefined} alt="result" loading="lazy" referrerPolicy="no-referrer" />;
   }
   return <Art type={["a","b","c","d"][idx % 4]} />;
 }
@@ -275,12 +297,15 @@ function TopupModal({ onClose }) {
     if (!selected) return;
     setBusy(true); setErr(null);
     try {
-      const endpoint = method === "crypto" ? "/topup/crypto" : "/topup/tbank";
+      const endpoint = method === "crypto"
+        ? "/topup/crypto"
+        : method === "stars"
+          ? "/topup/stars"
+          : "/topup/tbank";
       const res = await api(endpoint, { method: "POST", body: JSON.stringify({ plan_key: selected }) });
       const url = res.invoice_link || res.pay_url;
       if (!url) throw new Error("Платёжная ссылка не получена");
-      if (tg()) tg().openLink(url);
-      else window.open(url, "_blank");
+      openExternalUrl(url);
       onClose();
     } catch (e) {
       setErr(e.message);
@@ -307,7 +332,7 @@ function TopupModal({ onClose }) {
               >
                 <b>{p.title || p.label}</b>
                 <span>{p.credits} 💋</span>
-                <em>{formatRub(p)}</em>
+                <em>{method === "stars" ? `${p.price_stars} ⭐` : formatRub(p)}</em>
               </button>
             ))}
           </div>
@@ -315,6 +340,7 @@ function TopupModal({ onClose }) {
 
         <div className="tabs" style={{ marginTop: 16 }}>
           <button className={method === "tbank" ? "active" : ""} onClick={() => setMethod("tbank")}>💳 Т-Банк</button>
+          <button className={method === "stars" ? "active" : ""} onClick={() => setMethod("stars")}>⭐ Stars</button>
           <button className={method === "crypto" ? "active" : ""} onClick={() => setMethod("crypto")}>₮ Крипто</button>
         </div>
 
@@ -349,7 +375,7 @@ function ProfileStrip({ user, historyCount, setScreen, setTopup }) {
           <b>{user.credits}</b><span>💋 токены</span>
         </div>
         <div><b>{historyCount}</b><span>работ</span></div>
-        <div><b>{user.referral_balance || 0}</b><span>реф ₽</span></div>
+        <div><b>{user.referral_balance || 0}</b><span>партнёр ₽</span></div>
         <div><b>{user.referral_withdraw_min_rub || 1000}₽</b><span>мин. вывод</span></div>
         <div onClick={() => setTopup(true)} style={{ cursor: "pointer" }}>
           <b>+</b><span>пополнить</span>
@@ -445,6 +471,8 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const shares = item.shares_count || 0;
+  const remixes = item.remixes || 0;
 
   async function handleLike() {
     if (liked || busy) return;
@@ -467,6 +495,7 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
       await navigator.clipboard?.writeText(res.link);
       tg()?.HapticFeedback?.notificationOccurred("success");
       setLinkCopied(true);
+      onNotice?.({ type: "success", message: "Ссылка для репоста скопирована" });
       setTimeout(() => setLinkCopied(false), 2000);
     } catch (e) {
       onNotice?.({ type: "error", message: e.message || "Не удалось получить ссылку" });
@@ -491,24 +520,34 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
     }
   }
 
+  const actionBtn = { padding: "9px 12px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", border: "1px solid var(--border-strong)", background: "var(--surface-2)", color: "var(--text-soft)" };
+
   return (
     <div className="feedFullCard">
       <div className="feedFullMedia">
         <MediaThumb url={item.result_url} type="image" idx={idx} className="feedFullImg" />
       </div>
       <div className="feedFullInfo">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
           <span className="modelBadge">{item.model}</span>
           <span className="feedAuthor">@{item.author || "anon"}</span>
         </div>
-        <div className="feedActions" style={{ marginTop: 10, display: "flex", gap: 8 }}>
-          <button className={`likeBtn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={busy}>
-            ♥ {likes}
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10, fontSize: 12, color: "var(--text-ghost)" }}>
+          <span>♥ {likes}</span>
+          <span>🔁 {remixes}</span>
+          <span>📤 {shares}</span>
+          {item.is_mine && <span style={{ color: "var(--success)" }}>это твой пост</span>}
+        </div>
+
+        <div className="feedActions" style={{ display: "grid", gridTemplateColumns: item.is_mine ? "1fr 1fr" : "1fr 1fr", gap: 8 }}>
+          <button className={`likeBtn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={busy} style={{ ...actionBtn }}>
+            ♥ {liked ? "Лайк" : "Нравится"}
           </button>
           <button
             className="remixBtn"
             onClick={() => onRemix && onRemix(item)}
-            style={{ flex: 1, padding: "8px 12px", borderRadius: 10, background: "var(--accent-soft)", border: "1px solid var(--accent-border)", color: "var(--accent-text)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            style={{ ...actionBtn, background: "var(--accent-soft)", border: "1px solid var(--accent-border)", color: "var(--accent-text)" }}
           >
             🔁 Повторить
           </button>
@@ -516,16 +555,16 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
             <>
               <button
                 onClick={handleCopyLink}
-                style={{ padding: "8px 10px", borderRadius: 10, background: linkCopied ? "var(--success-soft)" : "var(--surface-2)", border: `1px solid ${linkCopied ? "var(--success-border)" : "var(--border-strong)"}`, color: linkCopied ? "var(--success)" : "var(--text-soft)", fontSize: 13, cursor: "pointer" }}
+                style={{ ...actionBtn, background: linkCopied ? "var(--success-soft)" : "var(--surface-2)", border: `1px solid ${linkCopied ? "var(--success-border)" : "var(--border-strong)"}`, color: linkCopied ? "var(--success)" : "var(--text-soft)" }}
               >
-                {linkCopied ? "✅" : "🔗"}
+                {linkCopied ? "✅ Скопировано" : "🔗 Репост"}
               </button>
               <button
                 onClick={handleRemove}
                 disabled={removing}
-                style={{ padding: "8px 10px", borderRadius: 10, background: "rgba(255, 107, 107, 0.12)", border: "1px solid rgba(255, 107, 107, 0.35)", color: "#ff6b6b", fontSize: 13, cursor: removing ? "default" : "pointer", opacity: removing ? 0.7 : 1 }}
+                style={{ ...actionBtn, background: "rgba(255, 107, 107, 0.12)", border: "1px solid rgba(255, 107, 107, 0.35)", color: "#ff6b6b", opacity: removing ? 0.7 : 1 }}
               >
-                {removing ? "…" : "🗑"}
+                {removing ? "…" : "🗑 Убрать"}
               </button>
             </>
           )}
@@ -536,16 +575,40 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
 }
 
 function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemoved }) {
-  const filtered = feed;
+  const [mode, setMode] = useState("all");
+  const myCount = (feed || []).filter(item => item.is_mine).length;
+  const filtered = mode === "mine" ? (feed || []).filter(item => item.is_mine) : (feed || []);
+  const totalLikes = filtered.reduce((sum, item) => sum + (item.likes_count || 0), 0);
 
   return (
     <>
       <h1>Лента</h1>
+      <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 14, background: "var(--surface-2)", border: "1px solid var(--border-soft)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <div>
+            <div style={{ fontWeight: 700 }}>Публичные работы</div>
+            <div style={{ fontSize: 12, color: "var(--text-ghost)", marginTop: 4 }}>Смотри чужие работы, повторяй и забирай ссылку на репост для своих.</div>
+          </div>
+          <button onClick={() => setScreen("studio")} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent-border)", background: "var(--accent-soft)", color: "var(--accent-text)", fontSize: 13, fontWeight: 600 }}>В студию</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <button onClick={() => setMode("all")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${mode === "all" ? "var(--accent-border)" : "var(--border-strong)"}`, background: mode === "all" ? "var(--accent-soft)" : "var(--surface-1)", color: mode === "all" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 600 }}>Все ({feed.length})</button>
+          <button onClick={() => setMode("mine")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${mode === "mine" ? "var(--success-border)" : "var(--border-strong)"}`, background: mode === "mine" ? "var(--success-soft)" : "var(--surface-1)", color: mode === "mine" ? "var(--success)" : "var(--text-muted)", fontWeight: 600 }}>Мои ({myCount})</button>
+        </div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: "var(--text-ghost)" }}>
+          <span>Карточек: {filtered.length}</span>
+          <span>Лайков: {totalLikes}</span>
+        </div>
+      </div>
       <PromptFeed prompts={prompts} setScreen={setScreen} />
       {feedLoading ? <Spinner /> : (
         <div className="feedList">
           {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} onNotice={onNotice} onRemoved={onRemoved} />)}
-          {filtered.length === 0 && <p style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 32 }}>Пусто</p>}
+          {filtered.length === 0 && (
+            <div style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 32, padding: "24px 16px", border: "1px dashed var(--border-strong)", borderRadius: 16 }}>
+              {mode === "mine" ? "У тебя пока нет работ в ленте. Опубликуй готовую картинку и забери ссылку для репоста." : "Лента пока пустая."}
+            </div>
+          )}
         </div>
       )}
     </>
@@ -564,9 +627,20 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false, onNot
     if (inFeed || busyFeed) return;
     setBusyFeed(true);
     try {
-      await api(`/generations/${genId}/share`, { method: "POST" });
+      const res = await api(`/generations/${genId}/share`, { method: "POST" });
       setInFeed(true);
       tg()?.HapticFeedback?.notificationOccurred("success");
+      const link = res?.link || "";
+      if (link) {
+        try {
+          await navigator.clipboard?.writeText(link);
+          onNotice?.({ type: "success", message: "Добавлено в ленту. Ссылка для репоста скопирована." });
+        } catch {
+          onNotice?.({ type: "success", message: `Добавлено в ленту. Ссылка: ${link}` });
+        }
+      } else {
+        onNotice?.({ type: "success", message: "Добавлено в ленту" });
+      }
     } catch (e) { onNotice?.({ type: "error", message: e.message || "Не удалось опубликовать" }); }
     finally { setBusyFeed(false); }
   }
@@ -909,11 +983,17 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
   const isPerSecond = Boolean(current?.is_per_second);
   const requiresPrompt = current?.key !== "midjourney-blend";
   const perSec = Number(current?.credits_per_sec || current?.credits || 0);
-  const baseCost = Number(current?.credits || 0);
+  const baseCost = kind === "image"
+    ? Number((current?.quality_prices?.[quality] ?? current?.credits) || 0)
+    : Number(current?.credits || 0);
   const estimatedCost = kind === "video" && isPerSecond ? duration * perSec : baseCost;
 
   const modes = current?.modes || ["text"];
-  const qualityOptions = normalizeQualityOptions(current);
+  const qualityOptions = normalizeQualityOptions(current).map((option) => {
+    const price = Number(current?.quality_prices?.[option.value]);
+    if (!Number.isFinite(price) || price <= 0) return option;
+    return { ...option, label: `${option.label} · ${formatCredits(price)} 💋` };
+  });
   const modeOptions = normalizeModeOptions(current);
   const durations = current?.durations || current?.duration_options || [];
   const resolutions = current?.resolutions || [];
@@ -933,7 +1013,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
     if (!prompt.trim() || improvingPrompt) return;
     setImprovingPrompt(true);
     try {
-      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind }) });
+      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind: "music" }) });
       setPrompt(result.prompt || prompt);
       tg()?.HapticFeedback?.notificationOccurred("success");
       onNotice?.({ type: "success", message: kind === "video" ? "Промпт для видео улучшен" : "Промпт улучшен" });
@@ -1049,7 +1129,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
                 <small>
                   {modelModesLabel(m)}
                   {" · "}
-                  {m.is_per_second ? `${m.credits_per_sec || m.credits} 💋/сек` : `${m.credits} 💋`}
+                  {m.is_per_second ? `${m.credits_per_sec || m.credits} 💋/сек` : `${formatCredits((model === m.key ? (m.quality_prices?.[quality] ?? m.credits) : m.credits) || 0)} 💋`}
                 </small>
               </span>
             </button>
@@ -1179,7 +1259,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
         onClick={handleGenerate}
       >
         {kind === "video" ? "Создать видео" : "Сгенерировать"}
-        <span>{estimatedCost || current?.credits || 0} 💋</span>
+        <span>{formatCredits(estimatedCost || current?.credits || 0)} 💋</span>
       </button>
 
       {generation && (
@@ -1189,6 +1269,32 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
             <span className={`statusBadge ${generationStatusTone(generation.status)}`}>{formatGenerationStatus(generation.status)}</span>
           </div>
           {generation.error && <p>{generation.error}</p>}
+          {generation.status === "pending" && (
+            <p style={{ color: "var(--text-soft)", fontSize: 12, margin: "8px 0 0" }}>Результат появится здесь автоматически, без поиска в истории.</p>
+          )}
+        </div>
+      )}
+
+      {generation?.result_url && kind === "image" && (
+        <div className="resultCard">
+          <div className="resultMedia">
+            <MediaThumb url={generation.result_url} type="image" className="resultImg" />
+          </div>
+          <div className="resultInfo">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <span className="modelBadge">{generation.model || model}</span>
+              <span style={{ fontSize: 11, color: "var(--success)" }}>готово</span>
+            </div>
+            <p className="resultPrompt">{generation.prompt || prompt || ""}</p>
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              <button type="button" className="ghost" onClick={() => openExternalUrl(generation.result_url)} style={{ textAlign: "center", padding: 12, borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--border-strong)" }}>Открыть оригинал</button>
+              <button type="button" className="ghost" onClick={async () => {
+                const ok = await copyText(generation.prompt || prompt || "");
+                if (ok) onNotice?.({ type: "success", message: "Промпт скопирован" });
+              }} style={{ textAlign: "center", padding: 12, borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--border-strong)" }}>📋 Скопировать промпт</button>
+            </div>
+            <GenShareButtons genId={generation.id} initialFeed={generation.is_public_feed} initialLib={generation.is_prompt_library} onNotice={onNotice} />
+          </div>
         </div>
       )}
     </section>
@@ -1210,7 +1316,7 @@ function Music({ user, musicGen, onGenerateMusic, setTopup, onNotice }) {
     if (!prompt.trim() || improvingPrompt) return;
     setImprovingPrompt(true);
     try {
-      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind }) });
+      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind: "music" }) });
       setPrompt(result.prompt || prompt);
       tg()?.HapticFeedback?.notificationOccurred("success");
       onNotice?.({ type: "success", message: "Промпт улучшен" });
@@ -1311,21 +1417,30 @@ function History({ history, loading, onNotice }) {
         : <div className="historyList">
             {history.map((g, i) => (
               <div key={g.id} className="historyCard">
-                <div className="historyMedia">
-                  <MediaThumb url={g.result_url} type={g.gen_type} idx={i} className="historyImg" />
+                <div className="historyMediaWrap">
+                  <button type="button" className="historyMedia historyMediaBtn" onClick={() => g.result_url && openExternalUrl(g.result_url)} disabled={!g.result_url}>
+                    <MediaThumb url={g.result_url} type={g.gen_type} idx={i} className="historyImg" />
+                  </button>
                 </div>
                 <div className="historyInfo">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                     <span className="modelBadge">{g.model}</span>
-                    <span style={{ fontSize: 11, color: getStatusColor(g.status) }}>{g.status}</span>
+                    <span style={{ fontSize: 11, color: getStatusColor(g.status) }}>{formatGenerationStatus(g.status)}</span>
                   </div>
                   <p className="feedPrompt">{g.prompt}</p>
                   {g.gen_type === "music" && g.result_url && (
                     <audio controls src={g.result_url} style={{ width: "100%", borderRadius: 8, marginTop: 6 }} />
                   )}
+                  <div className="historyActionRow">
+                    <button type="button" className="ghost" onClick={() => g.result_url && openExternalUrl(g.result_url)} disabled={!g.result_url}>👁 Открыть</button>
+                    <button type="button" className="ghost" onClick={async () => {
+                      const ok = await copyText(g.prompt || "");
+                      if (ok) onNotice?.({ type: "success", message: "Промпт скопирован" });
+                    }} disabled={!g.prompt}>📋 Промпт</button>
+                  </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                     <small style={{ color: "var(--text-ghost)", fontSize: 11 }}>{formatDate(g.created_at)}</small>
-                    <small style={{ color: "var(--accent-text)", fontSize: 11 }}>−{g.credits_spent} 💋</small>
+                    <small style={{ color: "var(--accent-text)", fontSize: 11 }}>−{formatCredits(g.credits_spent)} 💋</small>
                   </div>
                   {g.status === "done" && g.gen_type !== "music" && (
                     <GenShareButtons genId={g.id} initialFeed={g.is_public_feed} initialLib={g.is_prompt_library} onNotice={onNotice} />
@@ -1405,7 +1520,7 @@ function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolved
       <div className="profileStats">
         <div><b>{user.credits}</b><span>токены</span></div>
         <div><b>{history.length}</b><span>работ</span></div>
-        <div><b>{user.referral_balance || 0}</b><span>реф ₽</span></div>
+        <div><b>{user.referral_balance || 0}</b><span>партнёр ₽</span></div>
       </div>
 
       <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 13, lineHeight: 1.45 }}>
@@ -1424,7 +1539,7 @@ function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolved
       <ThemePicker value={theme} onChange={setTheme} resolvedTheme={resolvedTheme} />
 
       <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 13 }}>
-        <span style={{ color: "var(--text-soft)" }}>Реферальная ссылка: </span>
+        <span style={{ color: "var(--text-soft)" }}>Партнёрская ссылка: </span>
         <b
           style={{ color: "var(--accent-text)", cursor: "pointer", wordBreak: "break-all" }}
           onClick={() => {
@@ -1648,7 +1763,7 @@ function App() {
   const me = useApi(() => api("/me"), fallbackUser);
   const imageModels = useApi(() => api("/models/image").then(x => items(x).length ? items(x) : x), fallbackImageModels);
   const videoModels = useApi(() => api("/models/video").then(x => items(x).length ? items(x) : x), fallbackVideoModels);
-  const feed = useApi(() => api("/feed?limit=30").then(items), fallbackFeed);
+  const feed = useApi(() => api("/feed?limit=100").then(items), fallbackFeed);
   const history = useApi(() => api("/history?limit=50").then(items), []);
   const prompts = useApi(() => api("/prompts?limit=30").then(items), []);
   const midjourneyItems = useApi(() => api("/public/midjourney").then(items), []);
@@ -1719,7 +1834,14 @@ function App() {
         if (["done", "failed"].includes(g.status)) {
           clearInterval(poll.current);
           setPollId(null);
-          if (g.status === "done") { me.reload(); history.reload(); }
+          if (g.status === "done") {
+            me.reload();
+            history.reload();
+            feed.reload();
+            setScreen("studio");
+            tg()?.HapticFeedback?.notificationOccurred("success");
+            setNotice({ type: "success", message: "Фото готово — показываю результат сразу." });
+          }
         }
       } catch {
         clearInterval(poll.current);

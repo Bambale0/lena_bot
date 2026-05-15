@@ -1795,14 +1795,26 @@ async def cb_image_settings_model(
 # ── Share to feed ─────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("gen:share:"))
-async def cb_gen_share(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+async def cb_gen_share(call: CallbackQuery, session: AsyncSession, db_user: User, bot: Bot) -> None:
+    from bot.utils.deep_links import build_start_payload
     from bot.utils.telegram_ui import safe_answer_callback
+
     gen_id = int(call.data.split(":")[-1])
     gen = await repo.share_to_feed(session, gen_id, db_user.id)
     if not gen:
         await safe_answer_callback(call, "❌ Не удалось поделиться")
         return
-    await safe_answer_callback(call, "✅ Опубликовано в ленте!")
+
+    bot_info = await bot.get_me()
+    share_payload = build_start_payload(ref_code=db_user.referral_code, target_kind="feed", target_id=gen.id)
+    share_link = f"https://t.me/{bot_info.username}?start={share_payload}"
+
+    await call.message.answer(  # type: ignore[union-attr]
+        "📤 <b>Фото добавлено в ленту</b>\n\n"
+        f"🔗 Ссылка на пост для повтора:\n{share_link}",
+        reply_markup=back_to_menu_kb(),
+    )
+    await safe_answer_callback(call, "✅ Ссылка на пост готова")
 
 
 @router.callback_query(F.data.startswith("gen:library:"))

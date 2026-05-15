@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
+from typing import Any
 
 import httpx
 
@@ -37,6 +39,44 @@ async def generate_prompt_from_photo(image_bytes: bytes, mime_type: str = "image
             logger.warning("photo_prompt: %s failed — %s", model, exc)
 
     raise RuntimeError("Both KIE GPT models failed to generate a prompt.")
+
+
+def _extract_kie_text(data: Any) -> str:
+    if not isinstance(data, dict):
+        raise KeyError("response is not a JSON object")
+
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        if isinstance(message, dict):
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+            if isinstance(content, list):
+                parts: list[str] = []
+                for item in content:
+                    if isinstance(item, dict):
+                        text = item.get("text") or item.get("content")
+                        if isinstance(text, str) and text.strip():
+                            parts.append(text.strip())
+                    elif isinstance(item, str) and item.strip():
+                        parts.append(item.strip())
+                if parts:
+                    return "\n".join(parts).strip()
+
+    for key in ("output_text", "text", "answer", "response"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    result = data.get("data")
+    if isinstance(result, dict):
+        for key in ("output_text", "text", "answer", "response"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    raise KeyError("choices")
 
 
 async def _call_kie_gpt(model: str, image_data_url: str) -> str:
@@ -80,4 +120,12 @@ async def _call_kie_gpt(model: str, image_data_url: str) -> str:
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
+        try:
+            return _extract_kie_text(data)
+        except Exception:
+            logger.warning(
+                "photo_prompt: unexpected %s response: %s",
+                model,
+                json.dumps(data, ensure_ascii=False)[:1200],
+            )
+            raise

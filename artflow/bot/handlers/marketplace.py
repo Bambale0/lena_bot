@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.assistant_service import generate_prompt_moderation_decision
 from api.image_service import ImageModel
 from api.public_files import ensure_public_image_url, local_upload_path_from_url, mirror_telegram_file
 from bot.filters.admin import IsAdmin
@@ -51,6 +52,7 @@ from db.prompt_repository import (
     infer_tags,
     like_prompt,
     reject_prompt,
+    set_ai_moderation_result,
     use_prompt,
 )
 
@@ -397,7 +399,7 @@ async def cb_prompt_share(call: CallbackQuery, session: AsyncSession, db_user: U
     share_link = f"https://t.me/{bot_info.username}?start={share_payload}"
     await call.message.answer(
         f"📤 Поделись промптом «<b>{prompt.title}</b>»:\n{share_link}\n\n"
-        f"Твоя реферальная ссылка: https://t.me/{bot_info.username}?start={db_user.referral_code}",
+        f"Твоя партнёрская ссылка: https://t.me/{bot_info.username}?start={db_user.referral_code}",
         reply_markup=back_to_menu_kb(),
     )
     await call.answer("Ссылка готова")
@@ -818,10 +820,53 @@ async def fsm_confirm(
         model=data["model"],
         tags=data["tags"],
     )
+
+    moderation_decision = None
+    try:
+        moderation_decision = await generate_prompt_moderation_decision(
+            prompt_id=prompt.id,
+            title=prompt.title,
+            description=prompt.description,
+            prompt_text=prompt.prompt_text,
+            tags=list(prompt.tags or []),
+            model=prompt.model,
+        )
+        prompt = await set_ai_moderation_result(
+            session,
+            prompt.id,
+            decision=moderation_decision.decision,
+            risk=moderation_decision.risk,
+            reason=moderation_decision.reason,
+            recommendation=moderation_decision.recommendation,
+            raw=moderation_decision.raw,
+        ) or prompt
+    except Exception as e:
+        logger.warning("Prompt auto moderation failed %s: %s", prompt.id, e)
+
+    if moderation_decision and moderation_decision.decision == "approve":
+        prompt = await approve_prompt(session, prompt.id) or prompt
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            f"✅ Промпт «<b>{prompt.title}</b>» автоматически одобрен и опубликован в витрине.",
+            reply_markup=prompts_home_kb(),
+        )
+        await call.answer("Одобрено автоматически ✓")
+        return
+
+    if moderation_decision and moderation_decision.decision == "reject":
+        prompt = await reject_prompt(session, prompt.id, moderation_decision.reason[:500]) or prompt
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            f"❌ Промпт «<b>{prompt.title}</b>» автоматически отклонён.\n\nПричина: {prompt.reject_reason or moderation_decision.reason}",
+            reply_markup=prompts_home_kb(),
+        )
+        await call.answer("Отклонено автоматически")
+        return
+
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         f"✅ Промпт «<b>{prompt.title}</b>» отправлен на модерацию.\n\n"
-        "После одобрения он появится в витрине.",
+        "ИИ не смог уверенно принять решение, поэтому промпт ушёл на ручную проверку.",
         reply_markup=prompts_home_kb(),
     )
     await call.answer()
@@ -831,16 +876,24 @@ async def fsm_confirm(
     for admin_id in settings.ADMIN_IDS:
         try:
             admin_photo = _prompt_photo_source(prompt.preview_url)
+            ai_note = ""
+            if moderation_decision:
+                ai_note = (
+                    f"\nAI verdict: manual_review\n"
+                    f"AI risk: {moderation_decision.risk}\n"
+                    f"AI reason: {moderation_decision.reason[:220]}\n"
+                    f"AI recommendation: {moderation_decision.recommendation[:220]}\n"
+                )
             if admin_photo:
                 await bot.send_photo(
                     admin_id,
                     photo=admin_photo,
                     caption=(
-                        f"📬 <b>Новый промпт на модерацию</b>\n\n"
+                        f"📬 <b>Спорный промпт на модерацию</b>\n\n"
                         f"ID: {prompt.id}\n"
                         f"Название: {prompt.title}\n"
                         f"Теги: {' '.join('#' + tag for tag in prompt.tags)}\n"
-                        f"Автор: {db_user.tg_id} (@{db_user.username or '—'})\n\n"
+                        f"Автор: {db_user.tg_id} (@{db_user.username or '—'}){ai_note}\n"
                         f"<blockquote>{prompt.prompt_text[:400]}</blockquote>"
                     ),
                     reply_markup=moderation_kb(prompt.id),
@@ -848,9 +901,10 @@ async def fsm_confirm(
             else:
                 await bot.send_message(
                     admin_id,
-                    f"📬 <b>Новый промпт на модерацию</b>\n\n"
+                    f"📬 <b>Спорный промпт на модерацию</b>\n\n"
                     f"ID: {prompt.id}\n"
-                    f"Название: {prompt.title}\n\n"
+                    f"Название: {prompt.title}\n"
+                    f"Автор: {db_user.tg_id} (@{db_user.username or '—'}){ai_note}\n\n"
                     f"<blockquote>{prompt.prompt_text[:400]}</blockquote>",
                     reply_markup=moderation_kb(prompt.id),
                 )

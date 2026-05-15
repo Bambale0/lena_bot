@@ -85,8 +85,60 @@ _SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
 }
 
 _PROMPT_MAX_LENGTH_BY_MODEL: dict[str, int] = {
+    ImageModel.SEEDREAM_45.value: 2000,
+    ImageModel.SEEDREAM_45_EDIT.value: 2000,
     ImageModel.QWEN_EDIT.value: 2000,
 }
+
+
+_REFERENCE_LOCK_MODELS: set[str] = {
+    ImageModel.NANO_BANANA.value,
+    ImageModel.NANO_BANANA_2.value,
+    ImageModel.NANO_BANANA_PRO.value,
+    ImageModel.SEEDREAM_45_EDIT.value,
+    ImageModel.GROK_I2I.value,
+    ImageModel.QWEN_I2I.value,
+    ImageModel.QWEN_EDIT.value,
+    ImageModel.QWEN2_EDIT.value,
+    ImageModel.GPT_IMAGE_2_I2I.value,
+}
+
+_REFERENCE_LOCK_PREFIX = (
+    "STRICT IDENTITY AND DETAIL PRESERVATION. HIGHEST PRIORITY.\n\n"
+    "Treat the reference image(s) as the exact source of truth. "
+    "Recreate the same person or people with no identity drift and no redesign.\n\n"
+    "Preserve exactly and do not alter unless the prompt explicitly requests it:\n"
+    "- face identity\n"
+    "- head shape, facial proportions, bone structure\n"
+    "- eyes, eyelids, iris color, eyebrows, eyelashes\n"
+    "- nose, lips, teeth, smile line, ears\n"
+    "- skin tone, undertone, texture, freckles, moles, scars, wrinkles, pores\n"
+    "- age appearance and body proportions\n"
+    "- hairstyle, hairline, hair density, hair texture, hair color\n"
+    "- makeup style and intensity\n"
+    "- outfit, fabric, folds, fit, seams, logos, prints, labels\n"
+    "- accessories, jewelry, piercings, tattoos, glasses, headwear\n"
+    "- pose, hand shape, fingers, nails, silhouette\n"
+    "- colors, materials, textures, lighting logic, camera perspective\n\n"
+    "STRICT FACE LOCK - ABSOLUTE PRIORITY:\n"
+    "The face must match the reference exactly. Preserve every facial detail with no simplification and no beautification:\n"
+    "- exact face oval, skull shape, forehead, cheekbones, jawline, chin\n"
+    "- exact eye shape, eyelids, eye spacing, iris color, gaze character, eyelashes, eyebrows\n"
+    "- exact nose bridge, nostrils, tip, width, length, profile\n"
+    "- exact lips, mouth shape, cupid's bow, lip fullness, teeth, smile lines\n"
+    "- exact ears, temples, hairline, sideburns\n"
+    "- exact skin tone, undertone, pores, texture, freckles, moles, scars, wrinkles, nasolabial folds, dimples\n"
+    "- exact facial asymmetry, age signs, expression style, makeup placement\n\n"
+    "OUTFIT LOCK - ABSOLUTE PRIORITY:\n"
+    "Keep the exact same clothing and wearable details from the reference unless the user explicitly asks to change them:\n"
+    "- same garments, layers, sleeves, neckline, length, fit, silhouette\n"
+    "- same fabric type, texture, folds, seams, stitching, buttons, zippers\n"
+    "- same colors, color blocking, patterns, logos, prints, labels, trims\n"
+    "- same shoes, bags, jewelry, glasses, hats, belts, gloves, watches and other accessories\n\n"
+    "Do not make the face prettier, younger, older, smoother, slimmer, wider, more symmetrical, more generic, or more model-like. "
+    "Do not replace the face with a similar-looking person. "
+    "If the requested edit conflicts with face preservation, keep the face from the reference and apply the edit only outside the face."
+)
 
 # Aspect ratio options per model
 MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
@@ -115,6 +167,21 @@ class ImageResult:
     url: str | None = None
     image_bytes: bytes | None = None
     mime_type: str = "image/png"
+
+
+def _apply_reference_detail_preservation(
+    model: ImageModel | str,
+    prompt: str,
+    image_url: str | list[str] | None,
+) -> str:
+    if not image_url:
+        return prompt
+    model_key = model.value if isinstance(model, ImageModel) else str(model)
+    if model_key not in _REFERENCE_LOCK_MODELS:
+        return prompt
+    if "STRICT REFERENCE ADHERENCE" in prompt:
+        return prompt
+    return _REFERENCE_LOCK_PREFIX + "\n\n" + prompt.strip()
 
 
 def _normalize_prompt_for_model(model: ImageModel | str, prompt: str) -> str:
@@ -231,7 +298,8 @@ def _build_input(
         quality_value = normalized_quality
         resolution_value = normalized_quality if normalized_quality in {"1K", "2K", "4K"} else resolution_value
 
-    normalized_prompt = _normalize_prompt_for_model(resolved_for_validation, prompt)
+    prompt_with_reference_lock = _apply_reference_detail_preservation(resolved_for_validation, prompt, image_url)
+    normalized_prompt = _normalize_prompt_for_model(resolved_for_validation, prompt_with_reference_lock)
 
     return build_kie_input(
         model=model.value,

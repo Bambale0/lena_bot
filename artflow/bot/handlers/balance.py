@@ -29,7 +29,7 @@ class WithdrawalFSM(StatesGroup):
 
 def referral_screen_kb(lang: str = "ru"):
     builder = InlineKeyboardBuilder()
-    builder.button(text="👥 " + ("Мои приглашённые" if lang == "ru" else "My referrals"), callback_data="referral:list")
+    builder.button(text="👥 " + ("Мои партнёры" if lang == "ru" else "My partners"), callback_data="referral:list")
     builder.button(text="💸 " + ("Запросить вывод" if lang == "ru" else "Request withdrawal"), callback_data="referral:withdraw")
     builder.button(text=t("btn_main_menu", lang), callback_data="menu:main")
     builder.adjust(1)
@@ -144,21 +144,21 @@ async def cb_referral_list(call: CallbackQuery, db_user: User, session: AsyncSes
 
     if not children:
         text = (
-            "👥 <b>Мои приглашённые</b>\n\n"
+            "👥 <b>Мои партнёры</b>\n\n"
             "Пока здесь пусто.\n\n"
-            "Реферал появится в списке, если человек:\n"
+            "Партнёр появится в списке, если человек:\n"
             "• открыл бота именно по твоей ссылке\n"
             "• запустил бота через <code>/start</code> с твоим кодом\n"
             "• не был зарегистрирован раньше\n\n"
-            "Если человек уже был в боте до этого, новым рефералом он не станет."
+            "Если человек уже был в боте до этого, новым партнёром он не станет."
         ) if lang == "ru" else (
-            "👥 <b>My referrals</b>\n\n"
+            "👥 <b>My partners</b>\n\n"
             "Nothing here yet.\n\n"
             "A person appears here if they:\n"
-            "• open the bot using your referral link\n"
+            "• open the bot using your partner link\n"
             "• start the bot with your <code>/start</code> code\n"
             "• were not registered before\n\n"
-            "If they had already used the bot earlier, they will not count as a new referral."
+            "If they had already used the bot earlier, they will not count as a new partner."
         )
         await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
         await safe_answer_callback(call)
@@ -181,8 +181,8 @@ async def cb_referral_list(call: CallbackQuery, db_user: User, session: AsyncSes
             f"  {status}"
         )
 
-    title = "👥 <b>Мои приглашённые</b>" if lang == "ru" else "👥 <b>My referrals</b>"
-    hint = "\n\nПоказываю прямых рефералов по твоей ссылке." if lang == "ru" else "\n\nShowing direct referrals from your link."
+    title = "👥 <b>Мои партнёры</b>" if lang == "ru" else "👥 <b>My partners</b>"
+    hint = "\n\nПоказываю прямых партнёров по твоей ссылке." if lang == "ru" else "\n\nShowing direct partners from your link."
     text = title + "\n\n" + "\n\n".join(lines) + hint
     await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
     await safe_answer_callback(call)

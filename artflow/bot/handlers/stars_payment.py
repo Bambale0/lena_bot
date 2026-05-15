@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 from aiogram import F, Router, Bot
 from aiogram.types import CallbackQuery, Message, LabeledPrice, PreCheckoutQuery
@@ -16,6 +17,17 @@ from db.models import PaymentProvider, User
 logger = logging.getLogger(__name__)
 router = Router(name="stars_payment")
 
+_TELEGRAM_STARS_RUB_PER_STAR = 195.99 / 100
+
+def _plan_stars_price(plan) -> int:
+    explicit = getattr(plan, "price_stars", None)
+    if explicit is not None:
+        try:
+            return max(1, int(explicit))
+        except (TypeError, ValueError):
+            pass
+    return max(1, math.ceil(float(plan.price_rub) / _TELEGRAM_STARS_RUB_PER_STAR))
+
 
 @router.callback_query(F.data == "topup:stars")
 async def cb_topup_stars(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
@@ -28,7 +40,7 @@ async def cb_topup_stars(call: CallbackQuery, session: AsyncSession, db_user: Us
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
     for plan in plans:
-        stars = plan.price_stars or max(1, int(plan.price_rub / 10))
+        stars = _plan_stars_price(plan)
         builder.button(
             text=f"⭐ {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else plan.credits} 💋 · {stars} ⭐",
             callback_data=f"topup:stars_plan:{plan.key}",
@@ -59,7 +71,7 @@ async def cb_stars_plan(
         await call.answer(t("error_not_found", lang), show_alert=True)
         return
 
-    stars = plan.price_stars or max(1, int(plan.price_rub / 10))
+    stars = _plan_stars_price(plan)
 
     tx = await repo.create_transaction(
         session,
@@ -114,7 +126,7 @@ async def on_successful_payment(
     if not tx:
         logger.info("Stars payment already processed or missing tx_id=%s", tx_id)
         return
-    new_balance = await repo.add_credits(session, db_user.id, tx.credits)
+    new_balance = await repo.add_credits(session, db_user.id, tx.credits, entry_type="payment_credit", source_type="transaction", source_id=str(tx.id), note="Telegram Stars payment")
     from main import _accrue_referral_commissions
     await _accrue_referral_commissions(session, db_user, tx.amount_rub, bot)
     await message.answer(

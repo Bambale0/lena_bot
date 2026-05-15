@@ -270,13 +270,13 @@ async def apply_prompt_rewards(
         return {"author": 0, "l2": 0, "l3": 0}
 
     if author_reward > 0:
-        await repo.add_credits(session, author.id, author_reward)
+        await repo.add_credits(session, author.id, author_reward, entry_type="prompt_reward_author", source_type="prompt", source_id=str(prompt.id), note=f"Prompt reward from user {using_user_id}")
 
     if l2_reward > 0 and author.referrer_id:
-        await repo.add_credits(session, author.referrer_id, l2_reward)
+        await repo.add_credits(session, author.referrer_id, l2_reward, entry_type="prompt_reward_l2", source_type="prompt", source_id=str(prompt.id), note=f"L2 reward from prompt {prompt.id}")
 
     if l3_reward > 0 and author.referrer_l2_id:
-        await repo.add_credits(session, author.referrer_l2_id, l3_reward)
+        await repo.add_credits(session, author.referrer_l2_id, l3_reward, entry_type="prompt_reward_l3", source_type="prompt", source_id=str(prompt.id), note=f"L3 reward from prompt {prompt.id}")
 
     logger.info(
         "Prompt rewards: prompt_id=%s author=%s +%s l2=%s l3=%s",
@@ -322,6 +322,32 @@ async def get_pending_prompts(session: AsyncSession) -> list[UserPrompt]:
         .order_by(UserPrompt.created_at)
     )
     return list(result.scalars().all())
+
+
+async def set_ai_moderation_result(
+    session: AsyncSession,
+    prompt_id: int,
+    *,
+    decision: str,
+    risk: str,
+    reason: str,
+    recommendation: str,
+    raw: str,
+) -> UserPrompt | None:
+    await session.execute(
+        update(UserPrompt)
+        .where(UserPrompt.id == prompt_id)
+        .values(
+            ai_moderation_decision=decision[:32],
+            ai_moderation_risk=risk[:16],
+            ai_moderation_reason=reason[:500],
+            ai_moderation_recommendation=recommendation[:500],
+            ai_moderation_raw=raw,
+            ai_moderated_at=func.now(),
+        )
+    )
+    await session.commit()
+    return await get_prompt_by_id(session, prompt_id)
 
 
 async def approve_prompt(session: AsyncSession, prompt_id: int) -> UserPrompt | None:

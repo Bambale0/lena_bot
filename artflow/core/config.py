@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     # Feature flags
     SUBSCRIPTION_ENABLED: bool = False
     TELEGRAM_STARS_ENABLED: bool = False
+    REFERRAL_FREEZE: bool = False
 
     # Credits
     WELCOME_BONUS_CREDITS: int = 15

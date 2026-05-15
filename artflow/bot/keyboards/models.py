@@ -216,7 +216,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "counts": [1],
         "has_quality": True,
         "quality_options": [("2K", "2K"), ("4K", "4K")],
-        "max_refs": 4,
+        "max_refs": 8,
     },
     ImageModel.NANO_BANANA_PRO: {
         "modes": ["text", "image"],
@@ -225,7 +225,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "counts": [1],
         "has_quality": True,
         "quality_options": [("2K", "2K"), ("4K", "4K")],
-        "max_refs": 4,
+        "max_refs": 8,
     },
     ImageModel.QWEN_T2I: {
         "modes": ["text"],

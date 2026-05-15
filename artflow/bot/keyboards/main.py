@@ -26,7 +26,7 @@ def get_main_menu_keyboard(balance: int = 0, *, is_admin: bool = False) -> Inlin
         ],
 
         [
-            InlineKeyboardButton(text="👥 Рефералы", callback_data="menu:referral"),
+            InlineKeyboardButton(text="👥 Партнёры", callback_data="menu:referral"),
             InlineKeyboardButton(text="❓ Помощь", callback_data="help"),
         ],
     ])

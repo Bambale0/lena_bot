@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, midjourney_service, video_service
+from api.assistant_service import generate_prompt_moderation_decision
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.miniapp_auth import get_miniapp_user
 from api.photo_prompt_service import generate_prompt_from_photo
@@ -48,6 +50,17 @@ async def health() -> dict:
 
 MAX_CONCURRENT = 6
 STALE_GENERATION_TIMEOUT = timedelta(minutes=20)
+
+_TELEGRAM_STARS_RUB_PER_STAR = 195.99 / 100
+
+def _plan_stars_price(plan: Any) -> int:
+    explicit = getattr(plan, "price_stars", None)
+    if explicit is not None:
+        try:
+            return max(1, int(explicit))
+        except (TypeError, ValueError):
+            pass
+    return max(1, math.ceil(float(plan.price_rub) / _TELEGRAM_STARS_RUB_PER_STAR))
 
 _VEO_MODEL_KEYS = {item.value for item in (VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE)}
 _MIDJOURNEY_IMAGE_MODEL_KEYS = {"midjourney-imagine", "midjourney-blend", "midjourney-action"}
@@ -565,6 +578,7 @@ class ModelInfo(BaseModel):
     aspect_ratios: list[str]
     aspect_ratio_min_refs: int = 0
     quality_options: list[dict[str, str]]
+    quality_prices: dict[str, float] = Field(default_factory=dict)
     max_refs: int = 1
     counts: list[int]
     has_quality: bool
@@ -711,6 +725,26 @@ async def miniapp_improve_prompt(
     return {"prompt": improved}
 
 
+async def _resolve_image_quality_prices(
+    session: AsyncSession,
+    model_key: str,
+    quality_raw: list[tuple[str, str]] | list[list[str]],
+    fallback_credits: float,
+) -> dict[str, float]:
+    prices: dict[str, float] = {}
+    for raw in quality_raw or []:
+        if not raw:
+            continue
+        quality_value = str(raw[0])
+        try:
+            variant = await repo.resolve_image_model_cost(session, model_key, quality=quality_value)
+        except Exception as exc:
+            logger.warning("Failed to resolve quality price model=%s quality=%s: %s", model_key, quality_value, exc)
+            variant = None
+        prices[quality_value] = float(getattr(variant, "credits", fallback_credits) or fallback_credits)
+    return prices
+
+
 @router.get("/models/image", response_model=list[ModelInfo])
 async def list_image_models(
     session: AsyncSession = Depends(get_session),
@@ -727,6 +761,7 @@ async def list_image_models(
             continue
         caps: dict[str, Any] = IMAGE_CAPS.get(mc.model_key, _MJ_IMAGE_CAPS.get(mc.model_key, {}))
         quality_raw = caps.get("quality_options", [])
+        quality_prices = await _resolve_image_quality_prices(session, mc.model_key, quality_raw, float(mc.credits))
         result.append(ModelInfo(
             key=mc.model_key,
             display_name=_friendly_model_name(mc.model_key, mc.display_name),
@@ -735,6 +770,7 @@ async def list_image_models(
             aspect_ratios=caps.get("aspect_ratios", []),
             aspect_ratio_min_refs=int(caps.get("aspect_ratio_min_refs", 0) or 0),
             quality_options=[{"value": value, "label": label} for value, label in quality_raw],
+            quality_prices=quality_prices,
             counts=caps.get("counts", [1]),
             has_quality=bool(caps.get("has_quality")),
             max_refs=int(caps.get("max_refs", 1) or 1),
@@ -777,6 +813,48 @@ async def list_video_models(
             max_refs=int(caps.get("max_refs", 1) or 1),
         ))
     return result
+
+
+@router.get("/models/music", response_model=list[ModelInfo])
+async def list_music_models(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> list[ModelInfo]:
+    """All active music models with costs and capabilities."""
+    del user
+    model_costs = await repo.get_all_model_costs(session)
+    result = []
+    for mc in model_costs:
+        if getattr(mc, "gen_type", None) != GenerationType.music and mc.model_key != MUSIC_MODEL_KEY:
+            continue
+        if not getattr(mc, "is_active", True):
+            continue
+        result.append(ModelInfo(
+            key=mc.model_key,
+            display_name=_friendly_model_name(mc.model_key, mc.display_name),
+            credits=mc.credits,
+            modes=["text"],
+            aspect_ratios=[],
+            aspect_ratio_min_refs=0,
+            quality_options=[],
+            counts=[1],
+            has_quality=False,
+            max_refs=0,
+        ))
+    if result:
+        return result
+    return [ModelInfo(
+        key=MUSIC_MODEL_KEY,
+        display_name=_friendly_model_name(MUSIC_MODEL_KEY, "Suno"),
+        credits=await _resolve_music_credits(session),
+        modes=["text"],
+        aspect_ratios=[],
+        aspect_ratio_min_refs=0,
+        quality_options=[],
+        counts=[1],
+        has_quality=False,
+        max_refs=0,
+    )]
 
 
 @router.get("/public/midjourney", response_model=list[MidjourneyCatalogItem])
@@ -1144,7 +1222,7 @@ async def get_history(
 
 @router.get("/feed")
 async def get_feed(
-    limit: int = Query(default=20, ge=1, le=50),
+    limit: int = Query(default=40, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> list[dict]:
@@ -1172,11 +1250,12 @@ async def share_generation(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> dict:
-    """Publish own generation to the public feed."""
+    """Publish own generation to the public feed and return its repost link."""
     gen = await repo.share_to_feed(session, gen_id, user.id)
     if not gen:
         raise HTTPException(status_code=404, detail="Generation not found or not ready")
-    return {"id": gen.id, "is_public_feed": gen.is_public_feed}
+    link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="feed", target_id=gen.id))
+    return {"id": gen.id, "is_public_feed": gen.is_public_feed, "link": link}
 
 
 @router.post("/feed/{gen_id}/remove", status_code=200)
@@ -1393,7 +1472,7 @@ async def share_to_library(
 async def list_prompts(
     category: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=20, ge=1, le=50),
+    limit: int = Query(default=40, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
     _: User = Depends(get_miniapp_user),
 ) -> dict:
@@ -1440,7 +1519,7 @@ async def submit_prompt(
 ) -> dict:
     """Submit a new prompt for moderation."""
     from db.models import PromptCategory
-    from db.prompt_repository import create_prompt
+    from db.prompt_repository import create_prompt, set_ai_moderation_result
 
     try:
         cat = PromptCategory(body.category)
@@ -1455,7 +1534,39 @@ async def submit_prompt(
         cat,
         body.prompt_text,
     )
-    return {"id": p.id, "status": p.status.value, "message": "Submitted for moderation"}
+    try:
+        decision = await generate_prompt_moderation_decision(
+            prompt_id=p.id,
+            title=p.title,
+            description=p.description,
+            prompt_text=p.prompt_text,
+            tags=list(p.tags or []),
+            model=p.model,
+        )
+        p = await set_ai_moderation_result(
+            session,
+            p.id,
+            decision=decision.decision,
+            risk=decision.risk,
+            reason=decision.reason,
+            recommendation=decision.recommendation,
+            raw=decision.raw,
+        ) or p
+    except Exception as exc:
+        logger.warning("prompt auto moderation failed prompt=%s: %s", p.id, exc)
+        return {"id": p.id, "status": p.status.value, "message": "Submitted for manual moderation"}
+
+    if decision.decision == "approve":
+        from db.prompt_repository import approve_prompt
+        p = await approve_prompt(session, p.id) or p
+        return {"id": p.id, "status": p.status.value, "message": "Approved automatically"}
+
+    if decision.decision == "reject":
+        from db.prompt_repository import reject_prompt
+        p = await reject_prompt(session, p.id, decision.reason[:500]) or p
+        return {"id": p.id, "status": p.status.value, "message": decision.reason or "Rejected automatically"}
+
+    return {"id": p.id, "status": p.status.value, "message": "Sent to manual moderation"}
 
 
 # ── payments ──────────────────────────────────────────────────────────────────
@@ -1478,7 +1589,7 @@ async def list_plans(
             "credits": p.credits,
             "price_rub": p.price_rub,
             "price_rub_display": f"{_fmt_amount(p.price_rub)}₽",
-            "price_stars": getattr(p, "price_stars", None) or max(1, int(p.price_rub / 10)),
+            "price_stars": _plan_stars_price(p),
             "price_usdt": round(p.price_rub / 90, 2),  # approximate
         }
         for p in plans
@@ -1533,7 +1644,7 @@ async def topup_stars(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    stars = plan.price_stars or max(1, int(plan.price_rub / 10))
+    stars = _plan_stars_price(plan)
     pending_external_id = f"stars_pending:{user.id}:{plan.key}"
     tx = await repo.get_transaction_by_external_id(session, pending_external_id)
     if not tx or tx.status != TransactionStatus.pending or tx.user_id != user.id or tx.provider != PaymentProvider.telegram_stars:
@@ -1637,6 +1748,13 @@ def _prompt_out(p) -> dict:
         "preview_url": p.preview_url,
         "model": p.model,
         "author_id": p.author_id,
+        "status": p.status.value if p.status else "pending",
+        "reject_reason": p.reject_reason,
+        "ai_moderation_decision": getattr(p, "ai_moderation_decision", None),
+        "ai_moderation_risk": getattr(p, "ai_moderation_risk", None),
+        "ai_moderation_reason": getattr(p, "ai_moderation_reason", None),
+        "ai_moderation_recommendation": getattr(p, "ai_moderation_recommendation", None),
+        "ai_moderated_at": p.ai_moderated_at.isoformat() if getattr(p, "ai_moderated_at", None) else None,
         "created_at": p.created_at.isoformat() if p.created_at else "",
     }
 

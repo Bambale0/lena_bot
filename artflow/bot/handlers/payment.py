@@ -34,6 +34,59 @@ def _fmt_amount(value: float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
+async def _confirm_paid_transaction(session: AsyncSession, tx) -> float | None:
+    if not tx:
+        return None
+    new_balance = await repo.add_credits(
+        session,
+        tx.user_id,
+        tx.credits,
+        entry_type="payment_credit",
+        source_type="transaction",
+        source_id=str(tx.id),
+        note=f"Payment confirmed via {tx.provider}",
+    )
+    user = await repo.get_user_by_id(session, tx.user_id)
+    if user:
+        from main import _accrue_referral_commissions
+        await _accrue_referral_commissions(session, user, tx.amount_rub, None)
+    return new_balance
+
+
+async def _reconcile_transaction_status(
+    session: AsyncSession,
+    tx,
+) -> tuple[TransactionStatus, float | None]:
+    if tx.provider == PaymentProvider.tbank and tx.external_id:
+        state = await tbank.get_payment_state(tx.external_id)
+        status = str(state.get("Status", "")).upper()
+        if status == "CONFIRMED":
+            confirmed = await repo.confirm_transaction(session, tx.external_id)
+            balance = await _confirm_paid_transaction(session, confirmed) if confirmed else None
+            return TransactionStatus.paid, balance
+        if status in TBANK_FINAL_FAILURE_STATUSES:
+            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.failed)
+            return TransactionStatus.failed, None
+        if status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
+            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.refunded)
+            return TransactionStatus.refunded, None
+        return TransactionStatus.pending, None
+
+    if tx.provider == PaymentProvider.cryptobot and tx.external_id:
+        invoice = await cryptobot.get_invoice(int(tx.external_id))
+        status = str(invoice.get("status", "")).lower()
+        if status == "paid":
+            confirmed = await repo.confirm_transaction(session, tx.external_id)
+            balance = await _confirm_paid_transaction(session, confirmed) if confirmed else None
+            return TransactionStatus.paid, balance
+        if status in {"expired", "invalid", "cancelled"}:
+            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.failed)
+            return TransactionStatus.failed, None
+        return TransactionStatus.pending, None
+
+    return tx.status, None
+
+
 @router.callback_query(F.data == "menu:topup")
 async def cb_topup(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     lang = db_user.language or "ru"
@@ -83,6 +136,8 @@ async def cb_topup_rub(
         reply_markup=payment_link_kb(
             "💳 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
             payment.payment_url,
+            payment.payment_id,
+            lang=lang,
         ),
     )
     await call.answer()
@@ -111,13 +166,21 @@ async def _cancel_tbank_transaction(
         return True, "Payment was already cancelled by T-Bank."
 
     if provider_status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
-        await repo.set_transaction_status(session, payment_id, TransactionStatus.refunded)
+        updated_tx = await repo.set_transaction_status(session, payment_id, TransactionStatus.refunded)
+        if updated_tx and updated_tx.status == TransactionStatus.paid:
+            await repo.add_credits(session, updated_tx.user_id, -updated_tx.credits, entry_type="payment_refund", source_type="transaction", source_id=str(updated_tx.id), note="T-Bank refund/reversal")
+            from main import _reverse_referral_commissions
+            await _reverse_referral_commissions(session, db_user, updated_tx.amount_rub)
         return True, "Payment was already refunded."
 
     await tbank.cancel_payment(payment_id)
 
     new_status = TransactionStatus.refunded if tx.status == TransactionStatus.paid else TransactionStatus.failed
-    await repo.set_transaction_status(session, payment_id, new_status)
+    updated_tx = await repo.set_transaction_status(session, payment_id, new_status)
+    if new_status == TransactionStatus.refunded and updated_tx and tx.status == TransactionStatus.paid:
+        await repo.add_credits(session, updated_tx.user_id, -updated_tx.credits, entry_type="payment_refund", source_type="transaction", source_id=str(updated_tx.id), note="T-Bank cancel after paid")
+        from main import _reverse_referral_commissions
+        await _reverse_referral_commissions(session, db_user, updated_tx.amount_rub)
 
     if new_status == TransactionStatus.refunded:
         return True, "Payment cancelled and marked as refunded."
@@ -231,6 +294,54 @@ async def cb_crypto_plan(
 
     await call.message.edit_text(  # type: ignore[union-attr]
         t("topup_crypto_desc", lang, label=plan.label, amount=_fmt_amount(amount_usd)),
-        reply_markup=crypto_pay_kb(invoice.bot_invoice_url, lang=lang),
+        reply_markup=crypto_pay_kb(invoice.bot_invoice_url, str(invoice.invoice_id), lang=lang),
     )
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("topup:check:"))
+async def cb_check_payment_status(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    lang = db_user.language or "ru"
+    external_id = call.data.split(":")[-1]
+    tx = await repo.get_transaction_by_external_id(session, external_id)
+    if not tx or tx.user_id != db_user.id:
+        await call.answer(t("error_not_found", lang), show_alert=True)
+        return
+
+    try:
+        status, balance = await _reconcile_transaction_status(session, tx)
+    except Exception as e:
+        logger.error("Payment reconcile error: %s", e)
+        await call.answer(t("error_generic", lang), show_alert=True)
+        return
+
+    if status == TransactionStatus.paid:
+        refreshed = await repo.get_transaction_by_external_id(session, external_id)
+        credits = refreshed.credits if refreshed else tx.credits
+        current_balance = balance if balance is not None else (await repo.get_user_by_id(session, db_user.id)).credits
+        await call.message.edit_text(  # type: ignore[union-attr]
+            (
+                "✅ <b>Оплата подтверждена</b>\n\n"
+                + (f"Зачислено: <b>+{credits} 💋</b>\n" if lang == "ru" else f"Added: <b>+{credits} 💋</b>\n")
+                + (f"Баланс: <b>{current_balance} 💋</b>" if lang == "ru" else f"Balance: <b>{current_balance} 💋</b>")
+            ),
+            reply_markup=back_to_menu_kb(),
+        )
+        await call.answer()
+        return
+
+    if status in {TransactionStatus.failed, TransactionStatus.refunded}:
+        await call.answer(
+            "Платёж завершился без зачисления" if lang == "ru" else "Payment finished without credit",
+            show_alert=True,
+        )
+        return
+
+    await call.answer(
+        "Платёж ещё в обработке" if lang == "ru" else "Payment is still pending",
+        show_alert=True,
+    )

@@ -44,17 +44,21 @@ def crypto_plans_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardM
     return builder.as_markup()
 
 
-def crypto_pay_kb(pay_url: str, lang: str = "ru") -> InlineKeyboardMarkup:
+def crypto_pay_kb(pay_url: str, external_id: str | None = None, lang: str = "ru") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     back_text = "← " + ("Назад" if lang == "ru" else "Back")
     builder.row(InlineKeyboardButton(text="🌕 " + ("Оплатить в CryptoBot" if lang == "ru" else "Pay in CryptoBot"), url=pay_url))
+    if external_id:
+        builder.row(InlineKeyboardButton(text="✅ " + ("Проверить оплату" if lang == "ru" else "Check payment"), callback_data=f"topup:check:{external_id}"))
     builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:topup"))
     return builder.as_markup()
 
 
-def payment_link_kb(text: str, pay_url: str, lang: str = "ru") -> InlineKeyboardMarkup:
+def payment_link_kb(text: str, pay_url: str, external_id: str | None = None, lang: str = "ru") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     back_text = "← " + ("Назад" if lang == "ru" else "Back")
     builder.row(InlineKeyboardButton(text=text, url=pay_url))
+    if external_id:
+        builder.row(InlineKeyboardButton(text="✅ " + ("Проверить оплату" if lang == "ru" else "Check payment"), callback_data=f"topup:check:{external_id}"))
     builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:topup"))
     return builder.as_markup()
