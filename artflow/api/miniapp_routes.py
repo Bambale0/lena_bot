@@ -1595,6 +1595,123 @@ async def remix_feed_post(
     if not source:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
+    if body.model in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS):
+        source_prompt = (source.prompt or "").strip()
+        model_cost = await repo.get_model_cost(session, body.model)
+        if not model_cost or not getattr(model_cost, "is_active", True):
+            raise HTTPException(status_code=422, detail="Model not available")
+
+        caps: dict[str, Any] = _MJ_IMAGE_CAPS.get(body.model, {})
+        gen_type = "video" if body.model in _MJ_VIDEO_MODELS else "image"
+        normalized_ratio: str | None = None
+        normalized_quality = "basic"
+        refs: list[str] = []
+        motion_value = "low"
+
+        if body.model == "midjourney-imagine":
+            refs = _normalize_public_urls(
+                source.result_url if body.mode == "image" else None,
+                body.image_url,
+                *(body.reference_urls or []),
+            )
+            max_refs = int(caps.get("max_refs", 1) or 1)
+            if len(refs) > max_refs:
+                raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
+            normalized_ratio = _normalize_choice(body.aspect_ratio, caps.get("aspect_ratios", []), field_name="aspect ratio")
+            if not source_prompt:
+                raise HTTPException(status_code=422, detail="Prompt is required")
+        elif body.model == "midjourney-blend":
+            refs = _normalize_public_urls(
+                source.result_url if body.mode == "image" else None,
+                body.image_url,
+                *(body.reference_urls or []),
+            )
+            max_refs = int(caps.get("max_refs", 5) or 5)
+            if len(refs) < 2:
+                raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
+            if len(refs) > max_refs:
+                raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
+            normalized_ratio = _normalize_choice(body.aspect_ratio, caps.get("aspect_ratios", []), field_name="aspect ratio")
+        else:
+            video_refs = _normalize_public_urls(
+                body.image_url or (source.result_url if body.mode == "image" else None),
+                *(body.reference_urls or []),
+            )
+            max_refs = int(_MJ_VIDEO_CAPS.get(body.model, {}).get("max_refs", 1) or 1)
+            if not video_refs:
+                raise HTTPException(status_code=422, detail="Midjourney Video requires a reference image")
+            if len(video_refs) > max_refs:
+                raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
+            refs = video_refs
+            motion_value = body.grok_mode if body.grok_mode in {"low", "high"} else "low"
+
+        total_credits = model_cost.credits
+        if user.credits < total_credits:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
+
+        await _reconcile_user_active_generations(session, user.id)
+        active = await repo.count_user_active_generations(session, user.id)
+        if active >= MAX_CONCURRENT:
+            raise HTTPException(status_code=429, detail="Too many concurrent generations")
+
+        ok = await repo.spend_credits(session, user.id, total_credits)
+        if not ok:
+            raise HTTPException(status_code=402, detail="Failed to spend credits")
+
+        image_session_id: int | None = None
+        if gen_type == "image":
+            image_session = await repo.create_image_session(
+                session=session,
+                user_id=user.id,
+                model=body.model,
+                mode="image" if refs else "text",
+                aspect_ratio=normalized_ratio,
+                quality=normalized_quality,
+                count=1,
+                base_prompt=source_prompt,
+                reference_file_id=None,
+                reference_url=refs[0] if refs else None,
+            )
+            image_session_id = image_session.id
+
+        from db.models import GenerationType as GT
+        gen_type_enum = GT.video if gen_type == "video" else GT.image
+        gen = await repo.create_generation(
+            session, user.id, body.model, gen_type_enum,
+            source_prompt, total_credits,
+            image_session_id=image_session_id,
+            parent_generation_id=source.id if gen_type == "image" else None,
+            action_type=ImageGenerationAction.remix if gen_type == "image" else None,
+            source_feed_gen_id=gen_id,
+        )
+
+        try:
+            if body.model == "midjourney-imagine":
+                submitted_prompt = f"{refs[0]} {source_prompt}".strip() if refs else source_prompt
+                task_id = await midjourney_service.imagine(submitted_prompt, reference_url=refs[0] if refs else None)
+            elif body.model == "midjourney-blend":
+                blend_images = [await _data_uri_from_url(url) for url in refs]
+                task_id = await midjourney_service.blend(
+                    blend_images,
+                    dimensions=MJDimensions(_MJ_BLEND_DIMENSIONS.get(normalized_ratio or "1:1", "SQUARE")),
+                )
+            else:
+                task_id = await midjourney_service.submit_video(
+                    image=refs[0],
+                    motion=MJVideoMotion(motion_value),
+                    prompt=source_prompt,
+                )
+        except Exception as exc:
+            logger.error("feed Midjourney remix error user=%s gen=%s model=%s: %s", user.id, gen_id, body.model, exc)
+            if await repo.fail_generation(session, gen.id, str(exc)):
+                await repo.add_credits(session, user.id, total_credits)
+            raise HTTPException(status_code=502, detail="Generation service error")
+
+        await repo.update_generation_task(session, gen.id, task_id)
+        await repo.increment_feed_share(session, gen_id)
+        await session.refresh(gen)
+        return _gen_out(gen)
+
     # Use the source prompt but with the user-chosen model
     try:
         model = VideoModel(body.model)

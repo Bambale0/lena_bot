@@ -1,43 +1,82 @@
-# APIX AI landing
+# APIX Artflow standalone web
 
-Готовый статический сайт APIX AI: главная, возможности, инструкция, веб-кабинет генерации и контакты.
+Актуальная версия публичного сайта обслуживается из `landing/index.html` и работает как vanilla JS SPA через `landing/js/riot-site.js`. До авторизации это витрина-презентация продукта, после входа через Telegram тот же URL переключается в полноценную web-студию генерации.
 
-## Структура
+Legacy-страницы из старой версии (`features.html`, `guide.html`, `account.html`, `contact.html`, `css/styles.css`, `js/main.js`) оставлены в репозитории как архивный материал. Они не должны быть точкой входа для домена `apix.chillcreative.ru`.
+
+## Актуальная структура
 
 ```text
 landing/
 ├── index.html
-├── features.html
-├── guide.html
-├── account.html
-├── contact.html
 ├── css/
-│   └── styles.css
+│   └── riot-site.css
 ├── js/
-│   └── main.js
+│   └── riot-site.js
 ├── images/
 │   ├── apix-mark.svg
 │   ├── hero-cinematic-gallery.png
-│   ├── guide-contact-flow.png
-│   ├── avatar-neon-orbit-01.png
-│   ├── avatar-neon-orbit-02.png
-│   ├── avatar-neon-orbit-03.png
-│   ├── icon-all-formats.svg
-│   ├── icon-fast-flow.svg
-│   ├── icon-models.svg
-│   ├── icon-control.svg
-│   ├── chat-demo-accent.svg
+│   ├── apix-showcase.png
 │   └── favicon.png
-├── fonts/
 ├── media/
 └── README.md
 ```
+
+## Legacy файлы
+
+```text
+landing/
+├── account.html
+├── contact.html
+├── features.html
+├── guide.html
+├── css/styles.css
+└── js/main.js
+```
+
+Если деплой внезапно показывает старый сайт, сначала проверьте nginx/FastAPI static root и cache: актуальная точка входа должна быть `landing/index.html`, а не одна из legacy-страниц.
+
+## UX-логика
+
+- Гость видит презентацию: возможности, примеры, библиотеку идей, цены и вход через Telegram.
+- Авторизованный пользователь видит рабочую студию: dashboard, studio, feed, prompts, works, billing, profile.
+- Студия построена как пошаговый FSM: поток создания, идея, медиа, модель, настройки, проверка.
+- Настройки студии динамически меняются под выбранную модель: режим text/image, формат, качество, количество, длительность, разрешение, motion и требования к фото.
+- Фото-референсы загружаются через `/upload` и используются в image/video запросах.
+- Prompt можно улучшить через `/api/v1/prompt/improve`, а фото можно превратить в prompt через `/api/v1/photo-prompt`.
+- После запуска задача попадает в локальную очередь и poll-ится через `/api/v1/generations/{id}`.
+- Готовый результат можно использовать как следующий шаг: повторить идею, сделать image-вариант или оживить image в video.
+- Карточки результатов поддерживают изображения, видео и аудио без перехода в mini app.
+- Web-сайт не отправляет пользователя в Telegram Mini App. `/app` остается отдельной поверхностью.
+- Авторизация сайта использует Telegram Login Widget и `/api/web/auth/*`.
+- Студия использует реальные модели из `/api/v1/models/*` и endpoints генерации `/api/v1/generate/*`.
+
+## Последовательная генерация
+
+Frontend не запускает цепочку автоматически. Пользователь явно подтверждает каждый шаг:
+
+```text
+image prompt -> image result -> variant or image-to-video -> history/feed
+```
+
+Очередь хранится в `localStorage` под ключом `apix_generation_queue`, но backend остаётся источником истины. При refresh сайт восстанавливает локальные карточки задач и продолжает polling активных `generation_id`.
+
+Основные contracts:
+
+| Endpoint | Роль |
+|---|---|
+| `POST /api/v1/generate/image` | Первый image или image variation |
+| `POST /api/v1/generate/video` | Text-to-video или image-to-video |
+| `POST /api/v1/generate/music` | Music generation |
+| `GET /api/v1/generations/{id}` | Статус задачи |
+| `GET /api/v1/history` | История пользователя |
+| `POST /api/v1/feed/{id}/remix` | Ремикс публичной работы |
 
 ## Бренд и стиль
 
 Актуальная версия использует неоновый знак APIX без фоновой подложки. В нём считываются световая дуга, энергия генерации и движение от идеи к готовому медиа. Основная эмоция — технологичная креативность: продукт выглядит быстрым, визуальным и достаточно премиальным для рабочих задач.
 
-В вебе айдентика перенесена через hero-постер, неоновую палитру `cyan / pink / mint / violet`, тонкие световые контуры, прозрачный логотип, SVG-иконки без фоновых плиток и AI-сгенерированные изображения в едином cinematic/editorial стиле. Секции после первого экрана светлые, чтобы сайт ощущался как витрина креативной студии, а не админ-панель.
+В web-студии стиль более дерзкий: тёмная основа, poster/comic акценты, яркие карточки и крупные CTA. Comic Sans допустим только в акцентных блоках, а основной интерфейс, формы и длинные тексты должны оставаться читаемыми.
 
 ## Сгенерированные изображения
 
@@ -59,31 +98,11 @@ landing/
 
 Текущая версия переведена на концепцию **Cinematic Gallery**: она оставляет APIX технологичным и неоновым, но выглядит менее как dashboard и больше как современная витрина креативного продукта.
 
-## Как заменить ссылки
+## Деплой и ссылки
 
-Сейчас в HTML используются:
-
-- бот: `https://t.me/apix_ai_bot`
-- веб-кабинет: `account.html`
-- канал: `https://t.me/lelupromt`
-- саппорт: `https://t.me/LeLu88`
-- разработчик: `https://t.me/Chillcreative`
-- email: `happyarbuznik@gmail.com`
-
-Если username бота изменится, замените `https://t.me/apix_ai_bot` во всех HTML-файлах. Если сайт обслуживается через FastAPI/nginx из корня `landing/`, относительные пути `css/`, `js/`, `images/` уже готовы.
+Если username бота изменится, обновите backend-конфиг, который отдаёт `/api/web/auth/config`. Если сайт обслуживается через FastAPI/nginx из корня `landing/`, относительные пути `css/`, `js/`, `images/` уже готовы.
 
 Для корректных Telegram/social preview после деплоя замените относительные `og:image` на абсолютный URL, например `https://your-domain.ru/images/hero-cinematic-gallery.png`.
-
-## Форма связи
-
-Форма на `contact.html` валидируется на стороне клиента и имитирует успешную отправку. Для реального запуска можно подключить:
-
-- отправку в Telegram через backend endpoint;
-- отправку в CRM;
-- email provider;
-- Google Forms или иной внешний webhook.
-
-В `js/main.js` найдите обработчик `contactForm.addEventListener("submit", ...)` и замените блок успеха на `fetch()` к вашему endpoint. Токены бота нельзя хранить в frontend-коде: они должны оставаться на сервере.
 
 ## Контент
 

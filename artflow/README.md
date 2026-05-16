@@ -46,6 +46,7 @@ artflow/
 │   └── utils/telegram_ui.py
 │
 ├── api/
+│   ├── web/               # Standalone web API /api/web/* для сайта
 │   ├── image_service.py    # Интеграция с KIE.AI (изображения)
 │   ├── video_service.py    # Интеграция с KIE.AI/CometAPI (видео)
 │   ├── music_service.py    # Интеграция с KIE.AI (музыка)
@@ -81,6 +82,13 @@ artflow/
 │       ├── components/     # AppShell, Header, BottomNav, FeedCard, PromptCard…
 │       ├── theme/themes.ts  # Определения тем (neonPink, …)
 │       └── telegram.ts     # Telegram WebApp SDK-обёртка
+│
+├── landing/                # Standalone web-сайт для / (vanilla JS)
+│   ├── index.html
+│   ├── css/riot-site.css
+│   └── js/riot-site.js
+│
+├── web/static/prompt-riot/ # Прототип/референс prompt-riot интерфейса
 │
 ├── tests/                  # Pytest (34 теста, все проходят)
 │   ├── conftest.py
@@ -131,7 +139,8 @@ artflow/
 | Миграции | Alembic (9 версий) |
 | FSM-хранилище | Redis (aiogram RedisStorage) |
 | Антиспам | Redis (ThrottlingMiddleware) |
-| Frontend | React + TypeScript + Vite |
+| Mini App Frontend | React + TypeScript + Vite |
+| Public Web Frontend | HTML + CSS + vanilla JavaScript |
 | Деплой | Docker Compose (app + postgres + redis + nginx) |
 | Тесты | pytest + pytest-asyncio (34 теста) |
 
@@ -202,6 +211,8 @@ artflow/
     ├── POST /webhook/cryptobot       → подтверждение оплаты CryptoBot
     ├── POST /webhook/tbank           → подтверждение оплаты Т-Банк
     ├── POST /webhook/kie             → callback завершённой генерации KIE.AI
+    ├── GET  /                        → standalone web-сайт из landing/
+    ├── GET  /api/web/*               → Web API сайта (Telegram login / dev-token)
     ├── GET  /api/webapp/*            → WebApp API (auth via initData)
     ├── GET  /app                     → React SPA (статика из webapp/dist)
     └── GET  /static/upload/*         → зеркалированные файлы (публичные URL)
@@ -261,6 +272,44 @@ React-SPA, встроенное в Telegram WebApp. Доступно по `/app`
 | GET | `/api/webapp/referrals` | Реферальная статистика |
 
 Аутентификация: Telegram `initData` (HMAC-SHA256 с BOT_TOKEN). Реализована в `api/webapp_auth.py`.
+
+---
+
+## Standalone Web-Сайт
+
+Отдельный web-интерфейс доступен на `/` и обслуживается из `landing/`. Он не ведёт пользователя в mini app: до авторизации показывает витрину-презентацию, после входа через Telegram переключается в полноценную студию генерации контента.
+
+**Ключевые части:**
+
+| Компонент | Назначение |
+|---|---|
+| `landing/index.html` | HTML shell сайта |
+| `landing/css/riot-site.css` | Визуальный стиль сайта и студии |
+| `landing/js/riot-site.js` | Vanilla JS роутинг, i18n, авторизация, загрузка данных |
+| `api/web/` | Web API поверх существующих сущностей `User`, `Generation`, `UserPrompt`, `PricePlan` |
+
+**Web API:**
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| GET | `/api/web/health` | Healthcheck web-слоя |
+| GET | `/api/web/me` | Профиль авторизованного пользователя |
+| GET | `/api/web/feed` | Лента генераций |
+| GET | `/api/web/prompts` | Библиотека и маркетплейс промптов |
+| GET | `/api/web/price-plans` | Тарифы пополнения |
+| POST | `/api/web/auth/telegram` | Вход через Telegram Login Widget |
+| POST | `/api/web/auth/dev` | Dev-token вход для локальной проверки |
+
+Студия использует реальные каталоги моделей `/api/v1/models/image`, `/api/v1/models/video`, `/api/v1/models/music` и реальные endpoints генерации `/api/v1/generate/*`.
+
+Подробнее о UX-архитектуре и текущем frontend-анализе: `docs/web_studio_frontend.md`.
+Workflow для frontend/dev agents: `docs/frontend-agent-workflow.md`.
+
+**MCP для агентов разработки:**
+
+- `Context7` — основной источник актуальной документации и best practices для backend, frontend, тестов, интеграций и CI.
+- `shadcn` — обязательный MCP для frontend/UI задач: поиск компонентов, паттернов интерфейса и shadcn-compatible референсов.
+- Секреты MCP не хранятся в репозитории; они настраиваются в пользовательском Codex config.
 
 ---
 

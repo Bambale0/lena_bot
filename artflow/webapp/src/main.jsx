@@ -148,6 +148,11 @@ function isMiniappVideoModelSupported(model) {
   return modes.includes("text") || modes.includes("image");
 }
 
+function isMidjourneyModel(modelOrKey) {
+  const key = String(typeof modelOrKey === "string" ? modelOrKey : modelOrKey?.key || "").toLowerCase();
+  return key.startsWith("midjourney-");
+}
+
 function modelModesLabel(model) {
   const key = String(model?.key || "").toLowerCase();
   const modes = model?.modes || ["text"];
@@ -279,8 +284,8 @@ function Header({ screen, setScreen, user, setTopup }) {
 function Nav({ screen, setScreen }) {
   const tabs = [
     ["home", "⌂", "Главная"],
-    ["capabilities", "✦", "Все"],
     ["studio", "⌘", "Студия"],
+    ["midjourney", "MJ", "MJ"],
     ["assistant", "?", "AI"],
     ["feed", "◷", "Лента"],
     ["profile", "♙", "Профиль"],
@@ -426,12 +431,12 @@ function ProfileStrip({ user, historyCount, setScreen, setTopup }) {
   );
 }
 
-function PromptFeed({ prompts, setScreen, onPromptUse }) {
+function PromptFeed({ prompts, setScreen, onPromptUse, onOpenAll }) {
   return (
     <section className="block">
       <div className="title">
         <div><h2>Библиотека промптов</h2><p>Готовые идеи для старта</p></div>
-        <button onClick={() => setScreen("prompts")}>Все</button>
+        <button onClick={() => onOpenAll ? onOpenAll() : setScreen("prompts")}>Все</button>
       </div>
       <div className="hscroll">
         {prompts.map((p, i) => (
@@ -465,6 +470,7 @@ function Home({ user, feed, prompts, historyCount, setScreen, setTopup, midjourn
         </div>
         <div className="toolGrid compact">
           <button className="toolCard" onClick={() => setScreen("studio")}><b>⌘</b><span>Генерация изображений и видео</span></button>
+          <button className="toolCard" onClick={() => setScreen("midjourney")}><b>MJ</b><span>Midjourney модуль</span></button>
           <button className="toolCard" onClick={() => setScreen("music")}><b>♪</b><span>Музыка Suno</span></button>
           <button className="toolCard" onClick={() => setScreen("assistant")}><b>AI</b><span>Ассистент по промптам</span></button>
           <button className="toolCard" onClick={() => setScreen("referrals")}><b>₽</b><span>Партнёрский кабинет</span></button>
@@ -475,7 +481,7 @@ function Home({ user, feed, prompts, historyCount, setScreen, setTopup, midjourn
         <section className="block">
           <div className="title">
             <div><h2>Midjourney</h2><p>Цены из текущих моделей</p></div>
-            <button onClick={() => setScreen("studio")}>В студию</button>
+            <button onClick={() => setScreen("midjourney")}>Открыть</button>
           </div>
           <div className="grid">
             {midjourneyItems.map((item, i) => (
@@ -627,25 +633,27 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   );
 }
 
-function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemoved }) {
+function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemoved, scope = "all", onPromptUse, onOpenPrompts }) {
   const [mode, setMode] = useState("all");
-  const myCount = (feed || []).filter(item => item.is_mine).length;
-  const filtered = mode === "mine" ? (feed || []).filter(item => item.is_mine) : (feed || []);
+  const scopedFeed = scope === "midjourney" ? (feed || []).filter((item) => isMidjourneyModel(item.model)) : (feed || []);
+  const myCount = scopedFeed.filter(item => item.is_mine).length;
+  const filtered = mode === "mine" ? scopedFeed.filter(item => item.is_mine) : scopedFeed;
   const totalLikes = filtered.reduce((sum, item) => sum + (item.likes_count || 0), 0);
+  const isMjScope = scope === "midjourney";
 
   return (
     <>
-      <h1>Лента</h1>
+      <h1>{isMjScope ? "Midjourney лента" : "Лента"}</h1>
       <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 14, background: "var(--surface-2)", border: "1px solid var(--border-soft)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
           <div>
-            <div style={{ fontWeight: 700 }}>Публичные работы</div>
+            <div style={{ fontWeight: 700 }}>{isMjScope ? "Публичные MJ-работы" : "Публичные работы"}</div>
             <div style={{ fontSize: 12, color: "var(--text-ghost)", marginTop: 4 }}>Смотри чужие работы, повторяй и забирай ссылку на репост для своих.</div>
           </div>
-          <button onClick={() => setScreen("studio")} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent-border)", background: "var(--accent-soft)", color: "var(--accent-text)", fontSize: 13, fontWeight: 600 }}>В студию</button>
+          <button onClick={() => setScreen(isMjScope ? "midjourney" : "studio")} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent-border)", background: "var(--accent-soft)", color: "var(--accent-text)", fontSize: 13, fontWeight: 600 }}>{isMjScope ? "В MJ" : "В студию"}</button>
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <button onClick={() => setMode("all")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${mode === "all" ? "var(--accent-border)" : "var(--border-strong)"}`, background: mode === "all" ? "var(--accent-soft)" : "var(--surface-1)", color: mode === "all" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 600 }}>Все ({feed.length})</button>
+          <button onClick={() => setMode("all")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${mode === "all" ? "var(--accent-border)" : "var(--border-strong)"}`, background: mode === "all" ? "var(--accent-soft)" : "var(--surface-1)", color: mode === "all" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 600 }}>Все ({scopedFeed.length})</button>
           <button onClick={() => setMode("mine")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${mode === "mine" ? "var(--success-border)" : "var(--border-strong)"}`, background: mode === "mine" ? "var(--success-soft)" : "var(--surface-1)", color: mode === "mine" ? "var(--success)" : "var(--text-muted)", fontWeight: 600 }}>Мои ({myCount})</button>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: "var(--text-ghost)" }}>
@@ -653,7 +661,7 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemo
           <span>Лайков: {totalLikes}</span>
         </div>
       </div>
-      <PromptFeed prompts={prompts} setScreen={setScreen} />
+      <PromptFeed prompts={prompts} setScreen={setScreen} onPromptUse={onPromptUse} onOpenAll={onOpenPrompts} />
       {feedLoading ? <Spinner /> : (
         <div className="feedList">
           {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} onNotice={onNotice} onRemoved={onRemoved} />)}
@@ -845,23 +853,44 @@ function modeOptionLabel(x) {
   }[x] || x;
 }
 
-function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, generation, setTopup, remixSource, clearRemix, onNotice, preset }) {
+function Studio({
+  imageModels,
+  videoModels,
+  user,
+  onGenerate,
+  onRemixGenerate,
+  generation,
+  setTopup,
+  remixSource,
+  clearRemix,
+  onNotice,
+  preset,
+  modelScope = "all",
+  title = "Студия",
+  subtitle,
+}) {
   const isRemix = !!remixSource;
+  const scopedImageModels = useMemo(
+    () => modelScope === "midjourney" ? (imageModels || []).filter(isMidjourneyModel) : (imageModels || []),
+    [imageModels, modelScope],
+  );
   const supportedVideoModels = useMemo(
-    () => (videoModels || []).filter(isMiniappVideoModelSupported),
-    [videoModels],
+    () => (videoModels || [])
+      .filter(isMiniappVideoModelSupported)
+      .filter((model) => modelScope === "midjourney" ? isMidjourneyModel(model) : true),
+    [videoModels, modelScope],
   );
 
   const [kind, setKind] = useState(remixSource?.gen_type === "video" ? "video" : "image");
   const [scenario, setScenario] = useState("fast");
 
   const sourceModels = useMemo(
-    () => (kind === "image" ? imageModels : supportedVideoModels),
-    [kind, imageModels, supportedVideoModels],
+    () => (kind === "image" ? scopedImageModels : supportedVideoModels),
+    [kind, scopedImageModels, supportedVideoModels],
   );
   const scenarioModels = useMemo(
-    () => getScenarioModels(kind, scenario, imageModels, supportedVideoModels),
-    [kind, scenario, imageModels, supportedVideoModels],
+    () => getScenarioModels(kind, scenario, scopedImageModels, supportedVideoModels),
+    [kind, scenario, scopedImageModels, supportedVideoModels],
   );
   const visibleModels = scenarioModels.length ? scenarioModels : sourceModels;
 
@@ -1149,8 +1178,8 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
     <section className="studioClean">
       <div className="studioHead">
         <div>
-          <h1>{isRemix ? "🔁 Повтор из ленты" : "Студия"}</h1>
-          <p>{kind === "image" ? "Создай изображение или ремикс по фото" : "Создай видео или оживи фото"}</p>
+          <h1>{isRemix ? "🔁 Повтор из ленты" : title}</h1>
+          <p>{subtitle || (kind === "image" ? "Создай изображение или ремикс по фото" : "Создай видео или оживи фото")}</p>
         </div>
         <button className="balanceBtn" onClick={() => setTopup(true)}>{user.credits} 💋</button>
       </div>
@@ -1164,8 +1193,8 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
 
       <SettingsRow label="Что создаём">
         <div className="tabs">
-          <button className={kind === "image" ? "active" : ""} onClick={() => setKind("image")}>🖼 Фото</button>
-          <button className={kind === "video" ? "active" : ""} onClick={() => setKind("video")}>🎬 Видео</button>
+          <button className={kind === "image" ? "active" : ""} onClick={() => setKind("image")} disabled={!scopedImageModels.length}>🖼 Фото</button>
+          <button className={kind === "video" ? "active" : ""} onClick={() => setKind("video")} disabled={!supportedVideoModels.length}>🎬 Видео</button>
         </div>
       </SettingsRow>
 
@@ -1186,6 +1215,9 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
 
       <SettingsRow label="Модель">
         <div className="modelList">
+          {visibleModels.length === 0 && (
+            <div className="warn">Нет доступных моделей для этого раздела.</div>
+          )}
           {visibleModels.map((m) => (
             <button key={m.key} className={model === m.key ? "active" : ""} onClick={() => setModel(m.key)}>
               <i>{kind === "video" ? "🎬" : m.key?.includes("seedream") ? "☁️" : m.key?.includes("wan") ? "🌊" : m.key?.includes("grok") ? "⚡" : "🍌"}</i>
@@ -1486,15 +1518,17 @@ function Music({ user, musicGen, onGenerateMusic, setTopup, onNotice }) {
 
 // ── History screen ────────────────────────────────────────────────────────────
 
-function History({ history, loading, onNotice }) {
+function History({ history, loading, onNotice, scope = "all" }) {
   if (loading) return <Spinner />;
+  const visibleHistory = scope === "midjourney" ? (history || []).filter((item) => isMidjourneyModel(item.model)) : (history || []);
+  const isMjScope = scope === "midjourney";
   return (
     <>
-      <h1>История</h1>
-      {history.length === 0
-        ? <p style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 40 }}>Генераций пока нет. Создайте первую в Студии!</p>
+      <h1>{isMjScope ? "История Midjourney" : "История"}</h1>
+      {visibleHistory.length === 0
+        ? <p style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 40 }}>{isMjScope ? "Midjourney-генераций пока нет." : "Генераций пока нет. Создайте первую в Студии!"}</p>
         : <div className="historyList">
-            {history.map((g, i) => {
+            {visibleHistory.map((g, i) => {
               const resultUrls = generationResultUrls(g);
               return (
               <div key={g.id} className="historyCard">
@@ -1544,6 +1578,94 @@ function History({ history, loading, onNotice }) {
   );
 }
 
+function MidjourneyModule({
+  imageModels,
+  videoModels,
+  user,
+  generation,
+  prompts,
+  feed,
+  history,
+  setScreen,
+  setTopup,
+  onGenerate,
+  onRemixGenerate,
+  remixSource,
+  clearRemix,
+  onNotice,
+  preset,
+  onPromptUse,
+  onOpenPrompts,
+  onOpenFeed,
+  onOpenHistory,
+}) {
+  const mjHistory = (history || []).filter((item) => isMidjourneyModel(item.model));
+  const mjFeed = (feed || []).filter((item) => isMidjourneyModel(item.model)).slice(0, 3);
+  const mjPrompts = (prompts || []).slice(0, 4);
+
+  return (
+    <>
+      <section className="mjModuleHero">
+        <div>
+          <h1>Midjourney</h1>
+          <p>Отдельный модуль с тем же балансом, историей, лентой, библиотекой промптов и референсами.</p>
+        </div>
+        <button className="balanceBtn" onClick={() => setTopup(true)}>{user.credits} 💋</button>
+      </section>
+
+      <section className="block">
+        <div className="mjQuickGrid">
+          <button onClick={onOpenPrompts}><b>📚</b><span>Библиотека промптов</span></button>
+          <button onClick={onOpenFeed}><b>◷</b><span>Лента и ремиксы</span></button>
+          <button onClick={onOpenHistory}><b>☰</b><span>История MJ: {mjHistory.length}</span></button>
+          <button onClick={() => setTopup(true)}><b>💋</b><span>Баланс и оплата</span></button>
+        </div>
+      </section>
+
+      {!!mjPrompts.length && (
+        <PromptFeed prompts={mjPrompts} setScreen={setScreen} onPromptUse={onPromptUse} onOpenAll={onOpenPrompts} />
+      )}
+
+      <Studio
+        imageModels={imageModels}
+        videoModels={videoModels}
+        user={user}
+        onGenerate={onGenerate}
+        onRemixGenerate={onRemixGenerate}
+        generation={generation}
+        setTopup={setTopup}
+        remixSource={remixSource}
+        clearRemix={clearRemix}
+        onNotice={onNotice}
+        preset={preset}
+        modelScope="midjourney"
+        title="Midjourney Studio"
+        subtitle="Imagine, Blend, референсы, форматы, видео по фото и промпты из общей библиотеки."
+      />
+
+      {!!mjFeed.length && (
+        <section className="block">
+          <div className="title">
+            <div><h2>MJ в ленте</h2><p>Публичные работы можно ремиксовать и шарить</p></div>
+            <button onClick={onOpenFeed}>Все</button>
+          </div>
+          <div className="grid">
+            {mjFeed.map((item, index) => (
+              <button key={item.id || index} className="feedCard" onClick={onOpenFeed}>
+                <MediaThumb url={item.result_url} type={item.gen_type || "image"} idx={index} className="feedImg" />
+                <div>
+                  <span>{item.model}</span>
+                  <p>{item.likes_count || 0} лайков · {item.shares_count || 0} шеров</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
 function getStatusColor(s) {
   if (s === "done") return "#4ade80";
   if (s === "failed") return "#f87171";
@@ -1561,6 +1683,7 @@ function formatDate(iso) {
 function Capabilities({ setScreen, setTopup }) {
   const tools = [
     ["studio", "⌘", "Студия генераций", "Изображения, редактирование по референсам, blend, text-to-video и image-to-video."],
+    ["midjourney", "MJ", "Midjourney", "Отдельный MJ-модуль с общей историей, лентой, библиотекой промптов, оплатой и референсами."],
     ["music", "♪", "Музыка Suno", "Песни с вокалом или инструментальные треки по описанию настроения и жанра."],
     ["assistant", "AI", "AI-ассистент", "Помогает улучшить промпт, выбрать модель, разобраться с референсами и оплатой."],
     ["prompts", "📚", "Библиотека промптов", "Готовые идеи и формулы, которые можно быстро адаптировать под свою задачу."],
@@ -1809,6 +1932,7 @@ function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolved
   const menuItems = [
     ["capabilities", "✦", "Все возможности"],
     ["studio", "⌘", "Студия генераций"],
+    ["midjourney", "MJ", "Midjourney"],
     ["assistant", "AI", "AI-ассистент"],
     ["music", "🎶", "Музыка (Suno)"],
     ["history", "☰", "Мои генерации"],
@@ -1972,7 +2096,7 @@ function PhotoPromptTool({ setScreen, generatedPhotoPrompt, setGeneratedPhotoPro
   );
 }
 
-function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice }) {
+function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice, target = "studio" }) {
   const [photoPromptLoading, setPhotoPromptLoading] = useState(false);
   const [photoPromptResult, setPhotoPromptResult] = useState("");
   const [source, setSource] = useState("catalog");
@@ -1980,6 +2104,7 @@ function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice }) {
   const [sourceLoading, setSourceLoading] = useState(false);
   const photoPromptInputRef = useRef(null);
   const filtered = source === "catalog" ? (prompts || []) : sourceItems;
+  const targetLabel = target === "midjourney" ? "В MJ" : "В студию";
 
   useEffect(() => {
     if (source === "catalog") return;
@@ -2098,7 +2223,7 @@ function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice }) {
             <p>{photoPromptResult}</p>
             <div className="generatedPromptActions">
               <button onClick={copyPhotoPrompt}>📋 Скопировать</button>
-              <button onClick={() => onPromptUse ? onPromptUse({ title: "Промпт по фото", prompt_text: photoPromptResult }) : setScreen("studio")}>✨ В студию</button>
+              <button onClick={() => onPromptUse ? onPromptUse({ title: "Промпт по фото", prompt_text: photoPromptResult }) : setScreen("studio")}>✨ {targetLabel}</button>
             </div>
           </div>
         )}
@@ -2125,7 +2250,7 @@ function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice }) {
                 <span>♥ {p.likes || 0}  ·  {p.uses_count || 0} исп</span>
               </footer>
               <div className="promptActions">
-                <button onClick={() => onPromptUse ? onPromptUse(p) : setScreen("studio")}>В студию</button>
+                <button onClick={() => onPromptUse ? onPromptUse(p) : setScreen("studio")}>{targetLabel}</button>
                 <button onClick={() => likePrompt(p)}>♥</button>
                 <button onClick={() => sharePrompt(p)}>↗</button>
                 {source === "my" && <button onClick={() => deactivatePrompt(p)}>Скрыть</button>}
@@ -2172,8 +2297,12 @@ function App() {
   const [notice, setNotice] = useState(null);
   const [theme, setTheme] = useState(() => readStoredTheme());
   const [studioPreset, setStudioPreset] = useState(null);
+  const [promptTarget, setPromptTarget] = useState("studio");
+  const [feedScope, setFeedScope] = useState("all");
+  const [historyScope, setHistoryScope] = useState("all");
   const poll = useRef(null);
   const musicPoll = useRef(null);
+  const generationScreen = useRef("studio");
 
   const me = useApi(() => api("/me"), fallbackUser);
   const imageModels = useApi(() => api("/models/image").then(x => items(x).length ? items(x) : x), fallbackImageModels);
@@ -2254,9 +2383,9 @@ function App() {
             me.reload();
             history.reload();
             feed.reload();
-            setScreen("studio");
+            setScreen(generationScreen.current || "studio");
             tg()?.HapticFeedback?.notificationOccurred("success");
-            setNotice({ type: "success", message: "Фото готово — показываю результат сразу." });
+            setNotice({ type: "success", message: "Готово — показываю результат сразу." });
           }
         }
       } catch {
@@ -2289,6 +2418,7 @@ function App() {
   }, [musicPollId]);
 
   async function generate(kind, payload) {
+    generationScreen.current = screen === "midjourney" ? "midjourney" : "studio";
     setGeneration({ id: 0, status: "pending" });
     try {
       const endpoint = kind === "video" ? "/generate/video" : "/generate/image";
@@ -2306,6 +2436,7 @@ function App() {
   }
 
   async function remixGenerate(genId, payload) {
+    generationScreen.current = screen === "midjourney" ? "midjourney" : "studio";
     setGeneration({ id: 0, status: "pending" });
     try {
       const body = { model: payload.model, prompt: "", mode: payload.mode || "text", duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, reference_urls: payload.reference_urls || [], grok_mode: payload.grok_mode, quality: payload.quality, count: payload.count };
@@ -2335,10 +2466,14 @@ function App() {
 
   function openStudioPreset(item) {
     setStudioPreset({ modelKey: item.key, kind: item.gen_type });
-    setScreen("studio");
+    setScreen(isMidjourneyModel(item.key) ? "midjourney" : "studio");
   }
 
   function openPromptPreset(promptItem) {
+    if (isMidjourneyModel(promptItem.model)) {
+      openMidjourneyPromptPreset(promptItem);
+      return;
+    }
     setStudioPreset({
       kind: "image",
       modelKey: promptItem.model || undefined,
@@ -2349,7 +2484,43 @@ function App() {
     setScreen("studio");
   }
 
+  function openMidjourneyPromptPreset(promptItem) {
+    setStudioPreset({
+      kind: "image",
+      modelKey: "midjourney-imagine",
+      prompt: promptItem.prompt_text || promptItem.prompt || "",
+      promptId: promptItem.id || null,
+      title: promptItem.title || "Промпт",
+    });
+    setScreen("midjourney");
+  }
+
+  function navigate(nextScreen) {
+    if (nextScreen === "feed") setFeedScope("all");
+    if (nextScreen === "history") setHistoryScope("all");
+    if (nextScreen === "prompts") setPromptTarget("studio");
+    setScreen(nextScreen);
+  }
+
+  function openPromptLibrary(target = "studio") {
+    setPromptTarget(target === "midjourney" ? "midjourney" : "studio");
+    setScreen("prompts");
+  }
+
+  function openFeed(scope = "all") {
+    const normalizedScope = scope === "midjourney" ? "midjourney" : "all";
+    setFeedScope(normalizedScope);
+    setPromptTarget(normalizedScope === "midjourney" ? "midjourney" : "studio");
+    setScreen("feed");
+  }
+
+  function openHistory(scope = "all") {
+    setHistoryScope(scope === "midjourney" ? "midjourney" : "all");
+    setScreen("history");
+  }
+
   function handleRemix(feedItem) {
+    const targetScreen = isMidjourneyModel(feedItem.model) ? "midjourney" : "studio";
     setRemixSource({
       gen_id: feedItem.id,
       model: feedItem.model,
@@ -2357,28 +2528,32 @@ function App() {
       result_url: feedItem.result_url || null,
     });
     setGeneration(null);
-    setScreen("studio");
+    generationScreen.current = targetScreen;
+    setScreen(targetScreen);
   }
 
+  const activePromptUse = promptTarget === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset;
+
   const screens = {
-    home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={setScreen} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
-    capabilities: <Capabilities setScreen={setScreen} setTopup={setTopupOpen} />,
+    home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={navigate} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
+    capabilities: <Capabilities setScreen={navigate} setTopup={setTopupOpen} />,
     assistant: <Assistant onNotice={setNotice} />,
-    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={setScreen} onRemix={handleRemix} onNotice={setNotice} />,
+    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} scope={feedScope} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
     studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} />,
+    midjourney: <MidjourneyModule imageModels={imageModels.data} videoModels={videoModels.data} user={user} generation={generation} prompts={prompts.data} feed={feed.data} history={history.data} setScreen={navigate} setTopup={setTopupOpen} onGenerate={generate} onRemixGenerate={remixGenerate} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} onPromptUse={openMidjourneyPromptPreset} onOpenPrompts={() => openPromptLibrary("midjourney")} onOpenFeed={() => openFeed("midjourney")} onOpenHistory={() => openHistory("midjourney")} />,
     music: <Music user={user} musicGen={musicGen} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,
-    history: <History history={history.data} loading={history.loading} onNotice={setNotice} />,
-    profile: <Profile user={user} history={history.data} setScreen={setScreen} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} onNotice={setNotice} reloadUser={me.reload} />,
+    history: <History history={history.data} loading={history.loading} onNotice={setNotice} scope={historyScope} />,
+    profile: <Profile user={user} history={history.data} setScreen={navigate} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} onNotice={setNotice} reloadUser={me.reload} />,
     referrals: <Referrals user={user} stats={referrals.data} loading={referrals.loading} reload={referrals.reload} onNotice={setNotice} />,
     help: <Help onNotice={setNotice} />,
-    prompts:<Prompts prompts={prompts.data} loading={prompts.loading} setScreen={setScreen} onPromptUse={openPromptPreset} onNotice={setNotice}/>,
+    prompts:<Prompts prompts={prompts.data} loading={prompts.loading} setScreen={navigate} onPromptUse={activePromptUse} onNotice={setNotice} target={promptTarget}/>,
   };
 
   return (
     <main>
       <div className="bg" />
       <div className="wrap">
-        <Header screen={screen} setScreen={setScreen} user={user} setTopup={setTopupOpen} />
+        <Header screen={screen} setScreen={navigate} user={user} setTopup={setTopupOpen} />
         <NoticeBar notice={notice} onClose={() => setNotice(null)} />
         {isDemo && (
           <div className="warn">
@@ -2387,7 +2562,7 @@ function App() {
         )}
         {screens[screen] || screens.home}
       </div>
-      <Nav screen={screen} setScreen={setScreen} />
+      <Nav screen={screen} setScreen={navigate} />
       {topupOpen && <TopupModal onClose={() => setTopupOpen(false)} />}
     </main>
   );

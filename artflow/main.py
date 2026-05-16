@@ -24,6 +24,7 @@ import redis.asyncio as aioredis
 from api.comet_client import close_client, get_client
 from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import router as miniapp_router
+from api.web import router as web_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 from api.midjourney_service import MJButton, MJTaskResult
 from api.music_service import extract_music_urls, pop_task
@@ -385,8 +386,17 @@ async def miniapp_no_cache(request, call_next):
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 app.mount(settings.STATIC_UPLOAD_URL_PATH, StaticFiles(directory=str(UPLOAD_ROOT)), name="static_upload")
 app.include_router(miniapp_router)
+app.include_router(web_router, prefix="/api/web")
 
+PROMPT_RIOT_DIR = Path("web/static/prompt-riot")
 WEBAPP_DIST = Path("webapp/dist")
+if PROMPT_RIOT_DIR.exists():
+    app.mount(
+        "/prompt-riot",
+        StaticFiles(directory=str(PROMPT_RIOT_DIR), html=True),
+        name="prompt_riot_app",
+    )
+
 if WEBAPP_DIST.exists():
     @app.api_route("/app", methods=["GET", "HEAD"], include_in_schema=False)
     async def miniapp_index() -> FileResponse:
@@ -406,7 +416,11 @@ else:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://artflow.ru", "http://localhost:3000"],
+    allow_origins=[
+        "https://apix.chillcreative.ru",
+        "https://artflow.ru",
+        "http://localhost:3000",
+    ],
     allow_methods=["GET", "POST"],
     allow_headers=[
         "Content-Type",
@@ -414,6 +428,7 @@ app.add_middleware(
         "X-Telegram-Bot-Api-Secret-Token",
         "X-Telegram-Init-Data",
         "X-Web-Auth-Token",
+        "X-Dev-Tg-Id",
     ],
 )
 

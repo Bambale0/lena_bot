@@ -37,6 +37,16 @@ Default production stack for new frontend apps:
 
 For existing projects, prefer the repo stack unless the user explicitly asks for a new app or migration.
 
+## MCP Policy
+
+Development agents must use MCP tools as part of their normal research loop:
+
+- Context7 MCP is the default documentation source for all developer agents when checking current library APIs, framework behavior, package usage, and best practices.
+- shadcn MCP is required for frontend/UI agents when researching component patterns, registry examples, shadcn-compatible blocks, and implementation references.
+- Frontend agents should consult shadcn before designing or implementing reusable controls, dialogs, forms, navigation, cards, empty states, and layout primitives.
+- If an MCP server is not visible in the current Codex session, the orchestrator should record that the session needs a restart after MCP config changes and continue using local repo context.
+- Do not paste MCP API keys or secrets into project files, artifacts, client code, docs, or screenshots.
+
 ## Artifact Contract
 
 Agents communicate through machine-readable or structured artifacts. Each agent must read its input artifact, make assumptions when data is missing, produce its output artifact, and record risks and TODOs.
@@ -75,19 +85,19 @@ src/
 
 | Agent | Role | Input | Output |
 | --- | --- | --- | --- |
-| Frontend Orchestrator | Owns routing, gates, and final delivery | User task, repo context, artifacts | Current phase, selected agent, handoff, final report |
-| Product UX Agent | Converts vague requests into product requirements | Brief, goals, audience | `01-prd.md` |
-| UX Flow Agent | Builds journeys and screen architecture | PRD | `02-user-flow.md`, `03-screen-map.md` |
-| UI Design Agent | Defines implementable layouts and visual behavior | Flow, screen map, brand | UI specification |
-| Design System Agent | Defines reusable UI system | UI specification | `04-design-system.json`, `05-component-inventory.md` |
-| Frontend Architect Agent | Designs app architecture | PRD, design system | `06-frontend-architecture.md` |
-| Component Developer Agent | Implements reusable typed components | Component inventory | Component files and stories |
-| Page Builder Agent | Composes routes and layouts | Components, routes | Page files |
-| API Integration Agent | Connects APIs, auth, forms, state | API docs, app pages | `07-api-contract.md`, API helpers |
-| QA/A11y Agent | Finds release-blocking defects | App preview/code | `08-qa-report.md` |
-| E2E Test Agent | Writes Playwright tests | User flows | E2E specs and coverage notes |
-| DevOps Deploy Agent | Prepares CI/CD and deploy | Repo, env vars | `09-deploy-report.md` |
-| Code Review Agent | Reviews final implementation | Final code state | Final code review |
+| Frontend Orchestrator | Owns routing, gates, MCP availability, and final delivery | User task, repo context, artifacts | Current phase, selected agent, handoff, final report |
+| Product UX Agent | Converts vague requests into product requirements | Brief, goals, audience, Context7 when product depends on current platform docs | `01-prd.md` |
+| UX Flow Agent | Builds journeys and screen architecture | PRD, Context7 for current UX/platform constraints | `02-user-flow.md`, `03-screen-map.md` |
+| UI Design Agent | Defines implementable layouts and visual behavior | Flow, screen map, brand, shadcn examples | UI specification |
+| Design System Agent | Defines reusable UI system | UI specification, shadcn registry patterns | `04-design-system.json`, `05-component-inventory.md` |
+| Frontend Architect Agent | Designs app architecture | PRD, design system, Context7 framework docs | `06-frontend-architecture.md` |
+| Component Developer Agent | Implements reusable typed components | Component inventory, shadcn component references, Context7 package docs | Component files and stories |
+| Page Builder Agent | Composes routes and layouts | Components, routes, shadcn layout references | Page files |
+| API Integration Agent | Connects APIs, auth, forms, state | API docs, app pages, Context7 docs for clients/state libs | `07-api-contract.md`, API helpers |
+| QA/A11y Agent | Finds release-blocking defects | App preview/code, Context7 for testing/a11y docs | `08-qa-report.md` |
+| E2E Test Agent | Writes Playwright tests | User flows, Context7 Playwright docs | E2E specs and coverage notes |
+| DevOps Deploy Agent | Prepares CI/CD and deploy | Repo, env vars, Context7 deployment docs | `09-deploy-report.md` |
+| Code Review Agent | Reviews final implementation | Final code state, Context7 for disputed APIs | Final code review |
 
 ## Orchestrator Rules
 
@@ -99,6 +109,7 @@ The orchestrator must always return:
 4. Expected output artifact
 5. Quality gate
 6. Next handoff
+7. MCP sources used or unavailable
 
 Quality gates:
 

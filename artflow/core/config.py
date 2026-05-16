@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     # API
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
+    ENV: str = "development"
+    APIX_WEB_DEV_AUTH: bool = False
 
     # DB
     DATABASE_URL: str = ""

@@ -183,6 +183,63 @@ async def test_handle_imagine_prompt_success(_close_background_tasks) -> None:
 
 
 @pytest.mark.asyncio
+async def test_initial_mj_image_polling_sends_clickable_action_buttons(monkeypatch) -> None:
+    created = []
+
+    def fake_create_task(coro):
+        created.append(coro)
+        return SimpleNamespace(cancel=MagicMock())
+
+    class FakeSessionFactory:
+        async def __aenter__(self):
+            return AsyncMock()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    async def fake_poll_until_done(task_id, check_fn, on_success, on_failure):
+        await on_success("https://example.test/result.jpg")
+
+    button = midjourney.MJButton(custom_id="MJ::JOB::upsample::1", label="U1")
+    task_result = midjourney.MJTaskResult(
+        task_id="task_buttons",
+        status=midjourney.MJTaskStatus.SUCCESS,
+        image_url="https://example.test/result.jpg",
+        buttons=[button],
+    )
+    bot = AsyncMock()
+    state = _fake_state()
+    status_msg = AsyncMock()
+
+    monkeypatch.setattr(midjourney.asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(midjourney.polling, "poll_until_done", fake_poll_until_done)
+    monkeypatch.setattr(midjourney.mj, "fetch_task", AsyncMock(return_value=task_result))
+    monkeypatch.setattr(midjourney, "AsyncSessionLocal", lambda: FakeSessionFactory())
+    monkeypatch.setattr(midjourney.repo, "finish_generation", AsyncMock(return_value=SimpleNamespace(id=100)))
+
+    await midjourney._finish_initial_mj_image(
+        task_id="task_buttons",
+        gen_id=100,
+        user_id=42,
+        credits=10,
+        chat_id=123456,
+        caption="done",
+        state=state,
+        status_msg=status_msg,
+        bot=bot,
+    )
+    await created[0]
+
+    state.set_state.assert_awaited_with(MidjourneyFSM.viewing_result)
+    assert state.update_data.await_args.kwargs["buttons"] == [
+        {"custom_id": "MJ::JOB::upsample::1", "label": "U1", "emoji": ""}
+    ]
+    bot.send_photo.assert_awaited_once()
+    assert bot.send_photo.await_args.kwargs["reply_markup"] is not None
+    bot.send_document.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_handle_imagine_prompt_prepends_reference_url() -> None:
     msg = make_message(text="a beautiful cat")
     msg.answer = AsyncMock()

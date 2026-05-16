@@ -1066,6 +1066,162 @@ async def test_feed_remix_image_uses_and_saves_reference(client, monkeypatch) ->
     assert image_generate.await_args.kwargs["n"] == 2
 
 
+@pytest.mark.asyncio
+async def test_feed_remix_midjourney_imagine_uses_hidden_prompt_and_source_ref(client, monkeypatch) -> None:
+    source = SimpleNamespace(
+        id=89,
+        model="midjourney-imagine",
+        prompt="hidden mj prompt",
+        result_url="https://example.test/source-mj.jpg",
+    )
+    create_image_session = AsyncMock(return_value=SimpleNamespace(id=78))
+    update_generation_task = AsyncMock()
+    increment_feed_share = AsyncMock()
+    imagine = AsyncMock(return_value="mj_remix_task")
+
+    async def fake_create_generation(_session, _user_id, model, gen_type, prompt, credits_spent, **kwargs):
+        assert kwargs["image_session_id"] == 78
+        assert kwargs["parent_generation_id"] == 89
+        assert kwargs["action_type"] == ImageGenerationAction.remix
+        assert kwargs["source_feed_gen_id"] == 89
+        return SimpleNamespace(
+            id=702,
+            model=model,
+            gen_type=gen_type,
+            prompt=prompt,
+            status=GenerationStatus.processing,
+            result_url=None,
+            result_urls=None,
+            credits_spent=credits_spent,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+        )
+
+    monkeypatch.setattr("api.miniapp_routes.repo.get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr("api.miniapp_routes.repo.get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=10, is_active=True)))
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", AsyncMock(return_value=True))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_image_session", create_image_session)
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", update_generation_task)
+    monkeypatch.setattr("api.miniapp_routes.repo.increment_feed_share", increment_feed_share)
+    monkeypatch.setattr("api.miniapp_routes.midjourney_service.imagine", imagine)
+
+    response = await client.post(
+        "/api/v1/feed/89/remix",
+        json={
+            "model": "midjourney-imagine",
+            "mode": "image",
+            "aspect_ratio": "9:16",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["model"] == "midjourney-imagine"
+    assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/source-mj.jpg"
+    assert create_image_session.await_args.kwargs["base_prompt"] == "hidden mj prompt"
+    imagine.assert_awaited_once_with(
+        "https://example.test/source-mj.jpg hidden mj prompt",
+        reference_url="https://example.test/source-mj.jpg",
+    )
+    assert update_generation_task.await_args.args[1:] == (702, "mj_remix_task")
+    increment_feed_share.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_feed_remix_midjourney_blend_requires_refs_before_spending(client, monkeypatch) -> None:
+    source = SimpleNamespace(
+        id=90,
+        model="midjourney-imagine",
+        prompt="hidden blend prompt",
+        result_url="https://example.test/source-blend.jpg",
+    )
+    spend_credits = AsyncMock(return_value=True)
+
+    monkeypatch.setattr("api.miniapp_routes.repo.get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr("api.miniapp_routes.repo.get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=12, is_active=True)))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend_credits)
+
+    response = await client.post(
+        "/api/v1/feed/90/remix",
+        json={
+            "model": "midjourney-blend",
+            "mode": "text",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "Blend requires at least 2 reference images" in response.json()["detail"]
+    spend_credits.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_feed_remix_midjourney_blend_uses_source_ref_and_reference_urls(client, monkeypatch) -> None:
+    source = SimpleNamespace(
+        id=91,
+        model="midjourney-imagine",
+        prompt="hidden blend prompt",
+        result_url="https://example.test/source-blend.jpg",
+    )
+    create_image_session = AsyncMock(return_value=SimpleNamespace(id=79))
+    update_generation_task = AsyncMock()
+    increment_feed_share = AsyncMock()
+    data_uri_from_url = AsyncMock(side_effect=["data:image/jpeg;base64,source", "data:image/jpeg;base64,extra"])
+    blend = AsyncMock(return_value="mj_blend_task")
+
+    async def fake_create_generation(_session, _user_id, model, gen_type, prompt, credits_spent, **kwargs):
+        assert kwargs["image_session_id"] == 79
+        assert kwargs["parent_generation_id"] == 91
+        assert kwargs["action_type"] == ImageGenerationAction.remix
+        assert kwargs["source_feed_gen_id"] == 91
+        return SimpleNamespace(
+            id=703,
+            model=model,
+            gen_type=gen_type,
+            prompt=prompt,
+            status=GenerationStatus.processing,
+            result_url=None,
+            result_urls=None,
+            credits_spent=credits_spent,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+        )
+
+    monkeypatch.setattr("api.miniapp_routes.repo.get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr("api.miniapp_routes.repo.get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=12, is_active=True)))
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", AsyncMock(return_value=True))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_image_session", create_image_session)
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", update_generation_task)
+    monkeypatch.setattr("api.miniapp_routes.repo.increment_feed_share", increment_feed_share)
+    monkeypatch.setattr("api.miniapp_routes._data_uri_from_url", data_uri_from_url)
+    monkeypatch.setattr("api.miniapp_routes.midjourney_service.blend", blend)
+
+    response = await client.post(
+        "/api/v1/feed/91/remix",
+        json={
+            "model": "midjourney-blend",
+            "mode": "image",
+            "aspect_ratio": "2:3",
+            "reference_urls": ["https://example.test/extra.jpg"],
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["model"] == "midjourney-blend"
+    assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/source-blend.jpg"
+    assert data_uri_from_url.await_args_list[0].args == ("https://example.test/source-blend.jpg",)
+    assert data_uri_from_url.await_args_list[1].args == ("https://example.test/extra.jpg",)
+    blend.assert_awaited_once()
+    assert blend.await_args.args[0] == ["data:image/jpeg;base64,source", "data:image/jpeg;base64,extra"]
+    assert blend.await_args.kwargs["dimensions"].value == "PORTRAIT"
+    update_generation_task.assert_awaited_once()
+    increment_feed_share.assert_awaited_once()
+
+
 
 @pytest.mark.asyncio
 async def test_webapp_image_models_expose_single_ref_caps_and_no_false_count(client, monkeypatch) -> None:
