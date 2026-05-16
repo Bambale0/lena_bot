@@ -30,7 +30,7 @@ from api.music_service import extract_music_urls, pop_task
 from api.public_files import UPLOAD_ROOT, mirror_url, save_public_file
 from bot.handlers import admin, assistant, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen, stars_payment
 from bot.handlers import settings as settings_handler
-from bot.keyboards.main_menu import back_to_menu_kb
+from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.feed import get_generation_result_keyboard
 from bot.keyboards.midjourney import mj_action_buttons_kb
 from bot.middlewares.auth import AuthMiddleware

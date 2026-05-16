@@ -356,11 +356,15 @@ async def _data_uri_from_url(url: str) -> str:
 
 
 def _mj_catalog_item(mc: Any) -> MidjourneyCatalogItem:
+    raw_gen_type = getattr(mc, "gen_type", None)
+    gen_type = getattr(raw_gen_type, "value", raw_gen_type)
+    if not gen_type:
+        gen_type = "video" if mc.model_key in _MJ_VIDEO_MODELS else "image"
     return MidjourneyCatalogItem(
         key=mc.model_key,
         display_name=_friendly_model_name(mc.model_key, mc.display_name),
         credits=float(mc.credits),
-        gen_type=getattr(mc.gen_type, "value", str(mc.gen_type)),
+        gen_type=str(gen_type),
         available_in_studio=mc.model_key in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS),
     )
 
@@ -1035,8 +1039,6 @@ async def list_image_models(
     for mc in model_costs:
         if mc.model_key not in image_keys:
             continue
-        if _is_midjourney_model(mc.model_key) and not _is_admin_user(user):
-            continue
         caps: dict[str, Any] = IMAGE_CAPS.get(mc.model_key, _MJ_IMAGE_CAPS.get(mc.model_key, {}))
         quality_raw = caps.get("quality_options", [])
         quality_prices = await _resolve_image_quality_prices(session, mc.model_key, quality_raw, float(mc.credits))
@@ -1067,8 +1069,6 @@ async def list_video_models(
     result = []
     for mc in model_costs:
         if mc.model_key not in video_keys:
-            continue
-        if _is_midjourney_model(mc.model_key) and not _is_admin_user(user):
             continue
         caps: dict[str, Any] = VIDEO_CAPS.get(mc.model_key, _MJ_VIDEO_CAPS.get(mc.model_key, {}))
         is_per_sec, credits_per_sec = await _video_model_rate_info(session, mc.model_key, caps, mc.credits)
@@ -1139,7 +1139,12 @@ async def list_music_models(
 async def public_midjourney_models(
     session: AsyncSession = Depends(get_session),
 ) -> list[MidjourneyCatalogItem]:
-    return []
+    model_costs = await repo.get_all_model_costs(session)
+    return [
+        _mj_catalog_item(mc)
+        for mc in model_costs
+        if _is_midjourney_model(mc.model_key) and getattr(mc, "is_active", True)
+    ]
 
 
 @router.get("/public/models")
@@ -1183,8 +1188,6 @@ async def create_image_generation(
         effective_prompt = prompt_source.prompt_text.strip()
 
     if body.model in _MJ_STUDIO_IMAGE_MODELS:
-        if not _is_admin_user(user):
-            raise HTTPException(status_code=403, detail="Model not available")
         caps: dict[str, Any] = _MJ_IMAGE_CAPS.get(body.model, {})
         normalized_ratio = _normalize_choice(body.aspect_ratio, caps.get("aspect_ratios", []), field_name="aspect ratio")
         model_cost = await repo.get_model_cost(session, body.model)
@@ -1341,8 +1344,6 @@ async def create_video_generation(
     Poll `GET /api/v1/generations/{id}` until done.
     """
     if body.model in _MJ_VIDEO_MODELS:
-        if not _is_admin_user(user):
-            raise HTTPException(status_code=403, detail="Model not available")
         image_urls = _normalize_public_urls(body.image_url, *body.reference_urls)
         if not image_urls:
             raise HTTPException(status_code=422, detail="Midjourney Video requires a reference image")

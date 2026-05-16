@@ -432,6 +432,48 @@ async def test_webapp_public_models_is_public(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_public_midjourney_catalog_returns_active_models(monkeypatch) -> None:
+    app.dependency_overrides.clear()
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_all_model_costs",
+        AsyncMock(return_value=[
+            SimpleNamespace(model_key="midjourney-imagine", display_name="MJ Imagine", credits=10, is_active=True),
+            SimpleNamespace(model_key="midjourney-video", display_name="MJ Video", credits=15, is_active=True),
+            SimpleNamespace(model_key="midjourney-blend", display_name="MJ Blend", credits=12, is_active=False),
+            SimpleNamespace(model_key="nano-banana-pro", display_name="Nano Banana Pro", credits=5, is_active=True),
+        ]),
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anonymous_client:
+        response = await anonymous_client.get("/api/v1/public/midjourney")
+
+    assert response.status_code == 200
+    payload = {item["key"]: item for item in response.json()}
+    assert set(payload) == {"midjourney-imagine", "midjourney-video"}
+    assert payload["midjourney-imagine"]["available_in_studio"] is True
+    assert payload["midjourney-video"]["available_in_studio"] is True
+
+
+@pytest.mark.asyncio
+async def test_webapp_models_include_midjourney_for_regular_user(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_all_model_costs",
+        AsyncMock(return_value=[
+            SimpleNamespace(model_key="midjourney-imagine", display_name="MJ Imagine", credits=10, is_active=True),
+            SimpleNamespace(model_key="midjourney-video", display_name="MJ Video", credits=15, is_active=True),
+        ]),
+    )
+
+    image_response = await client.get("/api/v1/models/image")
+    video_response = await client.get("/api/v1/models/video")
+
+    assert image_response.status_code == 200
+    assert video_response.status_code == 200
+    assert {item["key"] for item in image_response.json()} == {"midjourney-imagine"}
+    assert {item["key"] for item in video_response.json()} == {"midjourney-video"}
+
+
+@pytest.mark.asyncio
 async def test_webapp_plans_use_label_as_title(client, monkeypatch) -> None:
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_active_price_plans",
@@ -745,6 +787,52 @@ async def test_generate_image_rejects_too_many_refs_for_single_ref_model(client,
 
     assert response.status_code == 422
     assert "at most 1 reference" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_generate_midjourney_image_available_to_regular_user(client, monkeypatch) -> None:
+    update_generation_task = AsyncMock()
+    update_image_session_last_prompt = AsyncMock()
+    imagine = AsyncMock(return_value="mj_task_1")
+
+    async def fake_create_generation(*args, **kwargs):
+        return SimpleNamespace(
+            id=504,
+            model="midjourney-imagine",
+            gen_type=GenerationType.image,
+            prompt="cat portrait",
+            status=GenerationStatus.processing,
+            result_url=None,
+            result_urls=None,
+            credits_spent=10,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+        )
+
+    monkeypatch.setattr("api.miniapp_routes.repo.get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=10, is_active=True)))
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", AsyncMock(return_value=True))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_image_session", AsyncMock(return_value=SimpleNamespace(id=80)))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", update_generation_task)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_image_session_last_prompt", update_image_session_last_prompt)
+    monkeypatch.setattr("api.miniapp_routes.midjourney_service.imagine", imagine)
+
+    response = await client.post(
+        "/api/v1/generate/image",
+        json={
+            "model": "midjourney-imagine",
+            "prompt": "cat portrait",
+            "aspect_ratio": "9:16",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["model"] == "midjourney-imagine"
+    imagine.assert_awaited_once_with("cat portrait", reference_url=None)
+    update_generation_task.assert_awaited_once()
+    update_image_session_last_prompt.assert_awaited_once()
 
 
 @pytest.mark.asyncio

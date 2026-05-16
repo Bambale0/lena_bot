@@ -26,6 +26,19 @@ def _fake_state(**initial: object):
     return state
 
 
+@pytest.fixture(autouse=True)
+def _close_background_tasks(monkeypatch):
+    created = []
+
+    def fake_create_task(coro):
+        created.append(coro)
+        coro.close()
+        return SimpleNamespace(cancel=MagicMock())
+
+    monkeypatch.setattr(midjourney.asyncio, "create_task", fake_create_task)
+    return created
+
+
 # ── menu:mj ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -34,7 +47,10 @@ async def test_cb_mj_menu_shows_submenu() -> None:
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
     repo_mock = AsyncMock(get_model_cost=AsyncMock(return_value=SimpleNamespace(credits=10)))
-    with patch("bot.handlers.midjourney.repo", repo_mock):
+    with (
+        patch("bot.handlers.midjourney.repo", repo_mock),
+        patch("bot.handlers.midjourney._ensure_admin_access", return_value=True),
+    ):
         await midjourney.cb_mj_menu(call, AsyncMock(), AsyncMock())
     call.message.edit_text.assert_awaited_once()
     args = call.message.edit_text.call_args
@@ -138,7 +154,7 @@ async def test_handle_mj_reference_photo() -> None:
 # ── handle_imagine_prompt ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_handle_imagine_prompt_success() -> None:
+async def test_handle_imagine_prompt_success(_close_background_tasks) -> None:
     msg = make_message(text="/imagine a beautiful cat")
     msg.answer = AsyncMock()
     status_msg = SimpleNamespace(message_id=777)
@@ -163,6 +179,7 @@ async def test_handle_imagine_prompt_success() -> None:
 
     mock_state.set_state.assert_awaited_once_with(MidjourneyFSM.generating)
     assert mock_state.update_data.await_args.kwargs["mj_status_message_id"] == 777
+    assert len(_close_background_tasks) == 1
 
 
 @pytest.mark.asyncio

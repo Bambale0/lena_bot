@@ -602,7 +602,7 @@ async def finish_generation(
     # Pay 5% royalty to the author of the source feed post (if remixed from feed)
 
     if not gen.source_feed_gen_id:
-        return
+        return gen
 
     source = await get_generation_by_id(session, gen.source_feed_gen_id)
     if not source:
@@ -648,6 +648,7 @@ async def finish_generation(
         source.id,
         gen.id,
     )
+    return gen
 
 
 async def fail_generation(
