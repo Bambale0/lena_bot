@@ -2,7 +2,7 @@
 
 - Version: `1.0.0`
 - OpenAPI: `3.1.0`
-- Paths: `48`
+- Paths: `49`
 
 APIX AI API for Telegram auth, content generation, billing, prompt library, feed, and provider webhooks.
 
@@ -385,6 +385,27 @@ Responses:
 - Request body: none
 
 User explicitly publishes own generation to public feed/prompt library.
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `gen_id` | `path` | yes | `integer` |
+| `x-telegram-init-data` | `header` | no | `string | null` |
+| `x-web-auth-token` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `422`: Validation Error (`application/json`)
+
+#### `POST /api/v1/generations/{gen_id}/remove-library`
+
+- Summary: Remove From Library
+- Operation ID: `remove_from_library_api_v1_generations__gen_id__remove_library_post`
+- Auth: not declared
+- Request body: none
+
+Remove own generation's prompt from the public prompt library.
 
 Parameters:
 

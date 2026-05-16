@@ -8,7 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user
-from api.miniapp_routes import _normalize_video_request
+from api.miniapp_routes import _gen_out, _normalize_video_request
 from db.models import GenerationStatus, GenerationType, ImageGenerationAction
 from db import repository as repo
 from db.session import get_session
@@ -390,6 +390,27 @@ def test_normalize_video_request_keeps_grok_i2v_ratio_for_multi_ref() -> None:
     assert normalized["aspect_ratio"] == "16:9"
 
 
+def test_generation_out_includes_all_result_urls() -> None:
+    gen = SimpleNamespace(
+        id=55,
+        model="wan/2-7-image-pro",
+        gen_type=GenerationType.image,
+        prompt="fashion editorial",
+        status=GenerationStatus.done,
+        result_url="https://example.test/1.png",
+        result_urls='["https://example.test/1.png","https://example.test/2.png"]',
+        credits_spent=5,
+        created_at=datetime.now(timezone.utc),
+        is_public_feed=False,
+        is_prompt_library=False,
+    )
+
+    payload = _gen_out(gen).model_dump()
+
+    assert payload["result_url"] == "https://example.test/1.png"
+    assert payload["result_urls"] == ["https://example.test/1.png", "https://example.test/2.png"]
+
+
 @pytest.mark.asyncio
 async def test_webapp_public_models_is_public(monkeypatch) -> None:
     app.dependency_overrides.clear()
@@ -490,6 +511,28 @@ async def test_webapp_prompt_use_marks_prompt_usage(client, monkeypatch) -> None
     assert response.json()["prompt"]["id"] == 7
     use_prompt.assert_awaited_once()
     assert use_prompt.await_args.args[1:] == (7, 1)
+
+
+@pytest.mark.asyncio
+async def test_webapp_remove_generation_from_library(client, monkeypatch) -> None:
+    remove_from_library = AsyncMock(return_value=SimpleNamespace(id=77, is_prompt_library=False))
+    monkeypatch.setattr("api.miniapp_routes.repo.remove_from_library", remove_from_library)
+
+    response = await client.post("/api/v1/generations/77/remove-library")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": 77, "is_prompt_library": False}
+    remove_from_library.assert_awaited_once()
+    assert remove_from_library.await_args.args[1:] == (77, 1)
+
+
+@pytest.mark.asyncio
+async def test_webapp_remove_missing_generation_from_library_returns_404(client, monkeypatch) -> None:
+    monkeypatch.setattr("api.miniapp_routes.repo.remove_from_library", AsyncMock(return_value=None))
+
+    response = await client.post("/api/v1/generations/77/remove-library")
+
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

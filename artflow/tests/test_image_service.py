@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from api import image_service
 from api.image_service import ImageModel, _build_input, normalize_quality_for_aspect_ratio
 
 
@@ -38,3 +41,22 @@ def test_build_input_omits_gpt_image_2_auto_aspect_ratio() -> None:
 
     assert payload["resolution"] == "2K"
     assert "aspect_ratio" not in payload
+
+
+@pytest.mark.asyncio
+async def test_poll_kieai_result_urls_returns_all_urls(monkeypatch) -> None:
+    async def fake_get_task_status(_task_id: str) -> dict:
+        return {
+            "data": {
+                "state": "success",
+                "resultJson": '{"resultUrls":["https://example.test/1.png","https://example.test/2.png"]}',
+            }
+        }
+
+    monkeypatch.setattr(image_service.kieai_client, "get_task_status", fake_get_task_status)
+
+    assert await image_service.poll_kieai_result_urls("task_1") == [
+        "https://example.test/1.png",
+        "https://example.test/2.png",
+    ]
+    assert await image_service.poll_kieai_status("task_1") == "https://example.test/1.png"

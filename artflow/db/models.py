@@ -126,6 +126,7 @@ class Generation(Base):
     gen_type: Mapped[GenerationType] = mapped_column(Enum(GenerationType), nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     result_url: Mapped[str | None] = mapped_column(Text)
+    result_urls: Mapped[str | None] = mapped_column(Text)
     is_public_feed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_prompt_library: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     source_feed_gen_id: Mapped[int | None] = mapped_column(

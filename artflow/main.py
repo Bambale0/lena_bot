@@ -728,13 +728,16 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                     logger.warning("Failed to notify empty KIE result user=%s: %s", user.tg_id, e)
             return {"ok": True}
 
-        try:
-            result_url = await mirror_url(urls[0])
-        except Exception as e:
-            logger.warning("Failed to mirror KIE result task_id=%s url=%s: %s", task_id, urls[0], e)
-            result_url = urls[0]
+        result_urls: list[str] = []
+        for url in urls:
+            try:
+                result_urls.append(await mirror_url(url))
+            except Exception as e:
+                logger.warning("Failed to mirror KIE result task_id=%s url=%s: %s", task_id, url, e)
+                result_urls.append(url)
+        result_url = result_urls[0]
 
-        await repo.finish_generation(session, gen.id, result_url)
+        await repo.finish_generation(session, gen.id, result_url, result_urls=result_urls)
 
         if gen.image_session_id:
             await repo.update_image_session_last_result(
@@ -754,7 +757,7 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                         "\n\n🎨 <b>Серия активна.</b>\n"
                         "Теперь просто отправляй новый текст или фото — настройки сохранятся."
                     )
-                    for idx, url in enumerate(urls):
+                    for idx, url in enumerate(result_urls):
                         is_first = idx == 0
                         img_caption = caption if is_first else None
                         try:
@@ -770,7 +773,7 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
                                 caption=img_caption,
                             )
 
-                    for idx, url in enumerate(urls):
+                    for idx, url in enumerate(result_urls):
                         doc_caption = "📎 <b>Исходник файлом</b>" if idx == 0 else None
                         try:
                             await bot.send_document(

@@ -340,7 +340,7 @@ def _build_input(
 
 # ── Poll functions ────────────────────────────────────────────────────────────
 
-async def poll_kieai_status(task_id: str) -> str | None:
+async def poll_kieai_result_urls(task_id: str) -> list[str] | None:
     """Universal poller for all KIE.AI image models."""
     resp = await kieai_client.get_task_status(task_id)
     if not isinstance(resp, dict):
@@ -362,13 +362,18 @@ async def poll_kieai_status(task_id: str) -> str | None:
             parsed = {}
         urls = parsed.get("resultUrls", [])
         if urls:
-            return urls[0]
+            return [str(url) for url in urls if url]
         raise RuntimeError("KIE.AI image: success but no resultUrls")
 
     if state == "fail":
         raise RuntimeError(f"KIE.AI image failed: {data.get('failMsg', 'unknown error')}")
 
     return None  # still processing
+
+
+async def poll_kieai_status(task_id: str) -> str | None:
+    urls = await poll_kieai_result_urls(task_id)
+    return urls[0] if urls else None
 
 
 # Backward-compat aliases kept for old polling calls

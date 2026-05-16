@@ -137,8 +137,10 @@ async function copyText(value) {
 
 function openExternalUrl(url) {
   if (!url) return;
-  if (tg()) tg().openLink(url);
-  else window.open(url, "_blank", "noopener,noreferrer");
+  let target = String(url).trim();
+  try { target = new URL(target, window.location.origin).toString(); } catch {}
+  if (tg()) tg().openLink(target);
+  else window.open(target, "_blank", "noopener,noreferrer");
 }
 
 function isMiniappVideoModelSupported(model) {
@@ -213,15 +215,39 @@ function NoticeBar({ notice, onClose }) {
   );
 }
 
-function MediaThumb({ url, type, idx = 0, className = "" }) {
+function MediaThumb({ url, type, idx = 0, className = "", onOpen }) {
+  const openable = !!(url && onOpen && type !== "music");
+  const mediaClass = `${className || ""}${openable ? " mediaOpenable" : ""}`.trim() || undefined;
+  const openProps = openable ? {
+    onClick: (event) => {
+      event.stopPropagation();
+      onOpen(url);
+    },
+    onKeyDown: (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpen(url);
+      }
+    },
+    role: "button",
+    tabIndex: 0,
+  } : {};
+
   if (url) {
     if (type === "video" || /\.(mp4|webm|mov)/i.test(url))
-      return <video src={url} className={className || undefined} controls playsInline preload="metadata" />;
+      return <video src={url} className={mediaClass} controls playsInline preload="metadata" {...openProps} />;
     if (type === "music" || /\.(mp3|ogg|wav)/i.test(url))
       return <div className={`musicThumb ${className}`}>🎵</div>;
-    return <img src={url} className={className || undefined} alt="result" loading="lazy" referrerPolicy="no-referrer" />;
+    return <img src={url} className={mediaClass} alt="result" loading="lazy" referrerPolicy="no-referrer" {...openProps} />;
   }
   return <Art type={["a","b","c","d"][idx % 4]} />;
+}
+
+function generationResultUrls(generation) {
+  const urls = Array.isArray(generation?.result_urls) ? generation.result_urls.filter(Boolean) : [];
+  if (!urls.length && generation?.result_url) urls.push(generation.result_url);
+  return urls;
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
@@ -552,7 +578,7 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   return (
     <div className="feedFullCard">
       <div className="feedFullMedia">
-        <MediaThumb url={item.result_url} type="image" idx={idx} className="feedFullImg" />
+        <MediaThumb url={item.result_url} type="image" idx={idx} className="feedFullImg" onOpen={openExternalUrl} />
       </div>
       <div className="feedFullInfo">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
@@ -673,13 +699,15 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false, onNot
   }
 
   async function handleLib() {
-    if (inLib || busyLib) return;
+    if (busyLib) return;
     setBusyLib(true);
     try {
-      await api(`/generations/${genId}/share-library`, { method: "POST" });
-      setInLib(true);
+      const endpoint = inLib ? "remove-library" : "share-library";
+      await api(`/generations/${genId}/${endpoint}`, { method: "POST" });
+      setInLib(!inLib);
       tg()?.HapticFeedback?.notificationOccurred("success");
-    } catch (e) { onNotice?.({ type: "error", message: e.message || "Не удалось опубликовать" }); }
+      onNotice?.({ type: "success", message: inLib ? "Убрано из библиотеки" : "Добавлено в библиотеку" });
+    } catch (e) { onNotice?.({ type: "error", message: e.message || "Не удалось изменить библиотеку" }); }
     finally { setBusyLib(false); }
   }
 
@@ -694,10 +722,10 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false, onNot
         {inFeed ? "✅ В ленте" : busyFeed ? "..." : "📤 В ленту"}
       </button>
       <button
-        onClick={handleLib} disabled={busyLib || inLib}
+        onClick={handleLib} disabled={busyLib}
         style={{ ...btnBase, background: inLib ? "var(--accent-soft)" : "var(--surface-2)", border: `1px solid ${inLib ? "var(--accent-border)" : "var(--border-strong)"}`, color: inLib ? "var(--accent-text)" : "var(--text-muted)" }}
       >
-        {inLib ? "✅ В библиотеке" : busyLib ? "..." : "📚 В библиотеку"}
+        {busyLib ? "..." : inLib ? "Убрать из библиотеки" : "📚 В библиотеку"}
       </button>
     </div>
   );
@@ -1320,9 +1348,17 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
 
       {generation?.result_url && kind === "image" && (
         <div className="resultCard">
-          <div className="resultMedia">
-            <MediaThumb url={generation.result_url} type="image" className="resultImg" />
-          </div>
+          {generationResultUrls(generation).length > 1 ? (
+            <div className="resultGallery">
+              {generationResultUrls(generation).map((url, index) => (
+                <MediaThumb key={`${url}-${index}`} url={url} type="image" className="resultGalleryImg" onOpen={openExternalUrl} />
+              ))}
+            </div>
+          ) : (
+            <div className="resultMedia">
+              <MediaThumb url={generation.result_url} type="image" className="resultImg" onOpen={openExternalUrl} />
+            </div>
+          )}
           <div className="resultInfo">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
               <span className="modelBadge">{generation.model || model}</span>
@@ -1458,12 +1494,22 @@ function History({ history, loading, onNotice }) {
       {history.length === 0
         ? <p style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 40 }}>Генераций пока нет. Создайте первую в Студии!</p>
         : <div className="historyList">
-            {history.map((g, i) => (
+            {history.map((g, i) => {
+              const resultUrls = generationResultUrls(g);
+              return (
               <div key={g.id} className="historyCard">
                 <div className="historyMediaWrap">
-                  <button type="button" className="historyMedia historyMediaBtn" onClick={() => g.result_url && openExternalUrl(g.result_url)} disabled={!g.result_url}>
-                    <MediaThumb url={g.result_url} type={g.gen_type} idx={i} className="historyImg" />
-                  </button>
+                  {g.gen_type === "image" && resultUrls.length > 1 ? (
+                    <div className="historyResultGallery">
+                      {resultUrls.map((url, index) => (
+                        <MediaThumb key={`${url}-${index}`} url={url} type="image" idx={index} className="historyGalleryImg" onOpen={openExternalUrl} />
+                      ))}
+                    </div>
+                  ) : (
+                    <button type="button" className="historyMedia historyMediaBtn" onClick={() => g.result_url && openExternalUrl(g.result_url)} disabled={!g.result_url}>
+                      <MediaThumb url={g.result_url} type={g.gen_type} idx={i} className="historyImg" />
+                    </button>
+                  )}
                 </div>
                 <div className="historyInfo">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
@@ -1490,7 +1536,8 @@ function History({ history, loading, onNotice }) {
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
       }
     </>
@@ -2062,7 +2109,11 @@ function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice }) {
         {filtered.map((p, i) => (
           <div key={p.id} className="promptListCard promptListCardAction">
             {p.preview_url
-              ? <img src={p.preview_url} alt={p.title} className="promptListImg" />
+              ? (
+                <button type="button" className="promptPreviewBtn" onClick={() => openExternalUrl(p.preview_url)}>
+                  <img src={p.preview_url} alt={p.title} className="promptListImg" />
+                </button>
+              )
               : <Art type={["a","b","c","d"][i % 4]} />}
             <div className="promptListInfo">
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{p.title}</h3>

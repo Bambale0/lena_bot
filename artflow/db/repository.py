@@ -575,7 +575,9 @@ async def finish_generation(
     session: AsyncSession,
     gen_id: int,
     result_url: str,
+    result_urls: list[str] | None = None,
 ) -> Generation | None:
+    clean_urls = [url for url in (result_urls or [result_url]) if url]
     result = await session.execute(
         update(Generation)
         .where(
@@ -585,6 +587,7 @@ async def finish_generation(
         .values(
             status=GenerationStatus.done,
             result_url=result_url,
+            result_urls=json.dumps(clean_urls, ensure_ascii=False),
             finished_at=datetime.now(timezone.utc),
         )
         .returning(Generation)
@@ -850,6 +853,23 @@ async def share_to_library(session: AsyncSession, gen_id: int, user_id: int) -> 
     )
     await session.commit()
     return await get_generation_by_id(session, gen_id)
+
+
+async def remove_from_library(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
+    result = await session.execute(
+        select(Generation).where(
+            Generation.id == gen_id,
+            Generation.user_id == user_id,
+            Generation.is_prompt_library.is_(True),
+        )
+    )
+    gen = result.scalar_one_or_none()
+    if not gen:
+        return None
+    gen.is_prompt_library = False
+    await session.commit()
+    await session.refresh(gen)
+    return gen
 
 
 async def get_public_feed_generation(session: AsyncSession, gen_id: int) -> Generation | None:

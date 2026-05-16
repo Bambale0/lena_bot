@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
@@ -292,11 +293,13 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         return gen
 
     try:
+        result_urls: list[str] | None = None
         if gen.gen_type == GenerationType.image:
             if gen.model in _MIDJOURNEY_IMAGE_MODEL_KEYS:
                 result_url = await midjourney_service.poll_mj_image(task_id)
             else:
-                result_url = await image_service.poll_kieai_status(task_id)
+                result_urls = await image_service.poll_kieai_result_urls(task_id)
+                result_url = result_urls[0] if result_urls else None
         elif gen.gen_type == GenerationType.video:
             if gen.model in _MIDJOURNEY_VIDEO_MODEL_KEYS:
                 result_url = await midjourney_service.poll_mj_video(task_id)
@@ -314,7 +317,7 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         return await repo.get_generation_by_id(session, gen.id)
 
     if result_url:
-        await repo.finish_generation(session, gen.id, result_url)
+        await repo.finish_generation(session, gen.id, result_url, result_urls=result_urls)
         if gen.image_session_id:
             await repo.update_image_session_last_result(session, gen.image_session_id, result_url, gen.id)
         return await repo.get_generation_by_id(session, gen.id)
@@ -651,6 +654,7 @@ class GenerationOut(BaseModel):
     created_at: str
     is_public_feed: bool = False
     is_prompt_library: bool = False
+    result_urls: list[str] = []
 
 
 class ImageGenRequest(BaseModel):
@@ -1758,6 +1762,19 @@ async def share_to_library(
     return {"id": gen.id, "is_prompt_library": gen.is_prompt_library}
 
 
+@router.post("/generations/{gen_id}/remove-library", status_code=200)
+async def remove_from_library(
+    gen_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Remove own generation's prompt from the public prompt library."""
+    gen = await repo.remove_from_library(session, gen_id, user.id)
+    if not gen:
+        raise HTTPException(status_code=404, detail="Generation not found in your library")
+    return {"id": gen.id, "is_prompt_library": gen.is_prompt_library}
+
+
 # ── prompt library ────────────────────────────────────────────────────────────
 
 @router.get("/prompts")
@@ -2122,6 +2139,21 @@ async def topup_crypto(
 
 # ── serializers ───────────────────────────────────────────────────────────────
 
+def _generation_result_urls(gen) -> list[str]:
+    raw = getattr(gen, "result_urls", None)
+    urls: list[str] = []
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            parsed = []
+        if isinstance(parsed, list):
+            urls = [str(url) for url in parsed if url]
+    if not urls and gen.result_url:
+        urls = [gen.result_url]
+    return urls
+
+
 def _gen_out(gen) -> GenerationOut:
     return GenerationOut(
         id=gen.id,
@@ -2134,6 +2166,7 @@ def _gen_out(gen) -> GenerationOut:
         created_at=gen.created_at.isoformat() if gen.created_at else "",
         is_public_feed=bool(gen.is_public_feed),
         is_prompt_library=bool(getattr(gen, "is_prompt_library", False)),
+        result_urls=_generation_result_urls(gen),
     )
 
 

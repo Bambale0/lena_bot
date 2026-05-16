@@ -1899,6 +1899,83 @@
         }
       }
     },
+    "/api/v1/generations/{gen_id}/remove-library": {
+      "post": {
+        "tags": [
+          "miniapp"
+        ],
+        "summary": "Remove From Library",
+        "description": "Remove own generation's prompt from the public prompt library.",
+        "operationId": "remove_from_library_api_v1_generations__gen_id__remove_library_post",
+        "parameters": [
+          {
+            "name": "gen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Gen Id"
+            }
+          },
+          {
+            "name": "x-telegram-init-data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          },
+          {
+            "name": "x-web-auth-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Remove From Library Api V1 Generations  Gen Id  Remove Library Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/prompts": {
       "get": {
         "tags": [
@@ -3390,6 +3467,14 @@
             "type": "boolean",
             "title": "Is Prompt Library",
             "default": false
+          },
+          "result_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Result Urls",
+            "default": []
           }
         },
         "type": "object",
