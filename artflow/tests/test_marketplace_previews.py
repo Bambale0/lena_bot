@@ -24,3 +24,15 @@ def test_prompt_photo_source_uses_local_upload_file(tmp_path, monkeypatch) -> No
     source = _prompt_photo_source("https://example.test/static/upload/preview.jpg")
 
     assert isinstance(source, FSInputFile)
+
+
+def test_prompt_photo_source_uses_fallback_when_local_upload_missing(tmp_path, monkeypatch) -> None:
+    from api import public_files
+
+    monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
+    monkeypatch.setattr(public_files.settings, "WEBHOOK_URL", "https://example.test")
+    monkeypatch.setattr(public_files.settings, "STATIC_UPLOAD_URL_PATH", "/static/upload")
+
+    source = _prompt_photo_source("https://example.test/static/upload/missing.jpg")
+
+    assert isinstance(source, FSInputFile)

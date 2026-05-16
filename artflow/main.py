@@ -14,7 +14,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, FSInputFile, Update, URLInputFile
 from aiogram.exceptions import TelegramEntityTooLarge
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
-from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, File
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 import redis.asyncio as aioredis
 
 from api.comet_client import close_client, get_client
+from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import router as miniapp_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 from api.midjourney_service import MJButton, MJTaskResult
@@ -363,7 +364,12 @@ async def lifespan(app: FastAPI):
 
 
 
-app = FastAPI(title="APIX", lifespan=lifespan)
+app = FastAPI(
+    title="APIX",
+    description="APIX AI API for Telegram auth, content generation, billing, prompt library, feed, and provider webhooks.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 @app.middleware("http")
 async def miniapp_no_cache(request, call_next):
@@ -382,11 +388,11 @@ app.include_router(miniapp_router)
 
 WEBAPP_DIST = Path("webapp/dist")
 if WEBAPP_DIST.exists():
-    @app.api_route("/app", methods=["GET", "HEAD"])
+    @app.api_route("/app", methods=["GET", "HEAD"], include_in_schema=False)
     async def miniapp_index() -> FileResponse:
         return FileResponse(WEBAPP_DIST / "index.html")
 
-    @app.api_route("/app/{path:path}", methods=["GET", "HEAD"])
+    @app.api_route("/app/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     async def miniapp_files(path: str) -> FileResponse:
         candidate = (WEBAPP_DIST / path).resolve()
         dist_root = WEBAPP_DIST.resolve()
@@ -394,7 +400,7 @@ if WEBAPP_DIST.exists():
             return FileResponse(candidate)
         return FileResponse(WEBAPP_DIST / "index.html")
 else:
-    @app.get("/app", response_class=PlainTextResponse)
+    @app.get("/app", response_class=PlainTextResponse, include_in_schema=False)
     async def miniapp_not_built() -> str:
         return "Mini app is not built. Run: cd webapp && npm install && npm run build"
 
@@ -402,16 +408,40 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://artflow.ru", "http://localhost:3000"],
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization", "X-Telegram-Bot-Api-Secret-Token"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Telegram-Bot-Api-Secret-Token",
+        "X-Telegram-Init-Data",
+        "X-Web-Auth-Token",
+    ],
 )
 
 
+def _is_supported_reference_image(data: bytes, content_type: str | None) -> bool:
+    content = (content_type or "").lower()
+    if content and not content.startswith("image/"):
+        return False
+    return (
+        data.startswith(b"\xff\xd8\xff")
+        or data.startswith(b"\x89PNG\r\n\x1a\n")
+        or (data.startswith(b"RIFF") and b"WEBP" in data[:16])
+    )
+
+
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)) -> dict:
+async def upload_file(
+    file: UploadFile = File(...),
+    _user=Depends(get_miniapp_user),
+) -> dict:
     """Upload an image for use as a reference in generation."""
     data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large (max 20 MB)")
+    if not _is_supported_reference_image(data, file.content_type):
+        raise HTTPException(status_code=422, detail="Only JPEG, PNG and WebP images are supported")
     url = save_public_file(data, file.content_type)
     return {"url": url}
 

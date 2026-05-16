@@ -15,9 +15,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, midjourney_service, video_service
-from api.assistant_service import generate_prompt_moderation_decision
+from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
-from api.miniapp_auth import get_miniapp_user
+from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_telegram_login_data
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.midjourney_service import MJDimensions, MJTaskStatus, MJVideoMotion
 from api.video_service import VideoModel
@@ -51,7 +51,7 @@ async def health() -> dict:
 MAX_CONCURRENT = 6
 STALE_GENERATION_TIMEOUT = timedelta(minutes=20)
 
-_TELEGRAM_STARS_RUB_PER_STAR = 195.99 / 100
+_TELEGRAM_STARS_RUB_PER_STAR = 10.5
 
 def _plan_stars_price(plan: Any) -> int:
     explicit = getattr(plan, "price_stars", None)
@@ -147,6 +147,55 @@ def _telegram_start_link(start_param: str) -> str:
     if not username:
         return ""
     return f"https://t.me/{username}?start={start_param}"
+
+
+def _withdrawal_out(item: Any) -> "ReferralWithdrawalOut":
+    status = getattr(getattr(item, "status", None), "value", None) or str(getattr(item, "status", "pending"))
+    created_at = getattr(item, "created_at", None)
+    return ReferralWithdrawalOut(
+        id=int(getattr(item, "id", 0) or 0),
+        amount_rub=float(getattr(item, "amount_rub", 0) or 0),
+        payout_details=str(getattr(item, "payout_details", "") or ""),
+        status=status,
+        created_at=created_at.isoformat() if created_at else "",
+    )
+
+
+def _feed_card_out(card: Any, user: User) -> dict:
+    generation = card.generation
+    return {
+        "id": generation.id,
+        "model": generation.model,
+        "result_url": generation.result_url,
+        "likes_count": generation.likes_count,
+        "shares_count": generation.shares_count,
+        "aspect_ratio": card.aspect_ratio,
+        "author": card.username or card.full_name or "anon",
+        "is_mine": generation.user_id == user.id,
+        "remixes": card.remix_count,
+        "score": getattr(card, "score", 0),
+    }
+
+
+async def _mark_prompt_used_after_generation(
+    session: AsyncSession,
+    *,
+    prompt_id: int | None,
+    user_id: int,
+    credits_spent: float,
+) -> None:
+    if prompt_id is None:
+        return
+    try:
+        from db.prompt_repository import use_prompt
+        await use_prompt(session, prompt_id, user_id, credits_spent=int(credits_spent))
+    except Exception as exc:
+        logger.warning(
+            "Failed to mark prompt used after generation prompt=%s user=%s: %s",
+            prompt_id,
+            user_id,
+            exc,
+        )
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -560,6 +609,7 @@ class UserProfile(BaseModel):
     referral_link: str
     referral_balance: float
     referral_withdraw_min_rub: float
+    language: str = "ru"
 
 
 class MidjourneyCatalogItem(BaseModel):
@@ -606,6 +656,7 @@ class GenerationOut(BaseModel):
 class ImageGenRequest(BaseModel):
     model: str
     prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt_id: int | None = None
     aspect_ratio: str | None = None
     quality: str = "basic"
     count: int = Field(default=1, ge=1, le=6)
@@ -661,11 +712,68 @@ class TopupRequest(BaseModel):
     plan_key: str
 
 
+class AssistantChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    history: list[dict[str, str]] = Field(default_factory=list)
+
+
+class AssistantChatResponse(BaseModel):
+    reply: str
+
+
+class LanguageRequest(BaseModel):
+    language: str = Field(..., pattern="^(ru|en)$")
+
+
+class ReferralChildOut(BaseModel):
+    id: int
+    username: str | None
+    full_name: str | None
+    generations_count: int
+    paid_rub: float
+
+
+class ReferralWithdrawalOut(BaseModel):
+    id: int
+    amount_rub: float
+    payout_details: str
+    status: str
+    created_at: str
+
+
+class ReferralStatsOut(BaseModel):
+    referral_code: str
+    referral_link: str
+    bonus_l1_credits: float
+    commission_l1: float
+    commission_l2: float
+    commission_l3: float
+    withdraw_min_rub: float
+    counts: dict[str, int]
+    balance: dict[str, float]
+    feed_remix_reward_rub: float
+    children: dict[str, list[ReferralChildOut]]
+    withdrawals: list[ReferralWithdrawalOut]
+
+
+class ReferralWithdrawalRequestIn(BaseModel):
+    amount_rub: float = Field(..., gt=0)
+    payout_details: str = Field(..., min_length=5, max_length=500)
+
+
+class TelegramLoginRequest(BaseModel):
+    id: int
+    first_name: str | None = None
+    last_name: str | None = None
+    username: str | None = None
+    photo_url: str | None = None
+    auth_date: int
+    hash: str
+
+
 # ── user ─────────────────────────────────────────────────────────────────────
 
-@router.get("/me", response_model=UserProfile)
-async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
-    """Current user profile with balance."""
+def _user_profile(user: User) -> UserProfile:
     return UserProfile(
         id=user.id,
         tg_id=user.tg_id,
@@ -676,7 +784,160 @@ async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
         referral_link=_telegram_start_link(user.referral_code),
         referral_balance=user.referral_balance,
         referral_withdraw_min_rub=settings.REFERRAL_WITHDRAW_MIN_RUB,
+        language=getattr(user, "language", "ru") or "ru",
     )
+
+
+@router.get("/auth/config")
+async def web_auth_config() -> dict[str, str]:
+    """Public auth config for the standalone website."""
+    return {"bot_username": _telegram_bot_username()}
+
+
+@router.post("/auth/telegram-login")
+async def web_telegram_login(
+    body: TelegramLoginRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Login for the standalone website via Telegram Login Widget."""
+    payload = body.model_dump()
+    tg_user = verify_telegram_login_data(payload)
+    first_name = str(tg_user.get("first_name") or "").strip()
+    last_name = str(tg_user.get("last_name") or "").strip()
+    full_name = " ".join(part for part in (first_name, last_name) if part).strip() or None
+    username = str(tg_user.get("username") or "").strip() or None
+
+    user = await repo.get_user_by_tg_id(session, int(tg_user["id"]))
+    if not user:
+        user = await repo.create_user(
+            session,
+            tg_id=int(tg_user["id"]),
+            username=username,
+            full_name=full_name,
+            welcome_credits=settings.WELCOME_BONUS_CREDITS,
+        )
+    if user.is_banned:
+        raise HTTPException(status_code=403, detail="User is banned")
+
+    return {
+        "token": create_web_auth_token(user.tg_id),
+        "token_type": "web",
+        "expires_in": 30 * 24 * 60 * 60,
+        "user": _user_profile(user).model_dump(),
+    }
+
+
+@router.get("/me", response_model=UserProfile)
+async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
+    """Current user profile with balance."""
+    return _user_profile(user)
+
+
+@router.post("/assistant", response_model=AssistantChatResponse)
+async def miniapp_assistant(
+    body: AssistantChatRequest,
+    user: User = Depends(get_miniapp_user),
+) -> AssistantChatResponse:
+    """Assistant chat inside the mini app, backed by the same assistant as the bot."""
+    message = body.message.strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="Message cannot be empty")
+
+    history: list[dict[str, str]] = []
+    for item in body.history[-10:]:
+        role = str(item.get("role", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if role in {"user", "assistant"} and content:
+            history.append({"role": role, "content": content[:4000]})
+    history.append({"role": "user", "content": message})
+
+    try:
+        reply = await generate_assistant_reply(history, admin_mode=_is_admin_user(user))
+    except Exception as exc:  # pragma: no cover - external LLM/network failure
+        logger.exception("Mini-app assistant failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Assistant service error") from exc
+    return AssistantChatResponse(reply=reply)
+
+
+@router.post("/settings/language")
+async def miniapp_set_language(
+    body: LanguageRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, str]:
+    await repo.set_user_language(session, user.id, body.language)
+    return {"language": body.language}
+
+
+@router.get("/referrals", response_model=ReferralStatsOut)
+async def miniapp_referrals(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> ReferralStatsOut:
+    l1, l2, l3 = await repo.count_user_referrals(session, user.id)
+    snapshot = await repo.get_user_referral_balance_snapshot(session, user.id)
+    feed_reward = await repo.get_user_feed_remix_reward_rub(session, user.id)
+    withdrawals = await repo.get_user_withdrawal_requests(session, user.id, limit=10)
+
+    children: dict[str, list[ReferralChildOut]] = {}
+    for level in (1, 2, 3):
+        rows = await repo.get_referral_children(session, user.id, level=level, limit=10)
+        children[f"l{level}"] = [
+            ReferralChildOut(
+                id=row.user.id,
+                username=row.user.username,
+                full_name=row.user.full_name,
+                generations_count=row.generations_count,
+                paid_rub=row.paid_rub,
+            )
+            for row in rows
+        ]
+
+    total = float(snapshot.total_earned if snapshot else getattr(user, "referral_balance", 0) or 0)
+    pending = float(snapshot.pending_withdrawals if snapshot else 0)
+    available = float(snapshot.available_to_withdraw if snapshot else total)
+    return ReferralStatsOut(
+        referral_code=user.referral_code,
+        referral_link=_telegram_start_link(user.referral_code),
+        bonus_l1_credits=float(settings.REFERRAL_L1_CREDITS),
+        commission_l1=float(settings.REFERRAL_COMMISSION_L1),
+        commission_l2=float(settings.REFERRAL_COMMISSION_L2),
+        commission_l3=float(settings.REFERRAL_COMMISSION_L3),
+        withdraw_min_rub=float(settings.REFERRAL_WITHDRAW_MIN_RUB),
+        counts={"l1": l1, "l2": l2, "l3": l3},
+        balance={
+            "total_earned": total,
+            "pending_withdrawals": pending,
+            "available_to_withdraw": available,
+        },
+        feed_remix_reward_rub=float(feed_reward or 0),
+        children=children,
+        withdrawals=[_withdrawal_out(item) for item in withdrawals],
+    )
+
+
+@router.post("/referrals/withdrawals", response_model=ReferralWithdrawalOut, status_code=201)
+async def miniapp_create_referral_withdrawal(
+    body: ReferralWithdrawalRequestIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> ReferralWithdrawalOut:
+    min_amount = float(settings.REFERRAL_WITHDRAW_MIN_RUB)
+    if body.amount_rub < min_amount:
+        raise HTTPException(status_code=422, detail=f"Минимальная сумма вывода — {min_amount:.0f}₽")
+    try:
+        item = await repo.create_withdrawal_request(
+            session,
+            user_id=user.id,
+            amount_rub=body.amount_rub,
+            payout_details=body.payout_details.strip(),
+        )
+    except repo.InsufficientReferralBalanceError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Доступно к выводу {exc.available_amount:.2f}₽",
+        ) from exc
+    return _withdrawal_out(item)
 
 
 # ── models ────────────────────────────────────────────────────────────────────
@@ -723,6 +984,19 @@ async def miniapp_improve_prompt(
         improved = _improve_image_prompt(prompt)
 
     return {"prompt": improved}
+
+
+@router.get("/help")
+async def miniapp_help(
+    topic: str = Query(default="main", pattern="^(main|stars)$"),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Help texts from the Telegram bot, exposed for the Mini App."""
+    from bot.handlers.start import _help_text, _stars_help_text
+
+    lang = getattr(user, "language", "ru") or "ru"
+    text = _stars_help_text(lang) if topic == "stars" else _help_text(lang)
+    return {"topic": topic, "language": lang, "text": text}
 
 
 async def _resolve_image_quality_prices(
@@ -889,6 +1163,21 @@ async def create_image_generation(
     Poll `GET /api/v1/generations/{id}` until `status` is `done` or `failed`.
     """
     all_refs = _normalize_public_urls(body.reference_url, *body.reference_urls)
+    effective_prompt = body.prompt.strip()
+    prompt_source = None
+    if body.prompt_id is not None:
+        from db.models import PromptStatus
+        from db.prompt_repository import get_prompt_by_id
+
+        prompt_source = await get_prompt_by_id(session, body.prompt_id)
+        if (
+            not prompt_source
+            or prompt_source.status != PromptStatus.approved
+            or not prompt_source.is_public
+        ):
+            raise HTTPException(status_code=404, detail="Prompt not found or not public")
+        effective_prompt = prompt_source.prompt_text.strip()
+
     if body.model in _MJ_STUDIO_IMAGE_MODELS:
         if not _is_admin_user(user):
             raise HTTPException(status_code=403, detail="Model not available")
@@ -902,7 +1191,7 @@ async def create_image_generation(
             raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
         if body.model == "midjourney-blend" and len(all_refs) < 2:
             raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
-        if body.model == "midjourney-imagine" and not body.prompt.strip():
+        if body.model == "midjourney-imagine" and not effective_prompt:
             raise HTTPException(status_code=422, detail="Prompt is required")
         if user.credits < model_cost.credits:
             raise HTTPException(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}")
@@ -913,12 +1202,12 @@ async def create_image_generation(
         ok = await repo.spend_credits(session, user.id, model_cost.credits)
         if not ok:
             raise HTTPException(status_code=402, detail="Failed to spend credits")
-        gen_prompt = body.prompt.strip() or f"blend:{len(all_refs)}"
+        gen_prompt = effective_prompt or f"blend:{len(all_refs)}"
         image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None)
         gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, model_cost.credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial)
         try:
             if body.model == "midjourney-imagine":
-                submitted_prompt = f"{all_refs[0]} {body.prompt.strip()}".strip() if all_refs else body.prompt.strip()
+                submitted_prompt = f"{all_refs[0]} {effective_prompt}".strip() if all_refs else effective_prompt
                 task_id = await midjourney_service.imagine(submitted_prompt, reference_url=all_refs[0] if all_refs else None)
             else:
                 blend_images = [await _data_uri_from_url(url) for url in all_refs]
@@ -930,6 +1219,12 @@ async def create_image_generation(
             raise HTTPException(status_code=502, detail="Generation service error")
         await repo.update_generation_task(session, gen.id, task_id)
         await repo.update_image_session_last_prompt(session, image_session.id, gen_prompt)
+        await _mark_prompt_used_after_generation(
+            session,
+            prompt_id=getattr(prompt_source, "id", None),
+            user_id=user.id,
+            credits_spent=model_cost.credits,
+        )
         await session.refresh(gen)
         return _gen_out(gen)
 
@@ -980,14 +1275,14 @@ async def create_image_generation(
         aspect_ratio=normalized_ratio,
         quality=normalized_quality,
         count=body.count,
-        base_prompt=body.prompt,
+        base_prompt=effective_prompt,
         reference_file_id=None,
         reference_url=all_refs[0] if all_refs else None,
     )
 
     gen = await repo.create_generation(
         session, user.id, body.model, GenerationType.image,
-        body.prompt, model_cost.credits,
+        effective_prompt, model_cost.credits,
         image_session_id=image_session.id,
         action_type=ImageGenerationAction.initial,
     )
@@ -1001,7 +1296,7 @@ async def create_image_generation(
     try:
         result = await image_service.generate_image(
             model,
-            body.prompt,
+            effective_prompt,
             image_url=ref_urls,
             aspect_ratio=normalized_ratio,
             n=body.count,
@@ -1015,7 +1310,13 @@ async def create_image_generation(
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
-    await repo.update_image_session_last_prompt(session, image_session.id, body.prompt)
+    await repo.update_image_session_last_prompt(session, image_session.id, effective_prompt)
+    await _mark_prompt_used_after_generation(
+        session,
+        prompt_id=getattr(prompt_source, "id", None),
+        user_id=user.id,
+        credits_spent=model_cost.credits,
+    )
 
     await session.refresh(gen)
     return _gen_out(gen)
@@ -1222,26 +1523,17 @@ async def get_history(
 
 @router.get("/feed")
 async def get_feed(
+    source: str = Query(default="recent", pattern="^(recent|top_day|top)$"),
     limit: int = Query(default=40, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> list[dict]:
     """Public image feed — prompt is hidden from non-authors."""
-    cards = await repo.get_feed_generations(session, limit=limit)
-    return [
-        {
-            "id": c.generation.id,
-            "model": c.generation.model,
-            "result_url": c.generation.result_url,
-            "likes_count": c.generation.likes_count,
-            "shares_count": c.generation.shares_count,
-            "aspect_ratio": c.aspect_ratio,
-            "author": c.username or c.full_name or "anon",
-            "is_mine": c.generation.user_id == user.id,
-                "remixes": c.remix_count,
-        }
-        for c in cards
-    ]
+    if source == "top_day":
+        cards = await repo.get_top_day_generations(session, limit=limit)
+    else:
+        cards = await repo.get_feed_generations(session, limit=limit)
+    return [_feed_card_out(c, user) for c in cards]
 
 
 @router.post("/generations/{gen_id}/share", status_code=200)
@@ -1471,14 +1763,23 @@ async def share_to_library(
 @router.get("/prompts")
 async def list_prompts(
     category: str | None = Query(default=None),
+    source: str = Query(default="catalog"),
+    tag: str | None = Query(default=None, min_length=1, max_length=32),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=40, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
     _: User = Depends(get_miniapp_user),
 ) -> dict:
-    """Paginated list of approved prompts. Optionally filter by category."""
+    """Prompt marketplace: catalog plus bot-like top/popular/collection sources."""
     from db.models import PromptCategory
-    from db.prompt_repository import count_approved_prompts, get_approved_prompts
+    from db.prompt_repository import (
+        COLLECTION_TAGS,
+        count_approved_prompts,
+        get_approved_prompts,
+        get_popular_prompts,
+        get_prompts_by_tag,
+        get_top_prompts,
+    )
 
     cat = None
     if category:
@@ -1487,13 +1788,49 @@ async def list_prompts(
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Unknown category: {category!r}")
 
-    prompts = await get_approved_prompts(session, category=cat, limit=limit, offset=(page - 1) * limit)
-    total = await count_approved_prompts(session, category=cat)
+    if source in {"top", "top_today", "best"}:
+        prompts = await get_top_prompts(session, limit=limit)
+        total = len(prompts)
+    elif source in {"popular", "trending"}:
+        prompts = await get_popular_prompts(session, limit=limit)
+        total = len(prompts)
+    elif source == "tag":
+        prompts = await get_prompts_by_tag(session, tag or "best", limit=limit)
+        total = len(prompts)
+    elif source == "collections":
+        return {
+            "total": len(COLLECTION_TAGS),
+            "page": page,
+            "limit": limit,
+            "items": [
+                {"key": key, "title": title, "source": "tag", "tag": key}
+                for key, title in COLLECTION_TAGS.items()
+            ],
+        }
+    else:
+        prompts = await get_approved_prompts(session, category=cat, limit=limit, offset=(page - 1) * limit)
+        total = await count_approved_prompts(session, category=cat)
 
     return {
         "total": total,
         "page": page,
         "limit": limit,
+        "items": [_prompt_out(p) for p in prompts],
+    }
+
+
+@router.get("/prompts/my")
+async def my_prompts(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Prompts submitted by the current user, including moderation status."""
+    from db.prompt_repository import get_author_prompts, get_author_total_uses
+
+    prompts = await get_author_prompts(session, user.id)
+    return {
+        "total": len(prompts),
+        "total_uses": await get_author_total_uses(session, user.id),
         "items": [_prompt_out(p) for p in prompts],
     }
 
@@ -1509,6 +1846,71 @@ async def get_prompt(
     if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
     return _prompt_out(p)
+
+
+@router.post("/prompts/{prompt_id}/like")
+async def like_prompt_web(
+    prompt_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    from db.prompt_repository import get_prompt_by_id, like_prompt
+
+    prompt, like_status = await like_prompt(session, prompt_id, user.id)
+    if like_status == "duplicate":
+        current = await get_prompt_by_id(session, prompt_id)
+        if not current:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        return {"status": "duplicate", "likes": current.likes}
+    if like_status == "missing" or not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return {"status": "liked", "likes": prompt.likes}
+
+
+@router.get("/prompts/{prompt_id}/link")
+async def get_prompt_share_link(
+    prompt_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    from db.prompt_repository import get_prompt_by_id
+
+    prompt = await get_prompt_by_id(session, prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="prompt", target_id=prompt_id))
+    return {"link": link, "prompt_id": prompt_id}
+
+
+@router.post("/prompts/{prompt_id}/use")
+async def use_prompt_web(
+    prompt_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Mark a prompt as used when it is loaded into the web studio."""
+    from db.prompt_repository import use_prompt
+
+    try:
+        prompt, rewards = await use_prompt(session, prompt_id, user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Prompt not found or not public") from exc
+    return {"prompt": _prompt_out(prompt), "rewards": rewards}
+
+
+@router.post("/prompts/{prompt_id}/deactivate")
+async def deactivate_prompt_web(
+    prompt_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    from db.prompt_repository import deactivate_prompt, get_prompt_by_id
+
+    prompt = await get_prompt_by_id(session, prompt_id)
+    if not prompt or prompt.author_id != user.id:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    prompt = await deactivate_prompt(session, prompt_id)
+    return _prompt_out(prompt)
 
 
 @router.post("/prompts", status_code=201)

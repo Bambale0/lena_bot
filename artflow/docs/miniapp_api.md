@@ -17,6 +17,7 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 | Метод | Путь | Описание |
 |-------|------|---------|
 | GET | `/me` | Профиль: баланс, имя, реф-код |
+| GET | `/help?topic=main\|stars` | Тексты помощи из Telegram-бота |
 
 **GET /me — ответ:**
 ```json
@@ -71,12 +72,17 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 {
   "model": "seedream/4.5-text-to-image",
   "prompt": "cinematic sunset over tokyo, hyperrealistic",
+  "prompt_id": null,
   "aspect_ratio": "16:9",
   "quality": "basic",
   "count": 1,
   "reference_url": null
 }
 ```
+
+Если генерация запускается из библиотеки промптов, передавай `prompt_id`.
+Сервер возьмёт сохранённый `prompt_text`, создаст генерацию с тем же общим балансом
+пользователя и после успешного запуска обновит счётчики использования/награды автора.
 
 **Ответ 202:**
 ```json
@@ -154,6 +160,7 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 | Метод | Путь | Описание |
 |-------|------|---------|
 | GET | `/feed?limit=20` | Публичная лента изображений |
+| GET | `/feed?source=top_day&limit=20` | Топ работ за день |
 | POST | `/feed/{id}/like` | Поставить лайк |
 
 **GET /feed — элемент:**
@@ -177,7 +184,13 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 | Метод | Путь | Описание |
 |-------|------|---------|
 | GET | `/prompts?category=image&page=1&limit=20` | Список промптов |
+| GET | `/prompts?source=top\|popular\|tag&tag=cinematic` | Подборки как в Telegram-боте |
+| GET | `/prompts/my` | Мои промпты и статусы модерации |
 | GET | `/prompts/{id}` | Детали промпта |
+| POST | `/prompts/{id}/like` | Лайк промпта |
+| GET | `/prompts/{id}/link` | Deep-link для шеринга промпта |
+| POST | `/prompts/{id}/use` | Отметить промпт как использованный в web-flow |
+| POST | `/prompts/{id}/deactivate` | Скрыть собственный промпт |
 | POST | `/prompts` | Отправить промпт на модерацию |
 
 **Категории:** `image`, `video`, `midjourney`, `other`

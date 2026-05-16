@@ -12,12 +12,12 @@ from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb
 from core.config import settings
 from db import repository as repo
-from db.models import PaymentProvider, User
+from db.models import PaymentProvider, TransactionStatus, User
 
 logger = logging.getLogger(__name__)
 router = Router(name="stars_payment")
 
-_TELEGRAM_STARS_RUB_PER_STAR = 195.99 / 100
+_TELEGRAM_STARS_RUB_PER_STAR = 10.5
 
 def _plan_stars_price(plan) -> int:
     explicit = getattr(plan, "price_stars", None)
@@ -73,14 +73,22 @@ async def cb_stars_plan(
 
     stars = _plan_stars_price(plan)
 
-    tx = await repo.create_transaction(
-        session,
-        user_id=db_user.id,
-        amount_rub=plan.price_rub,
-        credits=plan.credits,
-        provider=PaymentProvider.telegram_stars,
-        external_id=f"stars_pending:{db_user.id}:{plan_key}",
-    )
+    pending_external_id = f"stars_pending:{db_user.id}:{plan_key}"
+    tx = await repo.get_transaction_by_external_id(session, pending_external_id)
+    if (
+        not tx
+        or tx.status != TransactionStatus.pending
+        or tx.user_id != db_user.id
+        or tx.provider != PaymentProvider.telegram_stars
+    ):
+        tx = await repo.create_transaction(
+            session,
+            user_id=db_user.id,
+            amount_rub=plan.price_rub,
+            credits=plan.credits,
+            provider=PaymentProvider.telegram_stars,
+            external_id=pending_external_id,
+        )
 
     await bot.send_invoice(
         chat_id=call.from_user.id,

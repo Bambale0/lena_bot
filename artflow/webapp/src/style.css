@@ -17,13 +17,13 @@
   --border-strong:rgba(255,255,255,.15);
   --overlay:rgba(0,0,0,.82);
   --overlay-strong:rgba(0,0,0,.9);
-  --accent:#7c3aed;
-  --accent-2:#4f46e5;
-  --accent-3:#d946ef;
-  --accent-soft:rgba(124,58,237,.15);
-  --accent-soft-2:rgba(124,58,237,.3);
-  --accent-border:rgba(124,58,237,.5);
-  --accent-text:#c4b5fd;
+  --accent:#3bdcff;
+  --accent-2:#38f2b7;
+  --accent-3:#ff4fa4;
+  --accent-soft:rgba(59,220,255,.14);
+  --accent-soft-2:rgba(255,79,164,.22);
+  --accent-border:rgba(59,220,255,.42);
+  --accent-text:#7de8ff;
   --success:#4ade80;
   --success-soft:rgba(74,222,128,.15);
   --success-border:rgba(74,222,128,.4);
@@ -33,7 +33,7 @@
   --warning-text:#fef3c7;
   --warning-soft:rgba(234,179,8,.1);
   --warning-border:rgba(234,179,8,.2);
-  --shadow:0 0 34px rgba(124,58,237,.14);
+  --shadow:0 0 34px rgba(59,220,255,.13);
 }
 html[data-theme="light"]{
   color-scheme:light;
@@ -114,7 +114,7 @@ main{min-height:100vh;background:var(--bg)}
 img,video{display:block;width:100%;height:100%;object-fit:cover}
 
 /* layout */
-.bg{position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at top,rgba(124,58,237,.28),transparent 32%),radial-gradient(circle at bottom,rgba(217,70,239,.14),transparent 45%)}
+.bg{position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at top left,rgba(59,220,255,.22),transparent 34%),radial-gradient(circle at bottom right,rgba(255,79,164,.16),transparent 45%),radial-gradient(circle at 70% 8%,rgba(56,242,183,.12),transparent 28%)}
 .wrap{position:relative;max-width:430px;margin:auto;min-height:100vh;padding:0 16px 112px;font-size:15px;line-height:1.5}
 
 /* header */
@@ -125,7 +125,7 @@ img,video{display:block;width:100%;height:100%;object-fit:cover}
 .balanceBtn{padding:7px 12px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent-text)}
 
 /* avatar */
-.avatar{display:grid;place-items:center;border-radius:999px;border:2px solid #8b5cf6;background:linear-gradient(135deg,#f9a8d4,#8b5cf6,#3730a3);box-shadow:0 0 18px rgba(168,85,247,.26);width:40px;height:40px;font-size:16px;font-weight:700;flex-shrink:0}
+.avatar{display:grid;place-items:center;border-radius:999px;border:2px solid rgba(59,220,255,.7);background:linear-gradient(135deg,#3bdcff,#ff4fa4,#38f2b7);box-shadow:0 0 18px rgba(59,220,255,.22);width:40px;height:40px;font-size:16px;font-weight:700;flex-shrink:0}
 
 /* profile strip */
 .profileStrip,.profileMini{border:1px solid var(--border);background:var(--surface);border-radius:18px;padding:12px;box-shadow:0 0 30px rgba(124,58,237,.1)}
@@ -262,6 +262,18 @@ textarea{width:100%;height:112px;margin-top:16px;padding:14px;resize:none;outlin
 .promptListImg{width:80px;height:80px;object-fit:cover;flex-shrink:0}
 .promptListCard .art{width:80px;height:80px;flex-shrink:0}
 .promptListInfo{padding:10px 12px 10px 0}
+.promptListCardAction{text-align:left}
+.sourceTabs{display:flex;gap:8px;overflow-x:auto;margin:14px 0 4px;scrollbar-width:none}
+.sourceTabs::-webkit-scrollbar{display:none}
+.sourceTabs button{flex:0 0 auto;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text-soft);padding:8px 12px;font-size:12px;font-weight:650}
+.sourceTabs button.active{border-color:var(--accent-border);background:linear-gradient(90deg,var(--accent),var(--accent-3));color:#fff}
+.promptActions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.promptActions button{border-radius:10px;background:var(--surface-2);color:var(--text-muted);padding:7px 9px;font-size:11px;font-weight:700}
+.promptActions button:first-child{background:var(--accent-soft);color:var(--accent-text);border:1px solid var(--accent-border)}
+.selectedPrompt{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;border-radius:14px;border:1px solid var(--accent-border);background:var(--accent-soft);padding:9px 11px;color:var(--text-soft);font-size:12px}
+.selectedPrompt b{color:var(--accent-text)}
+.selectedPrompt button{width:24px;height:24px;border-radius:999px;background:var(--surface-2);font-size:18px;line-height:1}
+.helpText{border-radius:20px;border:1px solid var(--border);background:var(--surface);padding:14px;color:var(--text-muted);font-size:13px;line-height:1.6;white-space:pre-wrap}
 
 /* profile screens */
 .profileMini{display:flex;align-items:center;gap:12px;padding:14px}
@@ -802,4 +814,247 @@ textarea{width:100%;height:112px;margin-top:16px;padding:14px;resize:none;outlin
   border-color: var(--accent-border);
   background: linear-gradient(90deg,var(--accent),var(--accent-2));
   color: #fff;
+}
+
+/* capability hub */
+.capabilityHero {
+  border-radius: 22px;
+  border: 1px solid var(--accent-border);
+  background:
+    radial-gradient(circle at 10% 0%, var(--accent-soft-2), transparent 42%),
+    radial-gradient(circle at 90% 100%, rgba(59,220,255,.16), transparent 44%),
+    var(--surface);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.capabilityHero b {
+  display: block;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.capabilityHero p {
+  margin: 8px 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.toolGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.toolGrid.compact {
+  margin-top: 0;
+}
+
+.toolCard {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 13px;
+  text-align: left;
+  min-height: 96px;
+}
+
+.toolCard b {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: linear-gradient(135deg,var(--accent),var(--accent-3));
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.toolCard strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.toolCard span {
+  display: block;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.toolCard.big {
+  min-height: 156px;
+}
+
+/* assistant */
+.assistantPanel {
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.assistantMessages {
+  display: grid;
+  gap: 10px;
+  max-height: 48vh;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.assistantBubble {
+  width: fit-content;
+  max-width: 92%;
+  border-radius: 18px;
+  padding: 11px 13px;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.assistantBubble.assistant {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.assistantBubble.user {
+  justify-self: end;
+  background: linear-gradient(135deg,var(--accent),var(--accent-3));
+  color: #fff;
+}
+
+.assistantQuick {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 12px 0;
+  scrollbar-width: none;
+}
+
+.assistantQuick::-webkit-scrollbar {
+  display: none;
+}
+
+.assistantQuick button {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-soft);
+  padding: 8px 11px;
+  font-size: 12px;
+}
+
+.assistantInput {
+  display: grid;
+  gap: 10px;
+}
+
+.assistantInput textarea {
+  min-height: 88px;
+  margin-top: 0;
+}
+
+.assistantInput button {
+  border-radius: 16px;
+  padding: 13px;
+}
+
+/* referrals */
+.referralLinkBox {
+  border-radius: 18px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  padding: 13px;
+  cursor: pointer;
+}
+
+.referralLinkBox span {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.referralLinkBox b {
+  display: block;
+  margin-top: 4px;
+  color: var(--accent-text);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.referralStats {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.moneyGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.moneyGrid div,
+.miniList div {
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 13px;
+}
+
+.moneyGrid span,
+.miniList span {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.moneyGrid b,
+.miniList b {
+  display: block;
+  margin-top: 4px;
+  font-size: 17px;
+}
+
+.referralPanel {
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 14px;
+}
+
+.field {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 16px;
+  padding: 13px 14px;
+  outline: none;
+}
+
+.miniList {
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 370px) {
+  .toolGrid,
+  .moneyGrid,
+  .referralStats {
+    grid-template-columns: 1fr;
+  }
+
+  .nav small {
+    display: none;
+  }
 }

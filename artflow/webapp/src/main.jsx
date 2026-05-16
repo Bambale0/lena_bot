@@ -14,6 +14,7 @@ const fallbackUser = {
   referral_code: "",
   referral_link: "",
   referral_withdraw_min_rub: 1000,
+  language: "ru",
 };
 
 const fallbackImageModels = [];
@@ -23,6 +24,20 @@ const fallbackVideoModels = [];
 const fallbackFeed = [];
 
 const fallbackPlans = [];
+const fallbackReferralStats = {
+  referral_code: "",
+  referral_link: "",
+  bonus_l1_credits: 0,
+  commission_l1: 0,
+  commission_l2: 0,
+  commission_l3: 0,
+  withdraw_min_rub: 1000,
+  counts: { l1: 0, l2: 0, l3: 0 },
+  balance: { total_earned: 0, pending_withdrawals: 0, available_to_withdraw: 0 },
+  feed_remix_reward_rub: 0,
+  children: { l1: [], l2: [], l3: [] },
+  withdrawals: [],
+};
 const THEME_STORAGE_KEY = "apix-miniapp-theme";
 const THEME_OPTIONS = [
   { value: "system", label: "Системная" },
@@ -238,10 +253,10 @@ function Header({ screen, setScreen, user, setTopup }) {
 function Nav({ screen, setScreen }) {
   const tabs = [
     ["home", "⌂", "Главная"],
-    ["feed", "◷", "Лента"],
+    ["capabilities", "✦", "Все"],
     ["studio", "⌘", "Студия"],
-    ["music", "🎶", "Музыка"],
-    ["history", "☰", "История"],
+    ["assistant", "?", "AI"],
+    ["feed", "◷", "Лента"],
     ["profile", "♙", "Профиль"],
   ];
   return (
@@ -385,7 +400,7 @@ function ProfileStrip({ user, historyCount, setScreen, setTopup }) {
   );
 }
 
-function PromptFeed({ prompts, setScreen }) {
+function PromptFeed({ prompts, setScreen, onPromptUse }) {
   return (
     <section className="block">
       <div className="title">
@@ -394,7 +409,7 @@ function PromptFeed({ prompts, setScreen }) {
       </div>
       <div className="hscroll">
         {prompts.map((p, i) => (
-          <button key={p.id || i} className="promptCard" onClick={() => setScreen("studio")}>
+          <button key={p.id || i} className="promptCard" onClick={() => onPromptUse ? onPromptUse(p) : setScreen("studio")}>
             {p.preview_url
               ? <img src={p.preview_url} alt={p.title} />
               : <Art type={["a","b","c","d"][i % 4]} />}
@@ -413,11 +428,23 @@ function PromptFeed({ prompts, setScreen }) {
   );
 }
 
-function Home({ user, feed, prompts, historyCount, setScreen, setTopup, midjourneyItems = [], openStudioPreset }) {
+function Home({ user, feed, prompts, historyCount, setScreen, setTopup, midjourneyItems = [], openStudioPreset, onPromptUse }) {
   return (
     <>
       <ProfileStrip user={user} historyCount={historyCount} setScreen={setScreen} setTopup={setTopup} />
-      <PromptFeed prompts={prompts} setScreen={setScreen} />
+      <section className="block">
+        <div className="title">
+          <div><h2>Возможности APIX</h2><p>Фото, видео, музыка, промпты и партнёрка в одном Mini App</p></div>
+          <button onClick={() => setScreen("capabilities")}>Все</button>
+        </div>
+        <div className="toolGrid compact">
+          <button className="toolCard" onClick={() => setScreen("studio")}><b>⌘</b><span>Генерация изображений и видео</span></button>
+          <button className="toolCard" onClick={() => setScreen("music")}><b>♪</b><span>Музыка Suno</span></button>
+          <button className="toolCard" onClick={() => setScreen("assistant")}><b>AI</b><span>Ассистент по промптам</span></button>
+          <button className="toolCard" onClick={() => setScreen("referrals")}><b>₽</b><span>Партнёрский кабинет</span></button>
+        </div>
+      </section>
+      <PromptFeed prompts={prompts} setScreen={setScreen} onPromptUse={onPromptUse} />
       {!!midjourneyItems.length && (
         <section className="block">
           <div className="title">
@@ -815,6 +842,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
 
   const [mode, setMode] = useState("text");
   const [prompt, setPrompt] = useState("");
+  const [selectedPrompt, setSelectedPrompt] = useState(null);
   const [ratio, setRatio] = useState("9:16");
   const [quality, setQuality] = useState("basic");
   const [count, setCount] = useState(1);
@@ -875,6 +903,14 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
       setScenario("all");
     }
   }, [preset?.modelKey, preset?.kind]);
+
+  useEffect(() => {
+    if (!preset?.prompt) return;
+    setKind("image");
+    setPrompt(preset.prompt);
+    setSelectedPrompt(preset.promptId ? { id: preset.promptId, title: preset.title || "Промпт" } : null);
+    if (preset.modelKey) setScenario("all");
+  }, [preset?.prompt, preset?.promptId, preset?.title, preset?.modelKey]);
 
   useEffect(() => {
     if (preset?.modelKey && visibleModels.some((item) => item.key === preset.modelKey)) {
@@ -1013,7 +1049,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
     if (!prompt.trim() || improvingPrompt) return;
     setImprovingPrompt(true);
     try {
-      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind: "music" }) });
+      const result = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt, kind }) });
       setPrompt(result.prompt || prompt);
       tg()?.HapticFeedback?.notificationOccurred("success");
       onNotice?.({ type: "success", message: kind === "video" ? "Промпт для видео улучшен" : "Промпт улучшен" });
@@ -1051,6 +1087,7 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
     const payload = {
       model,
       prompt,
+      prompt_id: kind === "image" ? selectedPrompt?.id : null,
       mode,
       aspect_ratio: ratio,
       quality,
@@ -1244,6 +1281,12 @@ function Studio({ imageModels, videoModels, user, onGenerate, onRemixGenerate, g
             onChange={(e) => setPrompt(e.target.value)}
             placeholder={kind === "video" ? "Опиши сцену, движение и настроение..." : "Опиши идею изображения..."}
           />
+          {selectedPrompt && (
+            <div className="selectedPrompt">
+              <span>Из библиотеки: <b>{selectedPrompt.title}</b></span>
+              <button type="button" onClick={() => setSelectedPrompt(null)}>×</button>
+            </div>
+          )}
         </SettingsRow>
       )}
 
@@ -1466,6 +1509,225 @@ function formatDate(iso) {
   catch { return iso; }
 }
 
+// ── All capabilities ─────────────────────────────────────────────────────────
+
+function Capabilities({ setScreen, setTopup }) {
+  const tools = [
+    ["studio", "⌘", "Студия генераций", "Изображения, редактирование по референсам, blend, text-to-video и image-to-video."],
+    ["music", "♪", "Музыка Suno", "Песни с вокалом или инструментальные треки по описанию настроения и жанра."],
+    ["assistant", "AI", "AI-ассистент", "Помогает улучшить промпт, выбрать модель, разобраться с референсами и оплатой."],
+    ["prompts", "📚", "Библиотека промптов", "Готовые идеи и формулы, которые можно быстро адаптировать под свою задачу."],
+    ["feed", "◷", "Публичная лента", "Публикуй удачные работы, собирай лайки, делись ссылками и запускай ремиксы."],
+    ["history", "☰", "История", "Все твои генерации, статусы, результаты, промпты и быстрые действия в одном месте."],
+    ["referrals", "₽", "Партнёрка", "Реферальная ссылка, уровни, баланс, заявки на вывод и доход от ремиксов."],
+    ["help", "?", "Помощь", "Инструкции из Telegram-бота, подсказки по Stars, оплате, рефералам и промптам."],
+    ["profile", "♙", "Профиль и настройки", "Баланс, темы интерфейса, язык и основные пользовательские параметры."],
+  ];
+
+  return (
+    <section>
+      <div className="studioHead">
+        <h1>Все возможности</h1>
+        <button className="balanceBtn" onClick={() => setTopup(true)}>Пополнить</button>
+      </div>
+      <div className="capabilityHero">
+        <b>APIX Web работает с той же базой, что и Telegram-бот.</b>
+        <p>Запускай генерации из Mini App, возвращайся к ним в боте и наоборот: баланс, история, лента, промпты и партнёрка общие.</p>
+      </div>
+      <div className="toolGrid">
+        {tools.map(([id, icon, title, text]) => (
+          <button key={id} className="toolCard big" onClick={() => setScreen(id)}>
+            <b>{icon}</b>
+            <strong>{title}</strong>
+            <span>{text}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ── Assistant screen ─────────────────────────────────────────────────────────
+
+function Assistant({ onNotice }) {
+  const [messages, setMessages] = useState([
+    { role: "assistant", content: "Привет! Я помогу собрать промпт, выбрать модель или объяснить, как лучше сделать изображение, видео или трек в APIX." },
+  ]);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function send() {
+    const message = text.trim();
+    if (!message || busy) return;
+    const nextMessages = [...messages, { role: "user", content: message }];
+    setMessages(nextMessages);
+    setText("");
+    setBusy(true);
+    try {
+      const history = messages.slice(-10).map(({ role, content }) => ({ role, content }));
+      const res = await api("/assistant", { method: "POST", body: JSON.stringify({ message, history }) });
+      setMessages((prev) => [...prev, { role: "assistant", content: res.reply || "Готово. Чем ещё помочь?" }]);
+      tg()?.HapticFeedback?.notificationOccurred("success");
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Ассистент сейчас недоступен" });
+      setMessages((prev) => [...prev, { role: "assistant", content: "Не смог получить ответ. Попробуй ещё раз через минуту или сформулируй короче." }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section>
+      <div className="studioHead">
+        <h1>AI-ассистент</h1>
+        <span className="statusBadge success">web + bot</span>
+      </div>
+      <div className="assistantPanel">
+        <div className="assistantMessages">
+          {messages.map((m, i) => (
+            <div key={`${m.role}-${i}`} className={`assistantBubble ${m.role}`}>
+              {m.content}
+            </div>
+          ))}
+          {busy && <div className="assistantBubble assistant">Думаю над ответом...</div>}
+        </div>
+        <div className="assistantQuick">
+          {["Улучши промпт для фэшн-съёмки", "Какая модель подойдёт для анимации фото?", "Как заработать на рефералах?"].map((q) => (
+            <button key={q} onClick={() => setText(q)}>{q}</button>
+          ))}
+        </div>
+        <div className="assistantInput">
+          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Спроси про промпт, модель, оплату, историю или ленту..." maxLength={4000} />
+          <button className="primary" onClick={send} disabled={!text.trim() || busy}>{busy ? "..." : "Отправить"}</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Referrals screen ─────────────────────────────────────────────────────────
+
+function formatRub(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return "0₽";
+  return `${num.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}₽`;
+}
+
+function pct(value) {
+  return `${Math.round(Number(value || 0) * 100)}%`;
+}
+
+function Referrals({ user, stats, loading, reload, onNotice }) {
+  const referralLink = isTelegramDeepLink(stats.referral_link)
+    ? stats.referral_link
+    : isTelegramDeepLink(user.referral_link)
+      ? user.referral_link
+      : `https://t.me/apix_ai_bot?start=${user.referral_code || stats.referral_code || ""}`;
+  const available = Number(stats.balance?.available_to_withdraw || 0);
+  const minAmount = Number(stats.withdraw_min_rub || user.referral_withdraw_min_rub || 1000);
+  const [amount, setAmount] = useState("");
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function copyReferral() {
+    const ok = await copyText(referralLink);
+    onNotice?.({ type: ok ? "success" : "error", message: ok ? "Партнёрская ссылка скопирована" : "Не удалось скопировать ссылку" });
+  }
+
+  async function withdraw() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api("/referrals/withdrawals", {
+        method: "POST",
+        body: JSON.stringify({ amount_rub: Number(amount), payout_details: details }),
+      });
+      setAmount("");
+      setDetails("");
+      reload?.();
+      onNotice?.({ type: "success", message: "Заявка на вывод создана" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось создать заявку" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading) return <Spinner />;
+
+  return (
+    <section>
+      <div className="studioHead">
+        <h1>Партнёрка</h1>
+        <button className="balanceBtn" onClick={copyReferral}>Скопировать</button>
+      </div>
+      <div className="referralLinkBox" onClick={copyReferral}>
+        <span>Твоя ссылка</span>
+        <b>{referralLink}</b>
+      </div>
+      <div className="profileStats referralStats">
+        <div><b>{stats.counts?.l1 || 0}</b><span>1 уровень · +{formatCredits(stats.bonus_l1_credits)} 💋</span></div>
+        <div><b>{stats.counts?.l2 || 0}</b><span>2 уровень · {pct(stats.commission_l2)}</span></div>
+        <div><b>{stats.counts?.l3 || 0}</b><span>3 уровень · {pct(stats.commission_l3)}</span></div>
+      </div>
+      <div className="moneyGrid">
+        <div><span>Всего заработано</span><b>{formatRub(stats.balance?.total_earned)}</b></div>
+        <div><span>Доступно</span><b>{formatRub(available)}</b></div>
+        <div><span>В ожидании</span><b>{formatRub(stats.balance?.pending_withdrawals)}</b></div>
+        <div><span>Ремиксы ленты</span><b>{formatRub(stats.feed_remix_reward_rub)}</b></div>
+      </div>
+
+      <section className="block referralPanel">
+        <div className="title"><div><h2>Вывод средств</h2><p>Минимум {formatRub(minAmount)}. Реквизиты увидит администратор.</p></div></div>
+        <input className="field" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Сумма, например ${minAmount}`} />
+        <textarea value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Карта, СБП, USDT или другой способ выплаты" maxLength={500} />
+        <button className="primary" onClick={withdraw} disabled={busy || Number(amount) < minAmount || !details.trim() || available < Number(amount)} style={{ width: "100%", padding: 14, borderRadius: 16, marginTop: 10 }}>
+          {busy ? "Создаю заявку..." : "Создать заявку на вывод"}
+        </button>
+      </section>
+
+      <section className="block">
+        <div className="title"><div><h2>Последние заявки</h2><p>Статусы синхронизируются с ботом</p></div></div>
+        <div className="miniList">
+          {(stats.withdrawals || []).length
+            ? stats.withdrawals.map((item) => <div key={item.id}><b>{formatRub(item.amount_rub)}</b><span>{item.status} · {formatDate(item.created_at)}</span></div>)
+            : <div><b>Заявок пока нет</b><span>Когда появится баланс, можно будет отправить запрос на вывод.</span></div>}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function Help({ onNotice }) {
+  const [topic, setTopic] = useState("main");
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    api(`/help?topic=${topic}`)
+      .then((data) => { if (alive) setText(data.text || ""); })
+      .catch((e) => onNotice?.({ type: "error", message: e.message || "Не удалось загрузить помощь" }))
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [topic]);
+
+  return (
+    <section>
+      <div className="studioHead">
+        <h1>Помощь</h1>
+        <span className="statusBadge success">из бота</span>
+      </div>
+      <div className="tabs soft">
+        <button className={topic === "main" ? "active" : ""} onClick={() => setTopic("main")}>Как пользоваться</button>
+        <button className={topic === "stars" ? "active" : ""} onClick={() => setTopic("stars")}>Telegram Stars</button>
+      </div>
+      {loading ? <Spinner /> : <div className="helpText">{text.replace(/<[^>]+>/g, "")}</div>}
+    </section>
+  );
+}
+
 // ── Profile screen ────────────────────────────────────────────────────────────
 
 function ThemePicker({ value, onChange, resolvedTheme }) {
@@ -1492,17 +1754,37 @@ function ThemePicker({ value, onChange, resolvedTheme }) {
   );
 }
 
-function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolvedTheme }) {
+function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolvedTheme, onNotice, reloadUser }) {
   const referralLink = isTelegramDeepLink(user.referral_link)
     ? user.referral_link
     : `https://t.me/apix_ai_bot?start=${user.referral_code || ""}`;
+  const [language, setLanguage] = useState(user.language || "ru");
   const menuItems = [
+    ["capabilities", "✦", "Все возможности"],
     ["studio", "⌘", "Студия генераций"],
+    ["assistant", "AI", "AI-ассистент"],
     ["music", "🎶", "Музыка (Suno)"],
     ["history", "☰", "Мои генерации"],
     ["feed", "◷", "Публичная лента"],
     ["prompts", "📚", "Библиотека промптов"],
+    ["referrals", "₽", "Партнёрский кабинет"],
+    ["help", "?", "Помощь"],
   ];
+
+  useEffect(() => {
+    setLanguage(user.language || "ru");
+  }, [user.language]);
+
+  async function changeLanguage(nextLanguage) {
+    setLanguage(nextLanguage);
+    try {
+      await api("/settings/language", { method: "POST", body: JSON.stringify({ language: nextLanguage }) });
+      reloadUser?.();
+      onNotice?.({ type: "success", message: nextLanguage === "ru" ? "Язык: русский" : "Language: English" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось сохранить язык" });
+    }
+  }
 
   return (
     <>
@@ -1537,6 +1819,19 @@ function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolved
       </button>
 
       <ThemePicker value={theme} onChange={setTheme} resolvedTheme={resolvedTheme} />
+
+      <div className="themeCard">
+        <div className="themeCardHead">
+          <div>
+            <b>Язык бота</b>
+            <p>Настройка общая для Telegram-бота и Mini App.</p>
+          </div>
+        </div>
+        <div className="themeOptions">
+          <button className={language === "ru" ? "active" : ""} onClick={() => changeLanguage("ru")}>Русский</button>
+          <button className={language === "en" ? "active" : ""} onClick={() => changeLanguage("en")}>English</button>
+        </div>
+      </div>
 
       <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 13 }}>
         <span style={{ color: "var(--text-soft)" }}>Партнёрская ссылка: </span>
@@ -1630,11 +1925,30 @@ function PhotoPromptTool({ setScreen, generatedPhotoPrompt, setGeneratedPhotoPro
   );
 }
 
-function Prompts({ prompts, loading, setScreen }) {
+function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice }) {
   const [photoPromptLoading, setPhotoPromptLoading] = useState(false);
   const [photoPromptResult, setPhotoPromptResult] = useState("");
+  const [source, setSource] = useState("catalog");
+  const [sourceItems, setSourceItems] = useState([]);
+  const [sourceLoading, setSourceLoading] = useState(false);
   const photoPromptInputRef = useRef(null);
-  const filtered = prompts || [];
+  const filtered = source === "catalog" ? (prompts || []) : sourceItems;
+
+  useEffect(() => {
+    if (source === "catalog") return;
+    let alive = true;
+    setSourceLoading(true);
+    const path = source === "my"
+      ? "/prompts/my"
+      : source.startsWith("tag:")
+        ? `/prompts?source=tag&tag=${encodeURIComponent(source.slice(4))}&limit=30`
+        : `/prompts?source=${source}&limit=30`;
+    api(path)
+      .then((data) => { if (alive) setSourceItems(items(data)); })
+      .catch((e) => onNotice?.({ type: "error", message: e.message || "Не удалось загрузить промпты" }))
+      .finally(() => { if (alive) setSourceLoading(false); });
+    return () => { alive = false; };
+  }, [source]);
 
   async function handlePromptPhotoFile(e) {
     const file = e.target.files?.[0];
@@ -1659,11 +1973,54 @@ function Prompts({ prompts, loading, setScreen }) {
     } catch {}
   }
 
+  async function likePrompt(promptItem) {
+    try {
+      const res = await api(`/prompts/${promptItem.id}/like`, { method: "POST" });
+      onNotice?.({ type: "success", message: res.status === "duplicate" ? "Ты уже лайкал этот промпт" : "Лайк сохранён" });
+      setSourceItems((prev) => prev.map((p) => p.id === promptItem.id ? { ...p, likes: res.likes } : p));
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось поставить лайк" });
+    }
+  }
+
+  async function sharePrompt(promptItem) {
+    try {
+      const res = await api(`/prompts/${promptItem.id}/link`);
+      const ok = await copyText(res.link);
+      onNotice?.({ type: ok ? "success" : "error", message: ok ? "Ссылка на промпт скопирована" : "Не удалось скопировать ссылку" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось получить ссылку" });
+    }
+  }
+
+  async function deactivatePrompt(promptItem) {
+    if (!window.confirm("Деактивировать этот промпт? Он пропадёт из публичной библиотеки.")) return;
+    try {
+      await api(`/prompts/${promptItem.id}/deactivate`, { method: "POST" });
+      setSourceItems((prev) => prev.filter((p) => p.id !== promptItem.id));
+      onNotice?.({ type: "success", message: "Промпт деактивирован" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось деактивировать промпт" });
+    }
+  }
+
   if (loading) return <><h1>Библиотека</h1><Spinner /></>;
 
   return (
     <>
       <h1>Библиотека промптов</h1>
+      <div className="sourceTabs">
+        {[
+          ["catalog", "Каталог"],
+          ["top", "Топ"],
+          ["popular", "Популярные"],
+          ["tag:cinematic", "Cinematic"],
+          ["tag:cyberpunk", "Cyberpunk"],
+          ["my", "Мои"],
+        ].map(([id, label]) => (
+          <button key={id} className={source === id ? "active" : ""} onClick={() => setSource(id)}>{label}</button>
+        ))}
+      </div>
       <section className="photoPromptTool">
         <div>
           <h2>📸 Промпт по фото</h2>
@@ -1694,15 +2051,16 @@ function Prompts({ prompts, loading, setScreen }) {
             <p>{photoPromptResult}</p>
             <div className="generatedPromptActions">
               <button onClick={copyPhotoPrompt}>📋 Скопировать</button>
-              <button onClick={() => setScreen("studio")}>✨ В студию</button>
+              <button onClick={() => onPromptUse ? onPromptUse({ title: "Промпт по фото", prompt_text: photoPromptResult }) : setScreen("studio")}>✨ В студию</button>
             </div>
           </div>
         )}
       </section>
 
       <div style={{ display: "grid", gap: 12 }}>
+        {sourceLoading && <Spinner />}
         {filtered.map((p, i) => (
-          <button key={p.id} className="promptListCard" onClick={() => setScreen("studio")}>
+          <div key={p.id} className="promptListCard promptListCardAction">
             {p.preview_url
               ? <img src={p.preview_url} alt={p.title} className="promptListImg" />
               : <Art type={["a","b","c","d"][i % 4]} />}
@@ -1715,10 +2073,16 @@ function Prompts({ prompts, loading, setScreen }) {
                 <span>{p.model || "Any"}</span>
                 <span>♥ {p.likes || 0}  ·  {p.uses_count || 0} исп</span>
               </footer>
+              <div className="promptActions">
+                <button onClick={() => onPromptUse ? onPromptUse(p) : setScreen("studio")}>В студию</button>
+                <button onClick={() => likePrompt(p)}>♥</button>
+                <button onClick={() => sharePrompt(p)}>↗</button>
+                {source === "my" && <button onClick={() => deactivatePrompt(p)}>Скрыть</button>}
+              </div>
             </div>
-          </button>
+          </div>
         ))}
-        {filtered.length === 0 && (
+        {!sourceLoading && filtered.length === 0 && (
           <p style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 32 }}>Промпты не найдены</p>
         )}
       </div>
@@ -1767,6 +2131,7 @@ function App() {
   const history = useApi(() => api("/history?limit=50").then(items), []);
   const prompts = useApi(() => api("/prompts?limit=30").then(items), []);
   const midjourneyItems = useApi(() => api("/public/midjourney").then(items), []);
+  const referrals = useApi(() => api("/referrals"), fallbackReferralStats);
 
   const user = me.data;
   const isDemo = me.error || imageModels.error || videoModels.error;
@@ -1878,7 +2243,7 @@ function App() {
       const endpoint = kind === "video" ? "/generate/video" : "/generate/image";
       const body = kind === "video"
         ? { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-video" ? "mj-video" : ""), mode: payload.mode, duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, reference_urls: payload.reference_urls || [], grok_mode: payload.grok_mode }
-        : { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-blend" ? "mj-blend" : ""), aspect_ratio: payload.aspect_ratio, quality: payload.quality, count: payload.count, reference_url: payload.reference_url, reference_urls: payload.reference_urls || [] };
+        : { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-blend" ? "mj-blend" : ""), prompt_id: payload.prompt_id || null, aspect_ratio: payload.aspect_ratio, quality: payload.quality, count: payload.count, reference_url: payload.reference_url, reference_urls: payload.reference_urls || [] };
       const g = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
       setGeneration(g);
       setPollId(g.id);
@@ -1922,6 +2287,17 @@ function App() {
     setScreen("studio");
   }
 
+  function openPromptPreset(promptItem) {
+    setStudioPreset({
+      kind: "image",
+      modelKey: promptItem.model || undefined,
+      prompt: promptItem.prompt_text || promptItem.prompt || "",
+      promptId: promptItem.id || null,
+      title: promptItem.title || "Промпт",
+    });
+    setScreen("studio");
+  }
+
   function handleRemix(feedItem) {
     setRemixSource({
       gen_id: feedItem.id,
@@ -1934,13 +2310,17 @@ function App() {
   }
 
   const screens = {
-    home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={setScreen} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} />,
+    home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={setScreen} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
+    capabilities: <Capabilities setScreen={setScreen} setTopup={setTopupOpen} />,
+    assistant: <Assistant onNotice={setNotice} />,
     feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={setScreen} onRemix={handleRemix} onNotice={setNotice} />,
     studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} />,
     music: <Music user={user} musicGen={musicGen} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,
     history: <History history={history.data} loading={history.loading} onNotice={setNotice} />,
-    profile: <Profile user={user} history={history.data} setScreen={setScreen} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} />,
-    prompts:<Prompts prompts={prompts.data} loading={prompts.loading} setScreen={setScreen}/>,
+    profile: <Profile user={user} history={history.data} setScreen={setScreen} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} onNotice={setNotice} reloadUser={me.reload} />,
+    referrals: <Referrals user={user} stats={referrals.data} loading={referrals.loading} reload={referrals.reload} onNotice={setNotice} />,
+    help: <Help onNotice={setNotice} />,
+    prompts:<Prompts prompts={prompts.data} loading={prompts.loading} setScreen={setScreen} onPromptUse={openPromptPreset} onNotice={setNotice}/>,
   };
 
   return (

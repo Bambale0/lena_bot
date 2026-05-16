@@ -1,0 +1,9 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs><linearGradient id="g" x1="18" y1="18" x2="78" y2="78"><stop stop-color="#6ef7d8"/><stop offset=".48" stop-color="#4de2ff"/><stop offset="1" stop-color="#8b6dff"/></linearGradient><filter id="s"><feDropShadow dx="0" dy="0" stdDeviation="2.4" flood-color="#6ef7d8" flood-opacity=".45"/></filter></defs>
+  <path d="M48 22V74M22 48H74M31.5 31.5L64.5 64.5M64.5 31.5L31.5 64.5" stroke="url(#g)" stroke-width="2" stroke-linecap="round" opacity=".45"/>
+  <circle cx="48" cy="48" r="10" stroke="url(#g)" stroke-width="2.8" filter="url(#s)"/>
+  <circle cx="48" cy="22" r="6" fill="url(#g)"/>
+  <circle cx="74" cy="48" r="6" fill="url(#g)"/>
+  <circle cx="48" cy="74" r="6" fill="url(#g)"/>
+  <circle cx="22" cy="48" r="6" fill="url(#g)"/>
+</svg>

@@ -95,12 +95,17 @@ _REFERENCE_LOCK_MODELS: set[str] = {
     ImageModel.NANO_BANANA.value,
     ImageModel.NANO_BANANA_2.value,
     ImageModel.NANO_BANANA_PRO.value,
-    ImageModel.SEEDREAM_45_EDIT.value,
     ImageModel.GROK_I2I.value,
     ImageModel.QWEN_I2I.value,
     ImageModel.QWEN_EDIT.value,
     ImageModel.QWEN2_EDIT.value,
     ImageModel.GPT_IMAGE_2_I2I.value,
+}
+
+_REFERENCE_FLEX_MODELS: set[str] = {
+    ImageModel.SEEDREAM_45_EDIT.value,
+    ImageModel.WAN_27.value,
+    ImageModel.WAN_27_PRO.value,
 }
 
 _REFERENCE_LOCK_PREFIX = (
@@ -140,6 +145,19 @@ _REFERENCE_LOCK_PREFIX = (
     "If the requested edit conflicts with face preservation, keep the face from the reference and apply the edit only outside the face."
 )
 
+_REFERENCE_FLEX_PREFIX = (
+    "REFERENCE IDENTITY PRESERVATION WITH TRANSFORMATION. HIGH PRIORITY.\n\n"
+    "Keep the same person from the reference with recognizable face identity, skin tone, hair, and overall likeness.\n"
+    "But still follow the user's prompt as the main transformation instruction for pose, framing, composition, camera angle, expression, action, background, styling, outfit, and scene details.\n\n"
+    "Important rules:\n"
+    "- preserve identity, not the exact original photo composition\n"
+    "- do not simply recreate the same pose or same framing unless the prompt asks for it\n"
+    "- allow clear changes in body position, gesture, camera distance, and scene layout\n"
+    "- if the prompt requests a new setting, mood, clothing, or action, apply it while keeping the same person recognizable\n"
+    "- avoid background-only edits; perform the actual transformation requested in the prompt\n"
+    "- keep the face believable and consistent, but do not freeze the full image"
+)
+
 # Aspect ratio options per model
 MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.SEEDREAM_45:      ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"],
@@ -177,11 +195,17 @@ def _apply_reference_detail_preservation(
     if not image_url:
         return prompt
     model_key = model.value if isinstance(model, ImageModel) else str(model)
-    if model_key not in _REFERENCE_LOCK_MODELS:
+    if any(marker in prompt for marker in (
+        "STRICT REFERENCE ADHERENCE",
+        "STRICT IDENTITY AND DETAIL PRESERVATION",
+        "REFERENCE IDENTITY PRESERVATION WITH TRANSFORMATION",
+    )):
         return prompt
-    if "STRICT REFERENCE ADHERENCE" in prompt:
-        return prompt
-    return _REFERENCE_LOCK_PREFIX + "\n\n" + prompt.strip()
+    if model_key in _REFERENCE_FLEX_MODELS:
+        return _REFERENCE_FLEX_PREFIX + "\n\n" + prompt.strip()
+    if model_key in _REFERENCE_LOCK_MODELS:
+        return _REFERENCE_LOCK_PREFIX + "\n\n" + prompt.strip()
+    return prompt
 
 
 def _normalize_prompt_for_model(model: ImageModel | str, prompt: str) -> str:

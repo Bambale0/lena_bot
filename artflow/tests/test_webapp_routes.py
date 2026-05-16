@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from api.miniapp_auth import get_miniapp_user
+from api.miniapp_auth import create_web_auth_token, get_miniapp_user
 from api.miniapp_routes import _normalize_video_request
 from db.models import GenerationStatus, GenerationType, ImageGenerationAction
+from db import repository as repo
 from db.session import get_session
 from main import app
 
@@ -56,11 +57,240 @@ async def test_webapp_me_rejects_missing_init_data_without_override() -> None:
 
 
 @pytest.mark.asyncio
+async def test_webapp_me_accepts_standalone_web_auth_token(monkeypatch) -> None:
+    app.dependency_overrides.clear()
+    monkeypatch.setattr(
+        "api.miniapp_auth.repo.get_user_by_tg_id",
+        AsyncMock(return_value=SimpleNamespace(
+            id=1,
+            tg_id=111,
+            username="tester",
+            full_name="Test User",
+            credits=1003,
+            referral_code="REF",
+            referral_balance=0.0,
+            is_banned=False,
+            language="ru",
+        )),
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/v1/me", headers={"X-Web-Auth-Token": create_web_auth_token(111)})
+
+    assert response.status_code == 200
+    assert response.json()["credits"] == 1003
+
+
+@pytest.mark.asyncio
+async def test_upload_requires_auth() -> None:
+    app.dependency_overrides.clear()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/upload",
+            files={"file": ("ref.png", b"\x89PNG\r\n\x1a\npayload", "image/png")},
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_non_image_reference(client, monkeypatch) -> None:
+    save_public_file = MagicMock()
+    monkeypatch.setattr("main.save_public_file", save_public_file)
+
+    response = await client.post(
+        "/upload",
+        files={"file": ("ref.txt", b"not an image", "text/plain")},
+    )
+
+    assert response.status_code == 422
+    assert "JPEG, PNG and WebP" in response.json()["detail"]
+    save_public_file.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_upload_accepts_authenticated_image_reference(client, monkeypatch) -> None:
+    save_public_file = MagicMock(return_value="https://example.test/static/upload/ref.png")
+    monkeypatch.setattr("main.save_public_file", save_public_file)
+
+    response = await client.post(
+        "/upload",
+        files={"file": ("ref.png", b"\x89PNG\r\n\x1a\npayload", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["url"] == "https://example.test/static/upload/ref.png"
+    save_public_file.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_webapp_me_returns_verified_user(client, monkeypatch) -> None:
     monkeypatch.setattr("api.miniapp_routes.repo.get_active_image_session", AsyncMock(return_value=None))
     response = await client.get("/api/v1/me")
     assert response.json()["credits"] == 1003
     assert response.json()["referral_link"] == "https://t.me/TestBot?start=REF"
+    assert response.json()["language"] == "ru"
+
+
+@pytest.mark.asyncio
+async def test_webapp_assistant_filters_history_and_appends_message(client, monkeypatch) -> None:
+    generate_reply = AsyncMock(return_value="Готово, вот короткий промпт.")
+    monkeypatch.setattr("api.miniapp_routes.generate_assistant_reply", generate_reply)
+
+    response = await client.post(
+        "/api/v1/assistant",
+        json={
+            "message": "  помоги с промптом  ",
+            "history": [
+                {"role": "system", "content": "ignore"},
+                {"role": "assistant", "content": "Привет"},
+                {"role": "user", "content": ""},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reply"] == "Готово, вот короткий промпт."
+    generate_reply.assert_awaited_once_with(
+        [
+            {"role": "assistant", "content": "Привет"},
+            {"role": "user", "content": "помоги с промптом"},
+        ],
+        admin_mode=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_webapp_assistant_rejects_blank_message(client) -> None:
+    response = await client.post("/api/v1/assistant", json={"message": "   "})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Message cannot be empty"
+
+
+@pytest.mark.asyncio
+async def test_webapp_set_language_updates_common_user_record(client, monkeypatch) -> None:
+    set_user_language = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.set_user_language", set_user_language)
+
+    response = await client.post("/api/v1/settings/language", json={"language": "en"})
+
+    assert response.status_code == 200
+    assert response.json() == {"language": "en"}
+    set_user_language.assert_awaited_once()
+    assert set_user_language.await_args.args[1:] == (1, "en")
+
+
+@pytest.mark.asyncio
+async def test_webapp_set_language_rejects_unknown_language(client, monkeypatch) -> None:
+    set_user_language = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.set_user_language", set_user_language)
+
+    response = await client.post("/api/v1/settings/language", json={"language": "de"})
+
+    assert response.status_code == 422
+    set_user_language.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webapp_referrals_returns_counts_balance_children_and_withdrawals(client, monkeypatch) -> None:
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_referrals", AsyncMock(return_value=(2, 1, 0)))
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_user_referral_balance_snapshot",
+        AsyncMock(return_value=SimpleNamespace(total_earned=1250.5, pending_withdrawals=300.0, available_to_withdraw=950.5)),
+    )
+    monkeypatch.setattr("api.miniapp_routes.repo.get_user_feed_remix_reward_rub", AsyncMock(return_value=42.75))
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_user_withdrawal_requests",
+        AsyncMock(return_value=[
+            SimpleNamespace(
+                id=9,
+                amount_rub=300.0,
+                payout_details="SBP",
+                status=SimpleNamespace(value="pending"),
+                created_at=datetime(2026, 5, 15, tzinfo=timezone.utc),
+            ),
+        ]),
+    )
+
+    async def fake_children(_session, _user_id, *, level: int, limit: int):
+        if level != 1:
+            return []
+        return [
+            SimpleNamespace(
+                user=SimpleNamespace(id=15, username="child", full_name="Child User"),
+                generations_count=4,
+                paid_rub=199.0,
+            ),
+        ]
+
+    monkeypatch.setattr("api.miniapp_routes.repo.get_referral_children", fake_children)
+
+    response = await client.get("/api/v1/referrals")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["counts"] == {"l1": 2, "l2": 1, "l3": 0}
+    assert data["balance"]["available_to_withdraw"] == 950.5
+    assert data["feed_remix_reward_rub"] == 42.75
+    assert data["children"]["l1"][0]["username"] == "child"
+    assert data["withdrawals"][0]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_webapp_referral_withdrawal_creates_request(client, monkeypatch) -> None:
+    monkeypatch.setattr("api.miniapp_routes.settings.REFERRAL_WITHDRAW_MIN_RUB", 100.0)
+    create_withdrawal = AsyncMock(return_value=SimpleNamespace(
+        id=10,
+        amount_rub=150.0,
+        payout_details="SBP +79990000000",
+        status=SimpleNamespace(value="pending"),
+        created_at=datetime(2026, 5, 15, tzinfo=timezone.utc),
+    ))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_withdrawal_request", create_withdrawal)
+
+    response = await client.post(
+        "/api/v1/referrals/withdrawals",
+        json={"amount_rub": 150, "payout_details": "  SBP +79990000000  "},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["id"] == 10
+    assert create_withdrawal.await_args.kwargs["user_id"] == 1
+    assert create_withdrawal.await_args.kwargs["amount_rub"] == 150
+    assert create_withdrawal.await_args.kwargs["payout_details"] == "SBP +79990000000"
+
+
+@pytest.mark.asyncio
+async def test_webapp_referral_withdrawal_rejects_amount_below_minimum(client, monkeypatch) -> None:
+    monkeypatch.setattr("api.miniapp_routes.settings.REFERRAL_WITHDRAW_MIN_RUB", 100.0)
+    create_withdrawal = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.create_withdrawal_request", create_withdrawal)
+
+    response = await client.post(
+        "/api/v1/referrals/withdrawals",
+        json={"amount_rub": 99, "payout_details": "SBP +79990000000"},
+    )
+
+    assert response.status_code == 422
+    create_withdrawal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webapp_referral_withdrawal_reports_available_balance(client, monkeypatch) -> None:
+    monkeypatch.setattr("api.miniapp_routes.settings.REFERRAL_WITHDRAW_MIN_RUB", 100.0)
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.create_withdrawal_request",
+        AsyncMock(side_effect=repo.InsufficientReferralBalanceError(75.25)),
+    )
+
+    response = await client.post(
+        "/api/v1/referrals/withdrawals",
+        json={"amount_rub": 150, "payout_details": "SBP +79990000000"},
+    )
+
+    assert response.status_code == 402
+    assert "75.25" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -225,22 +455,41 @@ async def test_topup_stars_returns_invoice_link(client, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_webapp_prompt_use_returns_404_when_not_implemented(client, monkeypatch) -> None:
-    """The /prompts/{id}/use endpoint is not yet implemented — expect 404."""
+async def test_webapp_prompt_use_marks_prompt_usage(client, monkeypatch) -> None:
     prompt = SimpleNamespace(
         id=7,
-        status=SimpleNamespace(value="approved"),
+        title="Glossy card",
+        description="make it glossy",
+        category=SimpleNamespace(value="photo"),
+        tags=["photo"],
+        uses_count=3,
+        likes=2,
+        status=None,
         is_public=True,
         prompt_text="make it glossy",
         model=None,
         preview_url=None,
+        author_id=2,
+        reject_reason=None,
+        ai_moderation_decision=None,
+        ai_moderation_risk=None,
+        ai_moderation_reason=None,
+        ai_moderation_recommendation=None,
+        ai_moderated_at=None,
+        created_at=datetime.now(timezone.utc),
     )
     from db.models import PromptStatus
 
     prompt.status = PromptStatus.approved
-    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    use_prompt = AsyncMock(return_value=(prompt, {"author": 0, "l2": 0, "l3": 0}))
+    monkeypatch.setattr("db.prompt_repository.use_prompt", use_prompt)
+
     response = await client.post("/api/v1/prompts/7/use")
-    assert response.status_code == 405
+
+    assert response.status_code == 200
+    assert response.json()["prompt"]["id"] == 7
+    use_prompt.assert_awaited_once()
+    assert use_prompt.await_args.args[1:] == (7, 1)
 
 
 @pytest.mark.asyncio
@@ -314,6 +563,78 @@ async def test_generate_image_passes_multiple_reference_urls(client, monkeypatch
         "https://example.test/ref-1.jpg",
         "https://example.test/ref-2.jpg",
     ]
+
+
+@pytest.mark.asyncio
+async def test_generate_image_from_prompt_library_uses_saved_prompt_and_rewards(client, monkeypatch) -> None:
+    from db.models import PromptCategory, PromptStatus
+
+    prompt = SimpleNamespace(
+        id=44,
+        title="Library prompt",
+        description="",
+        category=PromptCategory.photo,
+        tags=[],
+        uses_count=0,
+        likes=0,
+        status=PromptStatus.approved,
+        is_public=True,
+        prompt_text="library prompt text",
+        model=None,
+        preview_url=None,
+        author_id=2,
+        reject_reason=None,
+        ai_moderation_decision=None,
+        ai_moderation_risk=None,
+        ai_moderation_reason=None,
+        ai_moderation_recommendation=None,
+        ai_moderated_at=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    use_prompt = AsyncMock(return_value=(prompt, {"author": 1, "l2": 0, "l3": 0}))
+    image_generate = AsyncMock(return_value=SimpleNamespace(task_id="img_task_prompt"))
+
+    async def fake_create_generation(_session, _user_id, model, gen_type, prompt_text, credits_spent, **_kwargs):
+        assert prompt_text == "library prompt text"
+        return SimpleNamespace(
+            id=503,
+            model=model,
+            gen_type=gen_type,
+            prompt=prompt_text,
+            status=GenerationStatus.processing,
+            result_url=None,
+            credits_spent=credits_spent,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+        )
+
+    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr("db.prompt_repository.use_prompt", use_prompt)
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4)))
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", AsyncMock(return_value=True))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_image_session", AsyncMock(return_value=SimpleNamespace(id=79)))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes.repo.update_image_session_last_prompt", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes.image_service.generate_image", image_generate)
+
+    response = await client.post(
+        "/api/v1/generate/image",
+        json={
+            "model": "nano-banana-pro",
+            "prompt": "user-visible prompt",
+            "prompt_id": 44,
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["prompt"] == "library prompt text"
+    assert image_generate.await_args.args[1] == "library prompt text"
+    use_prompt.assert_awaited_once()
+    assert use_prompt.await_args.args[1:] == (44, 1)
+    assert use_prompt.await_args.kwargs["credits_spent"] == 4
 
 
 @pytest.mark.asyncio

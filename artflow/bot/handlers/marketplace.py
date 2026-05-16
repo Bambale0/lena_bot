@@ -104,7 +104,7 @@ def _prompt_photo_source(preview_url: str | None):
     local_path = local_upload_path_from_url(normalized_url)
     if local_path and local_path.exists():
         return FSInputFile(local_path)
-    if normalized_url:
+    if normalized_url and not local_path:
         return normalized_url
     if PROMPT_FALLBACK_IMAGE.exists():
         return FSInputFile(PROMPT_FALLBACK_IMAGE)

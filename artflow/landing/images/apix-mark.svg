@@ -1,0 +1,24 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title">
+  <title id="title">APIX</title>
+  <defs>
+    <linearGradient id="g" x1="40" y1="180" x2="600" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38D7FF"/>
+      <stop offset=".38" stop-color="#E044FF"/>
+      <stop offset=".64" stop-color="#FF6C9E"/>
+      <stop offset="1" stop-color="#62F6C5"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-45%" width="140%" height="190%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feColorMatrix in="b" type="matrix" values="0 0 0 0 .3 0 0 0 0 .8 0 0 0 0 1 0 0 0 .5 0"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#glow)">
+    <path d="M40 238L110 96H148L218 238H174L160 205H96L82 238H40ZM112 169H144L128 131L112 169Z" fill="url(#g)"/>
+    <path d="M238 238V96H334C365 96 388 118 388 149C388 181 365 203 333 203H280V238H238ZM280 166H329C340 166 347 159 347 149C347 139 340 132 329 132H280V166Z" fill="url(#g)"/>
+    <path d="M420 238V96H463V238H420Z" fill="url(#g)"/>
+    <path d="M491 238L552 165L494 96H546L580 137L614 96H666L608 165L669 238H616L580 193L544 238H491Z" fill="url(#g)"/>
+  </g>
+  <path d="M132 56C220 14 369 17 493 75" stroke="url(#g)" stroke-width="5" stroke-linecap="round" opacity=".72" stroke-dasharray="30 18"/>
+  <path d="M98 294C188 337 357 335 505 275" stroke="url(#g)" stroke-width="5" stroke-linecap="round" opacity=".72" stroke-dasharray="30 18"/>
+</svg>

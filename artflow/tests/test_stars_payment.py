@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from bot.handlers import stars_payment
-from db.models import PaymentProvider
+from db.models import PaymentProvider, TransactionStatus
 
 
 @pytest.mark.asyncio
@@ -25,6 +25,7 @@ async def test_stars_plan_creates_xtr_invoice(monkeypatch) -> None:
     tx = SimpleNamespace(id=55)
 
     monkeypatch.setattr("bot.handlers.stars_payment.repo.get_price_plan_by_key", AsyncMock(return_value=plan))
+    monkeypatch.setattr("bot.handlers.stars_payment.repo.get_transaction_by_external_id", AsyncMock(return_value=None))
     create_transaction = AsyncMock(return_value=tx)
     monkeypatch.setattr("bot.handlers.stars_payment.repo.create_transaction", create_transaction)
 
@@ -36,6 +37,41 @@ async def test_stars_plan_creates_xtr_invoice(monkeypatch) -> None:
     assert bot.send_invoice.await_args.kwargs["currency"] == "XTR"
     assert bot.send_invoice.await_args.kwargs["provider_token"] == ""
     assert bot.send_invoice.await_args.kwargs["payload"] == "stars:55:credits_100"
+    call.answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stars_plan_reuses_pending_transaction(monkeypatch) -> None:
+    monkeypatch.setattr("bot.handlers.stars_payment.settings.TELEGRAM_STARS_ENABLED", True)
+
+    call = SimpleNamespace(
+        data="topup:stars_plan:credits_15",
+        from_user=SimpleNamespace(id=12345),
+        answer=AsyncMock(),
+    )
+    session = AsyncMock()
+    db_user = SimpleNamespace(id=7, language="ru")
+    bot = AsyncMock()
+    plan = SimpleNamespace(key="credits_15", label="Мини", price_rub=150.0, price_stars=100, credits=15)
+    tx = SimpleNamespace(
+        id=55,
+        user_id=db_user.id,
+        provider=PaymentProvider.telegram_stars,
+        status=TransactionStatus.pending,
+    )
+
+    monkeypatch.setattr("bot.handlers.stars_payment.repo.get_price_plan_by_key", AsyncMock(return_value=plan))
+    get_transaction = AsyncMock(return_value=tx)
+    monkeypatch.setattr("bot.handlers.stars_payment.repo.get_transaction_by_external_id", get_transaction)
+    create_transaction = AsyncMock()
+    monkeypatch.setattr("bot.handlers.stars_payment.repo.create_transaction", create_transaction)
+
+    await stars_payment.cb_stars_plan(call, session, db_user, bot)
+
+    get_transaction.assert_awaited_once_with(session, "stars_pending:7:credits_15")
+    create_transaction.assert_not_awaited()
+    bot.send_invoice.assert_awaited_once()
+    assert bot.send_invoice.await_args.kwargs["payload"] == "stars:55:credits_15"
     call.answer.assert_awaited_once()
 
 
@@ -66,7 +102,14 @@ async def test_successful_stars_payment_is_idempotent(monkeypatch) -> None:
     await stars_payment.on_successful_payment(message, session, db_user, bot)
 
     assert confirm_transaction_by_id.await_count == 2
-    add_credits.assert_awaited_once_with(session, db_user.id, tx.credits)
+    add_credits.assert_awaited_once()
+    assert add_credits.await_args.args == (session, db_user.id, tx.credits)
+    assert add_credits.await_args.kwargs == {
+        "entry_type": "payment_credit",
+        "source_type": "transaction",
+        "source_id": str(tx.id),
+        "note": "Telegram Stars payment",
+    }
     accrue.assert_awaited_once_with(session, db_user, tx.amount_rub, bot)
     message.answer.assert_awaited_once()
 
