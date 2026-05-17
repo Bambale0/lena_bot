@@ -56,3 +56,41 @@ async def test_kie_music_webhook_uses_db_generation_when_in_memory_task_is_missi
     get_generation_by_task_id.assert_awaited()
     finish_generation.assert_awaited_once()
     assert finish_generation.await_args.args[1:] == (77, "https://cdn.test/track.mp3")
+
+
+@pytest.mark.asyncio
+async def test_kie_music_webhook_rejects_invalid_secret_when_configured(monkeypatch) -> None:
+    monkeypatch.setattr(main.settings, "KIE_WEBHOOK_SECRET", "expected-secret")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/webhook/kie/music", json={"data": {"taskId": "music-task-1"}})
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_kie_music_webhook_accepts_query_secret_when_configured(monkeypatch) -> None:
+    monkeypatch.setattr(main.settings, "KIE_WEBHOOK_SECRET", "expected-secret")
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.repo, "get_generation_by_task_id", AsyncMock(return_value=None))
+
+    payload = {
+        "code": 200,
+        "data": {"taskId": "music-task-1", "status": "SUCCESS"},
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/webhook/kie/music?secret=expected-secret", json=payload)
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_kie_music_webhook_fails_closed_in_production_without_secret(monkeypatch) -> None:
+    monkeypatch.setattr(main.settings, "ENV", "production")
+    monkeypatch.setattr(main.settings, "KIE_WEBHOOK_SECRET", "")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/webhook/kie/music", json={"data": {"taskId": "music-task-1"}})
+
+    assert response.status_code == 503

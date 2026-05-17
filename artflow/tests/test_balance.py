@@ -59,7 +59,7 @@ async def test_cb_referral_shows_screen(db_user) -> None:
         get_user_referral_balance_snapshot=AsyncMock(
             return_value=SimpleNamespace(total_earned=10.5, available_to_withdraw=10.5, pending_withdrawals=0.0)
         ),
-        get_user_feed_remix_reward_credits=AsyncMock(return_value=0.0),
+        get_user_feed_remix_reward_rub=AsyncMock(return_value=0.0),
     )):
         await balance.cb_referral(call, db_user, mock_bot, AsyncMock())
     call.message.edit_text.assert_awaited_once()
@@ -75,7 +75,7 @@ async def test_cb_referral_list_empty(db_user) -> None:
         await balance.cb_referral_list(call, db_user, AsyncMock())
     call.message.edit_text.assert_awaited_once()
     text = call.message.edit_text.call_args[0][0]
-    assert "Мои приглашённые" in text
+    assert "Мои партнёры" in text
     assert "не был зарегистрирован раньше" in text
 
 

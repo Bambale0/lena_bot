@@ -29,3 +29,19 @@ def test_ensure_public_image_url_creates_jpg_for_legacy_bin(tmp_path, monkeypatc
 def test_local_upload_path_ignores_external_url(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
     assert public_files.local_upload_path_from_url("https://cdn.test/file.jpg") is None
+
+
+def test_public_url_is_available_filters_missing_local_upload(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
+    monkeypatch.setattr(public_files.settings, "STATIC_UPLOAD_URL_PATH", "/static/upload")
+
+    assert public_files.public_url_is_available("https://example.test/static/upload/missing.jpg") is False
+    assert public_files.public_url_is_available("https://cdn.test/file.jpg") is True
+
+
+def test_public_url_is_available_accepts_existing_local_upload(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
+    monkeypatch.setattr(public_files.settings, "STATIC_UPLOAD_URL_PATH", "/static/upload")
+    (tmp_path / "ok.jpg").write_bytes(JPEG)
+
+    assert public_files.public_url_is_available("https://example.test/static/upload/ok.jpg") is True

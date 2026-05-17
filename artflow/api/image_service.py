@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 try:
     from enum import StrEnum
@@ -25,6 +27,7 @@ from typing import Any
 
 from api import kieai_client
 from api.kie_model_specs import IMAGE_SPECS, build_kie_input, resolve_model_for_reference
+from api.public_files import local_upload_path_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +86,7 @@ _SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.GPT_IMAGE_2_I2I,
 }
+_KIE_UPLOAD_REFERENCE_MODELS = {"seedream/4.5-edit"}
 
 _PROMPT_MAX_LENGTH_BY_MODEL: dict[str, int] = {
     ImageModel.SEEDREAM_45.value: 2000,
@@ -239,6 +243,77 @@ def normalize_quality_for_aspect_ratio(
     return quality
 
 
+def _reference_list(image_url: str | list[str] | None) -> list[str]:
+    if not image_url:
+        return []
+    if isinstance(image_url, str):
+        return [image_url]
+    return [url for url in image_url if url]
+
+
+def _restore_reference_shape(original: str | list[str] | None, urls: list[str]) -> str | list[str] | None:
+    if not urls:
+        return None
+    if isinstance(original, str):
+        return urls[0]
+    return urls
+
+
+def _content_type_for_path(path: Path) -> str:
+    guessed, _ = mimetypes.guess_type(path.name)
+    if guessed and guessed.startswith("image/"):
+        return guessed
+    if path.suffix.lower() in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if path.suffix.lower() == ".png":
+        return "image/png"
+    if path.suffix.lower() == ".webp":
+        return "image/webp"
+    return "application/octet-stream"
+
+
+async def _upload_local_kie_reference(url: str) -> str | None:
+    path = local_upload_path_from_url(url)
+    if not path or not path.exists() or not path.is_file():
+        return None
+    return await kieai_client.upload_file_stream(
+        path.read_bytes(),
+        filename=path.name,
+        content_type=_content_type_for_path(path),
+    )
+
+
+async def _prepare_reference_urls_for_model(
+    model: ImageModel,
+    image_url: str | list[str] | None,
+) -> str | list[str] | None:
+    urls = _reference_list(image_url)
+    if not urls:
+        return image_url
+
+    resolved_model = resolve_model_for_reference(model.value)
+    if resolved_model not in _KIE_UPLOAD_REFERENCE_MODELS:
+        return image_url
+
+    prepared: list[str] = []
+    changed = False
+    for url in urls:
+        uploaded_url: str | None = None
+        try:
+            uploaded_url = await _upload_local_kie_reference(url)
+        except Exception as exc:
+            logger.warning("Failed to upload local reference to KIE storage url=%s: %s", url, exc)
+        if uploaded_url:
+            prepared.append(uploaded_url)
+            changed = True
+        else:
+            prepared.append(url)
+
+    if changed:
+        logger.info("Uploaded %d local reference(s) to KIE storage for %s", len(prepared), resolved_model)
+    return _restore_reference_shape(image_url, prepared)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def generate_image(
@@ -253,7 +328,8 @@ async def generate_image(
     quality: str = "basic",             # "basic"=2K / "high"=4K (Seedream)
     callback_url: str | None = None,
 ) -> ImageResult:
-    resolved_model, inp = _build_input(model, prompt, image_url, aspect_ratio, n, quality)
+    prepared_image_url = await _prepare_reference_urls_for_model(model, image_url)
+    resolved_model, inp = _build_input(model, prompt, prepared_image_url, aspect_ratio, n, quality)
     resp = await kieai_client.create_task({"model": resolved_model, "input": inp}, callback_url=callback_url)
     if not isinstance(resp, dict):
         raise RuntimeError(f"KIE.AI image: invalid createTask response for {resolved_model}: {resp!r}")

@@ -21,7 +21,9 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.kie.ai"
+_UPLOAD_BASE_URL = "https://kieai.redpandaai.co"
 _client: httpx.AsyncClient | None = None
+_upload_client: httpx.AsyncClient | None = None
 
 
 def get_client() -> httpx.AsyncClient:
@@ -38,10 +40,23 @@ def get_client() -> httpx.AsyncClient:
     return _client
 
 
+def get_upload_client() -> httpx.AsyncClient:
+    global _upload_client
+    if _upload_client is None or _upload_client.is_closed:
+        _upload_client = httpx.AsyncClient(
+            base_url=_UPLOAD_BASE_URL,
+            headers={"Authorization": f"Bearer {settings.KIE_AI_KEY}"},
+            timeout=60.0,
+        )
+    return _upload_client
+
+
 async def close_client() -> None:
-    global _client
+    global _client, _upload_client
     if _client and not _client.is_closed:
         await _client.aclose()
+    if _upload_client and not _upload_client.is_closed:
+        await _upload_client.aclose()
 
 
 async def _retry_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -85,6 +100,53 @@ async def _retry_get(path: str, params: dict[str, Any] | None = None) -> dict[st
             logger.warning("kie.ai GET %s error: %s (attempt %d)", path, e, attempt + 1)
         await asyncio.sleep(1.5 ** attempt)
     raise RuntimeError(f"kie.ai: max retries exceeded for GET {path}")
+
+
+def _extract_upload_url(value: Any) -> str | None:
+    if isinstance(value, dict):
+        for key in ("downloadUrl", "fileUrl", "url", "download_url", "file_url"):
+            url = value.get(key)
+            if isinstance(url, str) and url.startswith("http"):
+                return url
+        for nested in value.values():
+            url = _extract_upload_url(nested)
+            if url:
+                return url
+    if isinstance(value, list):
+        for item in value:
+            url = _extract_upload_url(item)
+            if url:
+                return url
+    return None
+
+
+async def upload_file_stream(
+    data: bytes,
+    *,
+    filename: str,
+    content_type: str,
+    upload_path: str = "images/apix-refs",
+) -> str:
+    client = get_upload_client()
+    files = {"file": (filename, data, content_type)}
+    form = {"path": upload_path}
+    for attempt in range(3):
+        try:
+            resp = await client.post("/api/file-stream-upload", data=form, files=files)
+            resp.raise_for_status()
+            payload = resp.json()
+            url = _extract_upload_url(payload)
+            if not url:
+                raise RuntimeError(f"empty upload url in response: {payload!r}")
+            return url
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code < 500:
+                raise
+            logger.warning("kie.ai file upload HTTP %s (attempt %d)", e.response.status_code, attempt + 1)
+        except (httpx.RequestError, RuntimeError, ValueError) as e:
+            logger.warning("kie.ai file upload error: %s (attempt %d)", e, attempt + 1)
+        await asyncio.sleep(1.5 ** attempt)
+    raise RuntimeError("kie.ai: max retries exceeded for file upload")
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

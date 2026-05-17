@@ -26,7 +26,7 @@ def test_legacy_and_ui_main_menu_have_same_callbacks_without_session():
     assert set(ui) == set(legacy)
 
 
-def test_main_menu_has_no_unstable_top_day_or_midjourney_entrypoints():
+def test_main_menu_has_no_unstable_top_day_or_non_admin_midjourney_entrypoints():
     ctx = SimpleNamespace(
         balance=100,
         active_image_session=None,
@@ -36,7 +36,7 @@ def test_main_menu_has_no_unstable_top_day_or_midjourney_entrypoints():
     cb = callbacks(render_main_menu(ctx).reply_markup)
 
     assert "menu:top_day" not in cb
-    assert "menu:mj" in cb
+    assert "menu:mj" not in cb
 
 
 def test_main_menu_core_callbacks():
@@ -53,7 +53,6 @@ def test_main_menu_core_callbacks():
         "menu:image",
         "menu:video",
         "menu:music",
-        "menu:mj",
         "menu:assistant",
         "menu:feed",
         "menu:prompts",

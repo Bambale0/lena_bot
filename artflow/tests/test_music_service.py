@@ -1,4 +1,5 @@
-from api.music_service import extract_music_urls
+from api.music_service import default_music_callback_url, extract_music_urls
+from core.config import settings
 
 
 def test_extract_music_urls_one_url_per_track():
@@ -47,3 +48,10 @@ def test_extract_music_urls_ignores_duplicates():
     result = extract_music_urls(payload)
     assert len(result) == 1
     assert result[0] == "https://tempfile.aiquickdraw.com/r/track1.mp3"
+
+
+def test_default_music_callback_url_includes_secret(monkeypatch):
+    monkeypatch.setattr(settings, "WEBHOOK_URL", "https://example.test/")
+    monkeypatch.setattr(settings, "KIE_WEBHOOK_SECRET", "secret with space")
+
+    assert default_music_callback_url() == "https://example.test/webhook/kie/music?secret=secret+with+space"

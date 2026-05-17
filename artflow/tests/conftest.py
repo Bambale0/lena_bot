@@ -10,13 +10,17 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-os.environ.setdefault("BOT_TOKEN", "123456:test-token")
-os.environ.setdefault("BOT_USERNAME", "TestBot")
-os.environ.setdefault("WEBHOOK_URL", "https://example.test")
-os.environ.setdefault("WEBHOOK_SECRET", "test-secret")
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/test")
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
-os.environ.setdefault("COMET_API_KEY", "test-comet-key")
+os.environ["BOT_TOKEN"] = "123456:test-token"
+os.environ["BOT_USERNAME"] = "TestBot"
+os.environ["WEBHOOK_URL"] = "https://example.test"
+os.environ["WEBHOOK_SECRET"] = "test-secret"
+os.environ["DATABASE_URL"] = "postgresql+asyncpg://user:pass@localhost:5432/test"
+os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+os.environ["COMET_API_KEY"] = "test-comet-key"
+os.environ["ENV"] = "test"
+os.environ["APIX_WEB_DEV_AUTH"] = "false"
+os.environ["TELEGRAM_STARS_ENABLED"] = "false"
+os.environ["KIE_WEBHOOK_SECRET"] = ""
 
 
 @pytest.fixture

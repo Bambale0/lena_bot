@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import httpx
+from urllib.parse import urlencode
+
 from core.config import settings
 
 KIE_URL = "https://api.kie.ai/api/v1/generate"
@@ -25,6 +27,14 @@ def register_miniapp_task(task_id: str, gen_id: int) -> None:
 
 def pop_miniapp_task(task_id: str) -> int | None:
     return _pending_gen.pop(task_id, None)
+
+
+def default_music_callback_url() -> str:
+    url = f"{settings.WEBHOOK_URL.rstrip('/')}/webhook/kie/music"
+    secret = (settings.KIE_WEBHOOK_SECRET or "").strip()
+    if secret:
+        return f"{url}?{urlencode({'secret': secret})}"
+    return url
 
 
 def extract_music_urls(payload: dict) -> list[str]:
@@ -128,7 +138,7 @@ async def create_music_task(
         "customMode": False,
         "instrumental": instrumental,
         "model": "V4_5",
-        "callBackUrl": callback_url or f"{settings.WEBHOOK_URL}/webhook/kie/music",
+        "callBackUrl": callback_url or default_music_callback_url(),
     }
 
     async with httpx.AsyncClient(timeout=60) as client:

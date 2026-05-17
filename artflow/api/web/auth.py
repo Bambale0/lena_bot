@@ -28,6 +28,13 @@ def _bot_username() -> str:
     return str(getattr(settings, "BOT_USERNAME", "") or "").strip().lstrip("@")
 
 
+def telegram_start_link(start_param: str) -> str:
+    username = _bot_username()
+    if not username or not start_param:
+        return ""
+    return f"https://t.me/{username}?start={start_param}"
+
+
 @router.get("/auth/config")
 async def auth_config() -> dict:
     return ok({"bot_username": _bot_username()})
@@ -59,6 +66,10 @@ async def telegram_login(
             "token": create_web_auth_token(user.tg_id),
             "token_type": "web",
             "expires_in": 30 * 24 * 60 * 60,
-            "user": UserMe.from_user(user, admin_ids=settings.ADMIN_IDS).model_dump(),
+            "user": UserMe.from_user(
+                user,
+                admin_ids=settings.ADMIN_IDS,
+                referral_link=telegram_start_link(getattr(user, "referral_code", "") or ""),
+            ).model_dump(),
         }
     )

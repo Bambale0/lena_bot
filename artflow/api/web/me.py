@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.web.deps import error_response, get_web_user_or_none, ok
+from api.web.auth import telegram_start_link
 from api.web.schemas import UserMe
 from core.config import settings
 from db.session import get_session
@@ -18,4 +19,10 @@ async def me(
 ):
     if user is None:
         return error_response(401, "Authentication required")
-    return ok(UserMe.from_user(user, admin_ids=settings.ADMIN_IDS).model_dump())
+    return ok(
+        UserMe.from_user(
+            user,
+            admin_ids=settings.ADMIN_IDS,
+            referral_link=telegram_start_link(getattr(user, "referral_code", "") or ""),
+        ).model_dump()
+    )

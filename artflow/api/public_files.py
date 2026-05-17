@@ -39,6 +39,19 @@ def local_upload_path_from_url(url: str | None) -> Path | None:
     return UPLOAD_ROOT / filename
 
 
+def public_url_is_available(url: str | None) -> bool:
+    """
+    Return False only for local /static/upload URLs whose file is missing.
+
+    External provider/CDN URLs are considered available because this process
+    cannot cheaply or reliably prove their existence while serializing API data.
+    """
+    path = local_upload_path_from_url(url)
+    if path is None:
+        return bool(url)
+    return path.exists() and path.is_file()
+
+
 def detect_image_extension(data: bytes, content_type: str | None = None) -> str:
     """Return KIE-friendly image extension. Never return .bin for image refs."""
     ct = (content_type or "").lower()

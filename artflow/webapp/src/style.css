@@ -10,10 +10,12 @@
   --text-faint:rgba(255,255,255,.42);
   --text-ghost:rgba(255,255,255,.35);
   --surface:rgba(255,255,255,.045);
+  --surface-1:rgba(255,255,255,.055);
   --surface-2:rgba(255,255,255,.07);
   --surface-3:rgba(255,255,255,.1);
   --surface-4:rgba(255,255,255,.13);
   --border:rgba(255,255,255,.1);
+  --border-soft:rgba(255,255,255,.08);
   --border-strong:rgba(255,255,255,.15);
   --overlay:rgba(0,0,0,.82);
   --overlay-strong:rgba(0,0,0,.9);
@@ -46,10 +48,12 @@ html[data-theme="light"]{
   --text-faint:rgba(22,17,34,.48);
   --text-ghost:rgba(22,17,34,.36);
   --surface:rgba(255,255,255,.82);
+  --surface-1:rgba(255,255,255,.9);
   --surface-2:rgba(255,255,255,.96);
   --surface-3:rgba(92,63,188,.10);
   --surface-4:rgba(92,63,188,.16);
   --border:rgba(92,63,188,.14);
+  --border-soft:rgba(92,63,188,.1);
   --border-strong:rgba(92,63,188,.22);
   --overlay:rgba(255,255,255,.86);
   --overlay-strong:rgba(255,255,255,.94);
@@ -82,10 +86,12 @@ html[data-theme="mintpink"]{
   --text-faint:rgba(31,26,31,.48);
   --text-ghost:rgba(31,26,31,.36);
   --surface:rgba(255,248,252,.82);
+  --surface-1:rgba(255,248,252,.9);
   --surface-2:rgba(255,250,244,.96);
   --surface-3:rgba(255,111,181,.10);
   --surface-4:rgba(255,111,181,.16);
   --border:rgba(255,111,181,.18);
+  --border-soft:rgba(255,111,181,.12);
   --border-strong:rgba(169,230,67,.26);
   --overlay:rgba(255,252,246,.88);
   --overlay-strong:rgba(255,244,250,.94);
@@ -117,7 +123,7 @@ img,video{display:block;width:100%;height:100%;object-fit:cover}
 
 /* layout */
 .bg{position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at top left,rgba(59,220,255,.22),transparent 34%),radial-gradient(circle at bottom right,rgba(255,79,164,.16),transparent 45%),radial-gradient(circle at 70% 8%,rgba(56,242,183,.12),transparent 28%)}
-.wrap{position:relative;max-width:430px;margin:auto;min-height:100vh;padding:0 16px 112px;font-size:15px;line-height:1.5}
+.wrap{position:relative;max-width:430px;margin:auto;min-height:100vh;padding:0 16px calc(112px + env(safe-area-inset-bottom));font-size:15px;line-height:1.5}
 
 /* header */
 .header{position:sticky;top:0;z-index:30;margin:0 -16px 16px;padding:10px 16px;border-bottom:1px solid var(--border);border-radius:0 0 22px 22px;background:var(--overlay-strong);backdrop-filter:blur(22px);display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -199,6 +205,12 @@ img,video{display:block;width:100%;height:100%;object-fit:cover}
 .resultGalleryImg{aspect-ratio:1/1;width:100%;height:auto;object-fit:cover;border-radius:12px}
 .resultInfo{padding:12px}
 .resultPrompt{margin:8px 0 0;font-size:12px;color:var(--text-soft);white-space:pre-wrap;word-break:break-word}
+.resultMetaRow{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.resultReady{font-size:11px;color:var(--success)}
+.resultActions{display:grid;gap:8px;margin-top:10px}
+.actionButton{text-align:center;padding:12px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border-strong)}
+.audioResult{min-height:120px;padding:18px}
+.audioResult audio{width:100%}
 
 /* studio */
 .studioHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
@@ -300,7 +312,7 @@ textarea{width:100%;height:112px;margin-top:16px;padding:14px;resize:none;outlin
 .menu button{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);background:var(--surface);border-radius:16px;padding:13px 16px;font-size:14px;font-weight:500}
 
 /* bottom nav */
-.nav{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:50;width:400px;max-width:94vw;border:1px solid var(--border);background:var(--overlay);backdrop-filter:blur(24px);border-radius:24px;padding:8px 12px;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;box-shadow:var(--shadow)}
+.nav{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:50;width:400px;max-width:94vw;border:1px solid var(--border);background:var(--overlay);backdrop-filter:blur(24px);border-radius:24px;padding:8px 12px;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;box-shadow:var(--shadow)}
 .nav button{border-radius:16px;background:transparent;color:var(--text-soft);padding:8px 0}
 .nav .on{background:var(--surface-3);color:var(--text)}
 .nav b{display:block;font-size:18px}

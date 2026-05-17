@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 
 const API_BASE = "/api/v1";
+const REALTIME_MAX_FAILURES = 5;
 
 // ── fallbacks ────────────────────────────────────────────────────────────────
 
@@ -117,6 +118,36 @@ async function api(path, options = {}) {
   return res.json();
 }
 
+function realtimeWsUrl() {
+  const data = initData();
+  if (!data) return "";
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}${API_BASE}/ws/generations`;
+}
+
+function realtimeAuthMessage() {
+  const data = initData();
+  return data ? { type: "auth", init_data: data } : null;
+}
+
+function generationFromRealtimeEvent(payload) {
+  if (!payload || payload.type !== "generation.updated") return null;
+  return {
+    id: payload.id || payload.generation_id,
+    model: payload.model || "",
+    gen_type: payload.gen_type || "image",
+    prompt: payload.prompt || "",
+    status: payload.status || "pending",
+    result_url: payload.result_url || null,
+    result_urls: Array.isArray(payload.result_urls) ? payload.result_urls.filter(Boolean) : [],
+    error: payload.error || null,
+    credits_spent: Number(payload.credits_spent || 0),
+    created_at: payload.created_at || "",
+    is_public_feed: Boolean(payload.is_public_feed),
+    is_prompt_library: Boolean(payload.is_prompt_library),
+  };
+}
+
 function items(x) { return Array.isArray(x) ? x : Array.isArray(x?.items) ? x.items : []; }
 
 function formatCredits(value) {
@@ -213,7 +244,7 @@ function Spinner() {
 function NoticeBar({ notice, onClose }) {
   if (!notice?.message) return null;
   return (
-    <div className={`noticeBar ${notice.type || "info"}`}>
+    <div className={`noticeBar ${notice.type || "info"}`} role={notice.type === "error" ? "alert" : "status"} aria-live={notice.type === "error" ? "assertive" : "polite"}>
       <span>{notice.message}</span>
       <button onClick={onClose}>×</button>
     </div>
@@ -540,9 +571,8 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
       const res = await api(`/feed/${item.id}/like`, { method: "POST" });
       setLikes(res.likes_count ?? likes + 1);
       setLiked(true);
-    } catch {
-      setLikes(l => l + 1);
-      setLiked(true);
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось поставить лайк" });
     } finally {
       setBusy(false);
     }
@@ -735,6 +765,56 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false, onNot
       >
         {busyLib ? "..." : inLib ? "Убрать из библиотеки" : "📚 В библиотеку"}
       </button>
+    </div>
+  );
+}
+
+function GenerationResultCard({ generation, kind = "image", model, prompt, onNotice }) {
+  if (!generation?.result_url) return null;
+  const mediaType = generation.gen_type || kind;
+  const resultUrls = generationResultUrls(generation);
+  const isImage = mediaType === "image";
+  const isMusic = mediaType === "music";
+  const displayPrompt = generation.prompt || prompt || "";
+
+  return (
+    <div className="resultCard">
+      {isImage && resultUrls.length > 1 ? (
+        <div className="resultGallery">
+          {resultUrls.map((url, index) => (
+            <MediaThumb key={`${url}-${index}`} url={url} type="image" className="resultGalleryImg" onOpen={openExternalUrl} />
+          ))}
+        </div>
+      ) : isMusic ? (
+        <div className="resultMedia audioResult">
+          <audio controls src={generation.result_url} />
+        </div>
+      ) : (
+        <div className="resultMedia">
+          <MediaThumb url={generation.result_url} type={mediaType} className="resultImg" onOpen={openExternalUrl} />
+        </div>
+      )}
+      <div className="resultInfo">
+        <div className="resultMetaRow">
+          <span className="modelBadge">{generation.model || model}</span>
+          <span className="resultReady">готово</span>
+        </div>
+        <p className="resultPrompt">{displayPrompt}</p>
+        <div className="resultActions">
+          <button type="button" className="ghost actionButton" onClick={() => openExternalUrl(generation.result_url)}>
+            Открыть оригинал
+          </button>
+          <button type="button" className="ghost actionButton" onClick={async () => {
+            const ok = await copyText(displayPrompt);
+            if (ok) onNotice?.({ type: "success", message: "Промпт скопирован" });
+          }}>
+            📋 Скопировать промпт
+          </button>
+        </div>
+        {isImage && (
+          <GenShareButtons genId={generation.id} initialFeed={generation.is_public_feed} initialLib={generation.is_prompt_library} onNotice={onNotice} />
+        )}
+      </div>
     </div>
   );
 }
@@ -1378,36 +1458,7 @@ function Studio({
         </div>
       )}
 
-      {generation?.result_url && kind === "image" && (
-        <div className="resultCard">
-          {generationResultUrls(generation).length > 1 ? (
-            <div className="resultGallery">
-              {generationResultUrls(generation).map((url, index) => (
-                <MediaThumb key={`${url}-${index}`} url={url} type="image" className="resultGalleryImg" onOpen={openExternalUrl} />
-              ))}
-            </div>
-          ) : (
-            <div className="resultMedia">
-              <MediaThumb url={generation.result_url} type="image" className="resultImg" onOpen={openExternalUrl} />
-            </div>
-          )}
-          <div className="resultInfo">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <span className="modelBadge">{generation.model || model}</span>
-              <span style={{ fontSize: 11, color: "var(--success)" }}>готово</span>
-            </div>
-            <p className="resultPrompt">{generation.prompt || prompt || ""}</p>
-            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-              <button type="button" className="ghost" onClick={() => openExternalUrl(generation.result_url)} style={{ textAlign: "center", padding: 12, borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--border-strong)" }}>Открыть оригинал</button>
-              <button type="button" className="ghost" onClick={async () => {
-                const ok = await copyText(generation.prompt || prompt || "");
-                if (ok) onNotice?.({ type: "success", message: "Промпт скопирован" });
-              }} style={{ textAlign: "center", padding: 12, borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--border-strong)" }}>📋 Скопировать промпт</button>
-            </div>
-            <GenShareButtons genId={generation.id} initialFeed={generation.is_public_feed} initialLib={generation.is_prompt_library} onNotice={onNotice} />
-          </div>
-        </div>
-      )}
+      <GenerationResultCard generation={generation} kind={kind} model={model} prompt={prompt} onNotice={onNotice} />
     </section>
   );
 }
@@ -1565,7 +1616,7 @@ function History({ history, loading, onNotice, scope = "all" }) {
                     <small style={{ color: "var(--text-ghost)", fontSize: 11 }}>{formatDate(g.created_at)}</small>
                     <small style={{ color: "var(--accent-text)", fontSize: 11 }}>−{formatCredits(g.credits_spent)} 💋</small>
                   </div>
-                  {g.status === "done" && g.gen_type !== "music" && (
+                  {g.status === "done" && g.gen_type === "image" && (
                     <GenShareButtons genId={g.id} initialFeed={g.is_public_feed} initialLib={g.is_prompt_library} onNotice={onNotice} />
                   )}
                 </div>
@@ -2302,6 +2353,10 @@ function App() {
   const [historyScope, setHistoryScope] = useState("all");
   const poll = useRef(null);
   const musicPoll = useRef(null);
+  const pollIdRef = useRef(null);
+  const musicPollIdRef = useRef(null);
+  const realtimeRef = useRef(null);
+  const realtimeReconnectRef = useRef(null);
   const generationScreen = useRef("studio");
 
   const me = useApi(() => api("/me"), fallbackUser);
@@ -2316,6 +2371,14 @@ function App() {
   const user = me.data;
   const isDemo = me.error || imageModels.error || videoModels.error;
   const resolvedTheme = resolveTheme(theme);
+
+  useEffect(() => {
+    pollIdRef.current = pollId;
+  }, [pollId]);
+
+  useEffect(() => {
+    musicPollIdRef.current = musicPollId;
+  }, [musicPollId]);
 
   useEffect(() => {
     if (!notice?.message) return undefined;
@@ -2367,6 +2430,89 @@ function App() {
       tg()?.offEvent?.("themeChanged", handleChange);
     };
   }, [theme]);
+
+  const applyRealtimeGeneration = useCallback((payload) => {
+    const g = generationFromRealtimeEvent(payload);
+    if (!g?.id) return;
+    const isFinal = ["done", "failed"].includes(String(g.status || "").toLowerCase());
+    const isMusic = g.gen_type === "music";
+
+    if (isMusic) {
+      setMusicGen((prev) => (!prev?.id || Number(prev.id) === Number(g.id) ? { ...(prev || {}), ...g } : prev));
+      if (Number(musicPollIdRef.current) === Number(g.id) && isFinal) {
+        clearInterval(musicPoll.current);
+        setMusicPollId(null);
+      }
+    } else {
+      setGeneration((prev) => (!prev?.id || Number(prev.id) === Number(g.id) ? { ...(prev || {}), ...g } : g));
+      if (Number(pollIdRef.current) === Number(g.id) && isFinal) {
+        clearInterval(poll.current);
+        setPollId(null);
+      }
+    }
+
+    if (isFinal) {
+      me.reload();
+      history.reload();
+      if (!isMusic) feed.reload();
+      tg()?.HapticFeedback?.notificationOccurred(g.status === "done" ? "success" : "error");
+      setNotice({
+        type: g.status === "done" ? "success" : "error",
+        message: g.status === "done"
+          ? `${isMusic ? "Музыка" : g.gen_type === "video" ? "Видео" : "Изображение"} готово — результат уже на экране.`
+          : `Генерация #${g.id} завершилась ошибкой.`,
+      });
+    }
+  }, [feed.reload, history.reload, me.reload]);
+
+  useEffect(() => {
+    const url = realtimeWsUrl();
+    const authMessage = realtimeAuthMessage();
+    if (!url || !authMessage) return undefined;
+
+    let closed = false;
+    let retryMs = 1000;
+    let failures = 0;
+
+    const connect = () => {
+      if (closed) return;
+      const socket = new WebSocket(url);
+      realtimeRef.current = socket;
+
+      socket.onopen = () => {
+        retryMs = 1000;
+        socket.send(JSON.stringify(authMessage));
+      };
+      socket.onmessage = (event) => {
+        failures = 0;
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "generation.snapshot" && Array.isArray(payload.items)) {
+            payload.items.forEach(applyRealtimeGeneration);
+            return;
+          }
+          applyRealtimeGeneration(payload);
+        } catch {}
+      };
+      socket.onclose = () => {
+        if (closed) return;
+        failures += 1;
+        if (failures > REALTIME_MAX_FAILURES) return;
+        realtimeReconnectRef.current = window.setTimeout(connect, retryMs);
+        retryMs = Math.min(retryMs * 1.8, 12000);
+      };
+      socket.onerror = () => {
+        socket.close();
+      };
+    };
+
+    connect();
+    return () => {
+      closed = true;
+      if (realtimeReconnectRef.current) window.clearTimeout(realtimeReconnectRef.current);
+      realtimeRef.current?.close?.();
+    };
+  }, [applyRealtimeGeneration]);
 
   // Poll image/video generation
   useEffect(() => {
@@ -2538,7 +2684,7 @@ function App() {
     home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={navigate} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
     capabilities: <Capabilities setScreen={navigate} setTopup={setTopupOpen} />,
     assistant: <Assistant onNotice={setNotice} />,
-    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} scope={feedScope} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
+    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} onRemoved={() => feed.reload()} scope={feedScope} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
     studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} />,
     midjourney: <MidjourneyModule imageModels={imageModels.data} videoModels={videoModels.data} user={user} generation={generation} prompts={prompts.data} feed={feed.data} history={history.data} setScreen={navigate} setTopup={setTopupOpen} onGenerate={generate} onRemixGenerate={remixGenerate} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} onPromptUse={openMidjourneyPromptPreset} onOpenPrompts={() => openPromptLibrary("midjourney")} onOpenFeed={() => openFeed("midjourney")} onOpenHistory={() => openHistory("midjourney")} />,
     music: <Music user={user} musicGen={musicGen} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,

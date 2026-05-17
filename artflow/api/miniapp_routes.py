@@ -21,6 +21,7 @@ from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_telegram_login_data
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.midjourney_service import MJDimensions, MJTaskStatus, MJVideoMotion
+from api.public_files import public_url_is_available
 from api.video_service import VideoModel
 from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
 from bot.utils.deep_links import build_start_payload
@@ -167,7 +168,7 @@ def _feed_card_out(card: Any, user: User) -> dict:
     return {
         "id": generation.id,
         "model": generation.model,
-        "result_url": generation.result_url,
+        "result_url": _generation_primary_result_url(generation) or "",
         "likes_count": generation.likes_count,
         "shares_count": generation.shares_count,
         "aspect_ratio": card.aspect_ratio,
@@ -2267,9 +2268,18 @@ def _generation_result_urls(gen) -> list[str]:
             parsed = []
         if isinstance(parsed, list):
             urls = [str(url) for url in parsed if url]
-    if not urls and gen.result_url:
-        urls = [gen.result_url]
+    urls = [url for url in urls if public_url_is_available(url)]
+    if not urls and gen.result_url and public_url_is_available(str(gen.result_url)):
+        urls = [str(gen.result_url)]
     return urls
+
+
+def _generation_primary_result_url(gen) -> str | None:
+    result_url = getattr(gen, "result_url", None)
+    if result_url and public_url_is_available(str(result_url)):
+        return str(result_url)
+    urls = _generation_result_urls(gen)
+    return urls[0] if urls else None
 
 
 def _gen_out(gen) -> GenerationOut:
@@ -2279,7 +2289,7 @@ def _gen_out(gen) -> GenerationOut:
         gen_type=gen.gen_type.value,
         prompt=gen.prompt,
         status=gen.status.value,
-        result_url=gen.result_url,
+        result_url=_generation_primary_result_url(gen),
         credits_spent=gen.credits_spent,
         created_at=gen.created_at.isoformat() if gen.created_at else "",
         is_public_feed=bool(gen.is_public_feed),

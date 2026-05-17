@@ -37,6 +37,17 @@ logger = logging.getLogger(__name__)
 ACTIVE_GENERATION_WINDOW = timedelta(minutes=45)
 
 
+async def _publish_generation_update(gen: Generation | None) -> None:
+    if not gen:
+        return
+    try:
+        from api.realtime import publish_generation_event
+
+        await publish_generation_event(gen)
+    except Exception as exc:
+        logger.warning("Failed to publish realtime generation event gen=%s: %s", getattr(gen, "id", None), exc)
+
+
 def feed_remix_royalty_credits(credits_spent: float | int) -> float:
     value = Decimal(str(credits_spent or 0))
     if value <= 0:
@@ -599,6 +610,8 @@ async def finish_generation(
     if not gen:
         return None
 
+    await _publish_generation_update(gen)
+
     # Pay 5% royalty to the author of the source feed post (if remixed from feed)
 
     if not gen.source_feed_gen_id:
@@ -613,7 +626,7 @@ async def finish_generation(
             gen.user_id,
             gen.credits_spent,
         )
-        return
+        return gen
 
     if source.user_id == gen.user_id:
         logger.info(
@@ -624,7 +637,7 @@ async def finish_generation(
             gen.id,
             gen.credits_spent,
         )
-        return
+        return gen
 
     if gen.credits_spent <= 0:
         logger.info(
@@ -635,7 +648,7 @@ async def finish_generation(
             gen.id,
             gen.credits_spent,
         )
-        return
+        return gen
 
     royalty = feed_remix_royalty_credits(gen.credits_spent)
     await add_credits(session, source.user_id, royalty, entry_type="feed_remix_royalty", source_type="generation", source_id=str(gen.id), note=f"Royalty from remix of feed post {source.id}")
@@ -665,10 +678,12 @@ async def fail_generation(
             error_msg=error,
             finished_at=datetime.now(timezone.utc),
         )
-        .returning(Generation.id)
+        .returning(Generation)
     )
-    updated = result.scalar_one_or_none() is not None
+    gen = result.scalar_one_or_none()
+    updated = gen is not None
     await session.commit()
+    await _publish_generation_update(gen)
     return updated
 
 async def get_generation_by_id(session: AsyncSession, gen_id: int) -> Generation | None:
@@ -1185,6 +1200,48 @@ async def confirm_transaction(
     tx = result.scalar_one_or_none()
     await session.commit()
     return tx
+
+
+async def confirm_transaction_and_add_credits(
+    session: AsyncSession,
+    external_id: str,
+    *,
+    entry_type: str = "payment_credit",
+    note: str | None = None,
+) -> tuple[Transaction, float] | None:
+    result = await session.execute(
+        update(Transaction)
+        .where(
+            Transaction.external_id == external_id,
+            Transaction.status == TransactionStatus.pending,
+        )
+        .values(status=TransactionStatus.paid)
+        .returning(Transaction)
+    )
+    tx = result.scalar_one_or_none()
+    if not tx:
+        await session.rollback()
+        return None
+
+    balance_result = await session.execute(
+        update(User)
+        .where(User.id == tx.user_id)
+        .values(credits=User.credits + tx.credits)
+        .returning(User.credits)
+    )
+    new_balance = balance_result.scalar_one()
+    await _insert_credit_ledger(
+        session,
+        user_id=tx.user_id,
+        delta=tx.credits,
+        balance_after=new_balance,
+        entry_type=entry_type,
+        source_type="transaction",
+        source_id=str(tx.id),
+        note=note or f"Payment confirmed via {tx.provider}",
+    )
+    await session.commit()
+    return tx, new_balance
 
 
 async def confirm_transaction_by_id(

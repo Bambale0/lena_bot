@@ -49,6 +49,15 @@ async def test_webapp_health_is_public() -> None:
 
 
 @pytest.mark.asyncio
+async def test_missing_static_upload_returns_placeholder() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/static/upload/definitely-missing-upload.jpg")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+
+
+@pytest.mark.asyncio
 async def test_webapp_me_rejects_missing_init_data_without_override() -> None:
     app.dependency_overrides.clear()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -409,6 +418,29 @@ def test_generation_out_includes_all_result_urls() -> None:
 
     assert payload["result_url"] == "https://example.test/1.png"
     assert payload["result_urls"] == ["https://example.test/1.png", "https://example.test/2.png"]
+
+
+def test_generation_out_omits_missing_local_uploads(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("api.public_files.UPLOAD_ROOT", tmp_path)
+    monkeypatch.setattr("api.public_files.settings.STATIC_UPLOAD_URL_PATH", "/static/upload")
+    gen = SimpleNamespace(
+        id=56,
+        model="wan/2-7-image-pro",
+        gen_type=GenerationType.image,
+        prompt="fashion editorial",
+        status=GenerationStatus.done,
+        result_url="https://example.test/static/upload/missing.jpg",
+        result_urls='["https://example.test/static/upload/missing.jpg","https://cdn.test/fallback.png"]',
+        credits_spent=5,
+        created_at=datetime.now(timezone.utc),
+        is_public_feed=False,
+        is_prompt_library=False,
+    )
+
+    payload = _gen_out(gen).model_dump()
+
+    assert payload["result_url"] == "https://cdn.test/fallback.png"
+    assert payload["result_urls"] == ["https://cdn.test/fallback.png"]
 
 
 @pytest.mark.asyncio

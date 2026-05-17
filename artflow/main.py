@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -16,14 +18,16 @@ from aiogram.exceptions import TelegramEntityTooLarge
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import redis.asyncio as aioredis
 
 from api.comet_client import close_client, get_client
 from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import router as miniapp_router
+from api.realtime import router as realtime_router
 from api.web import router as web_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 from api.midjourney_service import MJButton, MJTaskResult
@@ -81,6 +85,21 @@ def _sanitize_provider_error(raw: str | None, *, fallback: str = "Ошибка �
 
 def _midjourney_webhook_secret() -> str:
     return (settings.MIDJOURNEY_WEBHOOK_SECRET or settings.WEBHOOK_SECRET).strip()
+
+
+def _is_production_env() -> bool:
+    return str(settings.ENV or "").strip().lower() in {"prod", "production"}
+
+
+def _verify_kie_webhook_secret(secret: str | None, header_secret: str | None = None) -> None:
+    configured = (settings.KIE_WEBHOOK_SECRET or "").strip()
+    if not configured:
+        if _is_production_env():
+            logger.error("KIE webhook secret is required in production")
+            raise HTTPException(status_code=503, detail="KIE webhook secret is not configured")
+        return
+    if secret != configured and header_secret != configured:
+        raise HTTPException(status_code=403, detail="Invalid KIE webhook secret")
 
 
 def _midjourney_button_state(buttons: list[MJButton]) -> list[dict[str, str]]:
@@ -205,13 +224,12 @@ async def _download_url_to_tempfile(url: str, suffix: str = ".bin") -> str | Non
         headers = {
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
         }
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
-                if resp.status != 200:
-                    raise RuntimeError(f"download failed: {resp.status}")
+        async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=120) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
                 with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                     tmp_path = tmp.name
-                    async for chunk in resp.content.iter_chunked(1024 * 256):
+                    async for chunk in resp.aiter_bytes(1024 * 256):
                         if chunk:
                             tmp.write(chunk)
         return tmp_path
@@ -372,6 +390,29 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+_TRANSPARENT_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\rIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01"
+    b"\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+class UploadStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            return Response(
+                content=_TRANSPARENT_PNG,
+                media_type="image/png",
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
+
+
 @app.middleware("http")
 async def miniapp_no_cache(request, call_next):
     response = await call_next(request)
@@ -384,8 +425,9 @@ async def miniapp_no_cache(request, call_next):
 
 
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-app.mount(settings.STATIC_UPLOAD_URL_PATH, StaticFiles(directory=str(UPLOAD_ROOT)), name="static_upload")
+app.mount(settings.STATIC_UPLOAD_URL_PATH, UploadStaticFiles(directory=str(UPLOAD_ROOT)), name="static_upload")
 app.include_router(miniapp_router)
+app.include_router(realtime_router)
 app.include_router(web_router, prefix="/api/web")
 
 PROMPT_RIOT_DIR = Path("web/static/prompt-riot")
@@ -598,9 +640,13 @@ async def cryptobot_webhook(request: Request) -> dict:
     external_id = str(data["payload"]["invoice_id"])
 
     async with AsyncSessionLocal() as session:
-        tx = await repo.confirm_transaction(session, external_id)
-        if tx:
-            new_balance = await repo.add_credits(session, tx.user_id, tx.credits, entry_type="payment_credit", source_type="transaction", source_id=str(tx.id), note=f"Payment confirmed via {tx.provider}")
+        confirmed = await repo.confirm_transaction_and_add_credits(
+            session,
+            external_id,
+            note="Payment confirmed via cryptobot",
+        )
+        if confirmed:
+            tx, new_balance = confirmed
             user = await repo.get_user_by_id(session, tx.user_id)
             if user:
                 await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
@@ -653,9 +699,13 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
 
     async with AsyncSessionLocal() as session:
         if status == "CONFIRMED":
-            tx = await repo.confirm_transaction(session, external_id)
-            if tx:
-                new_balance = await repo.add_credits(session, tx.user_id, tx.credits, entry_type="payment_credit", source_type="transaction", source_id=str(tx.id), note=f"Payment confirmed via {tx.provider}")
+            confirmed = await repo.confirm_transaction_and_add_credits(
+                session,
+                external_id,
+                note="Payment confirmed via tbank",
+            )
+            if confirmed:
+                tx, new_balance = confirmed
                 user = await repo.get_user_by_id(session, tx.user_id)
                 if user:
                     await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
@@ -673,8 +723,10 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
         elif status in {"CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL"}:
             await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
         elif status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
+            existing_tx = await repo.get_transaction_by_external_id(session, external_id)
+            was_paid = bool(existing_tx and existing_tx.status == TransactionStatus.paid)
             tx = await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
-            if tx and tx.status == TransactionStatus.paid:
+            if tx and was_paid:
                 await repo.add_credits(session, tx.user_id, -tx.credits, entry_type="payment_refund", source_type="transaction", source_id=str(tx.id), note=f"Refund/reversal via {tx.provider}")
                 user = await repo.get_user_by_id(session, tx.user_id)
                 if user:
@@ -689,9 +741,12 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
 # ── KIE.AI Webhook ────────────────────────────────────────────────────────────
 
 @app.post(settings.KIE_WEBHOOK_PATH)
-async def kie_webhook(request: Request, secret: str | None = None) -> dict:
-    if settings.KIE_WEBHOOK_SECRET and secret != settings.KIE_WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid KIE webhook secret")
+async def kie_webhook(
+    request: Request,
+    secret: str | None = None,
+    x_kie_webhook_secret: str | None = Header(default=None, alias="X-KIE-Webhook-Secret"),
+) -> dict:
+    _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
 
     payload = await request.json()
     task_id = extract_task_id(payload)
@@ -891,7 +946,13 @@ async def kie_webhook(request: Request, secret: str | None = None) -> dict:
 
 
 @app.post("/webhook/kie/music")
-async def kie_music_webhook(request: Request) -> dict:
+async def kie_music_webhook(
+    request: Request,
+    secret: str | None = None,
+    x_kie_webhook_secret: str | None = Header(default=None, alias="X-KIE-Webhook-Secret"),
+) -> dict:
+    _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
+
     try:
         payload = await request.json()
     except Exception:
@@ -925,7 +986,7 @@ async def kie_music_webhook(request: Request) -> dict:
     )
 
     extracted_error = extract_error(payload) or ""
-    extracted_error_for_flags = "" if extracted_error == "KIE generation failed" else extracted_error
+    extracted_error_for_flags = "" if extracted_error in {"KIE generation failed", "Generation failed"} else extracted_error
     normalized_msg = f"{msg} {extracted_error_for_flags}".strip().lower()
 
     # Suno/KIE can send an intermediate callback after lyrics/text are ready.

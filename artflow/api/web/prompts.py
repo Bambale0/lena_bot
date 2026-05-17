@@ -4,22 +4,28 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.web.deps import error_response, get_web_user_or_none, ok
-from api.web.schemas import PromptCard, PromptCreateRequest
+from api.web.schemas import PromptCard, PromptCreateRequest, PromptRejectRequest
+from core.config import settings
 from db.models import PromptCategory, PromptStatus
 from db.prompt_repository import (
     MAX_ACTIVE_PROMPTS_PER_USER,
+    approve_prompt,
     count_approved_prompts,
     count_active_prompts_by_author,
     create_prompt,
+    deactivate_prompt,
     derive_description,
     derive_title,
     get_prompt_by_id,
     get_approved_prompts,
+    get_author_prompts,
     get_popular_prompts,
+    get_pending_prompts,
     get_prompts_by_tag,
     get_top_prompts,
     infer_category,
     like_prompt,
+    reject_prompt,
     use_prompt,
 )
 from db.session import get_session
@@ -35,14 +41,19 @@ def _is_public_approved(prompt) -> bool:
     )
 
 
+def _is_admin(user) -> bool:
+    return bool(user and getattr(user, "tg_id", None) in settings.ADMIN_IDS)
+
+
 @router.get("/prompts")
 async def prompts(
-    source: str = Query(default="catalog", pattern="^(catalog|top|trending|popular|best|tag)$"),
+    source: str = Query(default="catalog", pattern="^(catalog|top|trending|popular|best|tag|my)$"),
     tag: str | None = Query(default=None, min_length=1, max_length=32),
     category: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=40, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
 ) -> dict:
     prompt_category = None
     if category:
@@ -51,7 +62,13 @@ async def prompts(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"Unknown category: {category!r}") from exc
 
-    if tag:
+    if source == "my":
+        if user is None:
+            return error_response(401, "Authentication required")
+        items = await get_author_prompts(session, user.id)
+        total = len(items)
+        items = items[(page - 1) * limit : page * limit]
+    elif tag:
         items = await get_prompts_by_tag(session, tag, limit=limit)
         total = len(items)
     elif source in {"top", "best"}:
@@ -73,7 +90,7 @@ async def prompts(
             "total": total,
             "page": page,
             "limit": limit,
-            "items": [PromptCard.from_prompt(item).model_dump() for item in items],
+            "items": [PromptCard.from_prompt(item, current_user_id=getattr(user, "id", None)).model_dump() for item in items],
         }
     )
 
@@ -82,11 +99,13 @@ async def prompts(
 async def prompt_detail(
     prompt_id: int,
     session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
 ) -> dict:
     prompt = await get_prompt_by_id(session, prompt_id)
-    if not _is_public_approved(prompt):
+    is_owner = bool(user and prompt and getattr(prompt, "author_id", None) == user.id)
+    if not (_is_public_approved(prompt) or is_owner or _is_admin(user)):
         return error_response(404, "Prompt not found")
-    return ok(PromptCard.from_prompt(prompt).model_dump())
+    return ok(PromptCard.from_prompt(prompt, current_user_id=getattr(user, "id", None)).model_dump())
 
 
 @router.post("/prompts/{prompt_id}/like")
@@ -106,7 +125,7 @@ async def prompt_like(
         prompt = await get_prompt_by_id(session, prompt_id)
     if not _is_public_approved(prompt):
         return error_response(404, "Prompt not found")
-    return ok({"status": like_status, "prompt": PromptCard.from_prompt(prompt).model_dump()})
+    return ok({"status": like_status, "prompt": PromptCard.from_prompt(prompt, current_user_id=user.id).model_dump()})
 
 
 @router.post("/prompts/{prompt_id}/use")
@@ -121,7 +140,7 @@ async def prompt_use(
         prompt, rewards = await use_prompt(session, prompt_id, user.id)
     except ValueError:
         return error_response(404, "Prompt not found")
-    return ok({"prompt": PromptCard.from_prompt(prompt).model_dump(), "rewards": rewards})
+    return ok({"prompt": PromptCard.from_prompt(prompt, current_user_id=user.id).model_dump(), "rewards": rewards})
 
 
 @router.post("/prompts")
@@ -157,4 +176,64 @@ async def prompt_create(
         tags=tags,
         is_public=True,
     )
+    return ok(PromptCard.from_prompt(prompt, current_user_id=user.id).model_dump())
+
+
+@router.get("/admin/prompts")
+async def admin_prompts(
+    status_filter: str = Query(default="pending", alias="status", pattern="^(pending)$"),
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+) -> dict:
+    if not _is_admin(user):
+        return error_response(403, "Admin access required")
+    items = await get_pending_prompts(session)
+    return ok(
+        {
+            "status": status_filter,
+            "items": [PromptCard.from_prompt(item).model_dump() for item in items],
+        }
+    )
+
+
+@router.post("/admin/prompts/{prompt_id}/approve")
+async def admin_prompt_approve(
+    prompt_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+) -> dict:
+    if not _is_admin(user):
+        return error_response(403, "Admin access required")
+    prompt = await approve_prompt(session, prompt_id)
+    if prompt is None:
+        return error_response(404, "Prompt not found")
+    return ok(PromptCard.from_prompt(prompt).model_dump())
+
+
+@router.post("/admin/prompts/{prompt_id}/reject")
+async def admin_prompt_reject(
+    prompt_id: int,
+    body: PromptRejectRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+) -> dict:
+    if not _is_admin(user):
+        return error_response(403, "Admin access required")
+    prompt = await reject_prompt(session, prompt_id, body.reason.strip())
+    if prompt is None:
+        return error_response(404, "Prompt not found")
+    return ok(PromptCard.from_prompt(prompt).model_dump())
+
+
+@router.post("/admin/prompts/{prompt_id}/deactivate")
+async def admin_prompt_deactivate(
+    prompt_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+) -> dict:
+    if not _is_admin(user):
+        return error_response(403, "Admin access required")
+    prompt = await deactivate_prompt(session, prompt_id)
+    if prompt is None:
+        return error_response(404, "Prompt not found")
     return ok(PromptCard.from_prompt(prompt).model_dump())

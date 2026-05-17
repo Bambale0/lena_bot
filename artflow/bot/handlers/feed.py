@@ -237,37 +237,59 @@ async def show_feed_card_by_id(
 
 @router.message(Command("feed"))
 @router.callback_query(F.data == "menu:feed")
-async def open_feed(event: Message | CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User) -> None:
+async def open_feed(
+    event: Message | CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User | None = None,
+) -> None:
     await state.clear()
     holder = event.message if isinstance(event, CallbackQuery) else event
-    await show_feed_from_source(holder=holder, session=session, source="feed", index=0, viewer_user_id=db_user.id)  # type: ignore[arg-type]
+    await show_feed_from_source(
+        holder=holder,
+        session=session,
+        source="feed",
+        index=0,
+        viewer_user_id=db_user.id if db_user else None,
+    )  # type: ignore[arg-type]
     if isinstance(event, CallbackQuery):
         await safe_answer_callback(event)
 
 
 @router.callback_query(F.data == "menu:top_day")
 @router.callback_query(F.data == "feed:top")
-async def open_top_day(call: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User) -> None:
+async def open_top_day(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User | None = None,
+) -> None:
     await state.clear()
-    await show_feed_from_source(holder=call.message, session=session, source="top", index=0, viewer_user_id=db_user.id)  # type: ignore[arg-type]
+    await show_feed_from_source(
+        holder=call.message,
+        session=session,
+        source="top",
+        index=0,
+        viewer_user_id=db_user.id if db_user else None,
+    )  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("feed:next:"))
-async def cb_feed_next(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+async def cb_feed_next(call: CallbackQuery, session: AsyncSession, db_user: User | None = None) -> None:
     _, _, source, index_raw = call.data.split(":", 3)  # type: ignore[union-attr]
     await show_feed_from_source(
         holder=call.message,  # type: ignore[arg-type]
         session=session,
         source=source,
         index=int(index_raw),
-        viewer_user_id=db_user.id,
+        viewer_user_id=db_user.id if db_user else None,
     )
     await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("feed:like:"))
-async def cb_feed_like(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+async def cb_feed_like(call: CallbackQuery, session: AsyncSession, db_user: User | None = None) -> None:
     _, _, gen_id_raw, source, index_raw = call.data.split(":", 4)  # type: ignore[union-attr]
     await repo.like_feed_generation(session, int(gen_id_raw))
     await show_feed_from_source(
@@ -275,7 +297,7 @@ async def cb_feed_like(call: CallbackQuery, session: AsyncSession, db_user: User
         session=session,
         source=source,
         index=int(index_raw),
-        viewer_user_id=db_user.id,
+        viewer_user_id=db_user.id if db_user else None,
     )
     await safe_answer_callback(call, "Лайк сохранён ❤️")
 

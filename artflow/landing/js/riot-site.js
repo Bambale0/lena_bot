@@ -4,8 +4,9 @@ const tokenKey = "apix_web_token";
 const langKey = "apix_site_lang";
 const queueKey = "apix_generation_queue";
 const queuePollMs = 4500;
+const realtimeMaxFailures = 5;
 
-const routes = ["home", "examples", "features", "studio", "prompts", "feed", "works", "billing", "profile"];
+const routes = ["home", "examples", "features", "studio", "prompts", "feed", "works", "billing", "referrals", "profile", "admin"];
 
 const i18n = {
   ru: {
@@ -25,7 +26,9 @@ const i18n = {
       feed: "Лента",
       works: "Мои работы",
       billing: "Баланс",
+      referrals: "Рефералы",
       profile: "Профиль",
+      admin: "Модерация",
     },
   },
   en: {
@@ -45,7 +48,9 @@ const i18n = {
       feed: "Gallery",
       works: "My Works",
       billing: "Balance",
+      referrals: "Referrals",
       profile: "Profile",
+      admin: "Moderation",
     },
   },
 };
@@ -62,6 +67,9 @@ const data = {
   feed: [],
   prompts: [],
   history: [],
+  transactions: null,
+  referrals: null,
+  adminPrompts: null,
   errors: {},
 };
 
@@ -73,8 +81,15 @@ const state = {
   activePromptId: null,
   pendingReference: null,
   pendingFeedRemix: null,
+  drawer: null,
   queue: readQueue(),
+  seenResultIds: {},
   queueTimer: null,
+  realtimeSocket: null,
+  realtimeReconnectTimer: null,
+  realtimeStatus: "idle",
+  realtimeRetryMs: 1000,
+  realtimeFailures: 0,
   studio: {
     mode: "image",
     step: "brief",
@@ -140,13 +155,14 @@ function queueItemFromGeneration(result, meta = {}) {
   const resultUrls = Array.isArray(result?.result_urls) ? result.result_urls.filter(Boolean) : [];
   return {
     local_id: meta.local_id || `q_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-    gen_id: Number(result?.id || meta.gen_id || 0),
+    gen_id: Number(result?.id || result?.generation_id || meta.gen_id || 0),
     mode: result?.gen_type || meta.mode || "image",
     model: result?.model || meta.model || "",
     prompt: result?.prompt || meta.prompt || "",
     status: result?.status || meta.status || "pending",
     result_url: result?.result_url || resultUrls[0] || meta.result_url || "",
     result_urls: resultUrls.length ? resultUrls : (meta.result_urls || []),
+    error: result?.error || meta.error || "",
     credits_spent: Number(result?.credits_spent ?? meta.credits_spent ?? 0),
     created_at: result?.created_at || meta.created_at || now,
     updated_at: now,
@@ -245,7 +261,10 @@ function resetPrivateData() {
   data.videoModels = [];
   data.musicModels = [];
   data.history = [];
-  ["me", "imageModels", "videoModels", "musicModels", "history"].forEach((key) => {
+  data.transactions = null;
+  data.referrals = null;
+  data.adminPrompts = null;
+  ["me", "imageModels", "videoModels", "musicModels", "history", "transactions", "referrals", "adminPrompts"].forEach((key) => {
     delete state.loadedAt[key];
   });
 }
@@ -269,6 +288,9 @@ function loadKeysForRoute(route) {
     keys.add("history");
   }
   if (route === "works") keys.add("history");
+  if (route === "billing" && token()) keys.add("transactions");
+  if (route === "referrals" && token()) keys.add("referrals");
+  if (route === "admin" && token()) keys.add("adminPrompts");
   if (token()) keys.add("me");
   return keys;
 }
@@ -286,6 +308,9 @@ function jobForKey(key, signal) {
     videoModels: () => genApi("/models/video", { signal }),
     musicModels: () => genApi("/models/music", { signal }),
     history: () => genApi("/history?limit=12", { signal }),
+    transactions: () => webApi("/billing/transactions?limit=20", { signal }),
+    referrals: () => webApi("/referrals", { signal }),
+    adminPrompts: () => webApi("/admin/prompts?status=pending", { signal }),
   };
   return jobs[key];
 }
@@ -316,7 +341,8 @@ async function load(options = {}) {
 
 function nav() {
   const current = routeName();
-  const labels = data.me ? i18n[lang()].navApp : i18n[lang()].navPublic;
+  const labels = { ...(data.me ? i18n[lang()].navApp : i18n[lang()].navPublic) };
+  if (!data.me?.is_admin) delete labels.admin;
   return Object.entries(labels).map(([key, label]) => (
     `<a class="${current === key ? "is-active" : ""}" href="#/${key}"${current === key ? ' aria-current="page"' : ""}>${label}</a>`
   )).join("");
@@ -324,6 +350,11 @@ function nav() {
 
 function shell(view) {
   const userLabel = data.me ? `@${data.me.username || data.me.tg_id}` : (isRu() ? "Войти" : "Login");
+  const bottomTabs = data.me ? `
+    <nav class="bottom-tabs" aria-label="${isRu() ? "Быстрая навигация" : "Quick navigation"}">
+      ${["studio", "prompts", "feed", "works", "profile"].map((key) => `<a class="${routeName() === key ? "is-active" : ""}" href="#/${key}">${escapeHtml(i18n[lang()].navApp[key])}</a>`).join("")}
+    </nav>
+  ` : "";
   return `
     <div class="shell">
       <header class="topbar">
@@ -336,6 +367,8 @@ function shell(view) {
         <a class="btn primary" href="#/profile">${escapeHtml(userLabel)}</a>
       </header>
       <main class="main">${view}</main>
+      ${renderDrawer()}
+      ${bottomTabs}
       <footer class="footer">${isRu() ? "APIX Artflow: красивая витрина до входа и полноценная творческая студия после авторизации." : "APIX Artflow: a polished showcase before login and a full creative studio after sign-in."}</footer>
     </div>
   `;
@@ -374,6 +407,158 @@ function empty(text, error) {
   return `<div class="empty">${escapeHtml(text)}${error ? `<br><span class="mono">${escapeHtml(error)}</span>` : ""}</div>`;
 }
 
+function itemResultUrls(item) {
+  const urls = Array.isArray(item?.result_urls) ? item.result_urls.filter(Boolean) : [];
+  const primary = resultUrlFrom(item);
+  if (primary && !urls.includes(primary)) urls.unshift(primary);
+  return urls;
+}
+
+function detailRows(rows) {
+  return `<dl class="detail-rows">${rows.filter(([, value]) => value !== undefined && value !== null && value !== "").map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
+}
+
+function mediaGallery(item, label) {
+  const urls = itemResultUrls(item);
+  if (!urls.length) return media("", label, { type: item?.gen_type || item?.type || item?.mode });
+  return `<div class="media-gallery">${urls.map((url, index) => `
+    <figure>
+      ${media(url, `${label} ${index + 1}`, { type: item?.gen_type || item?.type || item?.mode })}
+      <figcaption>${index === 0 ? (isRu() ? "Основной" : "Primary") : `${isRu() ? "Вариант" : "Variant"} ${index + 1}`}</figcaption>
+    </figure>
+  `).join("")}</div>`;
+}
+
+function feedItem(id) {
+  return (Array.isArray(data.feed) ? data.feed : []).find((item) => Number(item.id) === Number(id));
+}
+
+function promptItem(id) {
+  return (data.prompts?.items || []).find((item) => Number(item.id) === Number(id))
+    || (data.adminPrompts?.items || []).find((item) => Number(item.id) === Number(id));
+}
+
+function historyItem(id) {
+  return queueItemById(id);
+}
+
+function openDrawer(kind, id) {
+  state.drawer = { kind, id: Number(id) };
+  render({ skipLoad: true }).catch(() => {});
+}
+
+function closeDrawer() {
+  state.drawer = null;
+  render({ skipLoad: true }).catch(() => {});
+}
+
+function drawerActions(kind, item) {
+  if (!item) return "";
+  if (kind === "feed") {
+    const canRef = item.can_use_reference !== false && item.result_url && mediaTypeFromUrl(item.result_url, item.type) === "image";
+    return data.me ? `
+      <div class="actions compact">
+        <button class="btn feed-like" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Нравится" : "Like"}</button>
+        <button class="btn feed-share" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Поделиться" : "Share"}</button>
+        ${canRef ? `<button class="btn feed-reference" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Как референс" : "Use as ref"}</button><button class="btn primary feed-remix" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Ремикс" : "Remix"}</button>` : `<button class="btn is-disabled" aria-disabled="true" type="button">${isRu() ? "Reference недоступен" : "Reference unavailable"}</button>`}
+      </div>
+    ` : `<a class="btn primary" href="#/profile">${isRu() ? "Войти для ремикса" : "Sign in to remix"}</a>`;
+  }
+  if (kind === "prompt") {
+    return data.me ? `
+      <div class="actions compact">
+        <button class="btn primary prompt-use" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "В студию" : "Use"}</button>
+        <button class="btn prompt-copy" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Копия" : "Copy"}</button>
+        <button class="btn prompt-like" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Нравится" : "Like"}</button>
+      </div>
+    ` : `<a class="btn primary" href="#/profile">${isRu() ? "Войти, чтобы использовать" : "Sign in to use"}</a>`;
+  }
+  const url = resultUrlFrom(item);
+  const canChain = data.me && isDoneStatus(item.status) && url && (item.gen_type || item.mode) === "image";
+  return data.me ? `
+    <div class="actions compact">
+      <button class="btn generation-reuse" data-generation-id="${escapeHtml(item.id || item.gen_id)}" type="button">${isRu() ? "Повторить идею" : "Reuse idea"}</button>
+      ${canChain ? `<button class="btn generation-next-image" data-generation-id="${escapeHtml(item.id || item.gen_id)}" type="button">${isRu() ? "Вариант" : "Variant"}</button><button class="btn generation-next-video" data-generation-id="${escapeHtml(item.id || item.gen_id)}" type="button">${isRu() ? "Оживить" : "Animate"}</button>` : ""}
+      ${url ? `<a class="btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">${isRu() ? "Открыть" : "Open"}</a>` : ""}
+      ${isDoneStatus(item.status) ? `<button class="btn generation-publish" data-generation-id="${escapeHtml(item.id || item.gen_id)}" type="button">${isRu() ? "Опубликовать" : "Publish"}</button><button class="btn generation-library" data-generation-id="${escapeHtml(item.id || item.gen_id)}" type="button">${isRu() ? "В библиотеку" : "Save prompt"}</button>` : ""}
+    </div>
+  ` : "";
+}
+
+function drawerContent() {
+  if (!state.drawer) return "";
+  const { kind, id } = state.drawer;
+  if (kind === "feed") {
+    const item = feedItem(id);
+    if (!item) return empty(isRu() ? "Работа не найдена." : "Work not found.");
+    return `
+      <p class="sticker pink">${isRu() ? "Работа из ленты" : "Feed work"}</p>
+      <h2>${escapeHtml(item.model || (isRu() ? "Результат" : "Result"))}</h2>
+      ${mediaGallery(item, isRu() ? "Работа" : "Work")}
+      ${detailRows([
+        [isRu() ? "Автор" : "Author", item.author],
+        [isRu() ? "Модель" : "Model", item.model],
+        [isRu() ? "Тип" : "Type", item.type || item.gen_type || "image"],
+        [isRu() ? "Лайки" : "Likes", Number(item.likes || 0)],
+        [isRu() ? "Ремиксы" : "Remixes", Number(item.remix_count || 0)],
+      ])}
+      <div class="prompt-preview">${escapeHtml(item.prompt || (isRu() ? "Prompt скрыт или недоступен." : "Prompt is hidden or unavailable."))}</div>
+      <div class="status-message is-warning">${isRu() ? "Вы используете идею автора как основу. Новый результат будет вашей генерацией." : "You use the author's idea as a base. The new result will be yours."}</div>
+      ${drawerActions(kind, item)}
+    `;
+  }
+  if (kind === "prompt") {
+    const item = promptItem(id);
+    if (!item) return empty(isRu() ? "Prompt не найден." : "Prompt not found.");
+    return `
+      <p class="sticker pink">${escapeHtml(item.status || "prompt")}</p>
+      <h2>${escapeHtml(item.title || (isRu() ? "Идея" : "Idea"))}</h2>
+      ${media(item.preview_url, item.title || "Prompt", { square: true })}
+      <p class="lead">${escapeHtml(item.description || "")}</p>
+      ${detailRows([
+        [isRu() ? "Модель" : "Model", item.model],
+        [isRu() ? "Категория" : "Category", item.category],
+        [isRu() ? "Лайки" : "Likes", Number(item.likes || 0)],
+        [isRu() ? "Использований" : "Uses", Number(item.uses_count || 0)],
+      ])}
+      <div class="prompt-preview">${escapeHtml(item.prompt_text || "")}</div>
+      ${(item.tags || []).length ? `<div class="capability-badges">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+      ${item.reject_reason ? `<div class="status-message is-error">${escapeHtml(item.reject_reason)}</div>` : ""}
+      ${drawerActions(kind, item)}
+    `;
+  }
+  const item = historyItem(id);
+  if (!item) return empty(isRu() ? "Результат не найден." : "Result not found.");
+  return `
+    <p class="sticker ${isDoneStatus(item.status) ? "" : "pink"}">${escapeHtml(item.status || "result")}</p>
+    <h2>${escapeHtml(item.model || studioModeTitle(item.gen_type || item.mode))}</h2>
+    ${mediaGallery(item, isRu() ? "Результат" : "Result")}
+    ${detailRows([
+      [isRu() ? "ID" : "ID", item.id || item.gen_id],
+      [isRu() ? "Тип" : "Type", item.gen_type || item.mode],
+      [isRu() ? "Модель" : "Model", item.model],
+      [isRu() ? "Стоимость" : "Cost", `${Number(item.credits_spent || 0)} ${isRu() ? "кредитов" : "credits"}`],
+      [isRu() ? "Создано" : "Created", item.created_at],
+    ])}
+    <div class="prompt-preview">${escapeHtml(item.prompt || "")}</div>
+    ${item.error ? `<div class="status-message is-error">${escapeHtml(item.error)}</div>` : ""}
+    ${drawerActions("result", item)}
+  `;
+}
+
+function renderDrawer() {
+  if (!state.drawer) return "";
+  return `
+    <div class="drawer-layer" role="presentation">
+      <button class="drawer-scrim" data-close-drawer type="button" aria-label="${isRu() ? "Закрыть" : "Close"}"></button>
+      <aside class="drawer dark" role="dialog" aria-modal="true" aria-label="${isRu() ? "Детали" : "Details"}">
+        <button class="drawer-close" data-close-drawer type="button" aria-label="${isRu() ? "Закрыть" : "Close"}">×</button>
+        ${drawerContent()}
+      </aside>
+    </div>
+  `;
+}
+
 function feedCard(item) {
   const caption = item.prompt && data.me
     ? item.prompt
@@ -392,10 +577,11 @@ function feedCard(item) {
         <span class="metric">${Number(item.remix_count || 0)} ${isRu() ? "вариантов" : "remixes"}</span>
       </div>
       ${data.me ? `<div class="actions compact">
+        <button class="btn card-detail" data-drawer-kind="feed" data-drawer-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Детали" : "Details"}</button>
         <button class="btn feed-like" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Нравится" : "Like"}</button>
         <button class="btn feed-share" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Поделиться" : "Share"}</button>
         ${canUseAsImageRef ? `<button class="btn feed-reference" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Как референс" : "Use as ref"}</button><button class="btn feed-remix" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Ремикс" : "Remix"}</button>` : ""}
-      </div>` : ""}
+      </div>` : `<div class="actions compact"><button class="btn card-detail" data-drawer-kind="feed" data-drawer-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Детали" : "Details"}</button></div>`}
     </article>
   `;
 }
@@ -412,10 +598,11 @@ function promptCard(item) {
         <span class="metric">${Number(item.uses_count || 0)} ${isRu() ? "запусков" : "uses"}</span>
       </div>
       ${data.me ? `<div class="actions compact">
+        <button class="btn card-detail" data-drawer-kind="prompt" data-drawer-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Детали" : "Details"}</button>
         <button class="btn prompt-use" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "В студию" : "Use"}</button>
         <button class="btn prompt-copy" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Копия" : "Copy"}</button>
         <button class="btn prompt-like" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Нравится" : "Like"}</button>
-      </div>` : ""}
+      </div>` : `<div class="actions compact"><button class="btn card-detail" data-drawer-kind="prompt" data-drawer-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Детали" : "Details"}</button></div>`}
     </article>
   `;
 }
@@ -433,6 +620,7 @@ function generationCard(item) {
         <span class="metric">${Number(item.credits_spent || 0)} ${isRu() ? "кредитов" : "credits"}</span>
       </div>
       ${data.me ? `<div class="actions compact">
+        <button class="btn card-detail" data-drawer-kind="result" data-drawer-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Детали" : "Details"}</button>
         <button class="btn generation-reuse" data-generation-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Повторить идею" : "Reuse idea"}</button>
         ${canChain ? `<button class="btn generation-next-image" data-generation-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Вариант" : "Variant"}</button><button class="btn generation-next-video" data-generation-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Оживить" : "Animate"}</button>` : ""}
       </div>` : ""}
@@ -468,7 +656,7 @@ function statusBar() {
       <article class="paper cyan"><p class="sticker pink">${isRu() ? "Сервис" : "Service"}</p><h3>${data.health ? (isRu() ? "Работает" : "Ready") : (isRu() ? "Недоступен" : "Unavailable")}</h3><p>${escapeHtml(data.errors.health || (isRu() ? "Можно смотреть примеры и входить в аккаунт" : "Browse examples and sign in"))}</p></article>
       <article class="paper"><p class="sticker">${isRu() ? "Аккаунт" : "Account"}</p><h3>${data.me ? (isRu() ? "Вход выполнен" : "Signed in") : (isRu() ? "Гость" : "Guest")}</h3><p>${escapeHtml(data.me?.username || data.errors.me || (isRu() ? "Войдите для создания" : "Sign in to create"))}</p></article>
       <article class="paper yellow"><p class="sticker pink">${isRu() ? "Баланс" : "Balance"}</p><h3>${data.me ? Number(data.me.credits || 0) : "-"}</h3><p>${isRu() ? "кредиты для создания" : "credits to create"}</p></article>
-      <article class="paper pink"><p class="sticker">${isRu() ? "Инструменты" : "Tools"}</p><h3>${Array.isArray(data.models) ? data.models.length : 0}</h3><p>${isRu() ? "вариантов для контента" : "ways to make content"}</p></article>
+      <article class="paper pink"><p class="sticker">${isRu() ? "Инструменты" : "Tools"}</p><h3>${modelCount()}</h3><p>${isRu() ? "вариантов для контента" : "ways to make content"}</p></article>
     </section>
   `;
 }
@@ -494,6 +682,13 @@ function home() {
     section(isRu() ? "Реальные примеры работ" : "Real examples", isRu() ? "Создано в APIX" : "Made in APIX", showcaseCards()),
     section(isRu() ? "Живая лента" : "Live gallery", isRu() ? "Готовые работы" : "Finished work", `<div class="grid">${feed.length ? feed.map(feedCard).join("") : empty(isRu() ? "Пока нет публичных работ." : "No public works yet.", data.errors.feed)}</div>`),
     section(isRu() ? "Библиотека идей" : "Idea library", isRu() ? "Готовые промпты" : "Ready ideas", `<div class="grid">${prompts.length ? prompts.map(promptCard).join("") : empty(isRu() ? "Пока нет идей в библиотеке." : "No ideas in the library yet.", data.errors.prompts)}</div>`),
+    section("FAQ", isRu() ? "Вопросы" : "Questions", `
+      <div class="grid">
+        <article class="paper"><h3>${isRu() ? "Зачем Telegram?" : "Why Telegram?"}</h3><p>${isRu() ? "Telegram связывает баланс, историю и уведомления между сайтом и ботом." : "Telegram connects balance, history, and notifications across web and bot."}</p></article>
+        <article class="paper cyan"><h3>${isRu() ? "Что такое кредиты?" : "What are credits?"}</h3><p>${isRu() ? "Кредиты списываются за выбранную модель. Стоимость видна до запуска." : "Credits are spent by model. Cost is shown before launch."}</p></article>
+        <article class="paper yellow"><h3>${isRu() ? "Если генерация упала?" : "If a job fails?"}</h3><p>${isRu() ? "Статус и причина появятся в очереди и истории; возврат отображается в lifecycle." : "Status and reason appear in queue and history; refunds are shown in the lifecycle."}</p></article>
+      </div>
+    `),
   ].join("");
 }
 
@@ -592,6 +787,12 @@ function modelName(model) {
 function modelPrice(model) {
   const credits = Number(model?.credits || 0);
   return credits ? `${credits} ${isRu() ? "кр." : "cr"}` : (isRu() ? "по тарифу" : "priced on use");
+}
+
+function modelCount() {
+  if (Array.isArray(data.models)) return data.models.length;
+  if (Array.isArray(data.models?.all)) return data.models.all.length;
+  return 0;
 }
 
 function modelsForMode(mode) {
@@ -1105,6 +1306,7 @@ function queueCard(item, compact = false) {
       ${!compact && url ? media(url, isRu() ? "Результат" : "Result", { type: item.mode }) : ""}
       ${!compact ? `<p class="card-text">${escapeHtml(item.prompt || "")}</p>` : ""}
       <div class="actions compact">
+        <button class="btn card-detail" data-drawer-kind="result" data-drawer-id="${escapeHtml(item.gen_id)}" type="button">${isRu() ? "Детали" : "Details"}</button>
         <button class="btn queue-reuse" data-queue-gen="${escapeHtml(item.gen_id)}" type="button">${isRu() ? "Идея" : "Idea"}</button>
         ${canChain ? `<button class="btn queue-next-image" data-queue-gen="${escapeHtml(item.gen_id)}" type="button">${isRu() ? "Вариант" : "Variant"}</button><button class="btn queue-next-video" data-queue-gen="${escapeHtml(item.gen_id)}" type="button">${isRu() ? "Видео" : "Video"}</button>` : ""}
       </div>
@@ -1116,11 +1318,19 @@ function queuePanelHtml(options = {}) {
   const limit = options.limit || 4;
   const compact = Boolean(options.compact);
   const items = state.queue.slice(0, limit);
+  const realtimeLabels = {
+    idle: isRu() ? "polling fallback" : "polling fallback",
+    connecting: isRu() ? "realtime подключается" : "realtime connecting",
+    connected: isRu() ? "realtime online" : "realtime online",
+    reconnecting: isRu() ? "realtime переподключается" : "realtime reconnecting",
+    fallback: isRu() ? "status polling" : "status polling",
+  };
   return `
     <div class="queue-head">
       <div>
         <p class="sticker">${isRu() ? "Очередь" : "Queue"}</p>
         <h3>${isRu() ? "Активные задачи" : "Active jobs"}</h3>
+        <small class="realtime-state">${escapeHtml(realtimeLabels[state.realtimeStatus] || realtimeLabels.idle)}</small>
       </div>
       <button class="btn" data-refresh-queue type="button">${isRu() ? "Обновить" : "Refresh"}</button>
     </div>
@@ -1163,6 +1373,7 @@ async function pollQueue() {
 
 function startQueuePolling() {
   if (state.queueTimer) clearInterval(state.queueTimer);
+  connectRealtime();
   if (!token() || !activeQueueItems().length) {
     state.queueTimer = null;
     return;
@@ -1170,6 +1381,108 @@ function startQueuePolling() {
   state.queueTimer = setInterval(() => {
     pollQueue().catch(() => {});
   }, queuePollMs);
+}
+
+function realtimeWsUrl() {
+  if (!token()) return "";
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${location.host}/api/v1/ws/generations`;
+}
+
+function realtimeAuthMessage() {
+  const authToken = token();
+  return authToken ? { type: "auth", token: authToken } : null;
+}
+
+function stopRealtime() {
+  if (state.realtimeReconnectTimer) {
+    clearTimeout(state.realtimeReconnectTimer);
+    state.realtimeReconnectTimer = null;
+  }
+  if (state.realtimeSocket) {
+    state.realtimeSocket.onclose = null;
+    state.realtimeSocket.close();
+    state.realtimeSocket = null;
+  }
+  state.realtimeFailures = 0;
+  state.realtimeStatus = "idle";
+}
+
+function handleRealtimePayload(payload) {
+  if (!payload) return;
+  if (payload.type === "generation.snapshot" && Array.isArray(payload.items)) {
+    payload.items.forEach(handleRealtimePayload);
+    return;
+  }
+  if (payload.type !== "generation.updated") return;
+
+  const item = queueItemFromGeneration(payload, { source: "realtime" });
+  upsertQueueItem(item);
+
+  if (isDoneStatus(item.status)) {
+    if (!state.seenResultIds[item.gen_id]) {
+      state.seenResultIds[item.gen_id] = true;
+      flash(
+        isRu() ? "Готово" : "Done",
+        isRu() ? "Результат появился в очереди и истории." : "The result is now in your queue and history.",
+      );
+    }
+  } else if (String(item.status || "").toLowerCase() === "failed") {
+    if (!state.seenResultIds[item.gen_id]) {
+      state.seenResultIds[item.gen_id] = true;
+      flash(
+        isRu() ? "Ошибка генерации" : "Generation failed",
+        item.error || (isRu() ? "Задача завершилась ошибкой." : "The job failed."),
+      );
+    }
+  }
+
+  if (["home", "studio", "works"].includes(routeName())) {
+    load({ route: routeName(), force: ["me", "history", "feed"] }).catch(() => {});
+  }
+}
+
+function connectRealtime() {
+  const url = realtimeWsUrl();
+  const authMessage = realtimeAuthMessage();
+  if (!url || !authMessage) {
+    stopRealtime();
+    return;
+  }
+  if (state.realtimeFailures >= realtimeMaxFailures) return;
+  if (state.realtimeSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(state.realtimeSocket.readyState)) {
+    return;
+  }
+
+  const socket = new WebSocket(url);
+  state.realtimeSocket = socket;
+  state.realtimeStatus = "connecting";
+  socket.onopen = () => {
+    state.realtimeRetryMs = 1000;
+    state.realtimeStatus = "connected";
+    socket.send(JSON.stringify(authMessage));
+    renderQueuePanels();
+  };
+  socket.onmessage = (event) => {
+    state.realtimeFailures = 0;
+    try {
+      handleRealtimePayload(JSON.parse(event.data));
+    } catch {}
+  };
+  socket.onclose = () => {
+    if (state.realtimeSocket !== socket) return;
+    state.realtimeSocket = null;
+    if (!token()) return;
+    state.realtimeFailures += 1;
+    state.realtimeStatus = state.realtimeFailures > realtimeMaxFailures ? "fallback" : "reconnecting";
+    renderQueuePanels();
+    if (state.realtimeFailures > realtimeMaxFailures) return;
+    state.realtimeReconnectTimer = setTimeout(connectRealtime, state.realtimeRetryMs);
+    state.realtimeRetryMs = Math.min(state.realtimeRetryMs * 1.8, 12000);
+  };
+  socket.onerror = () => {
+    socket.close();
+  };
 }
 
 function queueItemById(id) {
@@ -1199,6 +1512,7 @@ function prompts() {
       <button class="btn prompt-filter" data-source="catalog" type="button">${isRu() ? "Все" : "All"}</button>
       <button class="btn prompt-filter" data-source="popular" type="button">${isRu() ? "Популярные" : "Popular"}</button>
       <button class="btn prompt-filter" data-source="best" type="button">${isRu() ? "Лучшие" : "Best"}</button>
+      ${data.me ? `<button class="btn prompt-filter" data-source="my" type="button">${isRu() ? "Мои" : "Mine"}</button>` : ""}
       ${data.me ? `<button class="btn primary" id="toggle-prompt-submit" type="button">${isRu() ? "Добавить идею" : "Submit idea"}</button>` : `<a class="btn primary" href="#/profile">${isRu() ? "Войти, чтобы использовать" : "Sign in to use"}</a>`}
     </div>
     <div id="prompt-submit-panel" class="dark submit-panel" hidden>
@@ -1250,14 +1564,35 @@ function works() {
 
 function billing() {
   const plans = Array.isArray(data.plans) ? data.plans : [];
+  const methods = data.transactions?.methods || [];
+  const transactions = data.transactions?.transactions || [];
   return section(isRu() ? "Баланс и пакеты" : "Balance and packs", isRu() ? "Цены" : "Pricing", `
+    ${data.me ? `<div class="status-bar">
+      <article class="paper yellow"><p class="sticker pink">${isRu() ? "Баланс" : "Balance"}</p><h3>${Number(data.me.credits || 0)}</h3><p>${isRu() ? "кредитов доступно" : "credits available"}</p></article>
+      <article class="paper cyan"><p class="sticker">${isRu() ? "Методы" : "Methods"}</p><h3>${methods.length}</h3><p>${methods.length ? methods.map((m) => m.label).join(", ") : (isRu() ? "провайдеры не включены" : "providers disabled")}</p></article>
+      <article class="paper"><p class="sticker">${isRu() ? "Pending" : "Pending"}</p><h3>${data.transactions?.pending?.length || 0}</h3><p>${isRu() ? "ожидают подтверждения" : "awaiting confirmation"}</p></article>
+      <article class="paper pink"><p class="sticker">${isRu() ? "История" : "History"}</p><h3>${transactions.length}</h3><p>${isRu() ? "последних операций" : "recent records"}</p></article>
+    </div>` : authRequired()}
     <div class="grid">${plans.length ? plans.map((p) => `
       <article class="paper cyan">
         <p class="sticker pink">${escapeHtml(p.key)}</p>
         <h3>${escapeHtml(p.label)}</h3>
         <p><b>${Number(p.credits || 0)}</b> ${isRu() ? "кредитов" : "credits"}</p>
         <p class="mono">${Number(p.price_rub || 0)} RUB${p.price_stars ? ` / ${p.price_stars} Stars` : ""}</p>
+        ${methods.length ? `<div class="actions compact">${methods.map((m) => `<button class="btn payment-start" data-method="${escapeHtml(m.key)}" data-plan="${escapeHtml(p.key)}" type="button">${escapeHtml(m.label)}</button>`).join("")}</div>` : `<div class="status-message is-warning">${isRu() ? "Способы оплаты сейчас недоступны." : "Payment methods are unavailable."}</div>`}
       </article>`).join("") : empty(isRu() ? "Пакеты временно не загружены." : "Packs are not loaded yet.", data.errors.plans)}</div>
+    ${data.me ? `<div class="dark transaction-panel">
+      <p class="sticker">${isRu() ? "Операции" : "Transactions"}</p>
+      <h3>${isRu() ? "История пополнений" : "Payment history"}</h3>
+      <div class="transaction-list">${transactions.length ? transactions.map((tx) => `
+        <div class="transaction-row">
+          <span>${escapeHtml(tx.provider || "payment")}</span>
+          <b>${Number(tx.credits || 0)} ${isRu() ? "кр." : "cr"}</b>
+          <em>${escapeHtml(tx.status || "pending")}</em>
+          <small>${escapeHtml(tx.created_at || "")}</small>
+        </div>
+      `).join("") : empty(isRu() ? "Пополнений пока нет." : "No payments yet.", data.errors.transactions)}</div>
+    </div>` : ""}
   `);
 }
 
@@ -1276,7 +1611,11 @@ function profile() {
         <h3>${escapeHtml(user?.full_name || user?.username || (isRu() ? "Гость" : "Guest"))}</h3>
         <p class="mono">${user ? `tg ${escapeHtml(user.tg_id)}` : (isRu() ? "не подключено" : "not connected")}</p>
         <p>${user ? `${Number(user.credits || 0)} ${isRu() ? "кредитов" : "credits"}` : (isRu() ? "Войдите через Telegram, чтобы создавать прямо на сайте." : "Sign in with Telegram to create directly on the site.")}</p>
-        ${user ? `<button class="btn" id="logout" type="button">${isRu() ? "Выйти" : "Logout"}</button>` : ""}
+        ${user ? `${detailRows([
+          [isRu() ? "Язык" : "Language", user.language || "ru"],
+          [isRu() ? "Реферальный код" : "Referral code", user.referral_code],
+          [isRu() ? "Поверхности" : "Surfaces", (user.connected_surfaces || []).join(", ")],
+        ])}<div class="actions compact"><a class="btn primary" href="#/referrals">${isRu() ? "Рефералы" : "Referrals"}</a><button class="btn copy-referral" data-referral="${escapeHtml(user.referral_link || "")}" type="button">${isRu() ? "Копировать ссылку" : "Copy link"}</button><button class="btn" id="logout" type="button">${isRu() ? "Выйти" : "Logout"}</button></div>` : ""}
       </article>
       <article class="dark">
         <p class="sticker">TELEGRAM</p>
@@ -1288,7 +1627,80 @@ function profile() {
   `);
 }
 
-const views = { home, examples, features, studio, prompts, feed, works, billing, profile };
+function referrals() {
+  if (!data.me) {
+    return section(isRu() ? "Рефералы" : "Referrals", isRu() ? "Закрыто" : "Locked", authRequired());
+  }
+  const stats = data.referrals;
+  if (!stats) {
+    return section(isRu() ? "Рефералы" : "Referrals", isRu() ? "Загрузка" : "Loading", empty(isRu() ? "Реферальные данные загружаются." : "Referral data is loading.", data.errors.referrals));
+  }
+  const balance = stats.balance || {};
+  const withdrawals = stats.withdrawals || [];
+  return section(isRu() ? "Рефералы" : "Referrals", isRu() ? "Партнёрская программа" : "Referral program", `
+    <div class="status-bar">
+      <article class="paper yellow"><p class="sticker pink">L1</p><h3>${Number(stats.counts?.l1 || 0)}</h3><p>${isRu() ? "прямых приглашений" : "direct invites"}</p></article>
+      <article class="paper cyan"><p class="sticker">L2</p><h3>${Number(stats.counts?.l2 || 0)}</h3><p>${Math.round(Number(stats.commission_l2 || 0) * 100)}%</p></article>
+      <article class="paper"><p class="sticker">L3</p><h3>${Number(stats.counts?.l3 || 0)}</h3><p>${Math.round(Number(stats.commission_l3 || 0) * 100)}%</p></article>
+      <article class="paper pink"><p class="sticker">${isRu() ? "Доступно" : "Available"}</p><h3>${Number(balance.available_to_withdraw || 0).toFixed(0)}₽</h3><p>${isRu() ? "к выводу" : "to withdraw"}</p></article>
+    </div>
+    <div class="grid two">
+      <article class="dark">
+        <p class="sticker">${isRu() ? "Ссылка" : "Link"}</p>
+        <h3>${escapeHtml(stats.referral_code || "")}</h3>
+        <p class="mono">${escapeHtml(stats.referral_link || "")}</p>
+        <p>${isRu() ? "Скопируйте ссылку и отправьте её друзьям. Бонусы начисляются по правилам программы." : "Copy the link and send it to friends. Bonuses follow the program rules."}</p>
+        <button class="btn primary copy-referral" data-referral="${escapeHtml(stats.referral_link || "")}" type="button">${isRu() ? "Копировать" : "Copy"}</button>
+      </article>
+      <article class="paper">
+        <p class="sticker pink">${isRu() ? "Вывод" : "Withdrawal"}</p>
+        <h3>${isRu() ? "Запрос выплаты" : "Request payout"}</h3>
+        <form id="withdrawal-form" class="studio-form is-active">
+          <label><span>${isRu() ? "Сумма ₽" : "Amount RUB"}</span><input name="amount_rub" type="number" min="${Number(stats.withdraw_min_rub || 0)}" step="1" required></label>
+          <label><span>${isRu() ? "Реквизиты" : "Payout details"}</span><textarea name="payout_details" required></textarea></label>
+          <button class="btn primary" type="submit">${isRu() ? "Отправить" : "Submit"}</button>
+        </form>
+      </article>
+    </div>
+    <div class="dark transaction-panel">
+      <p class="sticker">${isRu() ? "Заявки" : "Requests"}</p>
+      <h3>${isRu() ? "История выплат" : "Withdrawal history"}</h3>
+      <div class="transaction-list">${withdrawals.length ? withdrawals.map((item) => `
+        <div class="transaction-row">
+          <span>#${escapeHtml(item.id)}</span>
+          <b>${Number(item.amount_rub || 0)}₽</b>
+          <em>${escapeHtml(item.status || "pending")}</em>
+          <small>${escapeHtml(item.created_at || "")}</small>
+        </div>
+      `).join("") : empty(isRu() ? "Заявок пока нет." : "No requests yet.")}</div>
+    </div>
+  `);
+}
+
+function admin() {
+  if (!data.me?.is_admin) {
+    return section(isRu() ? "Модерация" : "Moderation", isRu() ? "Недоступно" : "Unavailable", empty(isRu() ? "Раздел доступен только администраторам." : "Admins only."));
+  }
+  const items = data.adminPrompts?.items || [];
+  return section(isRu() ? "Модерация prompts" : "Prompt moderation", isRu() ? "Admin" : "Admin", `
+    <div class="grid">${items.length ? items.map((item) => `
+      <article class="dark">
+        <p class="sticker pink">${escapeHtml(item.status || "pending")}</p>
+        ${media(item.preview_url, item.title || "Prompt", { square: true })}
+        <h3>${escapeHtml(item.title || "Prompt")}</h3>
+        <p class="card-text">${escapeHtml(item.prompt_text || "")}</p>
+        <div class="actions compact">
+          <button class="btn admin-approve" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Одобрить" : "Approve"}</button>
+          <button class="btn admin-reject" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Отклонить" : "Reject"}</button>
+          <button class="btn admin-deactivate" data-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Деактивировать" : "Deactivate"}</button>
+          <button class="btn card-detail" data-drawer-kind="prompt" data-drawer-id="${escapeHtml(item.id)}" type="button">${isRu() ? "Детали" : "Details"}</button>
+        </div>
+      </article>
+    `).join("") : empty(isRu() ? "Очередь модерации пуста." : "Moderation queue is empty.", data.errors.adminPrompts)}</div>
+  `);
+}
+
+const views = { home, examples, features, studio, prompts, feed, works, billing, referrals, profile, admin };
 
 function resultSummary(result) {
   if (!result) return "";
@@ -1361,6 +1773,13 @@ async function submitStudio(form) {
     return;
   }
   const mode = form.dataset.form;
+  const validation = validateStudioForm(form);
+  renderFormErrors(form, validation);
+  if (validation.length) {
+    showResult(isRu() ? "Проверьте форму" : "Check the form", validation[0], null);
+    updateLaunchState(mode);
+    return;
+  }
   const selectedModel = findModel(mode, formValue(form, "model"));
   if (mode === "video") {
     const refs = modeRefs("video").map((ref) => ref.url).filter(Boolean);
@@ -1538,6 +1957,98 @@ function updateAllReviewSummaries() {
   ["image", "video", "music", "assistant"].forEach(updateReviewSummary);
 }
 
+function setFieldError(input, message) {
+  if (!input) return;
+  const label = input.closest("label");
+  label?.classList.toggle("is-invalid", Boolean(message));
+  input.setAttribute("aria-invalid", message ? "true" : "false");
+  let error = label?.querySelector(".field-error");
+  if (!error && label) {
+    error = document.createElement("small");
+    error.className = "field-error";
+    label.appendChild(error);
+  }
+  if (error) {
+    error.textContent = message || "";
+    error.hidden = !message;
+  }
+}
+
+function validateStudioForm(form) {
+  const mode = form?.dataset.form || "image";
+  const messages = [];
+  const promptName = mode === "assistant" ? "message" : "prompt";
+  const promptInput = form?.querySelector(`[name="${promptName}"]`);
+  const prompt = String(promptInput?.value || "").trim();
+  setFieldError(promptInput, "");
+  if (!prompt) {
+    const message = mode === "assistant"
+      ? (isRu() ? "Напишите вопрос для помощника." : "Write a question for the assistant.")
+      : (isRu() ? "Опишите идею перед запуском." : "Describe the idea before launch.");
+    messages.push(message);
+    setFieldError(promptInput, message);
+  }
+
+  const model = mode === "assistant" ? null : findModel(mode, formValue(form, "model"));
+  if (mode !== "assistant" && !model) {
+    messages.push(isRu() ? "Выберите модель." : "Choose a model.");
+  }
+
+  if (mode === "video") {
+    const refs = modeRefs("video").map((ref) => ref.url).filter(Boolean);
+    const selectedStart = formValue(form, "mode") || "text";
+    const modelModes = model?.modes || [];
+    const needsImage = selectedStart === "image" || (modelModes.includes("image") && !modelModes.includes("text"));
+    const imageInput = form.querySelector('[name="image_url"]');
+    setFieldError(imageInput, "");
+    if (needsImage && !refs.length && !formValue(form, "image_url")) {
+      const message = isRu() ? "Добавьте первый кадр для этой модели." : "Add a first frame for this model.";
+      messages.push(message);
+      setFieldError(imageInput, message);
+    }
+  }
+
+  const cost = estimateCost(mode, model, form);
+  if (data.me && cost > Number(data.me.credits || 0)) {
+    messages.push(isRu() ? "Недостаточно кредитов. Пополните баланс или выберите другую модель." : "Not enough credits. Top up or choose another model.");
+  }
+  return messages;
+}
+
+function renderFormErrors(form, messages) {
+  if (!form) return;
+  let box = form.querySelector(".form-errors");
+  const launch = form.querySelector(".launch-btn");
+  if (!box && launch) {
+    box = document.createElement("div");
+    box.className = "form-errors";
+    box.setAttribute("role", "status");
+    box.setAttribute("aria-live", "polite");
+    launch.before(box);
+  }
+  if (!box) return;
+  box.hidden = !messages.length;
+  box.innerHTML = messages.length
+    ? `<div class="status-message is-error">${messages.map(escapeHtml).join("<br>")}</div>`
+    : "";
+}
+
+function updateLaunchState(mode) {
+  const form = document.querySelector(`.studio-form[data-form="${mode}"]`);
+  if (!form) return;
+  const messages = validateStudioForm(form);
+  const launch = form.querySelector(".launch-btn");
+  if (launch) {
+    launch.disabled = messages.length > 0;
+    launch.title = messages.length ? (isRu() ? "Заполните обязательные поля, чтобы запустить генерацию." : "Fill required fields to start generation.") : "";
+  }
+  renderFormErrors(form, messages);
+}
+
+function updateAllLaunchStates() {
+  ["image", "video", "music", "assistant"].forEach(updateLaunchState);
+}
+
 function updateSelectedModel(mode, id) {
   const model = findModel(mode, id);
   const form = document.querySelector(`.studio-form[data-form="${mode}"]`);
@@ -1558,6 +2069,7 @@ function updateSelectedModel(mode, id) {
   if (capabilities) capabilities.innerHTML = mode === "assistant" ? "" : capabilityBadges(model, mode);
   updateSmartControls(mode, model);
   updateReviewSummary(mode);
+  updateLaunchState(mode);
 }
 
 function switchStudioMode(mode) {
@@ -1576,6 +2088,7 @@ function switchStudioMode(mode) {
   updateMediaPreview();
   switchStudioStep(state.studio.step);
   updateReviewSummary(mode);
+  updateLaunchState(mode);
 }
 
 function switchStudioStep(step) {
@@ -1633,6 +2146,7 @@ function currentStudioModel() {
 function refreshDynamicSettings() {
   const model = currentStudioModel();
   updateSmartControls(state.studio.mode, model);
+  updateLaunchState(state.studio.mode);
 }
 
 function filterModelCards(query) {
@@ -1715,12 +2229,14 @@ async function uploadReference(file, mode) {
     syncReferenceInputs();
     updateMediaPreview();
     updateReviewSummary(mode);
+    updateLaunchState(mode);
     flash(isRu() ? "Фото добавлено" : "Image added", isRu() ? "Референс готов к использованию." : "Reference is ready to use.");
   } catch (error) {
     state.studio.refs[mode] = [];
     syncReferenceInputs();
     updateMediaPreview();
     updateReviewSummary(mode);
+    updateLaunchState(mode);
     flash(isRu() ? "Ошибка" : "Error", error.message);
   }
 }
@@ -1745,6 +2261,7 @@ function applyPendingPrompt() {
     state.pendingPrompt = null;
   }
   updateAllReviewSummaries();
+  updateAllLaunchStates();
   renderQueuePanels();
 }
 
@@ -1813,6 +2330,7 @@ function bindStudio() {
     form.addEventListener("change", (event) => {
       const input = event.target;
       updateReviewSummary(form.dataset.form);
+      updateLaunchState(form.dataset.form);
       if (!input.closest?.(".dynamic-settings")) return;
       if (form.dataset.form === "video" && input.name === "mode" && input.value === "image") {
         state.studio.step = "media";
@@ -1823,14 +2341,19 @@ function bindStudio() {
       event.preventDefault();
       await withBusy(form, () => submitStudio(form));
     });
+    form.addEventListener("input", () => updateLaunchState(form.dataset.form));
   });
   switchStudioMode(state.studio.mode || "image");
   applyPendingPrompt();
+  updateAllLaunchStates();
   renderQueuePanels();
   startQueuePolling();
 }
 
 function bindCards() {
+  document.querySelectorAll(".card-detail").forEach((button) => {
+    button.addEventListener("click", () => openDrawer(button.dataset.drawerKind, button.dataset.drawerId));
+  });
   document.querySelectorAll(".feed-like").forEach((button) => {
     button.addEventListener("click", async () => {
       await withBusy(button, async () => {
@@ -1936,6 +2459,40 @@ function bindCards() {
   document.querySelectorAll(".generation-next-video").forEach((button) => {
     button.addEventListener("click", () => openStudioWithItem(queueItemById(button.dataset.generationId), "video"));
   });
+  document.querySelectorAll(".generation-publish").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await withBusy(button, async () => {
+        try {
+          await genApi(`/generations/${button.dataset.generationId}/publish`, { method: "POST" });
+          flash(isRu() ? "Опубликовано" : "Published", isRu() ? "Работа добавлена в публичную ленту." : "The work was added to the public feed.");
+          await load({ route: routeName(), force: ["history", "feed"] });
+          await render({ skipLoad: true });
+        } catch (error) {
+          flash(isRu() ? "Ошибка" : "Error", error.message);
+        }
+      });
+    });
+  });
+  document.querySelectorAll(".generation-library").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await withBusy(button, async () => {
+        try {
+          await genApi(`/generations/${button.dataset.generationId}/share-library`, { method: "POST" });
+          flash(isRu() ? "Сохранено" : "Saved", isRu() ? "Prompt результата сохранён в библиотеку." : "The result prompt was saved to the library.");
+          await load({ route: routeName(), force: ["history", "prompts"] });
+          await render({ skipLoad: true });
+        } catch (error) {
+          flash(isRu() ? "Ошибка" : "Error", error.message);
+        }
+      });
+    });
+  });
+}
+
+function bindDrawer() {
+  document.querySelectorAll("[data-close-drawer]").forEach((button) => {
+    button.addEventListener("click", closeDrawer);
+  });
 }
 
 function bindQueueActions() {
@@ -2040,6 +2597,29 @@ function bindLibrary() {
   }
 }
 
+function bindBilling() {
+  document.querySelectorAll(".payment-start").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await withBusy(button, async () => {
+        try {
+          const method = button.dataset.method === "telegram_stars" ? "stars" : button.dataset.method === "cryptobot" ? "crypto" : button.dataset.method;
+          const result = await genApi(`/topup/${method}`, {
+            method: "POST",
+            body: JSON.stringify({ plan_key: button.dataset.plan }),
+          });
+          const url = result.pay_url || result.invoice_link;
+          flash(isRu() ? "Счёт создан" : "Invoice created", isRu() ? "Ожидаем подтверждение оплаты. Баланс обновится автоматически." : "Waiting for payment confirmation. Balance will update automatically.");
+          if (url) window.open(url, "_blank", "noopener");
+          await load({ route: routeName(), force: ["transactions"] });
+          await render({ skipLoad: true });
+        } catch (error) {
+          flash(isRu() ? "Оплата не началась" : "Payment did not start", error.message);
+        }
+      });
+    });
+  });
+}
+
 function bindTelegramLogin() {
   window.onTelegramAuth = async (user) => {
     try {
@@ -2072,13 +2652,81 @@ function bindProfile() {
   if (logout) {
     logout.addEventListener("click", async () => {
       await withBusy(logout, async () => {
+        stopRealtime();
         localStorage.removeItem(tokenKey);
         resetPrivateData();
         await render();
       });
     });
   }
+  document.querySelectorAll(".copy-referral").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const value = button.dataset.referral || "";
+      try {
+        await navigator.clipboard.writeText(value);
+        flash(isRu() ? "Скопировано" : "Copied", isRu() ? "Реферальная ссылка в буфере." : "Referral link copied.");
+      } catch {
+        window.prompt(isRu() ? "Скопируйте ссылку" : "Copy the link", value);
+      }
+    });
+  });
   bindTelegramLogin();
+}
+
+function bindReferrals() {
+  const form = document.getElementById("withdrawal-form");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const fd = new FormData(form);
+    await withBusy(form, async () => {
+      try {
+        await webApi("/referrals/withdrawals", {
+          method: "POST",
+          body: JSON.stringify({
+            amount_rub: Number(fd.get("amount_rub") || 0),
+            payout_details: fd.get("payout_details"),
+          }),
+        });
+        flash(isRu() ? "Заявка отправлена" : "Request sent", isRu() ? "Мы добавили заявку на вывод." : "The payout request was added.");
+        await load({ route: routeName(), force: ["referrals"] });
+        await render({ skipLoad: true });
+      } catch (error) {
+        flash(isRu() ? "Не получилось" : "Something went wrong", error.message);
+      }
+    });
+  });
+}
+
+function bindAdmin() {
+  async function adminAction(button, action, body = null) {
+    await withBusy(button, async () => {
+      try {
+        await webApi(`/admin/prompts/${button.dataset.id}/${action}`, {
+          method: "POST",
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        flash(isRu() ? "Готово" : "Done", isRu() ? "Статус prompt обновлён." : "Prompt status updated.");
+        await load({ route: routeName(), force: ["adminPrompts", "prompts"] });
+        await render({ skipLoad: true });
+      } catch (error) {
+        flash(isRu() ? "Ошибка" : "Error", error.message);
+      }
+    });
+  }
+  document.querySelectorAll(".admin-approve").forEach((button) => {
+    button.addEventListener("click", () => adminAction(button, "approve"));
+  });
+  document.querySelectorAll(".admin-deactivate").forEach((button) => {
+    button.addEventListener("click", () => adminAction(button, "deactivate"));
+  });
+  document.querySelectorAll(".admin-reject").forEach((button) => {
+    button.addEventListener("click", () => {
+      const reason = window.prompt(isRu() ? "Причина отказа" : "Reject reason");
+      if (!reason) return;
+      adminAction(button, "reject", { reason });
+    });
+  });
 }
 
 function bindLanguage() {
@@ -2092,11 +2740,15 @@ function bindLanguage() {
 
 function bind() {
   bindLanguage();
+  bindDrawer();
   bindStudio();
   bindProfile();
   bindCards();
   bindQueueActions();
   bindLibrary();
+  bindBilling();
+  bindReferrals();
+  bindAdmin();
   startQueuePolling();
 }
 
@@ -2125,7 +2777,17 @@ async function render(options = {}) {
   }
 
   if (id !== state.renderId) return;
-  root.innerHTML = shell(`<div class="view">${views[name]()}</div>`);
+  let viewHtml = "";
+  try {
+    viewHtml = views[name] ? views[name]() : home();
+  } catch (error) {
+    viewHtml = section(
+      isRu() ? "Что-то пошло не так" : "Something went wrong",
+      "UI",
+      empty(isRu() ? "Интерфейс не смог отрисовать экран. Попробуйте обновить страницу." : "The interface could not render this screen. Try refreshing.", error.message),
+    );
+  }
+  root.innerHTML = shell(`<div class="view">${viewHtml}</div>`);
   bind();
 }
 

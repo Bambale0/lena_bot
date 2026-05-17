@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from api.public_files import public_url_is_available
+
 
 def enum_value(value: Any, default: str = "") -> str:
     raw = getattr(value, "value", value)
@@ -26,10 +28,19 @@ def generation_result_urls(generation: Any) -> list[str]:
                 urls = [str(url) for url in parsed if url]
         except (TypeError, ValueError):
             urls = []
+    urls = [url for url in urls if public_url_is_available(url)]
     result_url = getattr(generation, "result_url", None)
-    if not urls and result_url:
+    if not urls and result_url and public_url_is_available(str(result_url)):
         urls = [str(result_url)]
     return urls
+
+
+def generation_result_url(generation: Any) -> str | None:
+    result_url = getattr(generation, "result_url", None)
+    if result_url and public_url_is_available(str(result_url)):
+        return str(result_url)
+    urls = generation_result_urls(generation)
+    return urls[0] if urls else None
 
 
 class UserMe(BaseModel):
@@ -39,10 +50,20 @@ class UserMe(BaseModel):
     full_name: str | None
     credits: float
     referral_code: str
+    referral_link: str = ""
+    language: str = "ru"
+    created_at: str = ""
     is_admin: bool = False
+    connected_surfaces: list[str] = Field(default_factory=lambda: ["web", "telegram"])
 
     @classmethod
-    def from_user(cls, user: Any, *, admin_ids: list[int] | None = None) -> "UserMe":
+    def from_user(
+        cls,
+        user: Any,
+        *,
+        admin_ids: list[int] | None = None,
+        referral_link: str = "",
+    ) -> "UserMe":
         tg_id = int(getattr(user, "tg_id", 0))
         return cls(
             id=int(getattr(user, "id", 0)),
@@ -51,6 +72,9 @@ class UserMe(BaseModel):
             full_name=getattr(user, "full_name", None),
             credits=float(getattr(user, "credits", 0) or 0),
             referral_code=str(getattr(user, "referral_code", "") or ""),
+            referral_link=referral_link,
+            language=str(getattr(user, "language", "ru") or "ru"),
+            created_at=iso_datetime(getattr(user, "created_at", None)),
             is_admin=tg_id in set(admin_ids or []),
         )
 
@@ -58,17 +82,29 @@ class UserMe(BaseModel):
 class ModelCostCard(BaseModel):
     model_key: str
     display_name: str
+    technical_key: str
     gen_type: str
     credits: float
+    capabilities: list[str]
     is_active: bool
 
     @classmethod
     def from_model_cost(cls, model_cost: Any) -> "ModelCostCard":
+        gen_type = enum_value(getattr(model_cost, "gen_type", None))
+        capabilities: list[str] = []
+        if gen_type == "image":
+            capabilities.extend(["text", "image"])
+        elif gen_type == "video":
+            capabilities.extend(["text", "image", "video"])
+        elif gen_type == "music":
+            capabilities.extend(["text", "audio"])
         return cls(
             model_key=str(getattr(model_cost, "model_key", "")),
             display_name=str(getattr(model_cost, "display_name", "") or getattr(model_cost, "model_key", "")),
-            gen_type=enum_value(getattr(model_cost, "gen_type", None)),
+            technical_key=str(getattr(model_cost, "model_key", "")),
+            gen_type=gen_type,
             credits=float(getattr(model_cost, "credits", 0) or 0),
+            capabilities=capabilities,
             is_active=bool(getattr(model_cost, "is_active", False)),
         )
 
@@ -97,8 +133,11 @@ class PricePlanCard(BaseModel):
 
 class FeedCard(BaseModel):
     id: int
+    type: str = "image"
     result_url: str
+    result_urls: list[str] = Field(default_factory=list)
     prompt: str
+    prompt_visibility: str = "excerpt"
     model: str
     author: str
     likes: int
@@ -107,6 +146,8 @@ class FeedCard(BaseModel):
     aspect_ratio: str | None = None
     quality: str | None = None
     created_at: str
+    can_remix: bool = True
+    can_use_reference: bool = False
 
     @classmethod
     def from_feed_card(cls, card: Any) -> "FeedCard":
@@ -114,9 +155,14 @@ class FeedCard(BaseModel):
         username = getattr(card, "username", None)
         full_name = getattr(card, "full_name", None)
         author = f"@{username}" if username else (full_name or "anon")
+        gen_type = enum_value(getattr(generation, "gen_type", None), "image")
+        result_urls = generation_result_urls(generation)
+        result_url = generation_result_url(generation) or ""
         return cls(
             id=int(getattr(generation, "id", 0)),
-            result_url=str(getattr(generation, "result_url", "") or ""),
+            type=gen_type,
+            result_url=result_url,
+            result_urls=result_urls,
             prompt=str(getattr(generation, "prompt", "") or ""),
             model=str(getattr(generation, "model", "") or ""),
             author=author,
@@ -126,6 +172,8 @@ class FeedCard(BaseModel):
             aspect_ratio=getattr(card, "aspect_ratio", None),
             quality=getattr(card, "quality", None),
             created_at=iso_datetime(getattr(generation, "created_at", None)),
+            can_remix=bool(result_url),
+            can_use_reference=gen_type == "image" and bool(result_url),
         )
 
 
@@ -142,9 +190,16 @@ class PromptCard(BaseModel):
     status: str
     category: str = "other"
     created_at: str = ""
+    is_mine: bool = False
+    reject_reason: str | None = None
+    ai_moderation_decision: str | None = None
+    ai_moderation_risk: str | None = None
+    ai_moderation_reason: str | None = None
+    ai_moderation_recommendation: str | None = None
 
     @classmethod
-    def from_prompt(cls, prompt: Any) -> "PromptCard":
+    def from_prompt(cls, prompt: Any, *, current_user_id: int | None = None) -> "PromptCard":
+        author_id = getattr(prompt, "author_id", None)
         return cls(
             id=int(getattr(prompt, "id", 0)),
             title=str(getattr(prompt, "title", "") or ""),
@@ -158,6 +213,12 @@ class PromptCard(BaseModel):
             status=enum_value(getattr(prompt, "status", None), "pending"),
             category=enum_value(getattr(prompt, "category", None), "other"),
             created_at=iso_datetime(getattr(prompt, "created_at", None)),
+            is_mine=bool(current_user_id is not None and author_id == current_user_id),
+            reject_reason=getattr(prompt, "reject_reason", None),
+            ai_moderation_decision=getattr(prompt, "ai_moderation_decision", None),
+            ai_moderation_risk=getattr(prompt, "ai_moderation_risk", None),
+            ai_moderation_reason=getattr(prompt, "ai_moderation_reason", None),
+            ai_moderation_recommendation=getattr(prompt, "ai_moderation_recommendation", None),
         )
 
 
@@ -191,7 +252,7 @@ class GenerationCard(BaseModel):
             gen_type=enum_value(getattr(generation, "gen_type", None)),
             prompt=str(getattr(generation, "prompt", "") or ""),
             status=enum_value(getattr(generation, "status", None)),
-            result_url=getattr(generation, "result_url", None),
+            result_url=generation_result_url(generation),
             result_urls=generation_result_urls(generation),
             credits_spent=float(getattr(generation, "credits_spent", 0) or 0),
             is_public_feed=bool(getattr(generation, "is_public_feed", False)),
@@ -244,3 +305,75 @@ class ImageSessionCreateRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=6)
     base_prompt: str | None = Field(default=None, max_length=4000)
     reference_url: str | None = Field(default=None, max_length=2048)
+
+
+class TransactionCard(BaseModel):
+    id: int
+    amount_rub: float
+    credits: float
+    provider: str
+    status: str
+    external_id: str | None = None
+    created_at: str
+
+    @classmethod
+    def from_transaction(cls, transaction: Any) -> "TransactionCard":
+        return cls(
+            id=int(getattr(transaction, "id", 0)),
+            amount_rub=float(getattr(transaction, "amount_rub", 0) or 0),
+            credits=float(getattr(transaction, "credits", 0) or 0),
+            provider=enum_value(getattr(transaction, "provider", None)),
+            status=enum_value(getattr(transaction, "status", None), "pending"),
+            external_id=getattr(transaction, "external_id", None),
+            created_at=iso_datetime(getattr(transaction, "created_at", None)),
+        )
+
+
+class ReferralChildCard(BaseModel):
+    id: int
+    username: str | None
+    full_name: str | None
+    generations_count: int
+    paid_rub: float
+
+
+class ReferralWithdrawalCard(BaseModel):
+    id: int
+    amount_rub: float
+    payout_details: str
+    status: str
+    created_at: str
+
+    @classmethod
+    def from_withdrawal(cls, withdrawal: Any) -> "ReferralWithdrawalCard":
+        return cls(
+            id=int(getattr(withdrawal, "id", 0) or 0),
+            amount_rub=float(getattr(withdrawal, "amount_rub", 0) or 0),
+            payout_details=str(getattr(withdrawal, "payout_details", "") or ""),
+            status=enum_value(getattr(withdrawal, "status", None), "pending"),
+            created_at=iso_datetime(getattr(withdrawal, "created_at", None)),
+        )
+
+
+class ReferralStatsCard(BaseModel):
+    referral_code: str
+    referral_link: str
+    bonus_l1_credits: float
+    commission_l1: float
+    commission_l2: float
+    commission_l3: float
+    withdraw_min_rub: float
+    counts: dict[str, int]
+    balance: dict[str, float]
+    feed_remix_reward_rub: float
+    children: dict[str, list[ReferralChildCard]]
+    withdrawals: list[ReferralWithdrawalCard]
+
+
+class ReferralWithdrawalRequest(BaseModel):
+    amount_rub: float = Field(..., gt=0)
+    payout_details: str = Field(..., min_length=5, max_length=500)
+
+
+class PromptRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500)
