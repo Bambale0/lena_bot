@@ -63,11 +63,53 @@ async def _resolve_referral_chain(
     ref_code: str | None,
     *,
     tg_user_id: int,
+    current_user_id: int | None = None,
 ) -> tuple[Any | None, Any | None, Any | None]:
     if not ref_code:
         return None, None, None
     referrer = await repo.get_user_by_referral_code(session, ref_code)
-    if not referrer or referrer.tg_id == tg_user_id:
+    if not referrer or referrer.tg_id == tg_user_id or referrer.id == current_user_id:
+        return None, None, None
+
+    chain_user = referrer
+    seen_chain_ids: set[int] = set()
+    for _ in range(50):
+        chain_user_id = getattr(chain_user, "id", None)
+        if chain_user_id is None:
+            break
+        if chain_user_id in seen_chain_ids:
+            logger.warning(
+                "Referral chain cycle detected: tg_user_id=%s ref_code=%s repeated_user_id=%s",
+                tg_user_id,
+                ref_code,
+                chain_user_id,
+            )
+            return None, None, None
+        if chain_user_id == current_user_id or getattr(chain_user, "tg_id", None) == tg_user_id:
+            logger.warning(
+                "Referral bind would create cycle: tg_user_id=%s current_user_id=%s ref_code=%s referrer_id=%s",
+                tg_user_id,
+                current_user_id,
+                ref_code,
+                referrer.id,
+            )
+            return None, None, None
+        seen_chain_ids.add(chain_user_id)
+        parent_id = getattr(chain_user, "referrer_id", None)
+        if not parent_id:
+            break
+        parent = await repo.get_user_by_id(session, parent_id)
+        if not parent:
+            break
+        chain_user = parent
+    else:
+        logger.warning(
+            "Referral chain too deep: tg_user_id=%s current_user_id=%s ref_code=%s referrer_id=%s",
+            tg_user_id,
+            current_user_id,
+            ref_code,
+            referrer.id,
+        )
         return None, None, None
 
     seen_ids: set[int] = {referrer.id}
@@ -175,6 +217,7 @@ class AuthMiddleware(BaseMiddleware):
                 session,
                 ref_code,
                 tg_user_id=tg_user.id,
+                current_user_id=db_user.id,
             )
             if referrer:
                 if settings.REFERRAL_FREEZE:

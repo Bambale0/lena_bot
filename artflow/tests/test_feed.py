@@ -1,11 +1,14 @@
 """Тесты хендлеров feed."""
 from __future__ import annotations
 
+import random
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiogram.types import CallbackQuery, Message
+from PIL import Image
 
 from bot.handlers import feed
 from bot.states import PromptUseFSM
@@ -216,6 +219,39 @@ def test_author_label_with_username() -> None:
 def test_author_label_with_name() -> None:
     card = SimpleNamespace(generation=SimpleNamespace(), username=None, full_name="<b>Test</b>")
     assert "&lt;b&gt;" in feed._author_label(card)
+
+
+def test_prepare_feed_photo_upload_keeps_small_file() -> None:
+    data = b"small-image"
+
+    upload = feed._prepare_feed_photo_upload(
+        data=data,
+        result_url="https://example.test/result.png",
+        generation_id=42,
+    )
+
+    assert upload.data == data
+    assert upload.filename == "gen_42.png"
+
+
+def test_prepare_feed_photo_upload_compresses_large_png(monkeypatch: pytest.MonkeyPatch) -> None:
+    rng = random.Random(42)
+    rgb = bytes(rng.randrange(256) for _ in range(512 * 512 * 3))
+    image = Image.frombytes("RGB", (512, 512), rgb)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    data = buffer.getvalue()
+    monkeypatch.setattr(feed, "TELEGRAM_PHOTO_TARGET_BYTES", 80 * 1024)
+
+    upload = feed._prepare_feed_photo_upload(
+        data=data,
+        result_url="https://example.test/result.png",
+        generation_id=43,
+    )
+
+    assert upload.filename == "gen_43.jpg"
+    assert len(upload.data) <= feed.TELEGRAM_PHOTO_TARGET_BYTES
+    assert len(upload.data) < len(data)
 
 
 def test_feed_caption() -> None:
