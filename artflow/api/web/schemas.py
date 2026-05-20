@@ -48,6 +48,7 @@ class UserMe(BaseModel):
     tg_id: int
     username: str | None
     full_name: str | None
+    photo_url: str | None = None
     credits: float
     referral_code: str
     referral_link: str = ""
@@ -70,6 +71,7 @@ class UserMe(BaseModel):
             tg_id=tg_id,
             username=getattr(user, "username", None),
             full_name=getattr(user, "full_name", None),
+            photo_url=getattr(user, "photo_url", None),
             credits=float(getattr(user, "credits", 0) or 0),
             referral_code=str(getattr(user, "referral_code", "") or ""),
             referral_link=referral_link,

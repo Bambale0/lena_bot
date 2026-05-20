@@ -10,6 +10,7 @@ const REALTIME_MAX_FAILURES = 5;
 const fallbackUser = {
   username: null,
   full_name: null,
+  photo_url: null,
   credits: 0,
   referral_balance: 0,
   referral_code: "",
@@ -52,6 +53,10 @@ const THEME_OPTIONS = [
 function tg() { return window.Telegram?.WebApp || null; }
 function tgUser() { return tg()?.initDataUnsafe?.user || null; }
 function initData() { return tg()?.initData || ""; }
+
+function telegramFullName(user) {
+  return [user?.first_name, user?.last_name].filter(Boolean).join(" ").trim();
+}
 
 function readStoredTheme() {
   const value = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -233,8 +238,16 @@ function Art({ type = "a" }) {
   return <div className={`art art-${type}`}><span /></div>;
 }
 
-function Avatar({ name = "?" }) {
-  return <div className="avatar">{String(name || "?").slice(0, 1).toUpperCase()}</div>;
+function Avatar({ name = "?", photoUrl = null }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [photoUrl]);
+  const letter = String(name || "?").slice(0, 1).toUpperCase();
+  const showPhoto = Boolean(photoUrl) && !failed;
+  return (
+    <div className={`avatar ${showPhoto ? "hasPhoto" : ""}`}>
+      {showPhoto ? <img src={photoUrl} alt="" onError={() => setFailed(true)} /> : letter}
+    </div>
+  );
 }
 
 function Spinner() {
@@ -563,6 +576,8 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   const [linkCopied, setLinkCopied] = useState(false);
   const shares = item.shares_count || 0;
   const remixes = item.remixes || 0;
+  const resultUrls = (Array.isArray(item.result_urls) && item.result_urls.length ? item.result_urls : [item.result_url]).filter(Boolean);
+  const visibleUrls = resultUrls.slice(0, 4);
 
   async function handleLike() {
     if (liked || busy) return;
@@ -609,51 +624,58 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
     }
   }
 
-  const actionBtn = { padding: "9px 12px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", border: "1px solid var(--border-strong)", background: "var(--surface-2)", color: "var(--text-soft)" };
-
   return (
-    <div className="feedFullCard">
-      <div className="feedFullMedia">
-        <MediaThumb url={item.result_url} type="image" idx={idx} className="feedFullImg" onOpen={openExternalUrl} />
+    <div className="feedFullCard feedTileCard">
+      <div className={`feedTileMedia ${visibleUrls.length > 1 ? "multi" : ""}`}>
+        {visibleUrls.length ? visibleUrls.map((url, mediaIdx) => (
+          <MediaThumb
+            key={`${url}-${mediaIdx}`}
+            url={url}
+            type="image"
+            idx={idx + mediaIdx}
+            className="feedTileImg"
+            onOpen={openExternalUrl}
+          />
+        )) : <Art type="a" />}
+        {resultUrls.length > 4 && <span className="feedMoreBadge">+{resultUrls.length - 4}</span>}
       </div>
-      <div className="feedFullInfo">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+      <div className="feedTileInfo">
+        <div className="feedTileHead">
           <span className="modelBadge">{item.model}</span>
           <span className="feedAuthor">@{item.author || "anon"}</span>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10, fontSize: 12, color: "var(--text-ghost)" }}>
+        <div className="feedTileStats">
           <span>♥ {likes}</span>
           <span>🔁 {remixes}</span>
           <span>📤 {shares}</span>
-          {item.is_mine && <span style={{ color: "var(--success)" }}>это твой пост</span>}
+          {item.is_mine && <span className="mineMark">твой</span>}
         </div>
 
-        <div className="feedActions" style={{ display: "grid", gridTemplateColumns: item.is_mine ? "1fr 1fr" : "1fr 1fr", gap: 8 }}>
-          <button className={`likeBtn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={busy} style={{ ...actionBtn }}>
-            ♥ {liked ? "Лайк" : "Нравится"}
+        <div className="feedActions feedTileActions">
+          <button className={`likeBtn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={busy}>
+            ♥
           </button>
           <button
             className="remixBtn"
             onClick={() => onRemix && onRemix(item)}
-            style={{ ...actionBtn, background: "var(--accent-soft)", border: "1px solid var(--accent-border)", color: "var(--accent-text)" }}
           >
-            🔁 Повторить
+            🔁 Повтор
           </button>
           {item.is_mine && (
             <>
               <button
+                className={linkCopied ? "successAction" : ""}
                 onClick={handleCopyLink}
-                style={{ ...actionBtn, background: linkCopied ? "var(--success-soft)" : "var(--surface-2)", border: `1px solid ${linkCopied ? "var(--success-border)" : "var(--border-strong)"}`, color: linkCopied ? "var(--success)" : "var(--text-soft)" }}
               >
-                {linkCopied ? "✅ Скопировано" : "🔗 Репост"}
+                {linkCopied ? "✓" : "🔗"}
               </button>
               <button
+                className="dangerAction"
                 onClick={handleRemove}
                 disabled={removing}
-                style={{ ...actionBtn, background: "rgba(255, 107, 107, 0.12)", border: "1px solid rgba(255, 107, 107, 0.35)", color: "#ff6b6b", opacity: removing ? 0.7 : 1 }}
               >
-                {removing ? "…" : "🗑 Убрать"}
+                {removing ? "…" : "🗑"}
               </button>
             </>
           )}
@@ -763,7 +785,7 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false, onNot
         onClick={handleLib} disabled={busyLib}
         style={{ ...btnBase, background: inLib ? "var(--accent-soft)" : "var(--surface-2)", border: `1px solid ${inLib ? "var(--accent-border)" : "var(--border-strong)"}`, color: inLib ? "var(--accent-text)" : "var(--text-muted)" }}
       >
-        {busyLib ? "..." : inLib ? "Убрать из библиотеки" : "📚 В библиотеку"}
+        {busyLib ? "..." : inLib ? "Убрать из библиотеки" : "💾 Сохранить промпт"}
       </button>
     </div>
   );
@@ -1072,6 +1094,9 @@ function Studio({
     setModeOption((current.mode_options || [])[0] || "normal");
   }, [current?.key, scenario]);
 
+  const remixSourceRefUrl = isRemix && remixSource?.gen_type === "image" ? normalizeAbsoluteUrl(remixSource?.result_url || "") : "";
+  const isRemixSourceRef = (url) => remixSourceRefUrl && normalizeAbsoluteUrl(url) === remixSourceRefUrl;
+
   async function handleFileUpload(e) {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -1080,7 +1105,8 @@ function Studio({
     setRefError("");
     try {
       const limit = Math.max(1, Number(current?.max_refs || 1) || 1);
-      const existing = normalizedRefUrls.length;
+      const baseRefs = normalizedRefUrls.filter((url) => !isRemixSourceRef(url));
+      const existing = baseRefs.length;
       const availableSlots = Math.max(0, limit - existing);
       const queue = limit <= 1 ? files.slice(0, 1) : files.slice(0, availableSlots);
 
@@ -1127,7 +1153,10 @@ function Studio({
 
       setRefUrls((prev) => {
         const seen = new Set();
-        const merged = [...prev, ...uploadedUrls].filter((url) => {
+        const base = prev
+          .map((url) => normalizeAbsoluteUrl(url))
+          .filter((url) => url && !isRemixSourceRef(url));
+        const merged = [...base, ...uploadedUrls].filter((url) => {
           const normalized = normalizeAbsoluteUrl(url);
           if (!normalized || seen.has(normalized)) return false;
           seen.add(normalized);
@@ -1199,8 +1228,9 @@ function Studio({
 
   function handleGenerate() {
     if (!current) return;
+    const userProvidedRefUrls = normalizedRefUrls.filter((url) => !isRemixSourceRef(url));
 
-    if (requiresReference && !normalizedRefUrls.length && !(isRemix && remixSource?.gen_type === "image" && remixSource?.result_url)) {
+    if (requiresReference && !userProvidedRefUrls.length && !remixSourceRefUrl) {
       setRefError("Укажи полную ссылку на референс вида https://...");
       return;
     }
@@ -1215,9 +1245,8 @@ function Studio({
       return;
     }
 
-    const remixRefUrl = isRemix && remixSource?.gen_type === "image" ? normalizeAbsoluteUrl(remixSource?.result_url || "") : "";
     const effectiveRefUrls = mode === "image"
-      ? (normalizedRefUrls.length ? normalizedRefUrls.slice(0, maxRefs) : remixRefUrl ? [remixRefUrl] : [])
+      ? (userProvidedRefUrls.length ? userProvidedRefUrls.slice(0, maxRefs) : remixSourceRefUrl ? [remixSourceRefUrl] : [])
       : [];
     const effectiveRefUrl = effectiveRefUrls[0] || null;
 
@@ -1975,11 +2004,14 @@ function ThemePicker({ value, onChange, resolvedTheme }) {
   );
 }
 
-function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolvedTheme, onNotice, reloadUser }) {
+function Profile({ user, history, myFeed = [], setScreen, setTopup, theme, setTheme, resolvedTheme, onNotice, reloadUser }) {
   const referralLink = isTelegramDeepLink(user.referral_link)
     ? user.referral_link
     : `https://t.me/apix_ai_bot?start=${user.referral_code || ""}`;
   const [language, setLanguage] = useState(user.language || "ru");
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef(null);
+  const profileFeed = useMemo(() => myFeed || [], [myFeed]);
   const menuItems = [
     ["capabilities", "✦", "Все возможности"],
     ["studio", "⌘", "Студия генераций"],
@@ -2008,10 +2040,51 @@ function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolved
     }
   }
 
+  async function handleAvatarUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/upload", {
+        method: "POST",
+        headers: { "X-Telegram-Init-Data": initData() },
+        body: fd,
+      });
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "");
+        let detail = raw || "Не удалось загрузить фото";
+        try {
+          const parsed = raw ? JSON.parse(raw) : null;
+          detail = parsed?.detail || parsed?.message || detail;
+        } catch {}
+        throw new Error(detail);
+      }
+      const data = await res.json();
+      const photoUrl = normalizeAbsoluteUrl(data.url);
+      if (!isAbsoluteHttpUrl(photoUrl)) throw new Error("Сервер вернул неполную ссылку");
+      await api("/me/photo", { method: "POST", body: JSON.stringify({ photo_url: photoUrl }) });
+      await reloadUser?.();
+      tg()?.HapticFeedback?.notificationOccurred("success");
+      onNotice?.({ type: "success", message: "Фото профиля обновлено" });
+    } catch (e) {
+      tg()?.HapticFeedback?.notificationOccurred("error");
+      onNotice?.({ type: "error", message: e.message || "Не удалось обновить фото" });
+    } finally {
+      setAvatarUploading(false);
+      e.target.value = "";
+    }
+  }
+
   return (
     <>
-      <section className="profileMini">
-        <Avatar photoUrl={user.photo_url} name={user.full_name || user.username} />
+      <section className="profileMini profileHero">
+        <input ref={avatarInputRef} className="profilePhotoInput" type="file" accept="image/*" onChange={handleAvatarUpload} />
+        <button className="profileAvatarAction" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading}>
+          <Avatar photoUrl={user.photo_url} name={user.full_name || user.username} />
+          <span>{avatarUploading ? "..." : "+"}</span>
+        </button>
         <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{user.full_name || user.username}</h2>
           <p style={{ margin: "2px 0 0", color: "var(--text-faint)", fontSize: 13 }}>@{user.username || "user"}</p>
@@ -2026,6 +2099,30 @@ function Profile({ user, history, setScreen, setTopup, theme, setTheme, resolved
         <div><b>{history.length}</b><span>работ</span></div>
         <div><b>{user.referral_balance || 0}</b><span>партнёр ₽</span></div>
       </div>
+
+      <section className="profileFeedBlock">
+        <div className="title">
+          <div>
+            <h2>Мои фото в ленте</h2>
+            <p>{profileFeed.length} опубликовано</p>
+          </div>
+          <button onClick={() => setScreen("feed")}>Лента</button>
+        </div>
+        {profileFeed.length ? (
+          <div className="profileFeedGrid">
+            {profileFeed.slice(0, 12).map((item, idx) => {
+              const urls = (Array.isArray(item.result_urls) && item.result_urls.length ? item.result_urls : [item.result_url]).filter(Boolean);
+              return (
+                <button key={item.id || idx} className="profileFeedTile" onClick={() => setScreen("feed")}>
+                  <MediaThumb url={urls[0]} type="image" idx={idx} className="profileFeedMedia" onOpen={openExternalUrl} />
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="profileFeedEmpty">Пока здесь нет опубликованных фото.</div>
+        )}
+      </section>
 
       <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 13, lineHeight: 1.45 }}>
         <div style={{ fontWeight: 600, marginBottom: 4 }}>👥 Партнёрка</div>
@@ -2329,7 +2426,7 @@ function FullViewer({ item, onClose }) {
         <b>{item.model || "Generation"}</b>
         <p>{item.prompt || "Промпт скрыт"}</p>
         <div className="viewerActions">
-          <button onClick={() => item.id && publishGeneration(item.id)}>📚 В библиотеку</button>
+          <button onClick={() => item.id && publishGeneration(item.id)}>💾 Сохранить промпт</button>
           <button onClick={onClose}>Закрыть</button>
         </div>
       </div>
@@ -2363,12 +2460,23 @@ function App() {
   const imageModels = useApi(() => api("/models/image").then(x => items(x).length ? items(x) : x), fallbackImageModels);
   const videoModels = useApi(() => api("/models/video").then(x => items(x).length ? items(x) : x), fallbackVideoModels);
   const feed = useApi(() => api("/feed?limit=100").then(items), fallbackFeed);
+  const myFeed = useApi(() => api("/me/feed?limit=200").then(items), []);
   const history = useApi(() => api("/history?limit=50").then(items), []);
   const prompts = useApi(() => api("/prompts?limit=30").then(items), []);
   const midjourneyItems = useApi(() => api("/public/midjourney").then(items), []);
   const referrals = useApi(() => api("/referrals"), fallbackReferralStats);
 
-  const user = me.data;
+  const telegramUser = tgUser();
+  const user = useMemo(() => {
+    const tgName = telegramFullName(telegramUser);
+    return {
+      ...fallbackUser,
+      ...(me.data || {}),
+      username: me.data?.username || telegramUser?.username || null,
+      full_name: me.data?.full_name || tgName || null,
+      photo_url: me.data?.photo_url || telegramUser?.photo_url || null,
+    };
+  }, [me.data, telegramUser?.username, telegramUser?.first_name, telegramUser?.last_name, telegramUser?.photo_url]);
   const isDemo = me.error || imageModels.error || videoModels.error;
   const resolvedTheme = resolveTheme(theme);
 
@@ -2684,12 +2792,12 @@ function App() {
     home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={navigate} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
     capabilities: <Capabilities setScreen={navigate} setTopup={setTopupOpen} />,
     assistant: <Assistant onNotice={setNotice} />,
-    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} onRemoved={() => feed.reload()} scope={feedScope} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
+    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} onRemoved={() => { feed.reload(); myFeed.reload(); }} scope={feedScope} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
     studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} />,
     midjourney: <MidjourneyModule imageModels={imageModels.data} videoModels={videoModels.data} user={user} generation={generation} prompts={prompts.data} feed={feed.data} history={history.data} setScreen={navigate} setTopup={setTopupOpen} onGenerate={generate} onRemixGenerate={remixGenerate} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} onPromptUse={openMidjourneyPromptPreset} onOpenPrompts={() => openPromptLibrary("midjourney")} onOpenFeed={() => openFeed("midjourney")} onOpenHistory={() => openHistory("midjourney")} />,
     music: <Music user={user} musicGen={musicGen} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,
     history: <History history={history.data} loading={history.loading} onNotice={setNotice} scope={historyScope} />,
-    profile: <Profile user={user} history={history.data} setScreen={navigate} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} onNotice={setNotice} reloadUser={me.reload} />,
+    profile: <Profile user={user} history={history.data} myFeed={myFeed.data} setScreen={navigate} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} onNotice={setNotice} reloadUser={me.reload} />,
     referrals: <Referrals user={user} stats={referrals.data} loading={referrals.loading} reload={referrals.reload} onNotice={setNotice} />,
     help: <Help onNotice={setNotice} />,
     prompts:<Prompts prompts={prompts.data} loading={prompts.loading} setScreen={navigate} onPromptUse={activePromptUse} onNotice={setNotice} target={promptTarget}/>,

@@ -31,6 +31,7 @@ from bot.keyboards.models import (
     image_session_kb,
     image_session_settings_kb,
     image_dynamic_settings_kb,
+    image_style_edit_kb,
 )
 from bot.states import ImageGenFSM
 from bot.ui.router import render_screen
@@ -43,6 +44,13 @@ logger = logging.getLogger(__name__)
 router = Router(name="image_gen")
 
 MAX_CONCURRENT_GENERATIONS = 6
+
+STYLE_EDIT_HINTS: dict[str, tuple[str, str]] = {
+    "clothes": ("одежду", "Напиши, на какую одежду заменить. Например: белый костюм, шелковое платье, oversize худи."),
+    "haircut": ("прическу", "Напиши, какую прическу сделать. Например: каре, высокий хвост, мягкие локоны."),
+    "hair_color": ("цвет волос", "Напиши новый цвет волос. Например: медный блонд, холодный брюнет, пастельно-розовый."),
+    "nails": ("ногти", "Напиши, какие ногти нужны. Например: нюдовый маникюр, красный френч, хром."),
+}
 
 
 def _kie_callback_url() -> str:
@@ -193,10 +201,18 @@ async def _session_reference_url(
     if prefer_last_result and image_session.last_result_url:
         return image_session.last_result_url
 
-    # Check FSM state for collected multi-ref file IDs
+    # Check FSM state for collected multi-ref file IDs that belong to this session.
     if state:
         data = await state.get_data()
-        ref_file_ids: list[str] = list(data.get("ref_file_ids", []))
+        state_session_id = data.get("image_session_id")
+        session_id = getattr(image_session, "id", None)
+        state_matches_session = True
+        if state_session_id and session_id:
+            try:
+                state_matches_session = int(state_session_id) == int(session_id)
+            except (TypeError, ValueError):
+                state_matches_session = False
+        ref_file_ids: list[str] = list(data.get("ref_file_ids", [])) if state_matches_session else []
         if len(ref_file_ids) > 1:
             urls = []
             for fid in ref_file_ids:
@@ -270,6 +286,8 @@ async def _sync_state_with_image_session(state: FSMContext, image_session: Image
         aspect_ratio=image_session.aspect_ratio,
         count=image_session.count,
         quality=image_session.quality,
+        mode=image_session.mode,
+        image_mode=image_session.mode,
         image_file_id=image_session.reference_file_id,
         ref_file_ids=_stored_reference_file_ids(image_session),
         remix_mode=False,
@@ -595,18 +613,8 @@ async def cb_image_menu(
             image_session.model,
             quality=image_session.quality,
         )
-        await state.set_state(ImageGenFSM.session_active)
-        await state.update_data(
-            image_session_id=image_session.id,
-            model_key=image_session.model,
-            credits=model_cost.credits if model_cost else 1,
-            aspect_ratio=image_session.aspect_ratio,
-            count=image_session.count,
-            quality=image_session.quality,
-            image_file_id=image_session.reference_url,
-            remix_mode=False,
-            remix_parent_generation_id=None,
-        )
+        await _sync_state_with_image_session(state, image_session)
+        await state.update_data(credits=model_cost.credits if model_cost else 1)
         screen = await render_screen(
             screen="image_active",
             session=session,
@@ -1354,6 +1362,8 @@ async def cb_image_session_remix(
 
     image_session.mode = "image"
     image_session.reference_url = remix_reference_url
+    image_session.reference_file_id = None
+    image_session.reference_file_ids = None
     await session.commit()
 
     await state.set_state(ImageGenFSM.session_active)
@@ -1361,6 +1371,8 @@ async def cb_image_session_remix(
         image_session_id=image_session.id,
         mode="image",
         image_mode="image",
+        image_file_id=None,
+        ref_file_ids=[],
         remix_mode=True,
         remix_parent_generation_id=parent_id or image_session.last_generation_id,
         remix_reference_url=remix_reference_url,
@@ -1371,6 +1383,99 @@ async def cb_image_session_remix(
         "✍️ Напиши, что изменить.\n"
         "Можно также отправить новое фото, чтобы заменить референс.",
         reply_markup=image_session_kb(image_session.last_generation_id),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("img_session:style:"))
+async def cb_image_session_style_menu(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    gen_id_raw = call.data.split(":")[-1]  # type: ignore[union-attr]
+    gen_id = int(gen_id_raw) if gen_id_raw.isdigit() and int(gen_id_raw) > 0 else None
+    if not gen_id:
+        await call.answer("Генерация не найдена", show_alert=True)
+        return
+
+    image_session, parent_id = await _resolve_image_session(session, db_user, state, gen_id)
+    if not image_session:
+        await call.answer("Активная серия не найдена", show_alert=True)
+        return
+    if not _supports_img2img(image_session.model):
+        await call.answer("Эта модель не поддерживает редактирование по изображению", show_alert=True)
+        return
+
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "💅 <b>Что поменять в образе?</b>\n\n"
+        "Выбери направление, а потом напиши конкретные детали.",
+        reply_markup=image_style_edit_kb(parent_id or gen_id),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("img_style:"))
+async def cb_image_style_choice(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    parts = call.data.split(":") if call.data else []
+    if len(parts) < 3:
+        await call.answer("Не понял, что менять", show_alert=True)
+        return
+
+    edit_kind = parts[1]
+    gen_id_raw = parts[2]
+    gen_id = int(gen_id_raw) if gen_id_raw.isdigit() and int(gen_id_raw) > 0 else None
+    label, hint = STYLE_EDIT_HINTS.get(edit_kind, STYLE_EDIT_HINTS["clothes"])
+
+    image_session, parent_id = await _resolve_image_session(session, db_user, state, gen_id)
+    if not image_session:
+        await call.answer("Активная серия не найдена", show_alert=True)
+        return
+    if not _supports_img2img(image_session.model):
+        await call.answer("Эта модель не поддерживает редактирование по изображению", show_alert=True)
+        return
+
+    result_url = image_session.last_result_url
+    if parent_id:
+        parent_gen = await repo.get_generation_by_id(session, parent_id)
+        if parent_gen and parent_gen.user_id == db_user.id and parent_gen.result_url:
+            result_url = parent_gen.result_url
+
+    if not result_url:
+        await call.answer("Не нашёл изображение для редактирования", show_alert=True)
+        return
+
+    image_session.mode = "image"
+    image_session.reference_url = result_url
+    image_session.reference_file_id = None
+    image_session.reference_file_ids = None
+    await session.commit()
+
+    await state.set_state(ImageGenFSM.session_active)
+    await state.update_data(
+        image_session_id=image_session.id,
+        model_key=image_session.model,
+        mode="image",
+        image_mode="image",
+        image_file_id=None,
+        ref_file_ids=[],
+        remix_mode=True,
+        remix_parent_generation_id=parent_id or gen_id or image_session.last_generation_id,
+        remix_reference_url=result_url,
+        style_edit_kind=edit_kind,
+    )
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        f"💅 <b>Меняем {label}</b>\n\n{hint}\n\n"
+        "Остальное в кадре постараюсь сохранить.",
+        reply_markup=image_session_kb(parent_id or gen_id or image_session.last_generation_id),
     )
     await call.answer()
 
@@ -1401,7 +1506,7 @@ async def cb_image_session_repeat(
 
     data = await state.get_data()
     source_feed_gen_id = data.get("source_feed_gen_id") or getattr(last_gen, "source_feed_gen_id", None)
-    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
+    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=None)
 
     await _launch_session_generation(
         source_message=call.message,  # type: ignore[arg-type]
@@ -1823,9 +1928,9 @@ async def cb_gen_library(call: CallbackQuery, session: AsyncSession, db_user: Us
     gen_id = int(call.data.split(":")[-1])
     gen = await repo.share_to_library(session, gen_id, db_user.id)
     if not gen:
-        await safe_answer_callback(call, "❌ Не удалось добавить в библиотеку")
+        await safe_answer_callback(call, "❌ Не удалось сохранить промпт")
         return
-    await safe_answer_callback(call, "📚 Промпт добавлен в библиотеку!")
+    await safe_answer_callback(call, "💾 Промпт сохранён в библиотеке!")
 
 
 # ── Regen ─────────────────────────────────────────────────────────────────────

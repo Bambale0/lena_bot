@@ -444,7 +444,7 @@ async def cb_feed_remix(
     db_user: User,
     state: FSMContext,
 ) -> None:
-    from bot.keyboards.image_session import image_session_kb
+    from bot.keyboards.models import image_session_kb
     from bot.handlers.image_gen import _supports_img2img
 
     gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]

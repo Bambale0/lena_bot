@@ -86,7 +86,12 @@ _SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.GPT_IMAGE_2_I2I,
 }
-_KIE_UPLOAD_REFERENCE_MODELS = {"seedream/4.5-edit"}
+_KIE_UPLOAD_REFERENCE_MODELS = {
+    "seedream/4.5-edit",
+    ImageModel.QWEN_I2I.value,
+    ImageModel.QWEN_EDIT.value,
+    ImageModel.QWEN2_EDIT.value,
+}
 
 _PROMPT_MAX_LENGTH_BY_MODEL: dict[str, int] = {
     ImageModel.SEEDREAM_45.value: 2000,

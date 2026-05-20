@@ -40,6 +40,7 @@ async def test_ensure_active_image_session_passes_multi_ref_ids() -> None:
 @pytest.mark.asyncio
 async def test_session_reference_url_uses_stored_reference_file_ids() -> None:
     image_session = SimpleNamespace(
+        id=7,
         model="nano-banana-pro",
         reference_file_ids='["ref_1", "ref_2"]',
         reference_file_id="ref_1",
@@ -65,8 +66,38 @@ async def test_session_reference_url_uses_stored_reference_file_ids() -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_reference_url_ignores_state_refs_from_other_session() -> None:
+    image_session = SimpleNamespace(
+        id=7,
+        model="nano-banana-pro",
+        reference_file_ids='["stored_ref"]',
+        reference_file_id="stored_ref",
+        reference_url=None,
+        last_result_url=None,
+    )
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "image_session_id": 99,
+        "ref_file_ids": ["stale_ref"],
+    })
+
+    with patch("bot.handlers.image_gen._telegram_file_url", AsyncMock(return_value="https://example.test/stored.jpg")) as file_url:
+        result = await image_gen._session_reference_url(
+            AsyncMock(),
+            image_session,
+            prefer_last_result=False,
+            state=state,
+        )
+
+    assert result == "https://example.test/stored.jpg"
+    file_url.assert_awaited_once()
+    assert file_url.await_args.args[1] == "stored_ref"
+
+
+@pytest.mark.asyncio
 async def test_session_reference_url_prefers_last_result_for_remix() -> None:
     image_session = SimpleNamespace(
+        id=7,
         model="nano-banana-pro",
         reference_file_ids='["ref_1"]',
         reference_file_id="ref_1",
@@ -87,6 +118,7 @@ async def test_session_reference_url_prefers_last_result_for_remix() -> None:
 @pytest.mark.asyncio
 async def test_session_reference_url_falls_back_to_saved_reference_when_no_last_result() -> None:
     image_session = SimpleNamespace(
+        id=7,
         model="nano-banana-pro",
         reference_file_ids='["ref_1"]',
         reference_file_id="ref_1",

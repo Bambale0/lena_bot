@@ -61,6 +61,7 @@ class FeedGenerationCard:
     generation: Generation
     username: str | None
     full_name: str | None
+    author_photo_url: str | None
     aspect_ratio: str | None
     quality: str | None
     count: int | None
@@ -241,6 +242,20 @@ async def set_user_language(session: AsyncSession, user_id: int, language: str) 
         .values(language=language)
     )
     await session.commit()
+
+
+async def set_user_photo_url(session: AsyncSession, user_id: int, photo_url: str | None) -> User | None:
+    result = await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(photo_url=photo_url)
+        .returning(User)
+    )
+    user = result.scalar_one_or_none()
+    await session.commit()
+    if user:
+        await session.refresh(user)
+    return user
 
 
 async def add_credits(
@@ -733,6 +748,7 @@ async def _feed_cards_from_stmt(session: AsyncSession, stmt) -> list[FeedGenerat
         .add_columns(
             User.username,
             User.full_name,
+            User.photo_url,
             ImageSession.aspect_ratio,
             ImageSession.quality,
             ImageSession.count,
@@ -741,13 +757,14 @@ async def _feed_cards_from_stmt(session: AsyncSession, stmt) -> list[FeedGenerat
         )
     )
     cards: list[FeedGenerationCard] = []
-    for gen, username, full_name, aspect_ratio, quality, count, reference_url, remix_count in result.all():
+    for gen, username, full_name, author_photo_url, aspect_ratio, quality, count, reference_url, remix_count in result.all():
         remix_total = int(remix_count or 0)
         cards.append(
             FeedGenerationCard(
                 generation=gen,
                 username=username,
                 full_name=full_name,
+                author_photo_url=author_photo_url,
                 aspect_ratio=aspect_ratio,
                 quality=quality,
                 count=count,
@@ -774,6 +791,28 @@ async def get_feed_generations(
     stmt = (
         select(Generation)
         .where(
+            Generation.gen_type == GenerationType.image,
+            Generation.status == GenerationStatus.done,
+            Generation.result_url.is_not(None),
+            Generation.is_public_feed.is_(True),
+        )
+        .order_by(desc(Generation.created_at))
+        .limit(max(limit, 1) * 3)
+    )
+    cards = await _feed_cards_from_stmt(session, stmt)
+    return cards[:limit]
+
+
+async def get_user_feed_generations(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    limit: int = 200,
+) -> list[FeedGenerationCard]:
+    stmt = (
+        select(Generation)
+        .where(
+            Generation.user_id == user_id,
             Generation.gen_type == GenerationType.image,
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
@@ -1036,6 +1075,7 @@ async def update_image_session_references(
         .values(
             reference_file_id=lead_reference_file_id,
             reference_file_ids=json.dumps(normalized_reference_file_ids, ensure_ascii=True) if normalized_reference_file_ids else None,
+            reference_url=None,
             updated_at=func.now(),
         )
     )

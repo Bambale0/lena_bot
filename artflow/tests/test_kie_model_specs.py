@@ -130,6 +130,33 @@ def test_build_kie_input_wan_multi_ref_uses_input_urls_without_singular_alias() 
     assert "input_url" not in inp
 
 
+def test_build_kie_input_wan_reference_downgrades_unsupported_4k() -> None:
+    resolved_model, inp = build_kie_input(
+        model="wan/2-7-image-pro",
+        prompt="Keep the person and change the styling",
+        reference_urls=["https://example.test/wan-ref.jpg"],
+        params={"resolution": "4K", "aspect_ratio": "9:16", "n": 6},
+    )
+
+    assert resolved_model == "wan/2-7-image-pro"
+    assert inp["resolution"] == "2K"
+    assert inp["n"] == 4
+    assert "aspect_ratio" not in inp
+
+
+def test_build_kie_input_wan_text_clamps_non_sequential_count_to_four() -> None:
+    resolved_model, inp = build_kie_input(
+        model="wan/2-7-image-pro",
+        prompt="Editorial fashion portrait",
+        params={"resolution": "4K", "aspect_ratio": "9:16", "n": 6},
+    )
+
+    assert resolved_model == "wan/2-7-image-pro"
+    assert inp["resolution"] == "4K"
+    assert inp["n"] == 4
+    assert inp["aspect_ratio"] == "9:16"
+
+
 def test_build_kie_input_nano_banana_variants_do_not_send_count() -> None:
     for model in ("nano-banana-2", "nano-banana-pro"):
         resolved_model, inp = build_kie_input(

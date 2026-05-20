@@ -128,19 +128,21 @@ img,video{display:block;width:100%;height:100%;object-fit:cover}
 /* header */
 .header{position:sticky;top:0;z-index:30;margin:0 -16px 16px;padding:10px 16px;border-bottom:1px solid var(--border);border-radius:0 0 22px 22px;background:var(--overlay-strong);backdrop-filter:blur(22px);display:flex;align-items:center;justify-content:space-between;gap:8px}
 .ghost{background:transparent;font-weight:500;font-size:16px;color:var(--text-soft)}
-.headerTitle{font-size:17px;font-weight:700;letter-spacing:-.02em;background:linear-gradient(90deg,var(--accent-text),#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.headerTitle{font-size:17px;font-weight:700;letter-spacing:0;background:linear-gradient(90deg,var(--accent-text),#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .headerRight{display:flex;gap:8px;align-items:center}
 .balanceBtn{padding:7px 12px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent-text)}
 
 /* avatar */
-.avatar{display:grid;place-items:center;border-radius:999px;border:2px solid rgba(59,220,255,.7);background:linear-gradient(135deg,#3bdcff,#ff4fa4,#38f2b7);box-shadow:0 0 18px rgba(59,220,255,.22);width:40px;height:40px;font-size:16px;font-weight:700;flex-shrink:0}
+.avatar{display:grid;place-items:center;border-radius:999px;border:2px solid rgba(59,220,255,.7);background:linear-gradient(135deg,#3bdcff,#ff4fa4,#38f2b7);box-shadow:0 0 18px rgba(59,220,255,.22);width:40px;height:40px;font-size:16px;font-weight:700;flex-shrink:0;overflow:hidden}
+.avatar.hasPhoto{background:var(--surface-2)}
+.avatar img{width:100%;height:100%;object-fit:cover}
 
 /* profile strip */
 .profileStrip,.profileMini{border:1px solid var(--border);background:var(--surface);border-radius:18px;padding:12px;box-shadow:0 0 30px rgba(124,58,237,.1)}
 .profileStrip{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center}
 .profileStrip .avatar{width:56px;height:56px;font-size:20px}
 .grow{min-width:0}
-.profileStrip h2,.profileMini h2{margin:0;font-size:20px;font-weight:600;letter-spacing:-.02em}
+.profileStrip h2,.profileMini h2{margin:0;font-size:20px;font-weight:600;letter-spacing:0}
 .profileStrip p,.profileMini p{margin:2px 0 0;color:var(--text-faint);font-size:14px}
 .primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));box-shadow:0 0 28px rgba(124,58,237,.28);font-weight:600;color:#fff}
 .small{padding:9px 14px;border-radius:12px;font-size:14px}
@@ -152,7 +154,7 @@ img,video{display:block;width:100%;height:100%;object-fit:cover}
 /* content blocks */
 .block{margin-top:24px}
 .title{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-.title h2,h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em}
+.title h2,h1{margin:0;font-size:22px;font-weight:600;letter-spacing:0}
 .title p{margin:2px 0 0;font-size:12px;color:var(--text-ghost)}
 .title button{background:var(--surface-2);border-radius:999px;padding:6px 12px;font-size:12px;color:var(--text-soft)}
 
@@ -186,12 +188,25 @@ img,video{display:block;width:100%;height:100%;object-fit:cover}
 .feedCard div:not(.art){padding:12px}
 .feedCard span{display:inline-block;border-radius:8px;background:var(--accent-soft);padding:4px 8px;font-size:10px;color:var(--text-muted)}
 
-/* feed list (full-width cards) */
-.feedList{display:grid;gap:20px}
-.feedFullCard{border-radius:22px;border:1px solid var(--border);background:var(--surface);overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.16)}
-.feedFullMedia{width:100%;overflow:hidden;background:var(--bg-strong);display:flex;align-items:center;justify-content:center;padding:12px;min-height:360px;max-height:82vh;border-bottom:1px solid var(--border)}
-.feedFullImg{width:100%;height:auto;max-height:80vh;object-fit:contain;border-radius:16px}
-.feedFullInfo{padding:16px 16px 18px}
+/* feed gallery */
+.feedList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+.feedFullCard{border-radius:16px;border:1px solid var(--border);background:var(--surface);overflow:hidden;box-shadow:0 10px 24px rgba(0,0,0,.14)}
+.feedTileMedia{position:relative;display:grid;aspect-ratio:3/4;background:var(--bg-strong);overflow:hidden}
+.feedTileMedia.multi{grid-template-columns:repeat(2,1fr);gap:2px;aspect-ratio:1/1}
+.feedTileImg{width:100%;height:100%;object-fit:cover}
+.feedMoreBadge{position:absolute;right:6px;bottom:6px;border-radius:999px;background:rgba(0,0,0,.62);color:#fff;font-size:11px;font-weight:700;padding:3px 7px}
+.feedTileInfo{padding:9px}
+.feedTileHead{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:7px}
+.feedTileStats{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:var(--text-ghost)}
+.feedTileStats .mineMark{color:var(--success);font-weight:700}
+.feedTileActions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:0}
+.feedTileActions button{min-height:34px;border-radius:10px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text-soft);font-size:12px;font-weight:700}
+.feedTileActions .remixBtn{background:var(--accent-soft);border-color:var(--accent-border);color:var(--accent-text)}
+.feedTileActions .successAction{background:var(--success-soft);border-color:var(--success-border);color:var(--success)}
+.feedTileActions .dangerAction{background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.35);color:#ff6b6b}
+.feedTileHead .modelBadge{margin-bottom:0}
+.feedTileCard .modelBadge{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.feedTileCard .feedAuthor{max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modelBadge{display:inline-block;border-radius:8px;background:var(--accent-soft);padding:4px 8px;font-size:10px;color:var(--text-muted);margin-bottom:6px}
 .feedPrompt{margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--text-soft);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 .feedActions{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
@@ -242,7 +257,7 @@ textarea{width:100%;height:112px;margin-top:16px;padding:14px;resize:none;outlin
 .status,.warn{margin-top:16px;border:1px solid rgba(139,92,246,.3);background:var(--accent-soft);border-radius:16px;padding:12px}
 .status{display:grid;gap:10px}
 .statusHead{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.statusHead b{font-size:16px;font-weight:700;letter-spacing:-.02em}
+.statusHead b{font-size:16px;font-weight:700;letter-spacing:0}
 .status p{margin:0;font-size:13px;line-height:1.45;color:var(--text-soft)}
 .status-success{border-color:var(--success-border);background:var(--success-soft)}
 .status-danger{border-color:var(--danger-border);background:var(--danger-soft)}
@@ -305,9 +320,18 @@ textarea{width:100%;height:112px;margin-top:16px;padding:14px;resize:none;outlin
 
 /* profile screens */
 .profileMini{display:flex;align-items:center;gap:12px;padding:14px}
+.profileHero .avatar{width:64px;height:64px;font-size:24px}
+.profilePhotoInput{display:none}
+.profileAvatarAction{position:relative;display:block;padding:0;border:0;background:transparent;border-radius:999px}
+.profileAvatarAction span{position:absolute;right:-2px;bottom:-2px;display:grid;place-items:center;width:24px;height:24px;border-radius:999px;border:1px solid var(--border-strong);background:var(--accent);color:#fff;font-size:15px;font-weight:800}
 .profileStats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
 .profileStats div{border-radius:14px;background:var(--surface-2);padding:12px;font-size:18px;font-weight:600;text-align:center}
 .profileStats span{display:block;font-size:10px;color:var(--text-faint);margin-top:2px}
+.profileFeedBlock{margin-top:16px}
+.profileFeedGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.profileFeedTile{padding:0;border-radius:14px;overflow:hidden;border:1px solid var(--border);background:var(--surface)}
+.profileFeedMedia{aspect-ratio:1/1;width:100%;height:auto;object-fit:cover}
+.profileFeedEmpty{border:1px dashed var(--border-strong);border-radius:14px;padding:18px 14px;text-align:center;color:var(--text-ghost);font-size:13px}
 .menu{display:grid;gap:8px}
 .menu button{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);background:var(--surface);border-radius:16px;padding:13px 16px;font-size:14px;font-weight:500}
 

@@ -78,6 +78,7 @@ class User(Base):
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     username: Mapped[str | None] = mapped_column(String(64))
     full_name: Mapped[str | None] = mapped_column(String(256))
+    photo_url: Mapped[str | None] = mapped_column(Text)
     credits: Mapped[float] = mapped_column(Float, default=0, nullable=False)
 
     # Subscription (prepared, not active in v1)

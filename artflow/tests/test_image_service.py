@@ -102,3 +102,37 @@ async def test_generate_image_uploads_local_seedream_reference_before_create_tas
     assert uploaded_urls == ["ref.jpg"]
     assert created_payloads[0]["model"] == "seedream/4.5-edit"
     assert created_payloads[0]["input"]["image_urls"] == ["https://kie-files.test/ref.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_generate_image_uploads_local_qwen_reference_before_create_task(tmp_path, monkeypatch) -> None:
+    ref = tmp_path / "qwen-ref.jpg"
+    ref.write_bytes(JPEG)
+    created_payloads: list[dict] = []
+
+    monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
+    monkeypatch.setattr(public_files.settings, "STATIC_UPLOAD_URL_PATH", "/static/upload")
+
+    async def fake_upload_file_stream(data: bytes, *, filename: str, content_type: str, upload_path: str = "images/apix-refs") -> str:
+        assert data == JPEG
+        assert filename == "qwen-ref.jpg"
+        assert content_type == "image/jpeg"
+        return "https://kie-files.test/qwen-ref.jpg"
+
+    async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
+        created_payloads.append(payload)
+        return {"code": 200, "data": {"taskId": "task_qwen"}}
+
+    monkeypatch.setattr(image_service.kieai_client, "upload_file_stream", fake_upload_file_stream)
+    monkeypatch.setattr(image_service.kieai_client, "create_task", fake_create_task)
+
+    result = await image_service.generate_image(
+        ImageModel.QWEN_I2I,
+        "restyle",
+        image_url="https://example.test/static/upload/qwen-ref.jpg",
+        aspect_ratio="1:1",
+    )
+
+    assert result.task_id == "task_qwen"
+    assert created_payloads[0]["model"] == "qwen/image-to-image"
+    assert created_payloads[0]["input"]["image_url"] == "https://kie-files.test/qwen-ref.jpg"

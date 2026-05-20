@@ -198,7 +198,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "modes": ["text", "image"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.WAN_27_PRO, []),
         "aspect_ratio_modes": ["text"],
-        "counts": [1, 2, 4, 6],
+        "counts": [1, 2, 4],
         "has_quality": True,
         "quality_options": [("1K", "1K"), ("2K", "2K"), ("4K", "4K")],
         "max_refs": 9,
@@ -581,11 +581,14 @@ def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
     )
     if gen_id:
         builder.row(
+            InlineKeyboardButton(text="💅 Изменить образ", callback_data=f"img_session:style:{gen_id}"),
+        )
+        builder.row(
             InlineKeyboardButton(text="🎬 Оживить", callback_data=f"img_session:animate:{gen_id}"),
         )
         builder.row(
             InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
-            InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}"),
+            InlineKeyboardButton(text="💾 Сохранить промпт", callback_data=f"gen:library:{gen_id}"),
         )
     builder.row(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_settings"),
@@ -596,6 +599,20 @@ def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"),
     )
+    return builder.as_markup()
+
+
+def image_style_edit_kb(gen_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="👗 Одежда", callback_data=f"img_style:clothes:{gen_id}"),
+        InlineKeyboardButton(text="💇 Прическа", callback_data=f"img_style:haircut:{gen_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🎨 Цвет волос", callback_data=f"img_style:hair_color:{gen_id}"),
+        InlineKeyboardButton(text="💅 Ногти", callback_data=f"img_style:nails:{gen_id}"),
+    )
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data=f"img_session:remix:{gen_id}"))
     return builder.as_markup()
 
 
@@ -832,7 +849,7 @@ def after_generation_kb(gen_id: int, gen_type: str) -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
-        InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}"),
+        InlineKeyboardButton(text="💾 Сохранить промпт", callback_data=f"gen:library:{gen_id}"),
     )
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()

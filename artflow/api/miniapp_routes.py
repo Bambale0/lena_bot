@@ -165,14 +165,19 @@ def _withdrawal_out(item: Any) -> "ReferralWithdrawalOut":
 
 def _feed_card_out(card: Any, user: User) -> dict:
     generation = card.generation
+    result_urls = _generation_result_urls(generation)
+    gen_type = getattr(generation, "gen_type", "image")
     return {
         "id": generation.id,
         "model": generation.model,
-        "result_url": _generation_primary_result_url(generation) or "",
+        "gen_type": getattr(gen_type, "value", gen_type),
+        "result_url": (result_urls[0] if result_urls else _generation_primary_result_url(generation)) or "",
+        "result_urls": result_urls,
         "likes_count": generation.likes_count,
         "shares_count": generation.shares_count,
         "aspect_ratio": card.aspect_ratio,
         "author": card.username or card.full_name or "anon",
+        "author_photo_url": getattr(card, "author_photo_url", None),
         "is_mine": generation.user_id == user.id,
         "remixes": card.remix_count,
         "score": getattr(card, "score", 0),
@@ -612,6 +617,7 @@ class UserProfile(BaseModel):
     tg_id: int
     username: str | None
     full_name: str | None
+    photo_url: str | None = None
     credits: float
     referral_code: str
     referral_link: str
@@ -734,6 +740,10 @@ class LanguageRequest(BaseModel):
     language: str = Field(..., pattern="^(ru|en)$")
 
 
+class ProfilePhotoRequest(BaseModel):
+    photo_url: str | None = Field(default=None, max_length=2048)
+
+
 class ReferralChildOut(BaseModel):
     id: int
     username: str | None
@@ -788,6 +798,7 @@ def _user_profile(user: User) -> UserProfile:
         tg_id=user.tg_id,
         username=user.username,
         full_name=user.full_name,
+        photo_url=getattr(user, "photo_url", None),
         credits=user.credits,
         referral_code=user.referral_code,
         referral_link=_telegram_start_link(user.referral_code),
@@ -840,6 +851,31 @@ async def web_telegram_login(
 async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
     """Current user profile with balance."""
     return _user_profile(user)
+
+
+@router.get("/me/feed")
+async def get_my_feed(
+    limit: int = 200,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> list[dict]:
+    """Current user's public image feed posts."""
+    cards = await repo.get_user_feed_generations(session, user.id, limit=max(1, min(limit, 500)))
+    return [_feed_card_out(card, user) for card in cards]
+
+
+@router.post("/me/photo", response_model=UserProfile)
+async def set_me_photo(
+    body: ProfilePhotoRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> UserProfile:
+    """Save a profile photo uploaded by the current user."""
+    photo_url = (body.photo_url or "").strip() or None
+    if photo_url and (not photo_url.startswith("http") or not public_url_is_available(photo_url)):
+        raise HTTPException(status_code=422, detail="Invalid profile photo URL")
+    updated = await repo.set_user_photo_url(session, user.id, photo_url)
+    return _user_profile(updated or user)
 
 
 @router.post("/assistant", response_model=AssistantChatResponse)
@@ -1596,6 +1632,9 @@ async def remix_feed_post(
     if not source:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
+    user_refs = _normalize_public_urls(body.image_url, *(body.reference_urls or []))
+    source_refs = _normalize_public_urls(source.result_url) if body.mode == "image" else []
+
     if body.model in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS):
         source_prompt = (source.prompt or "").strip()
         model_cost = await repo.get_model_cost(session, body.model)
@@ -1610,11 +1649,7 @@ async def remix_feed_post(
         motion_value = "low"
 
         if body.model == "midjourney-imagine":
-            refs = _normalize_public_urls(
-                source.result_url if body.mode == "image" else None,
-                body.image_url,
-                *(body.reference_urls or []),
-            )
+            refs = user_refs or source_refs
             max_refs = int(caps.get("max_refs", 1) or 1)
             if len(refs) > max_refs:
                 raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
@@ -1622,11 +1657,7 @@ async def remix_feed_post(
             if not source_prompt:
                 raise HTTPException(status_code=422, detail="Prompt is required")
         elif body.model == "midjourney-blend":
-            refs = _normalize_public_urls(
-                source.result_url if body.mode == "image" else None,
-                body.image_url,
-                *(body.reference_urls or []),
-            )
+            refs = (source_refs + user_refs) if source_refs else user_refs
             max_refs = int(caps.get("max_refs", 5) or 5)
             if len(refs) < 2:
                 raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
@@ -1634,10 +1665,7 @@ async def remix_feed_post(
                 raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
             normalized_ratio = _normalize_choice(body.aspect_ratio, caps.get("aspect_ratios", []), field_name="aspect ratio")
         else:
-            video_refs = _normalize_public_urls(
-                body.image_url or (source.result_url if body.mode == "image" else None),
-                *(body.reference_urls or []),
-            )
+            video_refs = user_refs or source_refs
             max_refs = int(_MJ_VIDEO_CAPS.get(body.model, {}).get("max_refs", 1) or 1)
             if not video_refs:
                 raise HTTPException(status_code=422, detail="Midjourney Video requires a reference image")
@@ -1730,9 +1758,8 @@ async def remix_feed_post(
     normalized_quality = body.quality or "basic"
 
     if gen_type == "video":
-        fallback_image_url = body.image_url
-        if body.mode == "image" and not fallback_image_url:
-            fallback_image_url = source.result_url
+        video_refs = user_refs or source_refs
+        fallback_image_url = video_refs[0] if video_refs else None
         normalized_video = _normalize_video_request(
             model_key=body.model,
             mode=body.mode,
@@ -1740,7 +1767,7 @@ async def remix_feed_post(
             aspect_ratio=body.aspect_ratio,
             resolution=body.resolution,
             image_url=fallback_image_url,
-            reference_urls=body.reference_urls,
+            reference_urls=video_refs[1:],
             grok_mode=body.grok_mode,
         )
         model_cost = await repo.resolve_video_model_cost(
@@ -1750,11 +1777,7 @@ async def remix_feed_post(
             resolution=normalized_video["resolution"],
         )
     else:
-        image_refs = _normalize_public_urls(
-            source.result_url if body.mode == "image" else None,
-            body.image_url,
-            *(body.reference_urls or []),
-        )
+        image_refs = user_refs or source_refs
         if image_refs:
             normalized_image_url = image_refs[0] if len(image_refs) == 1 else image_refs
         else:

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from bot.handlers.start import _help_text
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
-from bot.keyboards.models import video_params_kb
+from bot.keyboards.models import after_generation_kb, image_session_kb, image_style_edit_kb, video_params_kb
 from bot.keyboards.payment import topup_kb
 from bot.ui.main_menu import render_main_menu
 
@@ -55,6 +55,30 @@ def test_video_params_kb_hides_grok_i2v_ratio_for_single_ref() -> None:
         )
     )
     assert all(button.callback_data != "vpar_ratio:16:9" for button in buttons)
+
+
+def test_image_session_keyboard_exposes_save_prompt_and_style_edit() -> None:
+    buttons = flatten_buttons(image_session_kb(123))
+    by_text = {button.text: button.callback_data for button in buttons}
+    assert by_text["💾 Сохранить промпт"] == "gen:library:123"
+    assert by_text["💅 Изменить образ"] == "img_session:style:123"
+
+
+def test_image_style_edit_keyboard_covers_requested_appearance_changes() -> None:
+    buttons = flatten_buttons(image_style_edit_kb(123))
+    callbacks = {button.callback_data for button in buttons}
+    assert {
+        "img_style:clothes:123",
+        "img_style:haircut:123",
+        "img_style:hair_color:123",
+        "img_style:nails:123",
+    }.issubset(callbacks)
+
+
+def test_after_generation_keyboard_uses_save_prompt_label() -> None:
+    buttons = flatten_buttons(after_generation_kb(123, "image"))
+    by_text = {button.text: button.callback_data for button in buttons}
+    assert by_text["💾 Сохранить промпт"] == "gen:library:123"
 
 
 def test_help_text_contains_support_contact() -> None:

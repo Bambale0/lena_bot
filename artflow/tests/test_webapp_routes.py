@@ -25,6 +25,7 @@ async def fake_user():
         tg_id=111,
         username="tester",
         full_name="Test User",
+        photo_url="https://cdn.example.test/tg-avatar.jpg",
         credits=1003,
         referral_code="REF",
         referral_balance=0.0,
@@ -137,6 +138,7 @@ async def test_webapp_me_returns_verified_user(client, monkeypatch) -> None:
     monkeypatch.setattr("api.miniapp_routes.repo.get_active_image_session", AsyncMock(return_value=None))
     response = await client.get("/api/v1/me")
     assert response.json()["credits"] == 1003
+    assert response.json()["photo_url"] == "https://cdn.example.test/tg-avatar.jpg"
     assert response.json()["referral_link"] == "https://t.me/TestBot?start=REF"
     assert response.json()["language"] == "ru"
 
@@ -199,6 +201,43 @@ async def test_webapp_set_language_rejects_unknown_language(client, monkeypatch)
 
     assert response.status_code == 422
     set_user_language.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webapp_set_profile_photo_saves_public_url(client, monkeypatch) -> None:
+    set_user_photo_url = AsyncMock(return_value=SimpleNamespace(
+        id=1,
+        tg_id=111,
+        username="tester",
+        full_name="Test User",
+        photo_url="https://cdn.example.test/avatar.png",
+        credits=1003,
+        referral_code="REF",
+        referral_balance=0.0,
+        language="ru",
+    ))
+    monkeypatch.setattr("api.miniapp_routes.repo.set_user_photo_url", set_user_photo_url)
+
+    response = await client.post(
+        "/api/v1/me/photo",
+        json={"photo_url": "https://cdn.example.test/avatar.png"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["photo_url"] == "https://cdn.example.test/avatar.png"
+    set_user_photo_url.assert_awaited_once()
+    assert set_user_photo_url.await_args.args[1:] == (1, "https://cdn.example.test/avatar.png")
+
+
+@pytest.mark.asyncio
+async def test_webapp_set_profile_photo_rejects_blob_url(client, monkeypatch) -> None:
+    set_user_photo_url = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.set_user_photo_url", set_user_photo_url)
+
+    response = await client.post("/api/v1/me/photo", json={"photo_url": "blob:local"})
+
+    assert response.status_code == 422
+    set_user_photo_url.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -316,17 +355,65 @@ async def test_webapp_feed_returns_items(client, monkeypatch) -> None:
     generation = SimpleNamespace(
         id=5,
         model="nano-banana-pro",
-        result_url="https://example.test/static/upload/a.jpg",
+        result_url="https://cdn.example.test/a.jpg",
+        result_urls='["https://cdn.example.test/a.jpg", "https://cdn.example.test/b.jpg"]',
+        gen_type=GenerationType.image,
         prompt="premium prompt",
         likes_count=2,
         shares_count=1,
         user_id=1,
         created_at=None,
     )
-    card = SimpleNamespace(generation=generation, username="author", full_name=None, remix_count=3, aspect_ratio="16:9")
+    card = SimpleNamespace(
+        generation=generation,
+        username="author",
+        full_name=None,
+        author_photo_url="https://example.test/avatar.jpg",
+        remix_count=3,
+        aspect_ratio="16:9",
+    )
     monkeypatch.setattr("api.miniapp_routes.repo.get_feed_generations", AsyncMock(return_value=[card]))
     response = await client.get("/api/v1/feed")
-    assert response.json()[0]["remixes"] == 3
+    item = response.json()[0]
+    assert item["remixes"] == 3
+    assert item["result_urls"] == [
+        "https://cdn.example.test/a.jpg",
+        "https://cdn.example.test/b.jpg",
+    ]
+    assert item["author_photo_url"] == "https://example.test/avatar.jpg"
+
+
+@pytest.mark.asyncio
+async def test_webapp_my_feed_returns_only_current_user_cards(client, monkeypatch) -> None:
+    generation = SimpleNamespace(
+        id=6,
+        model="nano-banana-pro",
+        result_url="https://cdn.example.test/mine.jpg",
+        result_urls=None,
+        gen_type=GenerationType.image,
+        likes_count=4,
+        shares_count=2,
+        user_id=1,
+        created_at=None,
+    )
+    card = SimpleNamespace(
+        generation=generation,
+        username="tester",
+        full_name="Test User",
+        author_photo_url="https://cdn.example.test/tg-avatar.jpg",
+        remix_count=0,
+        aspect_ratio="9:16",
+    )
+    get_user_feed_generations = AsyncMock(return_value=[card])
+    monkeypatch.setattr("api.miniapp_routes.repo.get_user_feed_generations", get_user_feed_generations)
+
+    response = await client.get("/api/v1/me/feed?limit=200")
+
+    assert response.status_code == 200
+    assert response.json()[0]["is_mine"] is True
+    assert response.json()[0]["result_urls"] == ["https://cdn.example.test/mine.jpg"]
+    get_user_feed_generations.assert_awaited_once()
+    assert get_user_feed_generations.await_args.args[1] == 1
 
 
 @pytest.mark.asyncio
@@ -1096,6 +1183,59 @@ async def test_feed_remix_image_uses_and_saves_reference(client, monkeypatch) ->
     assert create_image_session.await_args.kwargs["base_prompt"] == "hidden prompt"
     assert image_generate.await_args.kwargs["image_url"] == "https://example.test/source.jpg"
     assert image_generate.await_args.kwargs["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_feed_remix_image_prefers_user_reference_over_source(client, monkeypatch) -> None:
+    source = SimpleNamespace(
+        id=188,
+        model="seedream-4.0",
+        prompt="hidden prompt",
+        result_url="https://example.test/source.jpg",
+    )
+    create_image_session = AsyncMock(return_value=SimpleNamespace(id=177))
+    image_generate = AsyncMock(return_value=SimpleNamespace(task_id="img_task_user_ref"))
+
+    async def fake_create_generation(_session, _user_id, model, gen_type, prompt, credits_spent, **kwargs):
+        return SimpleNamespace(
+            id=801,
+            model=model,
+            gen_type=gen_type,
+            prompt=prompt,
+            status=GenerationStatus.processing,
+            result_url=None,
+            result_urls=None,
+            credits_spent=credits_spent,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+        )
+
+    monkeypatch.setattr("api.miniapp_routes.repo.get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4)))
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", AsyncMock(return_value=True))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_image_session", create_image_session)
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes.repo.increment_feed_share", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes.image_service.generate_image", image_generate)
+
+    response = await client.post(
+        "/api/v1/feed/188/remix",
+        json={
+            "model": "nano-banana-pro",
+            "mode": "image",
+            "image_url": "https://example.test/user-ref.jpg",
+            "aspect_ratio": "1:1",
+            "quality": "basic",
+            "count": 1,
+        },
+    )
+
+    assert response.status_code == 202
+    assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/user-ref.jpg"
+    assert image_generate.await_args.kwargs["image_url"] == "https://example.test/user-ref.jpg"
 
 
 @pytest.mark.asyncio

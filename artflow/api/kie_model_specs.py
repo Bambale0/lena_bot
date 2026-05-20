@@ -142,16 +142,22 @@ def _qwen2_text_params(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _wan_image_params(params: dict[str, Any]) -> dict[str, Any]:
+    has_reference = bool(params.get("has_reference"))
+    enable_sequential = bool(params.get("enable_sequential", False))
+    resolution = params.get("resolution") or "2K"
+    if resolution == "4K" and (has_reference or enable_sequential):
+        resolution = "2K"
+    max_images = 12 if enable_sequential else 4
     out = {
-        "resolution": params.get("resolution") or "2K",
-        "n": max(1, min(6, int(params.get("n") or 1))),
-        "enable_sequential": bool(params.get("enable_sequential", False)),
+        "resolution": resolution,
+        "n": max(1, min(max_images, int(params.get("n") or 1))),
+        "enable_sequential": enable_sequential,
         "thinking_mode": bool(params.get("thinking_mode", False)),
         "watermark": False,
         "seed": int(params.get("seed") or 0),
         "nsfw_checker": False,
     }
-    if not params.get("has_reference"):
+    if not has_reference:
         out["aspect_ratio"] = params.get("aspect_ratio") or "1:1"
     return out
 
