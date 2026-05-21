@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import main
+
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
 
 
@@ -44,3 +48,13 @@ def test_is_success_false_for_failed_state() -> None:
 
 def test_extract_error_prefers_nested_message() -> None:
     assert extract_error({"data": {"failMsg": "bad prompt"}}) == "bad prompt"
+
+
+def test_kie_result_caption_hides_feed_prompt() -> None:
+    gen = SimpleNamespace(prompt="secret feed prompt", source_feed_gen_id=42)
+    assert main._kie_result_caption(gen) == "✅ <b>Готово!</b>"
+
+
+def test_kie_result_caption_hides_own_prompt_preview() -> None:
+    gen = SimpleNamespace(prompt="own prompt", source_feed_gen_id=None)
+    assert main._kie_result_caption(gen) == "✅ <b>Готово!</b>"

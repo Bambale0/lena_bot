@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,9 +8,14 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user
-from api.miniapp_routes import _gen_out, _normalize_video_request
-from db.models import GenerationStatus, GenerationType, ImageGenerationAction
+from api.miniapp_routes import (
+    _data_uri_from_url,
+    _gen_out,
+    _normalize_public_urls,
+    _normalize_video_request,
+)
 from db import repository as repo
+from db.models import GenerationStatus, GenerationType, ImageGenerationAction
 from db.session import get_session
 from main import app
 
@@ -131,6 +136,36 @@ async def test_upload_accepts_authenticated_image_reference(client, monkeypatch)
     assert response.status_code == 200
     assert response.json()["url"] == "https://example.test/static/upload/ref.png"
     save_public_file.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_photo_prompt_rejects_disguised_non_image(client, monkeypatch) -> None:
+    generate_prompt = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.generate_prompt_from_photo", generate_prompt)
+
+    response = await client.post(
+        "/api/v1/photo-prompt",
+        files={"file": ("fake.png", b"not an image", "image/png")},
+    )
+
+    assert response.status_code == 422
+    assert "JPEG, PNG and WebP" in response.json()["detail"]
+    generate_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_photo_prompt_rejects_large_file_before_provider_call(client, monkeypatch) -> None:
+    generate_prompt = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.generate_prompt_from_photo", generate_prompt)
+    monkeypatch.setattr("api.miniapp_routes.MAX_PHOTO_PROMPT_BYTES", 8)
+
+    response = await client.post(
+        "/api/v1/photo-prompt",
+        files={"file": ("large.jpg", b"\xff\xd8\xff" + b"x" * 9, "image/jpeg")},
+    )
+
+    assert response.status_code == 413
+    generate_prompt.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -456,6 +491,36 @@ async def test_webapp_image_models_allow_fractional_credits(client, monkeypatch)
     assert response.json()[0]["credits"] == 2.5
 
 
+@pytest.mark.asyncio
+async def test_webapp_image_models_expose_quality_prices(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_all_model_costs",
+        AsyncMock(return_value=[
+            SimpleNamespace(
+                model_key="nano-banana-pro",
+                display_name="Nano Banana Pro",
+                credits=4,
+            ),
+        ]),
+    )
+
+    async def fake_resolve(_session, model_key, *, quality=None):
+        assert model_key == "nano-banana-pro"
+        return SimpleNamespace(credits={"2K": 4, "4K": 5}.get(quality, 4))
+
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_image_model_cost", fake_resolve)
+
+    response = await client.get("/api/v1/models/image")
+
+    assert response.status_code == 200
+    payload = response.json()[0]
+    assert payload["quality_options"] == [
+        {"value": "2K", "label": "2K"},
+        {"value": "4K", "label": "4K"},
+    ]
+    assert payload["quality_prices"] == {"2K": 4, "4K": 5}
+
+
 def test_normalize_video_request_drops_grok_i2v_ratio_for_single_ref() -> None:
     normalized = _normalize_video_request(
         model_key="grok-imagine/image-to-video",
@@ -505,6 +570,32 @@ def test_generation_out_includes_all_result_urls() -> None:
 
     assert payload["result_url"] == "https://example.test/1.png"
     assert payload["result_urls"] == ["https://example.test/1.png", "https://example.test/2.png"]
+    assert payload["prompt"] == "fashion editorial"
+    assert payload["prompt_hidden"] is False
+    assert payload["prompt_actions_allowed"] is True
+
+
+def test_generation_out_hides_feed_derivative_prompt() -> None:
+    gen = SimpleNamespace(
+        id=57,
+        model="nano-banana-pro",
+        gen_type=GenerationType.image,
+        prompt="secret feed prompt",
+        status=GenerationStatus.done,
+        result_url="https://example.test/1.png",
+        result_urls=None,
+        credits_spent=5,
+        created_at=datetime.now(timezone.utc),
+        is_public_feed=False,
+        is_prompt_library=False,
+        source_feed_gen_id=44,
+    )
+
+    payload = _gen_out(gen).model_dump()
+
+    assert payload["prompt"] == ""
+    assert payload["prompt_hidden"] is True
+    assert payload["prompt_actions_allowed"] is False
 
 
 def test_generation_out_omits_missing_local_uploads(tmp_path, monkeypatch) -> None:
@@ -675,6 +766,108 @@ async def test_webapp_prompt_use_marks_prompt_usage(client, monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_webapp_prompt_detail_hides_pending_prompt_from_other_user(client, monkeypatch) -> None:
+    from db.models import PromptCategory, PromptStatus
+
+    prompt = SimpleNamespace(
+        id=8,
+        title="Pending",
+        description="private",
+        category=PromptCategory.photo,
+        tags=[],
+        uses_count=0,
+        likes=0,
+        status=PromptStatus.pending,
+        is_public=True,
+        prompt_text="secret prompt",
+        model=None,
+        preview_url=None,
+        author_id=999,
+        reject_reason=None,
+        ai_moderation_decision=None,
+        ai_moderation_risk=None,
+        ai_moderation_reason=None,
+        ai_moderation_recommendation=None,
+        ai_moderated_at=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+
+    response = await client.get("/api/v1/prompts/8")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_webapp_prompt_like_rejects_non_public_prompt(client, monkeypatch) -> None:
+    from db.models import PromptCategory, PromptStatus
+
+    prompt = SimpleNamespace(
+        id=9,
+        title="Pending",
+        description="private",
+        category=PromptCategory.photo,
+        tags=[],
+        uses_count=0,
+        likes=0,
+        status=PromptStatus.pending,
+        is_public=True,
+        prompt_text="secret prompt",
+        model=None,
+        preview_url=None,
+        author_id=999,
+        reject_reason=None,
+        ai_moderation_decision=None,
+        ai_moderation_risk=None,
+        ai_moderation_reason=None,
+        ai_moderation_recommendation=None,
+        ai_moderated_at=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    like_prompt = AsyncMock()
+    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr("db.prompt_repository.like_prompt", like_prompt)
+
+    response = await client.post("/api/v1/prompts/9/like")
+
+    assert response.status_code == 404
+    like_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webapp_prompt_share_link_rejects_non_public_prompt(client, monkeypatch) -> None:
+    from db.models import PromptCategory, PromptStatus
+
+    prompt = SimpleNamespace(
+        id=10,
+        title="Pending",
+        description="private",
+        category=PromptCategory.photo,
+        tags=[],
+        uses_count=0,
+        likes=0,
+        status=PromptStatus.pending,
+        is_public=True,
+        prompt_text="secret prompt",
+        model=None,
+        preview_url=None,
+        author_id=999,
+        reject_reason=None,
+        ai_moderation_decision=None,
+        ai_moderation_risk=None,
+        ai_moderation_reason=None,
+        ai_moderation_recommendation=None,
+        ai_moderated_at=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+
+    response = await client.get("/api/v1/prompts/10/link")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_webapp_remove_generation_from_library(client, monkeypatch) -> None:
     remove_from_library = AsyncMock(return_value=SimpleNamespace(id=77, is_prompt_library=False))
     monkeypatch.setattr("api.miniapp_routes.repo.remove_from_library", remove_from_library)
@@ -697,6 +890,43 @@ async def test_webapp_remove_missing_generation_from_library_returns_404(client,
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "blocked_repo_method"),
+    [
+        ("/api/v1/generations/77/share", "share_to_feed"),
+        ("/api/v1/generations/77/share-library", "share_to_library"),
+        ("/api/v1/generations/77/publish", "share_to_feed"),
+    ],
+)
+async def test_webapp_publish_actions_reject_feed_derivatives(client, monkeypatch, path, blocked_repo_method) -> None:
+    generation = SimpleNamespace(id=77, user_id=1, source_feed_gen_id=12)
+    blocked = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.get_generation_by_id", AsyncMock(return_value=generation))
+    monkeypatch.setattr(f"api.miniapp_routes.repo.{blocked_repo_method}", blocked)
+
+    response = await client.post(path)
+
+    assert response.status_code == 403
+    blocked.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webapp_feed_link_uses_viewer_referral_for_public_posts(client, monkeypatch) -> None:
+    increment_feed_share = AsyncMock(return_value=SimpleNamespace(id=88, is_public_feed=True))
+    monkeypatch.setattr("api.miniapp_routes.repo.increment_feed_share", increment_feed_share)
+    monkeypatch.setattr("api.miniapp_routes.settings.BOT_USERNAME", "@TestBot")
+
+    response = await client.get("/api/v1/feed/88/link")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["gen_id"] == 88
+    assert payload["link"].startswith("https://t.me/TestBot?start=")
+    assert "__feed_88" in payload["link"]
+    increment_feed_share.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_generate_image_rejects_invalid_reference_without_spending_credits(client, monkeypatch) -> None:
     spend_credits = AsyncMock(return_value=True)
     monkeypatch.setattr("api.miniapp_routes.repo.resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4)))
@@ -714,6 +944,105 @@ async def test_generate_image_rejects_invalid_reference_without_spending_credits
 
     assert response.status_code == 422
     spend_credits.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webapp_generation_poll_refunds_stale_unfinished_task(client, monkeypatch) -> None:
+    stale_started = datetime.now(timezone.utc) - timedelta(minutes=30)
+    pending = SimpleNamespace(
+        id=77,
+        user_id=1,
+        model="nano-banana-pro",
+        gen_type=GenerationType.image,
+        prompt="cat portrait",
+        status=GenerationStatus.processing,
+        task_id="stale-task",
+        result_url=None,
+        result_urls=None,
+        credits_spent=4,
+        created_at=stale_started,
+        image_session_id=None,
+        is_public_feed=False,
+        is_prompt_library=False,
+        source_feed_gen_id=None,
+    )
+    failed = SimpleNamespace(
+        **{
+            **pending.__dict__,
+            "status": GenerationStatus.failed,
+            "error_msg": "Generation timed out before completion",
+            "finished_at": datetime.now(timezone.utc),
+        }
+    )
+    get_generation_by_id = AsyncMock(side_effect=[pending, failed])
+    fail_generation = AsyncMock(return_value=True)
+    add_credits = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.get_generation_by_id", get_generation_by_id)
+    monkeypatch.setattr("api.miniapp_routes.image_service.poll_kieai_result_urls", AsyncMock(return_value=None))
+    monkeypatch.setattr("api.miniapp_routes.repo.fail_generation", fail_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.add_credits", add_credits)
+
+    response = await client.get("/api/v1/generations/77")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    fail_generation.assert_awaited_once()
+    assert fail_generation.await_args.args[1:] == (77, "Generation timed out before completion")
+    add_credits.assert_awaited_once()
+    assert add_credits.await_args.args[1:] == (1, 4)
+
+
+def test_normalize_public_urls_rejects_private_hosts() -> None:
+    with pytest.raises(Exception) as exc:
+        _normalize_public_urls("http://127.0.0.1/private.png")
+
+    assert getattr(exc.value, "status_code", None) == 422
+
+
+@pytest.mark.asyncio
+async def test_data_uri_from_url_rejects_oversized_reference(monkeypatch) -> None:
+    from api import miniapp_routes
+
+    class FakeResponse:
+        status_code = 200
+        headers = {
+            "content-type": "image/png",
+            "content-length": str(miniapp_routes.MAX_REFERENCE_IMAGE_BYTES + 1),
+        }
+        url = "https://cdn.example.test/ref.png"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self):
+            yield b"\x89PNG\r\n\x1a\n"
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("api.miniapp_routes.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr("api.miniapp_routes._validate_fetchable_public_url", AsyncMock())
+
+    with pytest.raises(Exception) as exc:
+        await _data_uri_from_url("https://cdn.example.test/ref.png")
+
+    assert getattr(exc.value, "status_code", None) == 413
 
 
 @pytest.mark.asyncio
@@ -889,6 +1218,54 @@ async def test_generate_image_normalizes_square_4k_before_pricing(client, monkey
 
 
 @pytest.mark.asyncio
+async def test_generate_image_spends_selected_quality_price(client, monkeypatch) -> None:
+    resolve_image_model_cost = AsyncMock(return_value=SimpleNamespace(credits=5))
+    spend_credits = AsyncMock(return_value=True)
+    image_generate = AsyncMock(return_value=SimpleNamespace(task_id="img_task_4k"))
+
+    async def fake_create_generation(_session, _user_id, model, gen_type, prompt_text, credits_spent, **_kwargs):
+        return SimpleNamespace(
+            id=504,
+            model=model,
+            gen_type=gen_type,
+            prompt=prompt_text,
+            status=GenerationStatus.processing,
+            result_url=None,
+            result_urls=None,
+            credits_spent=credits_spent,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+        )
+
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_image_model_cost", resolve_image_model_cost)
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend_credits)
+    monkeypatch.setattr("api.miniapp_routes.repo.create_image_session", AsyncMock(return_value=SimpleNamespace(id=80)))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes.repo.update_image_session_last_prompt", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes.image_service.generate_image", image_generate)
+
+    response = await client.post(
+        "/api/v1/generate/image",
+        json={
+            "model": "nano-banana-pro",
+            "prompt": "cat portrait",
+            "aspect_ratio": "16:9",
+            "quality": "4K",
+        },
+    )
+
+    assert response.status_code == 202
+    assert resolve_image_model_cost.await_args.kwargs["quality"] == "4K"
+    spend_credits.assert_awaited_once()
+    assert spend_credits.await_args.args[1:] == (1, 5)
+    assert response.json()["credits_spent"] == 5
+    assert image_generate.await_args.kwargs["quality"] == "4K"
+
+
+@pytest.mark.asyncio
 async def test_generate_image_rejects_too_many_refs_for_single_ref_model(client, monkeypatch) -> None:
     monkeypatch.setattr("api.miniapp_routes.repo.resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4)))
 
@@ -991,6 +1368,7 @@ async def test_image_models_include_updated_wan_reference_limit(client, monkeypa
     assert response.status_code == 200
     payload = response.json()[0]
     assert payload["max_refs"] == 9
+    assert payload["aspect_ratio_modes"] == ["text"]
 
 
 async def test_generate_video_uses_total_duration_cost(client, monkeypatch) -> None:
@@ -1142,6 +1520,7 @@ async def test_feed_remix_image_uses_and_saves_reference(client, monkeypatch) ->
         assert kwargs["image_session_id"] == 77
         assert kwargs["parent_generation_id"] == 88
         assert kwargs["action_type"] == ImageGenerationAction.remix
+        assert kwargs["source_feed_gen_id"] == 88
         return SimpleNamespace(
             id=701,
             model=model,
@@ -1153,6 +1532,7 @@ async def test_feed_remix_image_uses_and_saves_reference(client, monkeypatch) ->
             created_at=datetime.now(timezone.utc),
             is_public_feed=False,
             is_prompt_library=False,
+            source_feed_gen_id=kwargs.get("source_feed_gen_id"),
         )
 
     monkeypatch.setattr("api.miniapp_routes.repo.get_public_feed_generation", AsyncMock(return_value=source))
@@ -1177,6 +1557,9 @@ async def test_feed_remix_image_uses_and_saves_reference(client, monkeypatch) ->
     )
 
     assert response.status_code == 202
+    assert response.json()["prompt"] == ""
+    assert response.json()["prompt_hidden"] is True
+    assert response.json()["prompt_actions_allowed"] is False
     create_image_session.assert_awaited_once()
     assert create_image_session.await_args.kwargs["mode"] == "image"
     assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/source.jpg"
@@ -1209,6 +1592,7 @@ async def test_feed_remix_image_prefers_user_reference_over_source(client, monke
             created_at=datetime.now(timezone.utc),
             is_public_feed=False,
             is_prompt_library=False,
+            source_feed_gen_id=kwargs.get("source_feed_gen_id"),
         )
 
     monkeypatch.setattr("api.miniapp_routes.repo.get_public_feed_generation", AsyncMock(return_value=source))
@@ -1234,6 +1618,7 @@ async def test_feed_remix_image_prefers_user_reference_over_source(client, monke
     )
 
     assert response.status_code == 202
+    assert response.json()["prompt_hidden"] is True
     assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/user-ref.jpg"
     assert image_generate.await_args.kwargs["image_url"] == "https://example.test/user-ref.jpg"
 
@@ -1268,6 +1653,7 @@ async def test_feed_remix_midjourney_imagine_uses_hidden_prompt_and_source_ref(c
             created_at=datetime.now(timezone.utc),
             is_public_feed=False,
             is_prompt_library=False,
+            source_feed_gen_id=kwargs.get("source_feed_gen_id"),
         )
 
     monkeypatch.setattr("api.miniapp_routes.repo.get_public_feed_generation", AsyncMock(return_value=source))
@@ -1291,6 +1677,8 @@ async def test_feed_remix_midjourney_imagine_uses_hidden_prompt_and_source_ref(c
 
     assert response.status_code == 202
     assert response.json()["model"] == "midjourney-imagine"
+    assert response.json()["prompt"] == ""
+    assert response.json()["prompt_hidden"] is True
     assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/source-mj.jpg"
     assert create_image_session.await_args.kwargs["base_prompt"] == "hidden mj prompt"
     imagine.assert_awaited_once_with(
@@ -1359,6 +1747,7 @@ async def test_feed_remix_midjourney_blend_uses_source_ref_and_reference_urls(cl
             created_at=datetime.now(timezone.utc),
             is_public_feed=False,
             is_prompt_library=False,
+            source_feed_gen_id=kwargs.get("source_feed_gen_id"),
         )
 
     monkeypatch.setattr("api.miniapp_routes.repo.get_public_feed_generation", AsyncMock(return_value=source))
@@ -1384,6 +1773,7 @@ async def test_feed_remix_midjourney_blend_uses_source_ref_and_reference_urls(cl
 
     assert response.status_code == 202
     assert response.json()["model"] == "midjourney-blend"
+    assert response.json()["prompt_hidden"] is True
     assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/source-blend.jpg"
     assert data_uri_from_url.await_args_list[0].args == ("https://example.test/source-blend.jpg",)
     assert data_uri_from_url.await_args_list[1].args == ("https://example.test/extra.jpg",)

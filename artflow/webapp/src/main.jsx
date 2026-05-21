@@ -83,8 +83,8 @@ function themeLabel(theme) {
 
 // ── API client ───────────────────────────────────────────────────────────────
 
-async function publishGeneration(id) {
-  return api(`/generations/${id}/publish`, { method: "POST" });
+async function saveGenerationPrompt(id) {
+  return api(`/generations/${id}/share-library`, { method: "POST" });
 }
 
 async function photoPromptApi(file) {
@@ -137,11 +137,14 @@ function realtimeAuthMessage() {
 
 function generationFromRealtimeEvent(payload) {
   if (!payload || payload.type !== "generation.updated") return null;
+  const promptHidden = Boolean(payload.prompt_hidden) || payload.prompt_actions_allowed === false;
   return {
     id: payload.id || payload.generation_id,
     model: payload.model || "",
     gen_type: payload.gen_type || "image",
-    prompt: payload.prompt || "",
+    prompt: promptHidden ? "" : payload.prompt || "",
+    prompt_hidden: promptHidden,
+    prompt_actions_allowed: !promptHidden && payload.prompt_actions_allowed !== false,
     status: payload.status || "pending",
     result_url: payload.result_url || null,
     result_urls: Array.isArray(payload.result_urls) ? payload.result_urls.filter(Boolean) : [],
@@ -159,6 +162,49 @@ function formatCredits(value) {
   const num = Number(value || 0);
   if (!Number.isFinite(num)) return "0";
   return String(Number.isInteger(num) ? num : Number(num.toFixed(2))).replace(/\.0+$/, "");
+}
+
+const STYLE_EDIT_OPTIONS = [
+  {
+    value: "clothes",
+    label: "Одежду",
+    hint: "Например: белый костюм, шелковое платье, oversize худи.",
+  },
+  {
+    value: "haircut",
+    label: "Прическу",
+    hint: "Например: каре, высокий хвост, мягкие локоны.",
+  },
+  {
+    value: "hair_color",
+    label: "Цвет волос",
+    hint: "Например: медный блонд, холодный брюнет, пастельно-розовый.",
+  },
+  {
+    value: "nails",
+    label: "Ногти",
+    hint: "Например: нюдовый маникюр, красный френч, хром.",
+  },
+];
+
+const STYLE_EDIT_PROMPT_RE = /^Edit the reference image\. Change ONLY .*? to: (.*?)\. Keep /s;
+
+function publicPromptText(value) {
+  const text = String(value || "").trim();
+  const match = text.match(STYLE_EDIT_PROMPT_RE);
+  return match?.[1]?.trim() || text;
+}
+
+function styleEditPrompt(editKind, detailValue) {
+  const detail = String(detailValue || "").trim();
+  if (!editKind || !detail) return detail;
+  const templates = {
+    clothes: `Edit the reference image. Change ONLY the main person's clothing to: ${detail}. Keep the face, hair, body, pose, background, vehicles, and all other objects unchanged. Do not recolor anything except the clothing.`,
+    haircut: `Edit the reference image. Change ONLY the main person's hairstyle or haircut to: ${detail}. Keep the face, hair color, clothing, body, pose, background, vehicles, and all other objects unchanged.`,
+    hair_color: `Edit the reference image. Change ONLY the main person's hair color to: ${detail}. Keep the hairstyle, face, skin, clothing, body, pose, background, cars, vehicles, and all other objects unchanged. Do not recolor anything except the hair.`,
+    nails: `Edit the reference image. Change ONLY the main person's nails or manicure to: ${detail}. Keep the hands shape, face, hair, clothing, body, pose, background, vehicles, and all other objects unchanged.`,
+  };
+  return templates[editKind] || detail;
 }
 
 async function copyText(value) {
@@ -297,6 +343,19 @@ function generationResultUrls(generation) {
   const urls = Array.isArray(generation?.result_urls) ? generation.result_urls.filter(Boolean) : [];
   if (!urls.length && generation?.result_url) urls.push(generation.result_url);
   return urls;
+}
+
+function generationPromptHidden(generation) {
+  return Boolean(generation?.prompt_hidden) || generation?.prompt_actions_allowed === false;
+}
+
+function generationPromptActionsAllowed(generation) {
+  return !generationPromptHidden(generation);
+}
+
+function generationDisplayPrompt(generation, fallback = "") {
+  if (generationPromptHidden(generation)) return "Промпт скрыт";
+  return publicPromptText(generation?.prompt || fallback || "");
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
@@ -791,13 +850,25 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false, onNot
   );
 }
 
-function GenerationResultCard({ generation, kind = "image", model, prompt, onNotice }) {
+function GenerationResultCard({
+  generation,
+  kind = "image",
+  model,
+  prompt,
+  onNotice,
+  onRepeat,
+  onRemixImage,
+  onStyleImage,
+  onAnimateImage,
+}) {
   if (!generation?.result_url) return null;
   const mediaType = generation.gen_type || kind;
   const resultUrls = generationResultUrls(generation);
   const isImage = mediaType === "image";
   const isMusic = mediaType === "music";
-  const displayPrompt = generation.prompt || prompt || "";
+  const promptHidden = generationPromptHidden(generation);
+  const promptActionsAllowed = generationPromptActionsAllowed(generation);
+  const displayPrompt = generationDisplayPrompt(generation, prompt);
 
   return (
     <div className="resultCard">
@@ -823,17 +894,39 @@ function GenerationResultCard({ generation, kind = "image", model, prompt, onNot
         </div>
         <p className="resultPrompt">{displayPrompt}</p>
         <div className="resultActions">
-          <button type="button" className="ghost actionButton" onClick={() => openExternalUrl(generation.result_url)}>
+          {isImage && onRemixImage && (
+            <button type="button" className="ghost actionButton" onClick={() => onRemixImage(generation)}>
+              ✨ Ремикс
+            </button>
+          )}
+          {onRepeat && (
+            <button type="button" className="ghost actionButton" onClick={onRepeat}>
+              🔁 Ещё вариант
+            </button>
+          )}
+          {isImage && onStyleImage && (
+            <button type="button" className="ghost actionButton wideAction" onClick={() => onStyleImage(generation)}>
+              💅 Изменить образ
+            </button>
+          )}
+          {isImage && onAnimateImage && (
+            <button type="button" className="ghost actionButton wideAction" onClick={() => onAnimateImage(generation)}>
+              🎬 Оживить
+            </button>
+          )}
+          {!promptHidden && displayPrompt && (
+            <button type="button" className="ghost actionButton wideAction" onClick={async () => {
+              const ok = await copyText(displayPrompt);
+              if (ok) onNotice?.({ type: "success", message: "Промпт скопирован" });
+            }}>
+              📋 Скопировать промпт
+            </button>
+          )}
+          <button type="button" className="ghost actionButton wideAction" onClick={() => openExternalUrl(generation.result_url)}>
             Открыть оригинал
           </button>
-          <button type="button" className="ghost actionButton" onClick={async () => {
-            const ok = await copyText(displayPrompt);
-            if (ok) onNotice?.({ type: "success", message: "Промпт скопирован" });
-          }}>
-            📋 Скопировать промпт
-          </button>
         </div>
-        {isImage && (
+        {isImage && promptActionsAllowed && (
           <GenShareButtons genId={generation.id} initialFeed={generation.is_public_feed} initialLib={generation.is_prompt_library} onNotice={onNotice} />
         )}
       </div>
@@ -1012,6 +1105,8 @@ function Studio({
   const [refError, setRefError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [improvingPrompt, setImprovingPrompt] = useState(false);
+  const [styleEditOpen, setStyleEditOpen] = useState(false);
+  const [styleEditKind, setStyleEditKind] = useState("");
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -1023,8 +1118,16 @@ function Studio({
       setScenario("fast");
       return;
     }
-    setScenario("fast");
+    const allowed = kind === "image" ? ["fast", "edit", "all"] : ["fast", "quality", "i2v", "all"];
+    setScenario((prev) => allowed.includes(prev) ? prev : "fast");
   }, [kind, isRemix, remixSource?.gen_type]);
+
+  useEffect(() => {
+    if (kind !== "image") {
+      setStyleEditOpen(false);
+      setStyleEditKind("");
+    }
+  }, [kind]);
 
   useEffect(() => {
     if (!remixSource) {
@@ -1032,6 +1135,8 @@ function Studio({
       setRefError("");
       return;
     }
+    setStyleEditOpen(false);
+    setStyleEditKind("");
     setKind(remixSource.gen_type === "video" ? "video" : "image");
     if (remixSource.gen_type === "image") {
       setScenario("edit");
@@ -1200,16 +1305,28 @@ function Studio({
   const durations = current?.durations || current?.duration_options || [];
   const resolutions = current?.resolutions || [];
   const counts = current?.counts || [1];
+  const ratioModes = Array.isArray(current?.aspect_ratio_modes) && current.aspect_ratio_modes.length
+    ? current.aspect_ratio_modes
+    : modes;
 
   const canUseReference = modes.includes("image");
   const requiresReference = mode === "image" && canUseReference;
   const showMode = modes.length > 1;
-  const showRatio = (current?.aspect_ratios || []).length > 1;
+  const showRatio = (current?.aspect_ratios || []).length > 1 && ratioModes.includes(mode);
   const showQuality = kind === "image" && qualityOptions.length > 1;
   const showCount = kind === "image" && counts.length > 1;
   const showDuration = kind === "video" && durations.length > 0;
   const showResolution = kind === "video" && resolutions.length > 1;
   const showModeOption = kind === "video" && modeOptions.length > 1;
+  const styleEditChoice = STYLE_EDIT_OPTIONS.find((option) => option.value === styleEditKind) || null;
+  const styleEditReady = !styleEditOpen || Boolean(styleEditKind);
+  const stylePromptPlaceholder = styleEditChoice
+    ? styleEditChoice.hint
+    : styleEditOpen
+      ? "Выбери, что меняем в образе, затем напиши детали..."
+      : kind === "video"
+        ? "Опиши сцену, движение и настроение..."
+        : "Опиши идею изображения...";
 
   async function handleImprovePrompt() {
     if (!prompt.trim() || improvingPrompt) return;
@@ -1229,6 +1346,11 @@ function Studio({
   function handleGenerate() {
     if (!current) return;
     const userProvidedRefUrls = normalizedRefUrls.filter((url) => !isRemixSourceRef(url));
+
+    if (styleEditOpen && !styleEditKind) {
+      onNotice?.({ type: "warning", message: "Выбери, что поменять в образе." });
+      return;
+    }
 
     if (requiresReference && !userProvidedRefUrls.length && !remixSourceRefUrl) {
       setRefError("Укажи полную ссылку на референс вида https://...");
@@ -1250,10 +1372,11 @@ function Studio({
       : [];
     const effectiveRefUrl = effectiveRefUrls[0] || null;
 
+    const promptForGeneration = styleEditKind ? styleEditPrompt(styleEditKind, prompt) : prompt;
     const payload = {
       model,
-      prompt,
-      prompt_id: kind === "image" ? selectedPrompt?.id : null,
+      prompt: promptForGeneration,
+      prompt_id: kind === "image" && !styleEditKind ? selectedPrompt?.id : null,
       mode,
       aspect_ratio: ratio,
       quality,
@@ -1268,6 +1391,63 @@ function Studio({
 
     if (isRemix) onRemixGenerate(remixSource.gen_id, payload);
     else onGenerate(kind, payload);
+  }
+
+  function resultImageUrl(item) {
+    return generationResultUrls(item)[0] || item?.result_url || "";
+  }
+
+  function handleResultRepeat() {
+    if (!prompt.trim() || isRemix || generationPromptHidden(generation)) return;
+    handleGenerate();
+  }
+
+  function handleResultRemix(item) {
+    const url = resultImageUrl(item);
+    if (!url) return;
+    clearRemix?.();
+    setKind("image");
+    setScenario("edit");
+    setMode("image");
+    setSelectedPrompt(null);
+    setStyleEditOpen(false);
+    setStyleEditKind("");
+    setPrompt("");
+    setRefUrls([url]);
+    setRefError(isAbsoluteHttpUrl(url) ? "" : "Для ремикса нужна полная ссылка вида https://...");
+    onNotice?.({ type: "success", message: "Референс добавлен. Напиши, что изменить." });
+  }
+
+  function handleResultStyle(item) {
+    const url = resultImageUrl(item);
+    if (!url) return;
+    clearRemix?.();
+    setKind("image");
+    setScenario("edit");
+    setMode("image");
+    setSelectedPrompt(null);
+    setStyleEditOpen(true);
+    setStyleEditKind("");
+    setPrompt("");
+    setRefUrls([url]);
+    setRefError(isAbsoluteHttpUrl(url) ? "" : "Для изменения образа нужна полная ссылка вида https://...");
+    onNotice?.({ type: "success", message: "Выбери, что поменять в образе." });
+  }
+
+  function handleResultAnimate(item) {
+    const url = resultImageUrl(item);
+    if (!url) return;
+    clearRemix?.();
+    setKind("video");
+    setScenario("i2v");
+    setMode("image");
+    setSelectedPrompt(null);
+    setStyleEditOpen(false);
+    setStyleEditKind("");
+    setPrompt("");
+    setRefUrls([url]);
+    setRefError(isAbsoluteHttpUrl(url) ? "" : "Для оживления нужна полная ссылка вида https://...");
+    onNotice?.({ type: "success", message: "Кадр добавлен для видео. Опиши движение." });
   }
 
   const scenarios = kind === "image"
@@ -1443,12 +1623,33 @@ function Studio({
         )}
       </div>
 
+      {kind === "image" && styleEditOpen && (
+        <SettingsRow label="Изменить образ">
+          <div className="tabs soft">
+            {STYLE_EDIT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={styleEditKind === option.value ? "active" : ""}
+                onClick={() => {
+                  setStyleEditKind(option.value);
+                  setPrompt("");
+                  setSelectedPrompt(null);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </SettingsRow>
+      )}
+
       {!isRemix && (
         <SettingsRow label="Промпт">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={kind === "video" ? "Опиши сцену, движение и настроение..." : "Опиши идею изображения..."}
+            placeholder={stylePromptPlaceholder}
           />
           {selectedPrompt && (
             <div className="selectedPrompt">
@@ -1467,7 +1668,7 @@ function Studio({
 
       <button
         className="primary studioGenerate"
-        disabled={!current || (!isRemix && requiresPrompt && !prompt.trim()) || (requiresReference && !normalizedRefUrl) || !hasValidRefUrl}
+        disabled={!current || (!isRemix && requiresPrompt && !prompt.trim()) || (styleEditOpen && !styleEditReady) || (requiresReference && !normalizedRefUrl) || !hasValidRefUrl}
         onClick={handleGenerate}
       >
         {kind === "video" ? "Создать видео" : "Сгенерировать"}
@@ -1487,7 +1688,17 @@ function Studio({
         </div>
       )}
 
-      <GenerationResultCard generation={generation} kind={kind} model={model} prompt={prompt} onNotice={onNotice} />
+      <GenerationResultCard
+        generation={generation}
+        kind={kind}
+        model={model}
+        prompt={prompt}
+        onNotice={onNotice}
+        onRepeat={!isRemix && prompt.trim() && !generationPromptHidden(generation) ? handleResultRepeat : null}
+        onRemixImage={handleResultRemix}
+        onStyleImage={handleResultStyle}
+        onAnimateImage={supportedVideoModels.length ? handleResultAnimate : null}
+      />
     </section>
   );
 }
@@ -1610,6 +1821,9 @@ function History({ history, loading, onNotice, scope = "all" }) {
         : <div className="historyList">
             {visibleHistory.map((g, i) => {
               const resultUrls = generationResultUrls(g);
+              const promptHidden = generationPromptHidden(g);
+              const promptActionsAllowed = generationPromptActionsAllowed(g);
+              const displayPrompt = generationDisplayPrompt(g);
               return (
               <div key={g.id} className="historyCard">
                 <div className="historyMediaWrap">
@@ -1630,22 +1844,24 @@ function History({ history, loading, onNotice, scope = "all" }) {
                     <span className="modelBadge">{g.model}</span>
                     <span style={{ fontSize: 11, color: getStatusColor(g.status) }}>{formatGenerationStatus(g.status)}</span>
                   </div>
-                  <p className="feedPrompt">{g.prompt}</p>
+                  <p className="feedPrompt">{displayPrompt}</p>
                   {g.gen_type === "music" && g.result_url && (
                     <audio controls src={g.result_url} style={{ width: "100%", borderRadius: 8, marginTop: 6 }} />
                   )}
                   <div className="historyActionRow">
                     <button type="button" className="ghost" onClick={() => g.result_url && openExternalUrl(g.result_url)} disabled={!g.result_url}>👁 Открыть</button>
-                    <button type="button" className="ghost" onClick={async () => {
-                      const ok = await copyText(g.prompt || "");
-                      if (ok) onNotice?.({ type: "success", message: "Промпт скопирован" });
-                    }} disabled={!g.prompt}>📋 Промпт</button>
+                    {!promptHidden && g.prompt && (
+                      <button type="button" className="ghost" onClick={async () => {
+                        const ok = await copyText(g.prompt || "");
+                        if (ok) onNotice?.({ type: "success", message: "Промпт скопирован" });
+                      }}>📋 Промпт</button>
+                    )}
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                     <small style={{ color: "var(--text-ghost)", fontSize: 11 }}>{formatDate(g.created_at)}</small>
                     <small style={{ color: "var(--accent-text)", fontSize: 11 }}>−{formatCredits(g.credits_spent)} 💋</small>
                   </div>
-                  {g.status === "done" && g.gen_type === "image" && (
+                  {g.status === "done" && g.gen_type === "image" && promptActionsAllowed && (
                     <GenShareButtons genId={g.id} initialFeed={g.is_public_feed} initialLib={g.is_prompt_library} onNotice={onNotice} />
                   )}
                 </div>
@@ -2418,15 +2634,18 @@ function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice, target = 
 
 function FullViewer({ item, onClose }) {
   if (!item) return null;
+  const promptActionsAllowed = generationPromptActionsAllowed(item);
   return <div className="viewer" onClick={onClose}>
     <div className="viewerPanel" onClick={(e) => e.stopPropagation()}>
       <button className="viewerClose" onClick={onClose}>×</button>
       {item.result_url ? <img src={item.result_url} alt="" /> : <Art type="a" />}
       <div className="viewerMeta">
         <b>{item.model || "Generation"}</b>
-        <p>{item.prompt || "Промпт скрыт"}</p>
+        <p>{generationDisplayPrompt(item)}</p>
         <div className="viewerActions">
-          <button onClick={() => item.id && publishGeneration(item.id)}>💾 Сохранить промпт</button>
+          {promptActionsAllowed && item.id && (
+            <button onClick={() => saveGenerationPrompt(item.id)}>💾 Сохранить промпт</button>
+          )}
           <button onClick={onClose}>Закрыть</button>
         </div>
       </div>
@@ -2625,10 +2844,12 @@ function App() {
   // Poll image/video generation
   useEffect(() => {
     if (!pollId) return;
+    let failures = 0;
     clearInterval(poll.current);
     poll.current = setInterval(async () => {
       try {
         const g = await api(`/generations/${pollId}`);
+        failures = 0;
         setGeneration(g);
         if (["done", "failed"].includes(g.status)) {
           clearInterval(poll.current);
@@ -2640,11 +2861,19 @@ function App() {
             setScreen(generationScreen.current || "studio");
             tg()?.HapticFeedback?.notificationOccurred("success");
             setNotice({ type: "success", message: "Готово — показываю результат сразу." });
+          } else {
+            me.reload();
+            history.reload();
+            setNotice({ type: "error", message: "Генерация завершилась ошибкой. Если кредиты списались, они вернутся автоматически." });
           }
         }
-      } catch {
-        clearInterval(poll.current);
-        setPollId(null);
+      } catch (e) {
+        failures += 1;
+        if (e?.status === 404 || failures >= 12) {
+          clearInterval(poll.current);
+          setPollId(null);
+          setNotice({ type: "error", message: "Не удалось получить статус генерации. Историю можно обновить позже." });
+        }
       }
     }, 3500);
     return () => clearInterval(poll.current);
@@ -2653,19 +2882,25 @@ function App() {
   // Poll music generation
   useEffect(() => {
     if (!musicPollId) return;
+    let failures = 0;
     clearInterval(musicPoll.current);
     musicPoll.current = setInterval(async () => {
       try {
         const g = await api(`/generations/${musicPollId}`);
+        failures = 0;
         setMusicGen(g);
         if (["done", "failed"].includes(g.status)) {
           clearInterval(musicPoll.current);
           setMusicPollId(null);
-          if (g.status === "done") { me.reload(); history.reload(); }
+          me.reload();
+          history.reload();
         }
-      } catch {
-        clearInterval(musicPoll.current);
-        setMusicPollId(null);
+      } catch (e) {
+        failures += 1;
+        if (e?.status === 404 || failures >= 12) {
+          clearInterval(musicPoll.current);
+          setMusicPollId(null);
+        }
       }
     }, 5000);
     return () => clearInterval(musicPoll.current);

@@ -48,7 +48,7 @@ def get_generation_result_keyboard(generation_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="✨ Ремикс", callback_data=f"feed:remix:{generation_id}"),
-        InlineKeyboardButton(text="💾 Сохранить промпт", callback_data=f"feed:publish:{generation_id}"),
+        InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"feed:publish:{generation_id}"),
     )
     builder.row(
         InlineKeyboardButton(text="🔁 Ещё вариант", callback_data=f"feed:again:{generation_id}"),

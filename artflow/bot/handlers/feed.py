@@ -583,18 +583,21 @@ async def cb_feed_remix(
         "✨ <b>Ремикс готов</b>\n\n"
         "Референс из выбранной генерации сохранён.\n"
         "Теперь напиши, что изменить.",
-        reply_markup=image_session_kb(gen.id),
+        reply_markup=image_session_kb(gen.id, allow_publish=False),
     )
     await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("feed:publish:"))
-async def cb_publish_generation(call: CallbackQuery, session: AsyncSession) -> None:
+async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     generation_id = int(call.data.split(":")[-1])
     gen = await repo.get_generation_by_id(session, generation_id)
 
     if not gen:
         await call.answer("Генерация не найдена", show_alert=True)
+        return
+    if gen.user_id != db_user.id or getattr(gen, "source_feed_gen_id", None):
+        await call.answer("Этот результат нельзя добавить в библиотеку", show_alert=True)
         return
 
     gen.is_public_feed = True

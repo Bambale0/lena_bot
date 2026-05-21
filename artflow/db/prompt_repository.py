@@ -224,6 +224,10 @@ async def increment_usage(session: AsyncSession, prompt_id: int) -> None:
 
 
 async def like_prompt(session: AsyncSession, prompt_id: int, user_id: int) -> tuple[UserPrompt | None, str]:
+    current = await get_prompt_by_id(session, prompt_id)
+    if not current or current.status != PromptStatus.approved or not current.is_public:
+        return None, "missing"
+
     try:
         inserted_like = await session.execute(
             insert(PromptLike)
@@ -236,7 +240,11 @@ async def like_prompt(session: AsyncSession, prompt_id: int, user_id: int) -> tu
         if liked_now:
             await session.execute(
                 update(UserPrompt)
-                .where(UserPrompt.id == prompt_id)
+                .where(
+                    UserPrompt.id == prompt_id,
+                    UserPrompt.status == PromptStatus.approved,
+                    UserPrompt.is_public.is_(True),
+                )
                 .values(likes=UserPrompt.likes + 1)
             )
 

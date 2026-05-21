@@ -129,7 +129,7 @@ async def upload_file_stream(
 ) -> str:
     client = get_upload_client()
     files = {"file": (filename, data, content_type)}
-    form = {"path": upload_path}
+    form = {"uploadPath": upload_path}
     for attempt in range(3):
         try:
             resp = await client.post("/api/file-stream-upload", data=form, files=files)

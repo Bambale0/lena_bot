@@ -4,7 +4,13 @@ from types import SimpleNamespace
 
 from bot.handlers.start import _help_text
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
-from bot.keyboards.models import after_generation_kb, image_session_kb, image_style_edit_kb, video_params_kb
+from bot.keyboards.models import (
+    after_generation_kb,
+    image_session_kb,
+    image_style_edit_kb,
+    public_prompt_text,
+    video_params_kb,
+)
 from bot.keyboards.payment import topup_kb
 from bot.ui.main_menu import render_main_menu
 
@@ -57,11 +63,52 @@ def test_video_params_kb_hides_grok_i2v_ratio_for_single_ref() -> None:
     assert all(button.callback_data != "vpar_ratio:16:9" for button in buttons)
 
 
-def test_image_session_keyboard_exposes_save_prompt_and_style_edit() -> None:
+def test_image_session_keyboard_keeps_library_button_and_style_edit() -> None:
     buttons = flatten_buttons(image_session_kb(123))
     by_text = {button.text: button.callback_data for button in buttons}
-    assert by_text["💾 Сохранить промпт"] == "gen:library:123"
+    assert by_text["📚 В библиотеку"] == "gen:library:123"
     assert by_text["💅 Изменить образ"] == "img_session:style:123"
+
+
+def test_image_session_keyboard_can_copy_short_prompt() -> None:
+    prompt = "короткий промпт"
+    buttons = flatten_buttons(image_session_kb(123, prompt=prompt))
+    copy_button = next(button for button in buttons if button.text == "📋 Скопировать промпт")
+    assert copy_button.copy_text.text == prompt
+
+
+def test_image_session_keyboard_keeps_actions_when_prompt_is_too_long_for_copy_button() -> None:
+    prompt = "очень длинный промпт " * 30
+    buttons = flatten_buttons(image_session_kb(123, prompt=prompt))
+    by_text = {button.text: button for button in buttons}
+    assert by_text["📋 Показать промпт"].callback_data == "gen:prompt:123"
+    assert by_text["📤 В ленту"].callback_data == "gen:share:123"
+    assert by_text["📚 В библиотеку"].callback_data == "gen:library:123"
+
+
+def test_image_session_keyboard_hides_prompt_public_actions_for_feed_derivative() -> None:
+    prompt = "private feed prompt"
+    buttons = flatten_buttons(
+        image_session_kb(
+            123,
+            prompt=prompt,
+            allow_publish=False,
+            allow_copy_prompt=False,
+        )
+    )
+    texts = {button.text for button in buttons}
+    assert "📋 Скопировать промпт" not in texts
+    assert "📤 В ленту" not in texts
+    assert "📚 В библиотеку" not in texts
+
+
+def test_public_prompt_text_hides_service_style_wrapper() -> None:
+    prompt = (
+        "Edit the reference image. Change ONLY the main person's hair color to: розовый. "
+        "Keep the hairstyle, face, skin, clothing, body, pose, background, cars, vehicles, and all other objects unchanged. "
+        "Do not recolor anything except the hair."
+    )
+    assert public_prompt_text(prompt) == "розовый"
 
 
 def test_image_style_edit_keyboard_covers_requested_appearance_changes() -> None:
@@ -75,10 +122,35 @@ def test_image_style_edit_keyboard_covers_requested_appearance_changes() -> None
     }.issubset(callbacks)
 
 
-def test_after_generation_keyboard_uses_save_prompt_label() -> None:
+def test_after_generation_keyboard_uses_library_label() -> None:
     buttons = flatten_buttons(after_generation_kb(123, "image"))
     by_text = {button.text: button.callback_data for button in buttons}
-    assert by_text["💾 Сохранить промпт"] == "gen:library:123"
+    assert by_text["📚 В библиотеку"] == "gen:library:123"
+
+
+def test_after_generation_keyboard_keeps_actions_when_prompt_is_too_long_for_copy_button() -> None:
+    prompt = "очень длинный видео промпт " * 30
+    buttons = flatten_buttons(after_generation_kb(123, "video", prompt=prompt))
+    by_text = {button.text: button for button in buttons}
+    assert by_text["📋 Показать промпт"].callback_data == "gen:prompt:123"
+    assert by_text["📤 В ленту"].callback_data == "gen:share:123"
+    assert by_text["📚 В библиотеку"].callback_data == "gen:library:123"
+
+
+def test_after_generation_keyboard_can_hide_copy_and_publish_actions() -> None:
+    buttons = flatten_buttons(
+        after_generation_kb(
+            123,
+            "video",
+            prompt="private feed prompt",
+            allow_publish=False,
+            allow_copy_prompt=False,
+        )
+    )
+    texts = {button.text for button in buttons}
+    assert "📋 Скопировать промпт" not in texts
+    assert "📤 В ленту" not in texts
+    assert "📚 В библиотеку" not in texts
 
 
 def test_help_text_contains_support_contact() -> None:

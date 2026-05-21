@@ -1,7 +1,9 @@
 # bot/keyboards/models.py
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+import re
+
+from aiogram.types import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from api.image_service import MODEL_ASPECT_RATIOS, ImageModel
@@ -11,6 +13,23 @@ from db.models import ModelCost
 # ── Video capabilities ────────────────────────────────────────────────────────
 
 DEFAULT_MOTION_CONTROLS = ["auto", "pan_left", "pan_right", "zoom_in", "zoom_out", "orbit", "dolly_in", "dolly_out", "handheld", "cinematic"]
+COPY_TEXT_MAX_LENGTH = 256
+_STYLE_EDIT_PROMPT_RE = re.compile(r"^Edit the reference image\. Change ONLY .*? to: (?P<detail>.*?)\. Keep ", re.S)
+
+
+def public_prompt_text(prompt: str | None) -> str:
+    text = (prompt or "").strip()
+    match = _STYLE_EDIT_PROMPT_RE.search(text)
+    return match.group("detail").strip() if match else text
+
+
+def _prompt_copy_button(gen_id: int, prompt: str | None) -> InlineKeyboardButton | None:
+    text = public_prompt_text(prompt)
+    if not text:
+        return None
+    if len(text) <= COPY_TEXT_MAX_LENGTH:
+        return InlineKeyboardButton(text="📋 Скопировать промпт", copy_text=CopyTextButton(text=text))
+    return InlineKeyboardButton(text="📋 Показать промпт", callback_data=f"gen:prompt:{gen_id}")
 
 VIDEO_CAPS: dict[str, dict] = {
     "kling-2.6/text-to-video": {
@@ -571,7 +590,13 @@ def image_active_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
+def image_session_kb(
+    gen_id: int | None = None,
+    *,
+    prompt: str | None = None,
+    allow_publish: bool = True,
+    allow_copy_prompt: bool = True,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     remix_cb = f"img_session:remix:{gen_id}" if gen_id else "img_remix"
     repeat_cb = f"img_session:repeat:{gen_id}" if gen_id else "img_variation"
@@ -586,10 +611,14 @@ def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(text="🎬 Оживить", callback_data=f"img_session:animate:{gen_id}"),
         )
-        builder.row(
-            InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
-            InlineKeyboardButton(text="💾 Сохранить промпт", callback_data=f"gen:library:{gen_id}"),
-        )
+        copy_button = _prompt_copy_button(gen_id, prompt) if allow_copy_prompt else None
+        if copy_button:
+            builder.row(copy_button)
+        if allow_publish:
+            builder.row(
+                InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
+                InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}"),
+            )
     builder.row(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="img_settings"),
     )
@@ -838,7 +867,14 @@ def multi_ref_kb(
     return builder.as_markup()
 
 
-def after_generation_kb(gen_id: int, gen_type: str) -> InlineKeyboardMarkup:
+def after_generation_kb(
+    gen_id: int,
+    gen_type: str,
+    *,
+    prompt: str | None = None,
+    allow_publish: bool = True,
+    allow_copy_prompt: bool = True,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🔄 Ещё вариант", callback_data=f"regen:{gen_type}:{gen_id}"),
@@ -847,10 +883,14 @@ def after_generation_kb(gen_id: int, gen_type: str) -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="⚙️ Изменить параметры", callback_data=f"reparams:{gen_type}:{gen_id}"),
     )
-    builder.row(
-        InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
-        InlineKeyboardButton(text="💾 Сохранить промпт", callback_data=f"gen:library:{gen_id}"),
-    )
+    copy_button = _prompt_copy_button(gen_id, prompt) if allow_copy_prompt else None
+    if copy_button:
+        builder.row(copy_button)
+    if allow_publish:
+        builder.row(
+            InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
+            InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}"),
+        )
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 

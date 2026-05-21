@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -48,7 +49,7 @@ def verify_notification_token(payload: dict[str, Any], password: str) -> bool:
     if not received_token:
         return False
     expected_token = make_token(payload, password)
-    return expected_token == received_token
+    return hmac.compare_digest(expected_token, received_token)
 
 
 async def _request(method: str, payload: dict[str, Any]) -> dict[str, Any]:

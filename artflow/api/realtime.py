@@ -54,13 +54,16 @@ def _generation_primary_result_url(gen: Generation) -> str | None:
 
 
 def generation_event_payload(gen: Generation) -> dict[str, Any]:
+    prompt_hidden = bool(getattr(gen, "source_feed_gen_id", None))
     return {
         "type": "generation.updated",
         "generation_id": gen.id,
         "id": gen.id,
         "model": gen.model,
         "gen_type": _enum_value(gen.gen_type),
-        "prompt": gen.prompt,
+        "prompt": "" if prompt_hidden else gen.prompt,
+        "prompt_hidden": prompt_hidden,
+        "prompt_actions_allowed": not prompt_hidden,
         "status": _enum_value(gen.status),
         "result_url": _generation_primary_result_url(gen),
         "result_urls": _generation_result_urls(gen),

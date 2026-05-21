@@ -33,4 +33,6 @@ set +a
 
 export PYTHONPATH="$SCRIPT_DIR"
 
+"$PYTHON_BIN" -m alembic upgrade head
+
 exec "$PYTHON_BIN" -m uvicorn main:app --host 127.0.0.1 --port "${API_PORT:-7777}" --workers 1

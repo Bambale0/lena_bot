@@ -867,18 +867,21 @@ async def get_feed_generation_card(
 
 
 async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
-    await session.execute(
+    result = await session.execute(
         update(Generation)
         .where(
             Generation.id == gen_id,
             Generation.user_id == user_id,
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
+            Generation.source_feed_gen_id.is_(None),
         )
         .values(is_public_feed=True)
+        .returning(Generation.id)
     )
+    updated_id = result.scalar_one_or_none()
     await session.commit()
-    return await get_generation_by_id(session, gen_id)
+    return await get_generation_by_id(session, gen_id) if updated_id else None
 
 
 async def remove_from_feed(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
@@ -896,18 +899,21 @@ async def remove_from_feed(session: AsyncSession, gen_id: int, user_id: int) -> 
 
 
 async def share_to_library(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
-    await session.execute(
+    result = await session.execute(
         update(Generation)
         .where(
             Generation.id == gen_id,
             Generation.user_id == user_id,
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
+            Generation.source_feed_gen_id.is_(None),
         )
         .values(is_prompt_library=True)
+        .returning(Generation.id)
     )
+    updated_id = result.scalar_one_or_none()
     await session.commit()
-    return await get_generation_by_id(session, gen_id)
+    return await get_generation_by_id(session, gen_id) if updated_id else None
 
 
 async def remove_from_library(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
@@ -945,6 +951,7 @@ async def like_feed_generation(session: AsyncSession, gen_id: int) -> Generation
         update(Generation)
         .where(
             Generation.id == gen_id,
+            Generation.is_public_feed.is_(True),
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
         )
@@ -959,6 +966,7 @@ async def increment_feed_share(session: AsyncSession, gen_id: int) -> Generation
         update(Generation)
         .where(
             Generation.id == gen_id,
+            Generation.is_public_feed.is_(True),
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
         )

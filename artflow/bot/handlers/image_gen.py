@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import logging
 import hashlib
@@ -32,6 +33,7 @@ from bot.keyboards.models import (
     image_session_settings_kb,
     image_dynamic_settings_kb,
     image_style_edit_kb,
+    public_prompt_text,
 )
 from bot.states import ImageGenFSM
 from bot.ui.router import render_screen
@@ -51,6 +53,35 @@ STYLE_EDIT_HINTS: dict[str, tuple[str, str]] = {
     "hair_color": ("цвет волос", "Напиши новый цвет волос. Например: медный блонд, холодный брюнет, пастельно-розовый."),
     "nails": ("ногти", "Напиши, какие ногти нужны. Например: нюдовый маникюр, красный френч, хром."),
 }
+
+
+def _style_edit_prompt(edit_kind: str | None, user_detail: str) -> str:
+    detail = user_detail.strip()
+    if not edit_kind or not detail:
+        return detail
+
+    prompts = {
+        "clothes": (
+            "Edit the reference image. Change ONLY the main person's clothing to: {detail}. "
+            "Keep the face, hair, body, pose, background, vehicles, and all other objects unchanged. "
+            "Do not recolor anything except the clothing."
+        ),
+        "haircut": (
+            "Edit the reference image. Change ONLY the main person's hairstyle or haircut to: {detail}. "
+            "Keep the face, hair color, clothing, body, pose, background, vehicles, and all other objects unchanged."
+        ),
+        "hair_color": (
+            "Edit the reference image. Change ONLY the main person's hair color to: {detail}. "
+            "Keep the hairstyle, face, skin, clothing, body, pose, background, cars, vehicles, and all other objects unchanged. "
+            "Do not recolor anything except the hair."
+        ),
+        "nails": (
+            "Edit the reference image. Change ONLY the main person's nails or manicure to: {detail}. "
+            "Keep the hands shape, face, hair, clothing, body, pose, background, vehicles, and all other objects unchanged."
+        ),
+    }
+    template = prompts.get(edit_kind)
+    return template.format(detail=detail) if template else detail
 
 
 def _kie_callback_url() -> str:
@@ -76,6 +107,14 @@ def _supports_img2img(model_key: str) -> bool:
     spec = IMAGE_SPECS.get(model_key)
     return "image" in caps.get("modes", []) or bool(spec and spec.remix_model)
 
+
+def _requires_reference_image(model_key: str) -> bool:
+    spec = IMAGE_SPECS.get(model_key)
+    if spec:
+        return spec.reference_type != KieReferenceType.NONE and "text" not in spec.supported_modes
+
+    modes = IMAGE_CAPS.get(model_key, {}).get("modes", ["text"])
+    return "image" in modes and "text" not in modes
 
 
 def _safe_image_model(model_key: str) -> ImageModel | None:
@@ -180,6 +219,26 @@ def _stored_reference_file_ids(image_session: ImageSession) -> list[str]:
     except (TypeError, ValueError):
         return []
     return [item for item in parsed if isinstance(item, str) and item]
+
+
+def _state_reference_file_ids(data: dict) -> list[str]:
+    ref_file_ids = [item for item in list(data.get("ref_file_ids", []) or []) if item]
+    image_file_id = data.get("image_file_id")
+    if image_file_id and image_file_id not in ref_file_ids:
+        ref_file_ids.insert(0, image_file_id)
+    return ref_file_ids
+
+
+def _state_reference_url(data: dict) -> str | None:
+    for key in ("remix_reference_url", "carryover_reference_url", "reference_url"):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _state_has_reference(data: dict) -> bool:
+    return bool(_state_reference_file_ids(data) or _state_reference_url(data))
 
 
 async def _session_reference_url(
@@ -346,6 +405,7 @@ async def _ensure_active_image_session_from_state(
         return existing
 
     aspect_ratio = data.get("aspect_ratio")
+    mode = data.get("image_mode") or data.get("mode", "text")
     quality = _normalize_session_quality(
         data["model_key"],
         aspect_ratio,
@@ -356,13 +416,14 @@ async def _ensure_active_image_session_from_state(
         session=session,
         user_id=db_user.id,
         model=data["model_key"],
-        mode=data.get("mode", "text"),
+        mode=mode,
         aspect_ratio=aspect_ratio,
         quality=quality,
         count=data.get("count", 1),
         base_prompt=None,
         reference_file_id=data.get("image_file_id"),
-        reference_file_ids=list(data.get("ref_file_ids", [])),
+        reference_file_ids=_state_reference_file_ids(data) if mode == "image" else None,
+        reference_url=_state_reference_url(data) if mode == "image" else None,
     )
     return image_session
 
@@ -450,11 +511,10 @@ async def _launch_session_generation(
         )
         return False
 
-    spec = IMAGE_SPECS.get(image_session.model)
-    if spec and spec.reference_type != KieReferenceType.NONE and not reference_url:
+    if _requires_reference_image(image_session.model) and not reference_url:
         await source_message.answer(
             "❌ Эта модель требует референс-изображение. Отправь фото.",
-            reply_markup=image_session_kb(parent_generation_id),
+            reply_markup=image_session_kb(parent_generation_id, allow_publish=not bool(source_feed_gen_id)),
         )
         return False
 
@@ -505,14 +565,17 @@ async def _launch_session_generation(
             await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
             "❌ Ошибка генерации. 💋 возвращены.",
-            reply_markup=image_session_kb(parent_generation_id),
+            reply_markup=image_session_kb(parent_generation_id, allow_publish=not bool(source_feed_gen_id)),
         )
         return False
 
     await repo.update_generation_task(session, gen.id, result.task_id or "")
     await _sync_state_with_image_session(state, image_session)
     await state.update_data(credits=credits, source_feed_gen_id=source_feed_gen_id)
-    await status_msg.edit_text(queued_text, reply_markup=image_session_kb(gen.id))
+    await status_msg.edit_text(
+        queued_text,
+        reply_markup=image_session_kb(gen.id, allow_publish=not bool(source_feed_gen_id)),
+    )
     return True
 
 
@@ -776,13 +839,22 @@ async def cb_image_dynamic_continue(call: CallbackQuery, state: FSMContext) -> N
     )
 
     if mode == "image":
-        await safe_edit_message(
-            call.message,
-            "🖼 <b>Загрузи фото-референс</b>\n\n"
-            "После фото отправь текст, что нужно изменить или какой стиль сделать.",
-            reply_markup=back_to_menu_kb(),
-        )
-        await state.set_state(ImageGenFSM.image_upload)
+        if _state_has_reference(data):
+            await safe_edit_message(
+                call.message,
+                "✍️ <b>Напиши промпт для изображения</b>\n\n"
+                "Референс уже сохранён из предыдущего результата.",
+                reply_markup=back_to_menu_kb(),
+            )
+            await state.set_state(ImageGenFSM.prompt_input)
+        else:
+            await safe_edit_message(
+                call.message,
+                "🖼 <b>Загрузи фото-референс</b>\n\n"
+                "После фото отправь текст, что нужно изменить или какой стиль сделать.",
+                reply_markup=back_to_menu_kb(),
+            )
+            await state.set_state(ImageGenFSM.image_upload)
     else:
         await safe_edit_message(
             call.message,
@@ -865,7 +937,9 @@ async def cb_image_mode(call: CallbackQuery, state: FSMContext) -> None:
     _, mode, model_key = call.data.split(":", 2)
 
     await state.update_data(
+        model_key=model_key,
         image_model=model_key,
+        mode=mode,
         image_mode=mode,
     )
 
@@ -1209,7 +1283,7 @@ async def handle_prompt(
     data = await state.get_data()
     current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
 
-    if not _supports_img2img(image_session.model):
+    if current_mode != "image" or not _supports_img2img(image_session.model):
         reference_url = None
 
     if current_mode == "image" and not reference_url:
@@ -1256,6 +1330,8 @@ async def handle_session_prompt(
 
     prompt = message.text.strip()
     is_remix = bool(data.get("remix_mode"))
+    style_edit_kind = data.get("style_edit_kind") if is_remix else None
+    prompt_for_generation = _style_edit_prompt(style_edit_kind, prompt)
     parent_id = data.get("remix_parent_generation_id") or image_session.last_generation_id
     source_feed_gen_id = data.get("source_feed_gen_id")
 
@@ -1270,7 +1346,7 @@ async def handle_session_prompt(
 
     current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
 
-    if not _supports_img2img(image_session.model):
+    if current_mode != "image" or not _supports_img2img(image_session.model):
         reference_url = None
 
     if current_mode == "image" and not reference_url:
@@ -1282,13 +1358,13 @@ async def handle_session_prompt(
         await state.set_state(ImageGenFSM.image_upload)
         return
 
-    await _launch_session_generation(
+    launched = await _launch_session_generation(
         source_message=message,
         state=state,
         session=session,
         db_user=db_user,
         image_session=image_session,
-        prompt=prompt,
+        prompt=prompt_for_generation,
         action_type=ImageGenerationAction.remix if is_remix else ImageGenerationAction.initial,
         reference_url=reference_url,
         parent_generation_id=parent_id,
@@ -1296,6 +1372,8 @@ async def handle_session_prompt(
         launching_text=f"⏳ <b>Генерирую в активной серии...</b>\n<b>{get_image_model_label(image_session.model)}</b>",
         queued_text="⏳ <b>Задача запущена.</b> Результат придёт сюда автоматически.",
     )
+    if launched and style_edit_kind:
+        await state.update_data(style_edit_kind=None)
 
 
 @router.message(ImageGenFSM.session_active, F.photo)
@@ -1319,10 +1397,14 @@ async def handle_session_photo(
         ref_file_ids=[best[0].file_id],
         image_session_id=image_session.id,
     )
+    data = await state.get_data()
 
     await message.answer(
         "✅ Новый референс сохранён для активной серии. Теперь напиши, что изменить.",
-        reply_markup=image_session_kb(image_session.last_generation_id),
+        reply_markup=image_session_kb(
+            image_session.last_generation_id,
+            allow_publish=not bool(data.get("source_feed_gen_id")),
+        ),
     )
 
 
@@ -1346,6 +1428,7 @@ async def cb_image_session_remix(
         await call.answer("Активная серия не найдена", show_alert=True)
         return
 
+    data = await state.get_data()
     if not _supports_img2img(image_session.model):
         await call.answer("Эта модель не поддерживает ремикс по изображению", show_alert=True)
         return
@@ -1376,13 +1459,17 @@ async def cb_image_session_remix(
         remix_mode=True,
         remix_parent_generation_id=parent_id or image_session.last_generation_id,
         remix_reference_url=remix_reference_url,
+        style_edit_kind=None,
     )
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         "✨ <b>Режим ремикса</b>\n\n"
         "✍️ Напиши, что изменить.\n"
         "Можно также отправить новое фото, чтобы заменить референс.",
-        reply_markup=image_session_kb(image_session.last_generation_id),
+        reply_markup=image_session_kb(
+            image_session.last_generation_id,
+            allow_publish=not bool(data.get("source_feed_gen_id")),
+        ),
     )
     await call.answer()
 
@@ -1438,6 +1525,7 @@ async def cb_image_style_choice(
     if not image_session:
         await call.answer("Активная серия не найдена", show_alert=True)
         return
+    data = await state.get_data()
     if not _supports_img2img(image_session.model):
         await call.answer("Эта модель не поддерживает редактирование по изображению", show_alert=True)
         return
@@ -1475,7 +1563,10 @@ async def cb_image_style_choice(
         call.message,  # type: ignore[arg-type]
         f"💅 <b>Меняем {label}</b>\n\n{hint}\n\n"
         "Остальное в кадре постараюсь сохранить.",
-        reply_markup=image_session_kb(parent_id or gen_id or image_session.last_generation_id),
+        reply_markup=image_session_kb(
+            parent_id or gen_id or image_session.last_generation_id,
+            allow_publish=not bool(data.get("source_feed_gen_id")),
+        ),
     )
     await call.answer()
 
@@ -1905,6 +1996,11 @@ async def cb_gen_share(call: CallbackQuery, session: AsyncSession, db_user: User
     from bot.utils.telegram_ui import safe_answer_callback
 
     gen_id = int(call.data.split(":")[-1])
+    existing = await repo.get_generation_by_id(session, gen_id)
+    if not existing or existing.user_id != db_user.id or existing.source_feed_gen_id:
+        await safe_answer_callback(call, "❌ Нельзя опубликовать результат из ленты")
+        return
+
     gen = await repo.share_to_feed(session, gen_id, db_user.id)
     if not gen:
         await safe_answer_callback(call, "❌ Не удалось поделиться")
@@ -1926,11 +2022,36 @@ async def cb_gen_share(call: CallbackQuery, session: AsyncSession, db_user: User
 async def cb_gen_library(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     from bot.utils.telegram_ui import safe_answer_callback
     gen_id = int(call.data.split(":")[-1])
+    existing = await repo.get_generation_by_id(session, gen_id)
+    if not existing or existing.user_id != db_user.id or existing.source_feed_gen_id:
+        await safe_answer_callback(call, "❌ Нельзя сохранить промпт из ленты")
+        return
+
     gen = await repo.share_to_library(session, gen_id, db_user.id)
     if not gen:
         await safe_answer_callback(call, "❌ Не удалось сохранить промпт")
         return
     await safe_answer_callback(call, "💾 Промпт сохранён в библиотеке!")
+
+
+@router.callback_query(F.data.startswith("gen:prompt:"))
+async def cb_gen_prompt(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    gen_id = int(call.data.split(":")[-1])
+    gen = await repo.get_generation_by_id(session, gen_id)
+    if not gen or gen.user_id != db_user.id or gen.source_feed_gen_id:
+        await safe_answer_callback(call, "❌ Промпт недоступен")
+        return
+
+    prompt = public_prompt_text(gen.prompt)
+    if not prompt:
+        await safe_answer_callback(call, "❌ Промпт пустой")
+        return
+
+    await call.message.answer(  # type: ignore[union-attr]
+        f"📋 <b>Промпт</b>\n\n<code>{html.escape(prompt)}</code>",
+        reply_markup=back_to_menu_kb(),
+    )
+    await safe_answer_callback(call, "Промпт отправлен")
 
 
 # ── Regen ─────────────────────────────────────────────────────────────────────

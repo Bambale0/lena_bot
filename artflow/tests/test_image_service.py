@@ -47,6 +47,40 @@ def test_build_input_omits_gpt_image_2_auto_aspect_ratio() -> None:
     assert "aspect_ratio" not in payload
 
 
+@pytest.mark.parametrize(
+    "model",
+    [ImageModel.QWEN_I2I, ImageModel.QWEN_EDIT, ImageModel.QWEN2_EDIT],
+)
+def test_build_input_qwen_reference_models_send_user_prompt_first(model: ImageModel) -> None:
+    user_prompt = "сменить цвет волос на пастельно розовый"
+    _resolved_model, payload = _build_input(
+        model,
+        prompt=user_prompt,
+        image_url="https://example.test/ref.jpg",
+        aspect_ratio="1:1",
+        n=1,
+        quality="basic",
+    )
+
+    assert payload["prompt"].startswith(user_prompt)
+    assert "STRICT REFERENCE PRESERVATION" in payload["prompt"]
+
+
+def test_build_input_qwen_edit_does_not_truncate_user_prompt_behind_reference_lock() -> None:
+    user_prompt = "сменить цвет волос на пастельно розовый"
+    _resolved_model, payload = _build_input(
+        ImageModel.QWEN_EDIT,
+        prompt=user_prompt,
+        image_url="https://example.test/ref.jpg",
+        aspect_ratio="1:1",
+        n=1,
+        quality="basic",
+    )
+
+    assert len(payload["prompt"]) <= 2000
+    assert user_prompt in payload["prompt"]
+
+
 @pytest.mark.asyncio
 async def test_poll_kieai_result_urls_returns_all_urls(monkeypatch) -> None:
     async def fake_get_task_status(_task_id: str) -> dict:

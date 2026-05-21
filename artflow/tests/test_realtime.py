@@ -41,7 +41,18 @@ def test_generation_event_payload_matches_frontend_contract() -> None:
     assert payload["id"] == 77
     assert payload["status"] == "done"
     assert payload["gen_type"] == "image"
+    assert payload["prompt"] == "test prompt"
+    assert payload["prompt_hidden"] is False
+    assert payload["prompt_actions_allowed"] is True
     assert payload["result_urls"] == ["https://cdn.test/1.png", "https://cdn.test/2.png"]
+
+
+def test_generation_event_payload_hides_feed_derivative_prompt() -> None:
+    payload = realtime.generation_event_payload(_gen(source_feed_gen_id=12, prompt="secret prompt"))
+
+    assert payload["prompt"] == ""
+    assert payload["prompt_hidden"] is True
+    assert payload["prompt_actions_allowed"] is False
 
 
 @pytest.mark.asyncio

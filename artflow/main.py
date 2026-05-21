@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import tempfile
 from contextlib import asynccontextmanager
@@ -98,8 +99,20 @@ def _verify_kie_webhook_secret(secret: str | None, header_secret: str | None = N
             logger.error("KIE webhook secret is required in production")
             raise HTTPException(status_code=503, detail="KIE webhook secret is not configured")
         return
-    if secret != configured and header_secret != configured:
+    provided = [value.strip() for value in (secret, header_secret) if value]
+    if not any(hmac.compare_digest(value, configured) for value in provided):
         raise HTTPException(status_code=403, detail="Invalid KIE webhook secret")
+
+
+def _verify_midjourney_webhook_secret(secret: str | None) -> None:
+    expected_secret = _midjourney_webhook_secret()
+    if not expected_secret:
+        if _is_production_env():
+            logger.error("Midjourney webhook secret is required in production")
+            raise HTTPException(status_code=503, detail="Midjourney webhook secret is not configured")
+        return
+    if not secret or not hmac.compare_digest(secret, expected_secret):
+        raise HTTPException(status_code=403, detail="Invalid Midjourney webhook secret")
 
 
 def _midjourney_button_state(buttons: list[MJButton]) -> list[dict[str, str]]:
@@ -107,6 +120,14 @@ def _midjourney_button_state(buttons: list[MJButton]) -> list[dict[str, str]]:
         {"custom_id": button.custom_id, "label": button.label, "emoji": button.emoji}
         for button in buttons
     ]
+
+
+def _is_feed_prompt_derivative(gen: Generation) -> bool:
+    return bool(getattr(gen, "source_feed_gen_id", None))
+
+
+def _kie_result_caption(gen: Generation) -> str:
+    return "✅ <b>Готово!</b>"
 
 
 async def _get_midjourney_context(user_tg_id: int):
@@ -527,9 +548,7 @@ async def telegram_webhook(
 
 @app.post(settings.MIDJOURNEY_WEBHOOK_PATH)
 async def midjourney_webhook(request: Request, secret: str | None = None) -> dict:
-    expected_secret = _midjourney_webhook_secret()
-    if expected_secret and secret != expected_secret:
-        raise HTTPException(status_code=403, detail="Invalid Midjourney webhook secret")
+    _verify_midjourney_webhook_secret(secret)
 
     payload = await request.json()
     task_result = MJTaskResult.from_dict(payload)
@@ -819,9 +838,11 @@ async def kie_webhook(
 
         if bot:
             try:
-                from bot.keyboards.models import image_session_kb, after_generation_kb
+                from bot.keyboards.models import after_generation_kb, image_session_kb, public_prompt_text
 
-                caption = f"✅ <b>Готово!</b>\n\n<i>{gen.prompt[:200]}</i>"
+                prompt_actions_allowed = not _is_feed_prompt_derivative(gen)
+                prompt_for_copy = public_prompt_text(gen.prompt) if prompt_actions_allowed else None
+                caption = _kie_result_caption(gen)
                 if gen.gen_type == GenerationType.image:
                     caption += (
                         "\n\n🎨 <b>Серия активна.</b>\n"
@@ -857,9 +878,21 @@ async def kie_webhook(
                     await bot.send_message(
                         chat_id=user.tg_id,
                         text="Что делаем дальше?",
-                        reply_markup=image_session_kb(gen.id),
+                        reply_markup=image_session_kb(
+                            gen.id,
+                            prompt=prompt_for_copy,
+                            allow_publish=prompt_actions_allowed,
+                            allow_copy_prompt=prompt_actions_allowed,
+                        ),
                     )
                 else:
+                    video_reply_markup = after_generation_kb(
+                        gen.id,
+                        "video",
+                        prompt=prompt_for_copy,
+                        allow_publish=prompt_actions_allowed,
+                        allow_copy_prompt=prompt_actions_allowed,
+                    )
                     video_sent = False
                     video_too_large = False
                     try:
@@ -867,7 +900,7 @@ async def kie_webhook(
                             chat_id=user.tg_id,
                             video=URLInputFile(result_url, filename="video.mp4"),
                             caption=caption,
-                            reply_markup=after_generation_kb(gen.id, "video"),
+                            reply_markup=video_reply_markup,
                         )
                         video_sent = True
                     except TelegramEntityTooLarge as video_url_err:
@@ -888,7 +921,7 @@ async def kie_webhook(
                                     chat_id=user.tg_id,
                                     video=FSInputFile(tmp_video, filename=f"video_{gen.id}.mp4"),
                                     caption=caption,
-                                    reply_markup=after_generation_kb(gen.id, "video"),
+                                    reply_markup=video_reply_markup,
                                 )
                                 video_sent = True
                             except TelegramEntityTooLarge as video_file_err:
@@ -914,7 +947,7 @@ async def kie_webhook(
                                     chat_id=user.tg_id,
                                     document=URLInputFile(result_url, filename=f"video_{gen.id}.mp4"),
                                     caption="📎 <b>Видео готово файлом</b>",
-                                    reply_markup=after_generation_kb(gen.id, "video"),
+                                    reply_markup=video_reply_markup,
                                 )
                                 video_sent = True
                             except Exception as video_doc_err:
@@ -936,7 +969,7 @@ async def kie_webhook(
                             await bot.send_message(
                                 chat_id=user.tg_id,
                                 text=fallback_text,
-                                reply_markup=after_generation_kb(gen.id, "video"),
+                                reply_markup=video_reply_markup,
                             )
                             logger.info("Video link fallback sent user=%s gen=%s", user.tg_id, gen.id)
             except Exception as e:

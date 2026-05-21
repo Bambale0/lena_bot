@@ -27,6 +27,13 @@ class CryptoBotInvoice:
     bot_invoice_url: str
 
 
+def _paid_button_url() -> str:
+    username = (settings.BOT_USERNAME or "").strip().lstrip("@")
+    if username:
+        return f"https://t.me/{username}"
+    return settings.WEBHOOK_URL.rstrip("/") or "https://t.me"
+
+
 async def create_invoice(
     credits: int,
     amount_usd: float,
@@ -43,7 +50,7 @@ async def create_invoice(
         "description": f"APIX — {credits} кредитов",
         "payload": f"{plan_key}:{user_id}",
         "paid_btn_name": "callback",
-        "paid_btn_url": f"https://t.me/{settings.BOT_TOKEN.split(':')[0]}",  # будет перекрыто webhook
+        "paid_btn_url": _paid_button_url(),
         "allow_comments": False,
         "allow_anonymous": False,
     }

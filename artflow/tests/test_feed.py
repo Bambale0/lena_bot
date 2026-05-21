@@ -179,9 +179,9 @@ async def test_cb_feed_use_no_prompt() -> None:
 async def test_cb_feed_publish() -> None:
     call = make_callback(data="feed:publish:42")
     call.answer = AsyncMock()
-    gen = SimpleNamespace(id=42, is_public_feed=False, is_prompt_library=False)
+    gen = SimpleNamespace(id=42, user_id=42, source_feed_gen_id=None, is_public_feed=False, is_prompt_library=False)
     with patch("bot.handlers.feed.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=gen), commit=AsyncMock())):
-        await feed.cb_publish_generation(call, AsyncMock())
+        await feed.cb_publish_generation(call, AsyncMock(), SimpleNamespace(id=42))
     assert gen.is_public_feed is True
     assert gen.is_prompt_library is True
     call.answer.assert_awaited_once()
@@ -192,9 +192,21 @@ async def test_cb_feed_publish_not_found() -> None:
     call = make_callback(data="feed:publish:999")
     call.answer = AsyncMock()
     with patch("bot.handlers.feed.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=None))):
-        await feed.cb_publish_generation(call, AsyncMock())
+        await feed.cb_publish_generation(call, AsyncMock(), SimpleNamespace(id=42))
     call.answer.assert_awaited_once()
     assert "не найдена" in call.answer.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_cb_feed_publish_rejects_feed_derivative() -> None:
+    call = make_callback(data="feed:publish:42")
+    call.answer = AsyncMock()
+    gen = SimpleNamespace(id=42, user_id=42, source_feed_gen_id=7, is_public_feed=False, is_prompt_library=False)
+    with patch("bot.handlers.feed.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=gen), commit=AsyncMock())):
+        await feed.cb_publish_generation(call, AsyncMock(), SimpleNamespace(id=42))
+    assert gen.is_public_feed is False
+    assert gen.is_prompt_library is False
+    call.answer.assert_awaited_once()
 
 
 # ── Utility functions ─────────────────────────────────────────────────────────

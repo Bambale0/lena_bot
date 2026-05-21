@@ -111,6 +111,12 @@ _REFERENCE_LOCK_MODELS: set[str] = {
     ImageModel.GPT_IMAGE_2_I2I.value,
 }
 
+_PROMPT_FIRST_REFERENCE_LOCK_MODELS: set[str] = {
+    ImageModel.QWEN_I2I.value,
+    ImageModel.QWEN_EDIT.value,
+    ImageModel.QWEN2_EDIT.value,
+}
+
 _REFERENCE_FLEX_MODELS: set[str] = {
     ImageModel.SEEDREAM_45_EDIT.value,
     ImageModel.WAN_27.value,
@@ -152,6 +158,12 @@ _REFERENCE_LOCK_PREFIX = (
     "Do not make the face prettier, younger, older, smoother, slimmer, wider, more symmetrical, more generic, or more model-like. "
     "Do not replace the face with a similar-looking person. "
     "If the requested edit conflicts with face preservation, keep the face from the reference and apply the edit only outside the face."
+)
+
+_REFERENCE_LOCK_PROMPT_FIRST_SUFFIX = (
+    "STRICT REFERENCE PRESERVATION. Keep the reference image as the source of truth unless the user explicitly asks to change a detail. "
+    "Preserve the same person, face identity, skin, body, pose, clothing, accessories, background, colors, lighting, and all untouched objects. "
+    "Apply the user instruction only to the requested area."
 )
 
 _REFERENCE_FLEX_PREFIX = (
@@ -207,11 +219,14 @@ def _apply_reference_detail_preservation(
     if any(marker in prompt for marker in (
         "STRICT REFERENCE ADHERENCE",
         "STRICT IDENTITY AND DETAIL PRESERVATION",
+        "STRICT REFERENCE PRESERVATION",
         "REFERENCE IDENTITY PRESERVATION WITH TRANSFORMATION",
     )):
         return prompt
     if model_key in _REFERENCE_FLEX_MODELS:
         return _REFERENCE_FLEX_PREFIX + "\n\n" + prompt.strip()
+    if model_key in _PROMPT_FIRST_REFERENCE_LOCK_MODELS:
+        return prompt.strip() + "\n\n" + _REFERENCE_LOCK_PROMPT_FIRST_SUFFIX
     if model_key in _REFERENCE_LOCK_MODELS:
         return _REFERENCE_LOCK_PREFIX + "\n\n" + prompt.strip()
     return prompt

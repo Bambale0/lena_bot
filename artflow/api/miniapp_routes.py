@@ -1,26 +1,30 @@
 """Mini-app REST API — generation endpoints for the Telegram WebApp frontend."""
 from __future__ import annotations
 
+import asyncio
+import base64
+import ipaddress
+import json
 import logging
 import math
 import re
-import json
+import socket
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin, urlparse
 
+import httpx
 from aiogram.types import LabeledPrice
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
-import httpx
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, midjourney_service, video_service
 from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
+from api.midjourney_service import MJDimensions, MJVideoMotion
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_telegram_login_data
 from api.photo_prompt_service import generate_prompt_from_photo
-from api.midjourney_service import MJDimensions, MJTaskStatus, MJVideoMotion
 from api.public_files import public_url_is_available
 from api.video_service import VideoModel
 from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
@@ -32,6 +36,7 @@ from db.models import (
     GenerationType,
     ImageGenerationAction,
     PaymentProvider,
+    PromptStatus,
     TransactionStatus,
     User,
 )
@@ -52,6 +57,9 @@ async def health() -> dict:
 
 MAX_CONCURRENT = 6
 STALE_GENERATION_TIMEOUT = timedelta(minutes=20)
+MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_PHOTO_PROMPT_BYTES = 20 * 1024 * 1024
+MAX_REFERENCE_REDIRECTS = 3
 
 _TELEGRAM_STARS_RUB_PER_STAR = 10.5
 
@@ -135,6 +143,28 @@ def _friendly_model_name(model_key: str, display_name: str | None = None) -> str
 def _is_admin_user(user: User | None) -> bool:
     tg_id = getattr(user, "tg_id", None)
     return bool(tg_id and tg_id in settings.ADMIN_IDS)
+
+
+def _is_prompt_public_approved(prompt: Any | None) -> bool:
+    return bool(
+        prompt
+        and getattr(prompt, "status", None) == PromptStatus.approved
+        and getattr(prompt, "is_public", False)
+    )
+
+
+def _can_view_prompt(prompt: Any | None, user: User | None) -> bool:
+    if not prompt:
+        return False
+    if _is_prompt_public_approved(prompt):
+        return True
+    if user and getattr(prompt, "author_id", None) == getattr(user, "id", None):
+        return True
+    return _is_admin_user(user)
+
+
+def _generation_prompt_hidden(gen: Any) -> bool:
+    return bool(getattr(gen, "source_feed_gen_id", None))
 
 
 def _is_midjourney_model(model_key: str) -> bool:
@@ -328,6 +358,16 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             await repo.update_image_session_last_result(session, gen.image_session_id, result_url, gen.id)
         return await repo.get_generation_by_id(session, gen.id)
 
+    if age >= STALE_GENERATION_TIMEOUT:
+        logger.warning(
+            'Marking stale generation with unfinished task as failed: gen=%s model=%s task=%s age=%s',
+            gen.id, gen.model, task_id, age,
+        )
+        if await repo.fail_generation(session, gen.id, 'Generation timed out before completion'):
+            if gen.credits_spent:
+                await repo.add_credits(session, gen.user_id, gen.credits_spent)
+        return await repo.get_generation_by_id(session, gen.id)
+
     return gen
 
 
@@ -345,20 +385,103 @@ async def _reconcile_user_active_generations(session: AsyncSession, user_id: int
         await _reconcile_generation_status(session, gen)
 
 
-async def _data_uri_from_url(url: str) -> str:
+def _is_supported_reference_image(data: bytes, content_type: str | None) -> bool:
+    content = (content_type or "").lower()
+    if content and not content.startswith("image/"):
+        return False
+    return (
+        data.startswith(b"\xff\xd8\xff")
+        or data.startswith(b"\x89PNG\r\n\x1a\n")
+        or (data.startswith(b"RIFF") and b"WEBP" in data[:16])
+    )
+
+
+def _url_has_safe_public_shape(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if not parsed.hostname:
+        return False
+
+    host = parsed.hostname.strip("[]").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return False
+
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return ip.is_global
+
+
+async def _resolve_public_host(hostname: str, port: int | None) -> None:
+    try:
+        infos = await asyncio.to_thread(
+            socket.getaddrinfo,
+            hostname,
+            port,
+            proto=socket.IPPROTO_TCP,
+        )
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=422, detail="Reference URL host cannot be resolved") from exc
+
+    for info in infos:
+        address = info[4][0]
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Reference URL host resolved to an invalid address")
+        if not ip.is_global:
+            raise HTTPException(status_code=422, detail="Reference URL host is not public")
+
+
+async def _validate_fetchable_public_url(url: str) -> None:
+    if not _url_has_safe_public_shape(url):
+        raise HTTPException(status_code=422, detail="Reference URL must be a public HTTP(S) URL")
+    parsed = urlparse(url)
+    await _resolve_public_host(parsed.hostname or "", parsed.port)
+
+
+async def _data_uri_from_url(url: str) -> str:
+    current_url = url
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for _ in range(MAX_REFERENCE_REDIRECTS + 1):
+                await _validate_fetchable_public_url(current_url)
+                async with client.stream("GET", current_url, follow_redirects=False) as resp:
+                    if 300 <= resp.status_code < 400:
+                        location = resp.headers.get("location")
+                        if not location:
+                            raise HTTPException(status_code=422, detail="Reference URL redirect has no location")
+                        current_url = urljoin(str(resp.url), location)
+                        continue
+
+                    resp.raise_for_status()
+                    content_type = resp.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                    if not content_type.startswith("image/"):
+                        raise HTTPException(status_code=422, detail="Reference URL must point to an image")
+
+                    content_length = resp.headers.get("content-length")
+                    if content_length and int(content_length) > MAX_REFERENCE_IMAGE_BYTES:
+                        raise HTTPException(status_code=413, detail="Reference image is too large")
+
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in resp.aiter_bytes():
+                        total += len(chunk)
+                        if total > MAX_REFERENCE_IMAGE_BYTES:
+                            raise HTTPException(status_code=413, detail="Reference image is too large")
+                        chunks.append(chunk)
+
+                    data = b"".join(chunks)
+                    if not _is_supported_reference_image(data, content_type):
+                        raise HTTPException(status_code=422, detail="Reference URL must point to a JPEG, PNG or WebP image")
+                    return f"data:{content_type};base64,{base64.b64encode(data).decode()}"
+            raise HTTPException(status_code=422, detail="Reference URL has too many redirects")
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Failed to fetch reference image: {exc}")
-
-    content_type = resp.headers.get("content-type", "image/jpeg").split(";", 1)[0].strip() or "image/jpeg"
-    if not content_type.startswith("image/"):
-        raise HTTPException(status_code=422, detail="Reference URL must point to an image")
-
-    import base64
-    return f"data:{content_type};base64,{base64.b64encode(resp.content).decode()}"
+        raise HTTPException(status_code=422, detail=f"Failed to fetch reference image: {exc}") from exc
 
 
 def _mj_catalog_item(mc: Any) -> MidjourneyCatalogItem:
@@ -380,7 +503,7 @@ def _normalize_public_urls(*urls: str | None) -> list[str]:
     for raw in urls:
         if not raw:
             continue
-        if raw.startswith("blob:") or not raw.startswith("http"):
+        if raw.startswith("blob:") or not _url_has_safe_public_shape(raw):
             raise HTTPException(status_code=422, detail="Invalid reference URL — upload the image first")
         normalized.append(raw)
     return normalized
@@ -640,6 +763,7 @@ class ModelInfo(BaseModel):
     credits: float
     modes: list[str]
     aspect_ratios: list[str]
+    aspect_ratio_modes: list[str] = Field(default_factory=list)
     aspect_ratio_min_refs: int = 0
     quality_options: list[dict[str, str]]
     quality_prices: dict[str, float] = Field(default_factory=dict)
@@ -659,13 +783,15 @@ class GenerationOut(BaseModel):
     model: str
     gen_type: str
     prompt: str
+    prompt_hidden: bool = False
+    prompt_actions_allowed: bool = True
     status: str
     result_url: str | None
     credits_spent: float
     created_at: str
     is_public_feed: bool = False
     is_prompt_library: bool = False
-    result_urls: list[str] = []
+    result_urls: list[str] = Field(default_factory=list)
 
 
 class ImageGenRequest(BaseModel):
@@ -998,10 +1124,12 @@ async def miniapp_photo_prompt(
     data = await file.read()
     if not data:
         raise HTTPException(status_code=422, detail="Empty file")
+    if len(data) > MAX_PHOTO_PROMPT_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 20 MB)")
 
     mime = file.content_type or "image/jpeg"
-    if not mime.startswith("image/"):
-        raise HTTPException(status_code=422, detail="Only image files are supported")
+    if not _is_supported_reference_image(data, mime):
+        raise HTTPException(status_code=422, detail="Only JPEG, PNG and WebP images are supported")
 
     try:
         prompt = await generate_prompt_from_photo(data, mime)
@@ -1085,6 +1213,7 @@ async def list_image_models(
             credits=mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
+            aspect_ratio_modes=caps.get("aspect_ratio_modes", caps.get("modes", ["text"])),
             aspect_ratio_min_refs=int(caps.get("aspect_ratio_min_refs", 0) or 0),
             quality_options=[{"value": value, "label": label} for value, label in quality_raw],
             quality_prices=quality_prices,
@@ -1115,6 +1244,7 @@ async def list_video_models(
             credits=credits_per_sec if is_per_sec and credits_per_sec is not None else mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
+            aspect_ratio_modes=caps.get("aspect_ratio_modes", caps.get("modes", ["text"])),
             aspect_ratio_min_refs=int(caps.get("aspect_ratio_min_refs", 0) or 0),
             quality_options=[{"value": r, "label": (caps.get("resolution_labels", {}) or {}).get(r, r)} for r in (caps.get("resolutions") or [])],
             counts=[],
@@ -1212,15 +1342,10 @@ async def create_image_generation(
     effective_prompt = body.prompt.strip()
     prompt_source = None
     if body.prompt_id is not None:
-        from db.models import PromptStatus
         from db.prompt_repository import get_prompt_by_id
 
         prompt_source = await get_prompt_by_id(session, body.prompt_id)
-        if (
-            not prompt_source
-            or prompt_source.status != PromptStatus.approved
-            or not prompt_source.is_public
-        ):
+        if not _is_prompt_public_approved(prompt_source):
             raise HTTPException(status_code=404, detail="Prompt not found or not public")
         effective_prompt = prompt_source.prompt_text.strip()
 
@@ -1585,6 +1710,12 @@ async def share_generation(
     user: User = Depends(get_miniapp_user),
 ) -> dict:
     """Publish own generation to the public feed and return its repost link."""
+    existing = await repo.get_generation_by_id(session, gen_id)
+    if not existing or existing.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    if _generation_prompt_hidden(existing):
+        raise HTTPException(status_code=403, detail="Cannot publish a feed remix")
+
     gen = await repo.share_to_feed(session, gen_id, user.id)
     if not gen:
         raise HTTPException(status_code=404, detail="Generation not found or not ready")
@@ -1881,12 +2012,10 @@ async def get_feed_share_link(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> dict:
-    """Returns a shareable Telegram deeplink for this public post. Only the author can get it."""
-    gen = await repo.get_generation_by_id(session, gen_id)
-    if not gen or gen.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Generation not found")
-    if not gen.is_public_feed:
-        raise HTTPException(status_code=400, detail="Generation is not public yet — share to feed first")
+    """Returns a shareable Telegram deeplink for a public post using the viewer's referral code."""
+    gen = await repo.increment_feed_share(session, gen_id)
+    if not gen:
+        raise HTTPException(status_code=404, detail="Public post not found")
     link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="feed", target_id=gen_id))
     return {"link": link, "gen_id": gen_id}
 
@@ -1898,6 +2027,12 @@ async def share_to_library(
     user: User = Depends(get_miniapp_user),
 ) -> dict:
     """Opt this generation's prompt into the public prompt library."""
+    existing = await repo.get_generation_by_id(session, gen_id)
+    if not existing or existing.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    if _generation_prompt_hidden(existing):
+        raise HTTPException(status_code=403, detail="Cannot save a feed remix prompt")
+
     gen = await repo.share_to_library(session, gen_id, user.id)
     if not gen:
         raise HTTPException(status_code=404, detail="Generation not found or not ready")
@@ -1998,11 +2133,12 @@ async def my_prompts(
 async def get_prompt(
     prompt_id: int,
     session: AsyncSession = Depends(get_session),
-    _: User = Depends(get_miniapp_user),
+    user: User = Depends(get_miniapp_user),
 ) -> dict:
     from db.prompt_repository import get_prompt_by_id
+
     p = await get_prompt_by_id(session, prompt_id)
-    if not p:
+    if not _can_view_prompt(p, user):
         raise HTTPException(status_code=404, detail="Prompt not found")
     return _prompt_out(p)
 
@@ -2015,13 +2151,17 @@ async def like_prompt_web(
 ) -> dict:
     from db.prompt_repository import get_prompt_by_id, like_prompt
 
+    current = await get_prompt_by_id(session, prompt_id)
+    if not _is_prompt_public_approved(current):
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
     prompt, like_status = await like_prompt(session, prompt_id, user.id)
     if like_status == "duplicate":
         current = await get_prompt_by_id(session, prompt_id)
-        if not current:
+        if not _is_prompt_public_approved(current):
             raise HTTPException(status_code=404, detail="Prompt not found")
         return {"status": "duplicate", "likes": current.likes}
-    if like_status == "missing" or not prompt:
+    if like_status == "missing" or not _is_prompt_public_approved(prompt):
         raise HTTPException(status_code=404, detail="Prompt not found")
     return {"status": "liked", "likes": prompt.likes}
 
@@ -2035,7 +2175,7 @@ async def get_prompt_share_link(
     from db.prompt_repository import get_prompt_by_id
 
     prompt = await get_prompt_by_id(session, prompt_id)
-    if not prompt:
+    if not _is_prompt_public_approved(prompt):
         raise HTTPException(status_code=404, detail="Prompt not found")
     link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="prompt", target_id=prompt_id))
     return {"link": link, "prompt_id": prompt_id}
@@ -2306,11 +2446,14 @@ def _generation_primary_result_url(gen) -> str | None:
 
 
 def _gen_out(gen) -> GenerationOut:
+    prompt_hidden = _generation_prompt_hidden(gen)
     return GenerationOut(
         id=gen.id,
         model=gen.model,
         gen_type=gen.gen_type.value,
-        prompt=gen.prompt,
+        prompt="" if prompt_hidden else (gen.prompt or ""),
+        prompt_hidden=prompt_hidden,
+        prompt_actions_allowed=not prompt_hidden,
         status=gen.status.value,
         result_url=_generation_primary_result_url(gen),
         credits_spent=gen.credits_spent,
@@ -2355,11 +2498,13 @@ async def publish_generation_to_library(
     gen = await repo.get_generation_by_id(session, gen_id)
     if not gen or gen.user_id != user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
+    if _generation_prompt_hidden(gen):
+        raise HTTPException(status_code=403, detail="Cannot publish a feed remix")
 
-    gen.is_public_feed = True
-    gen.is_prompt_library = True
-    await session.commit()
-    await session.refresh(gen)
+    shared = await repo.share_to_feed(session, gen_id, user.id)
+    if not shared:
+        raise HTTPException(status_code=404, detail="Generation not found or not ready")
+    gen = await repo.share_to_library(session, gen_id, user.id) or shared
 
     return {
         "ok": True,
