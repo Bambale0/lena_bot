@@ -11,6 +11,11 @@ import logging
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.gemini_omni import (
+    GEMINI_OMNI_PRICE_TABLE,
+    GEMINI_OMNI_VIDEO_INPUT_PRICES,
+    GEMINI_OMNI_VIDEO_MODEL,
+)
 from core.model_pricing import duration_label, pricing_variant_key, quality_label, resolution_label
 from db.models import GenerationType, ModelCost, PricePlan, UserPrompt
 from db.session import AsyncSessionLocal
@@ -55,6 +60,7 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "grok-imagine/image-to-video","display_name":"⚡ Grok Animate",              "gen_type": GenerationType.video, "credits": 35},
     {"model_key": "happyhorse/text-to-video",  "display_name": "🐎 HappyHorse Video",        "gen_type": GenerationType.video, "credits": 25},
     {"model_key": "happyhorse/image-to-video", "display_name": "🐎 HappyHorse Animate",        "gen_type": GenerationType.video, "credits": 30},
+    {"model_key": "gemini-omni-video",        "display_name": "✨ Gemini Omni",               "gen_type": GenerationType.video, "credits": 90},
     {"model_key": "veo3_fast",                 "display_name": "🎬 Veo 3 Fast",            "gen_type": GenerationType.video, "credits": 50},
     {"model_key": "veo3",                      "display_name": "🎬 Veo 3",                 "gen_type": GenerationType.video, "credits": 70},
     {"model_key": "veo3_lite",                 "display_name": "🎬 Veo 3 Lite",            "gen_type": GenerationType.video, "credits": 35},
@@ -142,6 +148,27 @@ def _build_variant_model_costs() -> list[dict]:
                     "credits": prices_per_sec[resolution],
                 }
             )
+
+    for resolution, prices_by_duration in GEMINI_OMNI_PRICE_TABLE.items():
+        for duration, credits in prices_by_duration.items():
+            records.append(
+                {
+                    "model_key": pricing_variant_key(GEMINI_OMNI_VIDEO_MODEL, duration=duration, resolution=resolution),
+                    "display_name": f"✨ Gemini Omni · {duration_label(duration)} · {resolution_label(resolution)}",
+                    "gen_type": GenerationType.video,
+                    "credits": credits,
+                }
+            )
+
+    for resolution, credits in GEMINI_OMNI_VIDEO_INPUT_PRICES.items():
+        records.append(
+            {
+                "model_key": pricing_variant_key(GEMINI_OMNI_VIDEO_MODEL, resolution=resolution),
+                "display_name": f"✨ Gemini Omni · видео-референс · {resolution_label(resolution)}",
+                "gen_type": GenerationType.video,
+                "credits": credits,
+            }
+        )
 
     return records
 

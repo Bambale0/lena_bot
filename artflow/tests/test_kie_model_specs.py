@@ -347,3 +347,41 @@ def test_build_kie_input_kling_30_motion_maps_legacy_pro_to_1080p() -> None:
     assert inp["mode"] == "1080p"
     assert inp["character_orientation"] == "image"
     assert inp["background_source"] == "input_video"
+
+
+def test_build_kie_input_gemini_omni_multimodal_payload() -> None:
+    resolved_model, inp = build_kie_input(
+        model="gemini-omni-video",
+        prompt="Cinematic scene with narration",
+        reference_urls=[
+            "https://example.test/scene-1.png",
+            "https://example.test/scene-2.png",
+        ],
+        params={
+            "duration": 8,
+            "aspect_ratio": "9:16",
+            "resolution": "4K",
+            "reference_video_url": "https://example.test/source.mp4",
+            "video_start": 1,
+            "video_end": 9,
+            "audio_ids": ["audio_1"],
+            "character_ids": ["character_1", "character_2"],
+            "seed": 123,
+        },
+    )
+
+    assert resolved_model == "gemini-omni-video"
+    assert inp["duration"] == "8"
+    assert inp["aspect_ratio"] == "9:16"
+    assert inp["resolution"] == "4k"
+    assert inp["image_urls"] == [
+        "https://example.test/scene-1.png",
+        "https://example.test/scene-2.png",
+    ]
+    assert "image_url" not in inp
+    assert inp["video_list"] == [
+        {"url": "https://example.test/source.mp4", "start": 1.0, "ends": 9.0}
+    ]
+    assert inp["audio_ids"] == ["audio_1"]
+    assert inp["character_ids"] == ["character_1", "character_2"]
+    assert inp["seed"] == 123

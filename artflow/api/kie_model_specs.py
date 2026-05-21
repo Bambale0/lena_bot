@@ -10,6 +10,18 @@ except ImportError:
         pass
 from typing import Any, Callable
 
+from core.gemini_omni import (
+    GEMINI_OMNI_MAX_AUDIO_IDS,
+    GEMINI_OMNI_MAX_CHARACTER_IDS,
+    GEMINI_OMNI_VIDEO_MODEL,
+    normalize_gemini_omni_aspect_ratio,
+    normalize_gemini_omni_duration,
+    normalize_gemini_omni_ids,
+    normalize_gemini_omni_resolution,
+    normalize_gemini_omni_seed,
+    validate_gemini_omni_media_slots,
+)
+
 
 class KieMediaType(StrEnum):
     IMAGE = "image"
@@ -22,6 +34,7 @@ class KieReferenceType(StrEnum):
     LIST = "list"
     FIRST_LAST = "first_last"
     KLING_MOTION = "kling_motion"
+    GEMINI_OMNI = "gemini_omni"
 
 
 ParamBuilder = Callable[[dict[str, Any]], dict[str, Any]]
@@ -252,6 +265,32 @@ def _kling_motion_params(params: dict[str, Any]) -> dict[str, Any]:
         return {"mode": mode_map.get(raw_mode or "720p", raw_mode or "720p")}
 
     return {"mode": raw_mode or "720p"}
+
+
+def _gemini_omni_video_params(params: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "duration": str(normalize_gemini_omni_duration(params.get("duration"))),
+        "aspect_ratio": normalize_gemini_omni_aspect_ratio(params.get("aspect_ratio")),
+        "resolution": normalize_gemini_omni_resolution(params.get("resolution")),
+    }
+    audio_ids = normalize_gemini_omni_ids(
+        params.get("audio_ids"),
+        max_items=GEMINI_OMNI_MAX_AUDIO_IDS,
+        field_name="audio_ids",
+    )
+    character_ids = normalize_gemini_omni_ids(
+        params.get("character_ids"),
+        max_items=GEMINI_OMNI_MAX_CHARACTER_IDS,
+        field_name="character_ids",
+    )
+    if audio_ids:
+        out["audio_ids"] = audio_ids
+    if character_ids:
+        out["character_ids"] = character_ids
+    seed = normalize_gemini_omni_seed(params.get("seed"))
+    if seed is not None:
+        out["seed"] = seed
+    return out
 
 
 IMAGE_SPECS: dict[str, KieModelSpec] = {
@@ -504,6 +543,14 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         optional_params={"duration": "duration", "resolution": "resolution", "seed": "seed"},
         defaults={"duration": 5, "resolution": "1080p", "seed": 0},
     ),
+    GEMINI_OMNI_VIDEO_MODEL: KieModelSpec(
+        model=GEMINI_OMNI_VIDEO_MODEL,
+        media_type=KieMediaType.VIDEO,
+        supported_modes=("text", "image", "video"),
+        reference_field="image_urls",
+        reference_type=KieReferenceType.GEMINI_OMNI,
+        param_builder=_gemini_omni_video_params,
+    ),
 
     # ── Veo 3 ────────────────────────────────────────────────────────────────
     "veo3": KieModelSpec(
@@ -627,8 +674,34 @@ def build_kie_input(
     elif spec.reference_type == KieReferenceType.KLING_MOTION:
         inp["input_urls"] = urls
         inp["video_urls"] = [p["reference_video_url"]] if p.get("reference_video_url") else []
+    elif spec.reference_type == KieReferenceType.GEMINI_OMNI:
+        video_url = p.get("reference_video_url")
+        character_ids = inp.get("character_ids") if isinstance(inp.get("character_ids"), list) else []
+        validate_gemini_omni_media_slots(
+            image_count=len(urls),
+            video_count=1 if video_url else 0,
+            character_count=len(character_ids),
+        )
+        if urls:
+            inp["image_urls"] = urls
+        if video_url:
+            raw_start = p.get("video_start", 0)
+            raw_end = p.get("video_end", p.get("video_ends", p.get("duration", 10)))
+            try:
+                start = float(raw_start or 0)
+            except (TypeError, ValueError):
+                start = 0.0
+            try:
+                end = float(raw_end or 10)
+            except (TypeError, ValueError):
+                end = 10.0
+            if end <= start:
+                end = start + 1
+            if end - start > 10:
+                end = start + 10
+            inp["video_list"] = [{"url": video_url, "start": start, "ends": end}]
 
-    if spec.reference_field in {"image_urls"}:
+    if spec.reference_field in {"image_urls"} and spec.reference_type != KieReferenceType.GEMINI_OMNI:
         urls_value = inp.get(spec.reference_field)
         if isinstance(urls_value, list) and urls_value:
             singular_field = _singular_reference_field(spec.reference_field)

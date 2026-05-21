@@ -9,8 +9,11 @@ from bot.keyboards.models import (
     image_session_kb,
     image_style_edit_kb,
     public_prompt_text,
+    video_model_groups_kb,
+    video_models_kb,
     video_params_kb,
 )
+from db.models import GenerationType
 from bot.keyboards.payment import topup_kb
 from bot.ui.main_menu import render_main_menu
 
@@ -61,6 +64,37 @@ def test_video_params_kb_hides_grok_i2v_ratio_for_single_ref() -> None:
         )
     )
     assert all(button.callback_data != "vpar_ratio:16:9" for button in buttons)
+
+
+def test_video_menu_has_gemini_omni_group_and_tools() -> None:
+    group_buttons = flatten_buttons(video_model_groups_kb())
+    assert any(button.callback_data == "vid_group:omni" for button in group_buttons)
+
+    costs = [
+        SimpleNamespace(
+            model_key="gemini-omni-video",
+            display_name="Gemini Omni",
+            credits=90,
+            gen_type=GenerationType.video,
+        )
+    ]
+    buttons = flatten_buttons(video_models_kb(costs, "omni"))
+    callbacks = {button.callback_data for button in buttons}
+    assert "vid_model:gemini-omni-video" in callbacks
+    assert "vid_omni_audio" in callbacks
+    assert "vid_omni_character" in callbacks
+
+
+def test_video_params_kb_shows_gemini_omni_controls() -> None:
+    buttons = flatten_buttons(
+        video_params_kb("gemini-omni-video", 4, "16:9", "720p", selected_mode="video")
+    )
+    callbacks = {button.callback_data for button in buttons}
+    assert "vpar_omni:audio" in callbacks
+    assert "vpar_omni:character" in callbacks
+    assert "vpar_omni:seed" in callbacks
+    assert all(not button.callback_data.startswith("vpar_dur:") for button in buttons)
+    assert any(button.text == "🎙️ Audio ID" for button in buttons)
 
 
 def test_image_session_keyboard_keeps_library_button_and_style_edit() -> None:

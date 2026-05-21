@@ -25,6 +25,10 @@ class VideoGenFSM(StatesGroup):
     image_upload = State()          # optional i2v
     params_select = State()         # duration + aspect_ratio + resolution
     motion_select = State()         # only for Kling 2.6 Motion
+    omni_ids_input = State()        # Gemini Omni audio_ids / character_ids / seed
+    omni_audio_input = State()      # Gemini Omni audio ID utility
+    omni_character_image = State()  # Gemini Omni character utility, reference image
+    omni_character_input = State()  # Gemini Omni character utility, metadata
     prompt_input = State()
     generating = State()
 

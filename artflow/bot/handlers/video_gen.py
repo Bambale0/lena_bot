@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from html import escape
 import logging
 from urllib.parse import urlencode
 
@@ -13,6 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import polling, video_service
 from api.public_files import mirror_telegram_file
 from api.video_service import VideoModel
+from core.gemini_omni import (
+    GEMINI_OMNI_AUDIO_VOICES,
+    GEMINI_OMNI_MAX_AUDIO_IDS,
+    GEMINI_OMNI_MAX_CHARACTER_IDS,
+    GEMINI_OMNI_VIDEO_MODEL,
+    normalize_gemini_omni_ids,
+    normalize_gemini_omni_seed,
+)
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     VIDEO_CAPS,
@@ -51,6 +60,7 @@ _DEFAULT_DURATION: dict[str, int] = {
     VideoModel.GROK_T2V: 6,
     VideoModel.HAPPYHORSE_T2V: 5,
     VideoModel.HAPPYHORSE_I2V: 5,
+    GEMINI_OMNI_VIDEO_MODEL: 4,
 }
 _DEFAULT_RATIO: dict[str, str] = {
     VideoModel.KLING_26_T2V: "16:9",
@@ -63,6 +73,7 @@ _DEFAULT_RATIO: dict[str, str] = {
     VideoModel.VEO_3_FAST: "16:9",
     VideoModel.VEO_3: "16:9",
     VideoModel.VEO_3_LITE: "16:9",
+    GEMINI_OMNI_VIDEO_MODEL: "16:9",
 }
 _DEFAULT_RES: dict[str, str] = {
     VideoModel.WAN_27_T2V: "1080p",
@@ -76,6 +87,7 @@ _DEFAULT_RES: dict[str, str] = {
     VideoModel.KLING_30: "pro",
     VideoModel.KLING_26_MOTION: "720p",
     VideoModel.KLING_30_MOTION: "pro",
+    GEMINI_OMNI_VIDEO_MODEL: "720p",
 }
 _MOTION_MODELS = {VideoModel.KLING_26_MOTION, VideoModel.KLING_30_MOTION}
 
@@ -97,18 +109,48 @@ def _video_price_text(model_key: str, duration: int, rate_or_flat: float) -> str
     return f"{total:g} 💋"
 
 
+def _has_gemini_omni_video_input(model_key: str, data: dict) -> bool:
+    return model_key == GEMINI_OMNI_VIDEO_MODEL and bool(data.get("reference_video_url"))
+
+
+async def _resolve_video_model_cost(
+    session: AsyncSession,
+    model_key: str,
+    *,
+    duration: int | None,
+    resolution: str | None,
+    has_video_input: bool = False,
+):
+    return await repo.resolve_video_model_cost(
+        session,
+        model_key,
+        duration=None if has_video_input else duration,
+        resolution=resolution,
+    )
+
+
 def _params_summary(data: dict) -> str:
+    is_gemini_video_ref = data.get("reference_video_url") and data.get("model_key") == GEMINI_OMNI_VIDEO_MODEL
     parts = [p for p in [
         data.get("aspect_ratio"),
-        f"{data['duration']} сек" if data.get("duration") else None,
+        "длительность авто" if is_gemini_video_ref else (f"{data['duration']} сек" if data.get("duration") else None),
         data.get("resolution"),
         data.get("grok_mode"),
+        "видео-референс" if is_gemini_video_ref else None,
+        f"Audio ID: {len(data.get('audio_ids') or [])}" if data.get("audio_ids") else None,
+        f"Character IDs: {len(data.get('character_ids') or [])}" if data.get("character_ids") else None,
+        f"seed {data['seed']}" if data.get("seed") is not None else None,
     ] if p]
     return " · ".join(parts) if parts else "по умолчанию"
 
 
 def _video_params_hint(model_key: str, data: dict) -> str:
     parts = ["Нажимай кнопки ниже: ✅ показывает выбранные параметры."]
+    if model_key == GEMINI_OMNI_VIDEO_MODEL:
+        if data.get("mode") == "video" or data.get("reference_video_url"):
+            parts.append("Для видео-референса длительность задаёт модель автоматически; можно настроить формат, качество, Audio ID, Character IDs и seed.")
+        else:
+            parts.append("Можно добавить 1 Audio ID для голоса и до 3 Character IDs для персонажей.")
     if data.get("mode") == "image" and not _video_ref_count(data) and model_key == VideoModel.GROK_I2V:
         parts.append("Формат кадра появится после загрузки нужного количества референсов.")
     else:
@@ -153,6 +195,7 @@ async def cb_video_menu(call: CallbackQuery, session: AsyncSession, state: FSMCo
         call.message,  # type: ignore[arg-type]
         "🎬 <b>Генерация видео</b>\n\n"
         "Модели разложены по типу задачи, чтобы не искать нужную среди всего списка:\n\n"
+        "• <b>✨ Gemini Omni</b> — мультимодальное видео, видео-референс, Audio ID и Character IDs\n"
         "• <b>⚡ Быстрый старт</b> — текст в видео и универсальные модели\n"
         "• <b>🖼️ Из изображения в видео</b> — если хочешь оживить фото\n"
         "• <b>🕺 Управление камерой</b> — если нужно движение камеры и ракурсы\n\n"
@@ -176,6 +219,111 @@ async def cb_video_group(call: CallbackQuery, session: AsyncSession) -> None:
     await safe_answer_callback(call)
 
 
+def _split_pipe_fields(text: str, max_parts: int) -> list[str]:
+    parts = [part.strip() for part in text.split("|")]
+    if len(parts) < max_parts:
+        parts.extend([""] * (max_parts - len(parts)))
+    return parts[:max_parts]
+
+
+@router.callback_query(VideoGenFSM.model_select, F.data == "vid_omni_audio")
+async def cb_gemini_omni_audio(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(VideoGenFSM.omni_audio_input)
+    voices_preview = ", ".join(f"<code>{voice}</code>" for voice in list(GEMINI_OMNI_AUDIO_VOICES)[:12])
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "🎙️ <b>Gemini Omni Audio ID</b>\n\n"
+        "Отправь строку в формате:\n"
+        "<code>voice_id | название | описание голоса | пример фразы</code>\n\n"
+        "Этот шаг создаёт один ID, который потом можно вставить в параметры видео.\n"
+        f"Голоса, с которых удобно начать: {voices_preview}\n"
+        "Полный список лежит в документации KIE, сохранённой в <code>docs/kie/gemini-omni-audio.md</code>.",
+        reply_markup=back_to_menu_kb(),
+    )
+    await safe_answer_callback(call)
+
+
+@router.message(VideoGenFSM.omni_audio_input, F.text)
+async def handle_gemini_omni_audio(message: Message, state: FSMContext) -> None:
+    audio_id, name, description, example = _split_pipe_fields(message.text or "", 4)  # type: ignore[union-attr]
+    try:
+        result = await video_service.create_gemini_omni_audio(
+            audio_id=audio_id,
+            name=name,
+            voice_description=description or None,
+            example_dialogue=example or None,
+        )
+    except Exception as exc:
+        await message.answer(f"❌ Не удалось создать Audio ID: {escape(str(exc))}", reply_markup=back_to_menu_kb())
+        return
+
+    await state.set_state(VideoGenFSM.model_select)
+    await message.answer(
+        "✅ <b>Audio ID создан</b>\n\n"
+        f"Название: <b>{escape(result.name)}</b>\n"
+        f"ID: <code>{escape(result.audio_id)}</code>\n\n"
+        "Теперь его можно добавить в параметрах Gemini Omni Video.",
+        reply_markup=video_model_groups_kb(),
+    )
+
+
+@router.callback_query(VideoGenFSM.model_select, F.data == "vid_omni_character")
+async def cb_gemini_omni_character(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(VideoGenFSM.omni_character_image)
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "🧍 <b>Gemini Omni Character ID</b>\n\n"
+        "Загрузи одно фото персонажа. После фото я попрошу описание, имя и optional Audio ID.",
+        reply_markup=back_to_menu_kb(),
+    )
+    await safe_answer_callback(call)
+
+
+@router.message(VideoGenFSM.omni_character_image, F.photo)
+async def handle_gemini_omni_character_image(message: Message, state: FSMContext, bot: Bot) -> None:
+    best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
+    image_url = await mirror_telegram_file(bot, best[0].file_id)
+    await state.update_data(omni_character_image_url=image_url)
+    await state.set_state(VideoGenFSM.omni_character_input)
+    await message.answer(
+        "✅ Фото загружено.\n\n"
+        "Отправь строку в формате:\n"
+        "<code>описание персонажа | имя | audio_id</code>\n\n"
+        "Имя и Audio ID можно оставить пустыми.",
+        reply_markup=back_to_menu_kb(),
+    )
+
+
+@router.message(VideoGenFSM.omni_character_input, F.text)
+async def handle_gemini_omni_character(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    description, name, audio_raw = _split_pipe_fields(message.text or "", 3)  # type: ignore[union-attr]
+    try:
+        audio_ids = normalize_gemini_omni_ids(
+            audio_raw,
+            max_items=GEMINI_OMNI_MAX_AUDIO_IDS,
+            field_name="audio_ids",
+        )
+        result = await video_service.create_gemini_omni_character(
+            descriptions=description,
+            image_urls=data.get("omni_character_image_url"),
+            audio_ids=audio_ids,
+            character_name=name or None,
+        )
+    except Exception as exc:
+        await message.answer(f"❌ Не удалось создать Character ID: {escape(str(exc))}", reply_markup=back_to_menu_kb())
+        return
+
+    await state.set_state(VideoGenFSM.model_select)
+    await message.answer(
+        "✅ <b>Character ID создан</b>\n\n"
+        + (f"Имя: <b>{escape(result.character_name)}</b>\n" if result.character_name else "")
+        + f"ID: <code>{escape(result.character_id)}</code>\n\n"
+        "Теперь его можно добавить в параметрах Gemini Omni Video.",
+        reply_markup=video_model_groups_kb(),
+    )
+
+
 @router.callback_query(VideoGenFSM.model_select, F.data.startswith("vid_model:"))
 async def cb_video_model(
     call: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User
@@ -183,7 +331,7 @@ async def cb_video_model(
     model_key = call.data.split(":")[1]  # type: ignore[union-attr]
     default_duration = _DEFAULT_DURATION.get(model_key, 5)
     default_resolution = _DEFAULT_RES.get(model_key)
-    model_cost = await repo.resolve_video_model_cost(
+    model_cost = await _resolve_video_model_cost(
         session,
         model_key,
         duration=default_duration,
@@ -236,6 +384,14 @@ async def _handle_mode(
             f"✅ <b>{display_name}</b> · анимация по фото\n\n🖼️ Загрузи первый кадр:",
             reply_markup=back_to_menu_kb(),
         )
+    elif mode == "video":
+        await state.set_state(VideoGenFSM.image_upload)
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            f"✅ <b>{display_name}</b> · видео-референс\n\n"
+            "🎞️ Загрузи исходное видео до 30 сек. Gemini Omni возьмёт фрагмент до 10 сек.",
+            reply_markup=back_to_menu_kb(),
+        )
     elif mode == "motion":
         await state.set_state(VideoGenFSM.image_upload)
         await state.update_data(motion_step="person")
@@ -271,29 +427,44 @@ async def cb_video_mode(
 async def handle_video_upload(
     message: Message, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
 ) -> None:
-    """Motion Control step 2: user uploads reference video."""
+    """Motion Control step 2 or Gemini Omni video-to-video upload."""
     data = await state.get_data()
     motion_step: str | None = data.get("motion_step")
+    model_key: str = data["model_key"]
+    is_gemini_omni_video_mode = model_key == GEMINI_OMNI_VIDEO_MODEL and data.get("mode") == "video"
 
-    if motion_step != "video_url":
+    if motion_step != "video_url" and not is_gemini_omni_video_mode:
         await message.answer("Пожалуйста, загрузи видео только на шаге 2 управления камерой.", reply_markup=back_to_menu_kb())
         return
 
     video = message.video  # type: ignore[union-attr]
     video_duration: int = video.duration or 5
     file_id = video.file_id
-    model_key: str = data["model_key"]
     resolution: str | None = data.get("resolution")
 
+    if is_gemini_omni_video_mode and video_duration > 30:
+        await message.answer(
+            "❌ Gemini Omni принимает видео-референс до 30 секунд. Загрузи более короткий фрагмент.",
+            reply_markup=back_to_menu_kb(),
+        )
+        return
+
     # Motion Control currently uses Kling, but keep the pricing logic generic.
-    model_cost = await repo.resolve_video_model_cost(session, model_key, resolution=resolution)
+    model_cost = await _resolve_video_model_cost(
+        session,
+        model_key,
+        duration=data.get("duration"),
+        resolution=resolution,
+        has_video_input=is_gemini_omni_video_mode,
+    )
     rate_or_flat = model_cost.credits if model_cost else int(data.get("credits", 8))
-    total_credits = _video_total_credits(model_key, video_duration, rate_or_flat)
+    billable_duration = video_duration if motion_step == "video_url" else int(data.get("duration", 4))
+    total_credits = _video_total_credits(model_key, billable_duration, rate_or_flat)
 
     if db_user.credits < total_credits:
         await message.answer(
             f"❌ Недостаточно 💋!\n"
-            f"Видео: {_video_price_text(model_key, video_duration, rate_or_flat)}\n"
+            f"Видео: {_video_price_text(model_key, billable_duration, rate_or_flat)}\n"
             f"Баланс: {db_user.credits:g} 💋.",
             reply_markup=back_to_menu_kb(),
         )
@@ -301,6 +472,35 @@ async def handle_video_upload(
 
     # Mirror video to public storage for KIE API
     video_url = await mirror_telegram_file(bot, file_id, is_video=True)
+
+    model_cost_obj = await repo.get_model_cost(session, model_key)
+    display_name = model_cost_obj.display_name if model_cost_obj else model_key
+
+    if is_gemini_omni_video_mode:
+        clip_end = min(video_duration, 10)
+        await state.update_data(
+            reference_video_url=video_url,
+            video_clip_start=0,
+            video_clip_end=clip_end,
+            credits=rate_or_flat,
+        )
+        updated = await state.get_data()
+        await state.set_state(VideoGenFSM.params_select)
+        await message.answer(
+            f"✅ Видео загружено! (<b>{_video_price_text(model_key, billable_duration, rate_or_flat)}</b>)\n\n"
+            f"⚙️ <b>Параметры</b> · {display_name}\n"
+            f"{_video_params_hint(model_key, updated)}",
+            reply_markup=video_params_kb(
+                model_key,
+                updated.get("duration"),
+                updated.get("aspect_ratio"),
+                updated.get("resolution"),
+                updated.get("grok_mode"),
+                selected_mode=updated.get("mode"),
+                ref_count=_video_ref_count(updated),
+            ),
+        )
+        return
 
     await state.update_data(
         reference_video_url=video_url,
@@ -310,9 +510,6 @@ async def handle_video_upload(
         motion_step="prompt",
     )
     await state.set_state(VideoGenFSM.prompt_input)
-
-    model_cost_obj = await repo.get_model_cost(session, model_key)
-    display_name = model_cost_obj.display_name if model_cost_obj else model_key
     await message.answer(
         f"✅ Видео загружено! (<b>{_video_price_text(model_key, video_duration, rate_or_flat)}</b>)\n\n"
         f"✅ <b>{display_name}</b>\n\n"
@@ -455,14 +652,100 @@ async def cb_vpar_mode(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer(mode)
 
 
+@router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_omni:"))
+async def cb_vpar_omni_extra(call: CallbackQuery, state: FSMContext) -> None:
+    target = call.data.split(":")[1]  # type: ignore[union-attr]
+    data = await state.get_data()
+    if data.get("model_key") != GEMINI_OMNI_VIDEO_MODEL:
+        await call.answer("Этот параметр доступен только для Gemini Omni", show_alert=True)
+        return
+
+    await state.update_data(omni_input_target=target)
+    await state.set_state(VideoGenFSM.omni_ids_input)
+    if target == "audio":
+        text = (
+            "🎙️ <b>Audio ID</b>\n\n"
+            "Отправь один ID. Этот ID создаётся кнопкой "
+            "<b>Создать Audio ID</b> в меню Gemini Omni.\n\n"
+            "Чтобы очистить поле, отправь <code>-</code>."
+        )
+    elif target == "character":
+        text = (
+            "🧍 <b>Character IDs</b>\n\n"
+            "Отправь до 3 ID через запятую. Эти ID создаются кнопкой "
+            "<b>Создать Character ID</b> в меню Gemini Omni.\n\n"
+            "Чтобы очистить поле, отправь <code>-</code>."
+        )
+    else:
+        text = (
+            "🌱 <b>Seed</b>\n\n"
+            "Отправь целое число от 0 до 2147483647. "
+            "Чтобы сбросить seed, отправь <code>-</code>."
+        )
+    await safe_edit_message(call.message, text, reply_markup=back_to_menu_kb())  # type: ignore[arg-type]
+    await call.answer()
+
+
+@router.message(VideoGenFSM.omni_ids_input, F.text)
+async def handle_omni_ids_input(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    data = await state.get_data()
+    target = data.get("omni_input_target")
+    raw = (message.text or "").strip()  # type: ignore[union-attr]
+    try:
+        if target == "audio":
+            value = [] if raw == "-" else normalize_gemini_omni_ids(
+                raw,
+                max_items=GEMINI_OMNI_MAX_AUDIO_IDS,
+                field_name="audio_ids",
+            )
+            await state.update_data(audio_ids=value, omni_input_target=None)
+            saved_text = "Audio ID очищен" if not value else "Audio ID добавлен"
+        elif target == "character":
+            value = [] if raw == "-" else normalize_gemini_omni_ids(
+                raw,
+                max_items=GEMINI_OMNI_MAX_CHARACTER_IDS,
+                field_name="character_ids",
+            )
+            await state.update_data(character_ids=value, omni_input_target=None)
+            saved_text = f"character IDs: {len(value)}"
+        else:
+            value = None if raw == "-" else normalize_gemini_omni_seed(raw)
+            await state.update_data(seed=value, omni_input_target=None)
+            saved_text = "seed сброшен" if value is None else f"seed: {value}"
+    except ValueError as exc:
+        await message.answer(f"❌ {escape(str(exc))}", reply_markup=back_to_menu_kb())
+        return
+
+    updated = await state.get_data()
+    model_key = updated["model_key"]
+    model_cost = await repo.get_model_cost(session, model_key)
+    display_name = model_cost.display_name if model_cost else model_key
+    await state.set_state(VideoGenFSM.params_select)
+    await message.answer(
+        f"✅ Сохранено: <b>{escape(saved_text)}</b>\n\n"
+        f"⚙️ <b>Параметры</b> · {display_name}\n"
+        f"{_video_params_hint(model_key, updated)}",
+        reply_markup=video_params_kb(
+            model_key,
+            updated.get("duration"),
+            updated.get("aspect_ratio"),
+            updated.get("resolution"),
+            updated.get("grok_mode"),
+            selected_mode=updated.get("mode"),
+            ref_count=_video_ref_count(updated),
+        ),
+    )
+
+
 @router.callback_query(VideoGenFSM.params_select, F.data == "vpar_next")
 async def cb_vpar_next(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
-    model_cost = await repo.resolve_video_model_cost(
+    model_cost = await _resolve_video_model_cost(
         session,
         data["model_key"],
         duration=data.get("duration"),
         resolution=data.get("resolution"),
+        has_video_input=_has_gemini_omni_video_input(data["model_key"], data),
     )
     display_name = model_cost.display_name if model_cost else data["model_key"]
     if model_cost:
@@ -566,11 +849,13 @@ async def handle_video_prompt(
         else data.get("image_url")
     )
 
-    model_cost = await repo.resolve_video_model_cost(
+    has_gemini_omni_video_input = _has_gemini_omni_video_input(model_key, data)
+    model_cost = await _resolve_video_model_cost(
         session,
         model_key,
         duration=duration,
         resolution=resolution,
+        has_video_input=has_gemini_omni_video_input,
     )
     motion_credits = data.get("motion_credits")  # pre-calculated for motion control
     if motion_credits is not None:
@@ -608,6 +893,11 @@ async def handle_video_prompt(
             resolution=resolution,
             reference_video_url=data.get("reference_video_url"),
             grok_mode=grok_mode,
+            audio_ids=data.get("audio_ids"),
+            character_ids=data.get("character_ids"),
+            video_start=data.get("video_clip_start"),
+            video_end=data.get("video_clip_end"),
+            seed=data.get("seed"),
             callback_url=_kie_callback_url(),
         )
     except Exception as e:

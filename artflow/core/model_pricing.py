@@ -19,6 +19,7 @@ RESOLUTION_LABELS: dict[str, str] = {
     "480p": "480p",
     "720p": "720p",
     "1080p": "1080p",
+    "4k": "4K",
 }
 
 

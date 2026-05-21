@@ -33,3 +33,37 @@ async def test_upload_file_stream_uses_upload_path_form_field(monkeypatch) -> No
     assert url == "https://cdn.example.test/ref.png"
     assert calls[0]["path"] == "/api/file-stream-upload"
     assert calls[0]["data"] == {"uploadPath": "images/custom"}
+
+
+@pytest.mark.asyncio
+async def test_create_omni_audio_uses_documented_endpoint(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_post(path: str, payload: dict) -> dict:
+        calls.append((path, payload))
+        return {"code": 0, "data": {"kieAudioId": "audio_123"}}
+
+    monkeypatch.setattr(kieai_client, "_retry_post", fake_post)
+
+    payload = {"audio_id": "achernar", "name": "Narrator"}
+    response = await kieai_client.create_omni_audio(payload)
+
+    assert response["data"]["kieAudioId"] == "audio_123"
+    assert calls == [("/api/v1/omni/audio/create", payload)]
+
+
+@pytest.mark.asyncio
+async def test_create_omni_character_uses_documented_endpoint(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_post(path: str, payload: dict) -> dict:
+        calls.append((path, payload))
+        return {"code": 200, "data": {"characterId": "character_123"}}
+
+    monkeypatch.setattr(kieai_client, "_retry_post", fake_post)
+
+    payload = {"descriptions": "hero", "image_urls": ["https://example.test/hero.png"]}
+    response = await kieai_client.create_omni_character(payload)
+
+    assert response["data"]["characterId"] == "character_123"
+    assert calls == [("/api/v1/omni/character/create", payload)]

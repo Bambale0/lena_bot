@@ -8,6 +8,16 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from api.image_service import MODEL_ASPECT_RATIOS, ImageModel
 from api.video_service import MotionDirection, VideoModel
+from core.gemini_omni import (
+    GEMINI_OMNI_ASPECT_RATIOS,
+    GEMINI_OMNI_DURATIONS,
+    GEMINI_OMNI_MAX_AUDIO_IDS,
+    GEMINI_OMNI_MAX_CHARACTER_IDS,
+    GEMINI_OMNI_PRICE_TABLE,
+    GEMINI_OMNI_RESOLUTIONS,
+    GEMINI_OMNI_VIDEO_INPUT_PRICES,
+    GEMINI_OMNI_VIDEO_MODEL,
+)
 from db.models import ModelCost
 
 # ── Video capabilities ────────────────────────────────────────────────────────
@@ -141,6 +151,22 @@ VIDEO_CAPS: dict[str, dict] = {
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
         "billing_mode": "per_second",
+    },
+    GEMINI_OMNI_VIDEO_MODEL: {
+        "modes": ["text", "image", "video"],
+        "duration_options": list(GEMINI_OMNI_DURATIONS),
+        "aspect_ratios": list(GEMINI_OMNI_ASPECT_RATIOS),
+        "has_resolution": True,
+        "resolutions": list(GEMINI_OMNI_RESOLUTIONS),
+        "resolution_labels": {"720p": "720p", "1080p": "1080p", "4k": "4K"},
+        "max_refs": 7,
+        "supports_video_input": True,
+        "max_audio_ids": GEMINI_OMNI_MAX_AUDIO_IDS,
+        "max_character_ids": GEMINI_OMNI_MAX_CHARACTER_IDS,
+        "has_seed": True,
+        "billing_mode": "flat",
+        "price_table": GEMINI_OMNI_PRICE_TABLE,
+        "video_input_prices": GEMINI_OMNI_VIDEO_INPUT_PRICES,
     },
     "veo3_fast": {
         "modes": ["text", "image"],
@@ -352,6 +378,7 @@ VIDEO_MODEL_DESC: dict[str, str] = {
     VideoModel.GROK_I2V: "⚡ Grok Animate · оживление фото",
     VideoModel.HAPPYHORSE_T2V: "🐎 HappyHorse Video · легко начать",
     VideoModel.HAPPYHORSE_I2V: "🐎 HappyHorse Animate · оживление фото",
+    VideoModel.GEMINI_OMNI_VIDEO: "✨ Gemini Omni · текст, фото, видео, Audio ID и Character IDs",
     VideoModel.VEO_3: "🏆 Veo · высокое качество",
     VideoModel.VEO_3_FAST: "🏆 Veo Fast · быстрее",
     VideoModel.VEO_3_LITE: "🏆 Veo Lite · быстрый старт",
@@ -367,6 +394,7 @@ _VIDEO_MODEL_ORDER: list[str] = [
     VideoModel.KLING_30,
     VideoModel.VEO_3_LITE,
     VideoModel.SEEDANCE_2_FAST,
+    VideoModel.GEMINI_OMNI_VIDEO,
     VideoModel.HAPPYHORSE_T2V,
     VideoModel.VEO_3,
     VideoModel.VEO_3_FAST,
@@ -384,6 +412,12 @@ _VIDEO_MODEL_ORDER: list[str] = [
 ]
 
 _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
+    (
+        "omni",
+        [
+            VideoModel.GEMINI_OMNI_VIDEO,
+        ],
+    ),
     (
         "fast",
         [
@@ -424,6 +458,7 @@ _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
 ]
 
 VIDEO_GROUP_TITLES: dict[str, str] = {
+    "omni": "✨ Gemini Omni",
     "fast": "⚡ Быстрый старт",
     "i2v": "🖼️ Из изображения в видео",
     "motion": "🕺 Управление камерой",
@@ -706,6 +741,9 @@ def video_models_kb(
         keys = dict(_VIDEO_GROUPS).get(group_key, [])
         for mc in _sorted_models([mc for mc in model_costs if mc.model_key in supported_video_keys], keys):
             builder.row(_model_button(mc, "vid_model", model_costs))
+        if group_key == "omni":
+            builder.row(InlineKeyboardButton(text="🎙️ Создать Audio ID", callback_data="vid_omni_audio"))
+            builder.row(InlineKeyboardButton(text="🧍 Создать Character ID", callback_data="vid_omni_character"))
         builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
         return builder.as_markup()
 
@@ -746,6 +784,10 @@ def video_mode_kb(model_key: str) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(text="🕺 Управление камерой", callback_data=f"vid_mode:motion:{model_key}"),
         )
+    if "video" in modes:
+        builder.row(
+            InlineKeyboardButton(text="🎞️ Видео → Видео", callback_data=f"vid_mode:video:{model_key}"),
+        )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
     return builder.as_markup()
 
@@ -773,6 +815,8 @@ def video_params_kb(
     builder = InlineKeyboardBuilder()
 
     duration_options = caps.get("duration_options", [])
+    if model_key == GEMINI_OMNI_VIDEO_MODEL and selected_mode == "video":
+        duration_options = []
     if duration_options:
         dur_buttons = [
             InlineKeyboardButton(
@@ -817,6 +861,14 @@ def video_params_kb(
             for opt in mode_options
         ]
         builder.row(*mode_buttons)
+
+    if caps.get("max_audio_ids"):
+        builder.row(
+            InlineKeyboardButton(text="🎙️ Audio ID", callback_data="vpar_omni:audio"),
+            InlineKeyboardButton(text="🧍 Character IDs", callback_data="vpar_omni:character"),
+        )
+    if caps.get("has_seed"):
+        builder.row(InlineKeyboardButton(text="🌱 Seed", callback_data="vpar_omni:seed"))
 
     builder.row(InlineKeyboardButton(text="▶️ Далее: Промпт", callback_data="vpar_next"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="vpar_back"))

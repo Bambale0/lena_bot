@@ -167,6 +167,16 @@ async def get_task_status(task_id: str) -> dict[str, Any]:
     return await _retry_get("/api/v1/jobs/recordInfo", params={"taskId": task_id})
 
 
+async def create_omni_audio(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST /api/v1/omni/audio/create — создать Gemini Omni audio ID."""
+    return await _retry_post("/api/v1/omni/audio/create", payload)
+
+
+async def create_omni_character(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST /api/v1/omni/character/create — создать Gemini Omni character ID."""
+    return await _retry_post("/api/v1/omni/character/create", payload)
+
+
 async def create_veo_task(payload: dict[str, Any]) -> dict[str, Any]:
     """POST /api/v1/veo/generate — только для Veo 3."""
     return await _retry_post("/api/v1/veo/generate", payload)

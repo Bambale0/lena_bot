@@ -30,6 +30,14 @@ from api.video_service import VideoModel
 from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
 from bot.utils.deep_links import build_start_payload
 from core.config import settings
+from core.gemini_omni import (
+    GEMINI_OMNI_MAX_AUDIO_IDS,
+    GEMINI_OMNI_MAX_CHARACTER_IDS,
+    GEMINI_OMNI_VIDEO_MODEL,
+    normalize_gemini_omni_ids,
+    normalize_gemini_omni_seed,
+    validate_gemini_omni_media_slots,
+)
 from db import repository as repo
 from db.models import (
     GenerationStatus,
@@ -579,6 +587,9 @@ def _normalize_video_resolution(model_key: str, resolution: str | None) -> str |
             "4K": "1080p",
         }
         return aliases.get(resolution, resolution)
+    if model_key == GEMINI_OMNI_VIDEO_MODEL:
+        aliases = {"4K": "4k", "2160p": "4k", "720P": "720p", "1080P": "1080p"}
+        return aliases.get(resolution, resolution)
     return resolution
 
 
@@ -644,7 +655,13 @@ def _normalize_video_request(
     resolution: str | None,
     image_url: str | None,
     reference_urls: list[str] | None,
-    grok_mode: str | None,
+    video_url: str | None = None,
+    video_start: float | None = None,
+    video_end: float | None = None,
+    audio_ids: list[str] | None = None,
+    character_ids: list[str] | None = None,
+    seed: int | None = None,
+    grok_mode: str | None = None,
 ) -> dict[str, Any]:
     caps: dict[str, Any] = VIDEO_CAPS.get(model_key, {})
     supported_modes = caps.get("modes", ["text"])
@@ -661,11 +678,21 @@ def _normalize_video_request(
     else:
         normalized_image_url = None
 
+    normalized_video_url: str | None = None
+    if video_url:
+        if "video" not in supported_modes:
+            raise HTTPException(status_code=422, detail="Selected model does not support video input")
+        video_urls = _normalize_public_urls(video_url)
+        normalized_video_url = video_urls[0] if video_urls else None
+    if normalized_mode == "video" and not normalized_video_url:
+        raise HTTPException(status_code=422, detail="Selected mode requires video_url")
+
+    duration_input = None if model_key == GEMINI_OMNI_VIDEO_MODEL and duration == 5 else duration
     normalized_duration = _normalize_int_choice(
-        duration,
+        duration_input,
         caps.get("duration_options", []),
         field_name="duration",
-        default=duration,
+        default=None if model_key == GEMINI_OMNI_VIDEO_MODEL else duration,
     )
     normalized_resolution_input = _normalize_video_resolution(model_key, resolution)
     normalized_resolution = _normalize_choice(
@@ -696,12 +723,53 @@ def _normalize_video_request(
     else:
         normalized_grok_mode = "normal"
 
+    normalized_audio_ids: list[str] = []
+    normalized_character_ids: list[str] = []
+    normalized_seed: int | None = None
+    if model_key == GEMINI_OMNI_VIDEO_MODEL:
+        try:
+            normalized_audio_ids = normalize_gemini_omni_ids(
+                audio_ids,
+                max_items=GEMINI_OMNI_MAX_AUDIO_IDS,
+                field_name="audio_ids",
+            )
+            normalized_character_ids = normalize_gemini_omni_ids(
+                character_ids,
+                max_items=GEMINI_OMNI_MAX_CHARACTER_IDS,
+                field_name="character_ids",
+            )
+            normalized_seed = normalize_gemini_omni_seed(seed)
+            validate_gemini_omni_media_slots(
+                image_count=len(all_refs),
+                video_count=1 if normalized_video_url else 0,
+                character_count=len(normalized_character_ids),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    elif audio_ids or character_ids or seed is not None or normalized_video_url:
+        raise HTTPException(status_code=422, detail="Gemini Omni extras are not supported by selected model")
+
+    start = float(video_start or 0)
+    end = video_end
+    if normalized_video_url:
+        end = float(end if end is not None else min(normalized_duration or 10, 10))
+        if end <= start:
+            raise HTTPException(status_code=422, detail="video_end must be greater than video_start")
+        if end - start > 10:
+            raise HTTPException(status_code=422, detail="Gemini Omni video trim must be 10 seconds or shorter")
+
     return {
         "mode": normalized_mode,
         "duration": normalized_duration,
         "aspect_ratio": normalized_aspect_ratio,
         "resolution": normalized_resolution,
         "image_url": normalized_image_url,
+        "reference_video_url": normalized_video_url,
+        "video_start": start if normalized_video_url else None,
+        "video_end": end if normalized_video_url else None,
+        "audio_ids": normalized_audio_ids,
+        "character_ids": normalized_character_ids,
+        "seed": normalized_seed,
         "grok_mode": normalized_grok_mode,
     }
 
@@ -776,6 +844,12 @@ class ModelInfo(BaseModel):
     resolutions: list[str] = []
     motion_controls: list[str] = []
     mode_options: list[str] = []
+    supports_video_input: bool = False
+    max_audio_ids: int = 0
+    max_character_ids: int = 0
+    has_seed: bool = False
+    video_input_prices: dict[str, float] = Field(default_factory=dict)
+    price_table: dict[str, dict[int, float]] = Field(default_factory=dict)
 
 
 class GenerationOut(BaseModel):
@@ -808,12 +882,18 @@ class ImageGenRequest(BaseModel):
 class VideoGenRequest(BaseModel):
     model: str
     prompt: str = Field(..., min_length=1, max_length=4000)
-    mode: str = "text"                    # "text" | "image"
+    mode: str = "text"                    # "text" | "image" | "video"
     duration: int = Field(default=5, ge=2, le=30)
     aspect_ratio: str | None = None
     resolution: str | None = None
     image_url: str | None = None
     reference_urls: list[str] = []
+    video_url: str | None = None
+    video_start: float = Field(default=0, ge=0)
+    video_end: float | None = None
+    audio_ids: list[str] = []
+    character_ids: list[str] = []
+    seed: int | None = None
     grok_mode: str = "normal"
 
 
@@ -825,6 +905,12 @@ class FeedRemixRequest(BaseModel):
     resolution: str | None = None
     image_url: str | None = None
     reference_urls: list[str] = []
+    video_url: str | None = None
+    video_start: float = Field(default=0, ge=0)
+    video_end: float | None = None
+    audio_ids: list[str] = []
+    character_ids: list[str] = []
+    seed: int | None = None
     grok_mode: str = "normal"
     quality: str = "basic"
     count: int = Field(default=1, ge=1, le=6)
@@ -1256,6 +1342,15 @@ async def list_video_models(
             motion_controls=caps.get("motion_controls", []),
             mode_options=caps.get("mode_options", []),
             max_refs=int(caps.get("max_refs", 1) or 1),
+            supports_video_input=bool(caps.get("supports_video_input")),
+            max_audio_ids=int(caps.get("max_audio_ids", 0) or 0),
+            max_character_ids=int(caps.get("max_character_ids", 0) or 0),
+            has_seed=bool(caps.get("has_seed")),
+            video_input_prices={str(k): float(v) for k, v in (caps.get("video_input_prices") or {}).items()},
+            price_table={
+                str(res): {int(duration): float(price) for duration, price in prices.items()}
+                for res, prices in (caps.get("price_table") or {}).items()
+            },
         ))
     return result
 
@@ -1548,12 +1643,19 @@ async def create_video_generation(
         resolution=body.resolution,
         image_url=body.image_url,
         reference_urls=body.reference_urls,
+        video_url=body.video_url,
+        video_start=body.video_start,
+        video_end=body.video_end,
+        audio_ids=body.audio_ids,
+        character_ids=body.character_ids,
+        seed=body.seed,
         grok_mode=body.grok_mode,
     )
+    has_gemini_omni_video_input = body.model == GEMINI_OMNI_VIDEO_MODEL and bool(normalized["reference_video_url"])
     model_cost = await repo.resolve_video_model_cost(
         session,
         body.model,
-        duration=normalized["duration"],
+        duration=None if has_gemini_omni_video_input else normalized["duration"],
         resolution=normalized["resolution"],
     )
     if not model_cost:
@@ -1595,7 +1697,13 @@ async def create_video_generation(
             duration=normalized["duration"],
             aspect_ratio=normalized["aspect_ratio"],
             resolution=normalized["resolution"],
+            reference_video_url=normalized["reference_video_url"],
             grok_mode=normalized["grok_mode"],
+            audio_ids=normalized["audio_ids"],
+            character_ids=normalized["character_ids"],
+            video_start=normalized["video_start"],
+            video_end=normalized["video_end"],
+            seed=normalized["seed"],
             callback_url=_kie_callback_url(),
         )
     except Exception as exc:
@@ -1899,12 +2007,22 @@ async def remix_feed_post(
             resolution=body.resolution,
             image_url=fallback_image_url,
             reference_urls=video_refs[1:],
+            video_url=body.video_url,
+            video_start=body.video_start,
+            video_end=body.video_end,
+            audio_ids=body.audio_ids,
+            character_ids=body.character_ids,
+            seed=body.seed,
             grok_mode=body.grok_mode,
+        )
+        has_gemini_omni_video_input = (
+            body.model == GEMINI_OMNI_VIDEO_MODEL
+            and bool(normalized_video["reference_video_url"])
         )
         model_cost = await repo.resolve_video_model_cost(
             session,
             body.model,
-            duration=normalized_video["duration"],
+            duration=None if has_gemini_omni_video_input else normalized_video["duration"],
             resolution=normalized_video["resolution"],
         )
     else:
@@ -1981,7 +2099,13 @@ async def remix_feed_post(
                 duration=normalized_video["duration"],
                 aspect_ratio=normalized_video["aspect_ratio"],
                 resolution=normalized_video["resolution"],
+                reference_video_url=normalized_video["reference_video_url"],
                 grok_mode=normalized_video["grok_mode"],
+                audio_ids=normalized_video["audio_ids"],
+                character_ids=normalized_video["character_ids"],
+                video_start=normalized_video["video_start"],
+                video_end=normalized_video["video_end"],
+                seed=normalized_video["seed"],
                 callback_url=_kie_callback_url(),
             )
         else:

@@ -176,6 +176,52 @@ async def test_handle_video_upload_insufficient_credits() -> None:
     assert "недостаточно" in msg.answer.call_args[0][0].lower()
 
 
+@pytest.mark.asyncio
+async def test_handle_video_upload_accepts_gemini_omni_video_mode() -> None:
+    msg = make_message(text="test")
+    msg.video = MagicMock()
+    msg.video.duration = 9
+    msg.video.file_id = "video_123"
+    msg.answer = AsyncMock()
+    mock_state = _fake_state(
+        model_key="gemini-omni-video",
+        mode="video",
+        duration=4,
+        aspect_ratio="16:9",
+        resolution="720p",
+        credits=90,
+    )
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
+    mock_cost = _make_video_model_cost("gemini-omni-video", credits=240, display_name="Gemini Omni")
+
+    with patch("bot.handlers.video_gen.repo", SimpleNamespace(
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        get_model_cost=AsyncMock(return_value=mock_cost),
+    )):
+        with patch("bot.handlers.video_gen.mirror_telegram_file", AsyncMock(return_value="https://cdn.test/video.mp4")):
+            await video_gen.handle_video_upload(msg, mock_state, MagicMock(), mock_db_user, MagicMock())
+
+    mock_state.set_state.assert_awaited_with(VideoGenFSM.params_select)
+    updated = await mock_state.get_data()
+    assert updated["reference_video_url"] == "https://cdn.test/video.mp4"
+    assert updated["video_clip_end"] == 9
+
+
+@pytest.mark.asyncio
+async def test_handle_omni_ids_input_rejects_multiple_audio_ids() -> None:
+    msg = make_message(text="audio_1,audio_2")
+    msg.answer = AsyncMock()
+    mock_state = _fake_state(
+        model_key="gemini-omni-video",
+        omni_input_target="audio",
+    )
+
+    await video_gen.handle_omni_ids_input(msg, mock_state, AsyncMock())
+
+    msg.answer.assert_awaited_once()
+    assert "audio_ids supports at most 1" in msg.answer.call_args.args[0]
+
+
 # ── handle_image_upload ───────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -341,3 +387,50 @@ async def test_handle_video_prompt_motion_control_keeps_user_prompt() -> None:
 
     assert mock_repo.create_generation.await_args.args[4] == "camera push in"
     assert mock_video_service.generate_video.await_args.args[1] == "camera push in"
+
+
+@pytest.mark.asyncio
+async def test_handle_video_prompt_passes_gemini_omni_extras() -> None:
+    msg = make_message(text="multimodal video")
+    msg.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test", is_banned=False)
+    mock_state = _fake_state(
+        model_key="gemini-omni-video",
+        duration=4,
+        aspect_ratio="16:9",
+        resolution="720p",
+        mode="video",
+        credits=240,
+        grok_mode="normal",
+        reference_video_url="https://cdn.test/source.mp4",
+        video_clip_start=0,
+        video_clip_end=8,
+        audio_ids=["audio_1"],
+        character_ids=["character_1"],
+        seed=99,
+    )
+    mock_cost = _make_video_model_cost("gemini-omni-video", 240, "Gemini Omni")
+    mock_gen = SimpleNamespace(id=102, task_id=None, model="gemini-omni-video")
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )):
+        with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_omni", provider="kieai")),
+            get_poll_fn=MagicMock(),
+        )) as mock_video_service:
+            await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
+
+    kwargs = mock_video_service.generate_video.await_args.kwargs
+    assert kwargs["reference_video_url"] == "https://cdn.test/source.mp4"
+    assert kwargs["audio_ids"] == ["audio_1"]
+    assert kwargs["character_ids"] == ["character_1"]
+    assert kwargs["video_end"] == 8
+    assert kwargs["seed"] == 99

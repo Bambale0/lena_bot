@@ -28,6 +28,10 @@ from typing import Any
 
 from api import kieai_client
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
+from core.gemini_omni import (
+    build_gemini_omni_audio_payload,
+    build_gemini_omni_character_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,8 @@ class VideoModel(StrEnum):
     # HappyHorse
     HAPPYHORSE_T2V  = "happyhorse/text-to-video"
     HAPPYHORSE_I2V  = "happyhorse/image-to-video"
+    # Gemini Omni
+    GEMINI_OMNI_VIDEO = "gemini-omni-video"
     # Veo (special endpoint)
     VEO_3           = "veo3"
     VEO_3_FAST      = "veo3_fast"
@@ -86,6 +92,19 @@ class VideoResult:
     provider: str  # "kieai" | "veo"
 
 
+@dataclass
+class GeminiOmniAudioResult:
+    audio_id: str
+    name: str
+
+
+@dataclass
+class GeminiOmniCharacterResult:
+    character_id: str
+    character_name: str | None
+    image_url: str | None
+
+
 # ── Model sets ────────────────────────────────────────────────────────────────
 _VEO_MODELS = {VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE}
 _MOTION_MODELS = {VideoModel.KLING_26_MOTION, VideoModel.KLING_30_MOTION}
@@ -114,6 +133,12 @@ async def generate_video(
     reference_video_url: str | None = None,
     # Grok mode
     grok_mode: str = "normal",
+    # Gemini Omni extras
+    audio_ids: list[str] | None = None,
+    character_ids: list[str] | None = None,
+    video_start: float | int | None = None,
+    video_end: float | int | None = None,
+    seed: int | None = None,
     callback_url: str | None = None,
     enable_fallback: bool = False,
 ) -> VideoResult:
@@ -132,6 +157,11 @@ async def generate_video(
         resolution=resolution,
         reference_video_url=reference_video_url,
         grok_mode=grok_mode,
+        audio_ids=audio_ids,
+        character_ids=character_ids,
+        video_start=video_start,
+        video_end=video_end,
+        seed=seed,
         callback_url=callback_url,
     )
 
@@ -149,6 +179,11 @@ async def _kieai_generate(
     resolution: str | None,
     reference_video_url: str | None,
     grok_mode: str,
+    audio_ids: list[str] | None,
+    character_ids: list[str] | None,
+    video_start: float | int | None,
+    video_end: float | int | None,
+    seed: int | None,
     callback_url: str | None,
 ) -> VideoResult:
     resolved_model, inp = build_kie_input(
@@ -162,6 +197,11 @@ async def _kieai_generate(
             "resolution": resolution,
             "reference_video_url": reference_video_url,
             "grok_mode": grok_mode,
+            "audio_ids": audio_ids,
+            "character_ids": character_ids,
+            "video_start": video_start,
+            "video_end": video_end,
+            "seed": seed,
         },
     )
 
@@ -185,6 +225,81 @@ async def _kieai_generate(
 
     logger.info("KIE.AI video task %s: %s", resolved_model, task_id)
     return VideoResult(task_id=task_id, provider="kieai")
+
+
+def _result_urls_from_dict(value: dict[str, Any]) -> list[str]:
+    urls: list[str] = []
+    for key in ("resultUrls", "result_urls", "videoUrls", "video_urls", "urls"):
+        items = value.get(key)
+        if isinstance(items, list):
+            urls.extend(str(item) for item in items if item)
+        elif isinstance(items, str) and items:
+            urls.append(items)
+    for key in ("resultUrl", "result_url", "videoUrl", "video_url", "url"):
+        item = value.get(key)
+        if isinstance(item, str) and item:
+            urls.append(item)
+    return list(dict.fromkeys(urls))
+
+
+async def create_gemini_omni_audio(
+    *,
+    audio_id: str,
+    name: str,
+    voice_description: str | None = None,
+    example_dialogue: str | None = None,
+) -> GeminiOmniAudioResult:
+    payload = build_gemini_omni_audio_payload(
+        audio_id=audio_id,
+        name=name,
+        voice_description=voice_description,
+        example_dialogue=example_dialogue,
+    )
+    resp = await kieai_client.create_omni_audio(payload)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"Gemini Omni audio: invalid response: {resp!r}")
+    code = resp.get("code")
+    if code not in (None, 0, 200, "0", "200"):
+        raise RuntimeError(f"Gemini Omni audio failed: {code} {resp.get('msg')}")
+    data = resp.get("data") or {}
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Gemini Omni audio: invalid data: {data!r}")
+    result_id = str(data.get("kieAudioId") or data.get("audioId") or "").strip()
+    if not result_id:
+        raise RuntimeError(f"Gemini Omni audio: empty audio id: {resp!r}")
+    return GeminiOmniAudioResult(audio_id=result_id, name=str(data.get("name") or payload["name"]))
+
+
+async def create_gemini_omni_character(
+    *,
+    descriptions: str,
+    image_urls: str | list[str],
+    audio_ids: list[str] | None = None,
+    character_name: str | None = None,
+) -> GeminiOmniCharacterResult:
+    payload = build_gemini_omni_character_payload(
+        descriptions=descriptions,
+        image_urls=image_urls,
+        audio_ids=audio_ids,
+        character_name=character_name,
+    )
+    resp = await kieai_client.create_omni_character(payload)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"Gemini Omni character: invalid response: {resp!r}")
+    code = resp.get("code")
+    if code not in (None, 0, 200, "0", "200"):
+        raise RuntimeError(f"Gemini Omni character failed: {code} {resp.get('msg')}")
+    data = resp.get("data") or {}
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Gemini Omni character: invalid data: {data!r}")
+    result_id = str(data.get("characterId") or data.get("character_id") or data.get("id") or "").strip()
+    if not result_id:
+        raise RuntimeError(f"Gemini Omni character: empty characterId: {resp!r}")
+    return GeminiOmniCharacterResult(
+        character_id=result_id,
+        character_name=data.get("characterName"),
+        image_url=data.get("imageUrl"),
+    )
 
 
 # ── Veo 3 ─────────────────────────────────────────────────────────────────────
@@ -241,7 +356,9 @@ async def poll_kieai_status(task_id: str) -> str | None:
             parsed = json.loads(result_json_str)
         except json.JSONDecodeError:
             parsed = {}
-        urls = parsed.get("resultUrls", [])
+        urls = _result_urls_from_dict(parsed) if isinstance(parsed, dict) else []
+        if not urls:
+            urls = _result_urls_from_dict(data)
         if urls:
             return urls[0]
         raise RuntimeError("KIE.AI: success but no resultUrls in resultJson")
