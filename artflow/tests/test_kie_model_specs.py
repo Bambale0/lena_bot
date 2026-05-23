@@ -373,7 +373,7 @@ def test_build_kie_input_gemini_omni_multimodal_payload() -> None:
     assert resolved_model == "gemini-omni-video"
     assert inp["duration"] == "8"
     assert inp["aspect_ratio"] == "9:16"
-    assert inp["resolution"] == "4k"
+    assert inp["resolution"] == "720p"
     assert inp["image_urls"] == [
         "https://example.test/scene-1.png",
         "https://example.test/scene-2.png",

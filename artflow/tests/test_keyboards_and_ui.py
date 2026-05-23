@@ -94,6 +94,8 @@ def test_video_params_kb_shows_gemini_omni_controls() -> None:
     assert "vpar_omni:character" in callbacks
     assert "vpar_omni:seed" in callbacks
     assert all(not button.callback_data.startswith("vpar_dur:") for button in buttons)
+    assert "vpar_res:1080p" not in callbacks
+    assert "vpar_res:4k" not in callbacks
     assert any(button.text == "🎙️ Audio ID" for button in buttons)
 
 

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-from db.models import ImageSession, ModelCost
-
 from bot.keyboards.models import (
     IMAGE_SCENARIOS,
     image_active_kb,
@@ -11,7 +9,7 @@ from bot.keyboards.models import (
     image_scenarios_kb,
 )
 from bot.ui.common import ScreenRender
-
+from db.models import ImageSession, ModelCost
 
 _IMAGE_MODEL_LABELS = {
     "grok-imagine/text-to-image": "Grok Imagine",

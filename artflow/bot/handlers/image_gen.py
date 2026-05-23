@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import logging
-import hashlib
-from urllib.parse import urlencode
 from pathlib import Path
+from urllib.parse import urlencode
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -15,25 +15,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
-from api.photo_prompt_service import generate_prompt_from_photo
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
+from api.photo_prompt_service import generate_prompt_from_photo
 from api.public_files import mirror_telegram_file
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
-    IMAGE_SCENARIOS,
     IMAGE_CAPS,
+    IMAGE_SCENARIOS,
+    NANA_BANANO_DEFAULT_MODEL,
+    NANA_BANANO_MODEL_CHOICES,
     image_aspect_ratio_kb,
     image_count_kb,
+    image_dynamic_settings_kb,
     image_mode_kb,
-    image_models_kb,
+    image_nana_banano_kb,
     image_quality_kb,
-    multi_ref_kb,
-    reference_upload_kb,
     image_session_kb,
     image_session_settings_kb,
-    image_dynamic_settings_kb,
     image_style_edit_kb,
+    multi_ref_kb,
     public_prompt_text,
+    reference_upload_kb,
 )
 from bot.states import ImageGenFSM
 from bot.ui.router import render_screen
@@ -142,6 +144,12 @@ def _quality_options(model_key: str) -> list[tuple[str, str]]:
         "quality_options",
         [("basic", "🔷 2K"), ("high", "💎 4K")],
     )
+
+
+def _default_image_quality(model_key: str) -> str:
+    if IMAGE_CAPS.get(model_key, {}).get("has_quality"):
+        return _quality_options(model_key)[0][0]
+    return "basic"
 
 
 def _quality_label(model_key: str, quality: str | None) -> str:
@@ -581,6 +589,93 @@ async def _launch_session_generation(
 
 # ── Model select ──────────────────────────────────────────────────────────────
 
+_NANA_BANANO_MODEL_LABELS = {
+    ImageModel.NANO_BANANA_PRO.value: "Nano Banana Pro",
+    ImageModel.NANO_BANANA_2.value: "Nano Banana 2",
+}
+
+
+def _nana_banano_ref_count(data: dict) -> int:
+    return len(_state_reference_file_ids(data))
+
+
+def _image_model_key(model_key: str | ImageModel) -> str:
+    return model_key.value if isinstance(model_key, ImageModel) else str(model_key)
+
+
+def _nana_banano_text(model_key: str, refs_count: int) -> str:
+    model_label = _NANA_BANANO_MODEL_LABELS.get(model_key, model_key)
+    max_refs = int(IMAGE_CAPS.get(model_key, {}).get("max_refs", 0) or 0)
+    refs_label = f"{refs_count}/{max_refs}" if max_refs else str(refs_count)
+    return (
+        "🍌 <b>nana banano</b>\n\n"
+        f"Модель: <b>{model_label}</b>\n"
+        f"Референсы: <b>{refs_label}</b>\n\n"
+        "👇 <b>Как запустить</b>\n"
+        "1️⃣ <b>Отправь фото-референс</b> сюда же.\n"
+        "2️⃣ <b>Затем отправь промпт текстом</b> — сразу запущу генерацию."
+    )
+
+
+async def _show_nana_banano_flow(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    model_key: str = NANA_BANANO_DEFAULT_MODEL,
+) -> bool:
+    model_key = _image_model_key(model_key)
+    allowed_models = set(NANA_BANANO_MODEL_CHOICES)
+    if model_key not in allowed_models:
+        await call.answer("Модель недоступна", show_alert=True)
+        return False
+
+    default_quality = _default_image_quality(model_key)
+    model_cost = await repo.resolve_image_model_cost(
+        session,
+        model_key,
+        quality=default_quality,
+    )
+    if not model_cost:
+        await call.answer("Модель недоступна", show_alert=True)
+        return False
+
+    if db_user.credits < model_cost.credits:
+        await call.answer(
+            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            show_alert=True,
+        )
+        return False
+
+    data = await state.get_data()
+    refs_count = _nana_banano_ref_count(data)
+    mode = "image" if refs_count or _state_reference_url(data) else "text"
+
+    await state.update_data(
+        nana_banano_flow=True,
+        model_key=model_key,
+        image_model=model_key,
+        mode=mode,
+        image_mode=mode,
+        credits=model_cost.credits,
+        aspect_ratio=None,
+        image_aspect_ratio=None,
+        count=1,
+        image_count=1,
+        quality=default_quality,
+        image_quality=default_quality,
+        remix_mode=False,
+        remix_parent_generation_id=None,
+    )
+    await state.set_state(ImageGenFSM.prompt_input)
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        _nana_banano_text(model_key, refs_count),
+        reply_markup=image_nana_banano_kb(model_key, refs_count),
+    )
+    return True
+
+
 async def _open_image_model_select(
     call: CallbackQuery,
     session: AsyncSession,
@@ -600,11 +695,7 @@ async def _start_image_model_flow(
     model_key: str,
     forced_mode: str | None = None,
 ) -> None:
-    default_quality = (
-        _quality_options(model_key)[0][0]
-        if IMAGE_CAPS.get(model_key, {}).get("has_quality")
-        else "basic"
-    )
+    default_quality = _default_image_quality(model_key)
 
     model_cost = await repo.resolve_image_model_cost(
         session,
@@ -725,6 +816,16 @@ async def cb_image_scenario(
     if not scenario:
         await call.answer("Сценарий недоступен", show_alert=True)
         return
+    if scenario_key == "fast":
+        if await _show_nana_banano_flow(
+            call=call,
+            session=session,
+            state=state,
+            db_user=db_user,
+            model_key=scenario["model"],
+        ):
+            await safe_answer_callback(call)
+        return
     await _start_image_model_flow(
         call=call,
         session=session,
@@ -734,6 +835,30 @@ async def cb_image_scenario(
         forced_mode=scenario["mode"],
     )
 
+
+@router.callback_query(ImageGenFSM.prompt_input, F.data.startswith("img_nb:model:"))
+async def cb_nana_banano_model(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    model_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
+    if await _show_nana_banano_flow(call, state, session, db_user, model_key):
+        await call.answer(f"Модель: {_NANA_BANANO_MODEL_LABELS.get(model_key, model_key)}")
+
+
+@router.callback_query(ImageGenFSM.prompt_input, F.data == "img_nb:refs")
+async def cb_nana_banano_refs_hint(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    model_key = _image_model_key(data.get("model_key") or NANA_BANANO_DEFAULT_MODEL)
+    refs_count = _nana_banano_ref_count(data)
+    max_refs = int(IMAGE_CAPS.get(model_key, {}).get("max_refs", 0) or 0)
+    refs_label = f"{refs_count}/{max_refs}" if max_refs else str(refs_count)
+    await call.answer(
+        f"Отправь фото сюда сообщением до промпта. Сейчас: {refs_label}.",
+        show_alert=True,
+    )
 
 
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:mode:"))
@@ -1067,12 +1192,6 @@ async def cb_image_count(
 ) -> None:
     count = int(call.data.split(":")[1])  # type: ignore[union-attr]
     await state.update_data(count=count)
-    data = await state.get_data()
-    model_key = data["model_key"]
-    model_cost = await repo.get_model_cost(session, model_key)
-    display_name = model_cost.display_name if model_cost else model_key
-    ratio = data.get("aspect_ratio")
-    summary = " · ".join(part for part in (display_name, ratio, f"{count} изображ.") if part)
 
     image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
     await _show_active_image_session_callback(call, state, session, db_user, image_session)
@@ -1267,6 +1386,60 @@ async def cb_image_reference_skip(
 
 
 # ── First prompt starts a session ─────────────────────────────────────────────
+
+@router.message(ImageGenFSM.prompt_input, F.photo)
+async def handle_prompt_reference_upload(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
+    file_id = best[0].file_id
+    data = await state.get_data()
+    model_key = _image_model_key(data.get("model_key") or NANA_BANANO_DEFAULT_MODEL)
+
+    if not _supports_img2img(model_key):
+        await message.answer(
+            "Эта модель не принимает фото-референсы. Выбери модель с поддержкой референсов или отправь текстовый промпт.",
+            reply_markup=image_nana_banano_kb(model_key, _nana_banano_ref_count(data))
+            if data.get("nana_banano_flow")
+            else back_to_menu_kb(),
+        )
+        return
+
+    caps = IMAGE_CAPS.get(model_key, {})
+    max_refs = int(caps.get("max_refs", 1) or 1)
+    existing = _state_reference_file_ids(data)
+
+    if file_id not in existing:
+        if len(existing) >= max_refs:
+            await message.answer(
+                f"У этой модели максимум {max_refs} референсов. Отправь промпт текстом.",
+                reply_markup=image_nana_banano_kb(model_key, len(existing))
+                if data.get("nana_banano_flow")
+                else back_to_menu_kb(),
+            )
+            return
+        existing.append(file_id)
+
+    await state.update_data(
+        image_file_id=existing[0],
+        ref_file_ids=existing,
+        mode="image",
+        image_mode="image",
+    )
+
+    reply_markup = (
+        image_nana_banano_kb(model_key, len(existing))
+        if data.get("nana_banano_flow")
+        else back_to_menu_kb()
+    )
+    await message.answer(
+        f"✅ Референс {len(existing)}/{max_refs} добавлен.\n\n"
+        "👇 <b>Следующий шаг</b>\n"
+        "<b>Отправь промпт текстом.</b> Можно сначала добавить ещё фото.",
+        reply_markup=reply_markup,
+    )
+
 
 @router.message(ImageGenFSM.prompt_input, F.text)
 async def handle_prompt(
@@ -2220,7 +2393,6 @@ async def handle_p2p_ref_upload(message: Message, state: FSMContext) -> None:
     await state.set_state(ImageGenFSM.photo_to_prompt)
 
     data = await state.get_data()
-    prompt = data.get("generated_prompt", "")
     await message.answer(
         _p2p_prompt_text(ref_file_id=ref_file_id, model_name=data.get("p2p_model_name")),
         reply_markup=_p2p_result_kb(

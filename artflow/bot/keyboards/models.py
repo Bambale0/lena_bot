@@ -351,8 +351,8 @@ HIDDEN_IMAGE_MODELS = {
 
 IMAGE_SCENARIOS: dict[str, dict[str, str]] = {
     "fast": {
-        "title": "⚡ Быстрый старт",
-        "description": "Текст → изображение. Быстро создать картинку по описанию",
+        "title": "🍌 nana banano",
+        "description": "Nano Banana Pro/2: промпт и референсы в одном меню",
         "model": ImageModel.NANO_BANANA_PRO,
         "mode": "text",
     },
@@ -363,6 +363,12 @@ IMAGE_SCENARIOS: dict[str, dict[str, str]] = {
         "mode": "image",
     },
 }
+
+NANA_BANANO_DEFAULT_MODEL = ImageModel.NANO_BANANA_PRO.value
+NANA_BANANO_MODEL_CHOICES = (
+    ImageModel.NANO_BANANA_PRO.value,
+    ImageModel.NANO_BANANA_2.value,
+)
 
 VIDEO_MODEL_DESC: dict[str, str] = {
     VideoModel.KLING_30: "🎬 Kling 3.0 · плавное движение · текст и фото",
@@ -540,6 +546,33 @@ def image_scenarios_kb() -> InlineKeyboardMarkup:
         )
     builder.row(InlineKeyboardButton(text="🧠 Все нейросети", callback_data="img_menu:advanced"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
+    return builder.as_markup()
+
+
+def image_nana_banano_kb(
+    selected_model: str = NANA_BANANO_DEFAULT_MODEL,
+    refs_count: int = 0,
+    *,
+    back_cb: str = "menu:image",
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    selected = selected_model.value if isinstance(selected_model, ImageModel) else str(selected_model)
+    pro = ImageModel.NANO_BANANA_PRO.value
+    banana2 = ImageModel.NANO_BANANA_2.value
+    builder.row(
+        InlineKeyboardButton(
+            text=f"{'✅ ' if selected == pro else ''}Pro",
+            callback_data=f"img_nb:model:{pro}",
+        ),
+        InlineKeyboardButton(
+            text=f"{'✅ ' if selected == banana2 else ''}Banana 2",
+            callback_data=f"img_nb:model:{banana2}",
+        ),
+    )
+    builder.row(
+        InlineKeyboardButton(text=f"📎 Референсы: {refs_count}", callback_data="img_nb:refs"),
+        InlineKeyboardButton(text="← Назад", callback_data=back_cb),
+    )
     return builder.as_markup()
 
 

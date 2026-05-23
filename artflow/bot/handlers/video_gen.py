@@ -20,6 +20,7 @@ from core.gemini_omni import (
     GEMINI_OMNI_MAX_CHARACTER_IDS,
     GEMINI_OMNI_VIDEO_MODEL,
     normalize_gemini_omni_ids,
+    normalize_gemini_omni_resolution,
     normalize_gemini_omni_seed,
 )
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
@@ -113,6 +114,15 @@ def _has_gemini_omni_video_input(model_key: str, data: dict) -> bool:
     return model_key == GEMINI_OMNI_VIDEO_MODEL and bool(data.get("reference_video_url"))
 
 
+def _normalize_resolution_for_state(model_key: str, resolution: str | None) -> str | None:
+    if model_key != GEMINI_OMNI_VIDEO_MODEL:
+        return resolution
+    try:
+        return normalize_gemini_omni_resolution(resolution)
+    except ValueError:
+        return "720p"
+
+
 async def _resolve_video_model_cost(
     session: AsyncSession,
     model_key: str,
@@ -125,7 +135,7 @@ async def _resolve_video_model_cost(
         session,
         model_key,
         duration=None if has_video_input else duration,
-        resolution=resolution,
+        resolution=_normalize_resolution_for_state(model_key, resolution),
     )
 
 
@@ -440,7 +450,10 @@ async def handle_video_upload(
     video = message.video  # type: ignore[union-attr]
     video_duration: int = video.duration or 5
     file_id = video.file_id
-    resolution: str | None = data.get("resolution")
+    stored_resolution: str | None = data.get("resolution")
+    resolution = _normalize_resolution_for_state(model_key, stored_resolution)
+    if resolution != stored_resolution:
+        await state.update_data(resolution=resolution)
 
     if is_gemini_omni_video_mode and video_duration > 30:
         await message.answer(
@@ -806,7 +819,11 @@ async def handle_video_prompt(
     aspect_ratio = _normalize_aspect_ratio_for_state(model_key, data.get("mode"), stored_aspect_ratio, _video_ref_count(data))
     if aspect_ratio != stored_aspect_ratio:
         await state.update_data(aspect_ratio=aspect_ratio)
-    resolution: str | None = data.get("resolution")
+    stored_resolution: str | None = data.get("resolution")
+    resolution = _normalize_resolution_for_state(model_key, stored_resolution)
+    if resolution != stored_resolution:
+        await state.update_data(resolution=resolution)
+        data = {**data, "resolution": resolution}
     grok_mode: str = data.get("grok_mode", "normal")
     prompt = message.text.strip()  # type: ignore[union-attr]
 

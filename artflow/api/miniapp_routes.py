@@ -35,6 +35,7 @@ from core.gemini_omni import (
     GEMINI_OMNI_MAX_CHARACTER_IDS,
     GEMINI_OMNI_VIDEO_MODEL,
     normalize_gemini_omni_ids,
+    normalize_gemini_omni_resolution,
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
@@ -588,8 +589,10 @@ def _normalize_video_resolution(model_key: str, resolution: str | None) -> str |
         }
         return aliases.get(resolution, resolution)
     if model_key == GEMINI_OMNI_VIDEO_MODEL:
-        aliases = {"4K": "4k", "2160p": "4k", "720P": "720p", "1080P": "1080p"}
-        return aliases.get(resolution, resolution)
+        try:
+            return normalize_gemini_omni_resolution(resolution)
+        except ValueError:
+            return resolution
     return resolution
 
 
