@@ -5,6 +5,7 @@ import json
 from bot.keyboards.models import (
     IMAGE_SCENARIOS,
     image_active_kb,
+    image_session_kb,
     image_models_kb,
     image_scenarios_kb,
 )
@@ -75,7 +76,12 @@ def render_image_advanced_menu(model_costs: list[ModelCost]) -> ScreenRender:
     return ScreenRender(text=text, reply_markup=image_models_kb(model_costs))
 
 
-def render_active_image_session(image_session: ImageSession) -> ScreenRender:
+def render_active_image_session(
+    image_session: ImageSession,
+    active_generation=None,
+    *,
+    prompt_actions_allowed: bool | None = None,
+) -> ScreenRender:
     ratio = _pretty_ratio(image_session.aspect_ratio)
     count = image_session.count or 1
 
@@ -94,6 +100,24 @@ def render_active_image_session(image_session: ImageSession) -> ScreenRender:
     quality_label = _pretty_quality(image_session.quality)
     count_label = f"{count} фото" if count > 1 else "1 фото"
 
+    gen_id = getattr(active_generation, "id", None) or getattr(image_session, "last_generation_id", None)
+    prompt = getattr(active_generation, "prompt", None)
+    action_type = getattr(active_generation, "action_type", None)
+    action_value = str(getattr(action_type, "value", action_type) or "")
+    is_repeat = action_value == "repeat" or action_value.endswith(".repeat")
+    if prompt_actions_allowed is None:
+        prompt_actions_allowed = not bool(getattr(active_generation, "source_feed_gen_id", None))
+    reply_markup = (
+        image_session_kb(
+            gen_id,
+            prompt=None if is_repeat else prompt,
+            allow_publish=prompt_actions_allowed,
+            allow_copy_prompt=prompt_actions_allowed and not is_repeat,
+        )
+        if gen_id
+        else image_active_kb()
+    )
+
     text = (
         "🎨 <b>Активная серия</b>\n\n"
         f"🍌 <b>{model_label}</b>\n"
@@ -103,5 +127,5 @@ def render_active_image_session(image_session: ImageSession) -> ScreenRender:
     )
     return ScreenRender(
         text=text,
-        reply_markup=image_active_kb(),
+        reply_markup=reply_markup,
     )

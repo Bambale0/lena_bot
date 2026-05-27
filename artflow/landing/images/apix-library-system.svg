@@ -1,0 +1,32 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="34" fill="#050817"/>
+  <rect x="118" y="110" width="964" height="520" rx="30" fill="#0B1025" stroke="#314064"/>
+  <rect x="156" y="154" width="204" height="430" rx="22" fill="#101936" stroke="#34456C"/>
+  <rect x="398" y="154" width="646" height="430" rx="22" fill="#090F22" stroke="#34456C"/>
+  <path d="M194 204H312M194 258H294M194 312H326M194 366H286" stroke="#AEBBE2" stroke-width="10" stroke-linecap="round"/>
+  <rect x="184" y="468" width="144" height="40" rx="12" fill="#17213F" stroke="#314064"/>
+  <g>
+    <rect x="438" y="198" width="166" height="132" rx="18" fill="url(#tile1)"/>
+    <rect x="638" y="198" width="166" height="132" rx="18" fill="url(#tile2)"/>
+    <rect x="838" y="198" width="166" height="132" rx="18" fill="url(#tile3)"/>
+    <rect x="438" y="374" width="166" height="132" rx="18" fill="url(#tile4)"/>
+    <rect x="638" y="374" width="166" height="132" rx="18" fill="url(#tile5)"/>
+    <rect x="838" y="374" width="166" height="132" rx="18" fill="url(#tile6)"/>
+  </g>
+  <path d="M462 348H552M662 348H744M862 348H952M462 524H574M662 524H760M862 524H938" stroke="#D7E8FF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M462 568H532M662 568H734M862 568H982" stroke="#6F7EA8" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="574" cy="222" r="13" fill="#5EEAD4"/>
+  <circle cx="774" cy="222" r="13" fill="#7DD3FF"/>
+  <circle cx="974" cy="222" r="13" fill="#FFD166"/>
+  <circle cx="574" cy="398" r="13" fill="#C59CFF"/>
+  <circle cx="774" cy="398" r="13" fill="#5EEAD4"/>
+  <circle cx="974" cy="398" r="13" fill="#7DD3FF"/>
+  <defs>
+    <linearGradient id="tile1" x1="438" y1="198" x2="604" y2="330" gradientUnits="userSpaceOnUse"><stop stop-color="#102E49"/><stop offset="1" stop-color="#271B3E"/></linearGradient>
+    <linearGradient id="tile2" x1="638" y1="198" x2="804" y2="330" gradientUnits="userSpaceOnUse"><stop stop-color="#151B39"/><stop offset="1" stop-color="#0D3440"/></linearGradient>
+    <linearGradient id="tile3" x1="838" y1="198" x2="1004" y2="330" gradientUnits="userSpaceOnUse"><stop stop-color="#1A2140"/><stop offset="1" stop-color="#332047"/></linearGradient>
+    <linearGradient id="tile4" x1="438" y1="374" x2="604" y2="506" gradientUnits="userSpaceOnUse"><stop stop-color="#111A31"/><stop offset="1" stop-color="#263452"/></linearGradient>
+    <linearGradient id="tile5" x1="638" y1="374" x2="804" y2="506" gradientUnits="userSpaceOnUse"><stop stop-color="#0D2D3F"/><stop offset="1" stop-color="#1C1C3C"/></linearGradient>
+    <linearGradient id="tile6" x1="838" y1="374" x2="1004" y2="506" gradientUnits="userSpaceOnUse"><stop stop-color="#142947"/><stop offset="1" stop-color="#2A1E45"/></linearGradient>
+  </defs>
+</svg>

@@ -220,10 +220,11 @@ async def _resolve_image_session(
 
 
 def _stored_reference_file_ids(image_session: ImageSession) -> list[str]:
-    if not image_session.reference_file_ids:
+    raw_reference_file_ids = getattr(image_session, "reference_file_ids", None)
+    if not raw_reference_file_ids:
         return []
     try:
-        parsed = json.loads(image_session.reference_file_ids)
+        parsed = json.loads(raw_reference_file_ids)
     except (TypeError, ValueError):
         return []
     return [item for item in parsed if isinstance(item, str) and item]
@@ -237,6 +238,32 @@ def _state_reference_file_ids(data: dict) -> list[str]:
     return ref_file_ids
 
 
+def _state_refs_belong_to_session(data: dict, image_session: ImageSession) -> bool:
+    state_session_id = data.get("image_session_id")
+    session_id = getattr(image_session, "id", None)
+    if not state_session_id or not session_id:
+        return True
+    try:
+        return int(state_session_id) == int(session_id)
+    except (TypeError, ValueError):
+        return False
+
+
+def _active_reference_file_ids(image_session: ImageSession, data: dict) -> list[str]:
+    refs: list[str] = []
+    for file_id in _stored_reference_file_ids(image_session):
+        if file_id not in refs:
+            refs.append(file_id)
+    reference_file_id = getattr(image_session, "reference_file_id", None)
+    if reference_file_id and reference_file_id not in refs:
+        refs.append(reference_file_id)
+    if _state_refs_belong_to_session(data, image_session):
+        for file_id in _state_reference_file_ids(data):
+            if file_id not in refs:
+                refs.append(file_id)
+    return refs
+
+
 def _state_reference_url(data: dict) -> str | None:
     for key in ("remix_reference_url", "carryover_reference_url", "reference_url"):
         value = data.get(key)
@@ -247,6 +274,83 @@ def _state_reference_url(data: dict) -> str | None:
 
 def _state_has_reference(data: dict) -> bool:
     return bool(_state_reference_file_ids(data) or _state_reference_url(data))
+
+
+def _session_has_stored_reference(image_session: ImageSession) -> bool:
+    return bool(
+        _stored_reference_file_ids(image_session)
+        or getattr(image_session, "reference_file_id", None)
+        or getattr(image_session, "reference_url", None)
+    )
+
+
+async def _external_source_feed_id(
+    *,
+    session: AsyncSession,
+    db_user: User,
+    source_feed_gen_id: int | None,
+) -> int | None:
+    if not source_feed_gen_id:
+        return None
+    source = await repo.get_generation_by_id(session, source_feed_gen_id)
+    if source and getattr(source, "user_id", None) == getattr(db_user, "id", None):
+        return None
+    return source_feed_gen_id
+
+
+async def _source_feed_id_from_parent(
+    *,
+    session: AsyncSession,
+    data: dict,
+    parent_gen,
+    db_user: User,
+) -> int | None:
+    if parent_gen and getattr(parent_gen, "user_id", None) == getattr(db_user, "id", None):
+        source_feed_gen_id = getattr(parent_gen, "source_feed_gen_id", None)
+    else:
+        source_feed_gen_id = data.get("source_feed_gen_id")
+    return await _external_source_feed_id(
+        session=session,
+        db_user=db_user,
+        source_feed_gen_id=source_feed_gen_id,
+    )
+
+
+async def _source_feed_id_for_generation_or_state(
+    *,
+    session: AsyncSession,
+    db_user: User,
+    generation_id: int | None,
+    data: dict,
+) -> int | None:
+    if not data.get("source_feed_gen_id") or not generation_id:
+        return await _external_source_feed_id(
+            session=session,
+            db_user=db_user,
+            source_feed_gen_id=data.get("source_feed_gen_id"),
+        )
+    parent_gen = await repo.get_generation_by_id(session, generation_id)
+    return await _source_feed_id_from_parent(
+        session=session,
+        data=data,
+        parent_gen=parent_gen,
+        db_user=db_user,
+    )
+
+
+async def _generation_prompt_actions_allowed(
+    *,
+    session: AsyncSession,
+    gen,
+    db_user: User,
+) -> bool:
+    if not gen or getattr(gen, "user_id", None) != getattr(db_user, "id", None):
+        return False
+    source_feed_gen_id = getattr(gen, "source_feed_gen_id", None)
+    if not source_feed_gen_id:
+        return True
+    source = await repo.get_generation_by_id(session, source_feed_gen_id)
+    return bool(source and getattr(source, "user_id", None) == getattr(db_user, "id", None))
 
 
 async def _session_reference_url(
@@ -265,21 +369,14 @@ async def _session_reference_url(
     if not _supports_img2img(image_session.model):
         return None
 
-    if prefer_last_result and image_session.last_result_url:
-        return image_session.last_result_url
+    last_result_url = getattr(image_session, "last_result_url", None)
+    if prefer_last_result and last_result_url:
+        return last_result_url
 
     # Check FSM state for collected multi-ref file IDs that belong to this session.
     if state:
         data = await state.get_data()
-        state_session_id = data.get("image_session_id")
-        session_id = getattr(image_session, "id", None)
-        state_matches_session = True
-        if state_session_id and session_id:
-            try:
-                state_matches_session = int(state_session_id) == int(session_id)
-            except (TypeError, ValueError):
-                state_matches_session = False
-        ref_file_ids: list[str] = list(data.get("ref_file_ids", [])) if state_matches_session else []
+        ref_file_ids: list[str] = list(data.get("ref_file_ids", [])) if _state_refs_belong_to_session(data, image_session) else []
         if len(ref_file_ids) > 1:
             urls = []
             for fid in ref_file_ids:
@@ -301,11 +398,13 @@ async def _session_reference_url(
     if len(stored_file_ids) == 1:
         return await _telegram_file_url(bot, stored_file_ids[0])
 
-    if image_session.reference_file_id:
-        return await _telegram_file_url(bot, image_session.reference_file_id)
+    reference_file_id = getattr(image_session, "reference_file_id", None)
+    if reference_file_id:
+        return await _telegram_file_url(bot, reference_file_id)
 
-    if image_session.reference_url:
-        return image_session.reference_url
+    reference_url = getattr(image_session, "reference_url", None)
+    if reference_url:
+        return reference_url
 
     return None
 
@@ -436,6 +535,26 @@ async def _ensure_active_image_session_from_state(
     return image_session
 
 
+async def _promote_reference_mode_if_needed(
+    *,
+    session: AsyncSession,
+    state: FSMContext,
+    image_session: ImageSession,
+    data: dict,
+    current_mode: str | None,
+    reference_url: str | list[str] | None,
+) -> str | None:
+    if current_mode == "image" or not reference_url or not _supports_img2img(image_session.model):
+        return current_mode
+    if not (_state_has_reference(data) or _session_has_stored_reference(image_session)):
+        return current_mode
+
+    image_session.mode = "image"
+    await session.commit()
+    await state.update_data(mode="image", image_mode="image")
+    return "image"
+
+
 def _session_ratio_choices_kb(image_session: ImageSession) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
@@ -494,6 +613,11 @@ async def _launch_session_generation(
     launching_text: str,
     queued_text: str,
 ) -> bool:
+    source_feed_gen_id = await _external_source_feed_id(
+        session=session,
+        db_user=db_user,
+        source_feed_gen_id=source_feed_gen_id,
+    )
     normalized_quality = _normalize_session_quality(
         image_session.model,
         image_session.aspect_ratio,
@@ -580,9 +704,17 @@ async def _launch_session_generation(
     await repo.update_generation_task(session, gen.id, result.task_id or "")
     await _sync_state_with_image_session(state, image_session)
     await state.update_data(credits=credits, source_feed_gen_id=source_feed_gen_id)
+    publish_actions_allowed = not bool(source_feed_gen_id)
+    prompt_actions_allowed = publish_actions_allowed and action_type != ImageGenerationAction.repeat
+    prompt_for_menu = prompt if prompt_actions_allowed else None
     await status_msg.edit_text(
         queued_text,
-        reply_markup=image_session_kb(gen.id, allow_publish=not bool(source_feed_gen_id)),
+        reply_markup=image_session_kb(
+            gen.id,
+            prompt=prompt_for_menu,
+            allow_publish=publish_actions_allowed,
+            allow_copy_prompt=prompt_actions_allowed,
+        ),
     )
     return True
 
@@ -666,6 +798,7 @@ async def _show_nana_banano_flow(
         image_quality=default_quality,
         remix_mode=False,
         remix_parent_generation_id=None,
+        source_feed_gen_id=None,
     )
     await state.set_state(ImageGenFSM.prompt_input)
     await safe_edit_message(
@@ -736,6 +869,7 @@ async def _start_image_model_flow(
         image_quality=default_quality,
         remix_mode=False,
         remix_parent_generation_id=None,
+        source_feed_gen_id=None,
     )
 
     text = (
@@ -1031,6 +1165,7 @@ async def cb_image_model(call: CallbackQuery, state: FSMContext, session: AsyncS
         "image_model": model_key,
         "mode": default_mode,
         "image_mode": default_mode,
+        "source_feed_gen_id": None,
     }
     if data.get("carryover_image_file_id"):
         updates["image_file_id"] = data.get("carryover_image_file_id")
@@ -1343,7 +1478,7 @@ async def cb_image_reference_skip(
         await call.answer("Для этой модели референс обязателен", show_alert=True)
         return
 
-    await state.update_data(mode="text", image_file_id=None)
+    await state.update_data(mode="text", image_mode="text", image_file_id=None, ref_file_ids=[])
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
     caps = IMAGE_CAPS.get(model_key, {})
@@ -1455,6 +1590,14 @@ async def handle_prompt(
     reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
     data = await state.get_data()
     current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
+    current_mode = await _promote_reference_mode_if_needed(
+        session=session,
+        state=state,
+        image_session=image_session,
+        data=data,
+        current_mode=current_mode,
+        reference_url=reference_url,
+    )
 
     if current_mode != "image" or not _supports_img2img(image_session.model):
         reference_url = None
@@ -1506,7 +1649,16 @@ async def handle_session_prompt(
     style_edit_kind = data.get("style_edit_kind") if is_remix else None
     prompt_for_generation = _style_edit_prompt(style_edit_kind, prompt)
     parent_id = data.get("remix_parent_generation_id") or image_session.last_generation_id
-    source_feed_gen_id = data.get("source_feed_gen_id")
+    source_feed_gen_id = (
+        await _source_feed_id_for_generation_or_state(
+            session=session,
+            db_user=db_user,
+            generation_id=parent_id,
+            data=data,
+        )
+        if is_remix
+        else None
+    )
 
     reference_url = data.get("remix_reference_url") if is_remix else None
     if not reference_url:
@@ -1518,6 +1670,14 @@ async def handle_session_prompt(
         )
 
     current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
+    current_mode = await _promote_reference_mode_if_needed(
+        session=session,
+        state=state,
+        image_session=image_session,
+        data=data,
+        current_mode=current_mode,
+        reference_url=reference_url,
+    )
 
     if current_mode != "image" or not _supports_img2img(image_session.model):
         reference_url = None
@@ -1563,20 +1723,65 @@ async def handle_session_photo(
         await state.clear()
         return
 
+    if not _supports_img2img(image_session.model):
+        await message.answer(
+            "Эта модель не принимает фото-референсы. Выбери модель с поддержкой референсов.",
+            reply_markup=main_menu_kb(),
+        )
+        return
+
     best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
-    await repo.update_image_session_references(session, image_session.id, [best[0].file_id])
-    await state.update_data(
-        image_file_id=best[0].file_id,
-        ref_file_ids=[best[0].file_id],
-        image_session_id=image_session.id,
-    )
+    file_id = best[0].file_id
     data = await state.get_data()
+    max_refs = int(IMAGE_CAPS.get(image_session.model, {}).get("max_refs", 1) or 1)
+    existing = _active_reference_file_ids(image_session, data)
+    if max_refs > 1:
+        if file_id not in existing:
+            if len(existing) >= max_refs:
+                await message.answer(
+                    f"У этой модели максимум {max_refs} референсов. Напиши промпт или начни новую серию.",
+                    reply_markup=image_session_kb(
+                        image_session.last_generation_id,
+                        allow_publish=not bool(data.get("source_feed_gen_id")),
+                    ),
+                )
+                return
+            existing.append(file_id)
+        reference_file_ids = existing
+    else:
+        reference_file_ids = [file_id]
+
+    await repo.update_image_session_references(session, image_session.id, reference_file_ids, mode="image")
+    image_session.mode = "image"
+    image_session.reference_file_id = reference_file_ids[0] if reference_file_ids else None
+    image_session.reference_file_ids = json.dumps(reference_file_ids, ensure_ascii=True) if reference_file_ids else None
+    image_session.reference_url = None
+    await state.update_data(
+        image_file_id=reference_file_ids[0] if reference_file_ids else None,
+        ref_file_ids=reference_file_ids,
+        image_session_id=image_session.id,
+        mode="image",
+        image_mode="image",
+    )
+    label = (
+        f"✅ Референс {len(reference_file_ids)}/{max_refs} добавлен для активной серии."
+        if max_refs > 1
+        else "✅ Новый референс сохранён для активной серии."
+    )
+    source_feed_gen_id = await _source_feed_id_for_generation_or_state(
+        session=session,
+        db_user=db_user,
+        generation_id=image_session.last_generation_id,
+        data=data,
+    )
+    if source_feed_gen_id != data.get("source_feed_gen_id"):
+        await state.update_data(source_feed_gen_id=source_feed_gen_id)
 
     await message.answer(
-        "✅ Новый референс сохранён для активной серии. Теперь напиши, что изменить.",
+        f"{label} Теперь напиши, что изменить.",
         reply_markup=image_session_kb(
             image_session.last_generation_id,
-            allow_publish=not bool(data.get("source_feed_gen_id")),
+            allow_publish=not bool(source_feed_gen_id),
         ),
     )
 
@@ -1606,11 +1811,19 @@ async def cb_image_session_remix(
         await call.answer("Эта модель не поддерживает ремикс по изображению", show_alert=True)
         return
 
-    remix_reference_url = image_session.last_result_url
-    if parent_id:
-        parent_gen = await repo.get_generation_by_id(session, parent_id)
+    source_parent_id = parent_id or image_session.last_generation_id
+    parent_gen = None
+    remix_reference_url = getattr(image_session, "last_result_url", None) or getattr(image_session, "reference_url", None)
+    if source_parent_id:
+        parent_gen = await repo.get_generation_by_id(session, source_parent_id)
         if parent_gen and parent_gen.user_id == db_user.id and parent_gen.result_url:
             remix_reference_url = parent_gen.result_url
+    source_feed_gen_id = await _source_feed_id_from_parent(
+        session=session,
+        data=data,
+        parent_gen=parent_gen,
+        db_user=db_user,
+    )
 
     if not remix_reference_url:
         await call.answer("Не нашёл изображение для ремикса", show_alert=True)
@@ -1633,6 +1846,7 @@ async def cb_image_session_remix(
         remix_parent_generation_id=parent_id or image_session.last_generation_id,
         remix_reference_url=remix_reference_url,
         style_edit_kind=None,
+        source_feed_gen_id=source_feed_gen_id,
     )
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
@@ -1641,7 +1855,7 @@ async def cb_image_session_remix(
         "Можно также отправить новое фото, чтобы заменить референс.",
         reply_markup=image_session_kb(
             image_session.last_generation_id,
-            allow_publish=not bool(data.get("source_feed_gen_id")),
+            allow_publish=not bool(source_feed_gen_id),
         ),
     )
     await call.answer()
@@ -1703,11 +1917,19 @@ async def cb_image_style_choice(
         await call.answer("Эта модель не поддерживает редактирование по изображению", show_alert=True)
         return
 
-    result_url = image_session.last_result_url
-    if parent_id:
-        parent_gen = await repo.get_generation_by_id(session, parent_id)
+    source_parent_id = parent_id or gen_id or image_session.last_generation_id
+    parent_gen = None
+    result_url = getattr(image_session, "last_result_url", None) or getattr(image_session, "reference_url", None)
+    if source_parent_id:
+        parent_gen = await repo.get_generation_by_id(session, source_parent_id)
         if parent_gen and parent_gen.user_id == db_user.id and parent_gen.result_url:
             result_url = parent_gen.result_url
+    source_feed_gen_id = await _source_feed_id_from_parent(
+        session=session,
+        data=data,
+        parent_gen=parent_gen,
+        db_user=db_user,
+    )
 
     if not result_url:
         await call.answer("Не нашёл изображение для редактирования", show_alert=True)
@@ -1731,6 +1953,7 @@ async def cb_image_style_choice(
         remix_parent_generation_id=parent_id or gen_id or image_session.last_generation_id,
         remix_reference_url=result_url,
         style_edit_kind=edit_kind,
+        source_feed_gen_id=source_feed_gen_id,
     )
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
@@ -1738,7 +1961,7 @@ async def cb_image_style_choice(
         "Остальное в кадре постараюсь сохранить.",
         reply_markup=image_session_kb(
             parent_id or gen_id or image_session.last_generation_id,
-            allow_publish=not bool(data.get("source_feed_gen_id")),
+            allow_publish=not bool(source_feed_gen_id),
         ),
     )
     await call.answer()
@@ -1769,7 +1992,7 @@ async def cb_image_session_repeat(
         return
 
     data = await state.get_data()
-    source_feed_gen_id = data.get("source_feed_gen_id") or getattr(last_gen, "source_feed_gen_id", None)
+    source_feed_gen_id = getattr(last_gen, "source_feed_gen_id", None)
     reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=None)
 
     await _launch_session_generation(
@@ -2170,7 +2393,7 @@ async def cb_gen_share(call: CallbackQuery, session: AsyncSession, db_user: User
 
     gen_id = int(call.data.split(":")[-1])
     existing = await repo.get_generation_by_id(session, gen_id)
-    if not existing or existing.user_id != db_user.id or existing.source_feed_gen_id:
+    if not await _generation_prompt_actions_allowed(session=session, gen=existing, db_user=db_user):
         await safe_answer_callback(call, "❌ Нельзя опубликовать результат из ленты")
         return
 
@@ -2196,7 +2419,7 @@ async def cb_gen_library(call: CallbackQuery, session: AsyncSession, db_user: Us
     from bot.utils.telegram_ui import safe_answer_callback
     gen_id = int(call.data.split(":")[-1])
     existing = await repo.get_generation_by_id(session, gen_id)
-    if not existing or existing.user_id != db_user.id or existing.source_feed_gen_id:
+    if not await _generation_prompt_actions_allowed(session=session, gen=existing, db_user=db_user):
         await safe_answer_callback(call, "❌ Нельзя сохранить промпт из ленты")
         return
 
@@ -2211,7 +2434,7 @@ async def cb_gen_library(call: CallbackQuery, session: AsyncSession, db_user: Us
 async def cb_gen_prompt(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     gen_id = int(call.data.split(":")[-1])
     gen = await repo.get_generation_by_id(session, gen_id)
-    if not gen or gen.user_id != db_user.id or gen.source_feed_gen_id:
+    if not await _generation_prompt_actions_allowed(session=session, gen=gen, db_user=db_user):
         await safe_answer_callback(call, "❌ Промпт недоступен")
         return
 

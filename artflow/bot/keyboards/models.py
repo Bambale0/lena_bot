@@ -237,7 +237,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "counts": [1, 2, 4],
         "has_quality": True,
         "quality_options": [("1K", "1K"), ("2K", "2K")],
-        "max_refs": 1,
+        "max_refs": 9,
     },
     ImageModel.WAN_27_PRO: {
         "modes": ["text", "image"],

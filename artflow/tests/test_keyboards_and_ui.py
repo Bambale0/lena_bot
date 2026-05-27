@@ -15,6 +15,7 @@ from bot.keyboards.models import (
 )
 from db.models import GenerationType
 from bot.keyboards.payment import topup_kb
+from bot.ui.image_menu import render_active_image_session
 from bot.ui.main_menu import render_main_menu
 
 
@@ -28,6 +29,18 @@ def test_main_menu_keyboard_keeps_core_buttons() -> None:
     assert "🎨 Изображение" in texts
     assert "📚 Библиотека" in texts
     assert "👑 Админ" in texts
+
+
+def test_main_menus_show_webapp_button_at_top() -> None:
+    context = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
+    legacy_markup = main_menu_kb(balance=100)
+    ui_markup = render_main_menu(context).reply_markup
+
+    assert legacy_markup.inline_keyboard[0][0].web_app is not None
+    assert ui_markup.inline_keyboard[0][0].web_app is not None
+
+    assert all(button.web_app is None for button in flatten_buttons(legacy_markup)[1:])
+    assert all(button.web_app is None for button in flatten_buttons(ui_markup)[1:])
 
 
 def test_back_to_menu_keyboard_has_main_callback() -> None:
@@ -49,6 +62,144 @@ def test_render_main_menu_force_main_text_even_with_active_session() -> None:
     assert "Твоя AI-студия" in render.text
     assert "Выбирай, что запустить:" in render.text
     assert "Текущая серия изображений" not in render.text
+
+
+def test_render_active_image_session_uses_result_actions_when_last_generation_exists() -> None:
+    session = SimpleNamespace(
+        model="wan/2-7-image-pro",
+        aspect_ratio=None,
+        quality="4K",
+        count=2,
+        reference_file_ids='["face_ref", "outfit_ref"]',
+        reference_url=None,
+        reference_file_id=None,
+        last_generation_id=123,
+    )
+    generation = SimpleNamespace(id=123, prompt="own prompt", source_feed_gen_id=None)
+
+    buttons = flatten_buttons(render_active_image_session(session, active_generation=generation).reply_markup)
+    texts = {button.text for button in buttons}
+
+    assert "📋 Скопировать промпт" in texts
+    assert "📤 В ленту" in texts
+    assert "📚 В библиотеку" in texts
+
+
+def test_render_active_image_session_hides_result_actions_for_feed_derivative() -> None:
+    session = SimpleNamespace(
+        model="wan/2-7-image-pro",
+        aspect_ratio=None,
+        quality="4K",
+        count=2,
+        reference_file_ids='["face_ref", "outfit_ref"]',
+        reference_url=None,
+        reference_file_id=None,
+        last_generation_id=123,
+    )
+    generation = SimpleNamespace(id=123, prompt="hidden prompt", source_feed_gen_id=77)
+
+    buttons = flatten_buttons(render_active_image_session(session, active_generation=generation).reply_markup)
+    texts = {button.text for button in buttons}
+
+    assert "📋 Скопировать промпт" not in texts
+    assert "📤 В ленту" not in texts
+    assert "📚 В библиотеку" not in texts
+
+
+def test_render_active_image_session_can_show_actions_for_own_feed_source() -> None:
+    session = SimpleNamespace(
+        model="wan/2-7-image-pro",
+        aspect_ratio=None,
+        quality="4K",
+        count=2,
+        reference_file_ids='["face_ref", "outfit_ref"]',
+        reference_url=None,
+        reference_file_id=None,
+        last_generation_id=123,
+    )
+    generation = SimpleNamespace(id=123, prompt="own prompt", source_feed_gen_id=77)
+
+    buttons = flatten_buttons(
+        render_active_image_session(
+            session,
+            active_generation=generation,
+            prompt_actions_allowed=True,
+        ).reply_markup
+    )
+    texts = {button.text for button in buttons}
+
+    assert "📋 Скопировать промпт" in texts
+    assert "📤 В ленту" in texts
+    assert "📚 В библиотеку" in texts
+
+
+def test_render_active_image_session_hides_prompt_copy_for_repeat_result() -> None:
+    session = SimpleNamespace(
+        model="wan/2-7-image-pro",
+        aspect_ratio=None,
+        quality="4K",
+        count=2,
+        reference_file_ids='["face_ref", "outfit_ref"]',
+        reference_url=None,
+        reference_file_id=None,
+        last_generation_id=123,
+    )
+    generation = SimpleNamespace(id=123, prompt="repeat prompt", source_feed_gen_id=None, action_type="repeat")
+
+    buttons = flatten_buttons(render_active_image_session(session, active_generation=generation).reply_markup)
+    texts = {button.text for button in buttons}
+
+    assert "📋 Скопировать промпт" not in texts
+    assert "📋 Показать промпт" not in texts
+    assert "📤 В ленту" in texts
+    assert "📚 В библиотеку" in texts
+
+
+def test_render_active_image_session_hides_prompt_copy_for_stringified_repeat_result() -> None:
+    session = SimpleNamespace(
+        model="wan/2-7-image-pro",
+        aspect_ratio=None,
+        quality="4K",
+        count=2,
+        reference_file_ids='["face_ref", "outfit_ref"]',
+        reference_url=None,
+        reference_file_id=None,
+        last_generation_id=123,
+    )
+    generation = SimpleNamespace(
+        id=123,
+        prompt="repeat prompt",
+        source_feed_gen_id=None,
+        action_type="ImageGenerationAction.repeat",
+    )
+
+    buttons = flatten_buttons(render_active_image_session(session, active_generation=generation).reply_markup)
+    texts = {button.text for button in buttons}
+
+    assert "📋 Скопировать промпт" not in texts
+    assert "📋 Показать промпт" not in texts
+    assert "📤 В ленту" in texts
+    assert "📚 В библиотеку" in texts
+
+
+def test_render_active_image_session_without_result_keeps_basic_active_actions() -> None:
+    session = SimpleNamespace(
+        model="wan/2-7-image-pro",
+        aspect_ratio=None,
+        quality="4K",
+        count=2,
+        reference_file_ids='["face_ref", "outfit_ref"]',
+        reference_url=None,
+        reference_file_id=None,
+        last_generation_id=None,
+    )
+
+    buttons = flatten_buttons(render_active_image_session(session).reply_markup)
+    texts = {button.text for button in buttons}
+
+    assert "✨ Ремикс" in texts
+    assert "📤 В ленту" not in texts
+    assert "📚 В библиотеку" not in texts
 
 
 def test_video_params_kb_hides_grok_i2v_ratio_for_single_ref() -> None:

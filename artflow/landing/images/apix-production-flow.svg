@@ -1,0 +1,29 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="34" fill="#040713"/>
+  <path d="M86 604C216 500 370 454 548 466C718 478 874 448 1114 328V760H86V604Z" fill="url(#floor)"/>
+  <rect x="134" y="112" width="932" height="510" rx="32" fill="#080F20" stroke="#2C3D62"/>
+  <g opacity=".82">
+    <rect x="184" y="180" width="206" height="330" rx="24" fill="#101A35" stroke="#33476E"/>
+    <rect x="497" y="154" width="206" height="382" rx="28" fill="#0D1730" stroke="#33476E"/>
+    <rect x="810" y="180" width="206" height="330" rx="24" fill="#101A35" stroke="#33476E"/>
+  </g>
+  <path d="M404 346C438 314 459 314 490 346" stroke="#7DD3FF" stroke-width="7" stroke-linecap="round"/>
+  <path d="M710 346C744 314 765 314 796 346" stroke="#5EEAD4" stroke-width="7" stroke-linecap="round"/>
+  <path d="M472 316L500 348L462 360M778 316L806 348L768 360" stroke="#DDF7FF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="224" y="226" width="126" height="96" rx="18" fill="url(#ref)"/>
+  <circle cx="324" cy="250" r="12" fill="#FFD166"/>
+  <path d="M246 372H336M246 410H312" stroke="#8FA1CA" stroke-width="10" stroke-linecap="round"/>
+  <rect x="532" y="210" width="136" height="126" rx="22" fill="url(#result)"/>
+  <path d="M558 298C586 258 614 246 636 263C650 274 654 292 660 304" stroke="#E3F7FF" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="626" cy="260" r="44" stroke="#FFD166" stroke-width="5" opacity=".72"/>
+  <path d="M544 386H656M544 426H620M544 466H640" stroke="#8FA1CA" stroke-width="10" stroke-linecap="round"/>
+  <rect x="852" y="232" width="124" height="72" rx="18" fill="#152444"/>
+  <rect x="852" y="344" width="124" height="20" rx="10" fill="#5EEAD4" opacity=".72"/>
+  <rect x="852" y="398" width="92" height="20" rx="10" fill="#7DD3FF" opacity=".72"/>
+  <rect x="852" y="452" width="108" height="20" rx="10" fill="#C59CFF" opacity=".72"/>
+  <defs>
+    <linearGradient id="floor" x1="86" y1="416" x2="1114" y2="760" gradientUnits="userSpaceOnUse"><stop stop-color="#0B253B"/><stop offset=".55" stop-color="#0B1024"/><stop offset="1" stop-color="#211536"/></linearGradient>
+    <linearGradient id="ref" x1="224" y1="226" x2="350" y2="322" gradientUnits="userSpaceOnUse"><stop stop-color="#102C45"/><stop offset="1" stop-color="#2B1D42"/></linearGradient>
+    <linearGradient id="result" x1="532" y1="210" x2="668" y2="336" gradientUnits="userSpaceOnUse"><stop stop-color="#132E48"/><stop offset=".52" stop-color="#131A36"/><stop offset="1" stop-color="#3A244F"/></linearGradient>
+  </defs>
+</svg>

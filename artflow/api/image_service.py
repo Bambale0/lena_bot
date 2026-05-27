@@ -94,8 +94,8 @@ _KIE_UPLOAD_REFERENCE_MODELS = {
 }
 
 _PROMPT_MAX_LENGTH_BY_MODEL: dict[str, int] = {
-    ImageModel.SEEDREAM_45.value: 2000,
-    ImageModel.SEEDREAM_45_EDIT.value: 2000,
+    ImageModel.SEEDREAM_45.value: 3000,
+    ImageModel.SEEDREAM_45_EDIT.value: 3000,
     ImageModel.QWEN_EDIT.value: 2000,
 }
 
@@ -124,59 +124,60 @@ _REFERENCE_FLEX_MODELS: set[str] = {
 }
 
 _REFERENCE_LOCK_PREFIX = (
-    "STRICT IDENTITY AND DETAIL PRESERVATION. HIGHEST PRIORITY.\n\n"
-    "Treat the reference image(s) as the exact source of truth. "
-    "Recreate the same person or people with no identity drift and no redesign.\n\n"
-    "Preserve exactly and do not alter unless the prompt explicitly requests it:\n"
-    "- face identity\n"
-    "- head shape, facial proportions, bone structure\n"
-    "- eyes, eyelids, iris color, eyebrows, eyelashes\n"
-    "- nose, lips, teeth, smile line, ears\n"
-    "- skin tone, undertone, texture, freckles, moles, scars, wrinkles, pores\n"
-    "- age appearance and body proportions\n"
-    "- hairstyle, hairline, hair density, hair texture, hair color\n"
-    "- makeup style and intensity\n"
-    "- outfit, fabric, folds, fit, seams, logos, prints, labels\n"
-    "- accessories, jewelry, piercings, tattoos, glasses, headwear\n"
-    "- pose, hand shape, fingers, nails, silhouette\n"
-    "- colors, materials, textures, lighting logic, camera perspective\n\n"
-    "STRICT FACE LOCK - ABSOLUTE PRIORITY:\n"
-    "The face must match the reference exactly. Preserve every facial detail with no simplification and no beautification:\n"
-    "- exact face oval, skull shape, forehead, cheekbones, jawline, chin\n"
-    "- exact eye shape, eyelids, eye spacing, iris color, gaze character, eyelashes, eyebrows\n"
-    "- exact nose bridge, nostrils, tip, width, length, profile\n"
-    "- exact lips, mouth shape, cupid's bow, lip fullness, teeth, smile lines\n"
-    "- exact ears, temples, hairline, sideburns\n"
-    "- exact skin tone, undertone, pores, texture, freckles, moles, scars, wrinkles, nasolabial folds, dimples\n"
-    "- exact facial asymmetry, age signs, expression style, makeup placement\n\n"
-    "OUTFIT LOCK - ABSOLUTE PRIORITY:\n"
-    "Keep the exact same clothing and wearable details from the reference unless the user explicitly asks to change them:\n"
-    "- same garments, layers, sleeves, neckline, length, fit, silhouette\n"
-    "- same fabric type, texture, folds, seams, stitching, buttons, zippers\n"
-    "- same colors, color blocking, patterns, logos, prints, labels, trims\n"
-    "- same shoes, bags, jewelry, glasses, hats, belts, gloves, watches and other accessories\n\n"
-    "Do not make the face prettier, younger, older, smoother, slimmer, wider, more symmetrical, more generic, or more model-like. "
-    "Do not replace the face with a similar-looking person. "
-    "If the requested edit conflicts with face preservation, keep the face from the reference and apply the edit only outside the face."
+    "PROMPT-DIRECTED REFERENCE TRANSFORMATION. HIGHEST PRIORITY.\n\n"
+    "Use the reference image(s) to keep the same recognizable person, not to freeze the whole source photo.\n"
+    "The user's prompt is the primary instruction for visible changes. Preserve identity and unmentioned details, but do not preserve reference details that conflict with the prompt.\n\n"
+    "Preserve unless explicitly changed:\n"
+    "- recognizable face identity, facial proportions, age impression, and natural skin tone\n"
+    "- body proportions, hands, clothing, accessories, background, and lighting only when the prompt does not ask to change them\n\n"
+    "When requested by the prompt, actively change and prioritize:\n"
+    "- hairstyle, hair length, volume, texture, waves or curls, hair color, and hair placement\n"
+    "- makeup, lashes, brows, lips, skin finish, retouching, glowing skin, beauty lighting, and glamour styling\n"
+    "- pose, head tilt, body angle, gesture, expression, camera angle, framing, crop, and composition\n"
+    "- outfit, accessories, background, scene, mood, realism level, editorial/fashion/beauty style, and lighting setup\n\n"
+    "If the prompt asks for long voluminous hair, wavy hair, smooth glowing retouched skin, makeup, a glamorous/editorial look, or the head tilted to the side, apply it even if the reference shows different hair, bare skin, a plain realistic texture, or a straight-on pose.\n"
+    "Do not replace the person with a different person. Keep the likeness believable while following the requested transformation."
 )
 
 _REFERENCE_LOCK_PROMPT_FIRST_SUFFIX = (
-    "STRICT REFERENCE PRESERVATION. Keep the reference image as the source of truth unless the user explicitly asks to change a detail. "
-    "Preserve the same person, face identity, skin, body, pose, clothing, accessories, background, colors, lighting, and all untouched objects. "
-    "Apply the user instruction only to the requested area."
+    "PROMPT-DIRECTED REFERENCE EDITING. Keep the same recognizable person and preserve unmentioned details. "
+    "The user instruction is the primary edit request: if it asks to change hairstyle, hair length, hair texture, hair color, makeup, skin finish, retouching, outfit, pose, head tilt, expression, background, lighting, framing, or glamour/editorial styling, apply that change even when the reference differs. "
+    "Do not replace the person with a different person."
 )
 
 _REFERENCE_FLEX_PREFIX = (
     "REFERENCE IDENTITY PRESERVATION WITH TRANSFORMATION. HIGH PRIORITY.\n\n"
-    "Keep the same person from the reference with recognizable face identity, skin tone, hair, and overall likeness.\n"
+    "Keep the same person from the reference with recognizable face identity, natural skin tone, and overall likeness.\n"
     "But still follow the user's prompt as the main transformation instruction for pose, framing, composition, camera angle, expression, action, background, styling, outfit, and scene details.\n\n"
     "Important rules:\n"
     "- preserve identity, not the exact original photo composition\n"
-    "- do not simply recreate the same pose or same framing unless the prompt asks for it\n"
+    "- do not simply recreate the same pose, same hair, same skin texture, or same framing unless the prompt asks for it\n"
     "- allow clear changes in body position, gesture, camera distance, and scene layout\n"
+    "- if the prompt asks for makeup, retouched/glowing skin, longer or wavy hair, beauty lighting, or a glamorous/editorial finish, apply those style changes\n"
     "- if the prompt requests a new setting, mood, clothing, or action, apply it while keeping the same person recognizable\n"
+    "- use the reference background only when the prompt explicitly asks to keep or preserve it\n"
+    "- if the prompt asks for a new background, scene, location, mood, or set design, replace the reference background completely\n"
+    "- do not carry over reference background artifacts, clutter, text, books, wall decor, glitches, or props unless requested\n"
+    "- prioritize the requested scene and composition over the original reference environment\n"
     "- avoid background-only edits; perform the actual transformation requested in the prompt\n"
     "- keep the face believable and consistent, but do not freeze the full image"
+)
+
+_MULTI_REFERENCE_FLEX_PREFIX = (
+    "MULTI-REFERENCE IDENTITY AND DETAIL CONTROL. HIGHEST PRIORITY.\n\n"
+    "Use the first reference image as the primary identity source for the main person: face, head shape, natural skin tone, body proportions, and likeness.\n"
+    "Use the additional reference images only for the details requested by the user, such as clothing, lingerie, accessories, fabric, color, pattern, object design, scene, or style.\n\n"
+    "Important rules:\n"
+    "- do not replace the first person's face with a face from any later reference\n"
+    "- do not copy another person's identity, body, expression, age, or facial features from clothing or style references\n"
+    "- do not lock the first reference hairstyle, skin texture, pose, or framing when the prompt asks to change them\n"
+    "- if the prompt asks for makeup, retouched/glowing skin, longer or wavy hair, beauty lighting, or a glamorous/editorial finish, apply those style changes\n"
+    "- if a later reference shows a garment on another person, transfer only the garment design, fabric, fit, color, and visible construction\n"
+    "- keep the first reference background only when the user explicitly asks to preserve it\n"
+    "- if the prompt asks for a new background, scene, location, mood, or set design, remove old reference background clutter, glitches, books, wall decor, and props\n"
+    "- use additional references as background or scene sources only when the prompt specifically asks for that\n"
+    "- preserve the main person's recognizable identity while applying the requested visual details from the other references\n"
+    "- if references conflict, identity from the first reference wins; requested outfit/product/style details from later references come second"
 )
 
 # Aspect ratio options per model
@@ -220,9 +221,15 @@ def _apply_reference_detail_preservation(
         "STRICT REFERENCE ADHERENCE",
         "STRICT IDENTITY AND DETAIL PRESERVATION",
         "STRICT REFERENCE PRESERVATION",
+        "PROMPT-DIRECTED REFERENCE TRANSFORMATION",
+        "PROMPT-DIRECTED REFERENCE EDITING",
         "REFERENCE IDENTITY PRESERVATION WITH TRANSFORMATION",
+        "MULTI-REFERENCE IDENTITY AND DETAIL CONTROL",
     )):
         return prompt
+    reference_count = len(_reference_list(image_url))
+    if model_key in _REFERENCE_FLEX_MODELS and reference_count > 1:
+        return _MULTI_REFERENCE_FLEX_PREFIX + "\n\n" + prompt.strip()
     if model_key in _REFERENCE_FLEX_MODELS:
         return _REFERENCE_FLEX_PREFIX + "\n\n" + prompt.strip()
     if model_key in _PROMPT_FIRST_REFERENCE_LOCK_MODELS:

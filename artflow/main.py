@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import hmac
 import logging
 import tempfile
@@ -12,9 +13,16 @@ import httpx
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, FSInputFile, Update, URLInputFile
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    FSInputFile,
+    MenuButtonCommands,
+    Update,
+    URLInputFile,
+)
 from aiogram.exceptions import TelegramEntityTooLarge
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
@@ -59,6 +67,7 @@ logger = logging.getLogger(__name__)
 _MJ_IMAGE_MODELS = {"midjourney-imagine", "midjourney-blend", "midjourney-action"}
 _MJ_DESCRIBE_MODEL = "midjourney-describe"
 _MJ_VIDEO_MODEL = "midjourney-video"
+_PROMPT_MENU_PREVIEW_MAX = 700
 
 
 def _sanitize_provider_error(raw: str | None, *, fallback: str = "Ошибка на стороне генератора") -> str:
@@ -126,8 +135,30 @@ def _is_feed_prompt_derivative(gen: Generation) -> bool:
     return bool(getattr(gen, "source_feed_gen_id", None))
 
 
+async def _prompt_actions_allowed_for_generation(session, gen: Generation) -> bool:
+    source_feed_gen_id = getattr(gen, "source_feed_gen_id", None)
+    if not source_feed_gen_id:
+        return True
+    source = await repo.get_generation_by_id(session, source_feed_gen_id)
+    return bool(source and getattr(source, "user_id", None) == getattr(gen, "user_id", None))
+
+
 def _kie_result_caption(gen: Generation) -> str:
     return "✅ <b>Готово!</b>"
+
+
+def _is_repeat_generation(gen: Generation) -> bool:
+    action_type = getattr(gen, "action_type", None)
+    action_value = str(getattr(action_type, "value", action_type) or "")
+    return action_value == "repeat" or action_value.endswith(".repeat")
+
+
+def _prompt_menu_preview_for_generation(gen: Generation, prompt: str | None) -> str | None:
+    return None if _is_repeat_generation(gen) else prompt
+
+
+def _prompt_menu_text(prompt: str | None) -> str:
+    return "Что делаем дальше?"
 
 
 async def _get_midjourney_context(user_tg_id: int):
@@ -278,6 +309,7 @@ async def _set_bot_commands(bot: Bot) -> None:
     if settings.ADMIN_IDS:
         commands.append(BotCommand(command="admin", description="Админ-панель"))
     await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
 async def _accrue_referral_commissions(session, user: "User", amount_rub: float, bot_instance: Bot | None = None) -> None:
@@ -538,6 +570,9 @@ async def telegram_webhook(
     update = Update.model_validate(body)
     try:
         await dp.feed_update(bot, update)  # type: ignore[arg-type]
+    except TelegramForbiddenError as e:
+        logger.info("Ignoring Telegram webhook update for unavailable chat: %s", e)
+        return {"ok": True}
     except TelegramBadRequest as e:
         if is_benign_telegram_error(e):
             logger.debug("Ignoring benign Telegram callback error: %s", e)
@@ -840,8 +875,10 @@ async def kie_webhook(
             try:
                 from bot.keyboards.models import after_generation_kb, image_session_kb, public_prompt_text
 
-                prompt_actions_allowed = not _is_feed_prompt_derivative(gen)
+                publish_actions_allowed = await _prompt_actions_allowed_for_generation(session, gen)
+                prompt_actions_allowed = publish_actions_allowed and not _is_repeat_generation(gen)
                 prompt_for_copy = public_prompt_text(gen.prompt) if prompt_actions_allowed else None
+                prompt_menu_preview = _prompt_menu_preview_for_generation(gen, prompt_for_copy)
                 caption = _kie_result_caption(gen)
                 if gen.gen_type == GenerationType.image:
                     caption += (
@@ -877,11 +914,11 @@ async def kie_webhook(
 
                     await bot.send_message(
                         chat_id=user.tg_id,
-                        text="Что делаем дальше?",
+                        text=_prompt_menu_text(prompt_menu_preview),
                         reply_markup=image_session_kb(
                             gen.id,
-                            prompt=prompt_for_copy,
-                            allow_publish=prompt_actions_allowed,
+                            prompt=prompt_menu_preview,
+                            allow_publish=publish_actions_allowed,
                             allow_copy_prompt=prompt_actions_allowed,
                         ),
                     )
@@ -889,8 +926,8 @@ async def kie_webhook(
                     video_reply_markup = after_generation_kb(
                         gen.id,
                         "video",
-                        prompt=prompt_for_copy,
-                        allow_publish=prompt_actions_allowed,
+                        prompt=prompt_menu_preview,
+                        allow_publish=publish_actions_allowed,
                         allow_copy_prompt=prompt_actions_allowed,
                     )
                     video_sent = False

@@ -46,6 +46,8 @@ async def test_share_to_feed_blocks_feed_derivatives(monkeypatch) -> None:
     statement = session.execute.await_args.args[0]
     compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
     assert "source_feed_gen_id IS NULL" in compiled
+    assert "source_feed_gen_id IN" in compiled
+    assert "user_id = 7" in compiled
     get_generation_by_id.assert_not_awaited()
 
 
@@ -64,4 +66,6 @@ async def test_share_to_library_blocks_feed_derivatives(monkeypatch) -> None:
     statement = session.execute.await_args.args[0]
     compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
     assert "source_feed_gen_id IS NULL" in compiled
+    assert "source_feed_gen_id IN" in compiled
+    assert "user_id = 7" in compiled
     get_generation_by_id.assert_not_awaited()

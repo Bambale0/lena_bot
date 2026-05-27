@@ -1,0 +1,36 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">APIX premium mark</title>
+  <desc id="desc">Minimal dark APIX mark with refined cyan and gold accents.</desc>
+  <defs>
+    <linearGradient id="frame" x1="42" y1="34" x2="220" y2="226" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#DDF7FF" stop-opacity=".58"/>
+      <stop offset=".48" stop-color="#6EA8FF" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#FFD166" stop-opacity=".44"/>
+    </linearGradient>
+    <linearGradient id="xA" x1="62" y1="58" x2="194" y2="198" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EAFBFF"/>
+      <stop offset=".48" stop-color="#7DD3FF"/>
+      <stop offset="1" stop-color="#D7C8A2"/>
+    </linearGradient>
+    <linearGradient id="xB" x1="194" y1="58" x2="62" y2="198" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE8A3"/>
+      <stop offset=".52" stop-color="#B8C7FF"/>
+      <stop offset="1" stop-color="#5EEAD4"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000712" flood-opacity=".42"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#7DD3FF" flood-opacity=".12"/>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#050817"/>
+  <rect x="21" y="21" width="214" height="214" rx="48" fill="#08101F" stroke="url(#frame)" stroke-width="1.5"/>
+  <path d="M51 104C60 70 86 48 128 48C170 48 196 70 205 104" stroke="#DDEBFF" stroke-opacity=".22" stroke-width="8" stroke-linecap="round"/>
+  <path d="M51 152C60 186 86 208 128 208C170 208 196 186 205 152" stroke="#FFD166" stroke-opacity=".22" stroke-width="8" stroke-linecap="round"/>
+  <g filter="url(#shadow)">
+    <path d="M76 77L180 181" stroke="url(#xA)" stroke-width="21" stroke-linecap="round"/>
+    <path d="M180 77L76 181" stroke="url(#xB)" stroke-width="21" stroke-linecap="round"/>
+    <circle cx="128" cy="128" r="21" fill="#091122" stroke="#EAFBFF" stroke-opacity=".5" stroke-width="1.5"/>
+    <circle cx="128" cy="128" r="6" fill="#FFD166"/>
+  </g>
+  <path d="M82 128H174" stroke="#F7F9FF" stroke-opacity=".24" stroke-width="2" stroke-linecap="round" stroke-dasharray="8 12"/>
+</svg>

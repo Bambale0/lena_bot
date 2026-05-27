@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import pytest
 import main
 
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
@@ -58,3 +60,54 @@ def test_kie_result_caption_hides_feed_prompt() -> None:
 def test_kie_result_caption_hides_own_prompt_preview() -> None:
     gen = SimpleNamespace(prompt="own prompt", source_feed_gen_id=None)
     assert main._kie_result_caption(gen) == "✅ <b>Готово!</b>"
+
+
+def test_prompt_menu_text_does_not_inline_prompt() -> None:
+    text = main._prompt_menu_text("portrait <cinematic>")
+
+    assert text == "Что делаем дальше?"
+
+
+def test_prompt_menu_text_hides_empty_prompt() -> None:
+    assert main._prompt_menu_text(None) == "Что делаем дальше?"
+
+
+def test_prompt_menu_preview_hides_repeats() -> None:
+    gen = SimpleNamespace(action_type="repeat")
+    assert main._prompt_menu_preview_for_generation(gen, "repeat prompt") is None
+
+
+def test_prompt_menu_preview_hides_stringified_repeats() -> None:
+    gen = SimpleNamespace(action_type="ImageGenerationAction.repeat")
+    assert main._prompt_menu_preview_for_generation(gen, "repeat prompt") is None
+
+
+def test_prompt_menu_preview_keeps_initial_generations() -> None:
+    gen = SimpleNamespace(action_type="initial")
+    assert main._prompt_menu_preview_for_generation(gen, "own prompt") == "own prompt"
+
+
+@pytest.mark.asyncio
+async def test_prompt_actions_allowed_for_own_feed_source(monkeypatch) -> None:
+    get_generation_by_id = AsyncMock(return_value=SimpleNamespace(user_id=42))
+    monkeypatch.setattr(main.repo, "get_generation_by_id", get_generation_by_id)
+
+    allowed = await main._prompt_actions_allowed_for_generation(
+        AsyncMock(),
+        SimpleNamespace(user_id=42, source_feed_gen_id=77),
+    )
+
+    assert allowed is True
+
+
+@pytest.mark.asyncio
+async def test_prompt_actions_hidden_for_other_author_feed_source(monkeypatch) -> None:
+    get_generation_by_id = AsyncMock(return_value=SimpleNamespace(user_id=7))
+    monkeypatch.setattr(main.repo, "get_generation_by_id", get_generation_by_id)
+
+    allowed = await main._prompt_actions_allowed_for_generation(
+        AsyncMock(),
+        SimpleNamespace(user_id=42, source_feed_gen_id=77),
+    )
+
+    assert allowed is False

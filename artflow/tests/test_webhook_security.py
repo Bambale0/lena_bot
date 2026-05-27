@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from aiogram.exceptions import TelegramForbiddenError
 from httpx import ASGITransport, AsyncClient
 
 import main
@@ -31,3 +32,37 @@ async def test_midjourney_webhook_rejects_wrong_secret(monkeypatch) -> None:
         )
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_acks_blocked_user_updates(monkeypatch) -> None:
+    class ForbiddenDispatcher:
+        async def feed_update(self, bot, update) -> None:
+            raise TelegramForbiddenError(
+                method=object(),
+                message="Forbidden: bot was blocked by the user",
+            )
+
+    monkeypatch.setattr(main, "dp", ForbiddenDispatcher())
+    monkeypatch.setattr(main, "bot", object())
+
+    update = {
+        "update_id": 1,
+        "message": {
+            "message_id": 10,
+            "date": 1779638390,
+            "chat": {"id": 123, "type": "private", "first_name": "Test"},
+            "from": {"id": 123, "is_bot": False, "first_name": "Test"},
+            "text": "/start",
+        },
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            main.settings.WEBHOOK_PATH,
+            headers={"X-Telegram-Bot-Api-Secret-Token": main.settings.WEBHOOK_SECRET},
+            json=update,
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}

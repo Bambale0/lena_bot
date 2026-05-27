@@ -1371,6 +1371,19 @@ async def test_image_models_include_updated_wan_reference_limit(client, monkeypa
     assert payload["aspect_ratio_modes"] == ["text"]
 
 
+@pytest.mark.asyncio
+async def test_image_models_include_standard_wan_reference_limit(client, monkeypatch) -> None:
+    model_costs = [SimpleNamespace(model_key="wan/2-7-image", display_name="WAN 2.7", credits=4)]
+    monkeypatch.setattr("api.miniapp_routes.repo.get_all_model_costs", AsyncMock(return_value=model_costs))
+
+    response = await client.get("/api/v1/models/image")
+
+    assert response.status_code == 200
+    payload = response.json()[0]
+    assert payload["max_refs"] == 9
+    assert payload["aspect_ratio_modes"] == ["text"]
+
+
 async def test_generate_video_uses_total_duration_cost(client, monkeypatch) -> None:
     spend_credits = AsyncMock(return_value=True)
     update_generation_task = AsyncMock()

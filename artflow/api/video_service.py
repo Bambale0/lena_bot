@@ -242,6 +242,29 @@ def _result_urls_from_dict(value: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(urls))
 
 
+def _result_urls_from_value(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        urls = _result_urls_from_dict(value)
+        for nested in value.values():
+            urls.extend(_result_urls_from_value(nested))
+        return list(dict.fromkeys(urls))
+    if isinstance(value, list):
+        urls: list[str] = []
+        for item in value:
+            urls.extend(_result_urls_from_value(item))
+        return list(dict.fromkeys(urls))
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("http"):
+            return [stripped]
+        if stripped.startswith("[") or stripped.startswith("{"):
+            try:
+                return _result_urls_from_value(json.loads(stripped))
+            except json.JSONDecodeError:
+                return []
+    return []
+
+
 async def create_gemini_omni_audio(
     *,
     audio_id: str,
@@ -333,11 +356,16 @@ async def _veo_generate(
     resp = await kieai_client.create_veo_task(payload)
     if not isinstance(resp, dict):
         raise RuntimeError(f"Veo3: API returned non-dict response: {type(resp)}")
+    code = resp.get("code")
+    if code not in (None, 200, "200"):
+        raise RuntimeError(f"Veo3 createTask failed: {code} {resp.get('msg')}")
     data = resp.get("data")
     if not isinstance(data, dict):
         data = {}
     # Veo 3.1 returns taskId in data
-    task_id = str(data.get("taskId") or resp.get("taskId") or "")
+    task_id = str(data.get("taskId") or resp.get("taskId") or "").strip()
+    if not task_id:
+        raise RuntimeError(f"Veo3: empty taskId in createTask response: {resp!r}")
     logger.info("Veo task taskId: %s", task_id)
     return VideoResult(task_id=task_id, provider="veo")
 
@@ -371,20 +399,25 @@ async def poll_kieai_status(task_id: str) -> str | None:
 
 async def poll_veo_status(video_id: str) -> str | None:
     resp = await kieai_client.get_veo_status(video_id)
-    data = resp.get("data", {})
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"Veo3: invalid status response: {resp!r}")
+    data = resp.get("data")
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        raise RuntimeError(f"Veo3: invalid status data: {data!r}")
     success_flag = data.get("successFlag")
 
     if success_flag is True or success_flag in (1, "1", "true", "success"):
-        url = data.get("videoUrl")
-        if not url:
-            result_urls = data.get("resultUrls", [])
-            url = result_urls[0] if result_urls else None
+        urls = _result_urls_from_value(data)
+        url = urls[0] if urls else None
         if url:
             return url
         raise RuntimeError("Veo3: success but no videoUrl")
 
-    if success_flag is False or success_flag in ("fail", "failed", "error"):
-        raise RuntimeError(f"Veo3 failed: {data.get('failMsg', 'unknown error')}")
+    if success_flag is False or success_flag in (2, 3, "2", "3", "fail", "failed", "error"):
+        error = data.get("failMsg") or data.get("errorMessage") or data.get("msg") or "unknown error"
+        raise RuntimeError(f"Veo3 failed: {error}")
 
     return None
 
@@ -414,21 +447,25 @@ async def generate_video_4k(
 async def poll_veo_4k_status(task_id: str) -> str | None:
     """Poll 4K enhancement status. Returns video URL when done."""
     resp = await kieai_client.get_veo_4k_status(task_id)
-    data = resp.get("data", {})
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"Veo3 4K: invalid status response: {resp!r}")
+    data = resp.get("data")
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        raise RuntimeError(f"Veo3 4K: invalid status data: {data!r}")
     success_flag = data.get("successFlag")
 
     if success_flag is True or success_flag in (1, "1", "true", "success"):
-        info = data.get("info") or {}
-        result_urls = info.get("resultUrls") or data.get("resultUrls") or []
-        if result_urls:
-            return result_urls[0]
-        url = data.get("videoUrl") or info.get("videoUrl")
+        urls = _result_urls_from_value(data)
+        url = urls[0] if urls else None
         if url:
             return url
         raise RuntimeError("Veo3 4K: success but no videoUrl in response")
 
-    if success_flag is False or success_flag in ("fail", "failed", "error"):
-        raise RuntimeError(f"Veo3 4K failed: {data.get('msg', data.get('errorMessage', 'unknown error'))}")
+    if success_flag is False or success_flag in (2, 3, "2", "3", "fail", "failed", "error"):
+        error = data.get("msg") or data.get("errorMessage") or data.get("failMsg") or "unknown error"
+        raise RuntimeError(f"Veo3 4K failed: {error}")
 
     return None
 

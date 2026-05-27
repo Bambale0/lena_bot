@@ -1,0 +1,312 @@
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.miniapp_routes import (
+    FeedRemixRequest,
+    ImageGenRequest,
+    MusicGenRequest,
+    PromptImproveRequest,
+    TopupRequest,
+    VideoGenRequest,
+    _is_supported_reference_image,
+    _reconcile_user_active_generations,
+    create_image_generation as miniapp_create_image_generation,
+    create_music_generation as miniapp_create_music_generation,
+    create_video_generation as miniapp_create_video_generation,
+    get_feed_share_link as miniapp_get_feed_share_link,
+    get_generation as miniapp_get_generation,
+    list_image_models as miniapp_list_image_models,
+    list_music_models as miniapp_list_music_models,
+    list_plans as miniapp_list_plans,
+    list_video_models as miniapp_list_video_models,
+    miniapp_improve_prompt,
+    miniapp_photo_prompt,
+    publish_generation_to_library as miniapp_publish_generation,
+    remove_feed_post as miniapp_remove_feed_post,
+    remove_from_library as miniapp_remove_from_library,
+    remix_feed_post as miniapp_remix_feed_post,
+    share_generation as miniapp_share_generation,
+    share_to_library as miniapp_share_to_library,
+    topup_crypto as miniapp_topup_crypto,
+    topup_stars as miniapp_topup_stars,
+    topup_tbank as miniapp_topup_tbank,
+)
+from api.public_files import save_public_file
+from api.web.deps import error_response, get_web_user_or_none, ok
+from api.web.schemas import GenerationCard
+from db import repository as repo
+from db.session import get_session
+
+router = APIRouter(tags=["web"])
+
+
+def _dump(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    if isinstance(value, list):
+        return [_dump(item) for item in value]
+    if isinstance(value, tuple):
+        return [_dump(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _dump(item) for key, item in value.items()}
+    return value
+
+
+async def _call_miniapp(handler, *args, **kwargs) -> dict | Response:
+    try:
+        return ok(_dump(await handler(*args, **kwargs)))
+    except HTTPException as exc:
+        return error_response(exc.status_code, str(exc.detail))
+
+
+def _auth_required(user):
+    if user is None:
+        return error_response(401, "Authentication required")
+    return None
+
+
+@router.get("/models/image")
+async def image_models(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_list_image_models, session=session, user=user)
+
+
+@router.get("/models/video")
+async def video_models(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_list_video_models, session=session, user=user)
+
+
+@router.get("/models/music")
+async def music_models(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_list_music_models, session=session, user=user)
+
+
+@router.post("/generate/image", status_code=202)
+async def generate_image(
+    body: ImageGenRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_create_image_generation, body=body, session=session, user=user)
+
+
+@router.post("/generate/video", status_code=202)
+async def generate_video(
+    body: VideoGenRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_create_video_generation, body=body, session=session, user=user)
+
+
+@router.post("/generate/music", status_code=202)
+async def generate_music(
+    body: MusicGenRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_create_music_generation, body=body, session=session, user=user)
+
+
+@router.get("/generations/active")
+async def active_generations(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    await _reconcile_user_active_generations(session, user.id)
+    items = await repo.get_user_active_generations(session, user.id)
+    return ok([GenerationCard.from_generation(item).model_dump() for item in items])
+
+
+@router.get("/generations/{generation_id}")
+async def generation_detail(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_get_generation, gen_id=generation_id, session=session, user=user)
+
+
+@router.post("/generations/{generation_id}/share")
+async def share_generation(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_share_generation, gen_id=generation_id, session=session, user=user)
+
+
+@router.post("/generations/{generation_id}/publish")
+async def publish_generation(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_publish_generation, gen_id=generation_id, session=session, user=user)
+
+
+@router.post("/generations/{generation_id}/share-library")
+async def share_generation_to_library(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_share_to_library, gen_id=generation_id, session=session, user=user)
+
+
+@router.post("/generations/{generation_id}/remove-library")
+async def remove_generation_from_library(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_remove_from_library, gen_id=generation_id, session=session, user=user)
+
+
+@router.post("/feed/{generation_id}/remove")
+async def remove_feed_generation(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_remove_feed_post, gen_id=generation_id, session=session, user=user)
+
+
+@router.post("/feed/{generation_id}/remix", status_code=202)
+async def remix_feed_generation(
+    generation_id: int,
+    body: FeedRemixRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_remix_feed_post, gen_id=generation_id, body=body, session=session, user=user)
+
+
+@router.get("/feed/{generation_id}/link")
+async def feed_share_link(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_get_feed_share_link, gen_id=generation_id, session=session, user=user)
+
+
+@router.post("/uploads/reference")
+async def upload_reference(
+    file: UploadFile = File(...),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    data = await file.read()
+    if not data:
+        return error_response(422, "Empty file")
+    if len(data) > 20 * 1024 * 1024:
+        return error_response(413, "File too large (max 20 MB)")
+    if not _is_supported_reference_image(data, file.content_type):
+        return error_response(422, "Only JPEG, PNG and WebP images are supported")
+    return ok({"url": save_public_file(data, file.content_type)})
+
+
+@router.post("/photo-prompt")
+async def photo_prompt(
+    file: UploadFile = File(...),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_photo_prompt, file=file, user=user)
+
+
+@router.post("/prompt/improve")
+async def improve_prompt(
+    body: PromptImproveRequest,
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_improve_prompt, body=body, user=user)
+
+
+@router.get("/billing/plans")
+async def billing_plans(
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    return await _call_miniapp(miniapp_list_plans, response=response, session=session)
+
+
+@router.post("/billing/topup/tbank")
+async def topup_tbank(
+    body: TopupRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_topup_tbank, body=body, session=session, user=user)
+
+
+@router.post("/billing/topup/stars")
+async def topup_stars(
+    body: TopupRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_topup_stars, body=body, session=session, user=user)
+
+
+@router.post("/billing/topup/crypto")
+async def topup_crypto(
+    body: TopupRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_topup_crypto, body=body, session=session, user=user)

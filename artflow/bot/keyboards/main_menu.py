@@ -1,6 +1,7 @@
 # bot/keyboards/main_menu.py
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 from core.config import settings
 
 
@@ -12,7 +13,10 @@ def main_menu_kb(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=f"{settings.WEBHOOK_URL.rstrip('/')}/app?v=1778285568")),
+        InlineKeyboardButton(
+            text="📱 Открыть приложение",
+            web_app=WebAppInfo(url=f"{settings.WEBHOOK_URL.rstrip('/')}/app?v=1778285568"),
+        ),
     )
     if balance is not None:
         builder.row(

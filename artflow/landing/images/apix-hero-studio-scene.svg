@@ -1,0 +1,39 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="34" fill="#040713"/>
+  <path d="M92 582C240 505 386 480 532 506C716 538 854 498 1108 372V760H92V582Z" fill="url(#floor)"/>
+  <rect x="118" y="116" width="964" height="470" rx="34" fill="#070D1E" stroke="#273657"/>
+  <rect x="178" y="178" width="238" height="330" rx="26" fill="#0D1730" stroke="#2F4268"/>
+  <rect x="452" y="150" width="330" height="386" rx="30" fill="#081020" stroke="#31456C"/>
+  <rect x="820" y="178" width="202" height="330" rx="26" fill="#0D1730" stroke="#2F4268"/>
+  <rect x="212" y="222" width="82" height="54" rx="14" fill="#182846"/>
+  <rect x="212" y="314" width="126" height="18" rx="9" fill="#293B63"/>
+  <rect x="212" y="356" width="96" height="14" rx="7" fill="#203053"/>
+  <circle cx="366" cy="249" r="12" fill="#5EEAD4"/>
+  <circle cx="366" cy="323" r="12" fill="#FFD166"/>
+  <circle cx="366" cy="397" r="12" fill="#7DD3FF"/>
+  <rect x="492" y="198" width="250" height="174" rx="24" fill="url(#canvas)"/>
+  <path d="M532 318C570 262 604 246 636 263C662 276 676 314 714 326" stroke="#E3F7FF" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="652" cy="262" r="54" stroke="#FFD166" stroke-width="5" opacity=".78"/>
+  <rect x="520" y="408" width="178" height="18" rx="9" fill="#263A64"/>
+  <rect x="520" y="444" width="226" height="14" rx="7" fill="#1B2A4D"/>
+  <rect x="520" y="476" width="132" height="14" rx="7" fill="#22365E"/>
+  <rect x="858" y="222" width="116" height="16" rx="8" fill="#BBC8E8"/>
+  <rect x="858" y="300" width="132" height="16" rx="8" fill="#7DD3FF" opacity=".82"/>
+  <rect x="858" y="378" width="96" height="16" rx="8" fill="#5EEAD4" opacity=".78"/>
+  <circle cx="1000" cy="230" r="10" fill="#5EEAD4"/>
+  <circle cx="1000" cy="308" r="10" fill="#7DD3FF"/>
+  <circle cx="1000" cy="386" r="10" fill="#C59CFF"/>
+  <rect x="198" y="620" width="804" height="18" rx="9" fill="#0C1428"/>
+  <rect x="198" y="620" width="438" height="18" rx="9" fill="url(#progress)"/>
+  <defs>
+    <linearGradient id="floor" x1="92" y1="402" x2="1108" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A2237"/><stop offset=".54" stop-color="#0B1024"/><stop offset="1" stop-color="#1C1432"/>
+    </linearGradient>
+    <linearGradient id="canvas" x1="492" y1="198" x2="742" y2="372" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#102C45"/><stop offset=".55" stop-color="#111833"/><stop offset="1" stop-color="#342047"/>
+    </linearGradient>
+    <linearGradient id="progress" x1="198" y1="620" x2="636" y2="638" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7DD3FF"/><stop offset=".58" stop-color="#5EEAD4"/><stop offset="1" stop-color="#FFD166"/>
+    </linearGradient>
+  </defs>
+</svg>

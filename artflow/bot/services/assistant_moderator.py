@@ -3,17 +3,38 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.assistant_service import generate_prompt_moderation_review
 from db import prompt_repository
 from db import repository as repo
-from db.models import User, WithdrawalStatus
+from db.models import (
+    CreditLedgerEntry,
+    Generation,
+    GenerationStatus,
+    Transaction,
+    TransactionStatus,
+    User,
+    WithdrawalStatus,
+)
 from db.repository import InsufficientReferralBalanceError
 
 logger = logging.getLogger(__name__)
+_MSK_TZ = ZoneInfo("Europe/Moscow")
+_REPORT_USER_SKIP_TOKENS = {
+    "user",
+    "tg",
+    "id",
+    "db",
+    "db_id",
+    "telegram",
+    "report",
+    "summary",
+}
 
 
 @dataclass(frozen=True)
@@ -45,6 +66,29 @@ def _clean_reason(raw: str | None) -> str | None:
     return reason or None
 
 
+def _format_msk_datetime(value) -> str:
+    if not value:
+        return "—"
+    if getattr(value, "tzinfo", None):
+        return value.astimezone(_MSK_TZ).strftime("%d.%m.%Y %H:%M")
+    if hasattr(value, "strftime"):
+        return value.strftime("%d.%m.%Y %H:%M")
+    return str(value)
+
+
+def _format_credits(value: float | int | None) -> str:
+    return f"{float(value or 0):g}"
+
+
+def _format_rub(value: float | int | None) -> str:
+    amount = float(value or 0)
+    return f"{amount:.0f}₽" if amount.is_integer() else f"{amount:.2f}₽"
+
+
+def _enum_value(value) -> str:
+    return value.value if hasattr(value, "value") else str(value)
+
+
 async def _resolve_user(session: AsyncSession, token: str) -> User | None:
     cleaned = token.strip()
     if not cleaned:
@@ -56,6 +100,227 @@ async def _resolve_user(session: AsyncSession, token: str) -> User | None:
     if re.fullmatch(r"[A-Za-z0-9_]{3,64}", cleaned):
         return await repo.get_user_by_username(session, cleaned)
     return None
+
+
+async def _resolve_user_for_report(
+    session: AsyncSession,
+    token: str,
+    *,
+    prefer_db_id: bool = False,
+) -> User | None:
+    cleaned = token.strip()
+    if not cleaned:
+        return None
+    if prefer_db_id and cleaned.isdigit():
+        user = await repo.get_user_by_id(session, int(cleaned))
+        if user:
+            return user
+    if cleaned.isdigit():
+        user = await repo.get_user_by_tg_id(session, int(cleaned))
+        if user:
+            return user
+        return await repo.get_user_by_id(session, int(cleaned))
+    return await _resolve_user(session, cleaned)
+
+
+def _has_user_report_intent(normalized: str) -> bool:
+    return (
+        any(word in normalized for word in ("сводк", "отчет", "отчёт", "инф", "карточк", "профил", "детал"))
+        or "любимая ии" in normalized
+        or "любимый ии" in normalized
+        or "любимую ии" in normalized
+        or ("оплат" in normalized and ("реферал" in normalized or "приглаш" in normalized or "ии" in normalized))
+        or ("статист" in normalized and any(word in normalized for word in ("пользовател", "юзер", "user")))
+    )
+
+
+def _extract_report_user_token(source: str, normalized: str) -> tuple[str, bool] | None:
+    if not _has_user_report_intent(normalized):
+        return None
+
+    db_match = re.search(
+        r"(?:db(?:[_\s-]*id)?|database\s*id|внутренн(?:ий|его)?\s+id)\s*[:#]?\s*(\d+)",
+        source,
+        re.I,
+    )
+    if db_match:
+        return db_match.group(1), True
+
+    tg_match = re.search(r"(?:tg(?:\s*id)?|тг(?:\s*id)?|telegram(?:\s*id)?)\s*[:#]?\s*(\d+)", source, re.I)
+    if tg_match:
+        return tg_match.group(1), False
+
+    username_match = re.search(r"@[A-Za-z0-9_]{3,64}", source)
+    if username_match:
+        return username_match.group(0), False
+
+    tokens = re.findall(r"\b\d{3,20}\b|\b[A-Za-z][A-Za-z0-9_]{2,63}\b", source)
+    for token in tokens:
+        if token.lower() not in _REPORT_USER_SKIP_TOKENS:
+            return token, False
+    return None
+
+
+def _format_user_brief_report(
+    *,
+    user: User,
+    paid_transactions: list[Transaction],
+    direct_referrals_count: int,
+    second_line_referrals_count: int,
+    direct_referrals_paid_total: float,
+    signup_bonus_credits: float,
+    generations_total: int,
+    generations_done: int,
+    generations_failed: int,
+    credits_spent: float,
+    favorite_model: tuple[str, int, float] | None,
+) -> str:
+    name = f"@{user.username}" if user.username else (user.full_name or f"TG {user.tg_id}")
+    full_name = user.full_name or "—"
+    paid_total = sum(float(tx.amount_rub or 0) for tx in paid_transactions)
+    status = "забанен" if user.is_banned else "активен"
+    subscription = "есть" if user.is_subscribed else "нет"
+
+    lines = [
+        "Сводка по пользователю",
+        f"{name} / {full_name}",
+        f"TG ID: {user.tg_id}",
+        f"Регистрация: {_format_msk_datetime(user.created_at)} MSK",
+        f"Статус: {status}, подписка {subscription}",
+        f"Баланс: {_format_credits(user.credits)} 💋",
+        f"Реф. баланс: {float(user.referral_balance or 0):.2f}₽",
+        "",
+        "Оплаты",
+        f"Всего paid: {_format_rub(paid_total)} ({len(paid_transactions)} платежа)",
+    ]
+    if paid_transactions:
+        for tx in paid_transactions:
+            provider = _enum_value(tx.provider)
+            lines.append(
+                f"• {_format_rub(tx.amount_rub)} → {_format_credits(tx.credits)} кр., "
+                f"{provider}, {_format_msk_datetime(tx.created_at)}, tx {tx.id}"
+            )
+    else:
+        lines.append("• успешных оплат нет")
+
+    lines.extend(
+        [
+            "",
+            "Приглашённые",
+            f"Прямых: {direct_referrals_count}, 2-я линия: {second_line_referrals_count}",
+            f"Оплат от прямых: {_format_rub(direct_referrals_paid_total)}",
+            f"Бонусов за регистрации: {_format_credits(signup_bonus_credits)} 💋",
+            "",
+            "Активность и ИИ",
+            f"Генерации: {generations_total} всего, {generations_done} успешных, {generations_failed} failed",
+            f"Потрачено: {_format_credits(credits_spent)} 💋",
+        ]
+    )
+    if favorite_model:
+        model, count, model_spent = favorite_model
+        lines.append(f"Любимая ИИ: {model} ({count} запусков, {_format_credits(model_spent)} 💋)")
+    else:
+        lines.append("Любимая ИИ: пока нет запусков")
+    return "\n".join(lines)
+
+
+async def _build_user_brief_report(session: AsyncSession, user: User) -> str:
+    paid_transactions = (
+        await session.execute(
+            select(Transaction)
+            .where(Transaction.user_id == user.id, Transaction.status == TransactionStatus.paid)
+            .order_by(Transaction.created_at.asc(), Transaction.id.asc())
+        )
+    ).scalars().all()
+    generations_by_status = (
+        await session.execute(
+            select(
+                Generation.status,
+                func.count(Generation.id),
+                func.coalesce(func.sum(Generation.credits_spent), 0),
+            )
+            .where(Generation.user_id == user.id)
+            .group_by(Generation.status)
+        )
+    ).all()
+    generations_total = sum(int(count or 0) for _, count, _ in generations_by_status)
+    generations_done = sum(
+        int(count or 0)
+        for status, count, _ in generations_by_status
+        if _enum_value(status) == GenerationStatus.done.value
+    )
+    generations_failed = sum(
+        int(count or 0)
+        for status, count, _ in generations_by_status
+        if _enum_value(status) == GenerationStatus.failed.value
+    )
+    credits_spent = sum(float(spent or 0) for _, _, spent in generations_by_status)
+    model_count = func.count(Generation.id)
+    model_spent = func.coalesce(func.sum(Generation.credits_spent), 0)
+    favorite_row = (
+        await session.execute(
+            select(
+                Generation.model,
+                model_count,
+                model_spent,
+            )
+            .where(Generation.user_id == user.id)
+            .group_by(Generation.model)
+            .order_by(model_count.desc(), model_spent.desc())
+            .limit(1)
+        )
+    ).one_or_none()
+    favorite_model = (
+        (str(favorite_row[0]), int(favorite_row[1] or 0), float(favorite_row[2] or 0))
+        if favorite_row
+        else None
+    )
+    direct_referrals_count = int(
+        (
+            await session.execute(select(func.count(User.id)).where(User.referrer_id == user.id))
+        ).scalar_one()
+        or 0
+    )
+    second_line_referrals_count = int(
+        (
+            await session.execute(select(func.count(User.id)).where(User.referrer_l2_id == user.id))
+        ).scalar_one()
+        or 0
+    )
+    direct_referrals_paid_total = float(
+        (
+            await session.execute(
+                select(func.coalesce(func.sum(Transaction.amount_rub), 0))
+                .join(User, User.id == Transaction.user_id)
+                .where(User.referrer_id == user.id, Transaction.status == TransactionStatus.paid)
+            )
+        ).scalar_one()
+        or 0
+    )
+    signup_bonus_credits = float(
+        (
+            await session.execute(
+                select(func.coalesce(func.sum(CreditLedgerEntry.delta), 0)).where(
+                    CreditLedgerEntry.user_id == user.id,
+                    CreditLedgerEntry.entry_type == "referral_signup_bonus",
+                )
+            )
+        ).scalar_one()
+        or 0
+    )
+    return _format_user_brief_report(
+        user=user,
+        paid_transactions=list(paid_transactions),
+        direct_referrals_count=direct_referrals_count,
+        second_line_referrals_count=second_line_referrals_count,
+        direct_referrals_paid_total=direct_referrals_paid_total,
+        signup_bonus_credits=signup_bonus_credits,
+        generations_total=generations_total,
+        generations_done=generations_done,
+        generations_failed=generations_failed,
+        credits_spent=credits_spent,
+        favorite_model=favorite_model,
+    )
 
 
 def _user_title(user: User) -> str:
@@ -93,11 +358,25 @@ async def try_handle_admin_request(
             "• забань 123456789\n"
             "• разбань @username\n"
             "• начисли 50 123456789\n"
+            "• сводка @username\n"
             "• одобри промпт 42\n"
             "• отклони промпт 42: причина\n"
             "• проверь промпт 42\n"
             "• подтверди вывод 15\n"
             "• отклони вывод 15: причина"
+        )
+
+    report_token = _extract_report_user_token(source, normalized)
+    if report_token:
+        token, prefer_db_id = report_token
+        user = await _resolve_user_for_report(session, token, prefer_db_id=prefer_db_id)
+        if not user:
+            return AdminAssistantOutcome(f"Пользователь {token} не найден.")
+        return AdminAssistantOutcome(await _build_user_brief_report(session, user))
+    if _has_user_report_intent(normalized):
+        return AdminAssistantOutcome(
+            "Укажи пользователя для сводки: username, TG ID или DB ID.\n"
+            "Примеры: сводка @username, отчет tg id 6006348428, отчет db id 273."
         )
 
     if (

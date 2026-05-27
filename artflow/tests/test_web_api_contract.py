@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from api.web import billing, health, referrals
+from api.web import billing, generations, health, referrals
+from api.miniapp_routes import GenerationOut, ImageGenRequest
 from api.web.schemas import FeedCard, ModelCostCard, TransactionCard, UserMe
 from db.models import GenerationType, PaymentProvider, TransactionStatus
 
@@ -112,3 +113,44 @@ async def test_referrals_requires_auth() -> None:
     response = await referrals.referrals(session=object(), user=None)
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_web_generate_image_requires_auth() -> None:
+    response = await generations.generate_image(
+        ImageGenRequest(model="nano-banana-2", prompt="premium product"),
+        session=object(),
+        user=None,
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_web_generate_image_wraps_generation_payload(monkeypatch) -> None:
+    async def fake_create_image_generation(*, body, session, user):
+        assert body.prompt == "premium product"
+        assert user.id == 1
+        return GenerationOut(
+            id=77,
+            model=body.model,
+            gen_type="image",
+            prompt=body.prompt,
+            status="processing",
+            result_url=None,
+            credits_spent=4,
+            created_at="2026-05-24T00:00:00+00:00",
+            result_urls=[],
+        )
+
+    monkeypatch.setattr(generations, "miniapp_create_image_generation", fake_create_image_generation)
+
+    response = await generations.generate_image(
+        ImageGenRequest(model="nano-banana-2", prompt="premium product"),
+        session=object(),
+        user=SimpleNamespace(id=1),
+    )
+
+    assert response["ok"] is True
+    assert response["data"]["id"] == 77
+    assert response["data"]["status"] == "processing"

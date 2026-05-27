@@ -238,28 +238,37 @@ class GenerationCard(BaseModel):
     model: str
     gen_type: str
     prompt: str
+    prompt_hidden: bool = False
+    prompt_actions_allowed: bool = True
     status: str
     result_url: str | None = None
     result_urls: list[str]
     credits_spent: float
     is_public_feed: bool
     is_prompt_library: bool
+    error: str | None = None
     created_at: str
+    finished_at: str = ""
 
     @classmethod
     def from_generation(cls, generation: Any) -> "GenerationCard":
+        prompt_hidden = bool(getattr(generation, "source_feed_gen_id", None))
         return cls(
             id=int(getattr(generation, "id", 0)),
             model=str(getattr(generation, "model", "") or ""),
             gen_type=enum_value(getattr(generation, "gen_type", None)),
-            prompt=str(getattr(generation, "prompt", "") or ""),
+            prompt="" if prompt_hidden else str(getattr(generation, "prompt", "") or ""),
+            prompt_hidden=prompt_hidden,
+            prompt_actions_allowed=not prompt_hidden,
             status=enum_value(getattr(generation, "status", None)),
             result_url=generation_result_url(generation),
             result_urls=generation_result_urls(generation),
             credits_spent=float(getattr(generation, "credits_spent", 0) or 0),
             is_public_feed=bool(getattr(generation, "is_public_feed", False)),
             is_prompt_library=bool(getattr(generation, "is_prompt_library", False)),
+            error=getattr(generation, "error_msg", None),
             created_at=iso_datetime(getattr(generation, "created_at", None)),
+            finished_at=iso_datetime(getattr(generation, "finished_at", None)),
         )
 
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import Date, cast, select, update, desc, func, case
+from sqlalchemy import Date, cast, select, update, desc, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -866,6 +866,16 @@ async def get_feed_generation_card(
     return cards[0] if cards else None
 
 
+def _own_or_empty_feed_source_clause(user_id: int):
+    source_gen = aliased(Generation)
+    return or_(
+        Generation.source_feed_gen_id.is_(None),
+        Generation.source_feed_gen_id.in_(
+            select(source_gen.id).where(source_gen.user_id == user_id)
+        ),
+    )
+
+
 async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
     result = await session.execute(
         update(Generation)
@@ -874,7 +884,7 @@ async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Gen
             Generation.user_id == user_id,
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
-            Generation.source_feed_gen_id.is_(None),
+            _own_or_empty_feed_source_clause(user_id),
         )
         .values(is_public_feed=True)
         .returning(Generation.id)
@@ -906,7 +916,7 @@ async def share_to_library(session: AsyncSession, gen_id: int, user_id: int) -> 
             Generation.user_id == user_id,
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
-            Generation.source_feed_gen_id.is_(None),
+            _own_or_empty_feed_source_clause(user_id),
         )
         .values(is_prompt_library=True)
         .returning(Generation.id)
@@ -1074,18 +1084,22 @@ async def update_image_session_references(
     session: AsyncSession,
     image_session_id: int,
     reference_file_ids: list[str],
+    mode: str | None = None,
 ) -> None:
     normalized_reference_file_ids = [item for item in reference_file_ids if item]
     lead_reference_file_id = normalized_reference_file_ids[0] if normalized_reference_file_ids else None
+    values = {
+        "reference_file_id": lead_reference_file_id,
+        "reference_file_ids": json.dumps(normalized_reference_file_ids, ensure_ascii=True) if normalized_reference_file_ids else None,
+        "reference_url": None,
+        "updated_at": func.now(),
+    }
+    if mode:
+        values["mode"] = mode
     await session.execute(
         update(ImageSession)
         .where(ImageSession.id == image_session_id)
-        .values(
-            reference_file_id=lead_reference_file_id,
-            reference_file_ids=json.dumps(normalized_reference_file_ids, ensure_ascii=True) if normalized_reference_file_ids else None,
-            reference_url=None,
-            updated_at=func.now(),
-        )
+        .values(**values)
     )
     await session.commit()
 

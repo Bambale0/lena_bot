@@ -29,7 +29,22 @@ async def render_screen(
         image_session = payload.get("image_session") or await repo.get_active_image_session(session, db_user.id)
         if not image_session:
             return render_image_scenarios()
-        return render_active_image_session(image_session)
+        active_generation = payload.get("active_generation")
+        prompt_actions_allowed = payload.get("prompt_actions_allowed")
+        if active_generation is None:
+            last_generation_id = getattr(image_session, "last_generation_id", None)
+            if last_generation_id:
+                active_generation = await repo.get_generation_by_id(session, last_generation_id)
+        if prompt_actions_allowed is None and active_generation is not None:
+            source_feed_gen_id = getattr(active_generation, "source_feed_gen_id", None)
+            if source_feed_gen_id:
+                source = await repo.get_generation_by_id(session, source_feed_gen_id)
+                prompt_actions_allowed = bool(source and getattr(source, "user_id", None) == db_user.id)
+        return render_active_image_session(
+            image_session,
+            active_generation=active_generation,
+            prompt_actions_allowed=prompt_actions_allowed,
+        )
 
     if screen == "image_entry":
         return render_image_scenarios()

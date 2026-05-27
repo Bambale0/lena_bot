@@ -1,0 +1,33 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="34" fill="#050817"/>
+  <path d="M112 580C260 448 443 403 661 446C824 478 940 454 1088 350V760H112V580Z" fill="url(#base)"/>
+  <rect x="126" y="118" width="948" height="484" rx="30" fill="#0B1025" stroke="#314064"/>
+  <rect x="174" y="172" width="292" height="374" rx="24" fill="#101936" stroke="#34456C"/>
+  <rect x="734" y="172" width="292" height="374" rx="24" fill="#101936" stroke="#34456C"/>
+  <rect x="214" y="216" width="212" height="166" rx="20" fill="url(#still)"/>
+  <path d="M248 334C280 292 306 281 330 295C348 305 359 331 390 340" stroke="#DDF7FF" stroke-width="3"/>
+  <circle cx="344" cy="292" r="42" stroke="#FFD166" stroke-width="4" opacity=".72"/>
+  <rect x="214" y="414" width="174" height="18" rx="9" fill="#25365E"/>
+  <rect x="214" y="450" width="128" height="14" rx="7" fill="#1D2A4D"/>
+  <path d="M520 286C573 249 630 249 684 286" stroke="#7DD3FF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M660 250L690 288L642 300" stroke="#7DD3FF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M520 414C573 451 630 451 684 414" stroke="#5EEAD4" stroke-width="8" stroke-linecap="round"/>
+  <path d="M544 450L514 412L562 400" stroke="#5EEAD4" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="774" y="216" width="212" height="166" rx="20" fill="url(#video)"/>
+  <path d="M804 344C840 292 875 274 906 292C929 306 942 335 976 346" stroke="#DDF7FF" stroke-width="3"/>
+  <circle cx="920" cy="290" r="45" stroke="#C59CFF" stroke-width="4" opacity=".74"/>
+  <rect x="798" y="416" width="164" height="16" rx="8" fill="#25365E"/>
+  <rect x="798" y="452" width="194" height="14" rx="7" fill="#1D2A4D"/>
+  <rect x="798" y="490" width="120" height="16" rx="8" fill="#5EEAD4" opacity=".8"/>
+  <defs>
+    <linearGradient id="base" x1="112" y1="398" x2="1088" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B263F"/><stop offset=".55" stop-color="#111633"/><stop offset="1" stop-color="#24143C"/>
+    </linearGradient>
+    <linearGradient id="still" x1="214" y1="216" x2="426" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#12314A"/><stop offset=".58" stop-color="#111A31"/><stop offset="1" stop-color="#38244E"/>
+    </linearGradient>
+    <linearGradient id="video" x1="774" y1="216" x2="986" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#142947"/><stop offset=".48" stop-color="#15162E"/><stop offset="1" stop-color="#352248"/>
+    </linearGradient>
+  </defs>
+</svg>
