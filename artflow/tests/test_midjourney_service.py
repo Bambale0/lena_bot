@@ -34,6 +34,18 @@ def test_task_result_from_dict_reads_video_and_image_url_lists() -> None:
     assert result.video_urls == ["https://example.test/video.mp4"]
 
 
+def test_task_result_from_dict_reads_describe_prompt_fallbacks() -> None:
+    result = midjourney_service.MJTaskResult.from_dict({
+        "id": "task_describe_ok",
+        "status": "SUCCESS",
+        "prompt": "",
+        "promptEn": "clean geometric icon prompt",
+        "properties": {"finalPrompt": "fallback prompt"},
+    })
+
+    assert result.prompt == "clean geometric icon prompt"
+
+
 @pytest.mark.asyncio
 async def test_imagine_includes_notify_hook(monkeypatch) -> None:
     post_mock = AsyncMock(return_value={"result": "task_with_hook"})

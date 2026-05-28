@@ -261,7 +261,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "counts": [1],
         "has_quality": True,
         "quality_options": [("2K", "2K"), ("4K", "4K")],
-        "max_refs": 8,
+        "max_refs": 14,
     },
     ImageModel.NANO_BANANA_PRO: {
         "modes": ["text", "image"],
@@ -544,6 +544,7 @@ def image_scenarios_kb() -> InlineKeyboardMarkup:
                 callback_data=f"img_scn:{scenario_key}",
             )
         )
+    builder.row(InlineKeyboardButton(text="📸 Фото → промпт", callback_data="img:photo2prompt"))
     builder.row(InlineKeyboardButton(text="🧠 Все нейросети", callback_data="img_menu:advanced"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()

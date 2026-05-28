@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from api import public_files
 from api import image_service
+from api import public_files
 from api.image_service import ImageModel, _build_input, normalize_quality_for_aspect_ratio
 
 
@@ -245,6 +245,7 @@ async def test_generate_image_uploads_local_seedream_reference_before_create_tas
         aspect_ratio="1:1",
     )
 
+    assert result.is_async is True
     assert result.task_id == "task_seedream"
     assert uploaded_urls == ["ref.jpg"]
     assert created_payloads[0]["model"] == "seedream/4.5-edit"
@@ -280,6 +281,7 @@ async def test_generate_image_uploads_local_qwen_reference_before_create_task(tm
         aspect_ratio="1:1",
     )
 
+    assert result.is_async is True
     assert result.task_id == "task_qwen"
     assert created_payloads[0]["model"] == "qwen/image-to-image"
     assert created_payloads[0]["input"]["image_url"] == "https://kie-files.test/qwen-ref.jpg"

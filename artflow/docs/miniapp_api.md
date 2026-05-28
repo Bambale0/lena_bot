@@ -103,7 +103,7 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 |--------|---------|
 | seedream/4.5-text-to-image | `basic` (2K), `high` (4K) |
 | nano-banana-pro | `2K`, `4K` |
-| nano-banana-2 | `1K`, `2K` |
+| nano-banana-2 | `2K`, `4K` |
 | остальные | `basic` |
 
 ---

@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, URLInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -92,6 +92,26 @@ def _kie_callback_url() -> str:
         params["secret"] = settings.KIE_WEBHOOK_SECRET
     query = f"?{urlencode(params)}" if params else ""
     return f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}{query}"
+
+
+def _direct_image_result_urls(result: image_service.ImageResult) -> list[str]:
+    result_urls = list(result.result_urls or [])
+    if result.url and result.url not in result_urls:
+        result_urls.insert(0, result.url)
+    return [url for url in result_urls if url]
+
+
+def _normalize_image_count(model_key: str, count: object) -> int:
+    allowed = [int(item) for item in IMAGE_CAPS.get(model_key, {}).get("counts", [1]) if int(item) > 0]
+    if not allowed:
+        allowed = [1]
+    try:
+        value = int(count or 1)
+    except (TypeError, ValueError):
+        value = 1
+    if value in allowed:
+        return value
+    return 1 if 1 in allowed else allowed[0]
 
 
 async def _telegram_file_url(bot: Bot, file_id: str | None) -> str | None:
@@ -509,7 +529,12 @@ async def _ensure_active_image_session_from_state(
     data = await state.get_data()
     existing = await repo.get_active_image_session(session, db_user.id)
     if existing:
-        return existing
+        try:
+            state_session_id = int(data.get("image_session_id") or 0)
+        except (TypeError, ValueError):
+            state_session_id = 0
+        if state_session_id == getattr(existing, "id", None) and existing.model == data["model_key"]:
+            return existing
 
     aspect_ratio = data.get("aspect_ratio")
     mode = data.get("image_mode") or data.get("mode", "text")
@@ -518,6 +543,7 @@ async def _ensure_active_image_session_from_state(
         aspect_ratio,
         data.get("quality", "basic"),
     )
+    count = _normalize_image_count(data["model_key"], data.get("count", 1))
 
     image_session = await repo.create_image_session(
         session=session,
@@ -526,12 +552,13 @@ async def _ensure_active_image_session_from_state(
         mode=mode,
         aspect_ratio=aspect_ratio,
         quality=quality,
-        count=data.get("count", 1),
+        count=count,
         base_prompt=None,
         reference_file_id=data.get("image_file_id"),
         reference_file_ids=_state_reference_file_ids(data) if mode == "image" else None,
         reference_url=_state_reference_url(data) if mode == "image" else None,
     )
+    await state.update_data(image_session_id=image_session.id, count=count, image_count=count)
     return image_session
 
 
@@ -618,6 +645,12 @@ async def _launch_session_generation(
         db_user=db_user,
         source_feed_gen_id=source_feed_gen_id,
     )
+    normalized_count = _normalize_image_count(image_session.model, image_session.count)
+    if normalized_count != image_session.count:
+        image_session.count = normalized_count
+        await session.commit()
+        await state.update_data(count=normalized_count, image_count=normalized_count)
+
     normalized_quality = _normalize_session_quality(
         image_session.model,
         image_session.aspect_ratio,
@@ -687,7 +720,7 @@ async def _launch_session_generation(
             prompt,
             image_url=reference_url,
             aspect_ratio=image_session.aspect_ratio,
-            n=image_session.count,
+            n=normalized_count,
             quality=normalized_quality,
             callback_url=_kie_callback_url(),
         )
@@ -701,12 +734,74 @@ async def _launch_session_generation(
         )
         return False
 
-    await repo.update_generation_task(session, gen.id, result.task_id or "")
-    await _sync_state_with_image_session(state, image_session)
-    await state.update_data(credits=credits, source_feed_gen_id=source_feed_gen_id)
     publish_actions_allowed = not bool(source_feed_gen_id)
     prompt_actions_allowed = publish_actions_allowed and action_type != ImageGenerationAction.repeat
     prompt_for_menu = prompt if prompt_actions_allowed else None
+    await repo.update_generation_task(session, gen.id, result.task_id or "")
+    await _sync_state_with_image_session(state, image_session)
+    await state.update_data(credits=credits, source_feed_gen_id=source_feed_gen_id)
+
+    if not getattr(result, "is_async", True):
+        result_urls = _direct_image_result_urls(result)
+        if not result_urls:
+            err = "CometAPI image fallback returned no result URL"
+            if await repo.fail_generation(session, gen.id, err):
+                await repo.add_credits(session, db_user.id, credits)
+            await status_msg.edit_text(
+                "❌ Ошибка генерации. 💋 возвращены.",
+                reply_markup=image_session_kb(parent_generation_id, allow_publish=publish_actions_allowed),
+            )
+            return False
+
+        await repo.finish_generation(session, gen.id, result_urls[0], result_urls=result_urls)
+        await repo.update_image_session_last_result(session, image_session.id, result_urls[0], gen.id)
+        image_session.last_result_url = result_urls[0]
+        image_session.last_generation_id = gen.id
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        caption = (
+            "✅ <b>Готово!</b>\n\n"
+            "🎨 <b>Серия активна.</b>\n"
+            "Теперь просто отправляй новый текст или фото — настройки сохранятся."
+        )
+        for idx, url in enumerate(result_urls):
+            try:
+                await source_message.answer_photo(
+                    URLInputFile(url, filename=f"image_{gen.id}_{idx + 1}.jpg"),
+                    caption=caption if idx == 0 else None,
+                )
+            except Exception:
+                try:
+                    await source_message.answer_document(
+                        URLInputFile(url, filename=f"image_{gen.id}_{idx + 1}.jpg"),
+                        caption=caption if idx == 0 else None,
+                    )
+                except Exception:
+                    logger.warning("Failed to send direct image result user=%s gen=%s idx=%s", db_user.tg_id, gen.id, idx)
+
+        for idx, url in enumerate(result_urls):
+            try:
+                await source_message.answer_document(
+                    URLInputFile(url, filename=f"source_{gen.id}_{idx + 1}.png"),
+                    caption="📎 <b>Исходник файлом</b>" if idx == 0 else None,
+                )
+            except Exception:
+                logger.warning("Failed to send direct image source document user=%s gen=%s idx=%s", db_user.tg_id, gen.id, idx)
+
+        await source_message.answer(
+            "Что делаем дальше?",
+            reply_markup=image_session_kb(
+                gen.id,
+                prompt=prompt_for_menu,
+                allow_publish=publish_actions_allowed,
+                allow_copy_prompt=prompt_actions_allowed,
+            ),
+        )
+        return True
+
     await status_msg.edit_text(
         queued_text,
         reply_markup=image_session_kb(
@@ -755,6 +850,8 @@ async def _show_nana_banano_flow(
     session: AsyncSession,
     db_user: User,
     model_key: str = NANA_BANANO_DEFAULT_MODEL,
+    *,
+    preserve_refs: bool = True,
 ) -> bool:
     model_key = _image_model_key(model_key)
     allowed_models = set(NANA_BANANO_MODEL_CHOICES)
@@ -780,11 +877,12 @@ async def _show_nana_banano_flow(
         return False
 
     data = await state.get_data()
-    refs_count = _nana_banano_ref_count(data)
+    refs_count = _nana_banano_ref_count(data) if preserve_refs else 0
     mode = "image" if refs_count or _state_reference_url(data) else "text"
 
-    await state.update_data(
+    updates = dict(
         nana_banano_flow=True,
+        image_session_id=None,
         model_key=model_key,
         image_model=model_key,
         mode=mode,
@@ -800,6 +898,13 @@ async def _show_nana_banano_flow(
         remix_parent_generation_id=None,
         source_feed_gen_id=None,
     )
+    if not preserve_refs:
+        updates.update(
+            image_file_id=None,
+            ref_file_ids=[],
+            remix_reference_url=None,
+        )
+    await state.update_data(**updates)
     await state.set_state(ImageGenFSM.prompt_input)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
@@ -855,6 +960,7 @@ async def _start_image_model_flow(
         default_mode = "text" if "text" in modes else modes[0]
 
     await state.update_data(
+        image_session_id=None,
         model_key=model_key,
         image_model=model_key,
         mode=default_mode,
@@ -957,6 +1063,7 @@ async def cb_image_scenario(
             state=state,
             db_user=db_user,
             model_key=scenario["model"],
+            preserve_refs=False,
         ):
             await safe_answer_callback(call)
         return
@@ -1161,10 +1268,17 @@ async def cb_image_model(call: CallbackQuery, state: FSMContext, session: AsyncS
         default_mode = "text" if "text" in modes else modes[0]
 
     updates = {
+        "image_session_id": None,
         "model_key": model_key,
         "image_model": model_key,
         "mode": default_mode,
         "image_mode": default_mode,
+        "aspect_ratio": None,
+        "image_aspect_ratio": None,
+        "count": 1,
+        "image_count": 1,
+        "quality": _default_image_quality(model_key),
+        "image_quality": _default_image_quality(model_key),
         "source_feed_gen_id": None,
     }
     if data.get("carryover_image_file_id"):

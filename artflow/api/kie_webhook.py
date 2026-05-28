@@ -26,6 +26,8 @@ def _nested_dicts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     data_result = _as_dict(data.get("resultJson"))
     data_info = _as_dict(data.get("info"))          # Veo3.1: data.info.resultUrls
     data_response = _as_dict(data.get("response"))  # Some image APIs: data.response.resultImageUrl
+    data_task_result = _as_dict(data.get("task_result"))  # Comet Kling: data.task_result.videos[].url
+    data_result_obj = _as_dict(data.get("result"))
     info_result = _as_dict(info.get("resultJson"))
     response_result = _as_dict(response.get("resultJson"))
     data_info_result = _as_dict(data_info.get("resultJson"))
@@ -40,6 +42,8 @@ def _nested_dicts(payload: dict[str, Any]) -> list[dict[str, Any]]:
         data_result,
         data_info,
         data_response,
+        data_task_result,
+        data_result_obj,
         info_result,
         response_result,
         data_info_result,
@@ -50,11 +54,33 @@ def _nested_dicts(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 def extract_task_id(payload: dict[str, Any]) -> str | None:
     for source in _nested_dicts(payload) + [payload]:
-        for key in ("task_id", "taskId"):
+        for key in ("task_id", "taskId", "id", "request_id", "video_id", "videoId"):
             value = source.get(key)
             if value:
                 return str(value)
     return None
+
+
+def extract_status(payload: dict[str, Any]) -> str:
+    data = _as_dict(payload.get("data"))
+    info = _as_dict(payload.get("info"))
+    return str(
+        data.get("state")
+        or data.get("status")
+        or data.get("task_status")
+        or info.get("state")
+        or info.get("status")
+        or info.get("task_status")
+        or payload.get("state")
+        or payload.get("status")
+        or payload.get("task_status")
+        or ""
+    ).lower()
+
+
+def is_processing(payload: dict[str, Any]) -> bool:
+    state = extract_status(payload)
+    return state in {"submitted", "submit", "queued", "queueing", "pending", "processing", "running", "generating", "in_progress"}
 
 
 def is_success(payload: dict[str, Any]) -> bool:
@@ -62,21 +88,11 @@ def is_success(payload: dict[str, Any]) -> bool:
     if code is not None and str(code) not in {"0", "200", "success", "SUCCESS"}:
         return False
 
-    data = _as_dict(payload.get("data"))
-    info = _as_dict(payload.get("info"))
-    state = str(
-        data.get("state")
-        or data.get("status")
-        or info.get("state")
-        or info.get("status")
-        or payload.get("state")
-        or payload.get("status")
-        or ""
-    ).lower()
+    state = extract_status(payload)
 
     if state in {"fail", "failed", "error"}:
         return False
-    if state in {"success", "succeeded", "complete", "completed", "done"}:
+    if state in {"success", "succeeded", "succeed", "complete", "completed", "done"}:
         return True
 
     # Veo3.1 fallback: code=200 but fallbackFlag may indicate fallback was used
@@ -91,7 +107,7 @@ def is_success(payload: dict[str, Any]) -> bool:
 
 def extract_error(payload: dict[str, Any]) -> str:
     for source in _nested_dicts(payload) + [payload]:
-        for key in ("failMsg", "error", "msg", "message"):
+        for key in ("failMsg", "task_status_msg", "error", "msg", "message"):
             value = source.get(key)
             if value:
                 return str(value)
@@ -99,6 +115,47 @@ def extract_error(payload: dict[str, Any]) -> str:
 
 
 def extract_result_urls(payload: dict[str, Any]) -> list[str]:
+    url_keys = {
+        "result_url",
+        "resultUrl",
+        "result_image_url",
+        "resultImageUrl",
+        "video_url",
+        "videoUrl",
+        "image_url",
+        "imageUrl",
+        "url",
+    }
+    url_list_keys = {
+        "result_urls",
+        "resultUrls",
+        "resultImageUrls",
+        "video_urls",
+        "videoUrls",
+        "image_urls",
+        "imageUrls",
+        "urls",
+    }
+
+    def collect_nested_urls(value: Any) -> list[str]:
+        found: list[str] = []
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in url_keys and isinstance(item, str) and item:
+                    found.append(item)
+                elif key in url_list_keys and isinstance(item, list):
+                    found.extend(str(x) for x in item if x)
+                else:
+                    found.extend(collect_nested_urls(item))
+        elif isinstance(value, list):
+            for item in value:
+                found.extend(collect_nested_urls(item))
+        elif isinstance(value, str):
+            parsed = _as_dict(value)
+            if parsed:
+                found.extend(collect_nested_urls(parsed))
+        return found
+
     sources = _nested_dicts(payload) + [payload]
     candidates: list[Any] = []
     for source in sources:
@@ -136,6 +193,8 @@ def extract_result_urls(payload: dict[str, Any]) -> list[str]:
             value = source.get(key)
             if isinstance(value, str) and value:
                 urls.append(value)
+
+    urls.extend(collect_nested_urls(payload))
 
     # Keep order, remove duplicates.
     seen = set()

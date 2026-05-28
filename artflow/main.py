@@ -6,6 +6,7 @@ import html
 import hmac
 import logging
 import tempfile
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -33,12 +34,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import redis.asyncio as aioredis
 
+from api import comet_fallback
 from api.comet_client import close_client, get_client
 from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import router as miniapp_router
 from api.realtime import router as realtime_router
 from api.web import router as web_router
-from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_success
+from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_processing, is_success
 from api.midjourney_service import MJButton, MJTaskResult
 from api.music_service import extract_music_urls, pop_task
 from api.public_files import UPLOAD_ROOT, mirror_url, save_public_file
@@ -68,6 +70,8 @@ _MJ_IMAGE_MODELS = {"midjourney-imagine", "midjourney-blend", "midjourney-action
 _MJ_DESCRIBE_MODEL = "midjourney-describe"
 _MJ_VIDEO_MODEL = "midjourney-video"
 _PROMPT_MENU_PREVIEW_MAX = 700
+_TELEGRAM_UPDATE_DEDUPE_TTL = 3600
+_recent_telegram_updates: dict[int, float] = {}
 
 
 def _sanitize_provider_error(raw: str | None, *, fallback: str = "Ошибка на стороне генератора") -> str:
@@ -159,6 +163,31 @@ def _prompt_menu_preview_for_generation(gen: Generation, prompt: str | None) -> 
 
 def _prompt_menu_text(prompt: str | None) -> str:
     return "Что делаем дальше?"
+
+
+def _claim_telegram_update_memory(update_id: int) -> bool:
+    now = time.monotonic()
+    if len(_recent_telegram_updates) > 10_000:
+        expired = [key for key, expires_at in _recent_telegram_updates.items() if expires_at <= now]
+        for key in expired:
+            _recent_telegram_updates.pop(key, None)
+
+    expires_at = _recent_telegram_updates.get(update_id)
+    if expires_at and expires_at > now:
+        return False
+    _recent_telegram_updates[update_id] = now + _TELEGRAM_UPDATE_DEDUPE_TTL
+    return True
+
+
+async def _claim_telegram_update(update_id: int) -> bool:
+    if redis_client is not None:
+        try:
+            key = f"telegram:update:{settings.BOT_USERNAME}:{update_id}"
+            claimed = await redis_client.set(key, "1", ex=_TELEGRAM_UPDATE_DEDUPE_TTL, nx=True)
+            return bool(claimed)
+        except Exception as exc:
+            logger.warning("Telegram update dedupe Redis fallback update_id=%s: %s", update_id, exc)
+    return _claim_telegram_update_memory(update_id)
 
 
 async def _get_midjourney_context(user_tg_id: int):
@@ -558,6 +587,20 @@ async def upload_file(
 
 # ── Telegram Webhook ──────────────────────────────────────────────────────────
 
+async def _process_telegram_update(update: Update) -> None:
+    try:
+        await dp.feed_update(bot, update)  # type: ignore[arg-type]
+    except TelegramForbiddenError as e:
+        logger.info("Ignoring Telegram webhook update for unavailable chat: %s", e)
+    except TelegramBadRequest as e:
+        if is_benign_telegram_error(e):
+            logger.debug("Ignoring benign Telegram callback error: %s", e)
+            return
+        logger.exception("Telegram webhook bad request: %s", e)
+    except Exception as e:
+        logger.exception("Telegram webhook update processing failed: %s", e)
+
+
 @app.post(settings.WEBHOOK_PATH)
 async def telegram_webhook(
     request: Request,
@@ -568,16 +611,10 @@ async def telegram_webhook(
 
     body = await request.json()
     update = Update.model_validate(body)
-    try:
-        await dp.feed_update(bot, update)  # type: ignore[arg-type]
-    except TelegramForbiddenError as e:
-        logger.info("Ignoring Telegram webhook update for unavailable chat: %s", e)
+    if not await _claim_telegram_update(update.update_id):
+        logger.info("Ignoring duplicate Telegram update_id=%s", update.update_id)
         return {"ok": True}
-    except TelegramBadRequest as e:
-        if is_benign_telegram_error(e):
-            logger.debug("Ignoring benign Telegram callback error: %s", e)
-            return {"ok": True}
-        raise
+    asyncio.create_task(_process_telegram_update(update))
     return {"ok": True}
 
 
@@ -798,6 +835,8 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
 async def kie_webhook(
     request: Request,
     secret: str | None = None,
+    provider: str | None = None,
+    comet_kind: str | None = None,
     x_kie_webhook_secret: str | None = Header(default=None, alias="X-KIE-Webhook-Secret"),
 ) -> dict:
     _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
@@ -807,11 +846,16 @@ async def kie_webhook(
     if not task_id:
         logger.warning("KIE webhook without task_id: %s", payload)
         return {"ok": True}
+    lookup_task_id = task_id
+    if provider == "comet" and comet_kind:
+        lookup_task_id = comet_fallback.prefixed_task_id(comet_kind, task_id)
 
     async with AsyncSessionLocal() as session:
-        gen = await repo.get_generation_by_task_id(session, task_id)
+        gen = await repo.get_generation_by_task_id(session, lookup_task_id)
+        if not gen and lookup_task_id != task_id:
+            gen = await repo.get_generation_by_task_id(session, task_id)
         if not gen:
-            logger.warning("KIE webhook for unknown task_id=%s", task_id)
+            logger.warning("KIE webhook for unknown task_id=%s lookup_task_id=%s", task_id, lookup_task_id)
             return {"ok": True}
 
         # Idempotency: if already finished, acknowledge duplicate callback.
@@ -824,6 +868,9 @@ async def kie_webhook(
             return {"ok": True}
 
         if not is_success(payload):
+            if is_processing(payload):
+                logger.info("KIE webhook ignoring non-terminal task_id=%s status update", task_id)
+                return {"ok": True}
             err = extract_error(payload)
             user_err = _sanitize_provider_error(err)
             if await repo.fail_generation(session, gen.id, err):
@@ -895,19 +942,21 @@ async def kie_webhook(
                                 caption=img_caption,
                             )
                         except Exception:
-                            await bot.send_document(
-                                chat_id=user.tg_id,
-                                document=URLInputFile(url, filename=f"image_{gen.id}_{idx + 1}.jpg"),
-                                caption=img_caption,
-                            )
+                            try:
+                                await bot.send_document(
+                                    chat_id=user.tg_id,
+                                    document=URLInputFile(url, filename=f"image_{gen.id}_{idx + 1}.jpg"),
+                                    caption=img_caption,
+                                )
+                            except Exception:
+                                logger.warning("Failed to send image result user=%s gen=%s idx=%s", user.tg_id, gen.id, idx)
 
                     for idx, url in enumerate(result_urls):
-                        doc_caption = "📎 <b>Исходник файлом</b>" if idx == 0 else None
                         try:
                             await bot.send_document(
                                 chat_id=user.tg_id,
                                 document=URLInputFile(url, filename=f"source_{gen.id}_{idx + 1}.png"),
-                                caption=doc_caption,
+                                caption="📎 <b>Исходник файлом</b>" if idx == 0 else None,
                             )
                         except Exception:
                             logger.warning("Failed to send source document user=%s gen=%s idx=%s", user.tg_id, gen.id, idx)

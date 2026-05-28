@@ -1,15 +1,6 @@
 # api/video_service.py
 """
-Video generation service — единый провайдер KIE.AI.
-
-Все модели кроме Veo:
-  POST /api/v1/jobs/createTask   →  VideoResult(task_id, provider="kieai")
-  GET  /api/v1/jobs/recordInfo   →  poll_kieai_status
-
-Veo 3:
-  POST /api/v1/veo/generate      →  VideoResult(task_id=videoId, provider="veo")
-  GET  /api/v1/veo/record-info   →  poll_veo_status
-  GET  /api/v1/veo/4k/record-info →  poll_veo_4k_status
+Video generation service — KIE.AI/Veo primary, CometAPI fallback.
 """
 from __future__ import annotations
 
@@ -26,7 +17,7 @@ except ImportError:
 
 from typing import Any
 
-from api import kieai_client
+from api import comet_fallback, kieai_client
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
 from core.gemini_omni import (
     build_gemini_omni_audio_payload,
@@ -89,7 +80,8 @@ class MotionDirection(StrEnum):
 @dataclass
 class VideoResult:
     task_id: str
-    provider: str  # "kieai" | "veo"
+    provider: str  # "kieai" | "veo" | "comet"
+    uses_webhook: bool = False
 
 
 @dataclass
@@ -143,30 +135,123 @@ async def generate_video(
     enable_fallback: bool = False,
 ) -> VideoResult:
     if model in _VEO_MODELS:
-        return await _veo_generate(model, prompt, image_url, aspect_ratio,
-                                       resolution=resolution,
-                                       callback_url=callback_url,
-                                       enable_fallback=enable_fallback)
-    return await _kieai_generate(
-        model, prompt,
-        image_url=image_url,
-        last_frame_url=last_frame_url,
-        motion=motion,
-        duration=duration,
-        aspect_ratio=aspect_ratio,
-        resolution=resolution,
-        reference_video_url=reference_video_url,
-        grok_mode=grok_mode,
-        audio_ids=audio_ids,
-        character_ids=character_ids,
-        video_start=video_start,
-        video_end=video_end,
-        seed=seed,
-        callback_url=callback_url,
-    )
+        try:
+            return await _veo_generate(
+                model,
+                prompt,
+                image_url,
+                aspect_ratio,
+                resolution=resolution,
+                callback_url=callback_url,
+                enable_fallback=enable_fallback,
+            )
+        except Exception as kie_exc:
+            logger.warning("Veo primary create failed for %s; trying CometAPI fallback: %s", model.value, kie_exc)
+            return await _comet_fallback_generate(
+                kie_exc=kie_exc,
+                model=model,
+                prompt=prompt,
+                image_url=image_url,
+                last_frame_url=last_frame_url,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+                reference_video_url=reference_video_url,
+                grok_mode=grok_mode,
+                audio_ids=audio_ids,
+                character_ids=character_ids,
+                video_start=video_start,
+                video_end=video_end,
+                seed=seed,
+                callback_url=callback_url,
+            )
+
+    try:
+        return await _kieai_generate(
+            model,
+            prompt,
+            image_url=image_url,
+            last_frame_url=last_frame_url,
+            motion=motion,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            reference_video_url=reference_video_url,
+            grok_mode=grok_mode,
+            audio_ids=audio_ids,
+            character_ids=character_ids,
+            video_start=video_start,
+            video_end=video_end,
+            seed=seed,
+            callback_url=callback_url,
+        )
+    except Exception as kie_exc:
+        logger.warning("KIE.AI video create failed for %s; trying CometAPI fallback: %s", model.value, kie_exc)
+        return await _comet_fallback_generate(
+            kie_exc=kie_exc,
+            model=model,
+            prompt=prompt,
+            image_url=image_url,
+            last_frame_url=last_frame_url,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            reference_video_url=reference_video_url,
+            grok_mode=grok_mode,
+            audio_ids=audio_ids,
+            character_ids=character_ids,
+            video_start=video_start,
+            video_end=video_end,
+            seed=seed,
+            callback_url=callback_url,
+        )
 
 
 # ── Universal KIE.AI generator ────────────────────────────────────────────────
+
+async def _comet_fallback_generate(
+    *,
+    kie_exc: Exception,
+    model: VideoModel,
+    prompt: str,
+    image_url: str | list[str] | None,
+    last_frame_url: str | None,
+    duration: int,
+    aspect_ratio: str | None,
+    resolution: str | None,
+    reference_video_url: str | None,
+    grok_mode: str | None,
+    audio_ids: list[str] | None,
+    character_ids: list[str] | None,
+    video_start: float | int | None,
+    video_end: float | int | None,
+    seed: int | None,
+    callback_url: str | None,
+) -> VideoResult:
+    try:
+        fallback = await comet_fallback.generate_video(
+            model_key=model.value,
+            prompt=prompt,
+            reference_urls=image_url,
+            last_frame_url=last_frame_url,
+            reference_video_url=reference_video_url,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            grok_mode=grok_mode,
+            audio_ids=audio_ids,
+            character_ids=character_ids,
+            video_start=video_start,
+            video_end=video_end,
+            seed=seed,
+            callback_url=callback_url,
+        )
+    except Exception as comet_exc:
+        raise RuntimeError(
+            f"Video generation failed via KIE.AI and CometAPI fallback: "
+            f"KIE={kie_exc}; CometAPI={comet_exc}"
+        ) from comet_exc
+    return VideoResult(task_id=fallback.task_id, provider=fallback.provider, uses_webhook=fallback.uses_webhook)
 
 async def _kieai_generate(
     model: VideoModel,
@@ -224,7 +309,7 @@ async def _kieai_generate(
         raise RuntimeError(f"KIE.AI video: empty taskId for {resolved_model}: {resp!r}")
 
     logger.info("KIE.AI video task %s: %s", resolved_model, task_id)
-    return VideoResult(task_id=task_id, provider="kieai")
+    return VideoResult(task_id=task_id, provider="kieai", uses_webhook=bool(callback_url))
 
 
 def _result_urls_from_dict(value: dict[str, Any]) -> list[str]:
@@ -367,13 +452,16 @@ async def _veo_generate(
     if not task_id:
         raise RuntimeError(f"Veo3: empty taskId in createTask response: {resp!r}")
     logger.info("Veo task taskId: %s", task_id)
-    return VideoResult(task_id=task_id, provider="veo")
+    return VideoResult(task_id=task_id, provider="veo", uses_webhook=bool(callback_url))
 
 
 # ── Poll functions ────────────────────────────────────────────────────────────
 
 async def poll_kieai_status(task_id: str) -> str | None:
     """Universal poller for all non-Veo KIE.AI models."""
+    if comet_fallback.is_comet_task_id(task_id):
+        return await comet_fallback.poll_status(task_id)
+
     resp = await kieai_client.get_task_status(task_id)
     data = resp.get("data", {})
     state = str(data.get("state", "")).lower()
@@ -398,6 +486,9 @@ async def poll_kieai_status(task_id: str) -> str | None:
 
 
 async def poll_veo_status(video_id: str) -> str | None:
+    if comet_fallback.is_comet_task_id(video_id):
+        return await comet_fallback.poll_status(video_id)
+
     resp = await kieai_client.get_veo_status(video_id)
     if not isinstance(resp, dict):
         raise RuntimeError(f"Veo3: invalid status response: {resp!r}")
@@ -470,10 +561,15 @@ async def poll_veo_4k_status(task_id: str) -> str | None:
     return None
 
 
+async def poll_comet_status(task_id: str) -> str | None:
+    return await comet_fallback.poll_status(task_id)
+
+
 POLL_FN_MAP: dict[str, Any] = {
     "kieai": poll_kieai_status,
     "veo":   poll_veo_status,
     "veo_4k": poll_veo_4k_status,
+    "comet": poll_comet_status,
 }
 
 

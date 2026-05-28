@@ -149,6 +149,15 @@ class MJTaskResult:
                 logger.warning("Unknown MJ task status %r for task %s; fallback to PENDING", raw_status, d.get("id", ""))
             raw_status = MJTaskStatus.PENDING
         raw_buttons = d.get("buttons") or []
+        properties = d.get("properties") if isinstance(d.get("properties"), dict) else {}
+        prompt = (
+            d.get("prompt")
+            or d.get("promptEn")
+            or d.get("prompt_en")
+            or properties.get("finalPrompt")
+            or properties.get("finalZhPrompt")
+            or ""
+        )
         return cls(
             task_id=str(d.get("id", "")),
             status=MJTaskStatus(raw_status),
@@ -157,7 +166,7 @@ class MJTaskResult:
             image_urls=[url for url in (d.get("image_urls") or []) if isinstance(url, str) and url],
             video_url=d.get("videoUrl", ""),
             video_urls=[url for url in (d.get("video_urls") or []) if isinstance(url, str) and url],
-            prompt=d.get("prompt", ""),
+            prompt=prompt,
             fail_reason=d.get("failReason", ""),
             buttons=[MJButton.from_dict(b) for b in raw_buttons if isinstance(b, dict) and b.get("customId")],
         )

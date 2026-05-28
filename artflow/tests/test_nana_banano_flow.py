@@ -36,7 +36,9 @@ def test_image_entry_keeps_full_scenario_menu() -> None:
     assert "Выбери сценарий" in render.text
     assert buttons[0].text == "🍌 nana banano"
     assert buttons[1].text == "🖼️ Из фото в новую версию"
-    assert buttons[2].text == "🧠 Все нейросети"
+    assert buttons[2].text == "📸 Фото → промпт"
+    assert buttons[2].callback_data == "img:photo2prompt"
+    assert buttons[3].text == "🧠 Все нейросети"
 
 
 @pytest.mark.asyncio

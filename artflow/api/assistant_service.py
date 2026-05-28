@@ -12,6 +12,8 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 
 _KIE_BASE = "https://api.kie.ai"
+_COMET_DEFAULT_ASSISTANT_MODEL = "gpt-5.4"
+_COMET_DEFAULT_ASSISTANT_FALLBACK = "gpt-5.4-mini"
 
 _SYSTEM_PROMPT = (
     "Ты — AI-ассистент внутри Telegram-бота APIX. "
@@ -201,7 +203,45 @@ async def _generate_text_reply(messages: list[dict[str, str]], *, system_prompt:
             return await _call_kie_chat(model, messages, system_prompt=system_prompt)
         except Exception as exc:
             logger.warning("assistant: %s chat fallback failed — %s", model, exc)
+
+    for model in _comet_assistant_models():
+        try:
+            reply = await _call_comet_chat(model, messages, system_prompt=system_prompt)
+            logger.info("assistant: generated via CometAPI %s", model)
+            return reply
+        except Exception as exc:
+            logger.warning("assistant: CometAPI %s fallback failed — %s", model, exc)
+
     raise RuntimeError("Assistant models are unavailable right now.")
+
+
+def _normalize_comet_text_model(model: str | None) -> str | None:
+    value = str(model or "").strip()
+    if not value:
+        return None
+    parts = value.split("-")
+    if len(parts) >= 3 and parts[0] == "gpt" and parts[1].isdigit() and parts[2].isdigit():
+        return f"gpt-{parts[1]}.{parts[2]}" + ("-" + "-".join(parts[3:]) if len(parts) > 3 else "")
+    return value
+
+
+def _comet_assistant_models() -> list[str]:
+    candidates = [
+        getattr(settings, "COMET_ASSISTANT_MODEL", None),
+        getattr(settings, "COMET_ASSISTANT_FALLBACK", None),
+        _normalize_comet_text_model(getattr(settings, "KIE_ASSISTANT_MODEL", None)),
+        _normalize_comet_text_model(getattr(settings, "KIE_ASSISTANT_FALLBACK", None)),
+        _COMET_DEFAULT_ASSISTANT_MODEL,
+        _COMET_DEFAULT_ASSISTANT_FALLBACK,
+    ]
+    models: list[str] = []
+    seen: set[str] = set()
+    for model in candidates:
+        normalized = _normalize_comet_text_model(model)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            models.append(normalized)
+    return models
 
 
 def _to_input_messages(messages: list[dict[str, str]], *, system_prompt: str) -> list[dict[str, Any]]:
@@ -257,6 +297,16 @@ def _extract_chat_output_text(data: dict[str, Any]) -> str:
         if text:
             return text
     raise RuntimeError(f"Assistant chat response did not contain text: {data!r}")
+
+
+def _to_chat_messages(messages: list[dict[str, str]], *, system_prompt: str) -> list[dict[str, str]]:
+    chat_messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    for item in messages[-12:]:
+        role = item.get("role") or "user"
+        if role not in {"user", "assistant", "system"}:
+            role = "user"
+        chat_messages.append({"role": role, "content": item.get("content", "")})
+    return chat_messages
 
 
 async def _call_kie_responses(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
@@ -328,16 +378,7 @@ async def _call_kie_claude(model: str, messages: list[dict[str, str]], *, system
 async def _call_kie_chat(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
     url = f"{_KIE_BASE}/{model}/v1/chat/completions"
     payload = {
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            *[
-                {
-                    "role": (item.get("role") or "user") if (item.get("role") or "user") in {"user", "assistant", "system"} else "user",
-                    "content": item.get("content", ""),
-                }
-                for item in messages[-12:]
-            ],
-        ],
+        "messages": _to_chat_messages(messages, system_prompt=system_prompt),
         "reasoning_effort": "medium",
     }
 
@@ -346,6 +387,30 @@ async def _call_kie_chat(model: str, messages: list[dict[str, str]], *, system_p
             url,
             headers={
                 "Authorization": f"Bearer {settings.KIE_AI_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        resp.raise_for_status()
+        return _extract_chat_output_text(resp.json())
+
+
+async def _call_comet_chat(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
+    url = f"{str(getattr(settings, 'COMET_BASE_URL', 'https://api.cometapi.com')).rstrip('/')}/v1/chat/completions"
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": _to_chat_messages(messages, system_prompt=system_prompt),
+        "stream": False,
+        "max_completion_tokens": 4096,
+    }
+    if model.startswith("gpt-"):
+        payload["reasoning_effort"] = "medium"
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        resp = await client.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {getattr(settings, 'COMET_API_KEY', '')}",
                 "Content-Type": "application/json",
             },
             json=payload,

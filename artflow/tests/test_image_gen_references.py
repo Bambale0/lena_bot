@@ -68,6 +68,36 @@ async def test_ensure_active_image_session_persists_carried_reference_url() -> N
 
 
 @pytest.mark.asyncio
+async def test_ensure_active_image_session_replaces_stale_active_session_and_resets_bad_count() -> None:
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "model_key": "nano-banana-2",
+        "mode": "text",
+        "aspect_ratio": "16:9",
+        "quality": "2K",
+        "count": 3,
+    })
+    db_user = SimpleNamespace(id=42)
+    existing = SimpleNamespace(id=11, model="seedream/4.5-text-to-image")
+
+    create_image_session = AsyncMock(return_value=SimpleNamespace(id=12))
+    repo_stub = SimpleNamespace(
+        get_active_image_session=AsyncMock(return_value=existing),
+        create_image_session=create_image_session,
+    )
+    with patch("bot.handlers.image_gen.repo", new=repo_stub):
+        await image_gen._ensure_active_image_session_from_state(
+            session=AsyncMock(),
+            state=state,
+            db_user=db_user,
+        )
+
+    assert create_image_session.await_args.kwargs["model"] == "nano-banana-2"
+    assert create_image_session.await_args.kwargs["count"] == 1
+    state.update_data.assert_awaited_with(image_session_id=12, count=1, image_count=1)
+
+
+@pytest.mark.asyncio
 async def test_dynamic_continue_keeps_carried_reference_without_upload_prompt() -> None:
     call = SimpleNamespace(data="img_dyn:continue:wan/2-7-image", message=SimpleNamespace())
     state = AsyncMock()

@@ -21,7 +21,6 @@ def get_client() -> httpx.AsyncClient:
             base_url=settings.COMET_BASE_URL,
             headers={
                 "Authorization": f"Bearer {settings.COMET_API_KEY}",
-                "Content-Type": "application/json",
             },
             timeout=60.0,
         )
@@ -55,8 +54,8 @@ async def _request_with_retry(
     path: str,
     *,
     json: dict[str, Any] | None = None,
-    data: dict[str, Any] | None = None,
-    files: dict | None = None,
+    data: dict[str, Any] | list[tuple[str, Any]] | None = None,
+    files: dict | list[tuple[str, Any]] | None = None,
     retries: int = 3,
     backoff: float = 1.5,
 ) -> dict[str, Any]:
@@ -100,6 +99,8 @@ async def get(path: str) -> dict[str, Any]:
 
 
 async def post_multipart(
-    path: str, data: dict[str, Any], files: dict
+    path: str,
+    data: dict[str, Any] | list[tuple[str, Any]],
+    files: dict | list[tuple[str, Any]],
 ) -> dict[str, Any]:
     return await _request_with_retry("POST", path, data=data, files=files)

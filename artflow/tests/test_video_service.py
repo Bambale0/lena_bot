@@ -7,14 +7,14 @@ from api.video_service import VideoModel
 
 
 @pytest.mark.asyncio
-async def test_veo_generate_rejects_empty_task_id(monkeypatch) -> None:
+async def test_veo_compat_generate_rejects_empty_task_id(monkeypatch) -> None:
     async def fake_create_veo_task(payload):
         return {"code": 500, "msg": "Server Error", "data": None}
 
     monkeypatch.setattr(video_service.kieai_client, "create_veo_task", fake_create_veo_task)
 
     with pytest.raises(RuntimeError, match="Veo3 createTask failed"):
-        await video_service.generate_video(VideoModel.VEO_3_FAST, "cat", aspect_ratio="16:9")
+        await video_service._veo_generate(VideoModel.VEO_3_FAST, "cat", None, "16:9")
 
 
 @pytest.mark.asyncio

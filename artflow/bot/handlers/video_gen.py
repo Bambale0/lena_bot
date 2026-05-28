@@ -926,17 +926,14 @@ async def handle_video_prompt(
         return
 
     await repo.update_generation_task(session, gen.id, result.task_id)
-    if result.provider == "kieai":
-        await status_msg.edit_text(
-            "⏳ <b>Видео-задача запущена.</b>\n"
-            "Пришлю результат автоматически, как только видео будет готово."
-        )
-        await state.clear()
-        return
-
     poll_fn = video_service.get_poll_fn(result.provider)
 
     async def on_success(url: str) -> None:
+        current = await repo.get_generation_by_id(session, gen.id)
+        current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
+        if current_status in {"done", "failed"}:
+            return
+
         await repo.finish_generation(session, gen.id, url)
         try:
             await status_msg.delete()
@@ -951,11 +948,26 @@ async def handle_video_prompt(
         )
 
     async def on_failure(err: str) -> None:
+        current = await repo.get_generation_by_id(session, gen.id)
+        current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
+        if current_status in {"done", "failed"}:
+            return
+
         if await repo.fail_generation(session, gen.id, err):
             await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
             f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb()
         )
+
+    if getattr(result, "uses_webhook", False) or result.provider == "kieai":
+        await status_msg.edit_text(
+            "⏳ <b>Видео-задача запущена.</b>\n"
+            "Пришлю результат автоматически, как только видео будет готово."
+        )
+        if result.provider == "comet":
+            asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))
+        await state.clear()
+        return
 
     asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))
     await state.clear()

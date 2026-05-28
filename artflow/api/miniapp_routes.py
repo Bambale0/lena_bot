@@ -380,6 +380,22 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
     return gen
 
 
+async def _finish_direct_image_result(session: AsyncSession, gen, result):
+    result_urls = list(getattr(result, "result_urls", None) or [])
+    result_url = getattr(result, "url", None)
+    if result_url and result_url not in result_urls:
+        result_urls.insert(0, result_url)
+    result_urls = [url for url in result_urls if url]
+    if not result_urls:
+        raise RuntimeError("CometAPI image fallback returned no result URL")
+
+    await repo.update_generation_task(session, gen.id, getattr(result, "task_id", None) or "comet:image:direct")
+    await repo.finish_generation(session, gen.id, result_urls[0], result_urls=result_urls)
+    if gen.image_session_id:
+        await repo.update_image_session_last_result(session, gen.image_session_id, result_urls[0], gen.id)
+    return await repo.get_generation_by_id(session, gen.id)
+
+
 async def _reconcile_user_active_generations(session: AsyncSession, user_id: int) -> None:
     if session.__class__.__module__.startswith('unittest.mock'):
         return
@@ -1576,7 +1592,10 @@ async def create_image_generation(
             await repo.add_credits(session, user.id, model_cost.credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
-    await repo.update_generation_task(session, gen.id, result.task_id or "")
+    if not getattr(result, "is_async", True):
+        gen = await _finish_direct_image_result(session, gen, result)
+    else:
+        await repo.update_generation_task(session, gen.id, result.task_id or "")
     await repo.update_image_session_last_prompt(session, image_session.id, effective_prompt)
     await _mark_prompt_used_after_generation(
         session,
@@ -2127,7 +2146,10 @@ async def remix_feed_post(
             await repo.add_credits(session, user.id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
-    await repo.update_generation_task(session, gen.id, result.task_id or "")
+    if gen_type == "image" and not getattr(result, "is_async", True):
+        gen = await _finish_direct_image_result(session, gen, result)
+    else:
+        await repo.update_generation_task(session, gen.id, result.task_id or "")
     await repo.increment_feed_share(session, gen_id)
     await session.refresh(gen)
     return _gen_out(gen)
