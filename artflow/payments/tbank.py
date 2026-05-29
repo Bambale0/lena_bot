@@ -72,9 +72,10 @@ async def _request(method: str, payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-async def create_payment(plan: PricePlan, user_id: int) -> TBankPayment:
+async def create_payment(plan: PricePlan, user_id: int, *, amount_rub: float | None = None) -> TBankPayment:
     order_id = uuid4().hex
-    amount_kopecks = int(plan.price_rub * 100)
+    pay_amount = plan.price_rub if amount_rub is None else amount_rub
+    amount_kopecks = int(pay_amount * 100)
     notification_url = f"{settings.WEBHOOK_URL.rstrip('/')}/webhook/tbank"
 
     payload: dict[str, Any] = {

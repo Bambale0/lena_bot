@@ -23,6 +23,9 @@ from db.models import (
     GenerationType,
     ModelCost,
     PaymentProvider,
+    PromoCode,
+    PromoRedemption,
+    PromoRewardType,
     PricePlan,
     ReferralWithdrawalRequest,
     Transaction,
@@ -116,6 +119,15 @@ class InsufficientReferralBalanceError(ValueError):
     def __init__(self, available_amount: float):
         super().__init__(f"Insufficient referral balance: available={available_amount:.2f}")
         self.available_amount = available_amount
+
+
+@dataclass(frozen=True)
+class PromoRedeemResult:
+    promo: PromoCode
+    redemption: PromoRedemption
+    credits_added: float
+    discount_reserved: bool
+    balance_after: float | None = None
 
 
 # ─── User ────────────────────────────────────────────────────────────────────
@@ -333,6 +345,180 @@ async def spend_credits(
     )
     await session.commit()
     return True
+
+
+# ─── Promo codes ─────────────────────────────────────────────────────────────
+
+def normalize_promo_code(code: str) -> str:
+    return (code or "").strip().upper()
+
+
+async def get_promo_code(session: AsyncSession, code: str) -> PromoCode | None:
+    normalized = normalize_promo_code(code)
+    if not normalized:
+        return None
+    result = await session.execute(select(PromoCode).where(PromoCode.code == normalized))
+    return result.scalar_one_or_none()
+
+
+async def upsert_promo_code(
+    session: AsyncSession,
+    *,
+    code: str,
+    reward_type: PromoRewardType,
+    value: float,
+    max_uses: int | None = None,
+    per_user_limit: int = 1,
+    is_active: bool = True,
+    note: str | None = None,
+    expires_at: datetime | None = None,
+) -> PromoCode:
+    normalized = normalize_promo_code(code)
+    promo = await get_promo_code(session, normalized)
+    if promo:
+        promo.reward_type = reward_type
+        promo.value = value
+        promo.credits = value if reward_type in {PromoRewardType.credits, PromoRewardType.free_generation} else 0.0
+        promo.max_uses = max_uses
+        promo.max_redemptions = max_uses
+        promo.per_user_limit = max(1, int(per_user_limit or 1))
+        promo.is_active = is_active
+        promo.note = note
+        promo.expires_at = expires_at
+        promo.valid_until = expires_at
+    else:
+        promo = PromoCode(
+            code=normalized,
+            reward_type=reward_type,
+            value=value,
+            credits=value if reward_type in {PromoRewardType.credits, PromoRewardType.free_generation} else 0.0,
+            max_uses=max_uses,
+            max_redemptions=max_uses,
+            per_user_limit=max(1, int(per_user_limit or 1)),
+            is_active=is_active,
+            note=note,
+            expires_at=expires_at,
+            valid_until=expires_at,
+        )
+        session.add(promo)
+    await session.commit()
+    await session.refresh(promo)
+    return promo
+
+
+async def get_active_discount_redemption(session: AsyncSession, user_id: int) -> PromoRedemption | None:
+    result = await session.execute(
+        select(PromoRedemption)
+        .where(
+            PromoRedemption.user_id == user_id,
+            PromoRedemption.consumed_at.is_(None),
+            PromoRedemption.reward_type.in_(
+                (PromoRewardType.discount_percent, PromoRewardType.discount_amount)
+            ),
+        )
+        .order_by(PromoRedemption.created_at.desc(), PromoRedemption.id.desc())
+    )
+    return result.scalars().first()
+
+
+async def mark_promo_discount_consumed(
+    session: AsyncSession,
+    redemption_id: int,
+    *,
+    transaction_id: int,
+) -> PromoRedemption | None:
+    result = await session.execute(
+        update(PromoRedemption)
+        .where(
+            PromoRedemption.id == redemption_id,
+            PromoRedemption.consumed_at.is_(None),
+        )
+        .values(transaction_id=transaction_id, consumed_at=datetime.now(timezone.utc))
+        .returning(PromoRedemption)
+    )
+    redemption = result.scalar_one_or_none()
+    await session.commit()
+    return redemption
+
+
+async def redeem_promo_code(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    code: str,
+) -> PromoRedeemResult:
+    normalized = normalize_promo_code(code)
+    promo = await get_promo_code(session, normalized)
+    now = datetime.now(timezone.utc)
+    if not promo or not promo.is_active:
+        raise ValueError("Промокод не найден или выключен.")
+    expires_at = promo.expires_at or promo.valid_until
+    if expires_at and expires_at <= now:
+        raise ValueError("Срок действия промокода истёк.")
+    max_uses = promo.max_uses if promo.max_uses is not None else promo.max_redemptions
+    uses_count = max(promo.uses_count or 0, promo.redeemed_count or 0)
+    if max_uses is not None and uses_count >= max_uses:
+        raise ValueError("Лимит использований промокода уже закончился.")
+
+    existing_result = await session.execute(
+        select(func.count())
+        .select_from(PromoRedemption)
+        .where(PromoRedemption.promo_code_id == promo.id, PromoRedemption.user_id == user_id)
+    )
+    if int(existing_result.scalar_one() or 0) >= promo.per_user_limit:
+        raise ValueError("Ты уже использовал(а) этот промокод.")
+
+    reward_type = promo.reward_type
+    credits_added = 0.0
+    discount_reserved = reward_type in {PromoRewardType.discount_percent, PromoRewardType.discount_amount}
+    consumed_at = None if discount_reserved else now
+
+    if reward_type in {PromoRewardType.credits, PromoRewardType.free_generation}:
+        credits_added = float(promo.value or promo.credits or 0)
+        if credits_added <= 0:
+            raise ValueError("Промокод настроен некорректно.")
+
+    redemption = PromoRedemption(
+        promo_code_id=promo.id,
+        user_id=user_id,
+        reward_type=reward_type,
+        value=float(promo.value or 0),
+        consumed_at=consumed_at,
+    )
+    session.add(redemption)
+    promo.uses_count += 1
+    promo.redeemed_count += 1
+
+    balance_after: float | None = None
+    if credits_added:
+        balance_result = await session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(credits=User.credits + credits_added)
+            .returning(User.credits)
+        )
+        balance_after = balance_result.scalar_one()
+        await _insert_credit_ledger(
+            session,
+            user_id=user_id,
+            delta=credits_added,
+            balance_after=balance_after,
+            entry_type="promo_credit",
+            source_type="promo_code",
+            source_id=promo.code,
+            note=f"Promo {promo.code}: {reward_type.value}",
+        )
+
+    await session.commit()
+    await session.refresh(redemption)
+    await session.refresh(promo)
+    return PromoRedeemResult(
+        promo=promo,
+        redemption=redemption,
+        credits_added=credits_added,
+        discount_reserved=discount_reserved,
+        balance_after=balance_after,
+    )
 
 
 async def count_users(session: AsyncSession) -> float:

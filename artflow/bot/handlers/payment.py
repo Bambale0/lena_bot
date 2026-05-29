@@ -4,15 +4,18 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.keyboards.payment import crypto_pay_kb, crypto_plans_kb, payment_link_kb, topup_kb
 from bot.keyboards.main_menu import back_to_menu_kb
+from bot.states import PromoFSM
 from core.config import settings
 from db import repository as repo
-from db.models import PaymentProvider, TransactionStatus, User
+from db.models import PaymentProvider, PromoRewardType, TransactionStatus, User
 from payments import cryptobot, tbank
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,51 @@ TBANK_FINAL_FAILURE_STATUSES = {
 
 def _fmt_amount(value: float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def _promo_discount_amount(price_rub: float, redemption) -> float:
+    if not redemption:
+        return 0.0
+    value = float(getattr(redemption, "value", 0) or 0)
+    if redemption.reward_type == PromoRewardType.discount_percent:
+        discount = price_rub * max(0.0, min(value, 100.0)) / 100.0
+    elif redemption.reward_type == PromoRewardType.discount_amount:
+        discount = max(0.0, value)
+    else:
+        return 0.0
+    return min(discount, max(0.0, price_rub - 1.0))
+
+
+async def _active_discount_text(session: AsyncSession, user_id: int, price_rub: float) -> tuple[float, str, object | None]:
+    redemption = await repo.get_active_discount_redemption(session, user_id)
+    discount = _promo_discount_amount(price_rub, redemption)
+    if not redemption or discount <= 0:
+        return price_rub, "", None
+    final_amount = max(1.0, price_rub - discount)
+    text = (
+        f"\n🎟 Промокод применён: -{_fmt_amount(discount)} ₽"
+        f"\nК оплате: <b>{_fmt_amount(final_amount)} ₽</b>"
+    )
+    return final_amount, text, redemption
+
+
+def _promo_success_text(result: repo.PromoRedeemResult) -> str:
+    promo = result.promo
+    if result.discount_reserved:
+        if promo.reward_type == PromoRewardType.discount_percent:
+            value = f"{_fmt_amount(promo.value)}%"
+        else:
+            value = f"{_fmt_amount(promo.value)} ₽"
+        return (
+            "✅ <b>Промокод активирован</b>\n\n"
+            f"Скидка: <b>{value}</b>\n"
+            "Она применится к следующей оплате T-Bank или CryptoBot."
+        )
+    return (
+        "✅ <b>Промокод активирован</b>\n\n"
+        f"Начислено: <b>+{_fmt_amount(result.credits_added)} 💋</b>\n"
+        f"Баланс: <b>{_fmt_amount(result.balance_after or 0)} 💋</b>"
+    )
 
 
 async def _confirm_paid_transaction(session: AsyncSession, tx) -> float | None:
@@ -98,6 +146,46 @@ async def cb_topup(call: CallbackQuery, session: AsyncSession, db_user: User) ->
     await call.answer()
 
 
+@router.callback_query(F.data == "promo:enter")
+async def cb_enter_promo(call: CallbackQuery, state: FSMContext, db_user: User) -> None:
+    await state.set_state(PromoFSM.waiting_code)
+    await call.message.answer(  # type: ignore[union-attr]
+        "🎟 <b>Введи промокод</b>\n\n"
+        "Промокод может дать 💋, скидку на оплату или бесплатную генерацию.",
+        reply_markup=back_to_menu_kb(),
+    )
+    await call.answer()
+
+
+@router.message(Command("promo"))
+async def cmd_promo(message: Message, state: FSMContext, session: AsyncSession, db_user: User) -> None:
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) == 1:
+        await state.set_state(PromoFSM.waiting_code)
+        await message.answer("🎟 Введи промокод одним сообщением.")
+        return
+    await _apply_promo_text(message, session, db_user, parts[1])
+
+
+@router.message(PromoFSM.waiting_code)
+async def handle_promo_code(message: Message, state: FSMContext, session: AsyncSession, db_user: User) -> None:
+    await _apply_promo_text(message, session, db_user, message.text or "")
+    await state.clear()
+
+
+async def _apply_promo_text(message: Message, session: AsyncSession, db_user: User, raw_code: str) -> None:
+    code = repo.normalize_promo_code(raw_code)
+    if not code:
+        await message.answer("Промокод пустой. Пришли код текстом.")
+        return
+    try:
+        result = await repo.redeem_promo_code(session, user_id=db_user.id, code=code)
+    except ValueError as exc:
+        await message.answer(f"❌ {exc}", reply_markup=back_to_menu_kb())
+        return
+    await message.answer(_promo_success_text(result), reply_markup=back_to_menu_kb())
+
+
 # ─── T-Bank / rubles ─────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("topup:rub:"))
@@ -115,24 +203,28 @@ async def cb_topup_rub(
         await call.answer(t("error_generic", lang), show_alert=True)
         return
 
+    pay_amount, discount_text, discount_redemption = await _active_discount_text(session, db_user.id, plan.price_rub)
+
     try:
-        payment = await tbank.create_payment(plan, db_user.id)
+        payment = await tbank.create_payment(plan, db_user.id, amount_rub=pay_amount)
     except Exception as e:
         logger.error("T-Bank payment error: %s", e)
         await call.answer(t("error_generic", lang), show_alert=True)
         return
 
-    await repo.create_transaction(
+    tx = await repo.create_transaction(
         session,
         user_id=db_user.id,
-        amount_rub=plan.price_rub,
+        amount_rub=pay_amount,
         credits=plan.credits,
         provider=PaymentProvider.tbank,
         external_id=payment.payment_id,
     )
+    if discount_redemption:
+        await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
 
     await call.message.edit_text(  # type: ignore[union-attr]
-        t("topup_tbank_desc", lang, label=plan.label, amount=_fmt_amount(plan.price_rub)),
+        t("topup_tbank_desc", lang, label=plan.label, amount=_fmt_amount(pay_amount)) + discount_text,
         reply_markup=payment_link_kb(
             "💳 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
             payment.payment_url,
@@ -269,7 +361,8 @@ async def cb_crypto_plan(
         await call.answer(t("error_not_found", lang), show_alert=True)
         return
 
-    amount_usd = plan.price_rub / RUB_TO_USDT
+    pay_amount, discount_text, discount_redemption = await _active_discount_text(session, db_user.id, plan.price_rub)
+    amount_usd = pay_amount / RUB_TO_USDT
 
     try:
         invoice = await cryptobot.create_invoice(
@@ -283,17 +376,19 @@ async def cb_crypto_plan(
         await call.answer(t("error_generic", lang), show_alert=True)
         return
 
-    await repo.create_transaction(
+    tx = await repo.create_transaction(
         session,
         user_id=db_user.id,
-        amount_rub=plan.price_rub,
+        amount_rub=pay_amount,
         credits=plan.credits,
         provider=PaymentProvider.cryptobot,
         external_id=str(invoice.invoice_id),
     )
+    if discount_redemption:
+        await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
 
     await call.message.edit_text(  # type: ignore[union-attr]
-        t("topup_crypto_desc", lang, label=plan.label, amount=_fmt_amount(amount_usd)),
+        t("topup_crypto_desc", lang, label=plan.label, amount=_fmt_amount(amount_usd)) + discount_text,
         reply_markup=crypto_pay_kb(invoice.bot_invoice_url, str(invoice.invoice_id), lang=lang),
     )
     await call.answer()

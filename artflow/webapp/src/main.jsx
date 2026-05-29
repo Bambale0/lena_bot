@@ -806,7 +806,7 @@ function GenShareButtons({ genId, initialFeed = false, initialLib = false, onNot
       if (link) {
         try {
           await navigator.clipboard?.writeText(link);
-          onNotice?.({ type: "success", message: "Добавлено в ленту. Ссылка для репоста скопирована." });
+          onNotice?.({ type: "success", message: `Добавлено в ленту. Ссылка скопирована: ${link}` });
         } catch {
           onNotice?.({ type: "success", message: `Добавлено в ленту. Ссылка: ${link}` });
         }

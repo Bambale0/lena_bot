@@ -1,0 +1,128 @@
+{
+  "models": [
+    {
+      "key": "gpt-image-2-text-to-image",
+      "name": "GPT Image 2",
+      "type": "image",
+      "credits": 2,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "gpt-image-2-image-to-image",
+      "name": "GPT Image 2 Edit",
+      "type": "image",
+      "credits": 2,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "nano-banana-2",
+      "name": "Nano Banana 2",
+      "type": "image",
+      "credits": 2.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "nano-banana-pro",
+      "name": "Nano Banana Pro",
+      "type": "image",
+      "credits": 2.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "seedream/4.5-text-to-image",
+      "name": "Seedream 4.5",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "grok-imagine/text-to-image",
+      "name": "Grok Imagine",
+      "type": "image",
+      "credits": 2,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "qwen2/text-to-image",
+      "name": "Qwen 2",
+      "type": "image",
+      "credits": 2,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/video",
+      "name": "Kling 3.0",
+      "type": "video",
+      "credits": 3,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/motion-control",
+      "name": "Kling 3.0 Motion",
+      "type": "video",
+      "credits": 5,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "veo3",
+      "name": "Veo",
+      "type": "video",
+      "credits": 3.5,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "suno/v4.5",
+      "name": "Suno",
+      "type": "music",
+      "credits": 10,
+      "capabilities": [
+        "text",
+        "audio"
+      ],
+      "active": true
+    }
+  ]
+}

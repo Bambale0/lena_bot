@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Возможности — APIX Studio</title>
+    <meta name="description" content="Выберите подходящий режим APIX Studio для картинок, видео, музыки, реалистичных фото и творческих идей." />
+    <meta name="theme-color" content="#080814" />
+    <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/prototype-premium.css" />
+    <script src="js/prototype-premium.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="APIX Studio">
+        <img src="images/apix-premium-mark.svg" alt="" />
+        <span>APIX <b>Studio</b></span>
+      </a>
+      <nav aria-label="Навигация сайта">
+        <a href="/">Главная</a>
+        <a href="studio.html">Создать</a>
+        <a href="models.html" aria-current="page">Возможности</a>
+        <a href="gallery.html">Идеи</a>
+        <a href="account.html">Мои работы</a>
+      </nav>
+      <div class="top-auth">
+        <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
+        <a class="top-cta" href="studio.html">Создать <span aria-hidden="true">↗</span></a>
+        <button class="top-logout" type="button" data-logout hidden>Выйти</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="page-shell models">
+        <div class="section-head split models-head">
+          <div>
+            <p class="eyebrow">Возможности</p>
+            <h1>Выберите режим под задачу</h1>
+            <p class="lead">Для каждой идеи есть подходящий сценарий: реалистичное фото, креативный арт, видео, музыка или работа по вашему примеру.</p>
+          </div>
+          <div class="segmented" data-model-filter>
+            <button class="active" type="button" data-type="all">Все</button>
+            <button type="button" data-type="image">Картинки</button>
+            <button type="button" data-type="video">Видео</button>
+            <button type="button" data-type="music">Музыка</button>
+          </div>
+        </div>
+
+        <div class="models-app-grid">
+          <div class="models-list-panel">
+            <div class="model-command">
+              <article>
+                <span>Все</span>
+                <b data-total-models>0</b>
+              </article>
+              <article>
+                <span>Картинки</span>
+                <b data-image-models>0</b>
+              </article>
+              <article>
+                <span>Видео</span>
+                <b data-video-models>0</b>
+              </article>
+              <article>
+                <span>Музыка</span>
+                <b data-music-models>0</b>
+              </article>
+            </div>
+
+            <div class="model-catalog">
+              <div class="model-catalog-head">
+                <span>Режим</span>
+                <span>Для чего подходит</span>
+                <span>Стоимость</span>
+                <span>Действие</span>
+              </div>
+              <div class="model-grid model-list" data-model-grid></div>
+            </div>
+          </div>
+
+          <aside class="model-focus-panel" aria-label="Пример результата">
+            <div class="focus-preview">
+              <img src="images/concepts/model-intelligence-lab.png" alt="Премиальный пример генерации модели" />
+              <div>
+                <span>Пример результата</span>
+                <b>Портрет, продукт, интерьер</b>
+              </div>
+            </div>
+            <div class="focus-strip">
+              <img src="images/avatar-neon-orbit-01.png" alt="" />
+              <img src="images/avatar-neon-orbit-02.png" alt="" />
+              <img src="images/hero-cinematic-gallery.png" alt="" />
+            </div>
+            <div class="focus-metrics">
+              <article>
+                <span>Детализация</span>
+                <b>Высокая</b>
+              </article>
+              <article>
+                <span>Реализм</span>
+                <b>94%</b>
+              </article>
+              <article>
+                <span>Старт</span>
+                <b>Быстро</b>
+              </article>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div class="modal-backdrop" data-login-modal hidden>
+      <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+        <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
+        <p class="eyebrow">Вход через Telegram</p>
+        <h2 id="login-title">Войдите, чтобы сохранить работы</h2>
+        <p>После входа откроются баланс, история, очередь, библиотека, тарифы и реферальная программа.</p>
+        <div class="telegram-slot" data-telegram-slot></div>
+        <div class="auth-fallback" data-auth-fallback hidden></div>
+      </section>
+    </div>
+
+    <div class="toast" data-toast hidden></div>
+  </body>
+</html>

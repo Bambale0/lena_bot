@@ -236,7 +236,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "aspect_ratio_modes": ["text"],
         "counts": [1, 2, 4],
         "has_quality": True,
-        "quality_options": [("1K", "1K"), ("2K", "2K")],
+        "quality_options": [("2K", "2K"), ("1K", "1K")],
         "max_refs": 9,
     },
     ImageModel.WAN_27_PRO: {
@@ -245,7 +245,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "aspect_ratio_modes": ["text"],
         "counts": [1, 2, 4],
         "has_quality": True,
-        "quality_options": [("1K", "1K"), ("2K", "2K"), ("4K", "4K")],
+        "quality_options": [("2K", "2K"), ("4K", "4K"), ("1K", "1K")],
         "max_refs": 9,
     },
     ImageModel.NANO_BANANA: {

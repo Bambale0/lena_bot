@@ -20,6 +20,20 @@ def test_extract_result_urls_deduplicates_ordered_urls() -> None:
     assert extract_result_urls(payload) == ["https://a.test/1.png", "https://a.test/2.png"]
 
 
+def test_extract_result_urls_filters_uploaded_reference_urls() -> None:
+    payload = {
+        "data": {
+            "resultJson": (
+                '{"resultUrls": ['
+                '"https://tempfile.aiquickdraw.com/qwen2/result.png",'
+                '"https://tempfile.redpandaai.co/kieai/x/images/apix-refs/input.png"'
+                "]}"
+            )
+        }
+    }
+    assert extract_result_urls(payload) == ["https://tempfile.aiquickdraw.com/qwen2/result.png"]
+
+
 def test_extract_result_urls_supports_result_image_url_callback_shape() -> None:
     payload = {
         "code": 200,

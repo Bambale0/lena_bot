@@ -24,6 +24,9 @@ def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⭐ Telegram Stars", callback_data="topup:stars"),
         )
     builder.row(
+        InlineKeyboardButton(text="🎟 Ввести промокод", callback_data="promo:enter"),
+    )
+    builder.row(
         InlineKeyboardButton(text="🌕 " + ("Оплата криптой" if lang == "ru" else "Pay with crypto"), callback_data="topup:crypto"),
     )
     builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:balance"))

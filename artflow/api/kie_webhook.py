@@ -5,6 +5,10 @@ import json
 from typing import Any
 
 
+def _is_uploaded_reference_url(url: str) -> bool:
+    return "/images/apix-refs/" in url
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -196,11 +200,12 @@ def extract_result_urls(payload: dict[str, Any]) -> list[str]:
 
     urls.extend(collect_nested_urls(payload))
 
-    # Keep order, remove duplicates.
+    # Keep order, remove duplicates, and drop our own uploaded references if
+    # a provider echoes them in the result payload.
     seen = set()
     deduped = []
     for url in urls:
-        if url not in seen:
+        if url not in seen and not _is_uploaded_reference_url(url):
             seen.add(url)
             deduped.append(url)
     return deduped

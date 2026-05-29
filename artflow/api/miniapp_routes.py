@@ -2654,10 +2654,12 @@ async def publish_generation_to_library(
     if not shared:
         raise HTTPException(status_code=404, detail="Generation not found or not ready")
     gen = await repo.share_to_library(session, gen_id, user.id) or shared
+    link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="feed", target_id=gen.id))
 
     return {
         "ok": True,
         "id": gen.id,
         "is_public_feed": gen.is_public_feed,
         "is_prompt_library": gen.is_prompt_library,
+        "link": link,
     }

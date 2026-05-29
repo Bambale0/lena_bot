@@ -589,7 +589,7 @@ async def cb_feed_remix(
 
 
 @router.callback_query(F.data.startswith("feed:publish:"))
-async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_user: User, bot: Bot | None = None) -> None:
     generation_id = int(call.data.split(":")[-1])
     gen = await repo.get_generation_by_id(session, generation_id)
 
@@ -604,7 +604,23 @@ async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_u
     gen.is_prompt_library = True
     await session.commit()
 
-    await call.answer("Добавлено в библиотеку промптов ✨", show_alert=False)
+    if bot and call.message:
+        bot_info = await bot.get_me()
+        share_payload = build_start_payload(
+            ref_code=getattr(db_user, "referral_code", None),
+            target_kind="feed",
+            target_id=gen.id,
+        )
+        share_link = f"https://t.me/{bot_info.username}?start={share_payload}"
+        await call.message.answer(
+            "📤 <b>Фото добавлено в ленту и библиотеку</b>\n\n"
+            f"🔗 Ссылка на пост для повтора:\n{share_link}",
+            reply_markup=back_to_menu_kb(),
+        )
+        await safe_answer_callback(call, "✅ Ссылка на пост готова")
+        return
+
+    await safe_answer_callback(call, "Добавлено в библиотеку промптов ✨")
 
 
 @router.callback_query(F.data.startswith("feed:remove:"))

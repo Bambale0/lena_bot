@@ -71,5 +71,6 @@ def back_to_menu_kb() -> InlineKeyboardMarkup:
 def balance_screen_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="💳 Пополнить", callback_data="menu:topup"))
+    builder.row(InlineKeyboardButton(text="🎟 Ввести промокод", callback_data="promo:enter"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()

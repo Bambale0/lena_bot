@@ -63,6 +63,21 @@ async def test_auth_middleware_ignores_banned_user(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_auth_middleware_blocks_non_admin_during_maintenance(monkeypatch) -> None:
+    monkeypatch.setattr("bot.middlewares.auth.is_maintenance_mode", lambda: True)
+    monkeypatch.setattr("bot.middlewares.auth.settings.ADMIN_IDS", [999])
+    handler = AsyncMock()
+    bot = AsyncMock()
+
+    data = {"session": AsyncMock(), "event_from_user": make_user(user_id=111), "bot": bot}
+    result = await AuthMiddleware()(handler, make_message(user_id=111), data)
+
+    assert result is None
+    handler.assert_not_called()
+    bot.send_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_auth_middleware_creates_user_with_referral(monkeypatch) -> None:
     referrer = SimpleNamespace(id=10, tg_id=1000, referrer_id=None)
     created = SimpleNamespace(id=2, tg_id=222, is_banned=False)

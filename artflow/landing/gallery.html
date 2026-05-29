@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Галерея — APIX Studio</title>
+    <meta name="description" content="Галерея APIX Studio: смотрите готовые работы, находите идеи и запускайте похожий результат для своих задач." />
+    <meta name="theme-color" content="#080814" />
+    <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/prototype-premium.css" />
+    <script src="js/prototype-premium.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="APIX Studio">
+        <img src="images/apix-premium-mark.svg" alt="" />
+        <span>APIX <b>Studio</b></span>
+      </a>
+      <nav aria-label="Навигация сайта">
+        <a href="/">Главная</a>
+        <a href="studio.html">Создать</a>
+        <a href="models.html">Возможности</a>
+        <a href="gallery.html" aria-current="page">Идеи</a>
+        <a href="account.html">Мои работы</a>
+      </nav>
+      <div class="top-auth">
+        <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
+        <a class="top-cta" href="studio.html">Создать <span aria-hidden="true">↗</span></a>
+        <button class="top-logout" type="button" data-logout hidden>Выйти</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="page-shell gallery">
+        <div class="section-head split">
+          <div>
+            <p class="eyebrow">Идеи и примеры</p>
+            <h1>Галерея готовых работ</h1>
+            <p class="lead">Смотрите удачные результаты, сохраняйте настроение, стиль и композицию, а затем создавайте похожее для своей задачи.</p>
+          </div>
+          <a class="button ghost" href="studio.html">Создать похожее</a>
+        </div>
+        <div class="gallery-grid" data-gallery-grid></div>
+      </section>
+    </main>
+
+    <div class="modal-backdrop" data-login-modal hidden>
+      <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+        <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
+        <p class="eyebrow">Вход через Telegram</p>
+        <h2 id="login-title">Войдите, чтобы сохранить работы</h2>
+        <p>После входа откроются баланс, история, очередь, библиотека, тарифы и реферальная программа.</p>
+        <div class="telegram-slot" data-telegram-slot></div>
+        <div class="auth-fallback" data-auth-fallback hidden></div>
+      </section>
+    </div>
+
+    <div class="toast" data-toast hidden></div>
+  </body>
+</html>

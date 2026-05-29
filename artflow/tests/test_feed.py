@@ -188,6 +188,27 @@ async def test_cb_feed_publish() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cb_feed_publish_sends_share_link() -> None:
+    bot = AsyncMock()
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="TestBot"))
+    call = make_callback(data="feed:publish:42", bot=bot)
+    gen = SimpleNamespace(id=42, user_id=42, source_feed_gen_id=None, is_public_feed=False, is_prompt_library=False)
+
+    with patch("bot.handlers.feed.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=gen))):
+        await feed.cb_publish_generation(
+            call,
+            AsyncMock(),
+            SimpleNamespace(id=42, referral_code="REF"),
+            bot,
+        )
+
+    call.message.answer.assert_awaited_once()
+    text = call.message.answer.await_args.args[0]
+    assert "https://t.me/TestBot?start=" in text
+    assert "__feed_42" in text
+
+
+@pytest.mark.asyncio
 async def test_cb_feed_publish_not_found() -> None:
     call = make_callback(data="feed:publish:999")
     call.answer = AsyncMock()

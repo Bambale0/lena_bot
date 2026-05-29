@@ -890,6 +890,24 @@ async def test_webapp_remove_missing_generation_from_library_returns_404(client,
 
 
 @pytest.mark.asyncio
+async def test_webapp_publish_generation_returns_feed_link(client, monkeypatch) -> None:
+    generation = SimpleNamespace(id=77, user_id=1, source_feed_gen_id=None)
+    shared = SimpleNamespace(id=77, is_public_feed=True, is_prompt_library=True)
+    monkeypatch.setattr("api.miniapp_routes.repo.get_generation_by_id", AsyncMock(return_value=generation))
+    monkeypatch.setattr("api.miniapp_routes.repo.share_to_feed", AsyncMock(return_value=shared))
+    monkeypatch.setattr("api.miniapp_routes.repo.share_to_library", AsyncMock(return_value=shared))
+    monkeypatch.setattr("api.miniapp_routes.settings.BOT_USERNAME", "@TestBot")
+
+    response = await client.post("/api/v1/generations/77/publish")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["link"].startswith("https://t.me/TestBot?start=")
+    assert "ref_REF__feed_77" in payload["link"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("path", "blocked_repo_method"),
     [

@@ -1,0 +1,124 @@
+{
+  "examples": [
+    {
+      "id": 11258,
+      "type": "image",
+      "model": "nano-banana-pro",
+      "author": "@artifci4lsuic1d3",
+      "likes": 12,
+      "image": "https://tempfile.aiquickdraw.com/images/1779801294239-82urfawh5ti.png",
+      "title": "Soft rose beauty",
+      "prompt": "Портрет молодой девушки с очень светлой кожей и длинными, слегка растрёпанными, волнистыми волосами. Она одета в чёрную футболку с приглушённым уветным принтом. На лице — лёгкий румянец, розовые губы. Она смотрит в камер"
+    },
+    {
+      "id": 11247,
+      "type": "image",
+      "model": "nano-banana-pro",
+      "author": "@artifci4lsuic1d3",
+      "likes": 11,
+      "image": "https://tempfile.aiquickdraw.com/images/1779800950851-eqlv05a32nf.png",
+      "title": "Coquette grunge selfie",
+      "prompt": "Селфи с нижнего ракурса молодой девушки в стиле «альт-готика» и «coquette grunge». У неё длинные волосы, часть собрана в два пучка («спейс-баны»), бледная кожа. Она одета в чёрный топ на бретелях. На руке — множество сер"
+    },
+    {
+      "id": 10350,
+      "type": "image",
+      "model": "nano-banana-pro",
+      "author": "@msBelovaE",
+      "likes": 10,
+      "image": "https://tempfile.aiquickdraw.com/p/117108a95e6d7efdda319a959903fe57_1_1779702963_7082.png",
+      "title": "Editorial neon portrait",
+      "prompt": "Не менять черты лица ни на 1%. Фотореалистичное evening portrait. Молодая девушка с длинными волнистыми волосами и челкой-шторкой держит огромный букет светло-розовых и белых кустовых роз в нежно-розовой упаковке. Она см"
+    },
+    {
+      "id": 12306,
+      "type": "image",
+      "model": "nano-banana-2",
+      "author": "@LeLu88",
+      "likes": 2,
+      "image": "https://tempfile.aiquickdraw.com/image-format-converter/1779980112360-ohrmfhwlys.jpg",
+      "title": "Gothic terrace fashion",
+      "prompt": "Не меняя внешности женщины с фото, перед нами предстает изысканный образ на фоне величественного готического собора, отраженного в стеклянной поверхности террасы. Женщина сидит за столом, покрытым белоснежной скатертью, "
+    },
+    {
+      "id": 11076,
+      "type": "image",
+      "model": "nano-banana-2",
+      "author": "@LeLu88",
+      "likes": 2,
+      "image": "https://tempfile.aiquickdraw.com/images/1779792126417-ika6h6x7f7e.jpeg",
+      "title": "Golden coast lifestyle",
+      "prompt": "Не меняя внешности женщины с фото, перед нами открывается кадр, наполненный солнечным светом и теплой атмосферой пляжа, где женщина расположилась прямо на песке, пальцы слегка касаются поверхности песка. Ее тело повернут"
+    },
+    {
+      "id": 11190,
+      "type": "image",
+      "model": "nano-banana-2",
+      "author": "@LeLu88",
+      "likes": 0,
+      "image": "https://tempfile.aiquickdraw.com/na2/e7dbdc1b6ec0f3d49f5e99cd56883b0d1993965.jpeg",
+      "title": "Desert cinematic frame",
+      "prompt": "Не меняя внешности женщины с фото, в этой кинематографической сцене она стоит на фоне бескрайних песчаных дюн пустыни под ясным голубым небом, окутанная мягким золотистым светом заката или рассвета, что создаёт тёплую, п"
+    },
+    {
+      "id": 11623,
+      "type": "image",
+      "model": "nano-banana-pro",
+      "author": "@yulch_ek",
+      "likes": 4,
+      "image": "https://tempfile.aiquickdraw.com/images/1779859523915-v76q4l1zlp.png",
+      "title": "Ocean couple portrait",
+      "prompt": "Крупный кинематографичный портрет на закате у океана. Пара стоит в объятиях на фоне мягко размытого берега и пирса. Девушка в лаконичном чёрном купальнике с высоким подъемом, тонкие бретели и минималистичный крой; на зап"
+    },
+    {
+      "id": 12263,
+      "type": "image",
+      "model": "nano-banana-2",
+      "author": "@LeLu88",
+      "likes": 0,
+      "image": "https://tempfile.aiquickdraw.com/images/1779974410653-7r75li1md4h.jpeg",
+      "title": "Pier solitude",
+      "prompt": "Не меняя внешности женщины с фото, кадр запечатлевает её в момент уединённого покоя на деревянном пирсе, уходящем в спокойные воды озера при заходящем солнце. Она сидит боком к камере, слегка повернув тело вправо, опирая"
+    },
+    {
+      "id": 11218,
+      "type": "image",
+      "model": "nano-banana-2",
+      "author": "@Rita2830DE",
+      "likes": 1,
+      "image": "https://tempfile.aiquickdraw.com/image-format-converter/1779799606504-wxq0slxs9ig.jpg",
+      "title": "Bright close-up",
+      "prompt": "Фото в стильном и ярком исполнении, где девушка изображена крупным планом. Она выглядит выразительно и уверенно, её лицо слегка повернуто вбок, что придаёт кадру загадочности и динамики. Её длинные объемные волосы блестя"
+    },
+    {
+      "id": 12023,
+      "type": "image",
+      "model": "nano-banana-2",
+      "author": "@Rita2830DE",
+      "likes": 0,
+      "image": "https://apix.chillcreative.ru/static/upload/34f3aa6e676b11e0dd48c0b339111145.jpg",
+      "title": "Alternative selfie",
+      "prompt": "Фотореалистичный селфи-портрет (close-up) молодой женщины в дерзком альтернативном стиле. Ракурс чуть сверху и под углом. Атмосфера таинственная, ночная, современная и провокационная. Молодая женщина с длинными волосами,"
+    },
+    {
+      "id": 11586,
+      "type": "image",
+      "model": "nano-banana-2",
+      "author": "@LeLu88",
+      "likes": 0,
+      "image": "https://tempfile.aiquickdraw.com/image-format-converter/1779845249982-64tpggdjel2.jpg",
+      "title": "Nature editorial",
+      "prompt": "Не меняя внешности женщины с фото, перед нами предстает женщина в живописном природном окружении, стоящая у гейзерова озера Акташ с бирюзовой водой, сквозь которую четко виднеется подводная растительность и каменный грун"
+    },
+    {
+      "id": 12032,
+      "type": "image",
+      "model": "nano-banana-2",
+      "author": "@Rita2830DE",
+      "likes": 0,
+      "image": "https://apix.chillcreative.ru/static/upload/1bcdcf08413fc22421cf155e44edf767.jpg",
+      "title": "Cinematic hair portrait",
+      "prompt": "Создай фото, не меняя черты лица. Кинематографический эффект с добавлением зерна. Девушка с блестящими волосами, уложенными в многослойный каскад, концы подкручены во внутрь. Макияж - сияющая кожа, легкий загар, контурин"
+    }
+  ]
+}

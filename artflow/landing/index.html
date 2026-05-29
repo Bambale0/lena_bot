@@ -3,25 +3,146 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>APIX Studio — AI image & video generation</title>
-    <meta name="description" content="APIX Studio: интерактивная premium web-студия для AI-изображений и видео с Quick Create, PRO workflow, визуальной галереей и входом через Telegram." />
-    <meta name="theme-color" content="#050617" />
+    <title>APIX Studio — создание картинок, видео и музыки</title>
+    <meta name="description" content="APIX Studio: создавайте картинки, видео и музыку, сохраняйте результаты, смотрите примеры и управляйте работами в личном кабинете." />
+    <meta name="theme-color" content="#080814" />
     <link rel="canonical" href="https://apix.chillcreative.ru/" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://apix.chillcreative.ru/" />
-    <meta property="og:title" content="APIX Studio — AI image & video generation" />
-    <meta property="og:description" content="Интерактивная web-студия APIX с Quick Create, PRO Studio, визуальным workflow, галереей, тарифами и Telegram Login." />
-    <meta property="og:image" content="https://apix.chillcreative.ru/images/apix-premium-studio-hero.png" />
+    <meta property="og:title" content="APIX Studio — создание картинок, видео и музыки" />
+    <meta property="og:description" content="Премиальная AI-студия: создавайте контент, смотрите примеры, сохраняйте работы и управляйте балансом." />
+    <meta property="og:image" content="https://apix.chillcreative.ru/images/concepts/aurora-atelier.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="APIX Studio — AI image & video generation" />
-    <meta name="twitter:description" content="Интерактивный premium landing APIX: Quick Create, PRO Studio, визуальный workflow, галерея, тарифы и Telegram Login." />
-    <meta name="twitter:image" content="https://apix.chillcreative.ru/images/apix-premium-studio-hero.png" />
+    <meta name="twitter:title" content="APIX Studio — создание картинок, видео и музыки" />
+    <meta name="twitter:description" content="Создавайте контент, смотрите примеры и храните готовые работы в одном кабинете." />
+    <meta name="twitter:image" content="https://apix.chillcreative.ru/images/concepts/aurora-atelier.png" />
     <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="css/riot-site.css" />
-    <script src="js/riot-site.js" defer></script>
+    <link rel="stylesheet" href="css/prototype-premium.css" />
+    <script src="js/prototype-premium.js" defer></script>
   </head>
-  <body>
-    <noscript>Для сайта APIX Studio нужен JavaScript.</noscript>
-    <div id="site-root"></div>
+  <body class="concept-home">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="APIX Studio">
+        <img src="images/apix-premium-mark.svg" alt="" />
+        <span>APIX <b>Studio</b></span>
+      </a>
+      <nav aria-label="Навигация сайта">
+        <a href="/" aria-current="page">Главная</a>
+        <a href="studio.html">Создать</a>
+        <a href="models.html">Возможности</a>
+        <a href="gallery.html">Идеи</a>
+        <a href="account.html">Мои работы</a>
+      </nav>
+      <div class="top-auth">
+        <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
+        <a class="top-cta" href="account.html">
+          Мои работы
+          <span aria-hidden="true">↗</span>
+        </a>
+        <button class="top-logout" type="button" data-logout hidden>Выйти</button>
+      </div>
+    </header>
+
+    <main class="concept-main">
+      <section class="concept-wall" aria-label="APIX Studio screens">
+        <header class="concept-wall-head">
+          <a class="concept-brand" href="/">
+            <img src="images/apix-premium-mark.svg" alt="" />
+            <span>APIX Studio</span>
+          </a>
+          <nav aria-label="Основное меню">
+            <a href="studio.html">Создать</a>
+            <a href="gallery.html">Идеи</a>
+            <a href="models.html">Возможности</a>
+            <a href="account.html">Мои работы</a>
+          </nav>
+          <div class="concept-balance">
+            <span data-account-status>Гость · войдите через Telegram</span>
+            <button type="button" data-open-login>Войти</button>
+          </div>
+        </header>
+
+        <div class="concept-intro">
+          <div>
+            <span>Меню возможностей</span>
+            <h1>Что хотите создать сегодня?</h1>
+          </div>
+          <p>Выберите готовый сценарий: от идеи и первого изображения до видео, музыки, сохранения результата и пополнения баланса.</p>
+        </div>
+
+        <nav class="product-menu" aria-label="Все возможности">
+          <a href="studio.html?type=image">Картинка</a>
+          <a href="studio.html?type=image">Фото по примеру</a>
+          <a href="studio.html?type=image">Редактировать фото</a>
+          <a href="studio.html?type=video">Видео</a>
+          <a href="studio.html?type=music">Музыка</a>
+          <a href="gallery.html">Идеи и примеры</a>
+          <a href="models.html">Все режимы</a>
+          <a href="account.html">Мои работы</a>
+          <a href="account.html">Баланс</a>
+          <a href="account.html">Помощник</a>
+        </nav>
+
+        <div class="concept-screen-grid">
+          <a class="concept-screen" href="studio.html" aria-label="Открыть Studio" aria-describedby="screen-studio-desc">
+            <img src="images/concepts/aurora-atelier.png" alt="APIX Studio create screen" />
+            <div class="concept-screen-glow"></div>
+            <div class="concept-screen-caption" id="screen-studio-desc">
+              <span>Создание</span>
+              <b>Картинки, видео и музыка</b>
+              <p>Опишите идею, добавьте фото при необходимости и получите готовый результат для поста, рекламы, презентации или личного проекта.</p>
+              <small>Начать создание</small>
+            </div>
+            <em>01</em>
+          </a>
+          <a class="concept-screen" href="models.html" aria-label="Открыть каталог моделей" aria-describedby="screen-models-desc">
+            <img src="images/concepts/model-intelligence-lab.png" alt="APIX models screen" />
+            <div class="concept-screen-glow"></div>
+            <div class="concept-screen-caption" id="screen-models-desc">
+              <span>Возможности</span>
+              <b>Подберите нужный режим</b>
+              <p>Выбирайте сценарий под задачу: реалистичное фото, стильный арт, оживление изображения, короткий ролик или музыкальный трек.</p>
+              <small>Выбрать режим</small>
+            </div>
+            <em>02</em>
+          </a>
+          <a class="concept-screen concept-screen-wide" href="gallery.html" aria-label="Открыть галерею" aria-describedby="screen-gallery-desc">
+            <img src="images/concepts/pink-blue-runway.png" alt="APIX gallery screen" />
+            <div class="concept-screen-glow"></div>
+            <div class="concept-screen-caption" id="screen-gallery-desc">
+              <span>Идеи</span>
+              <b>Примеры готовых работ</b>
+              <p>Смотрите, что уже получилось у других, сохраняйте удачные направления и запускайте похожий результат для своей задачи.</p>
+              <small>Смотреть примеры</small>
+            </div>
+            <em>03</em>
+          </a>
+          <a class="concept-screen" href="account.html" aria-label="Открыть личный кабинет" aria-describedby="screen-account-desc">
+            <img src="images/concepts/account-workflow.png" alt="APIX account workflow screen" />
+            <div class="concept-screen-glow"></div>
+            <div class="concept-screen-caption" id="screen-account-desc">
+              <span>Кабинет</span>
+              <b>Мои работы и баланс</b>
+              <p>Следите за готовностью задач, храните результаты, пополняйте баланс, выбирайте тариф и открывайте помощника по идеям.</p>
+              <small>Открыть кабинет</small>
+            </div>
+            <em>04</em>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <div class="modal-backdrop" data-login-modal hidden>
+      <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+        <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
+        <p class="eyebrow">Вход через Telegram</p>
+        <h2 id="login-title">Войдите, чтобы сохранить работы</h2>
+        <p>После входа откроются баланс, история, очередь, библиотека, тарифы и реферальная программа.</p>
+        <div class="telegram-slot" data-telegram-slot></div>
+        <div class="auth-fallback" data-auth-fallback hidden></div>
+      </section>
+    </div>
+
+    <div class="toast" data-toast hidden></div>
   </body>
 </html>

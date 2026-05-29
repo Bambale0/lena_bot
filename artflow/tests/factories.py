@@ -47,6 +47,7 @@ def make_message(
     msg.edit_media = AsyncMock()
     msg.delete = AsyncMock()
     msg.answer_photo = AsyncMock()
+    msg.answer_document = AsyncMock()
     return msg
 
 

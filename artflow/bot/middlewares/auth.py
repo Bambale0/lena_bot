@@ -4,11 +4,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
-from aiogram import BaseMiddleware
-from aiogram import Bot
-from aiogram.types import TelegramObject, Update, User as TgUser
+from aiogram import BaseMiddleware, Bot
+from aiogram.types import TelegramObject, Update
+from aiogram.types import User as TgUser
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.services.maintenance_mode import is_maintenance_mode
 from bot.utils.deep_links import parse_start_payload
 from core.config import settings
 from db import repository as repo
@@ -148,6 +149,14 @@ class AuthMiddleware(BaseMiddleware):
 
         if not tg_user or tg_user.is_bot:
             return await handler(event, data)
+
+        if is_maintenance_mode() and tg_user.id not in settings.ADMIN_IDS:
+            if bot:
+                await bot.send_message(
+                    tg_user.id,
+                    "🛠 Бот временно в техрежиме. Попробуйте позже.",
+                )
+            return None
 
         db_user = await repo.get_user_by_tg_id(session, tg_user.id)
         update: Update | None = event if isinstance(event, Update) else data.get("event_update")

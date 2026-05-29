@@ -5,13 +5,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select
-from aiogram.types import CallbackQuery, Message
 
 from bot.handlers import admin
-from db.models import PricePlan, GenerationType, User
+from bot.states import AdminStates
+from db.models import GenerationType
 from tests.factories import make_callback, make_message
-
 
 # ── /admin command ────────────────────────────────────────────────────────────
 
@@ -21,6 +19,90 @@ async def test_cmd_admin_opens_menu() -> None:
     msg.answer = AsyncMock()
     await admin.cmd_admin(msg)
     msg.answer.assert_awaited_once()
+
+
+def test_admin_menu_has_ai_admin_buttons() -> None:
+    markup = admin.admin_menu_kb()
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    callbacks = {button.callback_data for button in buttons}
+
+    assert "admin_ai" in callbacks
+    assert "admin_ai_help" in callbacks
+
+
+@pytest.mark.asyncio
+async def test_handle_admin_ai_request_requires_confirmation(monkeypatch) -> None:
+    msg = make_message(text="начисли 50 бананов пользователю 123456789")
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={"admin_ai_memory": []})
+    session = AsyncMock()
+    plan = {
+        "action": "add_credits",
+        "params": {"telegram_id": 123456789, "amount": 50},
+        "actions": [],
+        "summary": "Начислить баланс",
+        "confidence": 0.9,
+        "requires_confirmation": True,
+    }
+    execute = AsyncMock()
+    monkeypatch.setattr(admin.admin_ai_service, "plan_action", AsyncMock(return_value=plan))
+    monkeypatch.setattr(admin, "execute_admin_ai_plan", execute)
+
+    await admin.handle_admin_ai_request(msg, state, session)
+
+    state.set_state.assert_awaited_with(AdminStates.confirming_ai_action)
+    execute.assert_not_awaited()
+    text = msg.answer.await_args.args[0]
+    assert "Нужно подтверждение" in text
+
+
+@pytest.mark.asyncio
+async def test_handle_admin_ai_request_unknown_not_executed(monkeypatch) -> None:
+    msg = make_message(text="сделай что-нибудь странное")
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={"admin_ai_memory": []})
+    session = AsyncMock()
+    plan = {
+        "action": "unknown",
+        "params": {},
+        "actions": [],
+        "summary": "Не понял",
+        "confidence": 0.2,
+        "requires_confirmation": False,
+    }
+    execute = AsyncMock()
+    monkeypatch.setattr(admin.admin_ai_service, "plan_action", AsyncMock(return_value=plan))
+    monkeypatch.setattr(admin, "execute_admin_ai_plan", execute)
+
+    await admin.handle_admin_ai_request(msg, state, session)
+
+    execute.assert_not_awaited()
+    assert msg.answer.await_args.args[0] == "Не понял"
+
+
+@pytest.mark.asyncio
+async def test_cb_admin_ai_confirm_executes_saved_plan(monkeypatch) -> None:
+    call = make_callback(data="admin_ai_confirm")
+    wait = AsyncMock()
+    wait.delete = AsyncMock()
+    call.message.answer = AsyncMock(return_value=wait)
+    state = AsyncMock()
+    plan = {
+        "action": "ban_user",
+        "params": {"telegram_id": 123456789},
+        "actions": [],
+        "summary": "Забанить",
+        "confidence": 0.9,
+        "requires_confirmation": True,
+    }
+    state.get_data = AsyncMock(return_value={"admin_ai_plan": plan, "admin_ai_request": "забань", "admin_ai_memory": []})
+    execute = AsyncMock(return_value="Пользователь забанен.")
+    monkeypatch.setattr(admin, "execute_admin_ai_plan", execute)
+
+    await admin.cb_admin_ai_confirm(call, state, AsyncMock())
+
+    execute.assert_awaited_once()
+    state.set_state.assert_awaited_with(AdminStates.waiting_ai_request)
 
 
 # ── menu:admin ───────────────────────────────────────────────────────────────
@@ -292,7 +374,7 @@ async def test_cb_price_toggle() -> None:
     call = make_callback(data="adm:price_toggle:credits_500")
     call.answer = AsyncMock()
     with patch("bot.handlers.admin.repo", AsyncMock(toggle_price_plan=AsyncMock(return_value=False))):
-        with patch("bot.handlers.admin.cb_price_list", new_callable=AsyncMock) as mock_list:
+        with patch("bot.handlers.admin.cb_price_list", new_callable=AsyncMock):
             await admin.cb_price_toggle(call, AsyncMock())
     call.answer.assert_awaited_once()
 

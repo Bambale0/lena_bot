@@ -3,226 +3,227 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Личный кабинет APIX AI — генерация контента на сайте</title>
-    <meta name="description" content="Самостоятельный веб-кабинет APIX AI: вход через Telegram, общий баланс с ботом, генерация изображений, видео, музыки, промпты, история, лента и рефералы." />
-    <meta name="theme-color" content="#050507" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Личный кабинет APIX AI" />
-    <meta property="og:description" content="Создавайте AI-контент на сайте с тем же балансом, что и в Telegram-боте." />
-    <meta property="og:image" content="images/hero-cinematic-gallery.png" />
-    <link rel="icon" href="images/apix-mark.svg" type="image/svg+xml" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="css/styles.css" />
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="js/main.js" defer></script>
+    <title>Кабинет — APIX Studio</title>
+    <meta name="description" content="Личный кабинет APIX Studio: создавайте контент, отслеживайте готовность, храните работы, управляйте балансом, тарифами и рефералами." />
+    <meta name="theme-color" content="#080814" />
+    <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/prototype-premium.css" />
+    <script src="js/prototype-premium.js" defer></script>
   </head>
   <body>
-    <a class="skip-link" href="#main">К содержанию</a>
-    <header class="site-header">
-      <div class="container header-row">
-        <a class="brand" href="index.html" aria-label="APIX AI">
-          <img src="images/apix-mark.svg" alt="" />
-          <span><b>APIX</b><small>Creative AI studio</small></span>
-        </a>
-        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span></span><span></span><span></span></button>
-        <nav class="site-nav" id="site-nav" aria-label="Основная навигация">
-          <a href="index.html">Главная</a>
-          <a href="features.html">Возможности</a>
-          <a href="guide.html">Инструкция</a>
-          <a href="account.html" aria-current="page">ЛК</a>
-          <a href="contact.html">Поддержка</a>
-        </nav>
-        <a class="header-cta" href="#account-app">Войти</a>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="APIX Studio">
+        <img src="images/apix-premium-mark.svg" alt="" />
+        <span>APIX <b>Studio</b></span>
+      </a>
+      <nav aria-label="Навигация сайта">
+        <a href="/">Главная</a>
+        <a href="studio.html">Создать</a>
+        <a href="models.html">Возможности</a>
+        <a href="gallery.html">Идеи</a>
+        <a href="account.html" aria-current="page">Мои работы</a>
+      </nav>
+      <div class="top-auth">
+        <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
+        <button class="top-cta" type="button" data-open-login>Войти <span aria-hidden="true">↗</span></button>
+        <button class="top-logout" type="button" data-logout hidden>Выйти</button>
       </div>
     </header>
 
-    <main id="main">
-      <section class="account-hero web-account-hero">
-        <div class="container account-hero-grid">
-          <div class="account-copy">
-            <p class="eyebrow">Веб-студия APIX</p>
-            <h1>Генерируйте контент в отдельной веб-студии</h1>
-            <p class="lead">Это отдельный web-флоу для изображений, видео, музыки, ассистента, промптов, истории, ленты и рефералов. База одна: если вы входите через Telegram, сайт видит тот же аккаунт, баланс и цены, что и бот.</p>
-            <div class="hero-actions">
-              <a class="btn btn-primary" href="#account-app">Открыть кабинет</a>
-              <a class="btn btn-ghost" href="https://t.me/apix_ai_bot" target="_blank" rel="noopener noreferrer">Telegram-бот</a>
-            </div>
+    <main>
+      <section class="page-shell account">
+        <div class="section-head split">
+          <div>
+            <p class="eyebrow">Мои работы</p>
+            <h1>Кабинет для ваших результатов</h1>
+            <p class="lead">Создавайте контент, следите за готовностью, храните удачные работы, пополняйте баланс и возвращайтесь к идеям в любой момент.</p>
           </div>
-          <aside class="account-preview web-login-card" aria-label="Вход в личный кабинет">
-            <div class="account-top">
-              <span class="avatar-mark">AX</span>
-              <div><b>Единый аккаунт</b><small>Telegram ID связывает сайт и бота</small></div>
-            </div>
-            <div id="telegram-login-slot" class="telegram-login-slot"></div>
-            <p class="account-note">Вход выполняется через официальный Telegram Login Widget. После входа сайт получает подписанный токен APIX, а генерации списывают кредиты с общего баланса.</p>
-            <button class="btn btn-ghost" type="button" data-logout hidden>Выйти</button>
-          </aside>
+          <div class="account-status"><span></span><b data-account-status>Гость · войдите через Telegram</b></div>
         </div>
-      </section>
 
-      <section class="section" id="account-app">
-        <div class="container web-app-shell" data-account-app>
-          <div class="web-app-toolbar">
-            <div>
-              <p class="eyebrow">Личный кабинет</p>
-              <h2 id="account-title">Войдите, чтобы открыть студию</h2>
+        <div class="account-shell">
+          <aside class="account-sidebar" aria-label="Разделы личного кабинета">
+            <a class="account-logo" href="account.html"><img src="images/apix-premium-mark.svg" alt="" />APIX Studio</a>
+            <nav data-account-tabs>
+              <button class="active" type="button" data-tab="quick">Создать</button>
+              <button type="button" data-tab="pro">Точные настройки</button>
+              <button type="button" data-tab="queue">Очередь</button>
+              <button type="button" data-tab="library">Библиотека</button>
+              <button type="button" data-tab="billing">Баланс</button>
+              <button type="button" data-tab="referrals">Рефералы</button>
+              <button type="button" data-tab="prompts">Идеи</button>
+              <button type="button" data-tab="feed">Лента</button>
+              <button type="button" data-tab="assistant">Ассистент</button>
+              <button type="button" data-tab="settings">Помощь</button>
+            </nav>
+            <div class="upgrade-box">
+              <b>Больше возможностей</b>
+              <p>Больше вариантов, выше качество и больше задач в работе одновременно.</p>
+              <button class="button primary" type="button" data-billing-tab>Пополнить</button>
             </div>
-            <div class="web-user-pill" id="web-user-pill">Нет входа</div>
-          </div>
+          </aside>
 
-          <div class="web-alert" id="web-alert" hidden></div>
+          <div class="account-workspace">
+            <header class="account-topline">
+              <div>
+                <span>Рабочий процесс</span>
+                <b data-account-title>Создать</b>
+              </div>
+              <div class="workflow-steps">
+                <span class="active">Идея</span>
+                <span>Режим</span>
+                <span>Готовится</span>
+                <span>Результат</span>
+              </div>
+            </header>
 
-          <div class="web-dashboard" id="web-dashboard" hidden>
-            <aside class="web-sidebar">
-              <button class="is-active" type="button" data-account-tab="studio">Студия</button>
-              <button type="button" data-account-tab="balance">Баланс</button>
-              <button type="button" data-account-tab="history">История</button>
-              <button type="button" data-account-tab="prompts">Промпты</button>
-              <button type="button" data-account-tab="feed">Лента</button>
-              <button type="button" data-account-tab="referrals">Рефералы</button>
-              <button type="button" data-account-tab="assistant">Ассистент</button>
-            </aside>
-
-            <div class="web-panels">
-              <section class="web-panel is-active" data-account-panel="studio">
-                <div class="panel-heading">
-                  <div><h3>Генерация</h3><p>Выберите тип контента, модель и параметры. Цены берутся из той же таблицы, что и в боте.</p></div>
-                  <button class="mini-button" type="button" data-refresh-account>Обновить</button>
-                </div>
-                <form class="web-form studio-form" id="studio-form">
-                  <label>Тип
-                    <select name="kind">
-                      <option value="image">Изображение</option>
-                      <option value="video">Видео</option>
-                      <option value="music">Музыка</option>
-                    </select>
-                  </label>
-                  <label>Модель и цена
-                    <select name="model" required></select>
-                  </label>
-                  <label class="wide">Промпт
-                    <textarea name="prompt" rows="5" maxlength="4000" placeholder="Опишите результат, стиль, объект, свет, формат и ограничения" required></textarea>
-                  </label>
-                  <label>Формат
-                    <select name="aspect_ratio">
-                      <option value="">По умолчанию</option>
-                      <option value="1:1">1:1</option>
-                      <option value="4:3">4:3</option>
-                      <option value="3:4">3:4</option>
-                      <option value="16:9">16:9</option>
-                      <option value="9:16">9:16</option>
-                    </select>
-                  </label>
-                  <label>Качество
-                    <select name="quality">
-                      <option value="basic">Basic</option>
-                      <option value="2K">2K</option>
-                      <option value="4K">4K</option>
-                    </select>
-                  </label>
-                  <label>Количество
-                    <select name="count">
-                      <option value="1">1</option>
-                      <option value="2">2</option>
-                      <option value="3">3</option>
-                      <option value="4">4</option>
-                    </select>
-                  </label>
-                  <label>Длительность видео
-                    <select name="duration">
-                      <option value="5">5 сек</option>
-                      <option value="10">10 сек</option>
-                      <option value="15">15 сек</option>
-                    </select>
-                  </label>
-                  <label>Референс URL
-                    <input name="reference_url" type="url" placeholder="https://..." />
-                  </label>
-                  <label>Референс-файл
-                    <input name="reference_file" type="file" accept="image/*" />
-                  </label>
-                  <label class="check-line">
-                    <input name="instrumental" type="checkbox" />
-                    <span>Инструментальная музыка</span>
-                  </label>
-                  <div class="form-actions wide">
-                    <button class="btn btn-primary" type="submit" data-start-generation>Запустить генерацию</button>
-                    <button class="btn btn-ghost" type="button" data-improve-prompt>Улучшить промпт</button>
+            <section class="account-panel active" data-panel="quick">
+              <div class="quick-workflow">
+                <form class="account-composer">
+                  <div class="mode-buttons">
+                    <button class="active" type="button" data-generation-kind="image">Картинка</button>
+                    <button type="button" data-generation-kind="video">Видео</button>
+                    <button type="button" data-generation-kind="music">Музыка</button>
                   </div>
+                  <label>
+                    <span>Что создать</span>
+                    <textarea name="prompt" rows="4" required>Стильный портрет для обложки, лилово-розовый свет, аккуратный фон, премиальная подача</textarea>
+                  </label>
+                  <div class="composer-row">
+                    <label><span>Режим</span><select name="model" data-account-model-select required></select></label>
+                    <label><span>Формат</span><select name="aspect_ratio"><option>9:16</option><option>1:1</option><option>16:9</option></select></label>
+                  </div>
+                  <div class="composer-row" data-advanced-controls>
+                    <label><span>Качество</span><select name="quality"><option value="basic">Basic</option><option value="2K">2K</option><option value="4K">4K</option></select></label>
+                    <label><span>Количество</span><select name="count"><option>1</option><option>2</option><option>4</option></select></label>
+                  </div>
+                  <div class="composer-row">
+                    <label><span>Длительность</span><select name="duration"><option value="5">5 сек</option><option value="10">10 сек</option></select></label>
+                    <label><span>Размер</span><select name="resolution"><option value="">Авто</option></select></label>
+                  </div>
+                  <div class="composer-row">
+                    <label><span>Ссылка на пример</span><input name="reference_url" type="url" placeholder="https://..." /></label>
+                    <label><span>Загрузить фото</span><input name="reference_file" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+                  </div>
+                  <div class="composer-row">
+                    <label><span>Ссылка на видео</span><input name="video_url" type="url" placeholder="https://...mp4" /></label>
+                    <label><span>Тон результата</span><input name="seed" type="number" placeholder="номер варианта" /><select name="grok_mode"><option value="normal">обычный</option><option value="low">мягче</option><option value="high">смелее</option></select></label>
+                  </div>
+                  <label class="check-line"><input name="instrumental" type="checkbox" /> <span>Инструментальная музыка</span></label>
+                  <div class="composer-actions">
+                    <button class="button ghost" type="button" data-improve-prompt>Улучшить описание</button>
+                    <button class="button ghost" type="button" data-photo-prompt>Описать фото</button>
+                    <button class="button primary" type="submit" data-generate-button>Создать</button>
+                  </div>
+                  <p class="form-note" data-generation-note>Войдите через Telegram, чтобы сохранять работы и видеть готовность результата.</p>
                 </form>
-                <div class="studio-summary">
-                  <div id="generation-estimate" class="price-estimate">Стоимость рассчитается после загрузки моделей.</div>
-                  <div id="selected-prompt-note" class="selected-prompt-note" hidden></div>
+                <div class="result-stage">
+                  <img data-account-preview src="" alt="Превью результата генерации" />
+                  <div class="result-caption">
+                    <span data-account-preview-model>Режим</span>
+                    <b data-account-preview-title>Пример результата</b>
+                  </div>
                 </div>
-                <div class="web-result" id="generation-result"></div>
-              </section>
+              </div>
+            </section>
 
-              <section class="web-panel" data-account-panel="balance">
-                <div class="panel-heading"><div><h3>Баланс и пополнение</h3><p>Планы и суммы загружаются из общей базы APIX.</p></div></div>
-                <div class="stat-row" id="balance-stats"></div>
-                <div class="plan-grid" id="plans-grid"></div>
-              </section>
+            <section class="account-panel" data-panel="pro">
+              <div class="pro-grid">
+                <div class="studio-controls">
+                  <h3>Точные настройки</h3>
+                  <p data-pro-copy>Для тех, кому важно управлять качеством, количеством вариантов, форматом, длительностью и примером изображения.</p>
+                  <div class="control-grid">
+                    <label><span>Качество</span><select data-quality-options><option>Basic</option></select></label>
+                    <label><span>Варианты</span><select data-count-options><option>1</option></select></label>
+                    <label><span>Длительность</span><select data-duration-options><option>5 сек</option></select></label>
+                    <label><span>Фото-пример</span><button type="button" data-open-login>Загрузить</button></label>
+                  </div>
+                </div>
+                <div class="model-compare" data-account-models-mini></div>
+              </div>
+            </section>
 
-              <section class="web-panel" data-account-panel="history">
-                <div class="panel-heading"><div><h3>История</h3><p>Последние генерации сайта и бота в одном списке.</p></div></div>
-                <div class="history-grid" id="history-grid"></div>
-              </section>
+            <section class="account-panel" data-panel="queue">
+              <div class="queue-board" data-account-queue></div>
+            </section>
 
-              <section class="web-panel" data-account-panel="prompts">
-                <div class="panel-heading"><div><h3>Библиотека промптов</h3><p>Каталог, лайки, использование промпта в студии и отправка своих промптов на модерацию.</p></div></div>
-                <form class="web-form prompt-submit-form" id="prompt-submit-form">
-                  <label>Название<input name="title" required minlength="3" maxlength="120" /></label>
-                  <label>Категория<select name="category"><option value="other">Другое</option><option value="photo">Фото</option><option value="art">Арт</option><option value="marketing">Маркетинг</option><option value="business">Бизнес</option></select></label>
-                  <label class="wide">Промпт<textarea name="prompt_text" rows="3" required minlength="10" maxlength="4000"></textarea></label>
-                  <label class="wide">Описание<textarea name="description" rows="2" maxlength="500"></textarea></label>
-                  <button class="btn btn-primary" type="submit">Отправить промпт</button>
+            <section class="account-panel" data-panel="library">
+              <div class="library-board" data-account-library></div>
+            </section>
+
+            <section class="account-panel" data-panel="billing">
+              <div class="billing-grid" data-billing-grid></div>
+            </section>
+
+            <section class="account-panel" data-panel="referrals">
+              <div class="referral-panel" data-referral-panel></div>
+            </section>
+
+            <section class="account-panel" data-panel="prompts">
+              <div class="feature-split">
+                <form class="feature-form" data-prompt-form>
+                  <h3>Сохранить идею</h3>
+                  <label><span>Название</span><input name="title" required minlength="3" maxlength="120" /></label>
+                  <label><span>Категория</span><select name="category"><option value="other">Другое</option><option value="photo">Фото</option><option value="art">Арт</option><option value="marketing">Маркетинг</option><option value="business">Бизнес</option></select></label>
+                  <label><span>Описание идеи</span><textarea name="prompt_text" rows="4" required minlength="10" maxlength="4000"></textarea></label>
+                  <label><span>Описание</span><textarea name="description" rows="2" maxlength="500"></textarea></label>
+                  <button class="button primary" type="submit">На модерацию</button>
                 </form>
-                <div class="prompt-grid" id="prompts-grid"></div>
-              </section>
+                <div class="feature-board" data-prompts-board></div>
+              </div>
+            </section>
 
-              <section class="web-panel" data-account-panel="feed">
-                <div class="panel-heading"><div><h3>Публичная лента</h3><p>Смотрите работы, лайкайте и запускайте ремикс на основе опубликованного результата.</p></div></div>
-                <div class="feed-grid" id="feed-grid"></div>
-              </section>
+            <section class="account-panel" data-panel="feed">
+              <div class="feature-board feature-board-wide" data-feed-board></div>
+            </section>
 
-              <section class="web-panel" data-account-panel="referrals">
-                <div class="panel-heading"><div><h3>Партнёрский кабинет</h3><p>Реферальная ссылка, уровни, начисления и заявки на вывод.</p></div></div>
-                <div class="referral-box" id="referral-box"></div>
-                <form class="web-form withdrawal-form" id="withdrawal-form">
-                  <label>Сумма, ₽<input name="amount_rub" type="number" min="1" step="1" required /></label>
-                  <label class="wide">Реквизиты<textarea name="payout_details" rows="2" required minlength="5" maxlength="500"></textarea></label>
-                  <button class="btn btn-primary" type="submit">Создать заявку</button>
+            <section class="account-panel" data-panel="assistant">
+              <div class="assistant-panel">
+                <div class="assistant-log" data-assistant-log></div>
+                <form class="assistant-form" data-assistant-form>
+                  <textarea name="message" rows="3" placeholder="Например: придумай идею для стильной обложки" required></textarea>
+                  <button class="button primary" type="submit">Отправить</button>
                 </form>
-              </section>
+              </div>
+            </section>
 
-              <section class="web-panel" data-account-panel="assistant">
-                <div class="panel-heading"><div><h3>AI-ассистент</h3><p>Помогает с идеями, улучшением промптов и подготовкой сценариев генерации.</p></div></div>
-                <div class="assistant-log" id="assistant-log"></div>
-                <form class="assistant-form" id="assistant-form">
-                  <textarea name="message" rows="3" placeholder="Например: сделай промпт для fashion product shot" required></textarea>
-                  <button class="btn btn-primary" type="submit">Отправить</button>
-                </form>
-              </section>
-            </div>
+            <section class="account-panel" data-panel="settings">
+              <div class="settings-grid">
+                <article class="settings-card">
+                  <span>Язык</span>
+                  <h3>Язык аккаунта</h3>
+                  <div class="settings-actions">
+                    <button class="button ghost" type="button" data-language="ru">RU</button>
+                    <button class="button ghost" type="button" data-language="en">EN</button>
+                  </div>
+                </article>
+                <article class="settings-card">
+                  <span>Помощь</span>
+                  <h3>Справка бота</h3>
+                  <div class="settings-actions">
+                    <button class="button ghost" type="button" data-help-topic="main">Основная</button>
+                    <button class="button ghost" type="button" data-help-topic="stars">Баланс</button>
+                  </div>
+                </article>
+              </div>
+              <div class="help-panel" data-help-panel></div>
+            </section>
           </div>
         </div>
       </section>
     </main>
 
-    <footer class="site-footer">
-      <div class="container footer-grid">
-        <a class="brand" href="index.html"><img src="images/apix-mark.svg" alt="" /><span><b>APIX</b><small>Creative AI studio</small></span></a>
-        <p>Веб-кабинет APIX AI использует общую базу, баланс и цены Telegram-бота.</p>
-        <nav aria-label="Ссылки в футере">
-          <a href="index.html">Главная</a>
-          <a href="features.html">Возможности</a>
-          <a href="guide.html">Инструкция</a>
-          <a href="contact.html">Поддержка</a>
-          <a href="https://t.me/apix_ai_bot" target="_blank" rel="noopener noreferrer">Telegram</a>
-        </nav>
-      </div>
-    </footer>
+    <div class="modal-backdrop" data-login-modal hidden>
+      <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+        <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
+        <p class="eyebrow">Вход через Telegram</p>
+        <h2 id="login-title">Войдите, чтобы сохранить работы</h2>
+        <p>После входа откроются баланс, история, очередь, библиотека, тарифы и реферальная программа.</p>
+        <div class="telegram-slot" data-telegram-slot></div>
+        <div class="auth-fallback" data-auth-fallback hidden></div>
+      </section>
+    </div>
+
+    <div class="toast" data-toast hidden></div>
   </body>
 </html>

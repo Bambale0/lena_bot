@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from bot.handlers.start import _help_text
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
+    IMAGE_CAPS,
     after_generation_kb,
+    image_quality_kb,
     image_session_kb,
     image_style_edit_kb,
     public_prompt_text,
@@ -62,6 +64,14 @@ def test_render_main_menu_force_main_text_even_with_active_session() -> None:
     assert "Твоя AI-студия" in render.text
     assert "Выбирай, что запустить:" in render.text
     assert "Текущая серия изображений" not in render.text
+
+
+def test_wan_image_quality_defaults_to_2k_and_keeps_manual_4k() -> None:
+    assert IMAGE_CAPS["wan/2-7-image"]["quality_options"][0][0] == "2K"
+    assert IMAGE_CAPS["wan/2-7-image-pro"]["quality_options"][0][0] == "2K"
+
+    buttons = flatten_buttons(image_quality_kb("wan/2-7-image-pro"))
+    assert [button.text for button in buttons[:2]] == ["2K", "4K"]
 
 
 def test_render_active_image_session_uses_result_actions_when_last_generation_exists() -> None:

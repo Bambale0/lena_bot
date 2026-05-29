@@ -65,6 +65,13 @@ class PaymentProvider(str, enum.Enum):
     telegram_stars = "telegram_stars"
 
 
+class PromoRewardType(str, enum.Enum):
+    credits = "credits"
+    discount_percent = "discount_percent"
+    discount_amount = "discount_amount"
+    free_generation = "free_generation"
+
+
 class WithdrawalStatus(str, enum.Enum):
     pending = "pending"
     approved = "approved"
@@ -201,6 +208,45 @@ class Transaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="transactions", lazy="noload")
+
+
+class PromoCode(Base):
+    __tablename__ = "promo_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    reward_type: Mapped[PromoRewardType] = mapped_column(Enum(PromoRewardType), nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    credits: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    max_uses: Mapped[int | None] = mapped_column(Integer)
+    max_redemptions: Mapped[int | None] = mapped_column(Integer)
+    per_user_limit: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    uses_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    redeemed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by_tg_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromoRedemption(Base):
+    __tablename__ = "promo_redemptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    promo_code_id: Mapped[int] = mapped_column(Integer, ForeignKey("promo_codes.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    transaction_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("transactions.id"), nullable=True, index=True)
+    reward_type: Mapped[PromoRewardType] = mapped_column(Enum(PromoRewardType), nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    promo_code: Mapped[PromoCode] = relationship(lazy="noload")
+    user: Mapped[User] = relationship(lazy="noload")
+    transaction: Mapped[Transaction | None] = relationship(lazy="noload")
 
 
 class CreditLedgerEntry(Base):

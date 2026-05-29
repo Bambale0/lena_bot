@@ -801,8 +801,17 @@ if (contactForm) {
     const publish = target.closest("[data-publish]")
     if (publish) {
       try {
-        await api(`/generations/${publish.dataset.publish}/publish`, { method: "POST" })
-        showAlert("Работа опубликована в ленте и библиотеке.", "success")
+        const payload = await api(`/generations/${publish.dataset.publish}/publish`, { method: "POST" })
+        if (payload.link) {
+          try {
+            await navigator.clipboard?.writeText(payload.link)
+            showAlert(`Работа опубликована. Ссылка скопирована: ${payload.link}`, "success")
+          } catch {
+            showAlert(`Работа опубликована. Ссылка: ${payload.link}`, "success")
+          }
+        } else {
+          showAlert("Работа опубликована в ленте и библиотеке.", "success")
+        }
         await loadAccount()
       } catch (error) {
         showAlert(error.message, "danger")

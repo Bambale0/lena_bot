@@ -72,3 +72,12 @@ class PromptUseFSM(StatesGroup):
 
 class AssistantFSM(StatesGroup):
     waiting_message = State()
+
+
+class AdminStates(StatesGroup):
+    waiting_ai_request = State()
+    confirming_ai_action = State()
+
+
+class PromoFSM(StatesGroup):
+    waiting_code = State()
