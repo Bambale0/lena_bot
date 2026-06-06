@@ -6,16 +6,16 @@
     <title>APIX Studio — создание картинок, видео и музыки</title>
     <meta name="description" content="APIX Studio: создавайте картинки, видео и музыку, сохраняйте результаты, смотрите примеры и управляйте работами в личном кабинете." />
     <meta name="theme-color" content="#080814" />
-    <link rel="canonical" href="https://apix.chillcreative.ru/" />
+    <link rel="canonical" href="https://apixbotai.com/" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://apix.chillcreative.ru/" />
+    <meta property="og:url" content="https://apixbotai.com/" />
     <meta property="og:title" content="APIX Studio — создание картинок, видео и музыки" />
     <meta property="og:description" content="Премиальная AI-студия: создавайте контент, смотрите примеры, сохраняйте работы и управляйте балансом." />
-    <meta property="og:image" content="https://apix.chillcreative.ru/images/concepts/aurora-atelier.png" />
+    <meta property="og:image" content="https://apixbotai.com/images/concepts/aurora-atelier.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="APIX Studio — создание картинок, видео и музыки" />
     <meta name="twitter:description" content="Создавайте контент, смотрите примеры и храните готовые работы в одном кабинете." />
-    <meta name="twitter:image" content="https://apix.chillcreative.ru/images/concepts/aurora-atelier.png" />
+    <meta name="twitter:image" content="https://apixbotai.com/images/concepts/aurora-atelier.png" />
     <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="css/prototype-premium.css" />
     <script src="js/prototype-premium.js" defer></script>
@@ -28,118 +28,170 @@
       </a>
       <nav aria-label="Навигация сайта">
         <a href="/" aria-current="page">Главная</a>
-        <a href="studio.html">Создать</a>
-        <a href="models.html">Возможности</a>
-        <a href="gallery.html">Идеи</a>
-        <a href="account.html">Мои работы</a>
+        <a href="studio.html" data-auth-only hidden>Создать</a>
+        <a href="gallery.html">Лента</a>
+        <a href="models.html">Модели</a>
       </nav>
       <div class="top-auth">
         <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
-        <a class="top-cta" href="account.html">
-          Мои работы
-          <span aria-hidden="true">↗</span>
-        </a>
+        <a class="top-cta" href="account.html">Кабинет <span aria-hidden="true">↗</span></a>
         <button class="top-logout" type="button" data-logout hidden>Выйти</button>
       </div>
     </header>
 
     <main class="concept-main">
       <section class="concept-wall" aria-label="APIX Studio screens">
-        <header class="concept-wall-head">
-          <a class="concept-brand" href="/">
-            <img src="images/apix-premium-mark.svg" alt="" />
-            <span>APIX Studio</span>
-          </a>
-          <nav aria-label="Основное меню">
-            <a href="studio.html">Создать</a>
-            <a href="gallery.html">Идеи</a>
-            <a href="models.html">Возможности</a>
-            <a href="account.html">Мои работы</a>
-          </nav>
-          <div class="concept-balance">
-            <span data-account-status>Гость · войдите через Telegram</span>
-            <button type="button" data-open-login>Войти</button>
+        <section class="home-hero-grid" aria-label="Главный сценарий APIX Studio">
+          <div class="home-hero-copy">
+            <p class="eyebrow">AI-студия для контента</p>
+            <h1>Создайте картинку, видео или музыку без лишней возни</h1>
+            <p>Выберите задачу, загрузите референс при необходимости и сразу переходите к созданию. Без перегруза настройками на входе.</p>
+            <div class="home-actions">
+              <a class="button primary" href="studio.html?type=image&flow=text">Начать создание</a>
+              <a class="button ghost" href="models.html">Выбрать модель</a>
+            </div>
+            <div class="home-trust-row" aria-label="Ключевые возможности">
+              <span>Картинки</span>
+              <span>Видео</span>
+              <span>Музыка</span>
+            </div>
           </div>
-        </header>
 
-        <div class="concept-intro">
-          <div>
-            <span>Меню возможностей</span>
-            <h1>Что хотите создать сегодня?</h1>
+          <aside class="home-studio-card" aria-label="Быстрый выбор сценария">
+            <img src="images/home/home-gpt-image-create.webp" fetchpriority="high" decoding="async" alt="Реалистичный пример генерации картинки в APIX Studio" />
+            <div class="home-studio-overlay">
+              <span>Быстрый старт</span>
+              <b>Что нужно получить?</b>
+              <div class="home-studio-actions">
+                <a href="studio.html?type=image&flow=text">Картинка</a>
+                <a href="studio.html?type=image&flow=reference">По примеру</a>
+                <a href="studio.html?type=video">Видео</a>
+                <a href="studio.html?type=music">Музыка</a>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="home-section" aria-label="Сценарии создания">
+          <div class="home-section-head">
+            <div>
+              <span>Сценарии</span>
+              <h2>Выберите задачу, а не настройки</h2>
+            </div>
+            <a href="studio.html">Открыть Studio</a>
           </div>
-          <p>Выберите готовый сценарий: от идеи и первого изображения до видео, музыки, сохранения результата и пополнения баланса.</p>
-        </div>
 
-        <nav class="product-menu" aria-label="Все возможности">
-          <a href="studio.html?type=image">Картинка</a>
-          <a href="studio.html?type=image">Фото по примеру</a>
-          <a href="studio.html?type=image">Редактировать фото</a>
-          <a href="studio.html?type=video">Видео</a>
-          <a href="studio.html?type=music">Музыка</a>
-          <a href="gallery.html">Идеи и примеры</a>
-          <a href="models.html">Все режимы</a>
-          <a href="account.html">Мои работы</a>
-          <a href="account.html">Баланс</a>
-          <a href="account.html">Помощник</a>
-        </nav>
+          <div class="home-scenario-grid">
+            <a class="home-scenario-card primary" href="studio.html?type=image&flow=text">
+              <img src="images/home/home-gpt-image-create.webp" loading="lazy" decoding="async" alt="Реалистичный пример картинки, созданной с нуля" />
+              <div>
+                <span>01 · GPT Image 2</span>
+                <b>Картинка с нуля</b>
+                <p>Для обложек, рекламных кадров, постов, товаров и визуальных идей.</p>
+              </div>
+            </a>
+            <a class="home-scenario-card" href="studio.html?type=image&flow=reference">
+              <img src="images/home/home-nano-reference.webp" loading="lazy" decoding="async" alt="Реалистичный пример генерации фото по референсу" />
+              <div>
+                <span>02 · Nano Banana Pro</span>
+                <b>Фото по примеру</b>
+                <p>Сохранить героя, товар или настроение и собрать новый кадр.</p>
+              </div>
+            </a>
+            <a class="home-scenario-card" href="studio.html?type=image&flow=edit">
+              <img src="images/home/home-seedream-edit.webp" loading="lazy" decoding="async" alt="Реалистичный пример улучшения фото" />
+              <div>
+                <span>03 · Seedream Edit</span>
+                <b>Улучшить фото</b>
+                <p>Поменять фон, свет, стиль, убрать визуальный шум и довести кадр.</p>
+              </div>
+            </a>
+            <a class="home-scenario-card" href="studio.html?type=video">
+              <img src="images/home/home-kling-video.webp" loading="lazy" decoding="async" alt="Реалистичный пример создания видео" />
+              <div>
+                <span>04 · Kling 3.0</span>
+                <b>Сделать видео</b>
+                <p>Оживить фото или описать сцену с движением камеры.</p>
+              </div>
+            </a>
+            <a class="home-scenario-card" href="studio.html?type=music">
+              <img src="images/home/home-suno-music.webp" loading="lazy" decoding="async" alt="Реалистичный пример создания музыки" />
+              <div>
+                <span>05 · Suno</span>
+                <b>Сделать музыку</b>
+                <p>Фон, трек для ролика, джингл или атмосферная зарисовка.</p>
+              </div>
+            </a>
+          </div>
+        </section>
 
-        <div class="concept-screen-grid">
-          <a class="concept-screen" href="studio.html" aria-label="Открыть Studio" aria-describedby="screen-studio-desc">
-            <img src="images/concepts/aurora-atelier.png" alt="APIX Studio create screen" />
-            <div class="concept-screen-glow"></div>
-            <div class="concept-screen-caption" id="screen-studio-desc">
-              <span>Создание</span>
-              <b>Картинки, видео и музыка</b>
-              <p>Опишите идею, добавьте фото при необходимости и получите готовый результат для поста, рекламы, презентации или личного проекта.</p>
-              <small>Начать создание</small>
-            </div>
-            <em>01</em>
-          </a>
-          <a class="concept-screen" href="models.html" aria-label="Открыть каталог моделей" aria-describedby="screen-models-desc">
-            <img src="images/concepts/model-intelligence-lab.png" alt="APIX models screen" />
-            <div class="concept-screen-glow"></div>
-            <div class="concept-screen-caption" id="screen-models-desc">
-              <span>Возможности</span>
-              <b>Подберите нужный режим</b>
-              <p>Выбирайте сценарий под задачу: реалистичное фото, стильный арт, оживление изображения, короткий ролик или музыкальный трек.</p>
-              <small>Выбрать режим</small>
-            </div>
-            <em>02</em>
-          </a>
-          <a class="concept-screen concept-screen-wide" href="gallery.html" aria-label="Открыть галерею" aria-describedby="screen-gallery-desc">
-            <img src="images/concepts/pink-blue-runway.png" alt="APIX gallery screen" />
-            <div class="concept-screen-glow"></div>
-            <div class="concept-screen-caption" id="screen-gallery-desc">
-              <span>Идеи</span>
-              <b>Примеры готовых работ</b>
-              <p>Смотрите, что уже получилось у других, сохраняйте удачные направления и запускайте похожий результат для своей задачи.</p>
-              <small>Смотреть примеры</small>
-            </div>
-            <em>03</em>
-          </a>
-          <a class="concept-screen" href="account.html" aria-label="Открыть личный кабинет" aria-describedby="screen-account-desc">
-            <img src="images/concepts/account-workflow.png" alt="APIX account workflow screen" />
-            <div class="concept-screen-glow"></div>
-            <div class="concept-screen-caption" id="screen-account-desc">
-              <span>Кабинет</span>
-              <b>Мои работы и баланс</b>
-              <p>Следите за готовностью задач, храните результаты, пополняйте баланс, выбирайте тариф и открывайте помощника по идеям.</p>
-              <small>Открыть кабинет</small>
-            </div>
-            <em>04</em>
-          </a>
-        </div>
+        <section class="home-section home-decision-grid" aria-label="Как выбрать модель">
+          <div class="home-decision-copy">
+            <span>Модели</span>
+            <h2>Не знаете, что выбрать?</h2>
+            <p>Откройте карточку модели: там коротко объяснено, когда она подходит, какие промпты писать и как запустить тест.</p>
+            <a class="button ghost" href="models.html">Смотреть все модели</a>
+          </div>
+          <div class="home-model-strip">
+            <a href="model.html?model=gpt-image-2-text-to-image">
+              <img src="images/home/home-gpt-image-create.webp" loading="lazy" decoding="async" alt="Пример рекламного кадра GPT Image 2" />
+              <div>
+                <b>GPT Image 2</b>
+                <span>точные рекламные кадры</span>
+              </div>
+            </a>
+            <a href="model.html?model=nano-banana-pro">
+              <img src="images/home/home-nano-reference.webp" loading="lazy" decoding="async" alt="Пример работы Nano Banana Pro по референсу" />
+              <div>
+                <b>Nano Banana Pro</b>
+                <span>персонажи и референсы</span>
+              </div>
+            </a>
+            <a href="model.html?model=kling-3.0/video">
+              <img src="images/home/home-kling-video.webp" loading="lazy" decoding="async" alt="Пример видео-сцены Kling 3.0" />
+              <div>
+                <b>Kling 3.0</b>
+                <span>плавное видео</span>
+              </div>
+            </a>
+            <a href="model.html?model=suno/v4.5">
+              <img src="images/home/home-suno-music.webp" loading="lazy" decoding="async" alt="Пример музыкальной сцены Suno" />
+              <div>
+                <b>Suno</b>
+                <span>музыка под ролики</span>
+              </div>
+            </a>
+          </div>
+        </section>
+
       </section>
     </main>
 
     <div class="modal-backdrop" data-login-modal hidden>
       <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
         <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
-        <p class="eyebrow">Вход через Telegram</p>
-        <h2 id="login-title">Войдите, чтобы сохранить работы</h2>
-        <p>После входа откроются баланс, история, очередь, библиотека, тарифы и реферальная программа.</p>
-        <div class="telegram-slot" data-telegram-slot></div>
-        <div class="auth-fallback" data-auth-fallback hidden></div>
+        <p class="eyebrow">Вход и регистрация</p>
+        <h2 id="login-title">Откройте кабинет APIX</h2>
+        <p>Войдите через Telegram. После входа откроется кабинет, история, баланс и синхрон с ботом.</p>
+        <div class="auth-methods">
+          <form class="contact-auth-form" data-contact-login-form>
+            <span>Telegram username</span>
+            <label><input name="contact" type="text" inputmode="email" autocomplete="email tel" placeholder="@username" required /></label>
+            <label><input name="full_name" type="text" autocomplete="name" placeholder="Ваше имя" /></label>
+            <div class="contact-code-row">
+              <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Код" disabled />
+              <button class="button ghost" type="button" data-contact-request>Получить код</button>
+            </div>
+            <button class="button primary" type="submit" data-contact-submit disabled>Войти</button>
+            <small data-contact-login-status>Код откроет кабинет и сохранит ваши работы.</small>
+          </form>
+          <div class="telegram-auth-panel">
+            <span>Telegram</span>
+            <p>Быстрый вход, баланс и привязка к вашему Telegram-аккаунту.</p>
+            <div class="telegram-slot" data-telegram-slot></div>
+            <div class="auth-fallback" data-auth-fallback hidden></div>
+          </div>
+        </div>
       </section>
     </div>
 

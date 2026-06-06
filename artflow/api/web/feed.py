@@ -14,7 +14,7 @@ router = APIRouter(tags=["web"])
 @router.get("/feed")
 async def feed(
     source: str = Query(default="feed", pattern="^(feed|recent|top|top_day)$"),
-    limit: int = Query(default=40, ge=1, le=100),
+    limit: int = Query(default=40, ge=1, le=300),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     if source in {"top", "top_day"}:
@@ -26,7 +26,7 @@ async def feed(
 
 @router.get("/feed/top")
 async def feed_top(
-    limit: int = Query(default=40, ge=1, le=100),
+    limit: int = Query(default=40, ge=1, le=300),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     cards = await repo.get_top_day_generations(session, limit=limit)

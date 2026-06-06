@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from core.model_pricing import image_pricing_keys, video_pricing_keys
+from api.public_files import mirror_url
 from db.models import (
     Generation,
     ImageGenerationAction,
@@ -31,6 +32,7 @@ from db.models import (
     Transaction,
     TransactionStatus,
     User,
+    WebAuthCode,
     WithdrawalStatus,
     CreditLedgerEntry,
 )
@@ -218,6 +220,198 @@ async def create_user(
     await session.refresh(user)
     logger.info("User created: tg_id=%s", tg_id)
     return user
+
+
+async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
+    result = await session.execute(select(User).where(User.email == email.lower()))
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_phone(session: AsyncSession, phone: str) -> User | None:
+    result = await session.execute(select(User).where(User.phone == phone))
+    return result.scalar_one_or_none()
+
+
+async def create_contact_user(
+    session: AsyncSession,
+    *,
+    email: str | None = None,
+    phone: str | None = None,
+    full_name: str | None = None,
+    welcome_credits: float = 0,
+    language: str = "ru",
+) -> User:
+    for _ in range(8):
+        pseudo_tg_id = -secrets.randbelow(9_000_000_000_000) - 1
+        if await get_user_by_tg_id(session, pseudo_tg_id) is None:
+            break
+    else:
+        raise RuntimeError("Could not allocate web user id")
+
+    user = User(
+        tg_id=pseudo_tg_id,
+        email=email.lower() if email else None,
+        phone=phone,
+        full_name=full_name,
+        credits=welcome_credits,
+        referral_code=secrets.token_urlsafe(8),
+        language=language,
+    )
+    session.add(user)
+    await session.flush()
+    if welcome_credits:
+        await _insert_credit_ledger(
+            session,
+            user_id=user.id,
+            delta=welcome_credits,
+            balance_after=welcome_credits,
+            entry_type="welcome_bonus",
+            source_type="web_contact",
+            source_id=email or phone or str(pseudo_tg_id),
+            note="Welcome bonus credits on web signup",
+        )
+    await session.commit()
+    await session.refresh(user)
+    logger.info("Web contact user created: user_id=%s", user.id)
+    return user
+
+
+async def create_web_auth_code(
+    session: AsyncSession,
+    *,
+    contact_type: str,
+    contact: str,
+    code_hash: str,
+    expires_at: datetime,
+) -> WebAuthCode:
+    code = WebAuthCode(
+        contact_type=contact_type,
+        contact=contact,
+        code_hash=code_hash,
+        expires_at=expires_at,
+    )
+    session.add(code)
+    await session.commit()
+    await session.refresh(code)
+    return code
+
+
+async def get_recent_web_auth_code(
+    session: AsyncSession,
+    *,
+    contact_type: str,
+    contact: str,
+    now: datetime,
+) -> WebAuthCode | None:
+    result = await session.execute(
+        select(WebAuthCode)
+        .where(
+            WebAuthCode.contact_type == contact_type,
+            WebAuthCode.contact == contact,
+            WebAuthCode.consumed_at.is_(None),
+            WebAuthCode.expires_at > now,
+        )
+        .order_by(desc(WebAuthCode.id))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def consume_active_web_auth_codes(
+    session: AsyncSession,
+    *,
+    contact_type: str,
+    contact: str,
+    now: datetime,
+) -> None:
+    await session.execute(
+        update(WebAuthCode)
+        .where(
+            WebAuthCode.contact_type == contact_type,
+            WebAuthCode.contact == contact,
+            WebAuthCode.consumed_at.is_(None),
+            WebAuthCode.expires_at > now,
+        )
+        .values(consumed_at=now)
+    )
+    await session.commit()
+
+
+async def get_active_web_auth_code(
+    session: AsyncSession,
+    *,
+    contact_type: str,
+    contact: str,
+    code_hash: str,
+    now: datetime,
+) -> WebAuthCode | None:
+    result = await session.execute(
+        select(WebAuthCode)
+        .where(
+            WebAuthCode.contact_type == contact_type,
+            WebAuthCode.contact == contact,
+            WebAuthCode.code_hash == code_hash,
+            WebAuthCode.consumed_at.is_(None),
+            WebAuthCode.expires_at > now,
+            WebAuthCode.attempts < 5,
+        )
+        .order_by(desc(WebAuthCode.id))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def consume_web_auth_code(session: AsyncSession, code_id: int, *, now: datetime) -> None:
+    await session.execute(
+        update(WebAuthCode)
+        .where(WebAuthCode.id == code_id, WebAuthCode.consumed_at.is_(None))
+        .values(consumed_at=now)
+    )
+    await session.commit()
+
+
+async def increment_web_auth_attempts(
+    session: AsyncSession,
+    *,
+    contact_type: str,
+    contact: str,
+    now: datetime,
+) -> None:
+    await session.execute(
+        update(WebAuthCode)
+        .where(
+            WebAuthCode.contact_type == contact_type,
+            WebAuthCode.contact == contact,
+            WebAuthCode.consumed_at.is_(None),
+            WebAuthCode.expires_at > now,
+        )
+        .values(attempts=WebAuthCode.attempts + 1)
+    )
+    await session.commit()
+
+
+async def bind_user_telegram(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    tg_id: int,
+    username: str | None = None,
+    full_name: str | None = None,
+    photo_url: str | None = None,
+) -> User | None:
+    await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(
+            tg_id=tg_id,
+            username=username,
+            full_name=full_name,
+            photo_url=photo_url,
+        )
+    )
+    await session.commit()
+    result = await session.execute(select(User).where(User.id == user_id))
+    return result.scalar_one_or_none()
 
 
 async def bind_user_referrer_once(
@@ -769,18 +963,22 @@ async def create_generation(
     session.add(gen)
     await session.commit()
     await session.refresh(gen)
+    await _publish_generation_update(gen)
     return gen
 
 
 async def update_generation_task(
     session: AsyncSession, gen_id: int, task_id: str
 ) -> None:
-    await session.execute(
+    result = await session.execute(
         update(Generation)
         .where(Generation.id == gen_id)
         .values(task_id=task_id, status=GenerationStatus.processing)
+        .returning(Generation)
     )
+    gen = result.scalar_one_or_none()
     await session.commit()
+    await _publish_generation_update(gen)
 
 
 async def finish_generation(
@@ -789,7 +987,15 @@ async def finish_generation(
     result_url: str,
     result_urls: list[str] | None = None,
 ) -> Generation | None:
-    clean_urls = [url for url in (result_urls or [result_url]) if url]
+    original_urls = [url for url in (result_urls or [result_url]) if url]
+    clean_urls: list[str] = []
+    for url in original_urls:
+        mirrored = await mirror_url(url)
+        if mirrored:
+            clean_urls.append(mirrored)
+    if not clean_urls:
+        clean_urls = original_urls
+    result_url = clean_urls[0] if clean_urls else result_url
     result = await session.execute(
         update(Generation)
         .where(

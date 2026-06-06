@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from api import openrouter_client
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -181,28 +182,49 @@ def _parse_prompt_moderation_json(raw: str) -> dict[str, Any]:
 
 
 async def _generate_text_reply(messages: list[dict[str, str]], *, system_prompt: str) -> str:
-    seen: set[str] = set()
-    models: list[str] = []
-    for model in (settings.KIE_ASSISTANT_MODEL, settings.KIE_ASSISTANT_FALLBACK, "claude-sonnet-4-5"):
-        if model and model not in seen:
-            seen.add(model)
-            models.append(model)
+    """Try the fastest known-good providers first.
 
-    for model in models:
-        if model.startswith("claude-"):
+    KIE currently serves the Responses API for GPT-style assistant models, but its
+    chat-completions fallback for the same model family returns 422 unsupported,
+    and the KIE Claude endpoint has been intermittently failing with 404/500.
+    To keep assistant replies fast and reliable in production, we only use the
+    KIE Responses path here and fall back directly to CometAPI text models.
+    """
+    if openrouter_client.force_migrated_models() and not openrouter_client.configured():
+        raise RuntimeError("OpenRouter is forced for assistant replies, but OPENROUTER_API_KEY is not configured")
+
+    if openrouter_client.configured():
+        openrouter_errors: list[str] = []
+        for model in _openrouter_assistant_models():
             try:
-                return await _call_kie_claude(model, messages, system_prompt=system_prompt)
+                reply = await _call_openrouter_chat(model, messages, system_prompt=system_prompt)
+                logger.info("assistant: generated via OpenRouter %s", model)
+                return reply
             except Exception as exc:
-                logger.warning("assistant: %s claude fallback failed — %s", model, exc)
+                openrouter_errors.append(f"{model}: {exc}")
+                logger.warning("assistant: OpenRouter %s failed — %s", model, exc)
+        if openrouter_client.force_migrated_models():
+            raise RuntimeError(
+                "Assistant OpenRouter models are unavailable: "
+                + ("; ".join(openrouter_errors) if openrouter_errors else "no OpenRouter models configured")
+            )
+
+    seen: set[str] = set()
+    kie_models: list[str] = []
+    for model in (settings.KIE_ASSISTANT_MODEL, settings.KIE_ASSISTANT_FALLBACK):
+        if not model or model in seen:
             continue
+        seen.add(model)
+        if str(model).startswith("claude-"):
+            logger.info("assistant: skipping KIE Claude fallback for %s; using Comet fallback instead", model)
+            continue
+        kie_models.append(model)
+
+    for model in kie_models:
         try:
             return await _call_kie_responses(model, messages, system_prompt=system_prompt)
         except Exception as exc:
             logger.warning("assistant: %s responses failed — %s", model, exc)
-        try:
-            return await _call_kie_chat(model, messages, system_prompt=system_prompt)
-        except Exception as exc:
-            logger.warning("assistant: %s chat fallback failed — %s", model, exc)
 
     for model in _comet_assistant_models():
         try:
@@ -238,6 +260,25 @@ def _comet_assistant_models() -> list[str]:
     seen: set[str] = set()
     for model in candidates:
         normalized = _normalize_comet_text_model(model)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            models.append(normalized)
+    return models
+
+
+def _openrouter_assistant_models() -> list[str]:
+    candidates = [
+        getattr(settings, "KIE_ASSISTANT_MODEL", None),
+        getattr(settings, "KIE_ASSISTANT_FALLBACK", None),
+        getattr(settings, "COMET_ASSISTANT_MODEL", None),
+        getattr(settings, "COMET_ASSISTANT_FALLBACK", None),
+        _COMET_DEFAULT_ASSISTANT_MODEL,
+        _COMET_DEFAULT_ASSISTANT_FALLBACK,
+    ]
+    models: list[str] = []
+    seen: set[str] = set()
+    for model in candidates:
+        normalized = openrouter_client.text_model_for_source(model)
         if normalized and normalized not in seen:
             seen.add(normalized)
             models.append(normalized)
@@ -417,3 +458,13 @@ async def _call_comet_chat(model: str, messages: list[dict[str, str]], *, system
         )
         resp.raise_for_status()
         return _extract_chat_output_text(resp.json())
+
+
+async def _call_openrouter_chat(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
+    payload = await openrouter_client.chat_completion(
+        model=model,
+        messages=_to_chat_messages(messages, system_prompt=system_prompt),
+        max_completion_tokens=4096,
+        reasoning_effort="medium",
+    )
+    return _extract_chat_output_text(payload)

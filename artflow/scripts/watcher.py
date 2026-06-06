@@ -118,6 +118,11 @@ def main() -> None:
     parser.add_argument("--debounce", type=float, default=2.0, help="seconds to wait after last change")
     args = parser.parse_args()
 
+    enabled = os.getenv("APIX_WATCHER_ENABLED", "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        log.info("Watcher disabled. Set APIX_WATCHER_ENABLED=true to run it.")
+        return
+
     _acquire_lock()
 
     root = Path(__file__).resolve().parent.parent

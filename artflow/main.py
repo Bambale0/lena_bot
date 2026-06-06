@@ -5,6 +5,7 @@ import asyncio
 import html
 import hmac
 import logging
+import mimetypes
 import tempfile
 import time
 from contextlib import asynccontextmanager
@@ -28,7 +29,7 @@ from aiogram.exceptions import TelegramEntityTooLarge
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -38,6 +39,7 @@ from api import comet_fallback
 from api.comet_client import close_client, get_client
 from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import router as miniapp_router
+from api.openrouter_client import close_client as close_openrouter_client
 from api.realtime import router as realtime_router
 from api.web import router as web_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_processing, is_success
@@ -59,12 +61,16 @@ from core.config import settings
 from core.logger import setup_logging
 from db.models import Generation, GenerationType, TransactionStatus
 from payments.cryptobot import verify_webhook_signature
+from payments.lava import cached_payment_url as lava_cached_payment_url, get_invoice as lava_get_invoice, is_success_webhook as lava_is_success_webhook, webhook_contract_id as lava_webhook_contract_id
 from payments.tbank import verify_notification_token
 from db import repository as repo
 from db.seed import run_seed
 from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+
+mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("image/avif", ".avif")
 
 _MJ_IMAGE_MODELS = {"midjourney-imagine", "midjourney-blend", "midjourney-action"}
 _MJ_DESCRIBE_MODEL = "midjourney-describe"
@@ -460,6 +466,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Broadcast scheduler shutdown failed")
     await close_client()
+    await close_openrouter_client()
     await redis_client.aclose()
     logger.info("Shutdown complete")
 
@@ -541,6 +548,8 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://apixbotai.com",
+        "https://www.apixbotai.com",
         "https://apix.chillcreative.ru",
         "https://artflow.ru",
         "http://localhost:3000",
@@ -828,8 +837,64 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
     return PlainTextResponse("OK")
 
 
+@app.get("/pay/lava/{invoice_id}")
+async def lava_pay_redirect(invoice_id: str) -> RedirectResponse:
+    pay_url = lava_cached_payment_url(invoice_id)
+    if not pay_url:
+        try:
+            data = await lava_get_invoice(invoice_id)
+            pay_url = str(data.get("paymentUrl") or data.get("payment_url") or "").strip()
+        except Exception as exc:
+            logger.error("Lava redirect lookup failed for %s: %s", invoice_id, exc)
+            raise HTTPException(status_code=502, detail="Payment service error")
+    if not pay_url:
+        raise HTTPException(status_code=404, detail="Payment link not found")
+    return RedirectResponse(pay_url, status_code=307)
+
 
 # ── KIE.AI Webhook ────────────────────────────────────────────────────────────
+
+@app.post(settings.LAVA_WEBHOOK_PATH)
+async def lava_webhook(request: Request) -> PlainTextResponse:
+    try:
+        data = await request.json()
+    except Exception as exc:
+        logger.warning("Invalid Lava webhook JSON: %s", exc)
+        return PlainTextResponse("OK")
+
+    if not lava_is_success_webhook(data):
+        return PlainTextResponse("OK")
+
+    external_id = lava_webhook_contract_id(data)
+    if not external_id:
+        logger.warning("Lava webhook without contractId: %s", data)
+        return PlainTextResponse("OK")
+
+    async with AsyncSessionLocal() as session:
+        confirmed = await repo.confirm_transaction_and_add_credits(
+            session,
+            external_id,
+            note="Payment confirmed via lava",
+        )
+        if confirmed:
+            tx, new_balance = confirmed
+            user = await repo.get_user_by_id(session, tx.user_id)
+            if user:
+                await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
+                if bot:
+                    try:
+                        await bot.send_message(
+                            user.tg_id,
+                            f"✅ Оплата через Lava подтверждена!\n"
+                            f"Зачислено: <b>+{tx.credits} 💋</b>\n"
+                            f"Баланс: <b>{new_balance} 💋</b>",
+                            reply_markup=back_to_menu_kb(),
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to notify user %s: %s", user.tg_id, e)
+
+    return PlainTextResponse("OK")
+
 
 @app.post(settings.KIE_WEBHOOK_PATH)
 async def kie_webhook(
@@ -1244,7 +1309,21 @@ async def health() -> dict:
 
 
 LANDING_DIR = Path("landing")
+LANDING_PAGE_ALIASES = {
+    "/account": "account.html",
+    "/login": "account.html",
+    "/studio": "studio.html",
+    "/gallery": "gallery.html",
+    "/models": "models.html",
+    "/contact": "contact.html",
+    "/features": "features.html",
+    "/guide": "guide.html",
+}
 if LANDING_DIR.exists():
+    for route_path, file_name in LANDING_PAGE_ALIASES.items():
+        async def _landing_alias(file_name=file_name):
+            return FileResponse(LANDING_DIR / file_name)
+        app.add_api_route(route_path, _landing_alias, methods=["GET", "HEAD"], include_in_schema=False)
     app.mount("/", StaticFiles(directory=str(LANDING_DIR), html=True), name="landing")
 else:
     @app.get("/", response_class=PlainTextResponse)

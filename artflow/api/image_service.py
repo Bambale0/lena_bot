@@ -19,7 +19,7 @@ except ImportError:
 
 from typing import Any
 
-from api import comet_fallback, kieai_client
+from api import comet_fallback, kieai_client, openrouter_client
 from api.kie_model_specs import IMAGE_SPECS, build_kie_input, resolve_model_for_reference
 from api.public_files import local_upload_path_from_url
 
@@ -308,12 +308,16 @@ async def _upload_local_kie_reference(url: str) -> str | None:
 async def _prepare_reference_urls_for_model(
     model: ImageModel,
     image_url: str | list[str] | None,
+    *,
+    prefer_openrouter: bool = False,
 ) -> str | list[str] | None:
     urls = _reference_list(image_url)
     if not urls:
         return image_url
 
     resolved_model = resolve_model_for_reference(model.value)
+    if prefer_openrouter and openrouter_client.image_model_for_source(resolved_model) and openrouter_client.configured():
+        return image_url
     if resolved_model not in _KIE_UPLOAD_REFERENCE_MODELS:
         return image_url
 
@@ -350,7 +354,11 @@ async def generate_image(
     quality: str = "basic",             # "basic"=2K / "high"=4K (Seedream)
     callback_url: str | None = None,
 ) -> ImageResult:
-    prepared_image_url = await _prepare_reference_urls_for_model(model, image_url)
+    prepared_image_url = await _prepare_reference_urls_for_model(
+        model,
+        image_url,
+        prefer_openrouter=openrouter_client.force_migrated_models(),
+    )
     resolved_model, inp = _build_input(model, prompt, prepared_image_url, aspect_ratio, n, quality)
     comet_aspect_ratio = str(inp.get("aspect_ratio") or inp.get("image_size") or "") or None
     comet_resolution = str(inp.get("resolution") or "") or None
@@ -358,6 +366,43 @@ async def generate_image(
         comet_count = int(inp.get("n") or inp.get("num_images") or n or 1)
     except (TypeError, ValueError):
         comet_count = 1
+
+    openrouter_model = openrouter_client.image_model_for_source(resolved_model)
+    if openrouter_model:
+        if not openrouter_client.configured():
+            if openrouter_client.force_migrated_models():
+                raise RuntimeError(
+                    f"OpenRouter is forced for {resolved_model}, but OPENROUTER_API_KEY is not configured"
+                )
+        else:
+            try:
+                result = await openrouter_client.generate_image(
+                    source_model=resolved_model,
+                    prompt=str(inp.get("prompt") or prompt),
+                    reference_urls=prepared_image_url,
+                    aspect_ratio=comet_aspect_ratio,
+                    count=comet_count,
+                    resolution=comet_resolution,
+                    quality=str(inp.get("quality") or quality or "") or None,
+                )
+                return ImageResult(
+                    is_async=False,
+                    task_id=result.task_id,
+                    url=result.urls[0],
+                    result_urls=result.urls,
+                )
+            except Exception as openrouter_exc:
+                if openrouter_client.force_migrated_models():
+                    raise RuntimeError(
+                        f"OpenRouter image generation failed for {resolved_model} -> {openrouter_model}: "
+                        f"{openrouter_exc}"
+                    ) from openrouter_exc
+                logger.warning(
+                    "OpenRouter image create failed for %s -> %s; trying KIE.AI: %s",
+                    resolved_model,
+                    openrouter_model,
+                    openrouter_exc,
+                )
 
     try:
         resp = await kieai_client.create_task({"model": resolved_model, "input": inp}, callback_url=callback_url)
@@ -475,6 +520,8 @@ def _build_input(
 
 async def poll_kieai_result_urls(task_id: str) -> list[str] | None:
     """Universal poller for all KIE.AI image models."""
+    if openrouter_client.is_openrouter_task_id(task_id):
+        raise RuntimeError("OpenRouter image generation is synchronous and cannot be polled")
     resp = await kieai_client.get_task_status(task_id)
     if not isinstance(resp, dict):
         raise RuntimeError(f"KIE.AI image: invalid status response for task {task_id}: {resp!r}")

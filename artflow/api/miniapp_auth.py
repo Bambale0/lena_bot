@@ -67,7 +67,7 @@ def verify_web_auth_token(token: str) -> int:
         exp = int(payload.get("exp") or 0)
     except Exception:
         raise HTTPException(status_code=401, detail="Malformed web auth token")
-    if tg_id <= 0 or exp <= int(time.time()):
+    if tg_id == 0 or exp <= int(time.time()):
         raise HTTPException(status_code=401, detail="Web auth token expired")
     return tg_id
 

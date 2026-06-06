@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+
 from api.web.auth import telegram_start_link
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import (
@@ -13,6 +15,8 @@ from api.web.schemas import (
 )
 from core.config import settings
 from db import repository as repo
+from bot.handlers.balance import withdrawal_request_admin_kb
+from bot.i18n import t
 from db.session import get_session
 
 router = APIRouter(tags=["web"])
@@ -90,4 +94,27 @@ async def create_referral_withdrawal(
         )
     except repo.InsufficientReferralBalanceError as exc:
         return error_response(402, f"Доступно к выводу {exc.available_amount:.2f}₽")
+
+    from main import bot
+
+    admin_text = t(
+        "withdraw_admin_notify", getattr(user, "language", "ru") or "ru",
+        id=item.id,
+        username=user.username or "—",
+        tg_id=user.tg_id,
+        full_name=user.full_name or "—",
+        amount=float(item.amount_rub),
+        details=item.payout_details,
+    )
+    if bot:
+        for admin_id in settings.ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    admin_text,
+                    reply_markup=withdrawal_request_admin_kb(item.id),
+                )
+            except (TelegramBadRequest, TelegramForbiddenError, Exception):
+                continue
+
     return ok(ReferralWithdrawalCard.from_withdrawal(item).model_dump())

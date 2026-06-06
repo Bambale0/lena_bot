@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
+import mimetypes
 
+import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +25,8 @@ from api.miniapp_routes import (
     get_generation as miniapp_get_generation,
     list_image_models as miniapp_list_image_models,
     list_music_models as miniapp_list_music_models,
+    list_payment_methods as miniapp_list_payment_methods,
+    list_payment_options as miniapp_list_payment_options,
     list_plans as miniapp_list_plans,
     list_video_models as miniapp_list_video_models,
     miniapp_improve_prompt,
@@ -33,6 +38,7 @@ from api.miniapp_routes import (
     share_generation as miniapp_share_generation,
     share_to_library as miniapp_share_to_library,
     topup_crypto as miniapp_topup_crypto,
+    topup_lava as miniapp_topup_lava,
     topup_stars as miniapp_topup_stars,
     topup_tbank as miniapp_topup_tbank,
 )
@@ -144,6 +150,41 @@ async def active_generations(
     items = await repo.get_user_active_generations(session, user.id)
     return ok([GenerationCard.from_generation(item).model_dump() for item in items])
 
+
+@router.get("/generations/{generation_id}/download")
+async def generation_download(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    generation = await repo.get_generation_by_id(session, generation_id)
+    if generation is None or int(getattr(generation, "user_id", 0) or 0) != int(user.id):
+        return error_response(404, "Generation not found")
+    result_url = GenerationCard.from_generation(generation).result_url
+    if not result_url:
+        return error_response(409, "Result is not ready yet")
+
+    parsed = urlparse(result_url)
+    filename = parsed.path.rsplit("/", 1)[-1] or f"generation-{generation_id}"
+    if "." not in filename:
+        ext = mimetypes.guess_extension(getattr(generation, "mime_type", None) or "") or ".bin"
+        filename = f"generation-{generation_id}{ext}"
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            remote = await client.get(result_url)
+            remote.raise_for_status()
+    except httpx.HTTPError:
+        return error_response(502, "Could not fetch generated file")
+
+    media_type = remote.headers.get("content-type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return Response(
+        content=remote.content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 @router.get("/generations/{generation_id}")
 async def generation_detail(
@@ -279,6 +320,20 @@ async def billing_plans(
     return await _call_miniapp(miniapp_list_plans, response=response, session=session)
 
 
+@router.get("/billing/payment-methods")
+async def billing_payment_methods(
+    session: AsyncSession = Depends(get_session),
+):
+    return await _call_miniapp(miniapp_list_payment_methods, session=session)
+
+
+@router.get("/billing/payment-options")
+async def billing_payment_options(
+    session: AsyncSession = Depends(get_session),
+):
+    return await _call_miniapp(miniapp_list_payment_options, session=session)
+
+
 @router.post("/billing/topup/tbank")
 async def topup_tbank(
     body: TopupRequest,
@@ -310,3 +365,14 @@ async def topup_crypto(
     if auth_error := _auth_required(user):
         return auth_error
     return await _call_miniapp(miniapp_topup_crypto, body=body, session=session, user=user)
+
+
+@router.post("/billing/topup/lava")
+async def topup_lava(
+    body: TopupRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_topup_lava, body=body, session=session, user=user)

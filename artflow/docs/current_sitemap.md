@@ -1,78 +1,75 @@
 # APIX Studio: актуальная карта сайта
 
-Дата актуализации: 2026-05-24.
+Дата актуализации: 2026-05-31.
 
-## Канонический публичный URL
+## Канонические публичные URL
 
 | URL | Назначение | Индексация | Комментарий |
 | --- | --- | --- | --- |
-| `/` | Основной лендинг и SPA-точка входа APIX Studio | Да | Единственный canonical URL в `landing/sitemap.xml`. |
-| `/#/features` | Возможности продукта | Нет как отдельный URL | Hash-route внутри `landing/index.html`; используется для навигации, не для SEO. |
-| `/#/gallery` | Галерея и примеры результатов | Нет как отдельный URL | Hash-route, алиасы: `/#/examples`, `/#/feed`. |
-| `/#/billing` | Тарифы, баланс, апгрейд | Нет как отдельный URL | До входа - тарифы; после входа - баланс и транзакции. |
-| `/#/business` | B2B/командные сценарии | Нет как отдельный URL | Публичная секция в SPA. |
-| `/#/profile` | Вход через Telegram / профиль | Нет как отдельный URL | После авторизации ведет в app-shell. |
+| `/` | Главная продуктовая страница со сценариями создания | Да | Ведет в реальные разделы сайта, не заменяет кабинет. |
+| `/studio.html` | Создание картинки, видео и музыки | Да | Поддерживает `type=image|video|music`, `flow=text|reference|edit`, `model`. |
+| `/models.html` | Каталог моделей и возможностей | Да | Группирует варианты одной модели без дублей для пользователя. |
+| `/model.html?model=<model_key>` | Обучение по конкретной модели | Да | Возможности, интерактивный маршрут, FAQ, примеры, лайфхаки и переход в Studio с готовым тестом. |
+| `/gallery.html` | Галерея реальных работ и идей | Да | Карточки поддерживают лайк и запуск похожей работы после входа. |
+| `/account.html` | Личный кабинет | Да | Вкладки открываются через hash: `#queue`, `#library`, `#billing`, `#assistant`. |
 
-## Авторизованная web-app зона
+## Совместимые страницы
 
-| URL | Назначение | Сегмент | Комментарий |
-| --- | --- | --- | --- |
-| `/#/quick` | Быстрый запуск генерации | Новичок / оба | Простые действия: картинка, фото-видео, видео, редактирование фото. |
-| `/#/pro` | PRO Studio | Pro | Полные настройки моделей, референсов, качества, batch и video duration. Алиас: `/#/studio`. |
-| `/#/projects` | Проектный контекст | Pro / оба | Раздел предусмотрен в навигации; требует дальнейшего развития project/session/version model. |
-| `/#/library` | Моя библиотека | Оба | История и результаты пользователя. Алиас: `/#/works`. |
-| `/#/templates` | Шаблоны и prompt catalog | Оба | Алиас: `/#/prompts`. |
-| `/#/marketplace` | Маркетплейс шаблонов/пресетов | Оба | Product surface для curated presets. |
-| `/#/referrals` | Реферальная программа | Оба | Привязано к billing/growth механикам. |
-| `/#/settings` | Настройки аккаунта | Оба | Профиль, язык, web session state. |
-| `/#/admin` | Админ-поверхность | Admin | Доступ должен контролироваться backend-правами. |
+| URL | Canonical | Назначение |
+| --- | --- | --- |
+| `/features.html` | `/models.html` | Совместимый вход в возможности продукта. |
+| `/guide.html` | `/studio.html` | Совместимый вход в маршрут создания. |
+| `/contact.html` | `/account.html#assistant` | Совместимый вход в помощь и ассистента. |
+
+## Авторизованная зона
+
+| URL | Назначение | Комментарий |
+| --- | --- | --- |
+| `/account.html#quick` | Быстрый старт | Основной сценарий: идея -> модель -> проверка -> очередь. |
+| `/account.html#pro` | Точные настройки | Качество, варианты и длительность без дублей основного меню. |
+| `/account.html#queue` | Очередь | Готовность работ и текущие задачи. |
+| `/account.html#library` | Библиотека | История, публикация, сохранение и удаление работ. |
+| `/account.html#billing` | Баланс | Пакеты credits и только реально доступные способы оплаты. |
+| `/account.html#referrals` | Рефералы | Ссылка, уровни, выплаты и заявки. |
+| `/account.html#prompts` | Мои идеи | Сохранение и модерация пользовательских идей. |
+| `/account.html#feed` | Лента работ | Лайки, шаринг и создание похожей работы. |
+| `/account.html#assistant` | Помощник | Продуктовый ассистент через `/api/web/assistant`. |
+| `/account.html#settings` | Помощь | Язык и справка через `/api/web/help`. |
 
 ## Служебные поверхности
 
-| URL | Назначение | Индексация | Комментарий |
-| --- | --- | --- | --- |
-| `/sitemap.xml` | XML sitemap | Да | Отдает только canonical landing URL. |
-| `/robots.txt` | Robots policy | Да | Запрещает crawl для API, mini app и пользовательских uploads. |
-| `/app` | Telegram Mini App | Нет | Отдельная поверхность, не часть публичного лендинга. |
-| `/api/web/*` | Web API для лендинга/app-shell | Нет | Служебный API. |
-| `/api/v1/*` | Основной API web studio | Нет | Auth, models, generations, billing и realtime. |
-| `/api/v1/ws/generations` | WebSocket статусы генераций | Нет | Realtime queue/progress для UX без refresh. |
-| `/static/upload/*` | Пользовательские ассеты | Нет | Не индексировать без отдельной политики публикации. |
-
-## Legacy HTML
-
-| URL | Статус | Рекомендация |
+| URL | Назначение | Индексация |
 | --- | --- | --- |
-| `/features.html` | Legacy | Не включать в XML sitemap; позже заменить редиректом на `/#/features` или обновить как отдельную SEO-страницу. |
-| `/guide.html` | Legacy | Не включать в XML sitemap до актуализации контента. |
-| `/contact.html` | Legacy | Не включать в XML sitemap до решения по публичному contact/support flow. |
-| `/account.html` | Legacy | Не включать в XML sitemap; текущий вход живет в SPA через Telegram auth config. |
+| `/sitemap.xml` | XML sitemap публичных страниц | Да |
+| `/robots.txt` | Robots policy | Да |
+| `/app` | Telegram Mini App | Нет |
+| `/api/web/*` | Web API сайта | Нет |
+| `/api/v1/*` | Внутренние маршруты mini app/bot API | Нет |
+| `/api/web/ws/generations` | Realtime статусы сайта | Нет |
+| `/api/v1/ws/generations` | Внутренний realtime mini app/bot API | Нет |
+| `/static/upload/*` | Пользовательские ассеты | Нет |
 
 ## Mermaid
 
 ```mermaid
 flowchart TD
-    root["/ canonical landing"] --> public["Public SPA sections"]
-    public --> features["/#/features"]
-    public --> gallery["/#/gallery"]
-    public --> billing["/#/billing"]
-    public --> business["/#/business"]
-    public --> profile["/#/profile"]
+    root["/"] --> studio["/studio.html"]
+    root --> models["/models.html"]
+    models --> model["/model.html?model"]
+    root --> gallery["/gallery.html"]
+    root --> account["/account.html"]
 
-    profile --> auth["Telegram auth"]
-    auth --> app["Authenticated app shell"]
-    app --> quick["/#/quick"]
-    app --> pro["/#/pro"]
-    app --> projects["/#/projects"]
-    app --> library["/#/library"]
-    app --> templates["/#/templates"]
-    app --> marketplace["/#/marketplace"]
-    app --> referrals["/#/referrals"]
-    app --> settings["/#/settings"]
-    app --> admin["/#/admin"]
+    studio --> review["Проверка запуска"]
+    review --> queue["/account.html#queue"]
 
-    root --> sitemap["/sitemap.xml"]
-    root --> robots["/robots.txt"]
-    app -. realtime .-> ws["/api/v1/ws/generations"]
-    app -. api .-> api["/api/web/* and /api/v1/*"]
+    account --> quick["#quick"]
+    account --> pro["#pro"]
+    account --> library["#library"]
+    account --> billing["#billing"]
+    account --> assistant["#assistant"]
+
+    models -. data .-> apiweb["/api/web/landing"]
+    gallery -. actions .-> apiweb
+    account -. auth/actions .-> apiweb
+    queue -. realtime .-> ws["/api/web/ws/generations"]
 ```

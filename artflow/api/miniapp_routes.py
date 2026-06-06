@@ -14,9 +14,11 @@ from typing import Any
 from urllib.parse import urlencode, urljoin, urlparse
 
 import httpx
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import LabeledPrice
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import Date, String, cast, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, midjourney_service, video_service
@@ -27,7 +29,7 @@ from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_tel
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.public_files import public_url_is_available
 from api.video_service import VideoModel
-from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
+from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS, _IMAGE_MODEL_ORDER, _VIDEO_MODEL_ORDER
 from bot.utils.deep_links import build_start_payload
 from core.config import settings
 from core.gemini_omni import (
@@ -41,13 +43,19 @@ from core.gemini_omni import (
 )
 from db import repository as repo
 from db.models import (
+    CreditLedgerEntry,
+    Generation,
     GenerationStatus,
     GenerationType,
     ImageGenerationAction,
     PaymentProvider,
     PromptStatus,
+    ReferralWithdrawalRequest,
+    Transaction,
     TransactionStatus,
     User,
+    UserPrompt,
+    WithdrawalStatus,
 )
 from db.session import get_session
 
@@ -1213,6 +1221,31 @@ async def miniapp_create_referral_withdrawal(
             status_code=402,
             detail=f"Доступно к выводу {exc.available_amount:.2f}₽",
         ) from exc
+
+    from main import bot
+    from bot.handlers.balance import withdrawal_request_admin_kb
+    from bot.i18n import t
+
+    admin_text = t(
+        "withdraw_admin_notify", getattr(user, "language", "ru") or "ru",
+        id=item.id,
+        username=user.username or "—",
+        tg_id=user.tg_id,
+        full_name=user.full_name or "—",
+        amount=float(item.amount_rub),
+        details=item.payout_details,
+    )
+    if bot:
+        for admin_id in settings.ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    admin_text,
+                    reply_markup=withdrawal_request_admin_kb(item.id),
+                )
+            except (TelegramBadRequest, TelegramForbiddenError, Exception):
+                continue
+
     return _withdrawal_out(item)
 
 
@@ -1326,7 +1359,8 @@ async def list_image_models(
             has_quality=bool(caps.get("has_quality")),
             max_refs=int(caps.get("max_refs", 1) or 1),
         ))
-    return result
+    order = {key: idx for idx, key in enumerate(_IMAGE_MODEL_ORDER)}
+    return sorted(result, key=lambda item: (order.get(item.key, 10_000), item.display_name.lower()))
 
 
 @router.get("/models/video", response_model=list[ModelInfo])
@@ -1371,7 +1405,8 @@ async def list_video_models(
                 for res, prices in (caps.get("price_table") or {}).items()
             },
         ))
-    return result
+    order = {key: idx for idx, key in enumerate(_VIDEO_MODEL_ORDER)}
+    return sorted(result, key=lambda item: (order.get(item.key, 10_000), item.display_name.lower()))
 
 
 @router.get("/models/music", response_model=list[ModelInfo])
@@ -1821,7 +1856,7 @@ async def get_history(
 @router.get("/feed")
 async def get_feed(
     source: str = Query(default="recent", pattern="^(recent|top_day|top)$"),
-    limit: int = Query(default=40, ge=1, le=100),
+    limit: int = Query(default=40, ge=1, le=300),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> list[dict]:
@@ -2419,7 +2454,417 @@ async def submit_prompt(
     return {"id": p.id, "status": p.status.value, "message": "Sent to manual moderation"}
 
 
+
+class AdminCreditsRequest(BaseModel):
+    amount: float
+    note: str | None = None
+
+
+class AdminBanRequest(BaseModel):
+    banned: bool
+
+
+class AdminWithdrawalReviewRequest(BaseModel):
+    action: str = Field(pattern="^(approve|reject)$")
+    note: str | None = None
+
+
+def _admin_guard(user: User | None) -> None:
+    if not _is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def _admin_iso(value: Any) -> str:
+    return value.isoformat() if value else ""
+
+
+def _admin_series(rows: list[tuple[Any, Any]], labels: list[str]) -> list[dict[str, Any]]:
+    mapping = {str(day): float(value or 0) for day, value in rows}
+    return [{"date": label, "value": mapping.get(label, 0)} for label in labels]
+
+
+@router.get("/admin/overview")
+async def admin_overview(
+    days: int = Query(default=14, ge=7, le=60),
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _admin_guard(user)
+
+    today = datetime.now(timezone.utc).date()
+    since_day = today - timedelta(days=days - 1)
+    since_dt = datetime.combine(since_day, datetime.min.time(), tzinfo=timezone.utc)
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    labels = [str(since_day + timedelta(days=i)) for i in range(days)]
+
+    users_total = int((await session.execute(select(func.count(User.id)))).scalar() or 0)
+    users_new_7d = int((await session.execute(select(func.count(User.id)).where(User.created_at >= seven_days_ago))).scalar() or 0)
+    paid_users = int((await session.execute(select(func.count(func.distinct(Transaction.user_id))).where(Transaction.status == TransactionStatus.paid))).scalar() or 0)
+    revenue_total = float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.status == TransactionStatus.paid))).scalar() or 0)
+    revenue_7d = float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.status == TransactionStatus.paid, Transaction.created_at >= seven_days_ago))).scalar() or 0)
+    generations_total = int((await session.execute(select(func.count(Generation.id)))).scalar() or 0)
+    generations_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago))).scalar() or 0)
+    image_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago, Generation.gen_type == GenerationType.image))).scalar() or 0)
+    video_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago, Generation.gen_type == GenerationType.video))).scalar() or 0)
+    music_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago, Generation.gen_type == GenerationType.music))).scalar() or 0)
+    done_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago, Generation.status == GenerationStatus.done))).scalar() or 0)
+    failed_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago, Generation.status == GenerationStatus.failed))).scalar() or 0)
+    pending_withdrawals_count = int((await session.execute(select(func.count(ReferralWithdrawalRequest.id)).where(ReferralWithdrawalRequest.status == WithdrawalStatus.pending))).scalar() or 0)
+    pending_withdrawals_amount = float((await session.execute(select(func.coalesce(func.sum(ReferralWithdrawalRequest.amount_rub), 0)).where(ReferralWithdrawalRequest.status == WithdrawalStatus.pending))).scalar() or 0)
+    pending_prompts = int((await session.execute(select(func.count(UserPrompt.id)).where(UserPrompt.status == PromptStatus.pending))).scalar() or 0)
+
+    users_rows = (await session.execute(
+        select(cast(User.created_at, Date), func.count(User.id))
+        .where(User.created_at >= since_dt)
+        .group_by(cast(User.created_at, Date))
+        .order_by(cast(User.created_at, Date))
+    )).all()
+    revenue_rows = (await session.execute(
+        select(cast(Transaction.created_at, Date), func.coalesce(func.sum(Transaction.amount_rub), 0))
+        .where(Transaction.status == TransactionStatus.paid, Transaction.created_at >= since_dt)
+        .group_by(cast(Transaction.created_at, Date))
+        .order_by(cast(Transaction.created_at, Date))
+    )).all()
+    generation_rows = (await session.execute(
+        select(cast(Generation.created_at, Date), func.count(Generation.id))
+        .where(Generation.created_at >= since_dt)
+        .group_by(cast(Generation.created_at, Date))
+        .order_by(cast(Generation.created_at, Date))
+    )).all()
+    top_models = (await session.execute(
+        select(Generation.model, func.count(Generation.id).label("count"))
+        .where(Generation.created_at >= seven_days_ago)
+        .group_by(Generation.model)
+        .order_by(desc("count"))
+        .limit(8)
+    )).all()
+    providers = (await session.execute(
+        select(Transaction.provider, func.count(Transaction.id), func.coalesce(func.sum(Transaction.amount_rub), 0))
+        .where(Transaction.created_at >= thirty_days_ago)
+        .group_by(Transaction.provider)
+        .order_by(desc(func.count(Transaction.id)))
+    )).all()
+
+    return {
+        "summary": {
+            "users_total": users_total,
+            "users_new_7d": users_new_7d,
+            "paid_users": paid_users,
+            "revenue_total": revenue_total,
+            "revenue_7d": revenue_7d,
+            "generations_total": generations_total,
+            "generations_7d": generations_7d,
+            "image_7d": image_7d,
+            "video_7d": video_7d,
+            "music_7d": music_7d,
+            "success_rate_7d": round((done_7d / max(done_7d + failed_7d, 1)) * 100, 1),
+            "pending_withdrawals_count": pending_withdrawals_count,
+            "pending_withdrawals_amount": pending_withdrawals_amount,
+            "pending_prompts": pending_prompts,
+        },
+        "charts": {
+            "users": _admin_series(users_rows, labels),
+            "revenue": _admin_series(revenue_rows, labels),
+            "generations": _admin_series(generation_rows, labels),
+        },
+        "top_models": [{"model": str(model or "unknown"), "count": int(count or 0)} for model, count in top_models],
+        "providers": [
+            {"provider": getattr(provider, "value", str(provider or "unknown")), "count": int(count or 0), "revenue": float(revenue or 0)}
+            for provider, count, revenue in providers
+        ],
+    }
+
+
+@router.get("/admin/users")
+async def admin_users(
+    query: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=100),
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _admin_guard(user)
+
+    cleaned = str(query or "").strip()
+    stmt = select(User).order_by(desc(User.created_at)).limit(limit)
+    if cleaned:
+        like = f"%{cleaned}%"
+        stmt = (
+            select(User)
+            .where(
+                or_(
+                    cast(User.id, String).ilike(like),
+                    cast(User.tg_id, String).ilike(like),
+                    func.coalesce(User.username, "").ilike(like),
+                    func.coalesce(User.full_name, "").ilike(like),
+                )
+            )
+            .order_by(desc(User.created_at))
+            .limit(limit)
+        )
+    rows = list((await session.execute(stmt)).scalars().all())
+    items = []
+    for row in rows:
+        generations_count = int((await session.execute(select(func.count(Generation.id)).where(Generation.user_id == row.id))).scalar() or 0)
+        paid_rub = float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.user_id == row.id, Transaction.status == TransactionStatus.paid))).scalar() or 0)
+        items.append({
+            "id": int(row.id),
+            "tg_id": int(row.tg_id),
+            "username": row.username,
+            "full_name": row.full_name,
+            "credits": float(row.credits or 0),
+            "referral_balance": float(row.referral_balance or 0),
+            "is_banned": bool(row.is_banned),
+            "created_at": _admin_iso(row.created_at),
+            "generations_count": generations_count,
+            "paid_rub": paid_rub,
+        })
+    return {"items": items}
+
+
+@router.get("/admin/users/{user_id}")
+async def admin_user_detail(
+    user_id: int,
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _admin_guard(user)
+    target = await repo.get_user_by_id(session, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    generations = list((await session.execute(select(Generation).where(Generation.user_id == user_id).order_by(desc(Generation.created_at)).limit(20))).scalars().all())
+    transactions = list((await session.execute(select(Transaction).where(Transaction.user_id == user_id).order_by(desc(Transaction.created_at)).limit(20))).scalars().all())
+    ledger = list((await session.execute(select(CreditLedgerEntry).where(CreditLedgerEntry.user_id == user_id).order_by(desc(CreditLedgerEntry.created_at)).limit(20))).scalars().all())
+    withdrawals = await repo.get_user_withdrawal_requests(session, user_id, limit=20)
+    l1, l2, l3 = await repo.count_user_referrals(session, user_id)
+
+    return {
+        "user": {
+            "id": int(target.id),
+            "tg_id": int(target.tg_id),
+            "username": target.username,
+            "full_name": target.full_name,
+            "photo_url": target.photo_url,
+            "credits": float(target.credits or 0),
+            "referral_balance": float(target.referral_balance or 0),
+            "language": target.language,
+            "is_banned": bool(target.is_banned),
+            "created_at": _admin_iso(target.created_at),
+        },
+        "stats": {
+            "generations_count": int((await session.execute(select(func.count(Generation.id)).where(Generation.user_id == user_id))).scalar() or 0),
+            "paid_rub": float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.user_id == user_id, Transaction.status == TransactionStatus.paid))).scalar() or 0),
+            "payments_count": int((await session.execute(select(func.count(Transaction.id)).where(Transaction.user_id == user_id, Transaction.status == TransactionStatus.paid))).scalar() or 0),
+            "referrals": {"l1": l1, "l2": l2, "l3": l3},
+        },
+        "generations": [
+            {
+                "id": int(item.id),
+                "model": item.model,
+                "gen_type": getattr(item.gen_type, "value", item.gen_type),
+                "status": getattr(item.status, "value", item.status),
+                "credits_spent": float(item.credits_spent or 0),
+                "result_url": item.result_url,
+                "created_at": _admin_iso(item.created_at),
+            }
+            for item in generations
+        ],
+        "transactions": [
+            {
+                "id": int(item.id),
+                "provider": getattr(item.provider, "value", item.provider),
+                "status": getattr(item.status, "value", item.status),
+                "amount_rub": float(item.amount_rub or 0),
+                "credits": float(item.credits or 0),
+                "external_id": item.external_id,
+                "created_at": _admin_iso(item.created_at),
+            }
+            for item in transactions
+        ],
+        "ledger": [
+            {
+                "id": int(item.id),
+                "delta": float(item.delta or 0),
+                "balance_after": float(item.balance_after or 0),
+                "entry_type": item.entry_type,
+                "note": item.note,
+                "created_at": _admin_iso(item.created_at),
+            }
+            for item in ledger
+        ],
+        "withdrawals": [
+            {
+                "id": int(item.id),
+                "amount_rub": float(item.amount_rub or 0),
+                "status": getattr(item.status, "value", item.status),
+                "payout_details": item.payout_details,
+                "admin_note": item.admin_note,
+                "created_at": _admin_iso(item.created_at),
+                "reviewed_at": _admin_iso(item.reviewed_at),
+            }
+            for item in withdrawals
+        ],
+    }
+
+
+@router.post("/admin/users/{user_id}/credits")
+async def admin_user_credits(
+    user_id: int,
+    body: AdminCreditsRequest,
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    admin = user
+    _admin_guard(admin)
+    target = await repo.get_user_by_id(session, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    amount = float(body.amount or 0)
+    if amount == 0:
+        return {"ok": True, "balance": float(target.credits or 0)}
+    if amount > 0:
+        balance = await repo.add_credits(
+            session,
+            user_id,
+            amount,
+            entry_type="admin_adjustment",
+            source_type="admin",
+            source_id=str(getattr(admin, "tg_id", "")),
+            note=body.note or "Admin credit adjustment",
+        )
+    else:
+        spent = await repo.spend_credits(
+            session,
+            user_id,
+            abs(amount),
+            entry_type="admin_adjustment",
+            source_type="admin",
+            source_id=str(getattr(admin, "tg_id", "")),
+            note=body.note or "Admin credit adjustment",
+        )
+        if not spent:
+            raise HTTPException(status_code=400, detail="Insufficient user credits")
+        refreshed = await repo.get_user_by_id(session, user_id)
+        balance = float(getattr(refreshed, "credits", 0) or 0)
+    return {"ok": True, "balance": float(balance)}
+
+
+@router.post("/admin/users/{user_id}/ban")
+async def admin_user_ban(
+    user_id: int,
+    body: AdminBanRequest,
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _admin_guard(user)
+    target = await repo.get_user_by_id(session, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    changed = await (repo.ban_user(session, target.tg_id) if body.banned else repo.unban_user(session, target.tg_id))
+    return {"ok": True, "changed": bool(changed), "banned": bool(body.banned)}
+
+
+@router.get("/admin/withdrawals")
+async def admin_withdrawals(
+    status: str = Query(default="pending", pattern="^(pending|approved|rejected|all)$"),
+    limit: int = Query(default=50, ge=1, le=200),
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _admin_guard(user)
+    stmt = select(ReferralWithdrawalRequest, User).join(User, ReferralWithdrawalRequest.user_id == User.id)
+    if status != "all":
+        stmt = stmt.where(ReferralWithdrawalRequest.status == WithdrawalStatus(status))
+    stmt = stmt.order_by(desc(ReferralWithdrawalRequest.created_at)).limit(limit)
+    rows = (await session.execute(stmt)).all()
+    items = []
+    for request, owner in rows:
+        items.append({
+            "id": int(request.id),
+            "status": getattr(request.status, "value", request.status),
+            "amount_rub": float(request.amount_rub or 0),
+            "payout_details": request.payout_details,
+            "admin_note": request.admin_note,
+            "created_at": _admin_iso(request.created_at),
+            "reviewed_at": _admin_iso(request.reviewed_at),
+            "user": {
+                "id": int(owner.id),
+                "tg_id": int(owner.tg_id),
+                "username": owner.username,
+                "full_name": owner.full_name,
+            },
+        })
+    return {"items": items}
+
+
+@router.post("/admin/withdrawals/{request_id}/review")
+async def admin_withdrawal_review(
+    request_id: int,
+    body: AdminWithdrawalReviewRequest,
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _admin_guard(user)
+    result = await repo.set_withdrawal_status(
+        session,
+        request_id,
+        status=WithdrawalStatus.approved if body.action == "approve" else WithdrawalStatus.rejected,
+        admin_tg_id=int(getattr(user, "tg_id", 0) or 0),
+        admin_note=body.note,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Withdrawal request not found or already reviewed")
+    return {
+        "ok": True,
+        "item": {
+            "id": int(result.request.id),
+            "status": getattr(result.request.status, "value", result.request.status),
+            "reviewed_at": _admin_iso(result.request.reviewed_at),
+            "admin_note": result.request.admin_note,
+        },
+    }
+
 # ── payments ──────────────────────────────────────────────────────────────────
+
+
+
+@router.get("/payment-methods")
+async def list_payment_methods(
+    session: AsyncSession = Depends(get_session),
+) -> list[str]:
+    plans = await repo.get_active_price_plans(session)
+    plan_keys = [str(plan.key) for plan in plans]
+    methods: list[str] = []
+    if settings.TBANK_TERMINAL_KEY and settings.TBANK_PASSWORD:
+        methods.append("tbank")
+    if settings.TELEGRAM_STARS_ENABLED:
+        methods.append("stars")
+    if settings.CRYPTOBOT_TOKEN:
+        methods.append("crypto")
+    if settings.LAVA_API_KEY and any(settings.lava_offer_id_for_plan(key) for key in plan_keys):
+        methods.append("lava")
+    return methods
+
+
+
+@router.get("/payment-options")
+async def list_payment_options(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    plans = await repo.get_active_price_plans(session)
+    plan_keys = [str(plan.key) for plan in plans]
+    lava_plan_keys = [key for key in plan_keys if settings.lava_offer_id_for_plan(key)]
+    methods: list[str] = []
+    if settings.TBANK_TERMINAL_KEY and settings.TBANK_PASSWORD:
+        methods.append("tbank")
+    if settings.TELEGRAM_STARS_ENABLED:
+        methods.append("stars")
+    if settings.CRYPTOBOT_TOKEN:
+        methods.append("crypto")
+    if settings.LAVA_API_KEY and lava_plan_keys:
+        methods.append("lava")
+    return {"methods": methods, "lava_plan_keys": lava_plan_keys}
 
 @router.get("/plans")
 async def list_plans(
@@ -2566,6 +3011,38 @@ async def topup_crypto(
     )
 
     return {"pay_url": invoice.pay_url, "transaction_id": tx.id, "credits": plan.credits, "amount_usdt": usdt_amount}
+
+
+@router.post("/topup/lava")
+async def topup_lava(
+    body: TopupRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Create a Lava invoice. Returns `pay_url` to open checkout."""
+    from db.models import PaymentProvider
+    from payments.lava import create_invoice as lava_create_invoice
+
+    plan = await repo.get_price_plan_by_key(session, body.plan_key)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    try:
+        invoice = await lava_create_invoice(plan, user.id)
+    except Exception as exc:
+        logger.error("Lava invoice error user=%s: %s", user.id, exc)
+        raise HTTPException(status_code=502, detail="Payment service error")
+
+    tx = await repo.create_transaction(
+        session=session,
+        user_id=user.id,
+        amount_rub=plan.price_rub,
+        credits=plan.credits,
+        provider=PaymentProvider.lava,
+        external_id=invoice.invoice_id,
+    )
+
+    return {"pay_url": invoice.payment_url, "transaction_id": tx.id, "credits": plan.credits, "amount_rub": plan.price_rub}
 
 
 # ── serializers ───────────────────────────────────────────────────────────────

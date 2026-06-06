@@ -13,14 +13,16 @@ from db.session import get_session
 router = APIRouter(tags=["web"])
 
 
-def _enabled_payment_methods() -> list[dict[str, str]]:
+def enabled_payment_methods() -> list[dict[str, str]]:
     methods: list[dict[str, str]] = []
     if getattr(settings, "TBANK_TERMINAL_KEY", "") and getattr(settings, "TBANK_PASSWORD", ""):
-        methods.append({"key": "tbank", "label": "TBank", "status": "enabled"})
+        methods.append({"key": "tbank", "provider": "tbank", "label": "Карта", "status": "enabled"})
     if getattr(settings, "TELEGRAM_STARS_ENABLED", False):
-        methods.append({"key": "telegram_stars", "label": "Telegram Stars", "status": "enabled"})
+        methods.append({"key": "stars", "provider": "telegram_stars", "label": "Telegram", "status": "enabled"})
     if getattr(settings, "CRYPTOBOT_TOKEN", ""):
-        methods.append({"key": "cryptobot", "label": "CryptoBot", "status": "enabled"})
+        methods.append({"key": "crypto", "provider": "cryptobot", "label": "Крипто", "status": "enabled"})
+    if getattr(settings, "LAVA_API_KEY", ""):
+        methods.append({"key": "lava", "provider": "lava", "label": "Lava", "status": "enabled"})
     return methods
 
 
@@ -42,7 +44,7 @@ async def billing_transactions(
     transactions = [TransactionCard.from_transaction(item).model_dump() for item in result.scalars().all()]
     return ok(
         {
-            "methods": _enabled_payment_methods(),
+            "methods": enabled_payment_methods(),
             "transactions": transactions,
             "pending": [item for item in transactions if item["status"] == "pending"],
         }

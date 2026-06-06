@@ -8,11 +8,16 @@ from typing import Any
 
 import httpx
 
+from api import openrouter_client
 from core.config import settings
 
 logger = logging.getLogger(__name__)
 
 _KIE_BASE = "https://api.kie.ai"
+_PHOTO_PROMPT_REQUEST_TEXT = (
+    "Проанализируй это изображение и создай детальный промпт "
+    "на русском языке, который позволит воссоздать изображение максимально точно."
+)
 
 _SYSTEM_PROMPT = (
     "Ты — эксперт по промптам для AI-генерации изображений. "
@@ -26,17 +31,39 @@ _SYSTEM_PROMPT = (
 
 
 async def generate_prompt_from_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
-    """Call KIE.AI vision models first, then CometAPI fallback."""
+    """Call OpenRouter first, then existing providers unless OpenRouter force mode is enabled."""
     b64 = base64.b64encode(image_bytes).decode()
     image_data_url = f"data:{mime_type};base64,{b64}"
 
+    if openrouter_client.force_migrated_models() and not openrouter_client.configured():
+        raise RuntimeError("OpenRouter is forced for photo prompts, but OPENROUTER_API_KEY is not configured")
+
+    if openrouter_client.configured():
+        openrouter_errors: list[str] = []
+        for model in _openrouter_photo_prompt_models():
+            try:
+                result = await _call_openrouter_gpt(model, image_data_url)
+                logger.info("photo_prompt: generated via OpenRouter %s (%d chars)", model, len(result))
+                return result
+            except Exception as exc:
+                openrouter_errors.append(f"{model}: {exc}")
+                logger.warning("photo_prompt: OpenRouter %s failed — %s", model, exc)
+        if openrouter_client.force_migrated_models():
+            raise RuntimeError(
+                "Photo prompt OpenRouter models are unavailable: "
+                + ("; ".join(openrouter_errors) if openrouter_errors else "no OpenRouter models configured")
+            )
+
     for model in (settings.KIE_PHOTO_PROMPT_MODEL, settings.KIE_PHOTO_PROMPT_FALLBACK):
+        model_name = str(model or "").strip()
+        if not model_name:
+            continue
         try:
-            result = await _call_kie_gpt(model, image_data_url)
-            logger.info("photo_prompt: generated via %s (%d chars)", model, len(result))
+            result = await _call_kie_model(model_name, image_data_url)
+            logger.info("photo_prompt: generated via KIE %s (%d chars)", model_name, len(result))
             return result
         except Exception as exc:
-            logger.warning("photo_prompt: %s failed — %s", model, exc)
+            logger.warning("photo_prompt: KIE %s failed — %s", model_name, exc)
 
     for model in _comet_photo_prompt_models():
         try:
@@ -73,6 +100,23 @@ def _comet_photo_prompt_models() -> list[str]:
         if value and value not in seen:
             seen.add(value)
             models.append(value)
+    return models
+
+
+def _openrouter_photo_prompt_models() -> list[str]:
+    candidates = [
+        getattr(settings, "KIE_PHOTO_PROMPT_MODEL", None),
+        getattr(settings, "KIE_PHOTO_PROMPT_FALLBACK", None),
+        getattr(settings, "COMET_ASSISTANT_MODEL", None),
+        getattr(settings, "COMET_ASSISTANT_FALLBACK", None),
+    ]
+    models: list[str] = []
+    seen: set[str] = set()
+    for model in candidates:
+        normalized = openrouter_client.text_model_for_source(model)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            models.append(normalized)
     return models
 
 
@@ -114,33 +158,80 @@ def _extract_kie_text(data: Any) -> str:
     raise KeyError("choices")
 
 
-async def _call_kie_gpt(model: str, image_data_url: str) -> str:
-    # KIE endpoint: POST https://api.kie.ai/{model}/v1/chat/completions
-    url = f"{_KIE_BASE}/{model}/v1/chat/completions"
+def _extract_kie_responses_text(data: Any) -> str:
+    if not isinstance(data, dict):
+        raise RuntimeError("response is not a JSON object")
+    if data.get("code") and data.get("code") != 200:
+        raise RuntimeError(f"{data!r}")
 
+    output = data.get("output") or []
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for content in item.get("content") or []:
+            if not isinstance(content, dict):
+                continue
+            if content.get("type") == "output_text" and content.get("text"):
+                return str(content["text"]).strip()
+            text = content.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+
+    return _extract_kie_text(data)
+
+
+def _kie_prefers_responses(model: str) -> bool:
+    value = str(model or "").strip().lower()
+    return value in {"gpt-5-4", "gpt-5-5", "gpt-codex"}
+
+
+def _photo_prompt_chat_messages(image_data_url: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": _SYSTEM_PROMPT}],
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": image_data_url}},
+                {"type": "text", "text": _PHOTO_PROMPT_REQUEST_TEXT},
+            ],
+        },
+    ]
+
+
+def _photo_prompt_responses_input(image_data_url: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "system",
+            "content": [{"type": "input_text", "text": _SYSTEM_PROMPT}],
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_image", "image_url": image_data_url},
+                {"type": "input_text", "text": _PHOTO_PROMPT_REQUEST_TEXT},
+            ],
+        },
+    ]
+
+
+async def _call_kie_model(model: str, image_data_url: str) -> str:
+    if _kie_prefers_responses(model):
+        try:
+            return await _call_kie_gpt_responses(model, image_data_url)
+        except Exception as exc:
+            logger.warning("photo_prompt: KIE %s responses failed — %s", model, exc)
+        return await _call_kie_gpt_chat(model, image_data_url)
+
+    return await _call_kie_gpt_chat(model, image_data_url)
+
+
+async def _call_kie_gpt_chat(model: str, image_data_url: str) -> str:
+    url = f"{_KIE_BASE}/{model}/v1/chat/completions"
     payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": _SYSTEM_PROMPT}],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_data_url},
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "Проанализируй это изображение и создай детальный промпт "
-                            "на русском языке, который позволит воссоздать изображение максимально точно."
-                        ),
-                    },
-                ],
-            },
-        ],
+        "messages": _photo_prompt_chat_messages(image_data_url),
         "reasoning_effort": "high",
     }
 
@@ -159,7 +250,38 @@ async def _call_kie_gpt(model: str, image_data_url: str) -> str:
             return _extract_kie_text(data)
         except Exception:
             logger.warning(
-                "photo_prompt: unexpected %s response: %s",
+                "photo_prompt: unexpected KIE chat %s response: %s",
+                model,
+                json.dumps(data, ensure_ascii=False)[:1200],
+            )
+            raise
+
+
+async def _call_kie_gpt_responses(model: str, image_data_url: str) -> str:
+    url = f"{_KIE_BASE}/codex/v1/responses"
+    payload = {
+        "model": model,
+        "stream": False,
+        "input": _photo_prompt_responses_input(image_data_url),
+        "reasoning": {"effort": "high"},
+    }
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        resp = await client.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {settings.KIE_AI_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        try:
+            return _extract_kie_responses_text(data)
+        except Exception:
+            logger.warning(
+                "photo_prompt: unexpected KIE responses %s response: %s",
                 model,
                 json.dumps(data, ensure_ascii=False)[:1200],
             )
@@ -171,28 +293,7 @@ async def _call_comet_gpt(model: str, image_data_url: str) -> str:
 
     payload = {
         "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": _SYSTEM_PROMPT}],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_data_url},
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "Проанализируй это изображение и создай детальный промпт "
-                            "на русском языке, который позволит воссоздать изображение максимально точно."
-                        ),
-                    },
-                ],
-            },
-        ],
+        "messages": _photo_prompt_chat_messages(image_data_url),
         "reasoning_effort": "high",
     }
 
@@ -216,3 +317,21 @@ async def _call_comet_gpt(model: str, image_data_url: str) -> str:
                 json.dumps(data, ensure_ascii=False)[:1200],
             )
             raise
+
+
+async def _call_openrouter_gpt(model: str, image_data_url: str) -> str:
+    data = await openrouter_client.chat_completion(
+        model=model,
+        messages=_photo_prompt_chat_messages(image_data_url),
+        max_completion_tokens=4096,
+        reasoning_effort="high",
+    )
+    try:
+        return _extract_kie_text(data)
+    except Exception:
+        logger.warning(
+            "photo_prompt: unexpected OpenRouter %s response: %s",
+            model,
+            json.dumps(data, ensure_ascii=False)[:1200],
+        )
+        raise

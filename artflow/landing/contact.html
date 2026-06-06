@@ -3,122 +3,95 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Поддержка APIX AI — контакты и обратная связь</title>
-    <meta name="description" content="Контакты APIX AI: Telegram-бот, канал LeluPromt, саппорт, разработчик и форма обратной связи с валидацией." />
-    <meta name="theme-color" content="#050507" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Поддержка APIX AI" />
-    <meta property="og:description" content="Напишите в поддержку APIX AI или откройте Telegram-бота." />
-    <meta property="og:image" content="images/hero-cinematic-gallery.png" />
-    <link rel="icon" href="images/apix-mark.svg" type="image/svg+xml" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="css/styles.css" />
-    <script src="js/main.js" defer></script>
+    <title>Поддержка — APIX Studio</title>
+    <meta name="description" content="Поддержка APIX Studio: вход через Telegram, помощь по созданию, балансу, примерам, рефералам и готовым работам." />
+    <meta name="theme-color" content="#080814" />
+    <link rel="canonical" href="https://apixbotai.com/account.html#assistant" />
+    <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/prototype-premium.css" />
+    <script src="js/prototype-premium.js" defer></script>
   </head>
   <body>
-    <a class="skip-link" href="#main">К содержанию</a>
-    <header class="site-header">
-      <div class="container header-row">
-        <a class="brand" href="index.html" aria-label="APIX AI">
-          <img src="images/apix-mark.svg" alt="" />
-          <span><b>APIX</b><small>Creative AI bot</small></span>
-        </a>
-        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span></span><span></span><span></span></button>
-        <nav class="site-nav" id="site-nav" aria-label="Основная навигация">
-          <a href="index.html">Главная</a>
-          <a href="features.html">Возможности</a>
-          <a href="guide.html">Инструкция</a>
-          <a href="account.html">ЛК</a>
-          <a href="contact.html" aria-current="page">Поддержка</a>
-        </nav>
-        <a class="header-cta" href="account.html">Личный кабинет</a>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="APIX Studio">
+        <img src="images/apix-premium-mark.svg" alt="" />
+        <span>APIX <b>Studio</b></span>
+      </a>
+      <nav aria-label="Навигация сайта">
+        <a href="/">Главная</a>
+        <a href="studio.html">Создать</a>
+        <a href="gallery.html">Лента</a>
+        <a href="models.html">Модели</a>
+      </nav>
+      <div class="top-auth">
+        <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
+        <a class="top-cta" href="account.html">Кабинет <span aria-hidden="true">↗</span></a>
+        <button class="top-logout" type="button" data-logout hidden>Выйти</button>
       </div>
     </header>
 
-    <main id="main">
-      <section class="page-hero">
-        <div class="container narrow">
-          <p class="eyebrow">Связь и поддержка</p>
-          <h1>Поддержка APIX AI</h1>
-          <p class="lead">Поможем разобраться с запуском, генерациями, кредитами, Mini App, историей и реферальной программой.</p>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="container visual-panel">
-          <img src="images/guide-contact-flow.png" alt="Визуальная схема связи с APIX и перехода к результату" />
-        </div>
-        <div class="container contact-grid">
-          <form class="contact-form" id="contact-form" novalidate>
-            <div>
-              <label for="name">Имя</label>
-              <input id="name" name="name" type="text" autocomplete="name" placeholder="Как к вам обращаться" required minlength="2" />
-              <small class="field-error"></small>
-            </div>
-            <div>
-              <label for="contact">Telegram или email</label>
-              <input id="contact" name="contact" type="text" autocomplete="email" placeholder="@username или name@example.com" required />
-              <small class="field-error"></small>
-            </div>
-            <div>
-              <label for="topic">Тема</label>
-              <select id="topic" name="topic">
-                <option>Вопрос по генерации</option>
-                <option>Оплата и кредиты</option>
-                <option>Промпты и лента</option>
-                <option>Партнёрская программа</option>
-                <option>Коммерческое предложение</option>
-              </select>
-            </div>
-            <div>
-              <label for="message">Сообщение</label>
-              <textarea id="message" name="message" rows="6" placeholder="Например: не вижу результат генерации видео в истории или хочу уточнить реферальную программу" required minlength="20"></textarea>
-              <small class="field-error"></small>
-            </div>
-            <button class="btn btn-primary" type="submit">Отправить запрос</button>
-            <p class="form-status" id="form-status" role="status"></p>
-          </form>
-
-          <aside class="contact-list">
-            <a href="https://t.me/apix_ai_bot" target="_blank" rel="noopener noreferrer"><span class="icon-tile">B</span><b>Бот APIX</b><small>t.me/apix_ai_bot</small></a>
-            <a href="https://t.me/LeLu88" target="_blank" rel="noopener noreferrer"><span class="icon-tile icon-pink">S</span><b>Саппорт</b><small>@LeLu88</small></a>
-            <a href="https://t.me/Chillcreative" target="_blank" rel="noopener noreferrer"><span class="icon-tile icon-mint">D</span><b>Разработка</b><small>@Chillcreative</small></a>
-            <a href="https://t.me/lelupromt" target="_blank" rel="noopener noreferrer"><span class="icon-tile icon-gold">P</span><b>Канал с промптами</b><small>@lelupromt</small></a>
-            <a href="mailto:happyarbuznik@gmail.com"><span class="icon-tile">M</span><b>Email</b><small>happyarbuznik@gmail.com</small></a>
-          </aside>
-        </div>
-      </section>
-
-      <section class="section section-soft">
-        <div class="container">
-          <div class="section-title">
-            <p class="eyebrow">Быстрые темы</p>
-            <h2>С чем чаще всего обращаются</h2>
+    <main>
+      <section class="page-shell account">
+        <div class="section-head split">
+          <div>
+            <p class="eyebrow">Поддержка</p>
+            <h1>Помощь в создании и оплате</h1>
+            <p class="lead">Откройте помощника в кабинете, если нужно подобрать сценарий, улучшить описание, разобраться с балансом или найти готовую работу.</p>
           </div>
-          <div class="mode-grid">
-            <article><h3>Не пришёл результат</h3><p>Укажите формат генерации, примерное время запуска и, если есть, текст промпта. Так быстрее найти задачу в истории.</p></article>
-            <article><h3>Вопрос по кредитам</h3><p>Напишите, что именно нужно проверить: баланс, пополнение, списание или стартовый бонус 15 кредитов.</p></article>
-            <article><h3>Реферальная программа</h3><p>Уточните уровень: L1, L2 или L3. Комиссии: 30%, 7%, 3%, бонус за L1 — +5 кредитов.</p></article>
-            <article><h3>Идеи и предложения</h3><p>Расскажите, какой функции не хватает или какой сценарий хотелось бы видеть в APIX AI.</p></article>
+          <button class="button primary" type="button" data-open-login>Войти через Telegram</button>
+        </div>
+
+        <div class="feature-split">
+          <div class="assistant-panel">
+            <div class="assistant-log">
+              <div class="assistant-msg">Напишите помощнику, что хотите получить: обложку, рекламный креатив, портрет, ролик, музыку или готовую идею для запуска.</div>
+              <div class="assistant-msg user">Например: помоги сделать реалистичное фото товара в розово-синем свете.</div>
+            </div>
+            <div class="composer-actions">
+              <a class="button primary" href="account.html#assistant">Открыть помощника</a>
+              <a class="button ghost" href="account.html#billing">Проверить баланс</a>
+            </div>
+          </div>
+          <div class="feature-board">
+            <article class="feature-card">
+              <img src="images/concepts/account-workflow.png" alt="Поддержка в личном кабинете APIX Studio" />
+              <span>Кабинет</span>
+              <h3>Все вопросы внутри рабочего пространства</h3>
+              <p>История, очередь, библиотека, баланс, рефералы и помощник находятся рядом, чтобы не искать нужное действие по разным страницам.</p>
+            </article>
           </div>
         </div>
       </section>
     </main>
 
-    <footer class="site-footer">
-      <div class="container footer-grid">
-        <a class="brand" href="index.html"><img src="images/apix-mark.svg" alt="" /><span><b>APIX</b><small>Creative AI bot</small></span></a>
-        <p>Саппорт, контакты и обратная связь APIX AI.</p>
-        <nav aria-label="Ссылки в футере">
-          <a href="index.html">Главная</a>
-          <a href="features.html">Возможности</a>
-          <a href="account.html">Личный кабинет</a>
-          <a href="guide.html">Инструкция</a>
-          <a href="https://t.me/apix_ai_bot" target="_blank" rel="noopener noreferrer">Telegram</a>
-        </nav>
-      </div>
-    </footer>
+    <div class="modal-backdrop" data-login-modal hidden>
+      <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+        <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
+        <p class="eyebrow">Вход и регистрация</p>
+        <h2 id="login-title">Откройте кабинет APIX</h2>
+        <p>Войдите через Telegram. После входа откроется кабинет, история, баланс и синхрон с ботом.</p>
+        <div class="auth-methods">
+          <form class="contact-auth-form" data-contact-login-form>
+            <span>Telegram username</span>
+            <label><input name="contact" type="text" inputmode="email" autocomplete="email tel" placeholder="@username" required /></label>
+            <label><input name="full_name" type="text" autocomplete="name" placeholder="Ваше имя" /></label>
+            <div class="contact-code-row">
+              <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Код" disabled />
+              <button class="button ghost" type="button" data-contact-request>Получить код</button>
+            </div>
+            <button class="button primary" type="submit" data-contact-submit disabled>Войти</button>
+            <small data-contact-login-status>Код откроет кабинет и сохранит ваши работы.</small>
+          </form>
+          <div class="telegram-auth-panel">
+            <span>Telegram</span>
+            <p>Быстрый вход, баланс и привязка к вашему Telegram-аккаунту.</p>
+            <div class="telegram-slot" data-telegram-slot></div>
+            <div class="auth-fallback" data-auth-fallback hidden></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="toast" data-toast hidden></div>
   </body>
 </html>

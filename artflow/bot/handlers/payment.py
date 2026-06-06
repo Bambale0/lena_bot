@@ -10,13 +10,13 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
-from bot.keyboards.payment import crypto_pay_kb, crypto_plans_kb, payment_link_kb, topup_kb
+from bot.keyboards.payment import crypto_pay_kb, crypto_plans_kb, lava_plans_kb, payment_link_kb, rub_methods_kb, rub_plans_kb, topup_kb
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.states import PromoFSM
 from core.config import settings
 from db import repository as repo
 from db.models import PaymentProvider, PromoRewardType, TransactionStatus, User
-from payments import cryptobot, tbank
+from payments import cryptobot, lava, tbank
 
 logger = logging.getLogger(__name__)
 router = Router(name="payment")
@@ -132,6 +132,19 @@ async def _reconcile_transaction_status(
             return TransactionStatus.failed, None
         return TransactionStatus.pending, None
 
+    if tx.provider == PaymentProvider.lava and tx.external_id:
+        invoice = await lava.get_invoice(tx.external_id)
+        status = str(invoice.get("status", "")).lower()
+        event_type = str(invoice.get("eventType", "")).lower()
+        if status in {"completed", "success", "paid"} or event_type == "payment.success":
+            confirmed = await repo.confirm_transaction(session, tx.external_id)
+            balance = await _confirm_paid_transaction(session, confirmed) if confirmed else None
+            return TransactionStatus.paid, balance
+        if status in {"failed", "cancelled", "canceled", "expired"}:
+            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.failed)
+            return TransactionStatus.failed, None
+        return TransactionStatus.pending, None
+
     return tx.status, None
 
 
@@ -142,6 +155,104 @@ async def cb_topup(call: CallbackQuery, session: AsyncSession, db_user: User) ->
     await call.message.edit_text(  # type: ignore[union-attr]
         t("topup_title", lang),
         reply_markup=topup_kb(plans, lang=lang),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "topup:rub")
+async def cb_topup_rub_methods(call: CallbackQuery, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    text = (
+        "₽ <b>Оплата в рублях</b>\n\nВыбери способ оплаты."
+        if lang == "ru"
+        else "₽ <b>Pay in rubles</b>\n\nChoose a payment method."
+    )
+    await call.message.edit_text(  # type: ignore[union-attr]
+        text,
+        reply_markup=rub_methods_kb(lang=lang),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "topup:tbank")
+async def cb_topup_tbank_menu(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    plans = await repo.get_active_price_plans(session)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        t("topup_tbank_title", lang) + "\n\n" + t("topup_select_plan", lang),
+        reply_markup=rub_plans_kb(plans, lang=lang),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "topup:lava")
+async def cb_topup_lava(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    plans = [plan for plan in await repo.get_active_price_plans(session) if settings.lava_offer_id_for_plan(plan.key)]
+    if not plans:
+        await call.answer("Lava сейчас недоступна" if lang == "ru" else "Lava is unavailable right now", show_alert=True)
+        return
+    text = (
+        "💵 <b>Оплата в долларах</b>\n\nПокажем сумму в $, оплата откроется через Lava.\n\n" + t("topup_select_plan", lang)
+        if lang == "ru"
+        else "💵 <b>Pay in dollars</b>\n\nAmounts are shown in $, checkout opens via Lava.\n\n" + t("topup_select_plan", lang)
+    )
+    await call.message.edit_text(  # type: ignore[union-attr]
+        text,
+        reply_markup=lava_plans_kb(plans, lang=lang, currency="usd"),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("topup:lava_plan:"))
+async def cb_topup_lava_plan(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    plan_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
+    plan = await repo.get_price_plan_by_key(session, plan_key)
+    if not plan or not settings.lava_offer_id_for_plan(plan.key):
+        await call.answer(t("error_not_found", lang), show_alert=True)
+        return
+
+    try:
+        invoice = await lava.create_invoice(plan, db_user.id)
+    except Exception as e:
+        logger.error("Lava invoice error: %s", e)
+        await call.answer(t("error_generic", lang), show_alert=True)
+        return
+
+    await repo.create_transaction(
+        session,
+        user_id=db_user.id,
+        amount_rub=plan.price_rub,
+        credits=plan.credits,
+        provider=PaymentProvider.lava,
+        external_id=invoice.invoice_id,
+    )
+
+    await call.message.edit_text(  # type: ignore[union-attr]
+        (f"💸 <b>Lava</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(plan.price_rub)} ₽</b>" if lang == "ru" else f"💸 <b>Lava</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(plan.price_rub)} ₽</b>"),
+        reply_markup=payment_link_kb(
+            "💸 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
+            invoice.payment_url,
+            invoice.invoice_id,
+            lang=lang,
+        ),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "topup:usd")
+async def cb_topup_usd(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    plans = [plan for plan in await repo.get_active_price_plans(session) if settings.lava_offer_id_for_plan(plan.key)]
+    text = (
+        "💵 <b>Оплата в долларах</b>\n\nПокажем сумму в $, оплата откроется через Lava.\n\n" + t("topup_select_plan", lang)
+        if lang == "ru"
+        else "💵 <b>Pay in dollars</b>\n\nAmounts are shown in $, checkout opens via Lava.\n\n" + t("topup_select_plan", lang)
+    )
+    await call.message.edit_text(  # type: ignore[union-attr]
+        text,
+        reply_markup=lava_plans_kb(plans, lang=lang, currency="usd"),
     )
     await call.answer()
 
@@ -224,172 +335,13 @@ async def cb_topup_rub(
         await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
 
     await call.message.edit_text(  # type: ignore[union-attr]
-        t("topup_tbank_desc", lang, label=plan.label, amount=_fmt_amount(pay_amount)) + discount_text,
+        ((f"💳 <b>T-Bank</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(pay_amount)} ₽</b>" if lang == "ru" else f"💳 <b>T-Bank</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(pay_amount)} ₽</b>") + discount_text),
         reply_markup=payment_link_kb(
             "💳 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
             payment.payment_url,
             payment.payment_id,
             lang=lang,
         ),
-    )
-    await call.answer()
-
-
-async def _cancel_tbank_transaction(
-    *,
-    session: AsyncSession,
-    db_user: User,
-    payment_id: str,
-) -> tuple[bool, str]:
-    tx = await repo.get_last_tbank_transaction(session, db_user.id)
-    if not tx or tx.external_id != payment_id:
-        return False, "Can only cancel last T-Bank payment."
-
-    if tx.status == TransactionStatus.refunded:
-        return False, "Payment already refunded."
-    if tx.status == TransactionStatus.failed:
-        return False, "Payment already failed."
-
-    state = await tbank.get_payment_state(payment_id)
-    provider_status = str(state.get("Status", "")).upper()
-
-    if provider_status in TBANK_FINAL_FAILURE_STATUSES:
-        await repo.set_transaction_status(session, payment_id, TransactionStatus.failed)
-        return True, "Payment was already cancelled by T-Bank."
-
-    if provider_status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
-        updated_tx = await repo.set_transaction_status(session, payment_id, TransactionStatus.refunded)
-        if updated_tx and updated_tx.status == TransactionStatus.paid:
-            await repo.add_credits(session, updated_tx.user_id, -updated_tx.credits, entry_type="payment_refund", source_type="transaction", source_id=str(updated_tx.id), note="T-Bank refund/reversal")
-            from main import _reverse_referral_commissions
-            await _reverse_referral_commissions(session, db_user, updated_tx.amount_rub)
-        return True, "Payment was already refunded."
-
-    await tbank.cancel_payment(payment_id)
-
-    new_status = TransactionStatus.refunded if tx.status == TransactionStatus.paid else TransactionStatus.failed
-    updated_tx = await repo.set_transaction_status(session, payment_id, new_status)
-    if new_status == TransactionStatus.refunded and updated_tx and tx.status == TransactionStatus.paid:
-        await repo.add_credits(session, updated_tx.user_id, -updated_tx.credits, entry_type="payment_refund", source_type="transaction", source_id=str(updated_tx.id), note="T-Bank cancel after paid")
-        from main import _reverse_referral_commissions
-        await _reverse_referral_commissions(session, db_user, updated_tx.amount_rub)
-
-    if new_status == TransactionStatus.refunded:
-        return True, "Payment cancelled and marked as refunded."
-    return True, "Payment cancelled."
-
-
-@router.callback_query(F.data == "topup:tbank:cancel_last")
-async def cb_tbank_cancel_last(
-    call: CallbackQuery,
-    session: AsyncSession,
-    db_user: User,
-) -> None:
-    lang = db_user.language or "ru"
-    tx = await repo.get_last_cancellable_tbank_transaction(session, db_user.id)
-    if not tx or not tx.external_id:
-        await call.answer(t("error_not_found", lang), show_alert=True)
-        return
-
-    try:
-        ok, text = await _cancel_tbank_transaction(
-            session=session,
-            db_user=db_user,
-            payment_id=tx.external_id,
-        )
-    except Exception as e:
-        logger.error("T-Bank cancel-last error: %s", e)
-        await call.answer(t("error_generic", lang), show_alert=True)
-        return
-
-    await call.answer(text, show_alert=True)
-
-
-@router.callback_query(F.data.startswith("topup:tbank:cancel:"))
-async def cb_tbank_cancel_payment(
-    call: CallbackQuery,
-    session: AsyncSession,
-    db_user: User,
-) -> None:
-    lang = db_user.language or "ru"
-    payment_id = call.data.split(":")[-1]  # type: ignore[union-attr]
-    if not payment_id:
-        await call.answer(t("error_not_found", lang), show_alert=True)
-        return
-
-    try:
-        ok, text = await _cancel_tbank_transaction(
-            session=session,
-            db_user=db_user,
-            payment_id=payment_id,
-        )
-    except Exception as e:
-        logger.error("T-Bank cancel error: %s", e)
-        await call.answer(t("error_generic", lang), show_alert=True)
-        return
-
-    if ok:
-        await call.message.edit_text(  # type: ignore[union-attr]
-            "↩️ <b>" + ("Платёж отменён" if lang == "ru" else "Payment cancelled") + "</b>\n\n"
-            + ("Можно создать новый платёж из меню пополнения." if lang == "ru" else "You can create a new payment from the top-up menu."),
-            reply_markup=back_to_menu_kb(),
-        )
-    await call.answer(text, show_alert=True)
-
-
-# ─── CryptoBot ───────────────────────────────────────────────────────────────
-
-@router.callback_query(F.data == "topup:crypto")
-async def cb_topup_crypto(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
-    lang = db_user.language or "ru"
-    plans = await repo.get_active_price_plans(session)
-    await call.message.edit_text(  # type: ignore[union-attr]
-        t("topup_crypto_title", lang) + "\n\n" + t("topup_select_plan", lang),
-        reply_markup=crypto_plans_kb(plans, lang=lang),
-    )
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("topup:crypto_plan:"))
-async def cb_crypto_plan(
-    call: CallbackQuery, session: AsyncSession, db_user: User
-) -> None:
-    lang = db_user.language or "ru"
-    plan_key = call.data.split(":")[2]  # type: ignore[union-attr]
-    plan = await repo.get_price_plan_by_key(session, plan_key)
-    if not plan:
-        await call.answer(t("error_not_found", lang), show_alert=True)
-        return
-
-    pay_amount, discount_text, discount_redemption = await _active_discount_text(session, db_user.id, plan.price_rub)
-    amount_usd = pay_amount / RUB_TO_USDT
-
-    try:
-        invoice = await cryptobot.create_invoice(
-            credits=plan.credits,
-            amount_usd=amount_usd,
-            plan_key=plan_key,
-            user_id=db_user.id,
-        )
-    except Exception as e:
-        logger.error("CryptoBot invoice error: %s", e)
-        await call.answer(t("error_generic", lang), show_alert=True)
-        return
-
-    tx = await repo.create_transaction(
-        session,
-        user_id=db_user.id,
-        amount_rub=pay_amount,
-        credits=plan.credits,
-        provider=PaymentProvider.cryptobot,
-        external_id=str(invoice.invoice_id),
-    )
-    if discount_redemption:
-        await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
-
-    await call.message.edit_text(  # type: ignore[union-attr]
-        t("topup_crypto_desc", lang, label=plan.label, amount=_fmt_amount(amount_usd)) + discount_text,
-        reply_markup=crypto_pay_kb(invoice.bot_invoice_url, str(invoice.invoice_id), lang=lang),
     )
     await call.answer()
 

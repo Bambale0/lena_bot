@@ -370,6 +370,24 @@ NANA_BANANO_MODEL_CHOICES = (
     ImageModel.NANO_BANANA_2.value,
 )
 
+_IMAGE_MODEL_ORDER: list[str] = [
+    ImageModel.NANO_BANANA_PRO,
+    ImageModel.NANO_BANANA_2,
+    ImageModel.SEEDREAM_45,
+    ImageModel.GPT_IMAGE_2_T2I,
+    ImageModel.WAN_27_PRO,
+    ImageModel.WAN_27,
+    ImageModel.QWEN2_T2I,
+    ImageModel.QWEN_T2I,
+    ImageModel.GROK_T2I,
+    ImageModel.SEEDREAM_45_EDIT,
+    ImageModel.GPT_IMAGE_2_I2I,
+    ImageModel.QWEN2_EDIT,
+    ImageModel.QWEN_EDIT,
+    ImageModel.QWEN_I2I,
+    ImageModel.GROK_I2I,
+]
+
 VIDEO_MODEL_DESC: dict[str, str] = {
     VideoModel.KLING_30: "🎬 Kling 3.0 · плавное движение · текст и фото",
     VideoModel.KLING_26_T2V: "🎬 Kling 2.6 · текст в видео",
@@ -517,19 +535,26 @@ def _sorted_models(model_costs: list[ModelCost], allowed_keys: list[str]) -> lis
 
 def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for mc in model_costs:
-        if (
-            mc.gen_type.value == "image"
-            and mc.model_key in IMAGE_CAPS
-            and mc.model_key not in HIDDEN_IMAGE_MODELS
-        ):
-            label = f"{mc.display_name} · {mc.credits} 💋"
-            builder.row(
-                InlineKeyboardButton(
-                    text=label,
-                    callback_data=f"img_model:{mc.model_key}",
-                )
+    visible = [
+        mc
+        for mc in model_costs
+        if mc.gen_type.value == "image"
+        and mc.model_key in IMAGE_CAPS
+        and mc.model_key not in HIDDEN_IMAGE_MODELS
+    ]
+    ordered = _sorted_models(visible, _IMAGE_MODEL_ORDER)
+    remaining = sorted(
+        [mc for mc in visible if mc.model_key not in {item.model_key for item in ordered}],
+        key=lambda mc: mc.display_name.lower(),
+    )
+    for mc in ordered + remaining:
+        label = f"{mc.display_name} · {model_cost_display_text(mc, model_costs=model_costs)}"
+        builder.row(
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"img_model:{mc.model_key}",
             )
+        )
     builder.row(InlineKeyboardButton(text="← К сценариям", callback_data="menu:image"))
     return builder.as_markup()
 

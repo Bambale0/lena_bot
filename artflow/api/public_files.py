@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import mimetypes
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from urllib.request import Request, urlopen
 
 from core.config import settings
 
@@ -134,15 +136,32 @@ def save_public_file(data: bytes, content_type: str | None = None) -> str:
     return public_upload_url(filename)
 
 
-async def mirror_url(url: str) -> str:
-    """
-    Backward-compatible helper.
+def _download_public_url(url: str) -> tuple[bytes, str | None]:
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; APIXMirror/1.0)"})
+    with urlopen(req, timeout=25) as resp:
+        data = resp.read()
+        content_type = resp.headers.get("Content-Type")
+    return data, content_type
 
-    Older code imports mirror_url from api.public_files.
-    For now it returns the URL as-is unless another implementation is needed.
-    Generated Telegram uploads should use save_public_file(...), not this.
-    """
-    return url
+
+async def mirror_url(url: str) -> str:
+    """Mirror external public URLs into local static storage when possible."""
+    if not url:
+        return url
+
+    local_path = local_upload_path_from_url(url)
+    if local_path is not None:
+        return ensure_public_image_url(url) or url
+
+    try:
+        data, content_type = await asyncio.to_thread(_download_public_url, url)
+    except Exception:
+        return url
+
+    try:
+        return save_public_file(data, content_type)
+    except Exception:
+        return url
 
 
 async def mirror_telegram_file(bot, file_id: str, is_video: bool = False) -> str:

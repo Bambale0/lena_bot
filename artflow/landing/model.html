@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Как создать результат — APIX Studio</title>
-    <meta name="description" content="Короткий маршрут по APIX Studio: выберите сценарий, добавьте описание или фото, запустите создание и сохраните результат." />
+    <title>Модель — APIX Studio</title>
+    <meta name="description" content="Обучение по модели APIX Studio: возможности, примеры, лайфхаки, FAQ и быстрый запуск в Studio." />
     <meta name="theme-color" content="#080814" />
-    <link rel="canonical" href="https://apixbotai.com/studio.html" />
+    <link rel="canonical" href="https://apixbotai.com/model.html" />
     <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="css/prototype-premium.css" />
     <script src="js/prototype-premium.js" defer></script>
@@ -19,9 +19,9 @@
       </a>
       <nav aria-label="Навигация сайта">
         <a href="/">Главная</a>
-        <a href="studio.html" aria-current="page">Создать</a>
+        <a href="studio.html">Создать</a>
         <a href="gallery.html">Лента</a>
-        <a href="models.html">Модели</a>
+        <a href="models.html" aria-current="page">Модели</a>
       </nav>
       <div class="top-auth">
         <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
@@ -31,36 +31,9 @@
     </header>
 
     <main>
-      <section class="page-shell studio">
-        <div class="section-head split">
-          <div>
-            <p class="eyebrow">Маршрут</p>
-            <h1>От идеи до готовой работы</h1>
-            <p class="lead">Выберите сценарий, опишите результат, добавьте пример при необходимости и отслеживайте готовность в кабинете.</p>
-          </div>
-          <a class="button primary" href="studio.html">Начать создание</a>
-        </div>
-
-        <div class="studio-tools">
-          <div class="studio-controls">
-            <h3>Быстрый старт</h3>
-            <p>Для первого результата достаточно описать, что нужно получить. Если есть пример, добавьте ссылку или загрузите фото.</p>
-            <div class="control-grid">
-              <label><span>1</span><a href="studio.html?type=image&flow=text">Создать картинку</a></label>
-              <label><span>2</span><a href="studio.html?type=image&flow=reference">Добавить фото-пример</a></label>
-              <label><span>3</span><a href="studio.html?type=video">Собрать видео</a></label>
-              <label><span>4</span><a href="account.html#library">Сохранить работу</a></label>
-            </div>
-          </div>
-          <div class="result-stage">
-            <img src="images/guide-contact-flow.png" alt="Плавный рабочий процесс APIX Studio" />
-            <div class="result-caption">
-              <span>Рабочий процесс</span>
-              <b>Идея → создание → готовый результат</b>
-            </div>
-          </div>
-        </div>
-      </section>
+      <div class="page-shell model-detail-page" data-model-detail>
+        <div class="guide-empty">Загружаем модель и примеры...</div>
+      </div>
     </main>
 
     <div class="modal-backdrop" data-login-modal hidden>

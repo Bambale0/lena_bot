@@ -63,6 +63,7 @@ class PaymentProvider(str, enum.Enum):
     cryptobot = "cryptobot"
     tbank = "tbank"
     telegram_stars = "telegram_stars"
+    lava = "lava"
 
 
 class PromoRewardType(str, enum.Enum):
@@ -85,6 +86,8 @@ class User(Base):
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     username: Mapped[str | None] = mapped_column(String(64))
     full_name: Mapped[str | None] = mapped_column(String(256))
+    email: Mapped[str | None] = mapped_column(String(256), unique=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
     photo_url: Mapped[str | None] = mapped_column(Text)
     credits: Mapped[float] = mapped_column(Float, default=0, nullable=False)
 
@@ -107,6 +110,22 @@ class User(Base):
     generations: Mapped[list[Generation]] = relationship(back_populates="user", lazy="noload")
     transactions: Mapped[list[Transaction]] = relationship(back_populates="user", lazy="noload")
     withdrawal_requests: Mapped[list[ReferralWithdrawalRequest]] = relationship(back_populates="user", lazy="noload")
+
+
+class WebAuthCode(Base):
+    __tablename__ = "web_auth_codes"
+    __table_args__ = (
+        UniqueConstraint("contact_type", "contact", "code_hash", name="uq_web_auth_codes_contact_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    contact_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    contact: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    code_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Generation(Base):

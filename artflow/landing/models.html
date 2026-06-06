@@ -3,9 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Возможности — APIX Studio</title>
+    <title>Модели — APIX Studio</title>
     <meta name="description" content="Выберите подходящий режим APIX Studio для картинок, видео, музыки, реалистичных фото и творческих идей." />
     <meta name="theme-color" content="#080814" />
+    <link rel="canonical" href="https://apixbotai.com/models.html" />
     <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="css/prototype-premium.css" />
     <script src="js/prototype-premium.js" defer></script>
@@ -19,13 +20,12 @@
       <nav aria-label="Навигация сайта">
         <a href="/">Главная</a>
         <a href="studio.html">Создать</a>
-        <a href="models.html" aria-current="page">Возможности</a>
-        <a href="gallery.html">Идеи</a>
-        <a href="account.html">Мои работы</a>
+        <a href="gallery.html">Лента</a>
+        <a href="models.html" aria-current="page">Модели</a>
       </nav>
       <div class="top-auth">
         <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
-        <a class="top-cta" href="studio.html">Создать <span aria-hidden="true">↗</span></a>
+        <a class="top-cta" href="account.html">Кабинет <span aria-hidden="true">↗</span></a>
         <button class="top-logout" type="button" data-logout hidden>Выйти</button>
       </div>
     </header>
@@ -34,9 +34,9 @@
       <section class="page-shell models">
         <div class="section-head split models-head">
           <div>
-            <p class="eyebrow">Возможности</p>
-            <h1>Выберите режим под задачу</h1>
-            <p class="lead">Для каждой идеи есть подходящий сценарий: реалистичное фото, креативный арт, видео, музыка или работа по вашему примеру.</p>
+            <p class="eyebrow">Модели</p>
+            <h1>Выберите модель под задачу</h1>
+            <p class="lead">Откройте обучение по модели, посмотрите сильные стороны, примеры промптов и запустите тест в Studio с готовыми настройками.</p>
           </div>
           <div class="segmented" data-model-filter>
             <button class="active" type="button" data-type="all">Все</button>
@@ -69,10 +69,10 @@
 
             <div class="model-catalog">
               <div class="model-catalog-head">
-                <span>Режим</span>
+                <span>Модель</span>
                 <span>Для чего подходит</span>
                 <span>Стоимость</span>
-                <span>Действие</span>
+                <span>Страница</span>
               </div>
               <div class="model-grid model-list" data-model-grid></div>
             </div>
@@ -93,16 +93,16 @@
             </div>
             <div class="focus-metrics">
               <article>
-                <span>Детализация</span>
-                <b>Высокая</b>
+                <span>Форматы</span>
+                <b>Фото / видео / музыка</b>
               </article>
               <article>
-                <span>Реализм</span>
-                <b>94%</b>
+                <span>Примеры</span>
+                <b>По референсу</b>
               </article>
               <article>
-                <span>Старт</span>
-                <b>Быстро</b>
+                <span>Стоимость</span>
+                <b>В credits</b>
               </article>
             </div>
           </aside>
@@ -113,11 +113,28 @@
     <div class="modal-backdrop" data-login-modal hidden>
       <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
         <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
-        <p class="eyebrow">Вход через Telegram</p>
-        <h2 id="login-title">Войдите, чтобы сохранить работы</h2>
-        <p>После входа откроются баланс, история, очередь, библиотека, тарифы и реферальная программа.</p>
-        <div class="telegram-slot" data-telegram-slot></div>
-        <div class="auth-fallback" data-auth-fallback hidden></div>
+        <p class="eyebrow">Вход и регистрация</p>
+        <h2 id="login-title">Откройте кабинет APIX</h2>
+        <p>Войдите через Telegram. После входа откроется кабинет, история, баланс и синхрон с ботом.</p>
+        <div class="auth-methods">
+          <form class="contact-auth-form" data-contact-login-form>
+            <span>Telegram username</span>
+            <label><input name="contact" type="text" inputmode="email" autocomplete="email tel" placeholder="@username" required /></label>
+            <label><input name="full_name" type="text" autocomplete="name" placeholder="Ваше имя" /></label>
+            <div class="contact-code-row">
+              <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Код" disabled />
+              <button class="button ghost" type="button" data-contact-request>Получить код</button>
+            </div>
+            <button class="button primary" type="submit" data-contact-submit disabled>Войти</button>
+            <small data-contact-login-status>Код откроет кабинет и сохранит ваши работы.</small>
+          </form>
+          <div class="telegram-auth-panel">
+            <span>Telegram</span>
+            <p>Быстрый вход, баланс и привязка к вашему Telegram-аккаунту.</p>
+            <div class="telegram-slot" data-telegram-slot></div>
+            <div class="auth-fallback" data-auth-fallback hidden></div>
+          </div>
+        </div>
       </section>
     </div>
 

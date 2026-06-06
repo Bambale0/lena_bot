@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from api.web import billing, generations, health, referrals
-from api.miniapp_routes import GenerationOut, ImageGenRequest
+from api.web import assistant, billing, generations, health, landing, referrals, router as web_router
+from api.miniapp_routes import AssistantChatRequest, GenerationOut, ImageGenRequest
 from api.web.schemas import FeedCard, ModelCostCard, TransactionCard, UserMe
 from db.models import GenerationType, PaymentProvider, TransactionStatus
 
@@ -104,6 +105,84 @@ def test_user_me_includes_sync_fields() -> None:
 @pytest.mark.asyncio
 async def test_billing_transactions_requires_auth() -> None:
     response = await billing.billing_transactions(session=object(), user=None)
+
+    assert response.status_code == 401
+
+
+def test_enabled_payment_methods_match_topup_providers(monkeypatch) -> None:
+    monkeypatch.setattr(billing.settings, "TBANK_TERMINAL_KEY", "terminal", raising=False)
+    monkeypatch.setattr(billing.settings, "TBANK_PASSWORD", "password", raising=False)
+    monkeypatch.setattr(billing.settings, "TELEGRAM_STARS_ENABLED", True, raising=False)
+    monkeypatch.setattr(billing.settings, "CRYPTOBOT_TOKEN", "crypto", raising=False)
+
+    methods = billing.enabled_payment_methods()
+
+    assert [item["key"] for item in methods] == ["tbank", "stars", "crypto"]
+    assert [item["label"] for item in methods] == ["Карта", "Telegram", "Крипто"]
+
+
+def test_web_router_exposes_realtime_websocket_alias() -> None:
+    assert any(getattr(route, "path", "") == "/ws/generations" for route in web_router.routes)
+
+
+@pytest.mark.asyncio
+async def test_landing_payload_aggregates_public_site_data(monkeypatch) -> None:
+    model_costs = [
+        SimpleNamespace(model_key="nano-banana-pro", display_name="Nano Banana Pro", gen_type=GenerationType.image, credits=4, is_active=True),
+        SimpleNamespace(model_key="kling-2-1", display_name="Kling 2.1", gen_type=GenerationType.video, credits=8, is_active=True),
+    ]
+    generation = SimpleNamespace(
+        id=42,
+        result_url="https://cdn.test/primary.png",
+        result_urls='["https://cdn.test/primary.png"]',
+        prompt="portrait",
+        model="nano-banana-pro",
+        gen_type=GenerationType.image,
+        likes_count=2,
+        shares_count=1,
+        created_at=datetime(2026, 5, 16, tzinfo=timezone.utc),
+    )
+    prompt = SimpleNamespace(
+        id=7,
+        title="Cover idea",
+        description="Premium cover",
+        prompt_text="Create a premium cover",
+        preview_url="https://cdn.test/preview.png",
+        model="nano-banana-pro",
+        tags=["cover"],
+        likes=3,
+        uses_count=5,
+        status="approved",
+        category="marketing",
+        created_at=datetime(2026, 5, 16, tzinfo=timezone.utc),
+    )
+    plan = SimpleNamespace(key="starter", label="Старт", credits=300, price_rub=390, price_stars=None, is_active=True, sort_order=1)
+
+    monkeypatch.setattr(landing.repo, "get_all_model_costs", AsyncMock(return_value=model_costs))
+    monkeypatch.setattr(
+        landing.repo,
+        "get_feed_generations",
+        AsyncMock(return_value=[SimpleNamespace(generation=generation, username="artist", full_name=None, remix_count=0)]),
+    )
+    monkeypatch.setattr(landing, "get_approved_prompts", AsyncMock(return_value=[prompt]))
+    monkeypatch.setattr(landing.repo, "get_active_price_plans", AsyncMock(return_value=[plan]))
+    monkeypatch.setattr(landing, "enabled_payment_methods", lambda: [{"key": "tbank", "label": "Карта", "status": "enabled"}])
+
+    response = await landing.landing_payload(session=object())
+    data = response["data"]
+
+    assert response["ok"] is True
+    assert data["models"]["image"][0]["model_key"] == "nano-banana-pro"
+    assert data["models"]["video"][0]["model_key"] == "kling-2-1"
+    assert data["examples"][0]["result_url"] == "https://cdn.test/primary.png"
+    assert data["prompts"]["items"][0]["title"] == "Cover idea"
+    assert data["plans"][0]["key"] == "starter"
+    assert data["payment_methods"][0]["key"] == "tbank"
+
+
+@pytest.mark.asyncio
+async def test_web_assistant_requires_auth() -> None:
+    response = await assistant.assistant_chat(AssistantChatRequest(message="hello"), user=None)
 
     assert response.status_code == 401
 

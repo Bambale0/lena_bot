@@ -3,126 +3,98 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Возможности APIX AI — команды, модели и сценарии</title>
-    <meta name="description" content="Команды APIX AI: генерация изображений, видео, музыки, Midjourney, AI-ассистент, лента, промпты, история, пополнение и рефералы." />
-    <meta name="theme-color" content="#050507" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Возможности APIX AI" />
-    <meta property="og:description" content="Полный список сценариев сайта и Telegram-бота APIX AI." />
-    <meta property="og:image" content="images/hero-cinematic-gallery.png" />
-    <link rel="icon" href="images/apix-mark.svg" type="image/svg+xml" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="css/styles.css" />
-    <script src="js/main.js" defer></script>
+    <title>Модели — APIX Studio</title>
+    <meta name="description" content="Все возможности APIX Studio: картинки, фото по примеру, редактирование, видео, музыка, идеи, библиотека и баланс." />
+    <meta name="theme-color" content="#080814" />
+    <link rel="canonical" href="https://apixbotai.com/models.html" />
+    <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/prototype-premium.css" />
+    <script src="js/prototype-premium.js" defer></script>
   </head>
   <body>
-    <a class="skip-link" href="#main">К содержанию</a>
-    <header class="site-header">
-      <div class="container header-row">
-        <a class="brand" href="index.html" aria-label="APIX AI">
-          <img src="images/apix-mark.svg" alt="" />
-          <span><b>APIX</b><small>Creative AI bot</small></span>
-        </a>
-        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span></span><span></span><span></span></button>
-        <nav class="site-nav" id="site-nav" aria-label="Основная навигация">
-          <a href="index.html">Главная</a>
-          <a href="features.html" aria-current="page">Возможности</a>
-          <a href="guide.html">Инструкция</a>
-          <a href="account.html">ЛК</a>
-          <a href="contact.html">Поддержка</a>
-        </nav>
-        <a class="header-cta" href="account.html">Личный кабинет</a>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="APIX Studio">
+        <img src="images/apix-premium-mark.svg" alt="" />
+        <span>APIX <b>Studio</b></span>
+      </a>
+      <nav aria-label="Навигация сайта">
+        <a href="/">Главная</a>
+        <a href="studio.html">Создать</a>
+        <a href="gallery.html">Лента</a>
+        <a href="models.html" aria-current="page">Модели</a>
+      </nav>
+      <div class="top-auth">
+        <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
+        <a class="top-cta" href="account.html">Кабинет <span aria-hidden="true">↗</span></a>
+        <button class="top-logout" type="button" data-logout hidden>Выйти</button>
       </div>
     </header>
 
-    <main id="main">
-      <section class="page-hero">
-        <div class="container narrow">
-          <p class="eyebrow">Команды и возможности</p>
-          <h1>Всё, что APIX умеет на сайте и в боте</h1>
-          <p class="lead">Эта страница помогает быстро понять сценарии APIX: генерация на сайте работает через формы, а команды бота остаются быстрым Telegram-входом.</p>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="container command-layout">
+    <main>
+      <section class="page-shell models">
+        <div class="section-head split">
           <div>
-            <div class="section-title align-left">
-              <p class="eyebrow">Быстрые команды</p>
-              <h2>Кликни по карточке, чтобы скопировать команду</h2>
-            </div>
-            <div class="command-grid" id="command-grid">
-              <button class="command-card" type="button" data-command="/start" data-response='{"screen":"main","bonus":"15 💋","next":["Фото","Видео","Песня","AI-ассистент"]}'>
-                <span>/start</span><b>Запуск и главное меню</b><small>Регистрация, стартовые кредиты, вход в основные режимы.</small>
-              </button>
-              <button class="command-card" type="button" data-command="/menu" data-response='{"screen":"main_menu","actions":["Открыть приложение","Баланс","Лента","История","Пополнить"]}'>
-                <span>/menu</span><b>Вернуться в меню</b><small>Сбрасывает текущий шаг и показывает рабочую панель APIX.</small>
-              </button>
-              <button class="command-card" type="button" data-command="/help" data-response='{"help":["Фото: модель → референс → промпт","Видео: режим → промпт → ожидание","Саппорт: @LeLu88"]}'>
-                <span>/help</span><b>Помощь по боту</b><small>Короткая инструкция по изображениям, видео, музыке, оплатам и рефералам.</small>
-              </button>
-              <button class="command-card" type="button" data-command="/assistant" data-response='{"assistant":"готов","can":["идеи для контента","улучшение промпта","проверка модерационных рисков"]}'>
-                <span>/assistant</span><b>AI-ассистент</b><small>Помогает с идеями, промптами, вопросами по боту и модерацией текста.</small>
-              </button>
-              <button class="command-card" type="button" data-command="/feed" data-response='{"feed":"open","actions":["лайк","поделиться","использовать промпт","повторить генерацию"]}'>
-                <span>/feed</span><b>Лента генераций</b><small>Публичные работы, лайки, шаринг и быстрый ремикс удачных результатов.</small>
-              </button>
-              <button class="command-card" type="button" data-command="/prompts" data-response='{"library":"open","sources":["топ","популярное","коллекции","витрина авторов"]}'>
-                <span>/prompts</span><b>Библиотека промптов</b><small>Каталог формулировок, подборки и запуск генерации по готовому промпту.</small>
-              </button>
-              <button class="command-card" type="button" data-command="/starshelp" data-response='{"payments":"Telegram Stars","fallback":["T-Bank","CryptoBot"],"status":"зависит от флага TELEGRAM_STARS_ENABLED"}'>
-                <span>/starshelp</span><b>Оплата Stars</b><small>Объясняет пополнение через Telegram Stars, если оно включено в конфиге.</small>
-              </button>
-              <button class="command-card" type="button" data-command="" data-response='{"action":"Открыть сайт","url":"account.html","sections":["Studio","Balance","History","Prompts","Feed","Referrals"]}'>
-                <span>Сайт</span><b>Веб-кабинет APIX</b><small>Отдельный интерфейс для генерации, ленты, истории, профиля, платежей и рефералов.</small>
-              </button>
-            </div>
+            <p class="eyebrow">Модели</p>
+            <h1>Все сценарии APIX Studio</h1>
+            <p class="lead">Создавайте с нуля, работайте по примеру, оживляйте изображения, собирайте видео и музыку, сохраняйте удачные идеи в кабинете.</p>
           </div>
-          <aside class="response-panel" aria-live="polite">
-            <p class="eyebrow">Ответ бота</p>
-            <pre id="command-response">{
-  "command": "/start",
-  "screen": "main",
-  "bonus": "15 💋",
-  "next": ["Фото", "Видео", "Песня", "AI-ассистент"]
-}</pre>
-            <span class="copy-toast" id="copy-toast" role="status">Команда скопирована</span>
-          </aside>
+          <a class="button ghost" href="models.html">Открыть все режимы</a>
         </div>
-      </section>
 
-      <section class="section section-soft">
-        <div class="container">
-          <div class="section-title">
-            <p class="eyebrow">Режимы создания</p>
-            <h2>Что выбирать под конкретную задачу</h2>
-          </div>
-          <div class="mode-grid">
-            <article><h3>Фото</h3><p>Text-to-image, image-to-image, редактирование, референсы, серии и разные качества. Подходит для рекламы, концептов, аватаров, fashion и product shot.</p><small>Модели: Seedream 4.5, Grok Imagine, WAN 2.7, Nano Banana, Qwen, GPT Image 2, Midjourney.</small></article>
-            <article><h3>Видео</h3><p>Text-to-video, image-to-video и motion-control. Используй, когда нужно оживить кадр, проверить сцену, сделать короткий клип или промо-движение.</p><small>Модели: Kling 2.6/3.0, Veo 3, WAN 2.7, Seedance 2, Grok Video, HappyHorse.</small></article>
-            <article><h3>Песня</h3><p>Suno v4.5 генерирует трек по описанию: жанр, настроение, темп, вокал, сценарий использования. Удобно для moodboard, интро и коротких идей.</p><small>Стоимость в текущем seed: 20 💋.</small></article>
-            <article><h3>AI-ассистент</h3><p>Задавай вопросы по боту, проси идеи для контента, улучшай промпт или проверяй текст на модерационные риски перед публикацией.</p><small>Контекст диалога хранится коротко, его можно очистить кнопкой.</small></article>
-            <article><h3>Лента</h3><p>Смотри публичные генерации, сохраняй сильные идеи, делись ссылкой и запускай похожую работу без ручного восстановления промпта.</p><small>Есть лайки, share-ссылки и сценарии repeat/remix.</small></article>
-            <article><h3>Партнёрка</h3><p>Реферальная система начисляет бонус за приглашение и комиссии с оплат на трёх уровнях. Ссылку можно отправить прямо из бота.</p><small>По текущему конфигу: +5 💋 за L1 и комиссии 30% / 7% / 3%.</small></article>
-          </div>
+        <div class="feature-board feature-board-wide">
+          <article class="feature-card">
+            <img src="images/concepts/aurora-atelier.png" alt="Создание изображений в APIX Studio" />
+            <span>Создание</span>
+            <h3>Картинки и фото</h3>
+            <p>Опишите идею словами или добавьте фото-пример, чтобы получить результат в нужном стиле, формате и качестве.</p>
+            <div class="card-actions"><a href="studio.html?type=image&flow=text">Создать картинку</a></div>
+          </article>
+          <article class="feature-card">
+            <img src="images/concepts/pink-blue-runway.png" alt="Пример готовой генерации APIX Studio" />
+            <span>Примеры</span>
+            <h3>Лента идей</h3>
+            <p>Смотрите готовые работы, подбирайте настроение и запускайте похожий результат для своей задачи.</p>
+            <div class="card-actions"><a href="gallery.html">Смотреть идеи</a></div>
+          </article>
+          <article class="feature-card">
+            <img src="images/concepts/account-workflow.png" alt="Личный кабинет APIX Studio" />
+            <span>Кабинет</span>
+            <h3>Работы, баланс и помощник</h3>
+            <p>Следите за очередью, храните библиотеку, пополняйте баланс, сохраняйте идеи и пользуйтесь помощником в одном месте.</p>
+            <div class="card-actions"><a href="account.html">Открыть кабинет</a></div>
+          </article>
         </div>
       </section>
     </main>
 
-    <footer class="site-footer">
-      <div class="container footer-grid">
-        <a class="brand" href="index.html"><img src="images/apix-mark.svg" alt="" /><span><b>APIX</b><small>Creative AI bot</small></span></a>
-        <p>Команды, модели и сценарии APIX AI.</p>
-        <nav aria-label="Ссылки в футере">
-          <a href="index.html">Главная</a>
-          <a href="guide.html">Инструкция</a>
-          <a href="account.html">Личный кабинет</a>
-          <a href="contact.html">Поддержка</a>
-          <a href="https://t.me/apix_ai_bot" target="_blank" rel="noopener noreferrer">Telegram</a>
-        </nav>
-      </div>
-    </footer>
+    <div class="modal-backdrop" data-login-modal hidden>
+      <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+        <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
+        <p class="eyebrow">Вход и регистрация</p>
+        <h2 id="login-title">Откройте кабинет APIX</h2>
+        <p>Войдите через Telegram. После входа откроется кабинет, история, баланс и синхрон с ботом.</p>
+        <div class="auth-methods">
+          <form class="contact-auth-form" data-contact-login-form>
+            <span>Telegram username</span>
+            <label><input name="contact" type="text" inputmode="email" autocomplete="email tel" placeholder="@username" required /></label>
+            <label><input name="full_name" type="text" autocomplete="name" placeholder="Ваше имя" /></label>
+            <div class="contact-code-row">
+              <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Код" disabled />
+              <button class="button ghost" type="button" data-contact-request>Получить код</button>
+            </div>
+            <button class="button primary" type="submit" data-contact-submit disabled>Войти</button>
+            <small data-contact-login-status>Код откроет кабинет и сохранит ваши работы.</small>
+          </form>
+          <div class="telegram-auth-panel">
+            <span>Telegram</span>
+            <p>Быстрый вход, баланс и привязка к вашему Telegram-аккаунту.</p>
+            <div class="telegram-slot" data-telegram-slot></div>
+            <div class="auth-fallback" data-auth-fallback hidden></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="toast" data-toast hidden></div>
   </body>
 </html>

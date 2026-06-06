@@ -283,9 +283,9 @@ React-SPA, встроенное в Telegram WebApp. Доступно по `/app`
 
 | Компонент | Назначение |
 |---|---|
-| `landing/index.html` | HTML shell сайта |
-| `landing/css/riot-site.css` | Визуальный стиль сайта и студии |
-| `landing/js/riot-site.js` | Vanilla JS роутинг, i18n, авторизация, загрузка данных |
+| `landing/index.html` | Продуктовый вход и сценарии создания |
+| `landing/css/prototype-premium.css` | Визуальный стиль сайта и кабинета |
+| `landing/js/prototype-premium.js` | Vanilla JS: авторизация, каталог, создание, кабинет |
 | `api/web/` | Web API поверх существующих сущностей `User`, `Generation`, `UserPrompt`, `PricePlan` |
 
 **Web API:**
@@ -296,11 +296,15 @@ React-SPA, встроенное в Telegram WebApp. Доступно по `/app`
 | GET | `/api/web/me` | Профиль авторизованного пользователя |
 | GET | `/api/web/feed` | Лента генераций |
 | GET | `/api/web/prompts` | Библиотека и маркетплейс промптов |
+| GET | `/api/web/landing` | Единый публичный payload для сайта |
 | GET | `/api/web/price-plans` | Тарифы пополнения |
-| POST | `/api/web/auth/telegram` | Вход через Telegram Login Widget |
-| POST | `/api/web/auth/dev` | Dev-token вход для локальной проверки |
+| POST | `/api/web/auth/telegram-login` | Вход через Telegram Login Widget |
+| POST | `/api/web/generate/image` | Создание картинки |
+| POST | `/api/web/generate/video` | Создание видео |
+| POST | `/api/web/generate/music` | Создание музыки |
+| POST | `/api/web/assistant` | Помощник кабинета |
 
-Студия использует реальные каталоги моделей `/api/v1/models/image`, `/api/v1/models/video`, `/api/v1/models/music` и реальные endpoints генерации `/api/v1/generate/*`.
+Студия использует web-обертки `/api/web/models/*`, `/api/web/generate/*`, `/api/web/billing/*`, чтобы сайт не зависел от внутренних mini app маршрутов.
 
 Подробнее о UX-архитектуре и текущем frontend-анализе: `docs/web_studio_frontend.md`.
 Workflow для frontend/dev agents: `docs/frontend-agent-workflow.md`.
@@ -328,6 +332,8 @@ DATABASE_URL=postgresql+asyncpg://bot:password@postgres:5432/artflow
 REDIS_URL=redis://redis:6379
 
 # AI провайдеры
+OPENROUTER_API_KEY=...
+OPENROUTER_FORCE_MIGRATED_MODELS=true
 COMET_API_KEY=...
 KIE_AI_KEY=...
 AIVIDEOAPI_KEY=...

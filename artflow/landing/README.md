@@ -1,66 +1,48 @@
-# APIX Studio standalone web
+# APIX Studio standalone site
 
-Актуальная версия публичного сайта обслуживается из `landing/index.html` и работает как vanilla JS SPA через `landing/js/riot-site.js`. До авторизации это премиальная витрина APIX Studio, после входа через Telegram тот же URL переключается в рабочее пространство с быстрым режимом и PRO Studio.
-
-## Актуальная структура
+Актуальная версия публичного сайта и web-кабинета обслуживается из `landing/` как набор статических страниц на общем vanilla JS/CSS слое:
 
 ```text
 landing/
-├── index.html
-├── css/
-│   └── riot-site.css
-├── js/
-│   └── riot-site.js
-├── images/
-│   ├── apix-mark.svg
-│   ├── apix-premium-mark.svg
-│   ├── apix-premium-studio-hero.png
-│   ├── apix-hero-studio-scene.svg
-│   ├── apix-campaign-board.svg
-│   ├── apix-production-flow.svg
-│   ├── apix-reference-motion.svg
-│   ├── apix-motion-preview.svg
-│   ├── apix-library-system.svg
-│   ├── apix-credits-control.svg
-│   ├── hero-cinematic-gallery.png
-│   ├── apix-showcase.png
-│   └── favicon.png
-├── media/
-└── README.md
+├── index.html              # продуктовый вход и сценарии создания
+├── studio.html             # создание картинок, видео и музыки
+├── models.html             # каталог моделей
+├── model.html              # динамическая страница модели: обучение, FAQ, примеры
+├── gallery.html            # галерея и живые примеры
+├── account.html            # кабинет: очередь, библиотека, баланс, рефералы, помощник
+├── features.html           # совместимая страница возможностей в новом стиле
+├── guide.html              # совместимая страница маршрута создания в новом стиле
+├── contact.html            # совместимая страница поддержки в новом стиле
+├── css/prototype-premium.css
+├── js/prototype-premium.js
+├── data/
+└── images/
 ```
 
-## Legacy файлы
-
-```text
-landing/
-├── account.html
-├── contact.html
-├── features.html
-├── guide.html
-├── css/styles.css
-└── js/main.js
-```
-
-Если деплой внезапно показывает старый сайт, сначала проверьте nginx/FastAPI static root и cache: актуальная точка входа должна быть `landing/index.html`, а не одна из legacy-страниц.
+`index-riot-backup.html` и `prototype-premium.html` редиректят на `/`, чтобы прямые старые ссылки не показывали другой визуал. `css/riot-site.css`, `js/riot-site.js`, `css/styles.css` и `js/main.js` оставлены только как архив/референс. Новые правки публичного сайта нужно делать в `prototype-premium.css` и `prototype-premium.js`.
 
 ## UX-логика
 
-- Гость видит позиционирование APIX Studio, возможности, галерею, тарифы, бизнес-сценарии и вход через Telegram.
-- Публичная шапка ведёт по структуре лендинга: возможности, процесс, Studio preview, тарифы, галерея.
-- Меню авторизации раскрывается из шапки и ведёт в Telegram Login modal, Quick Create, тарифы и шаблоны.
-- Публичная витрина должна быть динамичной: scroll progress, floating navigation, animated hero, hover/tilt cards, reveal-анимации и визуальные секции показывают продукт как живую AI-студию.
-- Авторизованный пользователь первым экраном видит крупные действия: создать картинку, оживить фото, сделать видео, изменить фото.
-- `Быстро создать` не показывает названия моделей и advanced-параметры; модель выбирается автоматически из доступных `/api/v1/models/*`.
-- `PRO Studio` оставляет полный контроль: модель, примеры, формат, качество, количество, длительность видео и очередь.
-- `Проекты`, `Моя библиотека`, `Шаблоны`, `Галерея`, `Маркетплейс`, `Баланс`, `Рефералы`, `Настройки` собраны в app-shell с sidebar/topbar.
-- WebSocket-статусы генераций продолжают работать через `/api/v1/ws/generations`, с polling fallback.
+- Сайт не является одностраничным лендингом: основные сценарии разведены по отдельным страницам.
+- Верхнее меню отвечает только за разделы продукта: главная, создание, галерея и модели. Кабинет вынесен в правый блок аккаунта, чтобы не дублировать навигацию.
+- Продуктовое меню на главной ведёт только в сценарии создания: картинка с нуля, фото по примеру, улучшение фото, видео и музыка.
+- В `studio.html` выбор устроен в два уровня: сначала формат результата, затем сценарий картинки. Для видео и музыки второй уровень скрывается.
+- `studio.html?type=image&flow=text` открывает создание картинки с нуля.
+- `studio.html?type=image&flow=reference` открывает сценарий с фото-примером.
+- `studio.html?type=image&flow=edit` открывает улучшение фото.
+- `model.html?model=<model_key>` открывает обучение по конкретной модели: возможности, лайфхаки, FAQ, примеры и переход в Studio с готовым тестом.
+- `account.html#billing`, `account.html#assistant`, `account.html#library` открывают нужные вкладки кабинета.
+- Telegram Login создаёт web-token и сайт работает через `/api/web`.
+- Реальные генерации идут через `/api/web/generate/image`, `/api/web/generate/video`, `/api/web/generate/music`.
+- Статусы задач приходят по `/api/web/ws/generations`; токен передаётся первым auth-сообщением после открытия WebSocket.
 
-## Бренд и стиль
+## Дизайн
 
-Текущая версия использует строгий тёмный premium: графитовая основа, спокойные карточки, тонкие границы и тёплый золотой акцент. Простые экраны говорят человеческими словами, а термины вроде aspect ratio, seed и reference strength остаются в PRO Studio.
+Текущий визуальный язык: тёмная premium-основа, лилово-розово-синие акценты, реальные bitmap-примеры генераций, плавные карточки, единые dropdown-контролы и компактный app-like кабинет. Все видимые страницы в `landing/*.html` должны подключать `css/prototype-premium.css` и `js/prototype-premium.js`.
 
-`images/apix-premium-mark.svg` заменяет старый неоновый знак на спокойный тёмный mark с тонкими cyan/gold акцентами. Публичные product-visuals используют отдельные SVG-сцены без видимого текста внутри изображений: `apix-hero-studio-scene.svg`, `apix-campaign-board.svg`, `apix-production-flow.svg`, `apix-reference-motion.svg`, `apix-motion-preview.svg`, `apix-library-system.svg` и `apix-credits-control.svg`. Подписи и объяснение остаются в интерфейсе рядом с картинкой, чтобы визуалы не выглядели как технические скриншоты.
+## Проверка
 
-## Деплой и ссылки
-
-Если username бота изменится, обновите backend-конфиг, который отдаёт `/api/web/auth/config`. Если сайт обслуживается через FastAPI/nginx из корня `landing/`, относительные пути `css/`, `js/`, `images/` уже готовы.
+```bash
+node --check landing/js/prototype-premium.js
+tools/codex_static_checks.sh
+```

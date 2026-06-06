@@ -310,7 +310,7 @@ function NoticeBar({ notice, onClose }) {
   );
 }
 
-function MediaThumb({ url, type, idx = 0, className = "", onOpen }) {
+function MediaThumb({ url, type, idx = 0, className = "", onOpen, onError }) {
   const openable = !!(url && onOpen && type !== "music");
   const mediaClass = `${className || ""}${openable ? " mediaOpenable" : ""}`.trim() || undefined;
   const openProps = openable ? {
@@ -331,12 +331,30 @@ function MediaThumb({ url, type, idx = 0, className = "", onOpen }) {
 
   if (url) {
     if (type === "video" || /\.(mp4|webm|mov)/i.test(url))
-      return <video src={url} className={mediaClass} controls playsInline preload="metadata" {...openProps} />;
+      return <video src={url} className={mediaClass} controls playsInline preload="metadata" onError={onError} {...openProps} />;
     if (type === "music" || /\.(mp3|ogg|wav)/i.test(url))
       return <div className={`musicThumb ${className}`}>🎵</div>;
-    return <img src={url} className={mediaClass} alt="result" loading="lazy" referrerPolicy="no-referrer" {...openProps} />;
+    return <img src={url} className={mediaClass} alt="result" loading="lazy" referrerPolicy="no-referrer" onError={onError} {...openProps} />;
   }
   return <Art type={["a","b","c","d"][idx % 4]} />;
+}
+
+function ProfileFeedTile({ item, idx, setScreen }) {
+  const [hidden, setHidden] = useState(false);
+  const urls = (Array.isArray(item?.result_urls) && item.result_urls.length ? item.result_urls : [item?.result_url]).filter(Boolean);
+  if (hidden || !urls.length) return null;
+  return (
+    <button className="profileFeedTile" onClick={() => setScreen("feed")}>
+      <MediaThumb
+        url={urls[0]}
+        type="image"
+        idx={idx}
+        className="profileFeedMedia"
+        onOpen={openExternalUrl}
+        onError={() => setHidden(true)}
+      />
+    </button>
+  );
 }
 
 function generationResultUrls(generation) {
@@ -411,10 +429,21 @@ function TopupModal({ onClose }) {
     () => api(`/plans?_=${Date.now()}`, { cache: "no-store" }),
     fallbackPlans,
   );
+  const { data: paymentMethods = [] } = useApi(
+    () => api(`/payment-methods?_=${Date.now()}`, { cache: "no-store" }),
+    [],
+  );
   const [selected, setSelected] = useState(null);
   const [method, setMethod] = useState("tbank");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    if (!paymentMethods.length) return;
+    if (!paymentMethods.includes(method)) {
+      setMethod(paymentMethods[0]);
+    }
+  }, [paymentMethods, method]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -450,7 +479,9 @@ function TopupModal({ onClose }) {
         ? "/topup/crypto"
         : method === "stars"
           ? "/topup/stars"
-          : "/topup/tbank";
+          : method === "lava"
+            ? "/topup/lava"
+            : "/topup/tbank";
       const res = await api(endpoint, { method: "POST", body: JSON.stringify({ plan_key: selected }) });
       const url = res.invoice_link || res.pay_url;
       if (!url) throw new Error("Платёжная ссылка не получена");
@@ -488,9 +519,10 @@ function TopupModal({ onClose }) {
         )}
 
         <div className="tabs" style={{ marginTop: 16 }}>
-          <button className={method === "tbank" ? "active" : ""} onClick={() => setMethod("tbank")}>💳 Т-Банк</button>
-          <button className={method === "stars" ? "active" : ""} onClick={() => setMethod("stars")}>⭐ Stars</button>
-          <button className={method === "crypto" ? "active" : ""} onClick={() => setMethod("crypto")}>₮ Крипто</button>
+          {paymentMethods.includes("tbank") && <button className={method === "tbank" ? "active" : ""} onClick={() => setMethod("tbank")}>💳 Т-Банк</button>}
+          {paymentMethods.includes("stars") && <button className={method === "stars" ? "active" : ""} onClick={() => setMethod("stars")}>⭐ Stars</button>}
+          {paymentMethods.includes("crypto") && <button className={method === "crypto" ? "active" : ""} onClick={() => setMethod("crypto")}>₮ Крипто</button>}
+          {paymentMethods.includes("lava") && <button className={method === "lava" ? "active" : ""} onClick={() => setMethod("lava")}>💸 Lava</button>}
         </div>
 
         {err && <div className="warn">{err}</div>}
@@ -1988,6 +2020,7 @@ function Capabilities({ setScreen, setTopup }) {
     ["referrals", "₽", "Партнёрка", "Реферальная ссылка, уровни, баланс, заявки на вывод и доход от ремиксов."],
     ["help", "?", "Помощь", "Инструкции из Telegram-бота, подсказки по Stars, оплате, рефералам и промптам."],
     ["profile", "♙", "Профиль и настройки", "Баланс, темы интерфейса, язык и основные пользовательские параметры."],
+    ...(window.__APIX_IS_ADMIN__ ? [["admin", "🛡", "Owner cockpit", "Обзор метрик, юзеры, выводы и быстрые owner-операции."]] : []),
   ];
 
   return (
@@ -2164,6 +2197,310 @@ function Referrals({ user, stats, loading, reload, onNotice }) {
   );
 }
 
+function adminDate(value) {
+  return formatDate(value);
+}
+
+function AdminMetric({ label, value, hint }) {
+  return (
+    <div className="toolCard">
+      <strong>{value}</strong>
+      <span>{label}</span>
+      {hint ? <small style={{ opacity: 0.7 }}>{hint}</small> : null}
+    </div>
+  );
+}
+
+function AdminBars({ title, items, kind = "count" }) {
+  const max = Math.max(1, ...((items || []).map((item) => Number(item.value || 0))));
+  return (
+    <section>
+      <div className="studioHead">
+        <h1 style={{ fontSize: 18 }}>{title}</h1>
+      </div>
+      <div className="assistantPanel" style={{ gap: 10 }}>
+        {(items || []).map((item) => {
+          const value = Number(item.value || 0);
+          const width = `${Math.max(6, Math.round((value / max) * 100))}%`;
+          return (
+            <div key={`${title}-${item.date}`} style={{ display: "grid", gap: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12, opacity: 0.82 }}>
+                <span>{item.date}</span>
+                <b>{kind === "money" ? formatRub(value) : Math.round(value * 10) / 10}</b>
+              </div>
+              <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,.08)", overflow: "hidden" }}>
+                <div style={{ width, height: "100%", borderRadius: 999, background: "linear-gradient(90deg,#ff4d6d,#7c3aed)" }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function AdminDashboard({ user, onNotice }) {
+  const [tab, setTab] = useState("overview");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [withdrawalStatus, setWithdrawalStatus] = useState("pending");
+
+  const overview = useApi(
+    () => user.is_admin ? api("/admin/overview") : Promise.resolve({ summary: {}, charts: {}, top_models: [], providers: [] }),
+    { summary: {}, charts: {}, top_models: [], providers: [] },
+    [user.is_admin],
+  );
+  const users = useApi(
+    () => user.is_admin ? api(`/admin/users?query=${encodeURIComponent(search)}`) : Promise.resolve({ items: [] }),
+    { items: [] },
+    [user.is_admin, search],
+  );
+  const selectedUser = useApi(
+    () => user.is_admin && selectedUserId ? api(`/admin/users/${selectedUserId}`) : Promise.resolve(null),
+    null,
+    [user.is_admin, selectedUserId],
+  );
+  const withdrawals = useApi(
+    () => user.is_admin ? api(`/admin/withdrawals?status=${encodeURIComponent(withdrawalStatus)}`) : Promise.resolve({ items: [] }),
+    { items: [] },
+    [user.is_admin, withdrawalStatus],
+  );
+
+  useEffect(() => {
+    if (!selectedUserId && users.data?.items?.length) setSelectedUserId(users.data.items[0].id);
+  }, [users.data, selectedUserId]);
+
+  if (!user.is_admin) {
+    return (
+      <section>
+        <div className="warn">Админ-раздел доступен только owner/admin аккаунтам.</div>
+      </section>
+    );
+  }
+
+  async function applyCredits(sign = 1) {
+    if (!selectedUserId) return;
+    const raw = window.prompt(sign > 0 ? "Сколько кредитов добавить?" : "Сколько кредитов списать?");
+    if (!raw) return;
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      onNotice?.({ type: "error", message: "Нужна корректная сумма" });
+      return;
+    }
+    const note = window.prompt("Комментарий для истории", sign > 0 ? "Owner topup" : "Owner deduction") || undefined;
+    try {
+      await api(`/admin/users/${selectedUserId}/credits`, {
+        method: "POST",
+        body: JSON.stringify({ amount: amount * sign, note }),
+      });
+      onNotice?.({ type: "success", message: sign > 0 ? "Кредиты начислены" : "Кредиты списаны" });
+      users.reload();
+      selectedUser.reload();
+      overview.reload();
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось обновить баланс" });
+    }
+  }
+
+  async function toggleBan() {
+    if (!selectedUserId || !selectedUser.data?.user) return;
+    const next = !selectedUser.data.user.is_banned;
+    try {
+      await api(`/admin/users/${selectedUserId}/ban`, { method: "POST", body: JSON.stringify({ banned: next }) });
+      onNotice?.({ type: "success", message: next ? "Пользователь заблокирован" : "Пользователь разблокирован" });
+      users.reload();
+      selectedUser.reload();
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось изменить бан" });
+    }
+  }
+
+  async function reviewWithdrawal(item, action) {
+    const note = window.prompt(action === "approve" ? "Комментарий к выплате" : "Причина отклонения", item.admin_note || "") || undefined;
+    try {
+      await api(`/admin/withdrawals/${item.id}/review`, {
+        method: "POST",
+        body: JSON.stringify({ action, note }),
+      });
+      onNotice?.({ type: "success", message: action === "approve" ? "Заявка подтверждена" : "Заявка отклонена" });
+      withdrawals.reload();
+      overview.reload();
+      if (selectedUserId === item.user?.id) selectedUser.reload();
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось обработать заявку" });
+    }
+  }
+
+  const summary = overview.data?.summary || {};
+  const currentUser = selectedUser.data?.user;
+  const currentStats = selectedUser.data?.stats || {};
+
+  return (
+    <section>
+      <div className="studioHead">
+        <h1>Owner cockpit</h1>
+        <span className="statusBadge success">MVP</span>
+      </div>
+      <div className="tabs soft">
+        {[
+          ["overview", "Обзор"],
+          ["users", "Пользователи"],
+          ["withdrawals", "Выводы"],
+        ].map(([id, label]) => (
+          <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{label}</button>
+        ))}
+      </div>
+
+      {tab === "overview" && (
+        <>
+          {overview.loading ? <Spinner /> : (
+            <>
+              <div className="toolGrid">
+                <AdminMetric label="Юзеры всего" value={summary.users_total || 0} hint={`+${summary.users_new_7d || 0} за 7д`} />
+                <AdminMetric label="Платящие" value={summary.paid_users || 0} hint={`${summary.success_rate_7d || 0}% success`} />
+                <AdminMetric label="Выручка" value={formatRub(summary.revenue_total || 0)} hint={`${formatRub(summary.revenue_7d || 0)} за 7д`} />
+                <AdminMetric label="Генерации" value={summary.generations_total || 0} hint={`${summary.generations_7d || 0} за 7д`} />
+                <AdminMetric label="Выводы ждут" value={summary.pending_withdrawals_count || 0} hint={formatRub(summary.pending_withdrawals_amount || 0)} />
+                <AdminMetric label="Промпты на модерации" value={summary.pending_prompts || 0} hint={`img ${summary.image_7d || 0} · vid ${summary.video_7d || 0} · music ${summary.music_7d || 0}`} />
+              </div>
+              <AdminBars title="Новые пользователи" items={overview.data?.charts?.users || []} />
+              <AdminBars title="Выручка" items={overview.data?.charts?.revenue || []} kind="money" />
+              <AdminBars title="Генерации" items={overview.data?.charts?.generations || []} />
+              <section>
+                <div className="studioHead"><h1 style={{ fontSize: 18 }}>Топ моделей за 7 дней</h1></div>
+                <div className="assistantPanel">
+                  {(overview.data?.top_models || []).length ? overview.data.top_models.map((item) => (
+                    <div key={item.model} className="feedCard" style={{ cursor: "default" }}>
+                      <div>
+                        <b>{item.model}</b>
+                        <p>{item.count} запусков</p>
+                      </div>
+                    </div>
+                  )) : <div className="warn">Пока нет данных.</div>}
+                </div>
+              </section>
+              <section>
+                <div className="studioHead"><h1 style={{ fontSize: 18 }}>Платёжные провайдеры за 30 дней</h1></div>
+                <div className="assistantPanel">
+                  {(overview.data?.providers || []).length ? overview.data.providers.map((item) => (
+                    <div key={item.provider} className="feedCard" style={{ cursor: "default" }}>
+                      <div>
+                        <b>{item.provider}</b>
+                        <p>{item.count} платежей · {formatRub(item.revenue || 0)}</p>
+                      </div>
+                    </div>
+                  )) : <div className="warn">Пока нет платежей.</div>}
+                </div>
+              </section>
+            </>
+          )}
+        </>
+      )}
+
+      {tab === "users" && (
+        <div className="toolGrid" style={{ alignItems: "start" }}>
+          <section className="assistantPanel" style={{ gridColumn: "span 1" }}>
+            <div className="assistantInput">
+              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Поиск: id, tg_id, @username, имя" />
+              <button className="primary" onClick={() => setSearch(searchInput.trim())}>Найти</button>
+            </div>
+            {users.loading ? <Spinner /> : (users.data?.items || []).map((item) => (
+              <button key={item.id} className={`feedCard ${selectedUserId === item.id ? "active" : ""}`} onClick={() => setSelectedUserId(item.id)} style={{ textAlign: "left" }}>
+                <div>
+                  <b>{item.full_name || item.username || `User #${item.id}`}</b>
+                  <p>ID {item.id} · tg {item.tg_id}</p>
+                  <p>{formatCredits(item.credits)} кр · {formatRub(item.paid_rub || 0)} · {item.generations_count || 0} ген.</p>
+                </div>
+                {item.is_banned ? <span className="statusBadge danger">ban</span> : null}
+              </button>
+            ))}
+          </section>
+
+          <section className="assistantPanel" style={{ gridColumn: "span 1" }}>
+            {selectedUser.loading ? <Spinner /> : !currentUser ? <div className="warn">Выбери пользователя слева.</div> : (
+              <>
+                <div className="studioHead">
+                  <h1 style={{ fontSize: 18 }}>{currentUser.full_name || currentUser.username || `User #${currentUser.id}`}</h1>
+                  {currentUser.is_banned ? <span className="statusBadge danger">banned</span> : <span className="statusBadge success">active</span>}
+                </div>
+                <div className="toolGrid">
+                  <AdminMetric label="Кредиты" value={formatCredits(currentUser.credits)} />
+                  <AdminMetric label="Реф. баланс" value={formatRub(currentUser.referral_balance || 0)} />
+                  <AdminMetric label="Платежи" value={currentStats.payments_count || 0} hint={formatRub(currentStats.paid_rub || 0)} />
+                  <AdminMetric label="Рефералы" value={(currentStats.referrals?.l1 || 0) + (currentStats.referrals?.l2 || 0) + (currentStats.referrals?.l3 || 0)} hint={`L1 ${currentStats.referrals?.l1 || 0} · L2 ${currentStats.referrals?.l2 || 0} · L3 ${currentStats.referrals?.l3 || 0}`} />
+                </div>
+                <div className="assistantQuick">
+                  <button onClick={() => applyCredits(1)}>+ кредиты</button>
+                  <button onClick={() => applyCredits(-1)}>- кредиты</button>
+                  <button onClick={toggleBan}>{currentUser.is_banned ? "Разбанить" : "Забанить"}</button>
+                </div>
+                <div className="assistantPanel" style={{ gap: 8 }}>
+                  <b>Последние платежи</b>
+                  {(selectedUser.data?.transactions || []).slice(0, 6).map((item) => (
+                    <div key={`tx-${item.id}`} className="feedCard" style={{ cursor: "default" }}>
+                      <div>
+                        <b>{item.provider} · {item.status}</b>
+                        <p>{formatRub(item.amount_rub || 0)} · {formatCredits(item.credits || 0)} кр · {adminDate(item.created_at)}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {!selectedUser.data?.transactions?.length ? <div className="warn">Платежей пока нет.</div> : null}
+                </div>
+                <div className="assistantPanel" style={{ gap: 8 }}>
+                  <b>Кредитный ledger</b>
+                  {(selectedUser.data?.ledger || []).slice(0, 8).map((item) => (
+                    <div key={`ledger-${item.id}`} className="feedCard" style={{ cursor: "default" }}>
+                      <div>
+                        <b>{item.entry_type}</b>
+                        <p>{item.delta > 0 ? "+" : ""}{formatCredits(item.delta)} → {formatCredits(item.balance_after)} · {adminDate(item.created_at)}</p>
+                        {item.note ? <p>{item.note}</p> : null}
+                      </div>
+                    </div>
+                  ))}
+                  {!selectedUser.data?.ledger?.length ? <div className="warn">Записей пока нет.</div> : null}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
+      {tab === "withdrawals" && (
+        <>
+          <div className="tabs soft">
+            {["pending", "approved", "rejected", "all"].map((status) => (
+              <button key={status} className={withdrawalStatus === status ? "active" : ""} onClick={() => setWithdrawalStatus(status)}>{status}</button>
+            ))}
+          </div>
+          {withdrawals.loading ? <Spinner /> : (
+            <div className="assistantPanel">
+              {(withdrawals.data?.items || []).map((item) => (
+                <div key={item.id} className="feedCard" style={{ cursor: "default", display: "grid", gap: 10 }}>
+                  <div>
+                    <b>{item.user?.full_name || item.user?.username || `User #${item.user?.id}`}</b>
+                    <p>{formatRub(item.amount_rub || 0)} · {item.status} · {adminDate(item.created_at)}</p>
+                    <p>{item.payout_details}</p>
+                    {item.admin_note ? <p>Note: {item.admin_note}</p> : null}
+                  </div>
+                  {item.status === "pending" ? (
+                    <div className="assistantQuick">
+                      <button onClick={() => reviewWithdrawal(item, "approve")}>Подтвердить</button>
+                      <button onClick={() => reviewWithdrawal(item, "reject")}>Отклонить</button>
+                      <button onClick={() => { setTab("users"); setSelectedUserId(item.user?.id || null); }}>Открыть юзера</button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {!withdrawals.data?.items?.length ? <div className="warn">Заявок нет.</div> : null}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function Help({ onNotice }) {
   const [topic, setTopic] = useState("main");
   const [text, setText] = useState("");
@@ -2239,6 +2576,7 @@ function Profile({ user, history, myFeed = [], setScreen, setTopup, theme, setTh
     ["prompts", "📚", "Библиотека промптов"],
     ["referrals", "₽", "Партнёрский кабинет"],
     ["help", "?", "Помощь"],
+    ...(user.is_admin ? [["admin", "🛡", "Owner cockpit"]] : []),
   ];
 
   useEffect(() => {
@@ -2326,14 +2664,9 @@ function Profile({ user, history, myFeed = [], setScreen, setTopup, theme, setTh
         </div>
         {profileFeed.length ? (
           <div className="profileFeedGrid">
-            {profileFeed.slice(0, 12).map((item, idx) => {
-              const urls = (Array.isArray(item.result_urls) && item.result_urls.length ? item.result_urls : [item.result_url]).filter(Boolean);
-              return (
-                <button key={item.id || idx} className="profileFeedTile" onClick={() => setScreen("feed")}>
-                  <MediaThumb url={urls[0]} type="image" idx={idx} className="profileFeedMedia" onOpen={openExternalUrl} />
-                </button>
-              );
-            })}
+            {profileFeed.slice(0, 12).map((item, idx) => (
+              <ProfileFeedTile key={item.id || idx} item={item} idx={idx} setScreen={setScreen} />
+            ))}
           </div>
         ) : (
           <div className="profileFeedEmpty">Пока здесь нет опубликованных фото.</div>
@@ -2675,10 +3008,34 @@ function App() {
   const realtimeReconnectRef = useRef(null);
   const generationScreen = useRef("studio");
 
+  useEffect(() => {
+    const webApp = tg();
+    try {
+      webApp?.ready?.();
+      webApp?.expand?.();
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    const resetScroll = () => {
+      try {
+        window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      } catch (_) {
+        window.scrollTo(0, 0);
+      }
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+
+    resetScroll();
+    const frame = window.requestAnimationFrame(resetScroll);
+    return () => window.cancelAnimationFrame(frame);
+  }, [screen]);
+
   const me = useApi(() => api("/me"), fallbackUser);
   const imageModels = useApi(() => api("/models/image").then(x => items(x).length ? items(x) : x), fallbackImageModels);
   const videoModels = useApi(() => api("/models/video").then(x => items(x).length ? items(x) : x), fallbackVideoModels);
-  const feed = useApi(() => api("/feed?limit=100").then(items), fallbackFeed);
+  const feed = useApi(() => api("/feed?limit=300").then(items), fallbackFeed);
   const myFeed = useApi(() => api("/me/feed?limit=200").then(items), []);
   const history = useApi(() => api("/history?limit=50").then(items), []);
   const prompts = useApi(() => api("/prompts?limit=30").then(items), []);
@@ -3023,6 +3380,8 @@ function App() {
 
   const activePromptUse = promptTarget === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset;
 
+  window.__APIX_IS_ADMIN__ = Boolean(user?.is_admin);
+
   const screens = {
     home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={navigate} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
     capabilities: <Capabilities setScreen={navigate} setTopup={setTopupOpen} />,
@@ -3035,6 +3394,7 @@ function App() {
     profile: <Profile user={user} history={history.data} myFeed={myFeed.data} setScreen={navigate} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} onNotice={setNotice} reloadUser={me.reload} />,
     referrals: <Referrals user={user} stats={referrals.data} loading={referrals.loading} reload={referrals.reload} onNotice={setNotice} />,
     help: <Help onNotice={setNotice} />,
+    admin: <AdminDashboard user={user} onNotice={setNotice} />,
     prompts:<Prompts prompts={prompts.data} loading={prompts.loading} setScreen={navigate} onPromptUse={activePromptUse} onNotice={setNotice} target={promptTarget}/>,
   };
 

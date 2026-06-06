@@ -48,6 +48,8 @@ class UserMe(BaseModel):
     tg_id: int
     username: str | None
     full_name: str | None
+    email: str | None = None
+    phone: str | None = None
     photo_url: str | None = None
     credits: float
     referral_code: str
@@ -66,11 +68,17 @@ class UserMe(BaseModel):
         referral_link: str = "",
     ) -> "UserMe":
         tg_id = int(getattr(user, "tg_id", 0))
+        has_telegram = tg_id > 0
+        surfaces = ["web"]
+        if has_telegram:
+            surfaces.append("telegram")
         return cls(
             id=int(getattr(user, "id", 0)),
             tg_id=tg_id,
             username=getattr(user, "username", None),
             full_name=getattr(user, "full_name", None),
+            email=getattr(user, "email", None),
+            phone=getattr(user, "phone", None),
             photo_url=getattr(user, "photo_url", None),
             credits=float(getattr(user, "credits", 0) or 0),
             referral_code=str(getattr(user, "referral_code", "") or ""),
@@ -78,6 +86,7 @@ class UserMe(BaseModel):
             language=str(getattr(user, "language", "ru") or "ru"),
             created_at=iso_datetime(getattr(user, "created_at", None)),
             is_admin=tg_id in set(admin_ids or []),
+            connected_surfaces=surfaces,
         )
 
 

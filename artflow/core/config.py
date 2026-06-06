@@ -1,10 +1,12 @@
 # core/config.py
+import os
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Bot
     BOT_TOKEN: str
@@ -32,6 +34,11 @@ class Settings(BaseSettings):
     MIDJOURNEY_WEBHOOK_PATH: str = "/webhook/comet/midjourney"
     MIDJOURNEY_WEBHOOK_SECRET: str = ""
 
+    # OpenRouter (primary for migrated image/video/chat models)
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_FORCE_MIGRATED_MODELS: bool = False
+
     # aivideoapi.ai (HappyHorse)
     AIVIDEOAPI_KEY: str = ""
 
@@ -56,6 +63,29 @@ class Settings(BaseSettings):
     TBANK_BASE_URL: str = "https://securepay.tinkoff.ru/v2"
     TBANK_SUCCESS_URL: str = ""
     TBANK_FAIL_URL: str = ""
+
+    # Lava.top
+    LAVA_API_KEY: str = ""
+    LAVA_API_BASE_URL: str = "https://gate.lava.top"
+    LAVA_WEBHOOK_PATH: str = "/webhook/lava"
+    LAVA_DEFAULT_EMAIL: str = "buyer@example.com"
+
+    # Email auth delivery
+    WEB_AUTH_EMAIL_ENABLED: bool = False
+    RESEND_API_KEY: str = ""
+    RESEND_FROM_EMAIL: str = ""
+    RESEND_FROM_NAME: str = "APIX Studio"
+
+    # Email auth delivery (SMTP fallback)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "APIX Studio"
+    SMTP_REPLY_TO: str = ""
+    SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
 
     # KIE.AI photo → prompt (GPT-5.x vision via kie.ai)
     KIE_PHOTO_PROMPT_MODEL: str = "gpt-5-2"
@@ -85,6 +115,28 @@ class Settings(BaseSettings):
     # Polling
     POLLING_INTERVAL: float = 3.0
     POLLING_TIMEOUT: int = 600
+
+    def lava_offer_id_for_plan(self, plan_key: str) -> str:
+        normalized = (plan_key or "").strip().upper().replace("-", "_")
+        if not normalized:
+            return ""
+        key = f"LAVA_OFFER_ID_{normalized}"
+        value = os.getenv(key, "")
+        if value:
+            return value
+        env_path = ".env"
+        try:
+            with open(env_path, "r", encoding="utf-8") as fh:
+                for raw_line in fh:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    if k.strip() == key:
+                        return v.strip().strip("\"'")
+        except FileNotFoundError:
+            return ""
+        return ""
 
     @property
     def KIE_API_KEY(self) -> str:
