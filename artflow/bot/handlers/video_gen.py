@@ -8,6 +8,7 @@ import logging
 from urllib.parse import urlencode
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -586,7 +587,17 @@ async def handle_video_upload(
         return
 
     # Mirror video to public storage for KIE API
-    video_url = await mirror_telegram_file(bot, file_id, is_video=True)
+    try:
+        video_url = await mirror_telegram_file(bot, file_id, is_video=True)
+    except TelegramBadRequest as exc:
+        if "file is too big" in str(exc).lower():
+            await message.answer(
+                "❌ Это видео слишком большое для загрузки через Telegram Bot API, поэтому я не могу автоматически забрать его в обработку.\n\n"
+                "Что можно сделать: сожми ролик, укороти его или отправь файл меньшего размера.",
+                reply_markup=back_to_menu_kb(),
+            )
+            return
+        raise
 
     model_cost_obj = await repo.get_model_cost(session, model_key)
     display_name = model_cost_obj.display_name if model_cost_obj else model_key

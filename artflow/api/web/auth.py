@@ -6,6 +6,7 @@ import hmac
 import re
 import secrets
 import smtplib
+import time
 
 import httpx
 from datetime import datetime, timedelta, timezone
@@ -13,12 +14,12 @@ from email.message import EmailMessage
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.miniapp_auth import create_web_auth_token, verify_telegram_login_data
-from api.web.deps import error_response, ok
+from api.web.deps import WEB_AUTH_COOKIE_NAME, error_response, ok
 from api.web.schemas import UserMe
 from core.config import settings
 from db import repository as repo
@@ -47,8 +48,108 @@ class ContactAuthVerifyRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=256)
 
 
+class PasswordLoginRequest(BaseModel):
+    login: str = Field(..., min_length=3, max_length=256)
+    password: str = Field(..., min_length=8, max_length=128)
+
+
+class PasswordRegisterRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=256)
+    password: str = Field(..., min_length=8, max_length=128)
+    full_name: str | None = Field(default=None, max_length=256)
+
+
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TG_USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
+PASSWORD_HASH_ITERATIONS = 390_000
+PASSWORD_LOGIN_WINDOW_SECONDS = 15 * 60
+PASSWORD_LOGIN_MAX_FAILURES = 8
+_PASSWORD_LOGIN_FAILURES: dict[str, list[float]] = {}
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_urlsafe(18)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        PASSWORD_HASH_ITERATIONS,
+    ).hex()
+    return f"pbkdf2_sha256${PASSWORD_HASH_ITERATIONS}${salt}${digest}"
+
+
+def verify_password(password: str, encoded: str | None) -> bool:
+    if not encoded:
+        return False
+    try:
+        algorithm, iterations_raw, salt, digest = encoded.split("$", 3)
+        iterations = int(iterations_raw)
+    except (ValueError, TypeError):
+        return False
+    if algorithm != "pbkdf2_sha256" or iterations < 120_000:
+        return False
+    candidate = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        iterations,
+    ).hex()
+    return hmac.compare_digest(candidate, digest)
+
+
+def _is_production() -> bool:
+    return str(getattr(settings, "ENV", "") or "").lower() == "production"
+
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        WEB_AUTH_COOKIE_NAME,
+        token,
+        max_age=30 * 24 * 60 * 60,
+        httponly=True,
+        secure=_is_production(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(
+        WEB_AUTH_COOKIE_NAME,
+        httponly=True,
+        secure=_is_production(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _password_attempt_key(login: str) -> str:
+    return login.strip().lower()
+
+
+def _password_retry_after(login: str) -> int:
+    now = time.monotonic()
+    key = _password_attempt_key(login)
+    failures = [
+        item for item in _PASSWORD_LOGIN_FAILURES.get(key, [])
+        if now - item < PASSWORD_LOGIN_WINDOW_SECONDS
+    ]
+    if failures:
+        _PASSWORD_LOGIN_FAILURES[key] = failures
+    else:
+        _PASSWORD_LOGIN_FAILURES.pop(key, None)
+    if len(failures) < PASSWORD_LOGIN_MAX_FAILURES:
+        return 0
+    return max(1, int(PASSWORD_LOGIN_WINDOW_SECONDS - (now - failures[0])))
+
+
+def _record_password_failure(login: str) -> None:
+    key = _password_attempt_key(login)
+    _PASSWORD_LOGIN_FAILURES.setdefault(key, []).append(time.monotonic())
+
+
+def _clear_password_failures(login: str) -> None:
+    _PASSWORD_LOGIN_FAILURES.pop(_password_attempt_key(login), None)
 
 
 def _bot_username() -> str:
@@ -100,9 +201,12 @@ def _contact_user_label(contact_type: str, contact: str, full_name: str | None) 
     return f"Пользователь {contact[-4:]}"
 
 
-def _auth_payload(user) -> dict:
+def _auth_payload(user, response: Response | None = None) -> dict:
+    token = create_web_auth_token(user.tg_id)
+    if response is not None:
+        _set_auth_cookie(response, token)
     return {
-        "token": create_web_auth_token(user.tg_id),
+        "token": token,
         "token_type": "web",
         "expires_in": 30 * 24 * 60 * 60,
         "user": UserMe.from_user(
@@ -111,6 +215,18 @@ def _auth_payload(user) -> dict:
             referral_link=telegram_start_link(getattr(user, "referral_code", "") or ""),
         ).model_dump(),
     }
+
+
+async def _user_by_login(session: AsyncSession, login: str):
+    try:
+        contact_type, contact = _normalize_contact(login)
+    except ValueError:
+        return None
+    if contact_type == "email":
+        return await repo.get_user_by_email(session, contact)
+    if contact_type == "phone":
+        return await repo.get_user_by_phone(session, contact)
+    return await repo.get_user_by_username(session, contact)
 
 
 def _show_debug_auth_code() -> bool:
@@ -308,12 +424,15 @@ async def auth_config() -> dict:
         "contact_login": bool(modes),
         "contact_login_modes": modes,
         "contact_login_hint": _contact_login_hint(modes),
+        "password_login": True,
     })
 
 
 @router.post("/auth/telegram-login")
 async def telegram_login(
     body: TelegramLoginRequest,
+    response: Response,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     x_web_auth_token: str | None = Header(default=None, alias="X-Web-Auth-Token"),
 ) -> dict:
@@ -325,11 +444,12 @@ async def telegram_login(
 
     tg_id = int(tg_user["id"])
     current_user = None
-    if x_web_auth_token:
+    web_auth_token = x_web_auth_token or request.cookies.get(WEB_AUTH_COOKIE_NAME)
+    if web_auth_token:
         try:
             from api.miniapp_auth import verify_web_auth_token
 
-            current_tg_id = verify_web_auth_token(x_web_auth_token)
+            current_tg_id = verify_web_auth_token(web_auth_token)
             current_user = await repo.get_user_by_tg_id(session, current_tg_id)
         except Exception:
             current_user = None
@@ -355,7 +475,58 @@ async def telegram_login(
             welcome_credits=settings.WELCOME_BONUS_CREDITS,
         )
 
-    return ok(_auth_payload(user))
+    return ok(_auth_payload(user, response=response))
+
+
+@router.post("/auth/password-login")
+async def password_login(
+    body: PasswordLoginRequest,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    retry_after = _password_retry_after(body.login)
+    if retry_after > 0:
+        return error_response(429, f"Слишком много попыток. Повторите через {retry_after} сек.")
+    user = await _user_by_login(session, body.login)
+    if not user or getattr(user, "is_banned", False):
+        _record_password_failure(body.login)
+        return error_response(401, "Неверный логин или пароль")
+    if not verify_password(body.password, getattr(user, "password_hash", None)):
+        _record_password_failure(body.login)
+        return error_response(401, "Неверный логин или пароль")
+    _clear_password_failures(body.login)
+    return ok(_auth_payload(user, response=response))
+
+
+@router.post("/auth/password-register")
+async def password_register(
+    body: PasswordRegisterRequest,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    try:
+        contact_type, email = _normalize_contact(body.email)
+    except ValueError as exc:
+        return error_response(422, str(exc))
+    if contact_type != "email":
+        return error_response(422, "Регистрация с паролем доступна только по email")
+    existing = await repo.get_user_by_email(session, email)
+    if existing:
+        return error_response(409, "Аккаунт с таким email уже существует")
+    user = await repo.create_contact_user(
+        session,
+        email=email,
+        full_name=_contact_user_label("email", email, body.full_name),
+        welcome_credits=settings.WELCOME_BONUS_CREDITS,
+    )
+    user = await repo.set_user_password_hash(session, user.id, hash_password(body.password)) or user
+    return ok(_auth_payload(user, response=response))
+
+
+@router.post("/auth/logout")
+async def logout(response: Response) -> dict:
+    _clear_auth_cookie(response)
+    return ok()
 
 
 @router.post("/auth/contact/request")
@@ -444,6 +615,7 @@ async def contact_auth_request(
 @router.post("/auth/contact/verify")
 async def contact_auth_verify(
     body: ContactAuthVerifyRequest,
+    response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:
@@ -487,4 +659,4 @@ async def contact_auth_verify(
                 full_name=_contact_user_label(contact_type, contact, body.full_name),
                 welcome_credits=settings.WELCOME_BONUS_CREDITS,
             )
-    return ok(_auth_payload(user))
+    return ok(_auth_payload(user, response=response))

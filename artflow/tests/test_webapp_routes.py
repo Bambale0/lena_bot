@@ -377,6 +377,30 @@ async def test_webapp_referral_withdrawal_reports_available_balance(client, monk
 
 
 @pytest.mark.asyncio
+async def test_webapp_referral_exchange_uses_standard_tariff_rate(client, monkeypatch) -> None:
+    monkeypatch.setattr("api.miniapp_routes.settings.REFERRAL_EXCHANGE_MIN_RUB", 100.0)
+    monkeypatch.setattr("api.miniapp_routes.settings.REFERRAL_EXCHANGE_RUB_PER_CREDIT", 10.0)
+    exchange = AsyncMock(return_value=SimpleNamespace(
+        id=11,
+        amount_rub=500.0,
+        amount_credits=50.0,
+        payout_details="AUTO_CREDITS",
+        status=SimpleNamespace(value="approved"),
+        created_at=datetime(2026, 5, 15, tzinfo=timezone.utc),
+    ))
+    monkeypatch.setattr("api.miniapp_routes.repo.convert_referral_balance_to_credits", exchange)
+
+    response = await client.post("/api/v1/referrals/exchange", json={"amount_rub": 500})
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["amount_rub"] == 500.0
+    assert data["amount_credits"] == 50.0
+    assert exchange.await_args.kwargs["amount_rub"] == 500
+    assert exchange.await_args.kwargs["rub_per_credit"] == 10.0
+
+
+@pytest.mark.asyncio
 async def test_webapp_me_normalizes_bot_username_for_referral_link(client, monkeypatch) -> None:
     monkeypatch.setattr("api.miniapp_routes.repo.get_active_image_session", AsyncMock(return_value=None))
     monkeypatch.setattr("api.miniapp_routes.settings.BOT_USERNAME", "@TestBot")

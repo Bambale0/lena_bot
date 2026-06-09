@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from core.model_pricing import image_pricing_keys, video_pricing_keys
+from core.config import settings
 from api.public_files import mirror_url
 from db.models import (
     Generation,
@@ -71,6 +72,7 @@ class FeedGenerationCard:
     quality: str | None
     count: int | None
     reference_url: str | None
+    reference_urls: str | None
     remix_count: int
     score: float
 
@@ -112,6 +114,7 @@ class WithdrawalRequestView:
 
 @dataclass(frozen=True)
 class ReferralBalanceSnapshot:
+    user: User
     total_earned: float
     pending_withdrawals: float
     available_to_withdraw: float
@@ -274,6 +277,38 @@ async def create_contact_user(
     await session.refresh(user)
     logger.info("Web contact user created: user_id=%s", user.id)
     return user
+
+
+async def update_user_profile(
+    session: AsyncSession,
+    user_id: int,
+    **values,
+) -> User | None:
+    allowed = {"username", "full_name", "email", "phone", "photo_url", "language"}
+    clean_values = {key: value for key, value in values.items() if key in allowed}
+    if not clean_values:
+        return await get_user_by_id(session, user_id)
+    await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(**clean_values)
+    )
+    await session.commit()
+    return await get_user_by_id(session, user_id)
+
+
+async def set_user_password_hash(
+    session: AsyncSession,
+    user_id: int,
+    password_hash: str,
+) -> User | None:
+    await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(password_hash=password_hash, password_set_at=datetime.now(timezone.utc))
+    )
+    await session.commit()
+    return await get_user_by_id(session, user_id)
 
 
 async def create_web_auth_code(
@@ -1145,11 +1180,12 @@ async def _feed_cards_from_stmt(session: AsyncSession, stmt) -> list[FeedGenerat
             ImageSession.quality,
             ImageSession.count,
             ImageSession.reference_url,
+            ImageSession.reference_urls,
             func.coalesce(remix_counts.c.remix_count, 0).label("remix_count"),
         )
     )
     cards: list[FeedGenerationCard] = []
-    for gen, username, full_name, author_photo_url, aspect_ratio, quality, count, reference_url, remix_count in result.all():
+    for gen, username, full_name, author_photo_url, aspect_ratio, quality, count, reference_url, reference_urls, remix_count in result.all():
         remix_total = int(remix_count or 0)
         cards.append(
             FeedGenerationCard(
@@ -1161,6 +1197,7 @@ async def _feed_cards_from_stmt(session: AsyncSession, stmt) -> list[FeedGenerat
                 quality=quality,
                 count=count,
                 reference_url=reference_url,
+                reference_urls=reference_urls,
                 remix_count=remix_total,
                 score=_feed_score(gen, remix_total),
             )
@@ -1404,6 +1441,7 @@ async def create_image_session(
     reference_file_id: str | None = None,
     reference_file_ids: list[str] | None = None,
     reference_url: str | None = None,
+    reference_urls: list[str] | None = None,
 ) -> ImageSession:
     await archive_active_image_sessions(session, user_id)
 
@@ -1412,7 +1450,14 @@ async def create_image_session(
         normalized_reference_file_ids.insert(0, reference_file_id)
 
     if isinstance(reference_url, list):
-        reference_url = next((str(item) for item in reference_url if item), None)
+        reference_urls = [str(item) for item in reference_url if item]
+        reference_url = next(iter(reference_urls), None)
+
+    normalized_reference_urls = [str(item) for item in (reference_urls or []) if item]
+    if reference_url and reference_url not in normalized_reference_urls:
+        normalized_reference_urls.insert(0, reference_url)
+    if normalized_reference_urls:
+        reference_url = normalized_reference_urls[0]
 
     image_session = ImageSession(
         user_id=user_id,
@@ -1426,6 +1471,7 @@ async def create_image_session(
         reference_file_id=reference_file_id,
         reference_file_ids=json.dumps(normalized_reference_file_ids, ensure_ascii=True) if normalized_reference_file_ids else None,
         reference_url=reference_url,
+        reference_urls=json.dumps(normalized_reference_urls, ensure_ascii=False) if normalized_reference_urls else None,
         status=ImageSessionStatus.active,
     )
     session.add(image_session)
@@ -1457,6 +1503,17 @@ async def get_active_image_session(session: AsyncSession, user_id: int) -> Image
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def get_image_sessions_by_ids(
+    session: AsyncSession,
+    image_session_ids: list[int],
+) -> dict[int, ImageSession]:
+    ids = sorted({int(item) for item in image_session_ids if item})
+    if not ids:
+        return {}
+    result = await session.execute(select(ImageSession).where(ImageSession.id.in_(ids)))
+    return {item.id: item for item in result.scalars().all()}
 
 
 async def update_image_session_reference(
@@ -1777,6 +1834,62 @@ async def set_transaction_status(
 
 # ─── Referral Withdrawals ────────────────────────────────────────────────────
 
+async def convert_referral_balance_to_credits(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    amount_rub: float,
+    rub_per_credit: float,
+) -> ReferralWithdrawalRequest:
+    snapshot = await get_user_referral_balance_snapshot(session, user_id, lock_user=True)
+    if snapshot is None:
+        raise ValueError(f"User {user_id} not found")
+    if amount_rub > snapshot.available_to_withdraw + 1e-9:
+        raise InsufficientReferralBalanceError(snapshot.available_to_withdraw)
+    if rub_per_credit <= 0:
+        raise ValueError("rub_per_credit must be greater than zero")
+
+    user = snapshot.user
+    available_balance = float(user.referral_balance or 0.0)
+    credits_delta = float(
+        (Decimal(str(amount_rub)) / Decimal(str(rub_per_credit))).quantize(
+            Decimal("0.001"),
+            rounding=ROUND_HALF_UP,
+        )
+    )
+    if credits_delta <= 0:
+        raise ValueError("Referral exchange rate must produce a positive credit amount")
+
+    user.referral_balance = max(0.0, available_balance - amount_rub)
+    user.credits = float(user.credits or 0.0) + credits_delta
+
+    request = ReferralWithdrawalRequest(
+        user_id=user_id,
+        amount_rub=amount_rub,
+        payout_details="AUTO_CREDITS",
+        status=WithdrawalStatus.approved,
+        admin_tg_id=0,
+        admin_note=f"Auto-converted to kisses at {rub_per_credit:g} RUB per credit",
+        reviewed_at=func.now(),
+    )
+    session.add(request)
+    await session.flush()
+    await _insert_credit_ledger(
+        session,
+        user_id=user_id,
+        delta=credits_delta,
+        balance_after=float(user.credits or 0.0),
+        entry_type="referral_exchange",
+        source_type="referral_withdrawal",
+        source_id=str(request.id),
+        note=f"Referral balance converted to kisses: {amount_rub:g} RUB -> {credits_delta:g} credits",
+    )
+    await session.commit()
+    await session.refresh(request)
+    setattr(request, "amount_credits", credits_delta)
+    return request
+
+
 async def create_withdrawal_request(
     session: AsyncSession,
     *,
@@ -1925,6 +2038,7 @@ async def get_user_referral_balance_snapshot(
     total_earned = float(user.referral_balance or 0.0)
     available_to_withdraw = max(0.0, total_earned - pending_withdrawals)
     return ReferralBalanceSnapshot(
+        user=user,
         total_earned=total_earned,
         pending_withdrawals=pending_withdrawals,
         available_to_withdraw=available_to_withdraw,

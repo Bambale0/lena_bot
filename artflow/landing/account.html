@@ -8,8 +8,8 @@
     <meta name="theme-color" content="#080814" />
     <link rel="canonical" href="https://apixbotai.com/account.html" />
     <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="css/prototype-premium.css" />
-    <script src="js/prototype-premium.js" defer></script>
+    <link rel="stylesheet" href="css/prototype-premium.css?v=20260609_auth_login" />
+    <script src="js/prototype-premium.js?v=20260609_auth_login" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -20,11 +20,12 @@
       <nav aria-label="Навигация сайта">
         <a href="/">Главная</a>
         <a href="studio.html" data-auth-only hidden>Создать</a>
+        <a href="account.html#library" data-auth-only hidden>История</a>
         <a href="gallery.html">Лента</a>
         <a href="models.html">Модели</a>
       </nav>
       <div class="top-auth">
-        <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
+        <button class="top-user" type="button" data-open-login data-user-pill>Войти</button>
         <a class="top-cta" href="account.html" aria-current="page">Кабинет <span aria-hidden="true">↗</span></a>
         <button class="top-logout" type="button" data-logout hidden>Выйти</button>
       </div>
@@ -46,12 +47,21 @@
             <a class="account-logo" href="account.html"><img src="images/apix-premium-mark.svg" alt="" />APIX Account</a>
             <nav data-account-tabs>
               <div class="account-nav-group">
+                <button class="account-group-toggle" type="button" data-group-target="workspace">Работы</button>
+                <button class="active" type="button" data-tab="queue">Очередь</button>
+                <button type="button" data-tab="library">История и файлы</button>
+                <button type="button" data-tab="feed">Лента</button>
+                <button type="button" data-tab="prompts">Промпты</button>
+              </div>
+              <div class="account-nav-group">
                 <button class="account-group-toggle" type="button" data-group-target="billing">Финансы</button>
-                <button class="active" type="button" data-tab="billing">Баланс и пополнение</button>
+                <button type="button" data-tab="billing">Баланс и пополнение</button>
                 <button type="button" data-tab="referrals">Партнёрка и статистика</button>
               </div>
               <div class="account-nav-group">
                 <button class="account-group-toggle" type="button" data-group-target="pro">Синхрон</button>
+                <button type="button" data-tab="profile">Профиль</button>
+                <button type="button" data-tab="assistant">Ассистент</button>
                 <button type="button" data-tab="pro">Telegram и синхрон</button>
                 <button type="button" data-tab="settings">Настройки и помощь</button>
                 <button type="button" data-tab="admin" data-admin-only hidden>Админка</button>
@@ -68,17 +78,62 @@
             <header class="account-topline">
               <div>
                 <span>Личный кабинет</span>
-                <b data-account-title>Баланс и пополнение</b>
+                <b data-account-title>Очередь и история</b>
               </div>
               <div class="workflow-steps">
-                <span class="active">Баланс</span>
-                <span>Платежи</span>
-                <span>Партнёрка</span>
+                <span class="active">Очередь</span>
+                <span>История</span>
+                <span>Финансы</span>
                 <span>Синхрон</span>
               </div>
             </header>
 
-            <section class="account-panel active" data-panel="billing">
+            <section class="account-panel active" data-panel="queue">
+              <div class="feed-panel-intro">
+                <span>Очередь</span>
+                <h3>Активные генерации</h3>
+                <p>Здесь видно, что сейчас считается и что уже почти готово.</p>
+              </div>
+              <div class="feature-board" data-account-queue></div>
+            </section>
+
+            <section class="account-panel" data-panel="library">
+              <div class="feed-panel-intro">
+                <span>История</span>
+                <h3>Готовые работы и файлы</h3>
+                <p>Открывайте, скачивайте и повторяйте свои генерации отсюда.</p>
+              </div>
+              <div class="feature-board" data-account-library></div>
+            </section>
+
+            <section class="account-panel" data-panel="feed">
+              <div class="feature-board feature-board-wide" data-feed-board></div>
+            </section>
+
+            <section class="account-panel" data-panel="prompts">
+              <div class="feature-split">
+                <form class="feature-form" data-prompt-form>
+                  <label><span>Название</span><input name="title" type="text" autocomplete="off" placeholder="Идея для генерации" required /></label>
+                  <label><span>Промпт</span><textarea name="prompt_text" rows="5" placeholder="Опишите кадр, сцену или задачу" required></textarea></label>
+                  <label><span>Теги</span><input name="tags" type="text" autocomplete="off" placeholder="Портрет, продукт, видео, музыка" /></label>
+                  <label><span>Превью</span><input name="preview_url" type="url" inputmode="url" placeholder="https://..." /></label>
+                  <button class="button primary" type="submit">Сохранить промпт</button>
+                </form>
+                <div class="feature-board" data-prompts-board></div>
+              </div>
+            </section>
+
+            <section class="account-panel" data-panel="assistant">
+              <div class="assistant-panel">
+                <div class="assistant-log" data-assistant-log></div>
+                <form class="assistant-form" data-assistant-form>
+                  <textarea name="message" rows="3" placeholder="Опишите идею или задачу" required></textarea>
+                  <button class="button primary" type="submit">Отправить</button>
+                </form>
+              </div>
+            </section>
+
+            <section class="account-panel" data-panel="billing">
               <div class="billing-grid" data-billing-grid></div>
             </section>
 
@@ -103,6 +158,39 @@
                   <h3 data-web-contact-title>Web-аккаунт</h3>
                   <p data-web-contact-copy>Сайт хранит ваш кабинет, баланс и историю. Telegram используется для быстрого входа, кодов и синхронных уведомлений.</p>
                 </article>
+              </div>
+            </section>
+
+            <section class="account-panel" data-panel="profile">
+              <div class="profile-grid">
+                <form class="feature-form profile-form" data-profile-form>
+                  <div class="feed-panel-intro">
+                    <span>Профиль</span>
+                    <h3>Данные аккаунта</h3>
+                    <p>Имя, контакты и аватар для сайта. Telegram остаётся отдельным связанным каналом.</p>
+                  </div>
+                  <label><span>Имя</span><input name="full_name" type="text" autocomplete="name" placeholder="Ваше имя" /></label>
+                  <label><span>Username</span><input name="username" type="text" autocomplete="username" placeholder="@username" /></label>
+                  <label><span>Email</span><input name="email" type="email" autocomplete="email" placeholder="you@example.com" /></label>
+                  <label><span>Телефон</span><input name="phone" type="tel" autocomplete="tel" placeholder="+79990000000" /></label>
+                  <label><span>Фото профиля</span><input name="photo_url" type="url" placeholder="https://..." /></label>
+                  <div class="settings-actions">
+                    <button class="button primary" type="submit">Сохранить профиль</button>
+                  </div>
+                </form>
+                <form class="feature-form profile-form" data-password-form>
+                  <div class="feed-panel-intro">
+                    <span>Безопасность</span>
+                    <h3>Пароль для сайта</h3>
+                    <p data-password-status>Пароль можно использовать для входа без Telegram.</p>
+                  </div>
+                  <label data-current-password-row><span>Текущий пароль</span><input name="current_password" type="password" autocomplete="current-password" /></label>
+                  <label><span>Новый пароль</span><input name="new_password" type="password" autocomplete="new-password" minlength="8" required /></label>
+                  <label><span>Повторите пароль</span><input name="new_password_confirm" type="password" autocomplete="new-password" minlength="8" required /></label>
+                  <div class="settings-actions">
+                    <button class="button primary" type="submit">Обновить пароль</button>
+                  </div>
+                </form>
               </div>
             </section>
 
@@ -148,7 +236,7 @@
             <h2>APIX Studio — AI-студия для картинок, видео и музыки</h2>
             <p>Гостям показываем только продуктовый сценарий: что умеет сервис, какие форматы доступны и как быстро начать. Кабинет, история, финансы и внутренние инструменты открываются только после входа.</p>
             <div class="guest-product-actions">
-              <button class="button primary" type="button" data-open-login>Войти через Telegram</button>
+              <button class="button primary" type="button" data-open-login>Войти</button>
               <a class="button ghost" href="studio.html">Посмотреть сценарии</a>
               <a class="button ghost" href="gallery.html">Посмотреть примеры</a>
             </div>
@@ -177,12 +265,12 @@
     <div class="modal-backdrop" data-login-modal hidden>
       <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
         <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
-        <p class="eyebrow">Вход и регистрация</p>
+        <p class="eyebrow">Вход</p>
         <h2 id="login-title">Откройте кабинет APIX</h2>
-        <p>Войдите через Telegram. После входа откроется кабинет, история, баланс и синхрон с ботом.</p>
+        <p>Войдите по почте и паролю или через Telegram. Создание аккаунта открывается отдельной кнопкой.</p>
         <div class="auth-methods">
-          <form class="contact-auth-form" data-contact-login-form>
-            <span>Telegram username</span>
+          <form class="contact-auth-form" data-contact-login-form hidden aria-hidden="true">
+            <span>Email или Telegram</span>
             <label><input name="contact" type="text" inputmode="email" autocomplete="email tel" placeholder="@username" required /></label>
             <label><input name="full_name" type="text" autocomplete="name" placeholder="Ваше имя" /></label>
             <div class="contact-code-row">
@@ -190,7 +278,7 @@
               <button class="button ghost" type="button" data-contact-request>Получить код</button>
             </div>
             <button class="button primary" type="submit" data-contact-submit disabled>Войти</button>
-            <small data-contact-login-status>Укажи @username Telegram — код придёт в бот и откроет кабинет.</small>
+            <small data-contact-login-status>Введите email или @username для входа по коду.</small>
           </form>
           <div class="telegram-auth-panel">
             <span>Telegram</span>

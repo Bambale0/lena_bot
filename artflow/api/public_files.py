@@ -7,6 +7,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
+from PIL import Image, ImageOps
+
 from core.config import settings
 
 UPLOAD_ROOT = Path(settings.STATIC_UPLOAD_DIR)
@@ -103,6 +105,39 @@ def is_video_content_type(content_type: str | None) -> bool:
     return any(kw in ct for kw in ("video", "mp4", "webm", "mov", "ogg", "quicktime"))
 
 
+def detect_audio_extension(data: bytes, content_type: str | None = None) -> str:
+    ct = (content_type or "").lower()
+
+    if "mpeg" in ct or "mp3" in ct:
+        return ".mp3"
+    if "wav" in ct or "wave" in ct:
+        return ".wav"
+    if "x-m4a" in ct or "m4a" in ct or "mp4a" in ct or "aac" in ct:
+        return ".m4a"
+    if "flac" in ct:
+        return ".flac"
+    if "ogg" in ct or "opus" in ct:
+        return ".ogg"
+
+    if data.startswith(b"ID3"):
+        return ".mp3"
+    if len(data) > 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return ".wav"
+    if len(data) > 8 and data[4:8] == b"ftyp":
+        return ".m4a"
+    if data.startswith(b"fLaC"):
+        return ".flac"
+    if data.startswith(b"OggS"):
+        return ".ogg"
+
+    return ".mp3"
+
+
+def is_audio_content_type(content_type: str | None) -> bool:
+    ct = (content_type or "").lower()
+    return any(kw in ct for kw in ("audio", "mpeg", "mp3", "wav", "wave", "m4a", "aac", "flac", "ogg", "opus"))
+
+
 def ensure_public_image_url(url: str | None) -> str | None:
     """
     Return a Telegram/KIE-friendly public image URL.
@@ -126,9 +161,46 @@ def ensure_public_image_url(url: str | None) -> str | None:
     return public_upload_url(image_path.name)
 
 
+def preview_public_image_url(url: str | None, *, max_size: int = 768, quality: int = 82) -> str | None:
+    path = local_upload_path_from_url(ensure_public_image_url(url) or url)
+    if not url or not path or not path.exists() or not path.is_file():
+        return url
+
+    if "_preview_" in path.stem and path.suffix.lower() == ".webp":
+        return public_upload_url(path.name)
+
+    try:
+        stat = path.stat()
+    except OSError:
+        return url
+
+    digest = hashlib.sha256(f"{path.name}:{stat.st_mtime_ns}:{max_size}:{quality}".encode()).hexdigest()[:16]
+    preview_path = path.with_name(f"{path.stem}_preview_{max_size}_{digest}.webp")
+    if preview_path.exists() and preview_path.is_file():
+        return public_upload_url(preview_path.name)
+
+    try:
+        with Image.open(path) as image:
+            image = ImageOps.exif_transpose(image)
+            if image.mode not in ("RGB", "RGBA"):
+                image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+            image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            if "A" not in image.getbands():
+                image = image.convert("RGB")
+            image.save(preview_path, format="WEBP", quality=quality, method=6)
+        return public_upload_url(preview_path.name)
+    except Exception:
+        return ensure_public_image_url(url) or url
+
+
 def save_public_file(data: bytes, content_type: str | None = None) -> str:
     upload_dir = get_static_upload_directory()
-    ext = detect_image_extension(data, content_type)
+    if is_video_content_type(content_type):
+        ext = detect_video_extension(data, content_type)
+    elif is_audio_content_type(content_type):
+        ext = detect_audio_extension(data, content_type)
+    else:
+        ext = detect_image_extension(data, content_type)
     digest = hashlib.sha256(data).hexdigest()[:32]
     filename = f"{digest}{ext}"
     path = upload_dir / filename
@@ -151,6 +223,9 @@ async def mirror_url(url: str) -> str:
 
     local_path = local_upload_path_from_url(url)
     if local_path is not None:
+        suffix = local_path.suffix.lower()
+        if suffix in {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".mp4", ".webm", ".mov"}:
+            return url
         return ensure_public_image_url(url) or url
 
     try:

@@ -8,8 +8,8 @@
     <meta name="theme-color" content="#080814" />
     <link rel="canonical" href="https://apixbotai.com/gallery.html" />
     <link rel="icon" href="images/apix-premium-mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="css/prototype-premium.css" />
-    <script src="js/prototype-premium.js" defer></script>
+    <link rel="stylesheet" href="css/prototype-premium.css?v=20260609_auth_login" />
+    <script src="js/prototype-premium.js?v=20260609_auth_login" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -20,11 +20,12 @@
       <nav aria-label="Навигация сайта">
         <a href="/">Главная</a>
         <a href="studio.html">Создать</a>
+        <a href="account.html#library" data-auth-only hidden>История</a>
         <a href="gallery.html" aria-current="page">Лента</a>
         <a href="models.html">Модели</a>
       </nav>
       <div class="top-auth">
-        <button class="top-user" type="button" data-open-login data-user-pill>Войти через Telegram</button>
+        <button class="top-user" type="button" data-open-login data-user-pill>Войти</button>
         <a class="top-cta" href="account.html">Кабинет <span aria-hidden="true">↗</span></a>
         <button class="top-logout" type="button" data-logout hidden>Выйти</button>
       </div>
@@ -38,11 +39,12 @@
             <h1>Живые примеры APIX</h1>
             <p class="lead">Смотрите реальные результаты, забирайте настроение и запускайте похожую работу без лишних настроек.</p>
           </div>
-          <a class="button ghost" href="studio.html">Создать похожее</a>
+          <a class="button ghost" href="studio.html">Повторить</a>
         </div>
 
         <div class="feed-toolbar" aria-label="Сценарии ленты">
-          <a aria-current="page" href="gallery.html">Все примеры</a>
+          <button type="button" data-feed-source="feed" aria-pressed="true">Все примеры</button>
+          <button type="button" data-feed-source="top_day">Топ дня</button>
           <a href="studio.html?type=image&flow=text">Создать картинку</a>
           <a href="studio.html?type=image&flow=reference">Сделать по примеру</a>
           <a href="studio.html?type=video">Сделать видео</a>
@@ -56,11 +58,11 @@
     <div class="modal-backdrop" data-login-modal hidden>
       <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
         <button class="modal-x" type="button" data-close-login aria-label="Закрыть">×</button>
-        <p class="eyebrow">Вход и регистрация</p>
+        <p class="eyebrow">Вход</p>
         <h2 id="login-title">Откройте кабинет APIX</h2>
-        <p>Войдите удобным способом: через Telegram или по коду на email/телефон. Telegram можно привязать позже в этом же окне.</p>
+        <p>Войдите по почте и паролю или через Telegram. Создание аккаунта открывается отдельной кнопкой.</p>
         <div class="auth-methods">
-          <form class="contact-auth-form" data-contact-login-form>
+          <form class="contact-auth-form" data-contact-login-form hidden aria-hidden="true">
             <span>Email или телефон</span>
             <label><input name="contact" type="text" inputmode="email" autocomplete="email tel" placeholder="mail.com или +79990000000" required /></label>
             <label><input name="full_name" type="text" autocomplete="name" placeholder="Ваше имя" /></label>

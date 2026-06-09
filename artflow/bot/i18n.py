@@ -72,10 +72,11 @@ _RU = {
         "• Третий уровень (L3): <b>{l3}</b>"
     ),
     "referral_earned": "💰 <b>Всего заработано: {amount:.2f}₽</b>",
-    "referral_available": "💸 <b>Можно вывести сейчас: {amount:.2f}₽</b>",
+    "referral_available": "💸 <b>Доступно сейчас: {amount:.2f}₽</b>",
     "referral_feed_remix_rewards": "✨ <b>С повторов из ленты заработано: {amount:.2f}₽</b>",
-    "referral_withdraw_min": "🏦 <b>Минимальный вывод: {amount:.0f}₽</b>",
-    "referral_pending_withdrawals": "⏳ Уже в обработке на вывод: {amount:.2f}₽",
+    "referral_withdraw_min": "🏦 <b>Минимальный вывод денег: {amount:.0f}₽</b>",
+    "referral_exchange_rate": "💋 <b>Купить поцелуи: {rate}, минимум {min_amount:.0f}₽</b>",
+    "referral_pending_withdrawals": "⏳ Уже в обработке: {amount:.2f}₽",
     "referral_conditions": (
         "<b>Как это работает:</b>\n"
         "• Отправляешь другу свою ссылку приглашения\n"
@@ -88,7 +89,8 @@ _RU = {
         "  — {l2_pct}% с оплат друзей L2\n"
         "  — {l3_pct}% с оплат друзей L3\n"
         "• С повторов из ленты ты получаешь 5% от стоимости генерации в рублях\n"
-        "• Эти деньги копятся отдельно на партнёрском балансе — потом их можно вывести"
+        "• Эти деньги копятся отдельно на партнёрском балансе\n"
+        "• Их можно вывести деньгами или купить 💋 по обычному курсу: {rate}"
     ),
     "referral_bonus_received": (
         "🎉 По твоей ссылке пришёл новый пользователь!\n"
@@ -100,25 +102,37 @@ _RU = {
     ),
 
     # Вывод
-    "withdraw_title": "💸 <b>Заявка на вывод</b>",
+    "withdraw_title": "💸 <b>Вывод денег</b>",
     "withdraw_amount_prompt": (
-        "Введи сумму в рублях, которую нужно вывести.\n"
+        "Введи сумму в рублях, которую нужно вывести деньгами.\n"
         "Минимальная сумма вывода: <b>{min_amount:.0f}₽</b>\n"
         "Сейчас доступно: <b>{available:.2f}₽</b>\n"
         "Например: <code>1500</code>"
     ),
-    "withdraw_amount_invalid": "Введи сумму числом, например: <code>1500</code>",
+    "withdraw_amount_invalid": "Введи сумму в рублях числом, например: <code>1500</code>",
     "withdraw_amount_zero": "Сумма должна быть больше нуля.",
     "withdraw_amount_exceeds": "Недостаточно доступного партнёрского баланса. Сейчас доступно: <b>{available:.2f}₽</b>.",
-    "withdraw_amount_min": "Минимальная сумма вывода — <b>{min_amount:.0f}₽</b>.",
-    "withdraw_unavailable": "Сейчас вывод недоступен: для заявки нужно минимум <b>{min_amount:.0f}₽</b> на партнёрском балансе.",
-    "withdraw_details_prompt": "Теперь отправь реквизиты для выплаты одним сообщением.\n\nНапример: банк + номер телефона / карта / USDT-кошелёк.",
-    "withdraw_details_short": "Реквизиты слишком короткие. Отправь банк/номер/кошелёк подробнее.",
+    "withdraw_amount_min": "Минимальный вывод — <b>{min_amount:.0f}₽</b>.",
+    "withdraw_unavailable": "Сейчас вывод недоступен: нужно минимум <b>{min_amount:.0f}₽</b> на партнёрском балансе.",
+    "withdraw_details_prompt": "Теперь отправь реквизиты для выплаты одним сообщением.\n\nНапример: банк + телефон / карта / USDT кошелёк.",
+    "withdraw_details_short": "Реквизиты слишком короткие. Напиши банк, телефон, карту или кошелёк.",
     "withdraw_created": (
         "✅ Заявка на вывод #{id} создана.\n"
         "Сумма: <b>{amount:.2f}₽</b>\n\n"
         "Админ получит запрос на подтверждение."
     ),
+    "exchange_amount_prompt": (
+        "💋 <b>Купить поцелуи с партнёрского баланса</b>\n\n"
+        "Курс: <b>{rate}</b>\n"
+        "Минимальная сумма: <b>{min_amount:.0f}₽</b>\n"
+        "Сейчас доступно: <b>{available:.2f}₽</b>\n\n"
+        "Введи сумму в рублях.\n"
+        "Например: <code>500</code> → <b>50💋</b>"
+    ),
+    "exchange_amount_invalid": "Введи сумму в рублях числом, например: <code>500</code>",
+    "exchange_amount_min": "Минимальная покупка поцелуев — <b>{min_amount:.0f}₽</b>.",
+    "exchange_unavailable": "Сейчас покупка поцелуев недоступна: нужно минимум <b>{min_amount:.0f}₽</b> на партнёрском балансе.",
+    "exchange_created": "✅ Готово: <b>{rub:.2f}₽</b> обменяли на <b>{credits:.2f}💋</b>.",
     "withdraw_admin_notify": (
         "💸 <b>Новая заявка на вывод #{id}</b>\n\n"
         "Пользователь: @{username} · <code>{tg_id}</code>\n"
@@ -279,9 +293,10 @@ _EN = {
         "• Third level (L3): <b>{l3}</b>"
     ),
     "referral_earned": "💰 <b>Total earned: {amount:.2f}₽</b>",
-    "referral_available": "💸 <b>Ready to withdraw: {amount:.2f}₽</b>",
+    "referral_available": "💸 <b>Available now: {amount:.2f}₽</b>",
     "referral_feed_remix_rewards": "✨ <b>Earned from feed reuses: {amount:.2f}₽</b>",
-    "referral_withdraw_min": "🏦 <b>Minimum withdrawal: {amount:.0f}₽</b>",
+    "referral_withdraw_min": "🏦 <b>Minimum cash withdrawal: {amount:.0f}₽</b>",
+    "referral_exchange_rate": "💋 <b>Buy kisses: {rate}, minimum {min_amount:.0f}₽</b>",
     "referral_pending_withdrawals": "⏳ Already being processed: {amount:.2f}₽",
     "referral_conditions": (
         "<b>How it works:</b>\n"
@@ -294,7 +309,8 @@ _EN = {
         "  — {l1_pct}% from L1 friends' payments\n"
         "  — {l2_pct}% from L2 friends' payments\n"
         "  — {l3_pct}% from L3 friends' payments\n"
-        "• This money is stored separately in your partner balance and can be withdrawn later"
+        "• This money is stored separately in your partner balance\n"
+        "• You can withdraw it in cash or buy 💋 at the standard rate: {rate}"
     ),
     "referral_bonus_received": (
         "🎉 A new user joined via your link!\n"
@@ -306,9 +322,9 @@ _EN = {
     ),
 
     # Withdrawal
-    "withdraw_title": "💸 <b>Withdrawal Request</b>",
+    "withdraw_title": "💸 <b>Withdraw money</b>",
     "withdraw_amount_prompt": (
-        "Enter the amount in rubles you want to withdraw.\n"
+        "Enter the ruble amount you want to withdraw as money.\n"
         "Minimum withdrawal amount: <b>{min_amount:.0f}₽</b>\n"
         "Available now: <b>{available:.2f}₽</b>\n"
         "Example: <code>1500</code>"
@@ -316,7 +332,7 @@ _EN = {
     "withdraw_amount_invalid": "Please enter a number, e.g. <code>1500</code>",
     "withdraw_amount_zero": "Amount must be greater than zero.",
     "withdraw_amount_exceeds": "Not enough available referral balance. Available now: <b>{available:.2f}₽</b>.",
-    "withdraw_amount_min": "Minimum withdrawal amount is <b>{min_amount:.0f}₽</b>.",
+    "withdraw_amount_min": "Minimum withdrawal is <b>{min_amount:.0f}₽</b>.",
     "withdraw_unavailable": "Withdrawal is unavailable right now: you need at least <b>{min_amount:.0f}₽</b> on your referral balance.",
     "withdraw_details_prompt": "Now send your payout details in one message.\n\nExample: bank + phone number / card / USDT wallet.",
     "withdraw_details_short": "Details are too short. Please provide bank/account/wallet info.",
@@ -325,6 +341,18 @@ _EN = {
         "Amount: <b>{amount:.2f}₽</b>\n\n"
         "Admin will review and confirm."
     ),
+    "exchange_amount_prompt": (
+        "💋 <b>Buy kisses from partner balance</b>\n\n"
+        "Rate: <b>{rate}</b>\n"
+        "Minimum amount: <b>{min_amount:.0f}₽</b>\n"
+        "Available now: <b>{available:.2f}₽</b>\n\n"
+        "Enter the ruble amount.\n"
+        "Example: <code>500</code> → <b>50💋</b>"
+    ),
+    "exchange_amount_invalid": "Please enter a ruble amount, e.g. <code>500</code>",
+    "exchange_amount_min": "Minimum kiss purchase is <b>{min_amount:.0f}₽</b>.",
+    "exchange_unavailable": "Kiss purchase is unavailable right now: you need at least <b>{min_amount:.0f}₽</b> on your partner balance.",
+    "exchange_created": "✅ Done: <b>{rub:.2f}₽</b> exchanged to <b>{credits:.2f}💋</b>.",
     "withdraw_admin_notify": (
         "💸 <b>New withdrawal request #{id}</b>\n\n"
         "User: @{username} · <code>{tg_id}</code>\n"

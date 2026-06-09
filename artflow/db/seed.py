@@ -68,7 +68,8 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "gpt-image-2-text-to-image",   "display_name": "🤖 GPT Image 2",                 "gen_type": GenerationType.image, "credits": 4},
     {"model_key": "gpt-image-2-image-to-image", "display_name": "🤖 GPT Image 2 Edit",                 "gen_type": GenerationType.image, "credits": 4},
     # ── Музыка ────────────────────────────────────────────────────────────────
-    {"model_key": "suno/v4.5",                  "display_name": "🎵 Suno",                        "gen_type": GenerationType.music, "credits": 20},
+    {"model_key": "suno/v5.5",                  "display_name": "🎵 Suno 5.5",                    "gen_type": GenerationType.music, "credits": 10},
+    {"model_key": "suno/v4.5",                  "display_name": "🎵 Suno 4.5",                    "gen_type": GenerationType.music, "credits": 10},
     # ── Midjourney ────────────────────────────────────────────────────────────
     {"model_key": "midjourney-imagine",  "display_name": "🖌️ Midjourney Imagine",  "gen_type": GenerationType.image, "credits": 10},
     {"model_key": "midjourney-action",   "display_name": "🖌️ MJ Action",   "gen_type": GenerationType.image, "credits": 3},

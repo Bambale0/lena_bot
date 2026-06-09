@@ -1,9 +1,9 @@
-# bot/handlers/balance.py
 from __future__ import annotations
 
 import logging
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -15,8 +15,8 @@ from bot.keyboards.main_menu import back_to_menu_kb, balance_screen_kb
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db import repository as repo
-from db.repository import InsufficientReferralBalanceError
 from db.models import GenerationType, ModelCost, User
+from db.repository import InsufficientReferralBalanceError
 
 logger = logging.getLogger(__name__)
 router = Router(name="balance")
@@ -27,12 +27,17 @@ class WithdrawalFSM(StatesGroup):
     details = State()
 
 
+class ExchangeFSM(StatesGroup):
+    amount = State()
+
+
 def referral_screen_kb(lang: str = "ru"):
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 " + ("Мои партнёры" if lang == "ru" else "My partners"), callback_data="referral:list")
-    builder.button(text="💸 " + ("Запросить вывод" if lang == "ru" else "Request withdrawal"), callback_data="referral:withdraw")
+    builder.button(text="💸 " + ("Вывести деньги" if lang == "ru" else "Withdraw money"), callback_data="referral:withdraw")
+    builder.button(text="💋 " + ("Купить поцелуи" if lang == "ru" else "Buy kisses"), callback_data="referral:exchange")
     builder.button(text=t("btn_main_menu", lang), callback_data="menu:main")
-    builder.adjust(1)
+    builder.adjust(1, 2, 1)
     return builder.as_markup()
 
 
@@ -57,6 +62,26 @@ def _format_cost_range(costs: list[float]) -> str:
     return f"{values[0]}–{values[-1]} 💋"
 
 
+def _rub_per_credit() -> float:
+    return float(getattr(settings, "REFERRAL_EXCHANGE_RUB_PER_CREDIT", 10.0) or 10.0)
+
+
+def _rub_to_kisses(amount_rub: float) -> float:
+    return float(amount_rub) / _rub_per_credit()
+
+
+def _exchange_rate_text() -> str:
+    credits = _rub_to_kisses(100)
+    return f"100₽ = {_format_credit_amount(credits)}💋"
+
+
+def _format_referral_request_line(request) -> str:
+    if str(getattr(request, "payout_details", "") or "") == "AUTO_CREDITS":
+        credits = _rub_to_kisses(float(getattr(request, "amount_rub", 0) or 0))
+        return f"• #{request.id}: {request.amount_rub:.0f}₽ → {_format_credit_amount(credits)}💋 · {request.status.value}"
+    return f"• #{request.id}: {request.amount_rub:.0f}₽ · {request.status.value}"
+
+
 def _build_balance_costs_text(lang: str, model_costs: list[ModelCost]) -> str:
     image_costs = [float(mc.credits) for mc in model_costs if mc.gen_type == GenerationType.image]
     video_costs = [float(mc.credits) for mc in model_costs if mc.gen_type == GenerationType.video]
@@ -73,6 +98,26 @@ def _build_balance_costs_text(lang: str, model_costs: list[ModelCost]) -> str:
     if midjourney_costs:
         lines.append(t("balance_costs_midjourney", lang, amount=_format_cost_range(midjourney_costs)))
     return "\n".join(lines)
+
+
+async def _notify_admins_about_withdrawal(bot: Bot, user: User, request) -> None:
+    admin_text = t(
+        "withdraw_admin_notify",
+        getattr(user, "language", "ru") or "ru",
+        id=request.id,
+        username=user.username or "—",
+        tg_id=user.tg_id,
+        full_name=user.full_name or "—",
+        amount=float(request.amount_rub),
+        details=request.payout_details,
+    )
+    for admin_id in settings.ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, admin_text, reply_markup=withdrawal_request_admin_kb(request.id))
+        except (TelegramBadRequest, TelegramForbiddenError) as exc:
+            logger.warning("Failed to notify withdrawal admin %s: %s", admin_id, exc)
+        except Exception as exc:
+            logger.warning("Unexpected withdrawal admin notify error %s: %s", admin_id, exc)
 
 
 @router.callback_query(F.data == "menu:balance")
@@ -106,11 +151,7 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
     withdrawals = await repo.get_user_withdrawal_requests(session, db_user.id, limit=3)
     balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
     feed_remix_rewards = await repo.get_user_feed_remix_reward_rub(session, db_user.id)
-    withdrawal_lines = []
-    for request in withdrawals:
-        withdrawal_lines.append(
-            f"• #{request.id}: {request.amount_rub:.0f}₽ · {request.status.value}"
-        )
+    withdrawal_lines = [_format_referral_request_line(request) for request in withdrawals]
 
     earned = balance_snapshot.total_earned if balance_snapshot else float(db_user.referral_balance or 0.0)
     available = balance_snapshot.available_to_withdraw if balance_snapshot else earned
@@ -122,17 +163,22 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
         + t("referral_earned", lang, amount=earned) + "\n"
         + t("referral_available", lang, amount=available) + "\n"
         + t("referral_withdraw_min", lang, amount=settings.REFERRAL_WITHDRAW_MIN_RUB) + "\n"
+        + t("referral_exchange_rate", lang, rate=_exchange_rate_text(), min_amount=settings.REFERRAL_EXCHANGE_MIN_RUB) + "\n"
         + t("referral_feed_remix_rewards", lang, amount=feed_remix_rewards)
         + (("\n" + t("referral_pending_withdrawals", lang, amount=pending)) if pending > 0 else "")
         + "\n\n"
-        + t("referral_conditions", lang,
+        + t(
+            "referral_conditions",
+            lang,
             bonus=settings.REFERRAL_L1_CREDITS,
             l1_pct=int(settings.REFERRAL_COMMISSION_L1 * 100),
             l2_pct=int(settings.REFERRAL_COMMISSION_L2 * 100),
-            l3_pct=int(settings.REFERRAL_COMMISSION_L3 * 100))
+            l3_pct=int(settings.REFERRAL_COMMISSION_L3 * 100),
+            rate=_exchange_rate_text(),
+        )
     )
     if withdrawal_lines:
-        text += "\n\n💸 <b>" + ("Последние заявки на вывод" if lang == "ru" else "Recent withdrawal requests") + ":</b>\n" + "\n".join(withdrawal_lines)
+        text += "\n\n💸 <b>" + ("Последние операции" if lang == "ru" else "Recent operations") + ":</b>\n" + "\n".join(withdrawal_lines)
     await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
@@ -245,10 +291,7 @@ async def handle_withdraw_amount(
         return
     await state.update_data(withdraw_amount=amount)
     await state.set_state(WithdrawalFSM.details)
-    await message.answer(
-        t("withdraw_details_prompt", lang),
-        reply_markup=back_to_menu_kb(),
-    )
+    await message.answer(t("withdraw_details_prompt", lang), reply_markup=back_to_menu_kb())
 
 
 @router.message(WithdrawalFSM.details, F.text)
@@ -265,7 +308,7 @@ async def handle_withdraw_details(
         await message.answer(t("withdraw_details_short", lang), reply_markup=back_to_menu_kb())
         return
     data = await state.get_data()
-    amount = float(data["withdraw_amount"])
+    amount = float(data.get("withdraw_amount") or 0)
     try:
         request = await repo.create_withdrawal_request(
             session,
@@ -280,30 +323,95 @@ async def handle_withdraw_details(
             reply_markup=back_to_menu_kb(),
         )
         return
+    await _notify_admins_about_withdrawal(bot, db_user, request)
     await state.clear()
     await message.answer(
-        t("withdraw_created", lang, id=request.id, amount=amount),
+        t("withdraw_created", lang, id=request.id, amount=float(request.amount_rub)),
         reply_markup=back_to_menu_kb(),
     )
 
-    admin_text = t(
-        "withdraw_admin_notify", lang,
-        id=request.id,
-        username=db_user.username or "—",
-        tg_id=db_user.tg_id,
-        full_name=db_user.full_name or "—",
-        amount=amount,
-        details=details,
+
+@router.callback_query(F.data == "referral:exchange")
+async def cb_referral_exchange(
+    call: CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    session: AsyncSession,
+) -> None:
+    lang = db_user.language or "ru"
+    balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
+    available = balance_snapshot.available_to_withdraw if balance_snapshot else 0.0
+    min_amount = settings.REFERRAL_EXCHANGE_MIN_RUB
+    if available + 1e-9 < min_amount:
+        await call.message.answer(
+            t("exchange_unavailable", lang, min_amount=min_amount),
+            reply_markup=back_to_menu_kb(),
+        )
+        await call.answer()
+        return
+    await state.set_state(ExchangeFSM.amount)
+    await call.message.answer(
+        t(
+            "exchange_amount_prompt",
+            lang,
+            available=available,
+            min_amount=min_amount,
+            rate=_exchange_rate_text(),
+        ),
+        reply_markup=back_to_menu_kb(),
     )
-    for admin_id in settings.ADMIN_IDS:
-        try:
-            await bot.send_message(
-                admin_id,
-                admin_text,
-                reply_markup=withdrawal_request_admin_kb(request.id),
-            )
-        except Exception as e:
-            logger.warning("Failed to notify admin %s about withdrawal %s: %s", admin_id, request.id, e)
+    await call.answer()
+
+
+@router.message(ExchangeFSM.amount, F.text)
+async def handle_exchange_amount(
+    message: Message,
+    state: FSMContext,
+    db_user: User,
+    session: AsyncSession,
+) -> None:
+    lang = db_user.language or "ru"
+    raw = (message.text or "").strip().replace(",", ".")
+    try:
+        amount = float(raw)
+    except ValueError:
+        await message.answer(t("exchange_amount_invalid", lang), reply_markup=back_to_menu_kb())
+        return
+    if amount <= 0:
+        await message.answer(t("withdraw_amount_zero", lang), reply_markup=back_to_menu_kb())
+        return
+    min_amount = settings.REFERRAL_EXCHANGE_MIN_RUB
+    if amount + 1e-9 < min_amount:
+        await message.answer(t("exchange_amount_min", lang, min_amount=min_amount), reply_markup=back_to_menu_kb())
+        return
+    balance_snapshot = await repo.get_user_referral_balance_snapshot(session, db_user.id)
+    available = balance_snapshot.available_to_withdraw if balance_snapshot else 0.0
+    if amount > available + 1e-9:
+        await message.answer(
+            t("withdraw_amount_exceeds", lang, available=available),
+            reply_markup=back_to_menu_kb(),
+        )
+        return
+    try:
+        request = await repo.convert_referral_balance_to_credits(
+            session,
+            user_id=db_user.id,
+            amount_rub=amount,
+            rub_per_credit=_rub_per_credit(),
+        )
+    except InsufficientReferralBalanceError as exc:
+        await state.clear()
+        await message.answer(
+            t("withdraw_amount_exceeds", lang, available=exc.available_amount),
+            reply_markup=back_to_menu_kb(),
+        )
+        return
+    credits = _rub_to_kisses(float(request.amount_rub))
+    await state.clear()
+    await message.answer(
+        t("exchange_created", lang, rub=float(request.amount_rub), credits=credits),
+        reply_markup=back_to_menu_kb(),
+    )
 
 
 @router.callback_query(F.data == "menu:history")

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import html
 import hmac
+import json
 import logging
 import mimetypes
 import tempfile
@@ -38,7 +39,7 @@ import redis.asyncio as aioredis
 from api import comet_fallback
 from api.comet_client import close_client, get_client
 from api.miniapp_auth import get_miniapp_user
-from api.miniapp_routes import router as miniapp_router
+from api.miniapp_routes import WEB_TASK_PREFIX, is_web_task_id, router as miniapp_router
 from api.openrouter_client import close_client as close_openrouter_client
 from api.realtime import router as realtime_router
 from api.web import router as web_router
@@ -59,7 +60,7 @@ from bot.utils.telegram_ui import is_benign_telegram_error
 from core.broadcast_scheduler import run_broadcast_scheduler
 from core.config import settings
 from core.logger import setup_logging
-from db.models import Generation, GenerationType, TransactionStatus
+from db.models import Generation, GenerationType, ImageSession, TransactionStatus
 from payments.cryptobot import verify_webhook_signature
 from payments.lava import cached_payment_url as lava_cached_payment_url, get_invoice as lava_get_invoice, is_success_webhook as lava_is_success_webhook, webhook_contract_id as lava_webhook_contract_id
 from payments.tbank import verify_notification_token
@@ -163,12 +164,66 @@ def _is_repeat_generation(gen: Generation) -> bool:
     return action_value == "repeat" or action_value.endswith(".repeat")
 
 
+def _web_task_lookup_id(task_id: str | None) -> str:
+    value = str(task_id or "").strip()
+    if not value or value.startswith(WEB_TASK_PREFIX):
+        return value
+    return f"{WEB_TASK_PREFIX}{value}"
+
+
+def _should_notify_generation_in_bot(gen: Generation | None) -> bool:
+    return bool(gen) and not is_web_task_id(getattr(gen, "task_id", None))
+
+
 def _prompt_menu_preview_for_generation(gen: Generation, prompt: str | None) -> str | None:
     return None if _is_repeat_generation(gen) else prompt
 
 
 def _prompt_menu_text(prompt: str | None) -> str:
     return "Что делаем дальше?"
+
+
+def _looks_like_image_asset(url: str | None) -> bool:
+    value = str(url or "").strip().lower().split("?", 1)[0].split("#", 1)[0]
+    return value.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"))
+
+
+def _extract_video_result_urls(payload: dict) -> list[str]:
+    data = payload.get("data") if isinstance(payload, dict) else None
+    candidates: list[str] = []
+    if isinstance(data, dict):
+        result_json_str = data.get("resultJson")
+        if isinstance(result_json_str, str) and result_json_str.strip():
+            try:
+                parsed = json.loads(result_json_str)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                for key in ("resultUrls", "result_urls", "videoUrls", "video_urls", "urls"):
+                    value = parsed.get(key)
+                    if isinstance(value, list):
+                        candidates.extend(str(item).strip() for item in value if str(item or "").strip())
+                    elif isinstance(value, str) and value.strip():
+                        candidates.append(value.strip())
+                for key in ("resultUrl", "result_url", "videoUrl", "video_url", "url"):
+                    value = parsed.get(key)
+                    if isinstance(value, str) and value.strip():
+                        candidates.append(value.strip())
+        if not candidates:
+            for key in ("resultUrls", "result_urls", "videoUrls", "video_urls", "urls"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    candidates.extend(str(item).strip() for item in value if str(item or "").strip())
+                elif isinstance(value, str) and value.strip():
+                    candidates.append(value.strip())
+            for key in ("resultUrl", "result_url", "videoUrl", "video_url", "url"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    candidates.append(value.strip())
+    if not candidates:
+        candidates = extract_result_urls(payload)
+    filtered = [url for url in dict.fromkeys(candidates) if url and not _looks_like_image_asset(url)]
+    return filtered or list(dict.fromkeys(candidates))
 
 
 def _claim_telegram_update_memory(update_id: int) -> bool:
@@ -506,6 +561,20 @@ class UploadStaticFiles(StaticFiles):
 async def miniapp_no_cache(request, call_next):
     response = await call_next(request)
     path = request.url.path
+    if path.startswith("/app/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        if "Pragma" in response.headers:
+            del response.headers["Pragma"]
+        if "Expires" in response.headers:
+            del response.headers["Expires"]
+        return response
+    if path.startswith("/js/") or path.startswith("/css/"):
+        response.headers["Cache-Control"] = "public, max-age=600"
+        if "Pragma" in response.headers:
+            del response.headers["Pragma"]
+        if "Expires" in response.headers:
+            del response.headers["Expires"]
+        return response
     if path == "/app" or path.startswith("/app/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
@@ -648,6 +717,8 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
     async with AsyncSessionLocal() as session:
         gen = await repo.get_generation_by_task_id(session, task_result.task_id)
         if not gen:
+            gen = await repo.get_generation_by_task_id(session, _web_task_lookup_id(task_result.task_id))
+        if not gen:
             logger.warning("Midjourney webhook for unknown task_id=%s", task_result.task_id)
             return {"ok": True}
         if gen.status.value in {"done", "failed"}:
@@ -663,7 +734,7 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
         if not task_result.is_success:
             err = task_result.fail_reason or payload.get("description") or "Midjourney task failed"
             await _mark_midjourney_failed(session, gen, user.tg_id, err, state_ctx=state_ctx)
-            if bot:
+            if bot and _should_notify_generation_in_bot(gen):
                 await bot.send_message(
                     user.tg_id,
                     f"❌ Ошибка Midjourney: <code>{_sanitize_provider_error(err)[:500]}</code>\n💋 возвращены.",
@@ -676,7 +747,7 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                 await _mark_midjourney_failed(
                     session, gen, user.tg_id, "Midjourney callback success but no imageUrl", state_ctx=state_ctx
                 )
-                if bot:
+                if bot and _should_notify_generation_in_bot(gen):
                     await bot.send_message(
                         user.tg_id,
                         "❌ Midjourney вернул успех, но без изображения. 💋 возвращены.",
@@ -685,13 +756,13 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                 return {"ok": True}
 
             await repo.finish_generation(session, gen.id, task_result.image_url)
-            if bot:
+            if bot and _should_notify_generation_in_bot(gen):
                 await _finish_midjourney_image_generation(gen, user.tg_id, task_result, state_ctx=state_ctx)
             return {"ok": True}
 
         if gen.model == _MJ_DESCRIBE_MODEL:
             await repo.finish_generation(session, gen.id, task_result.task_id)
-            if bot:
+            if bot and _should_notify_generation_in_bot(gen):
                 await _finish_midjourney_describe_generation(gen, user.tg_id, task_result, state_ctx=state_ctx)
             return {"ok": True}
 
@@ -705,7 +776,7 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                 await _mark_midjourney_failed(
                     session, gen, user.tg_id, "Midjourney callback success but no videoUrl", state_ctx=state_ctx
                 )
-                if bot:
+                if bot and _should_notify_generation_in_bot(gen):
                     await bot.send_message(
                         user.tg_id,
                         "❌ Midjourney вернул успех, но без видео. 💋 возвращены.",
@@ -714,7 +785,7 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                 return {"ok": True}
 
             await repo.finish_generation(session, gen.id, resolved_video_url)
-            if bot:
+            if bot and _should_notify_generation_in_bot(gen):
                 await _finish_midjourney_video_generation(gen, user.tg_id, task_result, state_ctx=state_ctx)
             return {"ok": True}
 
@@ -920,6 +991,10 @@ async def kie_webhook(
         if not gen and lookup_task_id != task_id:
             gen = await repo.get_generation_by_task_id(session, task_id)
         if not gen:
+            gen = await repo.get_generation_by_task_id(session, _web_task_lookup_id(lookup_task_id))
+        if not gen and lookup_task_id != task_id:
+            gen = await repo.get_generation_by_task_id(session, _web_task_lookup_id(task_id))
+        if not gen:
             logger.warning("KIE webhook for unknown task_id=%s lookup_task_id=%s", task_id, lookup_task_id)
             return {"ok": True}
 
@@ -940,7 +1015,7 @@ async def kie_webhook(
             user_err = _sanitize_provider_error(err)
             if await repo.fail_generation(session, gen.id, err):
                 await repo.add_credits(session, gen.user_id, gen.credits_spent)
-            if bot:
+            if bot and _should_notify_generation_in_bot(gen):
                 try:
                     await bot.send_message(
                         user.tg_id,
@@ -951,18 +1026,29 @@ async def kie_webhook(
                     logger.warning("Failed to notify KIE failure user=%s: %s", user.tg_id, e)
             return {"ok": True}
 
-        urls = extract_result_urls(payload)
+        urls = _extract_video_result_urls(payload) if gen.gen_type == GenerationType.video else extract_result_urls(payload)
+        if gen.gen_type == GenerationType.image and gen.image_session_id:
+            image_session = await session.get(ImageSession, gen.image_session_id)
+            reference_url = (getattr(image_session, "reference_url", None) or "").strip() if image_session else ""
+            if reference_url:
+                filtered_urls = [url for url in urls if str(url or "").strip() != reference_url]
+                if filtered_urls:
+                    urls = filtered_urls
+
         if not urls:
             err = "Provider callback success but no result urls"
             user_err = "Результат готов, но ссылка на файл не пришла"
             if await repo.fail_generation(session, gen.id, err):
                 await repo.add_credits(session, gen.user_id, gen.credits_spent)
-            if bot:
+            if bot and _should_notify_generation_in_bot(gen):
                 try:
                     await bot.send_message(user.tg_id, f"❌ {user_err}. Кредиты возвращены.", reply_markup=back_to_menu_kb())
                 except Exception as e:
                     logger.warning("Failed to notify empty KIE result user=%s: %s", user.tg_id, e)
             return {"ok": True}
+
+        if gen.gen_type == GenerationType.video:
+            urls = [url for url in urls if not _looks_like_image_asset(url)] or urls
 
         result_urls: list[str] = []
         for url in urls:
@@ -983,7 +1069,7 @@ async def kie_webhook(
                 gen.id,
             )
 
-        if bot:
+        if bot and _should_notify_generation_in_bot(gen):
             try:
                 from bot.keyboards.models import after_generation_kb, image_session_kb, public_prompt_text
 
@@ -1225,6 +1311,8 @@ async def kie_music_webhook(
     db_user = None
     async with AsyncSessionLocal() as session:
         db_gen = await repo.get_generation_by_task_id(session, task_id)
+        if not db_gen:
+            db_gen = await repo.get_generation_by_task_id(session, _web_task_lookup_id(task_id))
         if db_gen:
             if db_gen.status.value in {"done", "failed"}:
                 pop_task(task_id)
@@ -1235,7 +1323,8 @@ async def kie_music_webhook(
     # Pop only on final success or final failure.
     tg_id = pop_task(task_id)
     miniapp_gen_id = pop_miniapp_task(task_id)
-    if not tg_id and db_user:
+    is_web_generation = is_web_task_id(getattr(db_gen, "task_id", None))
+    if not tg_id and db_user and not is_web_generation:
         tg_id = db_user.tg_id
 
     generation_id = db_gen.id if db_gen else miniapp_gen_id
@@ -1267,7 +1356,7 @@ async def kie_music_webhook(
 
     if not audio_urls:
         logger.warning("KIE music webhook: no audio URLs task_id=%s status=%s payload=%s", task_id, status, payload)
-        if tg_id and bot:
+        if tg_id and int(tg_id) > 0 and bot:
             try:
                 await bot.send_message(tg_id, "❌ Музыка готова, но ссылка не найдена.", reply_markup=back_to_menu_kb())
             except Exception:
@@ -1278,7 +1367,7 @@ async def kie_music_webhook(
         async with AsyncSessionLocal() as session:
             await repo.finish_generation(session, generation_id, audio_urls[0])
 
-    if tg_id and bot:
+    if tg_id and int(tg_id) > 0 and bot:
         try:
             for url in audio_urls:
                 await bot.send_audio(

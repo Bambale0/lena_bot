@@ -7,6 +7,17 @@ from core.config import settings
 
 KIE_URL = "https://api.kie.ai/api/v1/generate"
 
+MUSIC_MODEL_ALIASES = {
+    "suno/v4.5": "V4_5",
+    "suno/v5.0": "V5",
+    "suno/v5.5": "V5_5",
+}
+
+
+def normalize_music_model(model_key: str | None) -> str:
+    key = str(model_key or "").strip().lower()
+    return MUSIC_MODEL_ALIASES.get(key, MUSIC_MODEL_ALIASES["suno/v4.5"])
+
 # task_id → tg_id (bot flow)
 _pending: dict[str, int] = {}
 # task_id → gen_id (miniapp flow)
@@ -128,6 +139,7 @@ async def create_music_task(
     prompt: str,
     instrumental: bool = False,
     callback_url: str | None = None,
+    model_key: str | None = None,
 ) -> str:
     headers = {
         "Authorization": f"Bearer {settings.KIE_AI_KEY}",
@@ -137,7 +149,7 @@ async def create_music_task(
         "prompt": prompt,
         "customMode": False,
         "instrumental": instrumental,
-        "model": "V4_5",
+        "model": normalize_music_model(model_key),
         "callBackUrl": callback_url or default_music_callback_url(),
     }
 

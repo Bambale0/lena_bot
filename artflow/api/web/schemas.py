@@ -6,7 +6,15 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from api.public_files import public_url_is_available
+from api.public_files import public_url_is_available, preview_public_image_url
+from core.config import settings
+
+
+def _is_previewable_image(url: str | None, gen_type: str | None = None) -> bool:
+    if str(gen_type or "").lower() in {"video", "music", "audio"}:
+        return False
+    value = str(url or "").strip().lower().split("?", 1)[0].split("#", 1)[0]
+    return bool(value) and not value.endswith((".mp4", ".mov", ".webm", ".mkv", ".avi", ".mp3", ".wav", ".ogg", ".m4a"))
 
 
 def enum_value(value: Any, default: str = "") -> str:
@@ -43,6 +51,43 @@ def generation_result_url(generation: Any) -> str | None:
     return urls[0] if urls else None
 
 
+def json_url_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if item]
+
+
+def generation_preview_urls(generation: Any) -> list[str]:
+    gen_type = enum_value(getattr(generation, "gen_type", None))
+    urls = generation_result_urls(generation)
+    return [preview_public_image_url(url) if _is_previewable_image(url, gen_type) else url for url in urls]
+
+
+def generation_preview_url(generation: Any) -> str | None:
+    result_url = generation_result_url(generation)
+    if not result_url:
+        return None
+    gen_type = enum_value(getattr(generation, "gen_type", None))
+    return preview_public_image_url(result_url) if _is_previewable_image(result_url, gen_type) else result_url
+
+
+def prompt_preview_url(prompt: Any, fallback_url: str | None = None) -> str | None:
+    preview_url = getattr(prompt, "preview_url", None)
+    if not public_url_is_available(preview_url):
+        preview_url = fallback_url
+    if not public_url_is_available(preview_url):
+        return None
+    return preview_public_image_url(preview_url) if _is_previewable_image(preview_url) else preview_url
+
+
 class UserMe(BaseModel):
     id: int
     tg_id: int
@@ -57,6 +102,8 @@ class UserMe(BaseModel):
     language: str = "ru"
     created_at: str = ""
     is_admin: bool = False
+    has_password: bool = False
+    password_set_at: str = ""
     connected_surfaces: list[str] = Field(default_factory=lambda: ["web", "telegram"])
 
     @classmethod
@@ -72,6 +119,8 @@ class UserMe(BaseModel):
         surfaces = ["web"]
         if has_telegram:
             surfaces.append("telegram")
+        if getattr(user, "password_hash", None):
+            surfaces.append("password")
         return cls(
             id=int(getattr(user, "id", 0)),
             tg_id=tg_id,
@@ -86,6 +135,8 @@ class UserMe(BaseModel):
             language=str(getattr(user, "language", "ru") or "ru"),
             created_at=iso_datetime(getattr(user, "created_at", None)),
             is_admin=tg_id in set(admin_ids or []),
+            has_password=bool(getattr(user, "password_hash", None)),
+            password_set_at=iso_datetime(getattr(user, "password_set_at", None)),
             connected_surfaces=surfaces,
         )
 
@@ -147,15 +198,20 @@ class FeedCard(BaseModel):
     type: str = "image"
     result_url: str
     result_urls: list[str] = Field(default_factory=list)
+    preview_url: str | None = None
+    preview_urls: list[str] = Field(default_factory=list)
     prompt: str
     prompt_visibility: str = "excerpt"
     model: str
     author: str
+    author_photo_url: str | None = None
     likes: int
     remix_count: int
     shares: int
     aspect_ratio: str | None = None
     quality: str | None = None
+    reference_url: str | None = None
+    reference_urls: list[str] = Field(default_factory=list)
     created_at: str
     can_remix: bool = True
     can_use_reference: bool = False
@@ -169,19 +225,28 @@ class FeedCard(BaseModel):
         gen_type = enum_value(getattr(generation, "gen_type", None), "image")
         result_urls = generation_result_urls(generation)
         result_url = generation_result_url(generation) or ""
+        reference_urls = json_url_list(getattr(card, "reference_urls", None))
+        reference_url = getattr(card, "reference_url", None)
+        if reference_url and reference_url not in reference_urls:
+            reference_urls.insert(0, str(reference_url))
         return cls(
             id=int(getattr(generation, "id", 0)),
             type=gen_type,
             result_url=result_url,
             result_urls=result_urls,
+            preview_url=generation_preview_url(generation),
+            preview_urls=generation_preview_urls(generation),
             prompt=str(getattr(generation, "prompt", "") or ""),
             model=str(getattr(generation, "model", "") or ""),
             author=author,
+            author_photo_url=getattr(card, "author_photo_url", None),
             likes=int(getattr(generation, "likes_count", 0) or 0),
             remix_count=int(getattr(card, "remix_count", 0) or 0),
             shares=int(getattr(generation, "shares_count", 0) or 0),
             aspect_ratio=getattr(card, "aspect_ratio", None),
             quality=getattr(card, "quality", None),
+            reference_url=reference_urls[0] if reference_urls else None,
+            reference_urls=reference_urls,
             created_at=iso_datetime(getattr(generation, "created_at", None)),
             can_remix=bool(result_url),
             can_use_reference=gen_type == "image" and bool(result_url),
@@ -209,14 +274,20 @@ class PromptCard(BaseModel):
     ai_moderation_recommendation: str | None = None
 
     @classmethod
-    def from_prompt(cls, prompt: Any, *, current_user_id: int | None = None) -> "PromptCard":
+    def from_prompt(
+        cls,
+        prompt: Any,
+        *,
+        current_user_id: int | None = None,
+        fallback_preview_url: str | None = None,
+    ) -> "PromptCard":
         author_id = getattr(prompt, "author_id", None)
         return cls(
             id=int(getattr(prompt, "id", 0)),
             title=str(getattr(prompt, "title", "") or ""),
             description=str(getattr(prompt, "description", "") or ""),
             prompt_text=str(getattr(prompt, "prompt_text", "") or ""),
-            preview_url=getattr(prompt, "preview_url", None),
+            preview_url=prompt_preview_url(prompt, fallback_preview_url),
             model=getattr(prompt, "model", None),
             tags=list(getattr(prompt, "tags", None) or []),
             likes=int(getattr(prompt, "likes", 0) or 0),
@@ -252,6 +323,16 @@ class GenerationCard(BaseModel):
     status: str
     result_url: str | None = None
     result_urls: list[str]
+    preview_url: str | None = None
+    preview_urls: list[str] = Field(default_factory=list)
+    image_session_id: int | None = None
+    parent_generation_id: int | None = None
+    source_feed_gen_id: int | None = None
+    action_type: str | None = None
+    reference_url: str | None = None
+    reference_urls: list[str] = Field(default_factory=list)
+    session_last_prompt: str | None = None
+    session_last_result_url: str | None = None
     credits_spent: float
     is_public_feed: bool
     is_prompt_library: bool
@@ -260,8 +341,12 @@ class GenerationCard(BaseModel):
     finished_at: str = ""
 
     @classmethod
-    def from_generation(cls, generation: Any) -> "GenerationCard":
+    def from_generation(cls, generation: Any, *, image_session: Any | None = None) -> "GenerationCard":
         prompt_hidden = bool(getattr(generation, "source_feed_gen_id", None))
+        reference_urls = json_url_list(getattr(image_session, "reference_urls", None)) if image_session is not None else []
+        reference_url = getattr(image_session, "reference_url", None) if image_session is not None else None
+        if reference_url and reference_url not in reference_urls:
+            reference_urls.insert(0, str(reference_url))
         return cls(
             id=int(getattr(generation, "id", 0)),
             model=str(getattr(generation, "model", "") or ""),
@@ -272,6 +357,16 @@ class GenerationCard(BaseModel):
             status=enum_value(getattr(generation, "status", None)),
             result_url=generation_result_url(generation),
             result_urls=generation_result_urls(generation),
+            preview_url=generation_preview_url(generation),
+            preview_urls=generation_preview_urls(generation),
+            image_session_id=getattr(generation, "image_session_id", None),
+            parent_generation_id=getattr(generation, "parent_generation_id", None),
+            source_feed_gen_id=getattr(generation, "source_feed_gen_id", None),
+            action_type=enum_value(getattr(generation, "action_type", None)) or None,
+            reference_url=reference_urls[0] if reference_urls else None,
+            reference_urls=reference_urls,
+            session_last_prompt=(None if prompt_hidden else getattr(image_session, "last_prompt", None)) if image_session is not None else None,
+            session_last_result_url=getattr(image_session, "last_result_url", None) if image_session is not None else None,
             credits_spent=float(getattr(generation, "credits_spent", 0) or 0),
             is_public_feed=bool(getattr(generation, "is_public_feed", False)),
             is_prompt_library=bool(getattr(generation, "is_prompt_library", False)),
@@ -290,7 +385,10 @@ class ImageSessionCard(BaseModel):
     count: int
     base_prompt: str | None = None
     last_prompt: str | None = None
+    prompt_hidden: bool = False
+    prompt_actions_allowed: bool = True
     reference_url: str | None = None
+    reference_urls: list[str] = Field(default_factory=list)
     last_result_url: str | None = None
     last_generation_id: int | None = None
     status: str
@@ -298,7 +396,11 @@ class ImageSessionCard(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_image_session(cls, image_session: Any) -> "ImageSessionCard":
+    def from_image_session(cls, image_session: Any, *, hide_prompt: bool = False) -> "ImageSessionCard":
+        reference_urls = json_url_list(getattr(image_session, "reference_urls", None))
+        reference_url = getattr(image_session, "reference_url", None)
+        if reference_url and reference_url not in reference_urls:
+            reference_urls.insert(0, str(reference_url))
         return cls(
             id=int(getattr(image_session, "id", 0)),
             model=str(getattr(image_session, "model", "") or ""),
@@ -306,9 +408,12 @@ class ImageSessionCard(BaseModel):
             aspect_ratio=getattr(image_session, "aspect_ratio", None),
             quality=str(getattr(image_session, "quality", "") or ""),
             count=int(getattr(image_session, "count", 0) or 0),
-            base_prompt=getattr(image_session, "base_prompt", None),
-            last_prompt=getattr(image_session, "last_prompt", None),
+            base_prompt=None if hide_prompt else getattr(image_session, "base_prompt", None),
+            last_prompt=None if hide_prompt else getattr(image_session, "last_prompt", None),
+            prompt_hidden=hide_prompt,
+            prompt_actions_allowed=not hide_prompt,
             reference_url=getattr(image_session, "reference_url", None),
+            reference_urls=reference_urls,
             last_result_url=getattr(image_session, "last_result_url", None),
             last_generation_id=getattr(image_session, "last_generation_id", None),
             status=enum_value(getattr(image_session, "status", None)),
@@ -325,11 +430,13 @@ class ImageSessionCreateRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=6)
     base_prompt: str | None = Field(default=None, max_length=4000)
     reference_url: str | None = Field(default=None, max_length=2048)
+    reference_urls: list[str] = Field(default_factory=list)
 
 
 class TransactionCard(BaseModel):
     id: int
     amount_rub: float
+    amount_credits: float | None = None
     credits: float
     provider: str
     status: str
@@ -360,16 +467,24 @@ class ReferralChildCard(BaseModel):
 class ReferralWithdrawalCard(BaseModel):
     id: int
     amount_rub: float
+    amount_credits: float | None = None
     payout_details: str
     status: str
     created_at: str
 
     @classmethod
     def from_withdrawal(cls, withdrawal: Any) -> "ReferralWithdrawalCard":
+        amount_rub = float(getattr(withdrawal, "amount_rub", 0) or 0)
+        payout_details = str(getattr(withdrawal, "payout_details", "") or "")
+        amount_credits = getattr(withdrawal, "amount_credits", None)
+        if amount_credits is None and payout_details == "AUTO_CREDITS":
+            rub_per_credit = float(getattr(settings, "REFERRAL_EXCHANGE_RUB_PER_CREDIT", 10.0) or 10.0)
+            amount_credits = amount_rub / rub_per_credit
         return cls(
             id=int(getattr(withdrawal, "id", 0) or 0),
-            amount_rub=float(getattr(withdrawal, "amount_rub", 0) or 0),
-            payout_details=str(getattr(withdrawal, "payout_details", "") or ""),
+            amount_rub=amount_rub,
+            amount_credits=float(amount_credits) if amount_credits is not None else None,
+            payout_details=payout_details,
             status=enum_value(getattr(withdrawal, "status", None), "pending"),
             created_at=iso_datetime(getattr(withdrawal, "created_at", None)),
         )
@@ -383,6 +498,9 @@ class ReferralStatsCard(BaseModel):
     commission_l2: float
     commission_l3: float
     withdraw_min_rub: float
+    withdraw_min_credits: float | None = None
+    exchange_min_rub: float | None = None
+    exchange_rate_rub_per_credit: float | None = None
     counts: dict[str, int]
     balance: dict[str, float]
     feed_remix_reward_rub: float
@@ -392,7 +510,7 @@ class ReferralStatsCard(BaseModel):
 
 class ReferralWithdrawalRequest(BaseModel):
     amount_rub: float = Field(..., gt=0)
-    payout_details: str = Field(..., min_length=5, max_length=500)
+    payout_details: str = Field(default="AUTO_CREDITS", min_length=0, max_length=500)
 
 
 class PromptRejectRequest(BaseModel):

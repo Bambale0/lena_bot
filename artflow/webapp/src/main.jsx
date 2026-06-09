@@ -16,6 +16,7 @@ const fallbackUser = {
   referral_code: "",
   referral_link: "",
   referral_withdraw_min_rub: 1000,
+  referral_withdraw_min_credits: 1000,
   language: "ru",
 };
 
@@ -34,6 +35,7 @@ const fallbackReferralStats = {
   commission_l2: 0,
   commission_l3: 0,
   withdraw_min_rub: 1000,
+  withdraw_min_credits: 1000,
   counts: { l1: 0, l2: 0, l3: 0 },
   balance: { total_earned: 0, pending_withdrawals: 0, available_to_withdraw: 0 },
   feed_remix_reward_rub: 0,
@@ -147,7 +149,9 @@ function generationFromRealtimeEvent(payload) {
     prompt_actions_allowed: !promptHidden && payload.prompt_actions_allowed !== false,
     status: payload.status || "pending",
     result_url: payload.result_url || null,
+    preview_url: payload.preview_url || payload.result_url || null,
     result_urls: Array.isArray(payload.result_urls) ? payload.result_urls.filter(Boolean) : [],
+    preview_urls: Array.isArray(payload.preview_urls) ? payload.preview_urls.filter(Boolean) : [],
     error: payload.error || null,
     credits_spent: Number(payload.credits_spent || 0),
     created_at: payload.created_at || "",
@@ -157,6 +161,46 @@ function generationFromRealtimeEvent(payload) {
 }
 
 function items(x) { return Array.isArray(x) ? x : Array.isArray(x?.items) ? x.items : []; }
+
+function extractPlainText(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map(extractPlainText).filter(Boolean).join("\n").trim();
+  }
+  if (typeof value === "object") {
+    if (typeof value.text === "string") return value.text;
+    if (typeof value.reply === "string") return value.reply;
+    if (typeof value.message === "string") return value.message;
+    if (typeof value.content === "string") return value.content;
+    if (Array.isArray(value.content)) return extractPlainText(value.content);
+    return "";
+  }
+  return "";
+}
+
+function stripAssistantDebugContext(value) {
+  let text = extractPlainText(value).trim();
+  if (!text) return "";
+
+  text = text
+    .replace(/^\s*КОНТЕКСТ\s*/i, "")
+    .replace(/^\s*CONTEXT\s*/i, "");
+
+  const debugLine = /^\s*(role|content)\s*:/i;
+  const hasDebugShape = text.split(/\n+/).some((line) => debugLine.test(line));
+  if (hasDebugShape) {
+    const lines = text.split(/\n+/)
+      .filter((line) => !debugLine.test(line))
+      .filter((line) => !/^\s*\[\s*\{\s*"type"\s*:\s*"input_text"/i.test(line))
+      .map((line) => line.trim())
+      .filter(Boolean);
+    text = lines.join("\n").trim();
+  }
+
+  return text || "Готово. Чем ещё помочь?";
+}
 
 function formatCredits(value) {
   const num = Number(value || 0);
@@ -310,19 +354,20 @@ function NoticeBar({ notice, onClose }) {
   );
 }
 
-function MediaThumb({ url, type, idx = 0, className = "", onOpen, onError }) {
-  const openable = !!(url && onOpen && type !== "music");
+function MediaThumb({ url, openUrl = "", type, idx = 0, className = "", onOpen, onError }) {
+  const targetUrl = openUrl || url;
+  const openable = !!(targetUrl && onOpen && type !== "music");
   const mediaClass = `${className || ""}${openable ? " mediaOpenable" : ""}`.trim() || undefined;
   const openProps = openable ? {
     onClick: (event) => {
       event.stopPropagation();
-      onOpen(url);
+      onOpen(targetUrl);
     },
     onKeyDown: (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         event.stopPropagation();
-        onOpen(url);
+        onOpen(targetUrl);
       }
     },
     role: "button",
@@ -341,12 +386,13 @@ function MediaThumb({ url, type, idx = 0, className = "", onOpen, onError }) {
 
 function ProfileFeedTile({ item, idx, setScreen }) {
   const [hidden, setHidden] = useState(false);
-  const urls = (Array.isArray(item?.result_urls) && item.result_urls.length ? item.result_urls : [item?.result_url]).filter(Boolean);
+  const urls = generationPreviewUrls(item);
   if (hidden || !urls.length) return null;
   return (
     <button className="profileFeedTile" onClick={() => setScreen("feed")}>
       <MediaThumb
         url={urls[0]}
+        openUrl={item?.result_url || urls[0]}
         type="image"
         idx={idx}
         className="profileFeedMedia"
@@ -361,6 +407,16 @@ function generationResultUrls(generation) {
   const urls = Array.isArray(generation?.result_urls) ? generation.result_urls.filter(Boolean) : [];
   if (!urls.length && generation?.result_url) urls.push(generation.result_url);
   return urls;
+}
+
+function generationPreviewUrls(generation) {
+  const urls = Array.isArray(generation?.preview_urls) ? generation.preview_urls.filter(Boolean) : [];
+  if (!urls.length && generation?.preview_url) urls.push(generation.preview_url);
+  return urls.length ? urls : generationResultUrls(generation);
+}
+
+function generationPreviewUrl(generation) {
+  return generationPreviewUrls(generation)[0] || generation?.preview_url || generation?.result_url || "";
 }
 
 function generationPromptHidden(generation) {
@@ -542,7 +598,7 @@ function TopupModal({ onClose }) {
 
 // ── Home screen ───────────────────────────────────────────────────────────────
 
-function ProfileStrip({ user, historyCount, setScreen, setTopup }) {
+function ProfileStrip({ user, referrals, historyCount, setScreen, setTopup }) {
   return (
     <section className="profileStrip">
       <Avatar photoUrl={user.photo_url} name={user.full_name || user.username} />
@@ -556,8 +612,8 @@ function ProfileStrip({ user, historyCount, setScreen, setTopup }) {
           <b>{user.credits}</b><span>💋 токены</span>
         </div>
         <div><b>{historyCount}</b><span>работ</span></div>
-        <div><b>{user.referral_balance || 0}</b><span>партнёр ₽</span></div>
-        <div><b>{user.referral_withdraw_min_rub || 1000}₽</b><span>мин. вывод</span></div>
+        <div><b>{formatRub(user.referral_balance || 0)}</b><span>партнёрский баланс</span></div>
+        <div><b>{formatRub(referrals?.exchange_min_rub || 100)}</b><span>мин. обмен</span></div>
         <div onClick={() => setTopup(true)} style={{ cursor: "pointer" }}>
           <b>+</b><span>пополнить</span>
         </div>
@@ -594,10 +650,10 @@ function PromptFeed({ prompts, setScreen, onPromptUse, onOpenAll }) {
   );
 }
 
-function Home({ user, feed, prompts, historyCount, setScreen, setTopup, midjourneyItems = [], openStudioPreset, onPromptUse }) {
+function Home({ user, referrals, feed, prompts, historyCount, setScreen, setTopup, midjourneyItems = [], openStudioPreset, onPromptUse }) {
   return (
     <>
-      <ProfileStrip user={user} historyCount={historyCount} setScreen={setScreen} setTopup={setTopup} />
+      <ProfileStrip user={user} referrals={referrals} historyCount={historyCount} setScreen={setScreen} setTopup={setTopup} />
       <section className="block">
         <div className="title">
           <div><h2>Возможности APIX</h2><p>Фото, видео, музыка, промпты и партнёрка в одном Mini App</p></div>
@@ -606,7 +662,7 @@ function Home({ user, feed, prompts, historyCount, setScreen, setTopup, midjourn
         <div className="toolGrid compact">
           <button className="toolCard" onClick={() => setScreen("studio")}><b>⌘</b><span>Генерация изображений и видео</span></button>
           <button className="toolCard" onClick={() => setScreen("midjourney")}><b>MJ</b><span>Midjourney модуль</span></button>
-          <button className="toolCard" onClick={() => setScreen("music")}><b>♪</b><span>Музыка Suno</span></button>
+          <button className="toolCard" onClick={() => setScreen("music")}><b>♪</b><span>Музыка AI</span></button>
           <button className="toolCard" onClick={() => setScreen("assistant")}><b>AI</b><span>Ассистент по промптам</span></button>
           <button className="toolCard" onClick={() => setScreen("referrals")}><b>₽</b><span>Партнёрский кабинет</span></button>
         </div>
@@ -644,9 +700,8 @@ function Home({ user, feed, prompts, historyCount, setScreen, setTopup, midjourn
         <div className="grid">
           {feed.slice(0, 4).map((f, i) => (
             <button key={f.id || i} className="feedCard" onClick={() => setScreen("feed")}>
-              <MediaThumb url={f.result_url} type="image" idx={i} />
+              <MediaThumb url={generationPreviewUrl(f)} openUrl={f.result_url || generationPreviewUrl(f)} type="image" idx={i} />
               <div>
-                <span>{f.model}</span>
                 <p>@{f.author || "anon"} · ♥ {f.likes_count || 0} · 🔁 {f.remixes || 0}</p>
               </div>
             </button>
@@ -667,8 +722,9 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   const [linkCopied, setLinkCopied] = useState(false);
   const shares = item.shares_count || 0;
   const remixes = item.remixes || 0;
-  const resultUrls = (Array.isArray(item.result_urls) && item.result_urls.length ? item.result_urls : [item.result_url]).filter(Boolean);
-  const visibleUrls = resultUrls.slice(0, 4);
+  const resultUrls = generationResultUrls(item);
+  const previewUrls = generationPreviewUrls(item);
+  const visibleUrls = previewUrls.slice(0, 4);
 
   async function handleLike() {
     if (liked || busy) return;
@@ -722,6 +778,7 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
           <MediaThumb
             key={`${url}-${mediaIdx}`}
             url={url}
+            openUrl={resultUrls[mediaIdx] || url}
             type="image"
             idx={idx + mediaIdx}
             className="feedTileImg"
@@ -732,7 +789,6 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
       </div>
       <div className="feedTileInfo">
         <div className="feedTileHead">
-          <span className="modelBadge">{item.model}</span>
           <span className="feedAuthor">@{item.author || "anon"}</span>
         </div>
 
@@ -1123,6 +1179,7 @@ function Studio({
 
   const [model, setModel] = useState(visibleModels[0]?.key || "");
   const current = visibleModels.find((m) => m.key === model) || visibleModels[0] || sourceModels[0];
+  const [showAllModels, setShowAllModels] = useState(false);
 
   const [mode, setMode] = useState("text");
   const [prompt, setPrompt] = useState("");
@@ -1192,6 +1249,10 @@ function Studio({
       setModel(visibleModels[0]?.key || "");
     }
   }, [visibleModels, model]);
+
+  useEffect(() => {
+    setShowAllModels(false);
+  }, [kind, scenario, preset?.modelKey, remixSource?.gen_id]);
 
   useEffect(() => {
     if (preset?.modelKey) {
@@ -1322,9 +1383,21 @@ function Studio({
   const isPerSecond = Boolean(current?.is_per_second);
   const requiresPrompt = current?.key !== "midjourney-blend";
   const perSec = Number(current?.credits_per_sec || current?.credits || 0);
+  const isGeminiOmniVideo = current?.key === "gemini-omni-video";
+  const omniResolutionKey = isGeminiOmniVideo
+    ? ((resolution === "2160p" || resolution === "2160P") ? "4k" : (resolution || "720p"))
+    : resolution;
+  const omniHasVideoInput = isGeminiOmniVideo && mode === "video";
+  const omniBaseCost = isGeminiOmniVideo
+    ? Number(
+        omniHasVideoInput
+          ? (current?.video_input_prices?.[omniResolutionKey] ?? current?.credits)
+          : (current?.price_table?.[omniResolutionKey]?.[duration] ?? current?.credits)
+      )
+    : Number(current?.credits || 0);
   const baseCost = kind === "image"
     ? Number((current?.quality_prices?.[quality] ?? current?.credits) || 0)
-    : Number(current?.credits || 0);
+    : omniBaseCost;
   const estimatedCost = kind === "video" && isPerSecond ? duration * perSec : baseCost;
 
   const modes = current?.modes || ["text"];
@@ -1340,6 +1413,14 @@ function Studio({
   const ratioModes = Array.isArray(current?.aspect_ratio_modes) && current.aspect_ratio_modes.length
     ? current.aspect_ratio_modes
     : modes;
+  const recommendedModels = useMemo(() => {
+    if (visibleModels.length <= 4 || scenario === "all") return visibleModels;
+    const top = visibleModels.slice(0, 4);
+    if (top.some((item) => item.key === model)) return top;
+    const selected = visibleModels.find((item) => item.key === model);
+    return selected ? [...top.slice(0, 3), selected] : top;
+  }, [visibleModels, scenario, model]);
+  const displayedModels = showAllModels || scenario === "all" ? visibleModels : recommendedModels;
 
   const canUseReference = modes.includes("image");
   const requiresReference = mode === "image" && canUseReference;
@@ -1375,7 +1456,7 @@ function Studio({
     }
   }
 
-  function handleGenerate() {
+  function handleGenerate(promptOverride = null) {
     if (!current) return;
     const userProvidedRefUrls = normalizedRefUrls.filter((url) => !isRemixSourceRef(url));
 
@@ -1404,11 +1485,12 @@ function Studio({
       : [];
     const effectiveRefUrl = effectiveRefUrls[0] || null;
 
-    const promptForGeneration = styleEditKind ? styleEditPrompt(styleEditKind, prompt) : prompt;
+    const basePrompt = typeof promptOverride === "string" ? promptOverride : prompt;
+    const promptForGeneration = styleEditKind ? styleEditPrompt(styleEditKind, basePrompt) : basePrompt;
     const payload = {
       model,
       prompt: promptForGeneration,
-      prompt_id: kind === "image" && !styleEditKind ? selectedPrompt?.id : null,
+      prompt_id: kind === "image" && !styleEditKind && promptForGeneration === prompt ? selectedPrompt?.id : null,
       mode,
       aspect_ratio: ratio,
       quality,
@@ -1430,8 +1512,10 @@ function Studio({
   }
 
   function handleResultRepeat() {
-    if (!prompt.trim() || isRemix || generationPromptHidden(generation)) return;
-    handleGenerate();
+    const promptForRepeat = String(prompt || generation?.prompt || "").trim();
+    if (!promptForRepeat || isRemix || generationPromptHidden(generation)) return;
+    if (!prompt.trim()) setPrompt(promptForRepeat);
+    handleGenerate(promptForRepeat);
   }
 
   function handleResultRemix(item) {
@@ -1535,23 +1619,36 @@ function Studio({
       </SettingsRow>
 
       <SettingsRow label="Модель">
+        {visibleModels.length > 4 && scenario !== "all" && (
+          <div className="modelSectionHead">
+            <span>{showAllModels ? `Все модели: ${visibleModels.length}` : `Рекомендуемые: ${displayedModels.length}`}</span>
+            <button type="button" className="modelToggleBtn" onClick={() => setShowAllModels((prev) => !prev)}>
+              {showAllModels ? "Скрыть лишнее" : "Все модели"}
+            </button>
+          </div>
+        )}
         <div className="modelList">
           {visibleModels.length === 0 && (
             <div className="warn">Нет доступных моделей для этого раздела.</div>
           )}
-          {visibleModels.map((m) => (
-            <button key={m.key} className={model === m.key ? "active" : ""} onClick={() => setModel(m.key)}>
-              <i>{kind === "video" ? "🎬" : m.key?.includes("seedream") ? "☁️" : m.key?.includes("wan") ? "🌊" : m.key?.includes("grok") ? "⚡" : "🍌"}</i>
-              <span>
-                <b>{m.display_name}</b>
-                <small>
-                  {modelModesLabel(m)}
-                  {" · "}
-                  {m.is_per_second ? `${m.credits_per_sec || m.credits} 💋/сек` : `${formatCredits((model === m.key ? (m.quality_prices?.[quality] ?? m.credits) : m.credits) || 0)} 💋`}
-                </small>
-              </span>
-            </button>
-          ))}
+          {displayedModels.map((m) => {
+            const selected = model === m.key;
+            const selectedFlatPrice = selected && kind === "video" && m.key === "gemini-omni-video"
+              ? estimatedCost
+              : (selected ? (m.quality_prices?.[quality] ?? m.credits) : m.credits);
+            const modelPrice = m.is_per_second
+              ? `${m.credits_per_sec || m.credits} 💋/сек`
+              : `${formatCredits(selectedFlatPrice || 0)} 💋`;
+            return (
+              <button key={m.key} className={selected ? "active" : ""} onClick={() => setModel(m.key)}>
+                <i>{kind === "video" ? "🎬" : m.key?.includes("seedream") ? "☁️" : m.key?.includes("wan") ? "🌊" : m.key?.includes("grok") ? "⚡" : "🍌"}</i>
+                <span>
+                  <b>{m.display_name}</b>
+                  <small>{selected ? `${modelModesLabel(m)} · ${modelPrice}` : "Нажми, чтобы выбрать"}</small>
+                </span>
+              </button>
+            );
+          })}
         </div>
       </SettingsRow>
 
@@ -1726,7 +1823,7 @@ function Studio({
         model={model}
         prompt={prompt}
         onNotice={onNotice}
-        onRepeat={!isRemix && prompt.trim() && !generationPromptHidden(generation) ? handleResultRepeat : null}
+        onRepeat={!isRemix && String(prompt || generation?.prompt || "").trim() && !generationPromptHidden(generation) ? handleResultRepeat : null}
         onRemixImage={handleResultRemix}
         onStyleImage={handleResultStyle}
         onAnimateImage={supportedVideoModels.length ? handleResultAnimate : null}
@@ -1737,12 +1834,17 @@ function Studio({
 
 // ── Music screen ──────────────────────────────────────────────────────────────
 
-function Music({ user, musicGen, onGenerateMusic, setTopup, onNotice }) {
+function Music({ user, musicGen, musicModels = [], onGenerateMusic, setTopup, onNotice }) {
   const [prompt, setPrompt] = useState("");
   const [instrumental, setInstrumental] = useState(false);
   const [improvingPrompt, setImprovingPrompt] = useState(false);
+  const [selectedModelKey, setSelectedModelKey] = useState("");
 
-  const MUSIC_CREDITS = 20;
+  const availableModels = Array.isArray(musicModels) ? musicModels.filter(Boolean) : [];
+  const selectedModel = availableModels.find((item) => item.key === selectedModelKey) || availableModels[0] || null;
+  const musicCredits = Number(selectedModel?.credits || 0);
+  const musicTitle = selectedModel?.display_name || "Suno";
+
   const genStatus = musicGen?.status;
   const statusColor = genStatus === "done" ? "#4ade80" : genStatus === "failed" ? "#f87171" : "#facc15";
 
@@ -1761,10 +1863,17 @@ function Music({ user, musicGen, onGenerateMusic, setTopup, onNotice }) {
     }
   }
 
+  useEffect(() => {
+    if (!availableModels.length) return;
+    if (!selectedModelKey || !availableModels.some((item) => item.key === selectedModelKey)) {
+      setSelectedModelKey(availableModels[0].key);
+    }
+  }, [availableModels, selectedModelKey]);
+
   function handleGenerate() {
     if (!prompt.trim()) return;
-    if (user.credits < MUSIC_CREDITS) { setTopup(true); return; }
-    onGenerateMusic({ prompt, instrumental });
+    if (musicCredits > 0 && user.credits < musicCredits) { setTopup(true); return; }
+    onGenerateMusic({ prompt, instrumental, model: selectedModel?.key || undefined });
   }
 
   return (
@@ -1775,9 +1884,17 @@ function Music({ user, musicGen, onGenerateMusic, setTopup, onNotice }) {
       </div>
 
       <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 14, background: "var(--accent-soft)", border: "1px solid var(--accent-border)", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
-        Генерация песни с помощью Suno AI. Описывай жанр, настроение, инструменты и тематику.
-        <div style={{ marginTop: 8, fontWeight: 700, color: "var(--text)" }}>Стоимость: {MUSIC_CREDITS} 💋 за трек.</div>
+        Генерация песни через {musicTitle}. Описывай жанр, настроение, инструменты и тематику.
+        <div style={{ marginTop: 8, fontWeight: 700, color: "var(--text)" }}>Стоимость: {musicCredits || "—"} 💋 за трек.</div>
       </div>
+
+      {availableModels.length > 0 && (
+        <SettingsRow label="Модель">
+          <select value={selectedModelKey} onChange={e => setSelectedModelKey(e.target.value)}>
+            {availableModels.map((model) => <option key={model.key} value={model.key}>{model.display_name} · {formatCredits(model.credits)} 💋</option>)}
+          </select>
+        </SettingsRow>
+      )}
 
       <SettingsRow label="Режим">
         <div className="tabs soft">
@@ -1813,7 +1930,7 @@ function Music({ user, musicGen, onGenerateMusic, setTopup, onNotice }) {
         className="primary"
         style={{ width: "100%", padding: 14, borderRadius: 16, fontSize: 15 }}
       >
-        {genStatus === "pending" ? "⏳ Генерирую..." : `🎵 Создать трек · ${MUSIC_CREDITS} 💋`}
+        {genStatus === "pending" ? "⏳ Генерирую..." : `🎵 Создать трек · ${musicCredits || 0} 💋`}
       </button>
 
       {musicGen && (
@@ -1841,7 +1958,7 @@ function Music({ user, musicGen, onGenerateMusic, setTopup, onNotice }) {
 
 // ── History screen ────────────────────────────────────────────────────────────
 
-function History({ history, loading, onNotice, scope = "all" }) {
+function History({ history, loading, onNotice, scope = "all", onPromptUse = null }) {
   if (loading) return <Spinner />;
   const visibleHistory = scope === "midjourney" ? (history || []).filter((item) => isMidjourneyModel(item.model)) : (history || []);
   const isMjScope = scope === "midjourney";
@@ -1861,13 +1978,13 @@ function History({ history, loading, onNotice, scope = "all" }) {
                 <div className="historyMediaWrap">
                   {g.gen_type === "image" && resultUrls.length > 1 ? (
                     <div className="historyResultGallery">
-                      {resultUrls.map((url, index) => (
-                        <MediaThumb key={`${url}-${index}`} url={url} type="image" idx={index} className="historyGalleryImg" onOpen={openExternalUrl} />
+                      {generationPreviewUrls(g).map((url, index) => (
+                        <MediaThumb key={`${url}-${index}`} url={url} openUrl={resultUrls[index] || url} type="image" idx={index} className="historyGalleryImg" onOpen={openExternalUrl} />
                       ))}
                     </div>
                   ) : (
                     <button type="button" className="historyMedia historyMediaBtn" onClick={() => g.result_url && openExternalUrl(g.result_url)} disabled={!g.result_url}>
-                      <MediaThumb url={g.result_url} type={g.gen_type} idx={i} className="historyImg" />
+                      <MediaThumb url={generationPreviewUrl(g)} openUrl={g.result_url || generationPreviewUrl(g)} type={g.gen_type} idx={i} className="historyImg" />
                     </button>
                   )}
                 </div>
@@ -1881,6 +1998,14 @@ function History({ history, loading, onNotice, scope = "all" }) {
                     <audio controls src={g.result_url} style={{ width: "100%", borderRadius: 8, marginTop: 6 }} />
                   )}
                   <div className="historyActionRow">
+                    {!promptHidden && g.prompt && onPromptUse && (
+                      <button type="button" className="ghost" onClick={() => onPromptUse({
+                        title: "Повтор из истории",
+                        prompt: g.prompt || "",
+                        prompt_text: g.prompt || "",
+                        model: g.model || undefined,
+                      })}>🔁 Повторить</button>
+                    )}
                     <button type="button" className="ghost" onClick={() => g.result_url && openExternalUrl(g.result_url)} disabled={!g.result_url}>👁 Открыть</button>
                     {!promptHidden && g.prompt && (
                       <button type="button" className="ghost" onClick={async () => {
@@ -2012,7 +2137,7 @@ function Capabilities({ setScreen, setTopup }) {
   const tools = [
     ["studio", "⌘", "Студия генераций", "Изображения, редактирование по референсам, blend, text-to-video и image-to-video."],
     ["midjourney", "MJ", "Midjourney", "Отдельный MJ-модуль с общей историей, лентой, библиотекой промптов, оплатой и референсами."],
-    ["music", "♪", "Музыка Suno", "Песни с вокалом или инструментальные треки по описанию настроения и жанра."],
+    ["music", "♪", "Музыка AI", "Песни с вокалом или инструментальные треки по описанию настроения и жанра."],
     ["assistant", "AI", "AI-ассистент", "Помогает улучшить промпт, выбрать модель, разобраться с референсами и оплатой."],
     ["prompts", "📚", "Библиотека промптов", "Готовые идеи и формулы, которые можно быстро адаптировать под свою задачу."],
     ["feed", "◷", "Публичная лента", "Публикуй удачные работы, собирай лайки, делись ссылками и запускай ремиксы."],
@@ -2063,9 +2188,9 @@ function Assistant({ onNotice }) {
     setText("");
     setBusy(true);
     try {
-      const history = messages.slice(-10).map(({ role, content }) => ({ role, content }));
+      const history = messages.slice(-10).map(({ role, content }) => ({ role, content: stripAssistantDebugContext(content) }));
       const res = await api("/assistant", { method: "POST", body: JSON.stringify({ message, history }) });
-      setMessages((prev) => [...prev, { role: "assistant", content: res.reply || "Готово. Чем ещё помочь?" }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: stripAssistantDebugContext(res.reply || res) }]);
       tg()?.HapticFeedback?.notificationOccurred("success");
     } catch (e) {
       onNotice?.({ type: "error", message: e.message || "Ассистент сейчас недоступен" });
@@ -2085,7 +2210,7 @@ function Assistant({ onNotice }) {
         <div className="assistantMessages">
           {messages.map((m, i) => (
             <div key={`${m.role}-${i}`} className={`assistantBubble ${m.role}`}>
-              {m.content}
+              {stripAssistantDebugContext(m.content)}
             </div>
           ))}
           {busy && <div className="assistantBubble assistant">Думаю над ответом...</div>}
@@ -2123,32 +2248,53 @@ function Referrals({ user, stats, loading, reload, onNotice }) {
       ? user.referral_link
       : `https://t.me/apix_ai_bot?start=${user.referral_code || stats.referral_code || ""}`;
   const available = Number(stats.balance?.available_to_withdraw || 0);
-  const minAmount = Number(stats.withdraw_min_rub || user.referral_withdraw_min_rub || 1000);
-  const [amount, setAmount] = useState("");
-  const [details, setDetails] = useState("");
-  const [busy, setBusy] = useState(false);
+  const withdrawMinAmount = Number(stats.withdraw_min_rub || user.referral_withdraw_min_rub || 1000);
+  const exchangeMinAmount = Number(stats.exchange_min_rub || 100);
+  const rubPerCredit = Number(stats.exchange_rate_rub_per_credit || 10);
+  const [exchangeAmount, setExchangeAmount] = useState("");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawDetails, setWithdrawDetails] = useState("");
+  const [busyAction, setBusyAction] = useState("");
 
   async function copyReferral() {
     const ok = await copyText(referralLink);
     onNotice?.({ type: ok ? "success" : "error", message: ok ? "Партнёрская ссылка скопирована" : "Не удалось скопировать ссылку" });
   }
 
-  async function withdraw() {
-    if (busy) return;
-    setBusy(true);
+  async function exchange() {
+    if (busyAction) return;
+    setBusyAction("exchange");
+    try {
+      await api("/referrals/exchange", {
+        method: "POST",
+        body: JSON.stringify({ amount_rub: Number(exchangeAmount) }),
+      });
+      setExchangeAmount("");
+      reload?.();
+      onNotice?.({ type: "success", message: "Готово: 💋 начислены на баланс" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось обменять баланс" });
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function requestWithdrawal() {
+    if (busyAction) return;
+    setBusyAction("withdraw");
     try {
       await api("/referrals/withdrawals", {
         method: "POST",
-        body: JSON.stringify({ amount_rub: Number(amount), payout_details: details }),
+        body: JSON.stringify({ amount_rub: Number(withdrawAmount), payout_details: withdrawDetails }),
       });
-      setAmount("");
-      setDetails("");
+      setWithdrawAmount("");
+      setWithdrawDetails("");
       reload?.();
       onNotice?.({ type: "success", message: "Заявка на вывод создана" });
     } catch (e) {
       onNotice?.({ type: "error", message: e.message || "Не удалось создать заявку" });
     } finally {
-      setBusy(false);
+      setBusyAction("");
     }
   }
 
@@ -2177,20 +2323,40 @@ function Referrals({ user, stats, loading, reload, onNotice }) {
       </div>
 
       <section className="block referralPanel">
-        <div className="title"><div><h2>Вывод средств</h2><p>Минимум {formatRub(minAmount)}. Реквизиты увидит администратор.</p></div></div>
-        <input className="field" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Сумма, например ${minAmount}`} />
-        <textarea value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Карта, СБП, USDT или другой способ выплаты" maxLength={500} />
-        <button className="primary" onClick={withdraw} disabled={busy || Number(amount) < minAmount || !details.trim() || available < Number(amount)} style={{ width: "100%", padding: 14, borderRadius: 16, marginTop: 10 }}>
-          {busy ? "Создаю заявку..." : "Создать заявку на вывод"}
-        </button>
+        <div className="title"><div><h2>Партнёрский баланс</h2><p>Курс покупки: 100₽ = {formatCredits(100 / rubPerCredit)} 💋.</p></div></div>
+        <div className="referralActions">
+          <article className="referralActionBox">
+            <h3>Купить 💋</h3>
+            <p>Списать рубли с партнёрского баланса и сразу начислить поцелуи.</p>
+            <input className="field" inputMode="decimal" value={exchangeAmount} onChange={(e) => setExchangeAmount(e.target.value)} placeholder={`Сумма, например ${exchangeMinAmount}`} />
+            <button className="primary referralActionButton" onClick={exchange} disabled={Boolean(busyAction) || Number(exchangeAmount) < exchangeMinAmount || available < Number(exchangeAmount)}>
+              {busyAction === "exchange" ? "Обмен..." : "Купить поцелуи"}
+            </button>
+          </article>
+          <article className="referralActionBox">
+            <h3>Вывести деньги</h3>
+            <p>Создать заявку на выплату администратору.</p>
+            <input className="field" inputMode="decimal" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} placeholder={`Сумма от ${withdrawMinAmount}`} />
+            <input className="field" value={withdrawDetails} onChange={(e) => setWithdrawDetails(e.target.value)} placeholder="Реквизиты: банк, телефон, карта" />
+            <button className="secondaryBtn referralActionButton" onClick={requestWithdrawal} disabled={Boolean(busyAction) || Number(withdrawAmount) < withdrawMinAmount || available < Number(withdrawAmount) || withdrawDetails.trim().length < 5}>
+              {busyAction === "withdraw" ? "Отправляем..." : "Вывести деньги"}
+            </button>
+          </article>
+        </div>
       </section>
 
       <section className="block">
-        <div className="title"><div><h2>Последние заявки</h2><p>Статусы синхронизируются с ботом</p></div></div>
+        <div className="title"><div><h2>Последние операции</h2><p>История синхронизируется с ботом</p></div></div>
         <div className="miniList">
           {(stats.withdrawals || []).length
-            ? stats.withdrawals.map((item) => <div key={item.id}><b>{formatRub(item.amount_rub)}</b><span>{item.status} · {formatDate(item.created_at)}</span></div>)
-            : <div><b>Заявок пока нет</b><span>Когда появится баланс, можно будет отправить запрос на вывод.</span></div>}
+            ? stats.withdrawals.map((item) => {
+              const isExchange = item.payout_details === "AUTO_CREDITS";
+              const label = isExchange
+                ? `${formatRub(item.amount_rub)} → ${formatCredits(item.amount_credits || (Number(item.amount_rub || 0) / rubPerCredit))} 💋`
+                : formatRub(item.amount_rub);
+              return <div key={item.id}><b>{label}</b><span>{item.status} · {formatDate(item.created_at)}</span></div>;
+            })
+            : <div><b>Операций пока нет</b><span>Баланс можно вывести деньгами или обменять на 💋.</span></div>}
         </div>
       </section>
     </section>
@@ -2479,7 +2645,7 @@ function AdminDashboard({ user, onNotice }) {
                 <div key={item.id} className="feedCard" style={{ cursor: "default", display: "grid", gap: 10 }}>
                   <div>
                     <b>{item.user?.full_name || item.user?.username || `User #${item.user?.id}`}</b>
-                    <p>{formatRub(item.amount_rub || 0)} · {item.status} · {adminDate(item.created_at)}</p>
+                    <p>{formatCredits(item.amount_rub || 0)} 💋 · {item.status} · {adminDate(item.created_at)}</p>
                     <p>{item.payout_details}</p>
                     {item.admin_note ? <p>Note: {item.admin_note}</p> : null}
                   </div>
@@ -2570,7 +2736,7 @@ function Profile({ user, history, myFeed = [], setScreen, setTopup, theme, setTh
     ["studio", "⌘", "Студия генераций"],
     ["midjourney", "MJ", "Midjourney"],
     ["assistant", "AI", "AI-ассистент"],
-    ["music", "🎶", "Музыка (Suno)"],
+    ["music", "🎶", "Музыка"],
     ["history", "☰", "Мои генерации"],
     ["feed", "◷", "Публичная лента"],
     ["prompts", "📚", "Библиотека промптов"],
@@ -2651,7 +2817,7 @@ function Profile({ user, history, myFeed = [], setScreen, setTopup, theme, setTh
       <div className="profileStats">
         <div><b>{user.credits}</b><span>токены</span></div>
         <div><b>{history.length}</b><span>работ</span></div>
-        <div><b>{user.referral_balance || 0}</b><span>партнёр ₽</span></div>
+        <div><b>{formatRub(user.referral_balance || 0)}</b><span>партнёрский баланс</span></div>
       </div>
 
       <section className="profileFeedBlock">
@@ -2675,7 +2841,7 @@ function Profile({ user, history, myFeed = [], setScreen, setTopup, theme, setTh
 
       <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 13, lineHeight: 1.45 }}>
         <div style={{ fontWeight: 600, marginBottom: 4 }}>👥 Партнёрка</div>
-        <div style={{ color: "var(--text-soft)" }}>Минимальная сумма вывода: <b style={{ color: "var(--text-main)" }}>{user.referral_withdraw_min_rub || 1000}₽</b></div>
+        <div style={{ color: "var(--text-soft)" }}>Минимальный вывод: <b style={{ color: "var(--text-main)" }}>{formatRub(user.referral_withdraw_min_rub || 1000)}</b></div>
       </div>
 
       <button
@@ -3035,6 +3201,7 @@ function App() {
   const me = useApi(() => api("/me"), fallbackUser);
   const imageModels = useApi(() => api("/models/image").then(x => items(x).length ? items(x) : x), fallbackImageModels);
   const videoModels = useApi(() => api("/models/video").then(x => items(x).length ? items(x) : x), fallbackVideoModels);
+  const musicModels = useApi(() => api("/models/music").then(x => items(x).length ? items(x) : x), []);
   const feed = useApi(() => api("/feed?limit=300").then(items), fallbackFeed);
   const myFeed = useApi(() => api("/me/feed?limit=200").then(items), []);
   const history = useApi(() => api("/history?limit=50").then(items), []);
@@ -3311,6 +3478,7 @@ function App() {
   }
 
   function openStudioPreset(item) {
+    setRemixSource(null);
     setStudioPreset({ modelKey: item.key, kind: item.gen_type });
     setScreen(isMidjourneyModel(item.key) ? "midjourney" : "studio");
   }
@@ -3320,6 +3488,7 @@ function App() {
       openMidjourneyPromptPreset(promptItem);
       return;
     }
+    setRemixSource(null);
     setStudioPreset({
       kind: "image",
       modelKey: promptItem.model || undefined,
@@ -3331,6 +3500,7 @@ function App() {
   }
 
   function openMidjourneyPromptPreset(promptItem) {
+    setRemixSource(null);
     setStudioPreset({
       kind: "image",
       modelKey: "midjourney-imagine",
@@ -3383,14 +3553,14 @@ function App() {
   window.__APIX_IS_ADMIN__ = Boolean(user?.is_admin);
 
   const screens = {
-    home: <Home user={user} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={navigate} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
+    home: <Home user={user} referrals={referrals.data} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={navigate} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
     capabilities: <Capabilities setScreen={navigate} setTopup={setTopupOpen} />,
     assistant: <Assistant onNotice={setNotice} />,
     feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} onRemoved={() => { feed.reload(); myFeed.reload(); }} scope={feedScope} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
     studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} />,
     midjourney: <MidjourneyModule imageModels={imageModels.data} videoModels={videoModels.data} user={user} generation={generation} prompts={prompts.data} feed={feed.data} history={history.data} setScreen={navigate} setTopup={setTopupOpen} onGenerate={generate} onRemixGenerate={remixGenerate} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} onPromptUse={openMidjourneyPromptPreset} onOpenPrompts={() => openPromptLibrary("midjourney")} onOpenFeed={() => openFeed("midjourney")} onOpenHistory={() => openHistory("midjourney")} />,
-    music: <Music user={user} musicGen={musicGen} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,
-    history: <History history={history.data} loading={history.loading} onNotice={setNotice} scope={historyScope} />,
+    music: <Music user={user} musicGen={musicGen} musicModels={musicModels.data} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,
+    history: <History history={history.data} loading={history.loading} onNotice={setNotice} scope={historyScope} onPromptUse={openPromptPreset} />,
     profile: <Profile user={user} history={history.data} myFeed={myFeed.data} setScreen={navigate} setTopup={setTopupOpen} theme={theme} setTheme={setTheme} resolvedTheme={resolvedTheme} onNotice={setNotice} reloadUser={me.reload} />,
     referrals: <Referrals user={user} stats={referrals.data} loading={referrals.loading} reload={referrals.reload} onNotice={setNotice} />,
     help: <Help onNotice={setNotice} />,

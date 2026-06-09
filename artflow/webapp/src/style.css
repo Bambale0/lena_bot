@@ -199,6 +199,7 @@ img,video{display:block;width:100%;height:100%;object-fit:cover}
 .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
 .feedCard{overflow:hidden;border-radius:18px;border:1px solid var(--border);background:var(--surface);text-align:left}
 .feedCard .art,.feedCard img,.feedCard video{height:176px}
+.feedCard img,.feedCard video{object-fit:cover}
 .feedCard div:not(.art){padding:12px}
 .feedCard span{display:inline-block;border-radius:8px;background:var(--accent-soft);padding:4px 8px;font-size:10px;color:var(--text-muted)}
 
@@ -541,6 +542,29 @@ textarea{width:100%;height:112px;margin-top:16px;padding:14px;resize:none;outlin
 .scenarioCard.active {
   border-color: rgba(168,85,247,.72);
   background: linear-gradient(135deg, rgba(124,58,237,.28), rgba(217,70,239,.14));
+}
+
+.modelSectionHead {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:8px;
+}
+
+.modelSectionHead span {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.modelToggleBtn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .modelList {
@@ -1097,6 +1121,37 @@ textarea{width:100%;height:112px;margin-top:16px;padding:14px;resize:none;outlin
   border: 1px solid var(--border);
   background: var(--surface);
   padding: 14px;
+}
+
+.referralActions {
+  display: grid;
+  gap: 12px;
+}
+
+.referralActionBox {
+  display: grid;
+  gap: 9px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 12px;
+}
+
+.referralActionBox h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.referralActionBox p {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.referralActionButton {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 14px;
 }
 
 .field {

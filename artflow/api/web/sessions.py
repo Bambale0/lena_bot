@@ -24,7 +24,9 @@ async def active_image_session(
     image_session = await repo.get_active_image_session(session, user.id)
     if image_session is None:
         return ok(None)
-    return ok(ImageSessionCard.from_image_session(image_session).model_dump())
+    last_generation = await repo.get_last_session_generation(session, image_session.id)
+    hide_prompt = bool(getattr(last_generation, "source_feed_gen_id", None))
+    return ok(ImageSessionCard.from_image_session(image_session, hide_prompt=hide_prompt).model_dump())
 
 
 @router.post("/image-sessions")
@@ -45,6 +47,7 @@ async def create_image_session(
         count=body.count,
         base_prompt=(body.base_prompt or "").strip() or None,
         reference_url=(body.reference_url or "").strip() or None,
+        reference_urls=[item.strip() for item in body.reference_urls if item and item.strip()],
     )
     return ok(ImageSessionCard.from_image_session(image_session).model_dump())
 

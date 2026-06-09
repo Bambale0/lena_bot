@@ -89,6 +89,8 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(256), unique=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
     photo_url: Mapped[str | None] = mapped_column(Text)
+    password_hash: Mapped[str | None] = mapped_column(String(256))
+    password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     credits: Mapped[float] = mapped_column(Float, default=0, nullable=False)
 
     # Subscription (prepared, not active in v1)
@@ -192,6 +194,7 @@ class ImageSession(Base):
     reference_file_id: Mapped[str | None] = mapped_column(Text)
     reference_file_ids: Mapped[str | None] = mapped_column(Text)
     reference_url: Mapped[str | None] = mapped_column(Text)
+    reference_urls: Mapped[str | None] = mapped_column(Text)
     last_result_url: Mapped[str | None] = mapped_column(Text)
     last_generation_id: Mapped[int | None] = mapped_column(Integer)
 

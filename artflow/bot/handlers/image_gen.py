@@ -1943,12 +1943,6 @@ async def cb_image_session_remix(
         await call.answer("Не нашёл изображение для ремикса", show_alert=True)
         return
 
-    image_session.mode = "image"
-    image_session.reference_url = remix_reference_url
-    image_session.reference_file_id = None
-    image_session.reference_file_ids = None
-    await session.commit()
-
     await state.set_state(ImageGenFSM.session_active)
     await state.update_data(
         image_session_id=image_session.id,
@@ -2048,12 +2042,6 @@ async def cb_image_style_choice(
     if not result_url:
         await call.answer("Не нашёл изображение для редактирования", show_alert=True)
         return
-
-    image_session.mode = "image"
-    image_session.reference_url = result_url
-    image_session.reference_file_id = None
-    image_session.reference_file_ids = None
-    await session.commit()
 
     await state.set_state(ImageGenFSM.session_active)
     await state.update_data(
@@ -2247,6 +2235,7 @@ async def cb_image_session_animate(
         resolution=resolution,
         grok_mode=grok_mode,
         image_file_id=None,
+        ref_file_ids=[],
         image_url=result_url,
         reference_video_url=None,
         motion_step=None,

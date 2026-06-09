@@ -27,8 +27,9 @@ from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.midjourney_service import MJDimensions, MJVideoMotion
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_telegram_login_data
 from api.photo_prompt_service import generate_prompt_from_photo
-from api.public_files import public_url_is_available
+from api.public_files import public_url_is_available, preview_public_image_url
 from api.video_service import VideoModel
+from api.music_service import normalize_music_model
 from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS, _IMAGE_MODEL_ORDER, _VIDEO_MODEL_ORDER
 from bot.utils.deep_links import build_start_payload
 from core.config import settings
@@ -59,8 +60,9 @@ from db.models import (
 )
 from db.session import get_session
 
-MUSIC_MODEL_KEY = "suno/v4.5"
+MUSIC_MODEL_KEY = "suno/v5.5"
 DEFAULT_MUSIC_CREDITS = 20
+_MUSIC_MODEL_FALLBACK_KEYS = ["suno/v5.5", "suno/v5.0", "suno/v4.5"]
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +79,27 @@ STALE_GENERATION_TIMEOUT = timedelta(minutes=20)
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_PHOTO_PROMPT_BYTES = 20 * 1024 * 1024
 MAX_REFERENCE_REDIRECTS = 3
+WEB_TASK_PREFIX = "web:"
 
 _TELEGRAM_STARS_RUB_PER_STAR = 10.5
+
+
+def task_id_for_surface(task_id: str | None, surface: str = "miniapp") -> str:
+    value = str(task_id or "").strip()
+    if not value:
+        return ""
+    if str(surface or "").lower() == "web" and not value.startswith(WEB_TASK_PREFIX):
+        return f"{WEB_TASK_PREFIX}{value}"
+    return value
+
+
+def provider_task_id(task_id: str | None) -> str:
+    value = str(task_id or "").strip()
+    return value[len(WEB_TASK_PREFIX):] if value.startswith(WEB_TASK_PREFIX) else value
+
+
+def is_web_task_id(task_id: str | None) -> bool:
+    return str(task_id or "").strip().startswith(WEB_TASK_PREFIX)
 
 def _plan_stars_price(plan: Any) -> int:
     explicit = getattr(plan, "price_stars", None)
@@ -201,13 +222,27 @@ def _telegram_start_link(start_param: str) -> str:
 def _withdrawal_out(item: Any) -> "ReferralWithdrawalOut":
     status = getattr(getattr(item, "status", None), "value", None) or str(getattr(item, "status", "pending"))
     created_at = getattr(item, "created_at", None)
+    amount_rub = float(getattr(item, "amount_rub", 0) or 0)
+    payout_details = str(getattr(item, "payout_details", "") or "")
+    amount_credits = getattr(item, "amount_credits", None)
+    if amount_credits is None and payout_details == "AUTO_CREDITS":
+        rub_per_credit = float(getattr(settings, "REFERRAL_EXCHANGE_RUB_PER_CREDIT", 10.0) or 10.0)
+        amount_credits = amount_rub / rub_per_credit
     return ReferralWithdrawalOut(
         id=int(getattr(item, "id", 0) or 0),
-        amount_rub=float(getattr(item, "amount_rub", 0) or 0),
-        payout_details=str(getattr(item, "payout_details", "") or ""),
+        amount_rub=amount_rub,
+        amount_credits=float(amount_credits) if amount_credits is not None else None,
+        payout_details=payout_details,
         status=status,
         created_at=created_at.isoformat() if created_at else "",
     )
+
+
+def _preview_media_url(url: str | None, gen_type: Any) -> str | None:
+    raw_type = getattr(gen_type, "value", gen_type)
+    if str(raw_type or "").lower() in {"video", "music", "audio"}:
+        return url
+    return preview_public_image_url(url) or url
 
 
 def _feed_card_out(card: Any, user: User) -> dict:
@@ -220,6 +255,8 @@ def _feed_card_out(card: Any, user: User) -> dict:
         "gen_type": getattr(gen_type, "value", gen_type),
         "result_url": (result_urls[0] if result_urls else _generation_primary_result_url(generation)) or "",
         "result_urls": result_urls,
+        "preview_url": _preview_media_url((result_urls[0] if result_urls else _generation_primary_result_url(generation)) or "", gen_type),
+        "preview_urls": [_preview_media_url(url, gen_type) or url for url in result_urls],
         "likes_count": generation.likes_count,
         "shares_count": generation.shares_count,
         "aspect_ratio": card.aspect_ratio,
@@ -288,9 +325,27 @@ def _landing_models_payload(model_costs: list[Any]) -> dict[str, list[str]]:
     return grouped
 
 
-async def _resolve_music_credits(session: AsyncSession) -> float:
-    model_cost = await repo.get_model_cost(session, MUSIC_MODEL_KEY)
-    if model_cost and getattr(model_cost, "is_active", True):
+async def _resolve_active_music_model(session: AsyncSession, requested_model: str | None = None):
+    requested = str(requested_model or "").strip().lower()
+    if requested:
+        model_cost = await repo.get_model_cost(session, requested)
+        if model_cost and getattr(model_cost, "is_active", True) and getattr(model_cost, "gen_type", None) == GenerationType.music:
+            return model_cost
+    preferred = [requested] if requested else []
+    preferred.extend([key for key in _MUSIC_MODEL_FALLBACK_KEYS if key not in preferred])
+    model_cost = await repo.get_first_active_model_cost(session, preferred)
+    if model_cost and getattr(model_cost, "gen_type", None) == GenerationType.music:
+        return model_cost
+    model_costs = await repo.get_all_model_costs(session)
+    for item in model_costs:
+        if getattr(item, "gen_type", None) == GenerationType.music and getattr(item, "is_active", True):
+            return item
+    return None
+
+
+async def _resolve_music_credits(session: AsyncSession, requested_model: str | None = None) -> float:
+    model_cost = await _resolve_active_music_model(session, requested_model)
+    if model_cost:
         return float(model_cost.credits)
     return float(DEFAULT_MUSIC_CREDITS)
 
@@ -332,7 +387,8 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
     created_at = gen.created_at or now
     age = now - created_at
 
-    task_id = (gen.task_id or '').strip()
+    stored_task_id = (gen.task_id or '').strip()
+    task_id = provider_task_id(stored_task_id)
     if not task_id:
         if age >= STALE_GENERATION_TIMEOUT:
             logger.warning(
@@ -378,7 +434,7 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
     if age >= STALE_GENERATION_TIMEOUT:
         logger.warning(
             'Marking stale generation with unfinished task as failed: gen=%s model=%s task=%s age=%s',
-            gen.id, gen.model, task_id, age,
+            gen.id, gen.model, stored_task_id, age,
         )
         if await repo.fail_generation(session, gen.id, 'Generation timed out before completion'):
             if gen.credits_spent:
@@ -388,7 +444,7 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
     return gen
 
 
-async def _finish_direct_image_result(session: AsyncSession, gen, result):
+async def _finish_direct_image_result(session: AsyncSession, gen, result, *, surface: str = "miniapp"):
     result_urls = list(getattr(result, "result_urls", None) or [])
     result_url = getattr(result, "url", None)
     if result_url and result_url not in result_urls:
@@ -397,7 +453,11 @@ async def _finish_direct_image_result(session: AsyncSession, gen, result):
     if not result_urls:
         raise RuntimeError("CometAPI image fallback returned no result URL")
 
-    await repo.update_generation_task(session, gen.id, getattr(result, "task_id", None) or "comet:image:direct")
+    await repo.update_generation_task(
+        session,
+        gen.id,
+        task_id_for_surface(getattr(result, "task_id", None) or "comet:image:direct", surface),
+    )
     await repo.finish_generation(session, gen.id, result_urls[0], result_urls=result_urls)
     if gen.image_session_id:
         await repo.update_image_session_last_result(session, gen.image_session_id, result_urls[0], gen.id)
@@ -888,11 +948,13 @@ class GenerationOut(BaseModel):
     prompt_actions_allowed: bool = True
     status: str
     result_url: str | None
+    preview_url: str | None = None
     credits_spent: float
     created_at: str
     is_public_feed: bool = False
     is_prompt_library: bool = False
     result_urls: list[str] = Field(default_factory=list)
+    preview_urls: list[str] = Field(default_factory=list)
 
 
 class ImageGenRequest(BaseModel):
@@ -931,6 +993,7 @@ class FeedRemixRequest(BaseModel):
     aspect_ratio: str | None = None
     resolution: str | None = None
     image_url: str | None = None
+    source_image_url: str | None = None
     reference_urls: list[str] = []
     video_url: str | None = None
     video_start: float = Field(default=0, ge=0)
@@ -960,6 +1023,7 @@ class PromptSubmitRequest(BaseModel):
 class MusicGenRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=4000)
     instrumental: bool = False
+    model: str | None = None
 
 
 class TopupRequest(BaseModel):
@@ -994,6 +1058,7 @@ class ReferralChildOut(BaseModel):
 class ReferralWithdrawalOut(BaseModel):
     id: int
     amount_rub: float
+    amount_credits: float | None = None
     payout_details: str
     status: str
     created_at: str
@@ -1007,6 +1072,9 @@ class ReferralStatsOut(BaseModel):
     commission_l2: float
     commission_l3: float
     withdraw_min_rub: float
+    withdraw_min_credits: float | None = None
+    exchange_min_rub: float | None = None
+    exchange_rate_rub_per_credit: float | None = None
     counts: dict[str, int]
     balance: dict[str, float]
     feed_remix_reward_rub: float
@@ -1017,6 +1085,10 @@ class ReferralStatsOut(BaseModel):
 class ReferralWithdrawalRequestIn(BaseModel):
     amount_rub: float = Field(..., gt=0)
     payout_details: str = Field(..., min_length=5, max_length=500)
+
+
+class ReferralExchangeRequestIn(BaseModel):
+    amount_rub: float = Field(..., gt=0)
 
 
 class TelegramLoginRequest(BaseModel):
@@ -1188,6 +1260,9 @@ async def miniapp_referrals(
         commission_l2=float(settings.REFERRAL_COMMISSION_L2),
         commission_l3=float(settings.REFERRAL_COMMISSION_L3),
         withdraw_min_rub=float(settings.REFERRAL_WITHDRAW_MIN_RUB),
+        withdraw_min_credits=float(settings.REFERRAL_EXCHANGE_MIN_RUB / float(settings.REFERRAL_EXCHANGE_RUB_PER_CREDIT)),
+        exchange_min_rub=float(settings.REFERRAL_EXCHANGE_MIN_RUB),
+        exchange_rate_rub_per_credit=float(settings.REFERRAL_EXCHANGE_RUB_PER_CREDIT),
         counts={"l1": l1, "l2": l2, "l3": l3},
         balance={
             "total_earned": total,
@@ -1246,6 +1321,30 @@ async def miniapp_create_referral_withdrawal(
             except (TelegramBadRequest, TelegramForbiddenError, Exception):
                 continue
 
+    return _withdrawal_out(item)
+
+
+@router.post("/referrals/exchange", response_model=ReferralWithdrawalOut, status_code=201)
+async def miniapp_exchange_referral_balance(
+    body: ReferralExchangeRequestIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> ReferralWithdrawalOut:
+    min_amount = float(settings.REFERRAL_EXCHANGE_MIN_RUB)
+    if body.amount_rub < min_amount:
+        raise HTTPException(status_code=422, detail=f"Минимальный обмен — {min_amount:.0f}₽")
+    try:
+        item = await repo.convert_referral_balance_to_credits(
+            session,
+            user_id=user.id,
+            amount_rub=body.amount_rub,
+            rub_per_credit=float(settings.REFERRAL_EXCHANGE_RUB_PER_CREDIT),
+        )
+    except repo.InsufficientReferralBalanceError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Доступно для обмена {exc.available_amount:.2f}₽",
+        ) from exc
     return _withdrawal_out(item)
 
 
@@ -1437,9 +1536,10 @@ async def list_music_models(
         ))
     if result:
         return result
+    fallback_key = normalize_music_model(MUSIC_MODEL_KEY).lower().replace("v5_5", "v5.5").replace("v4_5", "v4.5")
     return [ModelInfo(
         key=MUSIC_MODEL_KEY,
-        display_name=_friendly_model_name(MUSIC_MODEL_KEY, "Suno"),
+        display_name=_friendly_model_name(fallback_key, "Suno 5.5"),
         credits=await _resolve_music_credits(session),
         modes=["text"],
         aspect_ratios=[],
@@ -1480,6 +1580,7 @@ async def create_image_generation(
     body: ImageGenRequest,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
+    surface: str = "miniapp",
 ) -> GenerationOut:
     """
     Start an async image generation.
@@ -1521,7 +1622,7 @@ async def create_image_generation(
         if not ok:
             raise HTTPException(status_code=402, detail="Failed to spend credits")
         gen_prompt = effective_prompt or f"blend:{len(all_refs)}"
-        image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None)
+        image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None, reference_urls=all_refs)
         gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, model_cost.credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial)
         try:
             if body.model == "midjourney-imagine":
@@ -1535,7 +1636,7 @@ async def create_image_generation(
             if await repo.fail_generation(session, gen.id, str(exc)):
                 await repo.add_credits(session, user.id, model_cost.credits)
             raise HTTPException(status_code=502, detail="Generation service error")
-        await repo.update_generation_task(session, gen.id, task_id)
+        await repo.update_generation_task(session, gen.id, task_id_for_surface(task_id, surface))
         await repo.update_image_session_last_prompt(session, image_session.id, gen_prompt)
         await _mark_prompt_used_after_generation(
             session,
@@ -1596,6 +1697,7 @@ async def create_image_generation(
         base_prompt=effective_prompt,
         reference_file_id=None,
         reference_url=all_refs[0] if all_refs else None,
+        reference_urls=all_refs,
     )
 
     gen = await repo.create_generation(
@@ -1628,9 +1730,9 @@ async def create_image_generation(
         raise HTTPException(status_code=502, detail="Generation service error")
 
     if not getattr(result, "is_async", True):
-        gen = await _finish_direct_image_result(session, gen, result)
+        gen = await _finish_direct_image_result(session, gen, result, surface=surface)
     else:
-        await repo.update_generation_task(session, gen.id, result.task_id or "")
+        await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
     await repo.update_image_session_last_prompt(session, image_session.id, effective_prompt)
     await _mark_prompt_used_after_generation(
         session,
@@ -1650,6 +1752,7 @@ async def create_video_generation(
     body: VideoGenRequest,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
+    surface: str = "miniapp",
 ) -> GenerationOut:
     """
     Start an async video generation.
@@ -1683,7 +1786,7 @@ async def create_video_generation(
             if await repo.fail_generation(session, gen.id, str(exc)):
                 await repo.add_credits(session, user.id, model_cost.credits)
             raise HTTPException(status_code=502, detail="Generation service error")
-        await repo.update_generation_task(session, gen.id, task_id)
+        await repo.update_generation_task(session, gen.id, task_id_for_surface(task_id, surface))
         await session.refresh(gen)
         return _gen_out(gen)
 
@@ -1769,7 +1872,7 @@ async def create_video_generation(
             await repo.add_credits(session, user.id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
-    await repo.update_generation_task(session, gen.id, result.task_id or "")
+    await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
 
     await session.refresh(gen)
     return _gen_out(gen)
@@ -1782,11 +1885,14 @@ async def create_music_generation(
     body: MusicGenRequest,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
+    surface: str = "miniapp",
 ) -> GenerationOut:
     """Start Suno music generation. Returns immediately; poll /generations/{id}."""
     from api.music_service import create_music_task, register_miniapp_task
 
-    music_credits = await _resolve_music_credits(session)
+    selected_music_model = await _resolve_active_music_model(session, body.model)
+    selected_music_key = getattr(selected_music_model, "model_key", None) or str(body.model or MUSIC_MODEL_KEY)
+    music_credits = float(getattr(selected_music_model, "credits", 0) or 0) if selected_music_model else await _resolve_music_credits(session, body.model)
 
     if user.credits < music_credits:
         raise HTTPException(
@@ -1804,19 +1910,19 @@ async def create_music_generation(
         raise HTTPException(status_code=402, detail="Failed to spend credits")
 
     gen = await repo.create_generation(
-        session, user.id, MUSIC_MODEL_KEY, GenerationType.music,
+        session, user.id, selected_music_key, GenerationType.music,
         body.prompt, music_credits,
     )
 
     try:
-        task_id = await create_music_task(body.prompt, body.instrumental)
+        task_id = await create_music_task(body.prompt, body.instrumental, model_key=selected_music_key)
     except Exception as exc:
         logger.error("miniapp music gen error user=%s: %s", user.id, exc)
         if await repo.fail_generation(session, gen.id, str(exc)):
             await repo.add_credits(session, user.id, music_credits)
         raise HTTPException(status_code=502, detail="Music generation service error")
 
-    await repo.update_generation_task(session, gen.id, task_id)
+    await repo.update_generation_task(session, gen.id, task_id_for_surface(task_id, surface))
     register_miniapp_task(task_id, gen.id)
 
     await session.refresh(gen)
@@ -1919,6 +2025,7 @@ async def remix_feed_post(
     body: FeedRemixRequest,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
+    surface: str = "miniapp",
 ) -> GenerationOut:
     """
     Start a generation using the hidden prompt of a public feed post.
@@ -1929,7 +2036,7 @@ async def remix_feed_post(
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
     user_refs = _normalize_public_urls(body.image_url, *(body.reference_urls or []))
-    source_refs = _normalize_public_urls(source.result_url) if body.mode == "image" else []
+    source_refs = _normalize_public_urls(body.source_image_url) or _generation_result_urls(source)
 
     if body.model in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS):
         source_prompt = (source.prompt or "").strip()
@@ -1996,6 +2103,7 @@ async def remix_feed_post(
                 base_prompt=source_prompt,
                 reference_file_id=None,
                 reference_url=refs[0] if refs else None,
+                reference_urls=refs,
             )
             image_session_id = image_session.id
 
@@ -2032,7 +2140,7 @@ async def remix_feed_post(
                 await repo.add_credits(session, user.id, total_credits)
             raise HTTPException(status_code=502, detail="Generation service error")
 
-        await repo.update_generation_task(session, gen.id, task_id)
+        await repo.update_generation_task(session, gen.id, task_id_for_surface(task_id, surface))
         await repo.increment_feed_share(session, gen_id)
         await session.refresh(gen)
         return _gen_out(gen)
@@ -2133,6 +2241,7 @@ async def remix_feed_post(
             count=body.count,
             base_prompt=source.prompt,
             reference_url=normalized_image_url,
+            reference_urls=image_refs,
         )
         image_session_id = image_session.id
 
@@ -2182,9 +2291,9 @@ async def remix_feed_post(
         raise HTTPException(status_code=502, detail="Generation service error")
 
     if gen_type == "image" and not getattr(result, "is_async", True):
-        gen = await _finish_direct_image_result(session, gen, result)
+        gen = await _finish_direct_image_result(session, gen, result, surface=surface)
     else:
-        await repo.update_generation_task(session, gen.id, result.task_id or "")
+        await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
     await repo.increment_feed_share(session, gen_id)
     await session.refresh(gen)
     return _gen_out(gen)
@@ -3082,11 +3191,13 @@ def _gen_out(gen) -> GenerationOut:
         prompt_actions_allowed=not prompt_hidden,
         status=gen.status.value,
         result_url=_generation_primary_result_url(gen),
+        preview_url=_preview_media_url(_generation_primary_result_url(gen), gen.gen_type),
         credits_spent=gen.credits_spent,
         created_at=gen.created_at.isoformat() if gen.created_at else "",
         is_public_feed=bool(gen.is_public_feed),
         is_prompt_library=bool(getattr(gen, "is_prompt_library", False)),
         result_urls=_generation_result_urls(gen),
+        preview_urls=[_preview_media_url(url, gen.gen_type) or url for url in _generation_result_urls(gen)],
     )
 
 

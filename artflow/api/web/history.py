@@ -20,4 +20,14 @@ async def history(
     if user is None:
         return error_response(401, "Authentication required")
     generations = await repo.get_user_history(session, user.id, limit=limit)
-    return ok([GenerationCard.from_generation(item).model_dump() for item in generations])
+    image_sessions = await repo.get_image_sessions_by_ids(
+        session,
+        [int(getattr(item, "image_session_id", 0) or 0) for item in generations],
+    )
+    return ok([
+        GenerationCard.from_generation(
+            item,
+            image_session=image_sessions.get(int(getattr(item, "image_session_id", 0) or 0)),
+        ).model_dump()
+        for item in generations
+    ])

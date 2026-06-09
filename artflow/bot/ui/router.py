@@ -55,10 +55,12 @@ async def render_screen(
 
     if screen == "music":
         music_cost = payload.get("music_cost")
+        music_model_name = payload.get("music_model_name")
         if music_cost is None:
-            model_cost = await repo.get_model_cost(session, "suno/v4.5")
+            model_cost = await repo.get_first_active_model_cost(session, ["suno/v5.5", "suno/v5.0", "suno/v4.5"])
             if model_cost and getattr(model_cost, "is_active", True):
                 music_cost = float(model_cost.credits)
-        return render_music_menu(payload.get("last_style"), credits=music_cost)
+                music_model_name = music_model_name or getattr(model_cost, "display_name", None)
+        return render_music_menu(payload.get("last_style"), credits=music_cost, model_name=music_model_name)
 
     raise ValueError(f"Unknown screen: {screen}")

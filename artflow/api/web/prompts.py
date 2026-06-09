@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import difflib
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import PromptCard, PromptCreateRequest, PromptRejectRequest
+from api.public_files import local_upload_path_from_url, public_url_is_available
 from core.config import settings
+from db import repository as repo
 from db.models import PromptCategory, PromptStatus
 from db.prompt_repository import (
     MAX_ACTIVE_PROMPTS_PER_USER,
@@ -31,6 +36,106 @@ from db.prompt_repository import (
 from db.session import get_session
 
 router = APIRouter(tags=["web"])
+
+_PROMPT_PREVIEW_POOL_MIN = 120
+
+
+def _normalize_preview_text(value: str | None) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]+", " ", str(value or "").lower())).strip()
+
+
+def _same_model_family(left: str | None, right: str | None) -> bool:
+    left_root = str(left or "").split("-", 1)[0].strip().lower()
+    right_root = str(right or "").split("-", 1)[0].strip().lower()
+    return bool(left_root and right_root and left_root == right_root)
+
+
+async def _prompt_preview_fallbacks(
+    session: AsyncSession,
+    prompts: list,
+) -> dict[int, str]:
+    missing = [item for item in prompts if not public_url_is_available(getattr(item, "preview_url", None))]
+    if not missing:
+        return {}
+
+    feed_cards = await repo.get_feed_generations(
+        session,
+        limit=max(_PROMPT_PREVIEW_POOL_MIN, len(missing) * 8),
+    )
+    local_generations = [
+        card.generation
+        for card in feed_cards
+        if local_upload_path_from_url(getattr(card.generation, "result_url", None))
+        and public_url_is_available(getattr(card.generation, "result_url", None))
+    ]
+    generations = local_generations or [
+        card.generation
+        for card in feed_cards
+        if public_url_is_available(getattr(card.generation, "result_url", None))
+    ]
+    if not generations:
+        return {}
+
+    normalized_generations = [
+        (generation, _normalize_preview_text(getattr(generation, "prompt", ""))[:800])
+        for generation in generations
+    ]
+    used_ids: set[int] = set()
+    fallbacks: dict[int, str] = {}
+
+    for index, prompt in enumerate(missing):
+        prompt_text = _normalize_preview_text(getattr(prompt, "prompt_text", ""))[:800]
+        prompt_model = getattr(prompt, "model", None)
+        best_score = 0.0
+        best_generation = None
+        for generation, generation_text in normalized_generations:
+            if not generation_text:
+                continue
+            score = difflib.SequenceMatcher(None, prompt_text[:500], generation_text[:500]).ratio()
+            if prompt_model == getattr(generation, "model", None):
+                score += 0.08
+            elif _same_model_family(prompt_model, getattr(generation, "model", None)):
+                score += 0.03
+            if score > best_score:
+                best_score = score
+                best_generation = generation
+
+        selected = best_generation if best_generation is not None and best_score >= 0.42 else None
+        if selected is None:
+            model_pool = [
+                generation
+                for generation in generations
+                if generation.id not in used_ids
+                and (
+                    prompt_model == getattr(generation, "model", None)
+                    or _same_model_family(prompt_model, getattr(generation, "model", None))
+                )
+            ]
+            pool = model_pool or [generation for generation in generations if generation.id not in used_ids] or generations
+            selected = pool[index % len(pool)]
+
+        if selected is not None:
+            used_ids.add(int(getattr(selected, "id", 0) or 0))
+            fallbacks[int(getattr(prompt, "id", 0))] = str(getattr(selected, "result_url", "") or "")
+
+    return fallbacks
+
+
+async def _prompt_cards(
+    session: AsyncSession,
+    prompts: list,
+    *,
+    current_user_id: int | None = None,
+) -> list[dict]:
+    fallbacks = await _prompt_preview_fallbacks(session, prompts)
+    return [
+        PromptCard.from_prompt(
+            item,
+            current_user_id=current_user_id,
+            fallback_preview_url=fallbacks.get(int(getattr(item, "id", 0))),
+        ).model_dump()
+        for item in prompts
+    ]
 
 
 def _is_public_approved(prompt) -> bool:
@@ -90,7 +195,7 @@ async def prompts(
             "total": total,
             "page": page,
             "limit": limit,
-            "items": [PromptCard.from_prompt(item, current_user_id=getattr(user, "id", None)).model_dump() for item in items],
+            "items": await _prompt_cards(session, items, current_user_id=getattr(user, "id", None)),
         }
     )
 

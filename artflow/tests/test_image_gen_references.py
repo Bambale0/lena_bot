@@ -344,6 +344,162 @@ async def test_handle_session_prompt_does_not_reuse_stale_feed_source_for_own_re
 
 
 @pytest.mark.asyncio
+async def test_session_remix_keeps_user_reference_ids_for_later_variants() -> None:
+    call = SimpleNamespace(
+        data="img_session:remix:99",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={"image_session_id": 7})
+    image_session = SimpleNamespace(
+        id=7,
+        model="nano-banana-pro",
+        mode="image",
+        reference_file_id="face_ref_1",
+        reference_file_ids='["face_ref_1", "face_ref_2"]',
+        reference_url=None,
+        last_result_url="https://example.test/previous.jpg",
+        last_generation_id=99,
+    )
+    parent_gen = SimpleNamespace(
+        id=99,
+        user_id=42,
+        result_url="https://example.test/current-result.jpg",
+        source_feed_gen_id=None,
+    )
+    session_obj = AsyncMock()
+    repo_stub = SimpleNamespace(get_generation_by_id=AsyncMock(return_value=parent_gen))
+
+    with (
+        patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 99))),
+        patch("bot.handlers.image_gen.repo", new=repo_stub),
+        patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()),
+    ):
+        await image_gen.cb_image_session_remix(
+            call,
+            session_obj,
+            state,
+            SimpleNamespace(id=42),
+        )
+
+    assert image_session.reference_file_id == "face_ref_1"
+    assert image_session.reference_file_ids == '["face_ref_1", "face_ref_2"]'
+    assert image_session.reference_url is None
+    session_obj.commit.assert_not_awaited()
+    state.update_data.assert_awaited()
+    updates = state.update_data.await_args.kwargs
+    assert updates["remix_reference_url"] == "https://example.test/current-result.jpg"
+    assert updates["ref_file_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_style_edit_keeps_user_reference_ids_for_later_variants() -> None:
+    call = SimpleNamespace(
+        data="img_style:hair_color:99",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={"image_session_id": 7})
+    image_session = SimpleNamespace(
+        id=7,
+        model="nano-banana-pro",
+        mode="image",
+        reference_file_id="face_ref_1",
+        reference_file_ids='["face_ref_1", "face_ref_2"]',
+        reference_url=None,
+        last_result_url="https://example.test/previous.jpg",
+        last_generation_id=99,
+    )
+    parent_gen = SimpleNamespace(
+        id=99,
+        user_id=42,
+        result_url="https://example.test/current-result.jpg",
+        source_feed_gen_id=None,
+    )
+    session_obj = AsyncMock()
+    repo_stub = SimpleNamespace(get_generation_by_id=AsyncMock(return_value=parent_gen))
+
+    with (
+        patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 99))),
+        patch("bot.handlers.image_gen.repo", new=repo_stub),
+        patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()),
+    ):
+        await image_gen.cb_image_style_choice(
+            call,
+            session_obj,
+            state,
+            SimpleNamespace(id=42),
+        )
+
+    assert image_session.reference_file_id == "face_ref_1"
+    assert image_session.reference_file_ids == '["face_ref_1", "face_ref_2"]'
+    assert image_session.reference_url is None
+    session_obj.commit.assert_not_awaited()
+    state.update_data.assert_awaited()
+    updates = state.update_data.await_args.kwargs
+    assert updates["remix_reference_url"] == "https://example.test/current-result.jpg"
+    assert updates["style_edit_kind"] == "hair_color"
+    assert updates["ref_file_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_repeat_variant_uses_saved_user_references_not_last_result() -> None:
+    call = SimpleNamespace(
+        data="img_session:repeat:101",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={"image_session_id": 7})
+    image_session = SimpleNamespace(
+        id=7,
+        model="nano-banana-pro",
+        mode="image",
+        reference_file_id="face_ref_1",
+        reference_file_ids='["face_ref_1", "face_ref_2"]',
+        reference_url=None,
+        last_result_url="https://example.test/generated-wrong-face.jpg",
+        last_generation_id=101,
+        count=1,
+        aspect_ratio="9:16",
+        quality="2K",
+    )
+    last_gen = SimpleNamespace(
+        id=101,
+        prompt="same prompt",
+        source_feed_gen_id=None,
+    )
+    repo_stub = SimpleNamespace(get_last_session_generation=AsyncMock(return_value=last_gen))
+    launch = AsyncMock(return_value=True)
+
+    with (
+        patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 101))),
+        patch("bot.handlers.image_gen._telegram_file_url", AsyncMock(side_effect=[
+            "https://example.test/face-1.jpg",
+            "https://example.test/face-2.jpg",
+        ])),
+        patch("bot.handlers.image_gen._launch_session_generation", launch),
+        patch("bot.handlers.image_gen.repo", new=repo_stub),
+    ):
+        await image_gen.cb_image_session_repeat(
+            call,
+            AsyncMock(),
+            state,
+            SimpleNamespace(id=42),
+            AsyncMock(),
+        )
+
+    assert launch.await_args.kwargs["prompt"] == "same prompt"
+    assert launch.await_args.kwargs["reference_url"] == [
+        "https://example.test/face-1.jpg",
+        "https://example.test/face-2.jpg",
+    ]
+    assert launch.await_args.kwargs["reference_url"] != "https://example.test/generated-wrong-face.jpg"
+
+
+@pytest.mark.asyncio
 async def test_handle_session_photo_switches_active_session_to_image_mode() -> None:
     message = SimpleNamespace(
         photo=[SimpleNamespace(file_size=10, file_id="ref_1")],

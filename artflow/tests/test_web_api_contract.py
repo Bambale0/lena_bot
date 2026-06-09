@@ -7,7 +7,15 @@ from unittest.mock import AsyncMock
 import pytest
 
 from api.web import assistant, billing, generations, health, landing, referrals, router as web_router
-from api.miniapp_routes import AssistantChatRequest, GenerationOut, ImageGenRequest
+from api.miniapp_routes import (
+    AssistantChatRequest,
+    FeedRemixRequest,
+    GenerationOut,
+    ImageGenRequest,
+    is_web_task_id,
+    provider_task_id,
+    task_id_for_surface,
+)
 from api.web.schemas import FeedCard, ModelCostCard, TransactionCard, UserMe
 from db.models import GenerationType, PaymentProvider, TransactionStatus
 
@@ -195,6 +203,35 @@ async def test_referrals_requires_auth() -> None:
 
 
 @pytest.mark.asyncio
+async def test_web_referral_exchange_uses_standard_tariff_rate(monkeypatch) -> None:
+    monkeypatch.setattr(referrals.settings, "REFERRAL_EXCHANGE_MIN_RUB", 100.0)
+    monkeypatch.setattr(referrals.settings, "REFERRAL_EXCHANGE_RUB_PER_CREDIT", 10.0)
+    exchange = AsyncMock(
+        return_value=SimpleNamespace(
+            id=9,
+            amount_rub=500.0,
+            amount_credits=50.0,
+            payout_details="AUTO_CREDITS",
+            status="approved",
+            created_at=datetime(2026, 5, 16, tzinfo=timezone.utc),
+        )
+    )
+    monkeypatch.setattr(referrals.repo, "convert_referral_balance_to_credits", exchange)
+
+    response = await referrals.exchange_referral_balance(
+        referrals.ReferralWithdrawalRequest(amount_rub=500.0),
+        session=object(),
+        user=SimpleNamespace(id=1),
+    )
+
+    assert response["ok"] is True
+    assert response["data"]["amount_credits"] == 50.0
+    exchange.assert_awaited_once()
+    assert exchange.await_args.kwargs["amount_rub"] == 500.0
+    assert exchange.await_args.kwargs["rub_per_credit"] == 10.0
+
+
+@pytest.mark.asyncio
 async def test_web_generate_image_requires_auth() -> None:
     response = await generations.generate_image(
         ImageGenRequest(model="nano-banana-2", prompt="premium product"),
@@ -233,3 +270,85 @@ async def test_web_generate_image_wraps_generation_payload(monkeypatch) -> None:
     assert response["ok"] is True
     assert response["data"]["id"] == 77
     assert response["data"]["status"] == "processing"
+
+
+@pytest.mark.asyncio
+async def test_web_generate_image_marks_surface_when_handler_supports_it(monkeypatch) -> None:
+    seen: dict[str, str] = {}
+
+    async def fake_create_image_generation(*, body, session, user, surface="miniapp"):
+        seen["surface"] = surface
+        return GenerationOut(
+            id=78,
+            model=body.model,
+            gen_type="image",
+            prompt=body.prompt,
+            status="processing",
+            result_url=None,
+            credits_spent=4,
+            created_at="2026-05-24T00:00:00+00:00",
+            result_urls=[],
+        )
+
+    monkeypatch.setattr(generations, "miniapp_create_image_generation", fake_create_image_generation)
+
+    response = await generations.generate_image(
+        ImageGenRequest(model="nano-banana-2", prompt="premium product"),
+        session=object(),
+        user=SimpleNamespace(id=1),
+    )
+
+    assert response["ok"] is True
+    assert seen["surface"] == "web"
+
+
+@pytest.mark.asyncio
+async def test_web_feed_remix_marks_surface_and_keeps_source_reference(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    async def fake_remix_feed_post(*, gen_id, body, session, user, surface="miniapp"):
+        seen["surface"] = surface
+        seen["source_image_url"] = body.source_image_url
+        seen["image_url"] = body.image_url
+        return GenerationOut(
+            id=79,
+            model=body.model,
+            gen_type="image",
+            prompt="",
+            prompt_hidden=True,
+            status="processing",
+            result_url=None,
+            credits_spent=4,
+            created_at="2026-05-24T00:00:00+00:00",
+            result_urls=[],
+        )
+
+    monkeypatch.setattr(generations, "miniapp_remix_feed_post", fake_remix_feed_post)
+
+    response = await generations.remix_feed_generation(
+        10,
+        FeedRemixRequest(
+            model="nano-banana-2",
+            mode="image",
+            image_url="https://cdn.test/user-ref.png",
+            source_image_url="https://cdn.test/feed-source.png",
+        ),
+        session=object(),
+        user=SimpleNamespace(id=1),
+    )
+
+    assert response["ok"] is True
+    assert seen == {
+        "surface": "web",
+        "source_image_url": "https://cdn.test/feed-source.png",
+        "image_url": "https://cdn.test/user-ref.png",
+    }
+
+
+def test_web_task_id_helpers_preserve_provider_id() -> None:
+    assert task_id_for_surface("task-1", "web") == "web:task-1"
+    assert task_id_for_surface("web:task-1", "web") == "web:task-1"
+    assert task_id_for_surface("task-1", "miniapp") == "task-1"
+    assert provider_task_id("web:task-1") == "task-1"
+    assert is_web_task_id("web:task-1") is True
+    assert is_web_task_id("task-1") is False

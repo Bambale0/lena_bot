@@ -181,3 +181,18 @@ def test_extract_chat_output_text_supports_list_content() -> None:
         ]
     }
     assert assistant_service._extract_chat_output_text(payload) == "Первая строка\nВторая строка"
+
+
+def test_sanitize_assistant_reply_hides_raw_context_dump() -> None:
+    raw = "\n".join(
+        [
+            "КОНТЕКСТ",
+            "role: user",
+            'content: [{"type":"input_text","text":"осьминоги"}]',
+            "role: assistant",
+            "content: служебный ответ",
+        ]
+    )
+
+    assert assistant_service.sanitize_assistant_reply(raw) == "Готово. Чем ещё помочь?"
+    assert assistant_service.sanitize_assistant_reply("Обычный ответ") == "Обычный ответ"

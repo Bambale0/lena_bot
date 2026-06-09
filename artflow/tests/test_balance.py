@@ -174,6 +174,31 @@ async def test_handle_withdraw_amount_exceeds_available(db_user) -> None:
     mock_state.set_state.assert_not_called()
 
 
+# ── ExchangeFSM.amount ────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_handle_exchange_amount_uses_standard_tariff_rate(db_user) -> None:
+    msg = make_message(text="500")
+    msg.answer = AsyncMock()
+    mock_state = AsyncMock()
+    mock_session = AsyncMock()
+    converted = SimpleNamespace(id=3, amount_rub=500.0)
+    mock_repo = AsyncMock(
+        get_user_referral_balance_snapshot=AsyncMock(
+            return_value=SimpleNamespace(total_earned=900.0, available_to_withdraw=900.0, pending_withdrawals=0.0)
+        ),
+        convert_referral_balance_to_credits=AsyncMock(return_value=converted),
+    )
+
+    with patch("bot.handlers.balance.repo", mock_repo):
+        await balance.handle_exchange_amount(msg, mock_state, db_user, mock_session)
+
+    mock_repo.convert_referral_balance_to_credits.assert_awaited_once()
+    assert mock_repo.convert_referral_balance_to_credits.await_args.kwargs["amount_rub"] == 500.0
+    assert mock_repo.convert_referral_balance_to_credits.await_args.kwargs["rub_per_credit"] == 10.0
+    assert "50.00💋" in msg.answer.call_args[0][0]
+
+
 # ── WithdrawalFSM.details ────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

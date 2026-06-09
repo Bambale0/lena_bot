@@ -73,7 +73,27 @@ async def generate_assistant_reply(messages: list[dict[str, str]], *, admin_mode
     system_prompt = _SYSTEM_PROMPT
     if admin_mode:
         system_prompt = f"{system_prompt} {_ADMIN_SYSTEM_PROMPT}"
-    return await _generate_text_reply(messages, system_prompt=system_prompt)
+    return sanitize_assistant_reply(await _generate_text_reply(messages, system_prompt=system_prompt))
+
+
+def sanitize_assistant_reply(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "Готово. Чем ещё помочь?"
+
+    text = text.removeprefix("КОНТЕКСТ").removeprefix("CONTEXT").strip()
+    lines = text.splitlines()
+    has_debug_shape = any(line.strip().lower().startswith(("role:", "content:")) for line in lines)
+    if has_debug_shape:
+        lines = [
+            line.strip()
+            for line in lines
+            if line.strip()
+            and not line.strip().lower().startswith(("role:", "content:"))
+            and not line.strip().startswith('[{"type":"input_text"')
+        ]
+        text = "\n".join(lines).strip()
+    return text or "Готово. Чем ещё помочь?"
 
 
 async def generate_prompt_moderation_review(

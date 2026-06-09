@@ -12,10 +12,11 @@ from core.gemini_omni import (
 )
 
 
-def test_gemini_omni_video_credits_use_stable_720p_tier() -> None:
+def test_gemini_omni_video_credits_support_public_resolutions() -> None:
     assert gemini_omni_video_credits(duration=4, resolution="720p") == 90
-    assert gemini_omni_video_credits(duration=10, resolution="4K") == 180
-    assert gemini_omni_video_credits(duration=4, resolution="4k", has_video_input=True) == 240
+    assert gemini_omni_video_credits(duration=10, resolution="1080p") == 30
+    assert gemini_omni_video_credits(duration=10, resolution="4K") == 48
+    assert gemini_omni_video_credits(duration=4, resolution="4k", has_video_input=True) == 54
 
 
 def test_gemini_omni_auxiliary_payloads() -> None:
@@ -111,7 +112,7 @@ def test_miniapp_normalizes_gemini_omni_video_request() -> None:
     )
 
     assert normalized["duration"] == 4
-    assert normalized["resolution"] == "720p"
+    assert normalized["resolution"] == "4k"
     assert normalized["reference_video_url"] == "https://example.test/source.mp4"
     assert normalized["video_start"] == 2
     assert normalized["video_end"] == 9

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any
 from urllib.parse import urlparse
 import mimetypes
@@ -63,7 +64,20 @@ def _dump(value: Any) -> Any:
     return value
 
 
-async def _call_miniapp(handler, *args, **kwargs) -> dict | Response:
+def _handler_accepts_kwarg(handler, name: str) -> bool:
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return False
+    return name in signature.parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+
+
+async def _call_miniapp(handler, *args, surface: str | None = None, **kwargs) -> dict | Response:
+    if surface and _handler_accepts_kwarg(handler, "surface"):
+        kwargs["surface"] = surface
     try:
         return ok(_dump(await handler(*args, **kwargs)))
     except HTTPException as exc:
@@ -114,7 +128,7 @@ async def generate_image(
 ):
     if auth_error := _auth_required(user):
         return auth_error
-    return await _call_miniapp(miniapp_create_image_generation, body=body, session=session, user=user)
+    return await _call_miniapp(miniapp_create_image_generation, body=body, session=session, user=user, surface="web")
 
 
 @router.post("/generate/video", status_code=202)
@@ -125,7 +139,7 @@ async def generate_video(
 ):
     if auth_error := _auth_required(user):
         return auth_error
-    return await _call_miniapp(miniapp_create_video_generation, body=body, session=session, user=user)
+    return await _call_miniapp(miniapp_create_video_generation, body=body, session=session, user=user, surface="web")
 
 
 @router.post("/generate/music", status_code=202)
@@ -136,7 +150,7 @@ async def generate_music(
 ):
     if auth_error := _auth_required(user):
         return auth_error
-    return await _call_miniapp(miniapp_create_music_generation, body=body, session=session, user=user)
+    return await _call_miniapp(miniapp_create_music_generation, body=body, session=session, user=user, surface="web")
 
 
 @router.get("/generations/active")
@@ -148,7 +162,17 @@ async def active_generations(
         return auth_error
     await _reconcile_user_active_generations(session, user.id)
     items = await repo.get_user_active_generations(session, user.id)
-    return ok([GenerationCard.from_generation(item).model_dump() for item in items])
+    image_sessions = await repo.get_image_sessions_by_ids(
+        session,
+        [int(getattr(item, "image_session_id", 0) or 0) for item in items],
+    )
+    return ok([
+        GenerationCard.from_generation(
+            item,
+            image_session=image_sessions.get(int(getattr(item, "image_session_id", 0) or 0)),
+        ).model_dump()
+        for item in items
+    ])
 
 
 @router.get("/generations/{generation_id}/download")
@@ -194,7 +218,13 @@ async def generation_detail(
 ):
     if auth_error := _auth_required(user):
         return auth_error
-    return await _call_miniapp(miniapp_get_generation, gen_id=generation_id, session=session, user=user)
+    generation = await repo.get_generation_by_id(session, generation_id)
+    if generation is None or int(getattr(generation, "user_id", 0) or 0) != int(user.id):
+        return error_response(404, "Generation not found")
+    image_session = None
+    if getattr(generation, "image_session_id", None):
+        image_session = await repo.get_image_session(session, int(generation.image_session_id), user_id=user.id)
+    return ok(GenerationCard.from_generation(generation, image_session=image_session).model_dump())
 
 
 @router.post("/generations/{generation_id}/share")
@@ -261,7 +291,7 @@ async def remix_feed_generation(
 ):
     if auth_error := _auth_required(user):
         return auth_error
-    return await _call_miniapp(miniapp_remix_feed_post, gen_id=generation_id, body=body, session=session, user=user)
+    return await _call_miniapp(miniapp_remix_feed_post, gen_id=generation_id, body=body, session=session, user=user, surface="web")
 
 
 @router.get("/feed/{generation_id}/link")

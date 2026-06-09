@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.miniapp_auth import _verify_init_data, verify_web_auth_token
 from api.public_files import public_url_is_available
+from api.web_auth_constants import WEB_AUTH_COOKIE_NAME
 from db import repository as repo
 from db.models import Generation, User
 from db.session import get_session
@@ -169,6 +170,11 @@ async def _read_ws_auth(websocket: WebSocket) -> tuple[str | None, str | None]:
         header_init_data = unquote(header_init_data)
     if header_token or header_init_data:
         return (str(header_token) if header_token else None, str(header_init_data) if header_init_data else None)
+
+    cookies = getattr(websocket, "cookies", None) or {}
+    cookie_token = cookies.get(WEB_AUTH_COOKIE_NAME)
+    if cookie_token:
+        return str(cookie_token), None
 
     query_params = getattr(websocket, "query_params", None)
     legacy_token = query_params.get("token") if query_params is not None else None

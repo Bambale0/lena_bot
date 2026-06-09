@@ -10,9 +10,7 @@ GEMINI_OMNI_CHARACTER_MODEL = "gemini-omni-character"
 GEMINI_OMNI_DURATIONS = (4, 6, 8, 10)
 GEMINI_OMNI_ASPECT_RATIOS = ("16:9", "9:16")
 GEMINI_OMNI_PROVIDER_RESOLUTIONS = ("720p", "1080p", "4k")
-# KIE documents 1080p/4k, but current production runs fail those modes often.
-# Keep the public surface on the stable tier until the provider side settles.
-GEMINI_OMNI_RESOLUTIONS = ("720p",)
+GEMINI_OMNI_RESOLUTIONS = GEMINI_OMNI_PROVIDER_RESOLUTIONS
 
 GEMINI_OMNI_MAX_IMAGE_SLOTS = 7
 GEMINI_OMNI_MAX_AUDIO_IDS = 1
@@ -22,9 +20,13 @@ GEMINI_OMNI_MAX_VIDEO_TRIM_SECONDS = 10
 
 GEMINI_OMNI_PRICE_TABLE: dict[str, dict[int, int]] = {
     "720p": {4: 90, 6: 120, 8: 150, 10: 180},
+    "1080p": {4: 18, 6: 22, 8: 26, 10: 30},
+    "4k": {4: 36, 6: 40, 8: 44, 10: 48},
 }
 GEMINI_OMNI_VIDEO_INPUT_PRICES: dict[str, int] = {
     "720p": 240,
+    "1080p": 38,
+    "4k": 54,
 }
 
 GEMINI_OMNI_AUDIO_VOICES: dict[str, str] = {
@@ -67,12 +69,10 @@ def normalize_gemini_omni_resolution(value: str | None) -> str:
     normalized = str(value).strip()
     aliases = {
         "720P": "720p",
-        "1080p": "720p",
-        "1080P": "720p",
-        "4k": "720p",
-        "4K": "720p",
-        "2160p": "720p",
-        "2160P": "720p",
+        "1080P": "1080p",
+        "4K": "4k",
+        "2160p": "4k",
+        "2160P": "4k",
     }
     normalized = aliases.get(normalized, normalized)
     if normalized not in GEMINI_OMNI_RESOLUTIONS:
