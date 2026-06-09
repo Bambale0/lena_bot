@@ -41,6 +41,7 @@ from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db import repository as repo
 from db.models import GenerationType, User
+from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 router = Router(name="video_gen")
@@ -1081,6 +1082,7 @@ async def handle_video_prompt(
         )
     except Exception as e:
         logger.error("Video generation error: %s", e)
+        await session.rollback()
         if await repo.fail_generation(session, gen.id, str(e)):
             await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text("❌ Ошибка запуска генерации. 💋 возвращены.\n\nПопробуй другую модель или повтори через минуту.", reply_markup=main_menu_kb())
@@ -1091,12 +1093,12 @@ async def handle_video_prompt(
     poll_fn = video_service.get_poll_fn(result.provider)
 
     async def on_success(url: str) -> None:
-        current = await repo.get_generation_by_id(session, gen.id)
-        current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
-        if current_status in {"done", "failed"}:
-            return
-
-        await repo.finish_generation(session, gen.id, url)
+        async with AsyncSessionLocal() as bg_session:
+            current = await repo.get_generation_by_id(bg_session, gen.id)
+            current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
+            if current_status in {"done", "failed"}:
+                return
+            await repo.finish_generation(bg_session, gen.id, url)
         try:
             await status_msg.delete()
         except Exception:
@@ -1110,13 +1112,13 @@ async def handle_video_prompt(
         )
 
     async def on_failure(err: str) -> None:
-        current = await repo.get_generation_by_id(session, gen.id)
-        current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
-        if current_status in {"done", "failed"}:
-            return
-
-        if await repo.fail_generation(session, gen.id, err):
-            await repo.add_credits(session, db_user.id, credits)
+        async with AsyncSessionLocal() as bg_session:
+            current = await repo.get_generation_by_id(bg_session, gen.id)
+            current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
+            if current_status in {"done", "failed"}:
+                return
+            if await repo.fail_generation(bg_session, gen.id, err):
+                await repo.add_credits(bg_session, db_user.id, credits)
         await status_msg.edit_text(
             f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb()
         )
@@ -1268,6 +1270,7 @@ async def cb_regen_video(
         )
     except Exception as exc:
         logger.error("Video regeneration error: %s", exc)
+        await session.rollback()
         if await repo.fail_generation(session, gen.id, str(exc)):
             await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
@@ -1281,11 +1284,12 @@ async def cb_regen_video(
     poll_fn = video_service.get_poll_fn(result.provider)
 
     async def on_success(url: str) -> None:
-        current = await repo.get_generation_by_id(session, gen.id)
-        current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
-        if current_status in {"done", "failed"}:
-            return
-        await repo.finish_generation(session, gen.id, url)
+        async with AsyncSessionLocal() as bg_session:
+            current = await repo.get_generation_by_id(bg_session, gen.id)
+            current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
+            if current_status in {"done", "failed"}:
+                return
+            await repo.finish_generation(bg_session, gen.id, url)
         try:
             await status_msg.delete()
         except Exception:
@@ -1301,12 +1305,13 @@ async def cb_regen_video(
         )
 
     async def on_failure(err: str) -> None:
-        current = await repo.get_generation_by_id(session, gen.id)
-        current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
-        if current_status in {"done", "failed"}:
-            return
-        if await repo.fail_generation(session, gen.id, err):
-            await repo.add_credits(session, db_user.id, credits)
+        async with AsyncSessionLocal() as bg_session:
+            current = await repo.get_generation_by_id(bg_session, gen.id)
+            current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
+            if current_status in {"done", "failed"}:
+                return
+            if await repo.fail_generation(bg_session, gen.id, err):
+                await repo.add_credits(bg_session, db_user.id, credits)
         await status_msg.edit_text(f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
 
     if getattr(result, "uses_webhook", False) or result.provider == "kieai":

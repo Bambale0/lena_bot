@@ -16,14 +16,25 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_TASK_PREFIX = "openrouter:"
 
-IMAGE_MODEL_BY_SOURCE: dict[str, str] = {}
+IMAGE_MODEL_BY_SOURCE: dict[str, str] = {
+    "nano-banana-2": "google/gemini-3.1-flash-image-preview",
+    "nano-banana-pro": "google/gemini-3-pro-image-preview",
+    "gpt-image-2-text-to-image": "openai/gpt-5.4-image-2",
+    "gpt-image-2-image-to-image": "openai/gpt-5.4-image-2",
+}
 
 IMAGE_ONLY_MODELS = {
     "bytedance-seed/seedream-4.5",
     "x-ai/grok-imagine-image-quality",
 }
 
-VIDEO_MODEL_BY_SOURCE: dict[str, str] = {}
+VIDEO_MODEL_BY_SOURCE: dict[str, str] = {
+    "wan/2-7-text-to-video": "alibaba/wan-2.7",
+    "wan/2-7-image-to-video": "alibaba/wan-2.7",
+    "veo3_fast": "google/veo-3.1-fast",
+    "veo3": "google/veo-3.1",
+    "kling-3.0/video": "kwaivgi/kling-v3.0-pro",
+}
 
 TEXT_MODEL_BY_SOURCE: dict[str, str] = {
     "gpt-5-2": "openai/gpt-5.2",

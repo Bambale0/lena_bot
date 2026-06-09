@@ -900,6 +900,8 @@ def video_params_kb(
             builder.row(*ratio_buttons[i:i+3])
 
     resolutions = caps.get("resolutions", []) if caps.get("has_resolution") else []
+    if model_key == GEMINI_OMNI_VIDEO_MODEL and selected_mode == "video":
+        resolutions = ["720p"]
     if resolutions:
         res_buttons = [
             InlineKeyboardButton(

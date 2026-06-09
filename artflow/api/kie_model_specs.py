@@ -268,10 +268,11 @@ def _kling_motion_params(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _gemini_omni_video_params(params: dict[str, Any]) -> dict[str, Any]:
+    resolution = "720p" if params.get("reference_video_url") else normalize_gemini_omni_resolution(params.get("resolution"))
     out: dict[str, Any] = {
         "duration": str(normalize_gemini_omni_duration(params.get("duration"))),
         "aspect_ratio": normalize_gemini_omni_aspect_ratio(params.get("aspect_ratio")),
-        "resolution": normalize_gemini_omni_resolution(params.get("resolution")),
+        "resolution": resolution,
     }
     audio_ids = normalize_gemini_omni_ids(
         params.get("audio_ids"),

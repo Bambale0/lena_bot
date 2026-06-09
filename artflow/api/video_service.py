@@ -19,6 +19,7 @@ from typing import Any
 
 from api import comet_fallback, kieai_client, openrouter_client
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
+from api.public_files import ensure_video_reference_aspect_url
 from core.gemini_omni import (
     build_gemini_omni_audio_payload,
     build_gemini_omni_character_payload,
@@ -111,6 +112,33 @@ SUPPORTS_I2V.update({VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_L
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+async def _prepare_video_reference_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    return ensure_video_reference_aspect_url(url) or url
+
+
+async def _prepare_video_reference_urls(urls: str | list[str] | None) -> str | list[str] | None:
+    if not urls:
+        return None
+    if isinstance(urls, str):
+        return await _prepare_video_reference_url(urls)
+    prepared = [url for url in [await _prepare_video_reference_url(str(item)) for item in urls if item] if url]
+    return prepared or None
+
+
+def _is_provider_validation_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "422",
+            "image aspect ratio",
+            "aspect ratio must be",
+            "input parameters are not correct",
+        )
+    )
+
 async def generate_video(
     model: VideoModel,
     prompt: str,
@@ -134,6 +162,9 @@ async def generate_video(
     callback_url: str | None = None,
     enable_fallback: bool = False,
 ) -> VideoResult:
+    image_url = await _prepare_video_reference_urls(image_url)
+    last_frame_url = await _prepare_video_reference_url(last_frame_url)
+
     openrouter_model = openrouter_client.video_model_for_source(model.value)
     if openrouter_model:
         if not openrouter_client.configured():
@@ -180,6 +211,8 @@ async def generate_video(
             )
         except Exception as kie_exc:
             logger.warning("Veo primary create failed for %s; trying CometAPI fallback: %s", model.value, kie_exc)
+            if _is_provider_validation_error(kie_exc):
+                raise
             return await _comet_fallback_generate(
                 kie_exc=kie_exc,
                 model=model,
@@ -220,6 +253,8 @@ async def generate_video(
         )
     except Exception as kie_exc:
         logger.warning("KIE.AI video create failed for %s; trying CometAPI fallback: %s", model.value, kie_exc)
+        if _is_provider_validation_error(kie_exc):
+            raise
         return await _comet_fallback_generate(
             kie_exc=kie_exc,
             model=model,

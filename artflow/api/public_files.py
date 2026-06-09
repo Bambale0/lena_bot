@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 
 from core.config import settings
 
@@ -191,6 +191,86 @@ def preview_public_image_url(url: str | None, *, max_size: int = 768, quality: i
         return public_upload_url(preview_path.name)
     except Exception:
         return ensure_public_image_url(url) or url
+
+
+def ensure_video_reference_aspect_url(
+    url: str | None,
+    *,
+    min_ratio: float = 1 / 2.5,
+    max_ratio: float = 2.5,
+    max_side: int = 2048,
+) -> str | None:
+    """
+    Return a local video-reference image URL whose aspect ratio provider APIs accept.
+
+    Some video providers reject very tall/wide source images before generation
+    starts. For local uploads we create a fitted JPEG with a blurred background
+    instead of cropping the user reference. External URLs are returned unchanged.
+    """
+    image_url = ensure_public_image_url(url) or url
+    path = local_upload_path_from_url(image_url)
+    if not image_url or not path or not path.exists() or not path.is_file():
+        return image_url
+
+    try:
+        stat = path.stat()
+    except OSError:
+        return image_url
+
+    digest = hashlib.sha256(
+        f"{path.name}:{stat.st_mtime_ns}:{min_ratio:.4f}:{max_ratio:.4f}:{max_side}".encode()
+    ).hexdigest()[:16]
+    fitted_path = path.with_name(f"{path.stem}_video_ref_{max_side}_{digest}.jpg")
+    if fitted_path.exists() and fitted_path.is_file():
+        return public_upload_url(fitted_path.name)
+
+    try:
+        with Image.open(path) as source:
+            source = ImageOps.exif_transpose(source)
+            if source.mode not in ("RGB", "RGBA"):
+                source = source.convert("RGBA" if "A" in source.getbands() else "RGB")
+            if "A" in source.getbands():
+                base = Image.new("RGB", source.size, (8, 9, 18))
+                base.paste(source, mask=source.getchannel("A"))
+                source = base
+            else:
+                source = source.convert("RGB")
+
+            width, height = source.size
+            if width <= 0 or height <= 0:
+                return image_url
+            ratio = width / height
+            needs_ratio_fit = ratio < min_ratio or ratio > max_ratio
+            needs_resize = max(width, height) > max_side
+            if not needs_ratio_fit and not needs_resize:
+                return image_url
+
+            target_width = width
+            target_height = height
+            if ratio < min_ratio:
+                target_width = int(round(height * min_ratio))
+            elif ratio > max_ratio:
+                target_height = int(round(width / max_ratio))
+
+            scale = min(1.0, max_side / max(target_width, target_height))
+            canvas_size = (
+                max(1, int(round(target_width * scale))),
+                max(1, int(round(target_height * scale))),
+            )
+            background = ImageOps.fit(source.copy(), canvas_size, method=Image.Resampling.LANCZOS)
+            background = background.filter(ImageFilter.GaussianBlur(radius=max(8, max(canvas_size) // 32)))
+            background = ImageOps.autocontrast(background)
+
+            foreground = ImageOps.contain(source.copy(), canvas_size, method=Image.Resampling.LANCZOS)
+            offset = (
+                (canvas_size[0] - foreground.size[0]) // 2,
+                (canvas_size[1] - foreground.size[1]) // 2,
+            )
+            background.paste(foreground, offset)
+            background.save(fitted_path, format="JPEG", quality=92, optimize=True)
+            return public_upload_url(fitted_path.name)
+    except Exception:
+        return image_url
 
 
 def save_public_file(data: bytes, content_type: str | None = None) -> str:

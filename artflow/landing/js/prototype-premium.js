@@ -875,6 +875,7 @@ function normalizeExample(item, index = 0) {
     isPublicFeed: Boolean(item.is_public_feed),
     isPromptLibrary: Boolean(item.is_prompt_library),
     promptActionsAllowed: item.prompt_actions_allowed ?? true,
+    aspectRatio: item.aspect_ratio || item.aspectRatio || "",
     imageSessionId: item.image_session_id || item.imageSessionId || null,
     parentGenerationId: item.parent_generation_id || item.parentGenerationId || null,
     sourceFeedGenId: item.source_feed_gen_id || item.sourceFeedGenId || null,
@@ -962,12 +963,33 @@ function feedCarouselIndex(item = {}, index = 0, mediaIndex = 0, urls = null) {
   return Math.max(activeIndex, 0);
 }
 
+function mediaAspectRatioCss(item = {}) {
+  const raw = String(item.aspectRatio || item.aspect_ratio || "").trim();
+  const match = raw.match(/^(\d+(?:\.\d+)?)\s*[/:]\s*(\d+(?:\.\d+)?)$/);
+  if (!match) return "";
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "";
+  return `${width} / ${height}`;
+}
+
+function mediaAspectStyle(item = {}) {
+  const ratio = mediaAspectRatioCss(item);
+  return ratio ? ` style="aspect-ratio: ${ratio};"` : "";
+}
+
 function mediaHtml(item, index = 0, options = {}) {
   const mediaUrls = mediaOriginalUrls(item, index);
   const fullUrl = mediaUrls[0] || "";
   const previewUrls = mediaPreviewUrls(item);
   const previewUrl = previewUrls[0] || fullUrl;
   const url = previewUrl || fullUrl;
+  const eagerLimit = options.eager ? 18 : 8;
+  const highPriorityLimit = options.eager ? 6 : 3;
+  const loadingMode = index < eagerLimit ? "eager" : "lazy";
+  const fetchPriority = index < highPriorityLimit ? ' fetchpriority="high"' : (options.feedImage ? ' fetchpriority="low"' : "");
+  const feedImageAttr = options.feedImage ? ' data-feed-image=""' : "";
+  const aspectStyle = mediaAspectStyle(item);
   const viewerUrls = Array.isArray(options.openUrls) && options.openUrls.length ? options.openUrls : mediaUrls;
   const viewerIndexFor = (mediaUrl, fallback = 0) => {
     const safeMediaUrl = safeUrl(mediaUrl);
@@ -977,7 +999,7 @@ function mediaHtml(item, index = 0, options = {}) {
   };
   if (!url) return "";
   if (item.type === "video" || /\.(mp4|mov|webm)(\?|$)/i.test(fullUrl || url)) {
-    return `<video src="${escapeHtml(url)}" controls playsinline preload="metadata"></video>`;
+    return `<video src="${escapeHtml(url)}" controls playsinline preload="metadata"${aspectStyle}></video>`;
   }
   if (item.type === "music" || /\.(mp3|wav|ogg|m4a)(\?|$)/i.test(fullUrl || url)) {
     return `<audio src="${escapeHtml(fullUrl || url)}" controls></audio>`;
@@ -985,16 +1007,40 @@ function mediaHtml(item, index = 0, options = {}) {
   if (mediaUrls.length > 1) {
     const visible = mediaUrls.slice(0, 4);
     return `
-      <figure class="media-mosaic media-mosaic-${visible.length}">
+      <figure class="media-mosaic media-mosaic-${visible.length}"${aspectStyle}>
         ${visible.map((mediaUrl, mediaIndex) => {
           const thumb = previewUrls[mediaIndex] || mediaUrl;
-          return `<img class="zoomable-media" src="${escapeHtml(thumb)}" loading="lazy" decoding="async" alt="" ${mediaOpenAttrs(viewerUrls, viewerIndexFor(mediaUrl, mediaIndex))}>`;
+          return `<img class="zoomable-media" src="${escapeHtml(thumb)}" loading="${loadingMode}" decoding="async"${fetchPriority}${feedImageAttr} alt="" ${mediaOpenAttrs(viewerUrls, viewerIndexFor(mediaUrl, mediaIndex))}>`;
         }).join("")}
         ${mediaUrls.length > visible.length ? `<span>+${mediaUrls.length - visible.length}</span>` : ""}
       </figure>
     `;
   }
-  return `<img class="zoomable-media" src="${escapeHtml(url)}" loading="lazy" decoding="async" alt="" ${mediaOpenAttrs(viewerUrls, viewerIndexFor(fullUrl || url, 0))}>`;
+  return `<img class="zoomable-media" src="${escapeHtml(url)}" loading="${loadingMode}" decoding="async"${fetchPriority}${feedImageAttr} alt=""${aspectStyle} ${mediaOpenAttrs(viewerUrls, viewerIndexFor(fullUrl || url, 0))}>`;
+}
+
+let feedImageObserver = null;
+
+function primeFeedImages() {
+  const images = $$("[data-gallery-grid] img[data-feed-image]");
+  if (!images.length) return;
+  if (feedImageObserver) feedImageObserver.disconnect();
+  const promote = (img, high = false) => {
+    if (!(img instanceof HTMLImageElement)) return;
+    img.loading = "eager";
+    img.fetchPriority = high ? "high" : "auto";
+    if (typeof img.decode === "function" && img.complete) img.decode().catch(() => {});
+  };
+  images.slice(0, 18).forEach((img, index) => promote(img, index < 6));
+  if (!("IntersectionObserver" in window)) return;
+  feedImageObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      promote(entry.target, false);
+      feedImageObserver?.unobserve(entry.target);
+    });
+  }, { rootMargin: "900px 0px" });
+  images.slice(18).forEach((img) => feedImageObserver.observe(img));
 }
 
 function primaryMediaUrl(item = {}) {
@@ -1387,7 +1433,6 @@ function ensureMediaViewer() {
         </div>
         <div class="media-viewer-actions">
           <button class="button ghost" type="button" data-media-prev aria-label="Предыдущий файл">Назад</button>
-          <button class="button ghost" type="button" data-download-media="" data-download-name="apix-result">Скачать</button>
           <button class="button ghost" type="button" data-media-next aria-label="Следующий файл">Дальше</button>
         </div>
       </div>
@@ -1404,7 +1449,6 @@ function renderMediaViewer() {
   const current = items[state.mediaViewerIndex] || "";
   const body = modal.querySelector("[data-media-viewer-body]");
   const counter = modal.querySelector("[data-media-viewer-counter]");
-  const download = modal.querySelector("[data-download-media]");
   const prev = modal.querySelector("[data-media-prev]");
   const next = modal.querySelector("[data-media-next]");
   if (!current || !body) return;
@@ -1414,7 +1458,6 @@ function renderMediaViewer() {
     body.innerHTML = `<img src="${escapeHtml(current)}" alt="Полный размер результата">`;
   }
   if (counter) counter.textContent = `${state.mediaViewerIndex + 1} / ${items.length}`;
-  if (download) download.dataset.downloadMedia = current;
   if (prev) prev.disabled = items.length < 2;
   if (next) next.disabled = items.length < 2;
 }
@@ -2636,6 +2679,7 @@ function renderGallery() {
   if (!grid) return;
   grid.classList.add("feed-grid");
   grid.innerHTML = state.examples.map((item, index) => feedCard(item, index, "gallery")).join("");
+  primeFeedImages();
 }
 
 function renderAuth() {
@@ -3110,7 +3154,7 @@ function renderPrompts() {
       <div>
         <span>Библиотека промптов</span>
         <h3>Готовые идеи с реальными примерами</h3>
-        <p>Как в mini app: выбирайте карточку, запускайте идею, ставьте лайк или открывайте превью.</p>
+        <p>Выбирайте готовую идею, открывайте пример и запускайте свою версию.</p>
       </div>
       <div class="feed-toolbar feed-toolbar-compact">
         <button type="button" data-prompt-source="catalog" aria-pressed="${state.promptSource === "catalog" ? "true" : "false"}">Каталог</button>
@@ -3165,7 +3209,6 @@ function feedCard(item, index = 0, variant = "panel") {
   const promptText = "Промпт скрыт. Повтор использует настройки выбранной работы.";
   const rawAuthor = String(item.author || "anon").replace(/^@+/, "");
   const author = `@${rawAuthor || "anon"}`;
-  const model = cleanModelName(item.model || "model");
   const mediaUrl = primaryMediaUrl(item);
   const mediaUrls = mediaOriginalUrls(item, index);
   const carouselUrls = variant === "gallery" ? feedCarouselUrls() : mediaUrls;
@@ -3175,17 +3218,16 @@ function feedCard(item, index = 0, variant = "panel") {
   if (variant === "gallery") {
     return `
       <article class="gallery-card feed-card feed-card-clean feed-pin-card">
-        ${mediaHtml(item, index, { openUrls, openIndex: carouselIndex })}
+        ${mediaHtml(item, index, { openUrls, openIndex: carouselIndex, eager: true, feedImage: true })}
         <div class="feed-pin-info">
           <div class="feed-tile-head">
             <span class="feed-author">${escapeHtml(author)}</span>
-            <b class="model-badge">${escapeHtml(model)}</b>
           </div>
           <div class="feed-tile-stats">${feedCountsHtml(item)}</div>
           <div class="feed-clean-actions feed-tile-actions">
-            ${mediaUrl ? `<button type="button" class="feed-action-ghost" ${openAttrs}>Открыть</button>` : ""}
-            ${id ? `<button type="button" data-like-feed="${escapeHtml(id)}">♥ Лайк</button>` : ""}
-            ${id ? `<button type="button" class="feed-action-main" data-remix-feed="${escapeHtml(id)}">Повторить</button>` : `<a class="feed-action-main" href="studio.html">Создать</a>`}
+            ${mediaUrl ? `<button type="button" class="feed-action-ghost" aria-label="Открыть" title="Открыть" ${openAttrs}>↗</button>` : ""}
+            ${id ? `<button type="button" aria-label="Лайк" title="Лайк" data-like-feed="${escapeHtml(id)}">♥</button>` : ""}
+            ${id ? `<button type="button" class="feed-action-main" aria-label="Повторить" title="Повторить" data-remix-feed="${escapeHtml(id)}">↻</button>` : `<a class="feed-action-main" aria-label="Создать" title="Создать" href="studio.html">+</a>`}
           </div>
         </div>
       </article>
@@ -3198,7 +3240,6 @@ function feedCard(item, index = 0, variant = "panel") {
       <div class="feed-pin-info">
         <div class="feed-tile-head">
           <span class="feed-author">${escapeHtml(author)}</span>
-          <b class="model-badge">${escapeHtml(model)}</b>
         </div>
         <div class="feed-tile-stats">${feedCountsHtml(item)}</div>
         <h3>${escapeHtml(title)}</h3>
@@ -3218,10 +3259,12 @@ function renderFeedPanel() {
   const board = $("[data-feed-board]");
   if (!board) return;
   const controls = `
-    <div class="feed-panel-intro">
-      <span>Лента</span>
-      <h3>Работы, которые можно повторить или развить</h3>
-      <p>Лайкайте удачные кадры, делитесь ими и запускайте похожий результат в свою очередь.</p>
+    <div class="feed-panel-intro feed-panel-head">
+      <div>
+        <span>Лента</span>
+        <h3>Работы, которые можно повторить или развить</h3>
+        <p>Лайкайте удачные кадры, делитесь ими и запускайте похожий результат в свою очередь.</p>
+      </div>
       <div class="feed-toolbar feed-toolbar-compact">
         <button type="button" data-feed-source="feed" aria-pressed="${state.feedSource === "feed" ? "true" : "false"}">Все</button>
         <button type="button" data-feed-source="top_day" aria-pressed="${state.feedSource === "top_day" ? "true" : "false"}">Топ дня</button>
@@ -4356,8 +4399,30 @@ function applyLandingPayload(payload = {}) {
 
 async function loadPublic() {
   state.authConfig = await optionalRequest("/auth/config", null);
+  if ($("[data-gallery-grid]") && !$("[data-feed-board]")) {
+    try {
+      const [feed, modelPayload] = await Promise.all([
+        request(`/feed?limit=${FULL_FEED_LIMIT}&compact=1`),
+        optionalRequest("/models", null),
+      ]);
+      state.examples = (Array.isArray(feed) ? feed : feed.items || []).map(normalizeExample).filter((item) => item.image);
+      if (modelPayload) applyModelPayload(modelPayload || {});
+    } catch {
+      state.fallbackMode = true;
+      clearPublicData();
+    }
+    await ensureFallbackVisuals();
+    return;
+  }
   try {
     applyLandingPayload(await request("/landing"));
+    if ($("[data-gallery-grid]") || $("[data-feed-board]")) {
+      const feed = await optionalRequest(`/feed?limit=${FULL_FEED_LIMIT}`, null);
+      const feedItems = Array.isArray(feed) ? feed : feed?.items || [];
+      if (feedItems.length) {
+        state.examples = feedItems.map(normalizeExample).filter((item) => item.image);
+      }
+    }
   } catch {
     try {
       const [feed, modelPayload, promptPayload] = await Promise.all([
@@ -4380,7 +4445,8 @@ async function loadPublic() {
 async function loadFeedSource(source = "feed") {
   const normalized = ["feed", "recent", "top", "top_day"].includes(source) ? source : "feed";
   try {
-    const payload = await request(`/feed?source=${encodeURIComponent(normalized)}&limit=${FULL_FEED_LIMIT}`);
+    const compact = $("[data-gallery-grid]") && !$("[data-feed-board]") ? "&compact=1" : "";
+    const payload = await request(`/feed?source=${encodeURIComponent(normalized)}&limit=${FULL_FEED_LIMIT}${compact}`);
     state.feedSource = normalized;
     state.examples = (Array.isArray(payload) ? payload : payload.items || []).map(normalizeExample).filter((item) => item.image);
     renderGallery();
@@ -4871,6 +4937,12 @@ async function boot() {
   applyRouteParams();
   syncActiveNavigation();
   await loadPublic();
+  renderHeroStack();
+  renderModels();
+  applyGenerationPresetToComposer();
+  renderGallery();
+  renderAccount();
+  renderAuth();
   await loadPrivate({ quiet: true });
   renderHeroStack();
   renderModels();

@@ -21,8 +21,6 @@ def enabled_payment_methods() -> list[dict[str, str]]:
         methods.append({"key": "stars", "provider": "telegram_stars", "label": "Telegram", "status": "enabled"})
     if getattr(settings, "CRYPTOBOT_TOKEN", ""):
         methods.append({"key": "crypto", "provider": "cryptobot", "label": "Крипто", "status": "enabled"})
-    if getattr(settings, "LAVA_API_KEY", ""):
-        methods.append({"key": "lava", "provider": "lava", "label": "Lava", "status": "enabled"})
     return methods
 
 

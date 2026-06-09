@@ -12,9 +12,17 @@ def _fmt_amount(value: float) -> str:
 
 
 def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
-    del plans
     builder = InlineKeyboardBuilder()
     back_text = "← " + ("Назад" if lang == "ru" else "Back")
+
+    for plan in plans:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"💳 {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else _fmt_amount(plan.credits)} 💋 · {_fmt_amount(plan.price_rub)}₽",
+                callback_data=f"topup:rub:{plan.key}",
+            )
+        )
+
     currency_texts = {
         "usd": "💵 Доллар" if lang == "ru" else "💵 Dollar",
         "rub": "₽ Рубль" if lang == "ru" else "₽ Ruble",

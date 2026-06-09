@@ -326,15 +326,26 @@ def _landing_models_payload(model_costs: list[Any]) -> dict[str, list[str]]:
 
 
 async def _resolve_active_music_model(session: AsyncSession, requested_model: str | None = None):
+    def is_active_music(model_cost: Any | None) -> bool:
+        if not model_cost or not getattr(model_cost, "is_active", True):
+            return False
+        return getattr(model_cost, "gen_type", GenerationType.music) == GenerationType.music
+
     requested = str(requested_model or "").strip().lower()
     if requested:
         model_cost = await repo.get_model_cost(session, requested)
-        if model_cost and getattr(model_cost, "is_active", True) and getattr(model_cost, "gen_type", None) == GenerationType.music:
+        if is_active_music(model_cost):
             return model_cost
     preferred = [requested] if requested else []
     preferred.extend([key for key in _MUSIC_MODEL_FALLBACK_KEYS if key not in preferred])
+    for key in preferred:
+        if not key:
+            continue
+        model_cost = await repo.get_model_cost(session, key)
+        if is_active_music(model_cost):
+            return model_cost
     model_cost = await repo.get_first_active_model_cost(session, preferred)
-    if model_cost and getattr(model_cost, "gen_type", None) == GenerationType.music:
+    if is_active_music(model_cost):
         return model_cost
     model_costs = await repo.get_all_model_costs(session)
     for item in model_costs:
@@ -1868,6 +1879,7 @@ async def create_video_generation(
         )
     except Exception as exc:
         logger.error("miniapp video gen error user=%s: %s", user.id, exc)
+        await session.rollback()
         if await repo.fail_generation(session, gen.id, str(exc)):
             await repo.add_credits(session, user.id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
@@ -2286,6 +2298,7 @@ async def remix_feed_post(
             )
     except Exception as exc:
         logger.error("feed remix error user=%s gen=%s: %s", user.id, gen_id, exc)
+        await session.rollback()
         if await repo.fail_generation(session, gen.id, str(exc)):
             await repo.add_credits(session, user.id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")

@@ -257,6 +257,71 @@ async def cb_topup_usd(call: CallbackQuery, session: AsyncSession, db_user: User
     await call.answer()
 
 
+@router.callback_query(F.data == "topup:crypto")
+async def cb_topup_crypto_menu(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    plans = await repo.get_active_price_plans(session)
+    text = (
+        "🪙 <b>Оплата криптовалютой</b>\n\nВыбери пакет. Сумму покажем в USDT."
+        if lang == "ru"
+        else "🪙 <b>Pay with crypto</b>\n\nChoose a plan. The amount is shown in USDT."
+    )
+    await call.message.edit_text(  # type: ignore[union-attr]
+        text,
+        reply_markup=crypto_plans_kb(plans, lang=lang),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("topup:crypto_plan:"))
+async def cb_topup_crypto_plan(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    plan_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
+    plan = await repo.get_price_plan_by_key(session, plan_key)
+    if not plan:
+        await call.answer(t("error_not_found", lang), show_alert=True)
+        return
+    if not settings.CRYPTOBOT_TOKEN:
+        await call.answer(t("error_generic", lang), show_alert=True)
+        return
+
+    pay_amount, discount_text, discount_redemption = await _active_discount_text(session, db_user.id, plan.price_rub)
+    amount_usdt = pay_amount / RUB_TO_USDT
+
+    try:
+        invoice = await cryptobot.create_invoice(
+            int(plan.credits),
+            amount_usdt,
+            plan.key,
+            db_user.id,
+        )
+    except Exception as exc:
+        logger.error("CryptoBot invoice error: %s", exc)
+        await call.answer(t("error_generic", lang), show_alert=True)
+        return
+
+    tx = await repo.create_transaction(
+        session,
+        user_id=db_user.id,
+        amount_rub=pay_amount,
+        credits=plan.credits,
+        provider=PaymentProvider.cryptobot,
+        external_id=str(invoice.invoice_id),
+    )
+    if discount_redemption:
+        await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
+
+    await call.message.edit_text(  # type: ignore[union-attr]
+        (
+            f"🪙 <b>CryptoBot</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(amount_usdt)} USDT</b>"
+            if lang == "ru"
+            else f"🪙 <b>CryptoBot</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(amount_usdt)} USDT</b>"
+        ) + discount_text,
+        reply_markup=crypto_pay_kb(invoice.pay_url, str(invoice.invoice_id), lang=lang),
+    )
+    await call.answer()
+
+
 @router.callback_query(F.data == "promo:enter")
 async def cb_enter_promo(call: CallbackQuery, state: FSMContext, db_user: User) -> None:
     await state.set_state(PromoFSM.waiting_code)
