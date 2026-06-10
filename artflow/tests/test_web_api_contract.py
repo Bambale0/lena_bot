@@ -5,8 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import Response
 
-from api.web import assistant, billing, generations, health, landing, referrals, router as web_router
+from api.web import assistant, auth, billing, generations, health, landing, referrals, router as web_router
 from api.miniapp_routes import (
     AssistantChatRequest,
     FeedRemixRequest,
@@ -108,6 +109,77 @@ def test_user_me_includes_sync_fields() -> None:
     assert card.language == "ru"
     assert card.is_admin is True
     assert card.connected_surfaces == ["web", "telegram"]
+
+
+@pytest.mark.asyncio
+async def test_web_referrals_return_site_link(monkeypatch) -> None:
+    monkeypatch.setattr(referrals.settings, "WEB_PUBLIC_URL", "https://site.example", raising=False)
+    monkeypatch.setattr(referrals.repo, "count_user_referrals", AsyncMock(return_value=(1, 0, 0)))
+    monkeypatch.setattr(referrals.repo, "get_user_referral_balance_snapshot", AsyncMock(return_value=None))
+    monkeypatch.setattr(referrals.repo, "get_user_feed_remix_reward_rub", AsyncMock(return_value=0))
+    monkeypatch.setattr(referrals.repo, "get_user_withdrawal_requests", AsyncMock(return_value=[]))
+    monkeypatch.setattr(referrals.repo, "get_referral_children", AsyncMock(return_value=[]))
+
+    response = await referrals.referrals(
+        session=object(),
+        user=SimpleNamespace(id=1, referral_code="REF_123", referral_balance=0),
+    )
+
+    assert response["ok"] is True
+    assert response["data"]["referral_link"] == "https://site.example/account.html?ref=REF_123"
+    assert "t.me" not in response["data"]["referral_link"]
+
+
+@pytest.mark.asyncio
+async def test_password_register_binds_site_referral(monkeypatch) -> None:
+    referrer = SimpleNamespace(id=10, tg_id=1000, referrer_id=None)
+    created = SimpleNamespace(
+        id=2,
+        tg_id=-20,
+        username=None,
+        full_name="New User",
+        email="new@example.test",
+        phone=None,
+        photo_url=None,
+        credits=15,
+        referral_code="NEW_REF",
+        language="ru",
+        created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        password_hash="hash",
+        password_set_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        referrer_id=10,
+        referrer_l2_id=None,
+        referrer_l3_id=None,
+    )
+    create_contact_user = AsyncMock(return_value=created)
+    add_credits = AsyncMock(return_value=20)
+
+    monkeypatch.setattr(auth.settings, "WEB_PUBLIC_URL", "https://site.example", raising=False)
+    monkeypatch.setattr(auth.repo, "get_user_by_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth.repo, "get_user_by_referral_code", AsyncMock(return_value=referrer))
+    monkeypatch.setattr(auth.repo, "create_contact_user", create_contact_user)
+    monkeypatch.setattr(auth.repo, "add_credits", add_credits)
+    monkeypatch.setattr(auth.repo, "set_user_password_hash", AsyncMock(return_value=created))
+    monkeypatch.setattr(auth, "hash_password", lambda password: "hash")
+
+    session = object()
+    response = await auth.password_register(
+        auth.PasswordRegisterRequest(
+            email="new@example.test",
+            password="supersecret",
+            full_name="New User",
+            referral_code="REF_123",
+        ),
+        response=Response(),
+        session=session,
+    )
+
+    assert response["ok"] is True
+    assert response["data"]["user"]["referral_link"] == "https://site.example/account.html?ref=NEW_REF"
+    create_contact_user.assert_awaited_once()
+    assert create_contact_user.await_args.kwargs["referrer"] is referrer
+    add_credits.assert_awaited_once()
+    assert add_credits.await_args.args[:3] == (session, 10, auth.settings.REFERRAL_L1_CREDITS)
 
 
 @pytest.mark.asyncio

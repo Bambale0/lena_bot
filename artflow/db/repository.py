@@ -36,6 +36,7 @@ from db.models import (
     WebAuthCode,
     WithdrawalStatus,
     CreditLedgerEntry,
+    FeedRemixPayout,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,41 @@ def feed_remix_royalty_credits(credits_spent: float | int) -> float:
         return 0.0
     royalty = (value * Decimal("0.05")).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
     return float(royalty)
+
+
+async def credit_feed_remix_payout(
+    session: AsyncSession,
+    *,
+    generation: Generation,
+    source_generation: Generation,
+) -> float:
+    existing = await session.execute(
+        select(FeedRemixPayout.id).where(FeedRemixPayout.generation_id == generation.id)
+    )
+    if existing.scalar_one_or_none() is not None:
+        return 0.0
+
+    rub_per_credit = await _active_price_plan_rub_per_credit(session)
+    amount_rub = feed_remix_royalty_rub(generation.credits_spent, rub_per_credit)
+    if amount_rub <= 0:
+        return 0.0
+
+    payout = FeedRemixPayout(
+        generation_id=generation.id,
+        source_generation_id=source_generation.id,
+        source_user_id=source_generation.user_id,
+        remixer_user_id=generation.user_id,
+        credits_spent=float(generation.credits_spent or 0.0),
+        amount_rub=amount_rub,
+    )
+    session.add(payout)
+    await session.execute(
+        update(User)
+        .where(User.id == source_generation.user_id)
+        .values(referral_balance=User.referral_balance + amount_rub)
+    )
+    await session.commit()
+    return amount_rub
 
 
 @dataclass(frozen=True)
@@ -242,6 +278,9 @@ async def create_contact_user(
     phone: str | None = None,
     full_name: str | None = None,
     welcome_credits: float = 0,
+    referrer: User | None = None,
+    referrer_l2: User | None = None,
+    referrer_l3: User | None = None,
     language: str = "ru",
 ) -> User:
     for _ in range(8):
@@ -258,6 +297,9 @@ async def create_contact_user(
         full_name=full_name,
         credits=welcome_credits,
         referral_code=secrets.token_urlsafe(8),
+        referrer_id=referrer.id if referrer else None,
+        referrer_l2_id=referrer_l2.id if referrer_l2 else None,
+        referrer_l3_id=referrer_l3.id if referrer_l3 else None,
         language=language,
     )
     session.add(user)
@@ -1092,14 +1134,28 @@ async def finish_generation(
         )
         return gen
 
-    royalty = feed_remix_royalty_credits(gen.credits_spent)
-    await add_credits(session, source.user_id, royalty, entry_type="feed_remix_royalty", source_type="generation", source_id=str(gen.id), note=f"Royalty from remix of feed post {source.id}")
+    amount_rub = await credit_feed_remix_payout(
+        session,
+        generation=gen,
+        source_generation=source,
+    )
+    if amount_rub <= 0:
+        logger.info(
+            "Feed remix royalty skipped: reason=zero_or_duplicate_rub_payout source_user=%s remixer=%s source_generation=%s generation=%s credits_spent=%s",
+            source.user_id,
+            gen.user_id,
+            source.id,
+            gen.id,
+            gen.credits_spent,
+        )
+        return gen
+
     logger.info(
-        "Feed remix royalty credited: source_user=%s remixer=%s credits_spent=%s royalty=%s source_generation=%s generation=%s",
+        "Feed remix royalty credited: source_user=%s remixer=%s credits_spent=%s amount_rub=%s source_generation=%s generation=%s",
         source.user_id,
         gen.user_id,
         gen.credits_spent,
-        royalty,
+        amount_rub,
         source.id,
         gen.id,
     )
@@ -2003,21 +2059,12 @@ def feed_remix_royalty_rub(credits_spent: float | int, rub_per_credit: float | i
 
 
 async def get_user_feed_remix_reward_rub(session: AsyncSession, user_id: int) -> float:
-    source_gen = aliased(Generation)
     result = await session.execute(
-        select(Generation.credits_spent)
-        .select_from(Generation)
-        .join(source_gen, Generation.source_feed_gen_id == source_gen.id)
-        .where(
-            source_gen.user_id == user_id,
-            Generation.status == GenerationStatus.done,
-            Generation.source_feed_gen_id.is_not(None),
-            Generation.user_id != user_id,
-            Generation.credits_spent > 0,
+        select(func.coalesce(func.sum(FeedRemixPayout.amount_rub), 0.0)).where(
+            FeedRemixPayout.source_user_id == user_id,
         )
     )
-    rub_per_credit = await _active_price_plan_rub_per_credit(session)
-    return float(sum(feed_remix_royalty_rub(value, rub_per_credit) for value in result.scalars().all()))
+    return float(result.scalar_one() or 0.0)
 
 
 async def get_user_referral_balance_snapshot(

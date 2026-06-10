@@ -1,6 +1,7 @@
 const API_BASE = "/api/web";
 const TOKEN_KEY = "apix-premium-web-token";
 const LANG_KEY = "apix-premium-language";
+const REFERRAL_KEY = "apix-premium-referral-code";
 const FULL_FEED_LIMIT = 240;
 const PROMPT_LIBRARY_LIMIT = 60;
 
@@ -149,6 +150,31 @@ function escapeHtml(value) {
 
 function unwrap(json) {
   return Object.prototype.hasOwnProperty.call(json || {}, "data") ? json.data : json;
+}
+
+function cleanReferralCode(value) {
+  const code = String(value || "").trim();
+  return /^[A-Za-z0-9_-]{3,128}$/.test(code) ? code : "";
+}
+
+function captureReferralCode() {
+  const params = new URLSearchParams(window.location.search);
+  const code = cleanReferralCode(params.get("ref") || params.get("referral") || params.get("referral_code"));
+  if (code) localStorage.setItem(REFERRAL_KEY, code);
+  return code;
+}
+
+function pendingReferralCode() {
+  return cleanReferralCode(localStorage.getItem(REFERRAL_KEY) || "");
+}
+
+function referralRequestFields() {
+  const referralCode = pendingReferralCode();
+  return referralCode ? { referral_code: referralCode } : {};
+}
+
+function clearPendingReferralCode() {
+  localStorage.removeItem(REFERRAL_KEY);
 }
 
 async function request(path, options = {}) {
@@ -3437,6 +3463,7 @@ async function passwordLogin(form) {
     state.token = "";
     state.user = result.user;
     localStorage.removeItem(TOKEN_KEY);
+    clearPendingReferralCode();
     toast("Вход выполнен.", "success");
     await loadPrivate();
     finalizeAuth("queue");
@@ -3455,11 +3482,13 @@ async function passwordRegister(form) {
         full_name: String(data.get("full_name") || "").trim() || null,
         email: String(data.get("email") || "").trim(),
         password: String(data.get("password") || ""),
+        ...referralRequestFields(),
       }),
     });
     state.token = "";
     state.user = result.user;
     localStorage.removeItem(TOKEN_KEY);
+    clearPendingReferralCode();
     toast("Аккаунт создан.", "success");
     await loadPrivate();
     finalizeAuth("profile");
@@ -3612,10 +3641,14 @@ async function injectTelegramWidget() {
 
 window.onTelegramAuth = async (user) => {
   try {
-    const result = await request("/auth/telegram-login", { method: "POST", body: JSON.stringify(user) });
+    const result = await request("/auth/telegram-login", {
+      method: "POST",
+      body: JSON.stringify({ ...user, ...referralRequestFields() }),
+    });
     state.token = "";
     state.user = result.user;
     localStorage.removeItem(TOKEN_KEY);
+    clearPendingReferralCode();
     toast("Вход выполнен. Ваш кабинет открыт.", "success");
     await loadPrivate();
     finalizeAuth("queue");
@@ -3712,11 +3745,12 @@ async function verifyContactCode(form) {
   try {
     const result = await request("/auth/contact/verify", {
       method: "POST",
-      body: JSON.stringify({ contact, code, full_name: fullName || null }),
+      body: JSON.stringify({ contact, code, full_name: fullName || null, ...referralRequestFields() }),
     });
     state.token = "";
     state.user = result.user;
     localStorage.removeItem(TOKEN_KEY);
+    clearPendingReferralCode();
     toast("Вход выполнен. Кабинет открыт.", "success");
     await loadPrivate();
     finalizeAuth("queue");
@@ -4933,6 +4967,7 @@ function bindUi() {
 
 async function boot() {
   localStorage.removeItem(TOKEN_KEY);
+  const routeReferralCode = captureReferralCode();
   bindUi();
   applyRouteParams();
   syncActiveNavigation();
@@ -4944,13 +4979,14 @@ async function boot() {
   renderAccount();
   renderAuth();
   await loadPrivate({ quiet: true });
+  if (state.user) clearPendingReferralCode();
   renderHeroStack();
   renderModels();
   applyGenerationPresetToComposer();
   renderGallery();
   renderAccount();
   renderAuth();
-  if (location.pathname === '/login') openLogin();
+  if (location.pathname === '/login' || (routeReferralCode && !state.user)) openLogin();
   syncAccountTabFromHash();
   syncActiveNavigation();
   refreshCustomSelects();

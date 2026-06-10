@@ -7,11 +7,11 @@ import re
 import secrets
 import smtplib
 import time
-
-import httpx
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from urllib.parse import urlencode
 
+import httpx
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
 from fastapi import APIRouter, Depends, Header, Request, Response
@@ -36,6 +36,7 @@ class TelegramLoginRequest(BaseModel):
     photo_url: str | None = None
     auth_date: int
     hash: str
+    referral_code: str | None = Field(default=None, max_length=128)
 
 
 class ContactAuthRequest(BaseModel):
@@ -46,6 +47,7 @@ class ContactAuthVerifyRequest(BaseModel):
     contact: str = Field(..., min_length=5, max_length=256)
     code: str = Field(..., min_length=4, max_length=12)
     full_name: str | None = Field(default=None, max_length=256)
+    referral_code: str | None = Field(default=None, max_length=128)
 
 
 class PasswordLoginRequest(BaseModel):
@@ -57,10 +59,12 @@ class PasswordRegisterRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=256)
     password: str = Field(..., min_length=8, max_length=128)
     full_name: str | None = Field(default=None, max_length=256)
+    referral_code: str | None = Field(default=None, max_length=128)
 
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TG_USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
+REFERRAL_CODE_RE = re.compile(r"^[A-Za-z0-9_-]{3,128}$")
 PASSWORD_HASH_ITERATIONS = 390_000
 PASSWORD_LOGIN_WINDOW_SECONDS = 15 * 60
 PASSWORD_LOGIN_MAX_FAILURES = 8
@@ -168,6 +172,25 @@ def telegram_bot_link() -> str:
     return f"https://t.me/{username}" if username else ""
 
 
+def web_referral_link(referral_code: str) -> str:
+    code = _normalize_referral_code(referral_code)
+    if not code:
+        return ""
+    base = str(getattr(settings, "WEB_PUBLIC_URL", "") or "").strip().rstrip("/")
+    if not base:
+        base = str(getattr(settings, "WEBHOOK_URL", "") or "").strip().rstrip("/")
+    if not base:
+        return ""
+    return f"{base}/account.html?{urlencode({'ref': code})}"
+
+
+def _normalize_referral_code(referral_code: str | None) -> str | None:
+    code = str(referral_code or "").strip()
+    if not code or not REFERRAL_CODE_RE.match(code):
+        return None
+    return code
+
+
 def _normalize_contact(contact: str) -> tuple[str, str]:
     raw = contact.strip()
     if EMAIL_RE.match(raw):
@@ -201,6 +224,123 @@ def _contact_user_label(contact_type: str, contact: str, full_name: str | None) 
     return f"Пользователь {contact[-4:]}"
 
 
+async def _resolve_referral_chain(
+    session: AsyncSession,
+    referral_code: str | None,
+    *,
+    current_user=None,
+    current_tg_id: int | None = None,
+):
+    code = _normalize_referral_code(referral_code)
+    if not code or settings.REFERRAL_FREEZE:
+        return None, None, None
+
+    referrer = await repo.get_user_by_referral_code(session, code)
+    if not referrer:
+        return None, None, None
+
+    current_user_id = int(getattr(current_user, "id", 0) or 0) or None
+    tg_id = current_tg_id
+    if tg_id is None:
+        try:
+            tg_id = int(getattr(current_user, "tg_id", 0) or 0)
+        except (TypeError, ValueError):
+            tg_id = None
+    if referrer.id == current_user_id or (tg_id and int(getattr(referrer, "tg_id", 0) or 0) == tg_id):
+        return None, None, None
+
+    chain_user = referrer
+    seen_chain_ids: set[int] = set()
+    for _ in range(50):
+        chain_user_id = getattr(chain_user, "id", None)
+        if chain_user_id is None:
+            break
+        if chain_user_id in seen_chain_ids:
+            return None, None, None
+        if chain_user_id == current_user_id or (tg_id and int(getattr(chain_user, "tg_id", 0) or 0) == tg_id):
+            return None, None, None
+        seen_chain_ids.add(chain_user_id)
+        parent_id = getattr(chain_user, "referrer_id", None)
+        if not parent_id:
+            break
+        parent = await repo.get_user_by_id(session, parent_id)
+        if not parent:
+            break
+        chain_user = parent
+    else:
+        return None, None, None
+
+    seen_ids: set[int] = {referrer.id}
+    referrer_l2 = None
+    referrer_l3 = None
+    if getattr(referrer, "referrer_id", None) and referrer.referrer_id not in seen_ids:
+        referrer_l2 = await repo.get_user_by_id(session, referrer.referrer_id)
+        if referrer_l2 and (referrer_l2.id in seen_ids or (tg_id and int(getattr(referrer_l2, "tg_id", 0) or 0) == tg_id)):
+            referrer_l2 = None
+        elif referrer_l2:
+            seen_ids.add(referrer_l2.id)
+    if referrer_l2 and getattr(referrer_l2, "referrer_id", None) and referrer_l2.referrer_id not in seen_ids:
+        referrer_l3 = await repo.get_user_by_id(session, referrer_l2.referrer_id)
+        if referrer_l3 and (referrer_l3.id in seen_ids or (tg_id and int(getattr(referrer_l3, "tg_id", 0) or 0) == tg_id)):
+            referrer_l3 = None
+    return referrer, referrer_l2, referrer_l3
+
+
+def _has_referrer(user) -> bool:
+    return bool(
+        getattr(user, "referrer_id", None)
+        or getattr(user, "referrer_l2_id", None)
+        or getattr(user, "referrer_l3_id", None)
+    )
+
+
+def _referral_bonus_source_id(user) -> str:
+    try:
+        tg_id = int(getattr(user, "tg_id", 0) or 0)
+    except (TypeError, ValueError):
+        tg_id = 0
+    return str(tg_id if tg_id > 0 else getattr(user, "id", ""))
+
+
+async def _award_referral_signup_bonus(session: AsyncSession, referrer, user) -> None:
+    await repo.add_credits(
+        session,
+        referrer.id,
+        settings.REFERRAL_L1_CREDITS,
+        entry_type="referral_signup_bonus",
+        source_type="user",
+        source_id=_referral_bonus_source_id(user),
+        note="L1 referral signup bonus",
+    )
+
+
+async def _bind_existing_user_referral(
+    session: AsyncSession,
+    user,
+    referral_code: str | None,
+):
+    if not user or _has_referrer(user):
+        return user
+    referrer, referrer_l2, referrer_l3 = await _resolve_referral_chain(
+        session,
+        referral_code,
+        current_user=user,
+    )
+    if not referrer:
+        return user
+    bound = await repo.bind_user_referrer_once(
+        session,
+        user.id,
+        referrer=referrer,
+        referrer_l2=referrer_l2,
+        referrer_l3=referrer_l3,
+    )
+    if not bound:
+        return user
+    await _award_referral_signup_bonus(session, referrer, user)
+    return await repo.get_user_by_id(session, user.id) or user
+
+
 def _auth_payload(user, response: Response | None = None) -> dict:
     token = create_web_auth_token(user.tg_id)
     if response is not None:
@@ -212,7 +352,7 @@ def _auth_payload(user, response: Response | None = None) -> dict:
         "user": UserMe.from_user(
             user,
             admin_ids=settings.ADMIN_IDS,
-            referral_link=telegram_start_link(getattr(user, "referral_code", "") or ""),
+            referral_link=web_referral_link(getattr(user, "referral_code", "") or ""),
         ).model_dump(),
     }
 
@@ -436,11 +576,12 @@ async def telegram_login(
     session: AsyncSession = Depends(get_session),
     x_web_auth_token: str | None = Header(default=None, alias="X-Web-Auth-Token"),
 ) -> dict:
-    tg_user = verify_telegram_login_data(body.model_dump())
+    tg_user = verify_telegram_login_data(body.model_dump(exclude={"referral_code"}))
     first_name = str(tg_user.get("first_name") or "").strip()
     last_name = str(tg_user.get("last_name") or "").strip()
     full_name = " ".join(part for part in (first_name, last_name) if part).strip() or None
     username = str(tg_user.get("username") or "").strip() or None
+    referral_code = _normalize_referral_code(body.referral_code)
 
     tg_id = int(tg_user["id"])
     current_user = None
@@ -467,13 +608,25 @@ async def telegram_login(
             photo_url=tg_user.get("photo_url"),
         )
     if not user:
+        referrer, referrer_l2, referrer_l3 = await _resolve_referral_chain(
+            session,
+            referral_code,
+            current_tg_id=tg_id,
+        )
         user = await repo.create_user(
             session,
             tg_id=tg_id,
             username=username,
             full_name=full_name,
             welcome_credits=settings.WELCOME_BONUS_CREDITS,
+            referrer=referrer,
+            referrer_l2=referrer_l2,
+            referrer_l3=referrer_l3,
         )
+        if referrer:
+            await _award_referral_signup_bonus(session, referrer, user)
+    else:
+        user = await _bind_existing_user_referral(session, user, referral_code)
 
     return ok(_auth_payload(user, response=response))
 
@@ -513,12 +666,18 @@ async def password_register(
     existing = await repo.get_user_by_email(session, email)
     if existing:
         return error_response(409, "Аккаунт с таким email уже существует")
+    referrer, referrer_l2, referrer_l3 = await _resolve_referral_chain(session, body.referral_code)
     user = await repo.create_contact_user(
         session,
         email=email,
         full_name=_contact_user_label("email", email, body.full_name),
         welcome_credits=settings.WELCOME_BONUS_CREDITS,
+        referrer=referrer,
+        referrer_l2=referrer_l2,
+        referrer_l3=referrer_l3,
     )
+    if referrer:
+        await _award_referral_signup_bonus(session, referrer, user)
     user = await repo.set_user_password_hash(session, user.id, hash_password(body.password)) or user
     return ok(_auth_payload(user, response=response))
 
@@ -640,12 +799,18 @@ async def contact_auth_verify(
     if contact_type == "email":
         user = await repo.get_user_by_email(session, contact)
         if not user:
+            referrer, referrer_l2, referrer_l3 = await _resolve_referral_chain(session, body.referral_code)
             user = await repo.create_contact_user(
                 session,
                 email=contact,
                 full_name=_contact_user_label(contact_type, contact, body.full_name),
                 welcome_credits=settings.WELCOME_BONUS_CREDITS,
+                referrer=referrer,
+                referrer_l2=referrer_l2,
+                referrer_l3=referrer_l3,
             )
+            if referrer:
+                await _award_referral_signup_bonus(session, referrer, user)
     elif contact_type == "telegram":
         user = await repo.get_user_by_username(session, contact)
         if not user:
@@ -653,10 +818,17 @@ async def contact_auth_verify(
     else:
         user = await repo.get_user_by_phone(session, contact)
         if not user:
+            referrer, referrer_l2, referrer_l3 = await _resolve_referral_chain(session, body.referral_code)
             user = await repo.create_contact_user(
                 session,
                 phone=contact,
                 full_name=_contact_user_label(contact_type, contact, body.full_name),
                 welcome_credits=settings.WELCOME_BONUS_CREDITS,
+                referrer=referrer,
+                referrer_l2=referrer_l2,
+                referrer_l3=referrer_l3,
             )
+            if referrer:
+                await _award_referral_signup_bonus(session, referrer, user)
+    user = await _bind_existing_user_referral(session, user, body.referral_code)
     return ok(_auth_payload(user, response=response))

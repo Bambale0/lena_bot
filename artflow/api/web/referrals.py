@@ -4,7 +4,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.web.auth import telegram_start_link
+from api.web.auth import web_referral_link
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import (
     ReferralChildCard,
@@ -81,7 +81,7 @@ async def referrals(
     available = float(snapshot.available_to_withdraw if snapshot else total)
     payload = ReferralStatsCard(
         referral_code=user.referral_code,
-        referral_link=telegram_start_link(user.referral_code),
+        referral_link=web_referral_link(user.referral_code),
         bonus_l1_credits=float(settings.REFERRAL_L1_CREDITS),
         commission_l1=float(settings.REFERRAL_COMMISSION_L1),
         commission_l2=float(settings.REFERRAL_COMMISSION_L2),

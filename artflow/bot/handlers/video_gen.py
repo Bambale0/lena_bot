@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import tempfile
 from html import escape
 import logging
 from urllib.parse import urlencode
 
+import aiohttp
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, FSInputFile, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import polling, video_service
@@ -53,6 +56,81 @@ def _kie_callback_url() -> str:
         params["secret"] = settings.KIE_WEBHOOK_SECRET
     query = f"?{urlencode(params)}" if params else ""
     return f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}{query}"
+
+
+async def _send_video_with_fallback(
+    bot: Bot,
+    *,
+    chat_id: int,
+    video_url: str,
+    caption: str,
+    reply_markup,
+) -> None:
+    try:
+        await bot.send_video(
+            chat_id=chat_id,
+            video=video_url,
+            caption=caption,
+            reply_markup=reply_markup,
+            supports_streaming=True,
+        )
+        return
+    except TelegramBadRequest as exc:
+        if "failed to get HTTP URL content" not in str(exc):
+            raise
+        logger.warning(
+            "Telegram failed to fetch video URL directly, falling back to local upload url=%s error=%s",
+            video_url,
+            exc,
+        )
+
+    tmp_file = None
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; Telegram Bot SDK/1.0)",
+            "Accept": "*/*",
+        }
+        async with aiohttp.ClientSession() as http:
+            async with http.get(
+                video_url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=180),
+            ) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"Video download failed: status={resp.status}")
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+                tmp_file = tmp.name
+                tmp.close()
+                with open(tmp_file, "wb") as fh:
+                    async for chunk in resp.content.iter_chunked(1024 * 64):
+                        if chunk:
+                            fh.write(chunk)
+
+        await bot.send_video(
+            chat_id=chat_id,
+            video=FSInputFile(tmp_file),
+            caption=caption,
+            reply_markup=reply_markup,
+            supports_streaming=True,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Video fallback upload failed url=%s error=%s",
+            video_url,
+            exc,
+        )
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"{caption}\n\nСкачать видео: {video_url}",
+            reply_markup=reply_markup,
+            disable_web_page_preview=True,
+        )
+    finally:
+        if tmp_file and os.path.exists(tmp_file):
+            try:
+                os.remove(tmp_file)
+            except OSError:
+                logger.warning("Failed to remove temporary video file: %s", tmp_file)
 
 _DEFAULT_DURATION: dict[str, int] = {
     VideoModel.KLING_26_T2V: 5,
@@ -1106,9 +1184,12 @@ async def handle_video_prompt(
         caption = f"✅ <b>Видео готово!</b>\n\n<i>{prompt[:200]}</i>"
         if summary != "по умолчанию":
             caption += f"\n<code>{summary}</code>"
-        await bot.send_video(
-            chat_id=message.chat.id, video=url,
-            caption=caption, reply_markup=after_generation_kb(gen.id, "video"),
+        await _send_video_with_fallback(
+            bot,
+            chat_id=message.chat.id,
+            video_url=url,
+            caption=caption,
+            reply_markup=after_generation_kb(gen.id, "video"),
         )
 
     async def on_failure(err: str) -> None:
@@ -1297,9 +1378,10 @@ async def cb_regen_video(
         caption = f"✅ <b>Видео готово!</b>\n\n<i>{prev.prompt[:200]}</i>"
         if summary != "по умолчанию":
             caption += f"\n<code>{summary}</code>"
-        await bot.send_video(
+        await _send_video_with_fallback(
+            bot,
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
-            video=url,
+            video_url=url,
             caption=caption,
             reply_markup=after_generation_kb(gen.id, "video"),
         )

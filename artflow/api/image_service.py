@@ -368,41 +368,12 @@ async def generate_image(
         comet_count = 1
 
     openrouter_model = openrouter_client.image_model_for_source(resolved_model)
-    if openrouter_model:
-        if not openrouter_client.configured():
-            if openrouter_client.force_migrated_models():
-                raise RuntimeError(
-                    f"OpenRouter is forced for {resolved_model}, but OPENROUTER_API_KEY is not configured"
-                )
-        else:
-            try:
-                result = await openrouter_client.generate_image(
-                    source_model=resolved_model,
-                    prompt=str(inp.get("prompt") or prompt),
-                    reference_urls=prepared_image_url,
-                    aspect_ratio=comet_aspect_ratio,
-                    count=comet_count,
-                    resolution=comet_resolution,
-                    quality=str(inp.get("quality") or quality or "") or None,
-                )
-                return ImageResult(
-                    is_async=False,
-                    task_id=result.task_id,
-                    url=result.urls[0],
-                    result_urls=result.urls,
-                )
-            except Exception as openrouter_exc:
-                if openrouter_client.force_migrated_models():
-                    raise RuntimeError(
-                        f"OpenRouter image generation failed for {resolved_model} -> {openrouter_model}: "
-                        f"{openrouter_exc}"
-                    ) from openrouter_exc
-                logger.warning(
-                    "OpenRouter image create failed for %s -> %s; trying KIE.AI: %s",
-                    resolved_model,
-                    openrouter_model,
-                    openrouter_exc,
-                )
+    if openrouter_model and openrouter_client.configured():
+        logger.info(
+            "OpenRouter image route disabled for %s -> %s; using KIE.AI primary with CometAPI fallback",
+            resolved_model,
+            openrouter_model,
+        )
 
     try:
         resp = await kieai_client.create_task({"model": resolved_model, "input": inp}, callback_url=callback_url)

@@ -112,6 +112,7 @@ class User(Base):
     generations: Mapped[list[Generation]] = relationship(back_populates="user", lazy="noload")
     transactions: Mapped[list[Transaction]] = relationship(back_populates="user", lazy="noload")
     withdrawal_requests: Mapped[list[ReferralWithdrawalRequest]] = relationship(back_populates="user", lazy="noload")
+    feed_remix_payouts: Mapped[list["FeedRemixPayout"]] = relationship(foreign_keys="FeedRemixPayout.source_user_id", back_populates="source_user", lazy="noload")
 
 
 class WebAuthCode(Base):
@@ -304,6 +305,24 @@ class ReferralWithdrawalRequest(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship(back_populates="withdrawal_requests", lazy="noload")
+
+
+class FeedRemixPayout(Base):
+    __tablename__ = "feed_remix_payouts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    generation_id: Mapped[int] = mapped_column(Integer, ForeignKey("generations.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    source_generation_id: Mapped[int] = mapped_column(Integer, ForeignKey("generations.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    remixer_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    credits_spent: Mapped[float] = mapped_column(Float, nullable=False)
+    amount_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    generation: Mapped[Generation] = relationship(foreign_keys=[generation_id], lazy="noload")
+    source_generation: Mapped[Generation] = relationship(foreign_keys=[source_generation_id], lazy="noload")
+    source_user: Mapped[User] = relationship(foreign_keys=[source_user_id], back_populates="feed_remix_payouts", lazy="noload")
+    remixer_user: Mapped[User] = relationship(foreign_keys=[remixer_user_id], lazy="noload")
 
 
 class PricePlan(Base):
