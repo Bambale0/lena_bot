@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import tempfile
 from html import escape
-import logging
 from urllib.parse import urlencode
 
 import aiohttp
@@ -19,15 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import polling, video_service
 from api.public_files import mirror_telegram_file
 from api.video_service import VideoModel
-from core.gemini_omni import (
-    GEMINI_OMNI_AUDIO_VOICES,
-    GEMINI_OMNI_MAX_AUDIO_IDS,
-    GEMINI_OMNI_MAX_CHARACTER_IDS,
-    GEMINI_OMNI_VIDEO_MODEL,
-    normalize_gemini_omni_ids,
-    normalize_gemini_omni_resolution,
-    normalize_gemini_omni_seed,
-)
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     VIDEO_CAPS,
@@ -42,6 +33,15 @@ from bot.keyboards.models import (
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.gemini_omni import (
+    GEMINI_OMNI_AUDIO_VOICES,
+    GEMINI_OMNI_MAX_AUDIO_IDS,
+    GEMINI_OMNI_MAX_CHARACTER_IDS,
+    GEMINI_OMNI_VIDEO_MODEL,
+    normalize_gemini_omni_ids,
+    normalize_gemini_omni_resolution,
+    normalize_gemini_omni_seed,
+)
 from db import repository as repo
 from db.models import GenerationType, User
 from db.session import AsyncSessionLocal

@@ -35,11 +35,6 @@ class Settings(BaseSettings):
     MIDJOURNEY_WEBHOOK_PATH: str = "/webhook/comet/midjourney"
     MIDJOURNEY_WEBHOOK_SECRET: str = ""
 
-    # OpenRouter (primary for migrated image/video/chat models)
-    OPENROUTER_API_KEY: str = ""
-    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-    OPENROUTER_FORCE_MIGRATED_MODELS: bool = False
-
     # aivideoapi.ai (HappyHorse)
     AIVIDEOAPI_KEY: str = ""
 

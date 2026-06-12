@@ -1,7 +1,5 @@
 # api/video_service.py
-"""
-Video generation service — OpenRouter primary for migrated models, KIE.AI/Veo/Comet for the rest.
-"""
+"""Video generation service — KIE.AI/Veo primary with CometAPI fallback."""
 from __future__ import annotations
 
 import json
@@ -17,7 +15,7 @@ except ImportError:
 
 from typing import Any
 
-from api import comet_fallback, kieai_client, openrouter_client
+from api import comet_fallback, kieai_client
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
 from api.public_files import ensure_video_reference_aspect_url
 from core.gemini_omni import (
@@ -81,7 +79,7 @@ class MotionDirection(StrEnum):
 @dataclass
 class VideoResult:
     task_id: str
-    provider: str  # "openrouter" | "kieai" | "veo" | "comet"
+    provider: str  # "kieai" | "veo" | "comet"
     uses_webhook: bool = False
 
 
@@ -164,39 +162,6 @@ async def generate_video(
 ) -> VideoResult:
     image_url = await _prepare_video_reference_urls(image_url)
     last_frame_url = await _prepare_video_reference_url(last_frame_url)
-
-    openrouter_model = openrouter_client.video_model_for_source(model.value)
-    if openrouter_model:
-        if not openrouter_client.configured():
-            if openrouter_client.force_migrated_models():
-                raise RuntimeError(
-                    f"OpenRouter is forced for {model.value}, but OPENROUTER_API_KEY is not configured"
-                )
-        else:
-            try:
-                result = await openrouter_client.generate_video(
-                    source_model=model.value,
-                    prompt=prompt,
-                    reference_urls=image_url,
-                    last_frame_url=last_frame_url,
-                    duration=duration,
-                    aspect_ratio=aspect_ratio,
-                    resolution=resolution,
-                    seed=seed,
-                )
-                return VideoResult(task_id=result.task_id, provider=result.provider, uses_webhook=False)
-            except Exception as openrouter_exc:
-                if openrouter_client.force_migrated_models():
-                    raise RuntimeError(
-                        f"OpenRouter video generation failed for {model.value} -> {openrouter_model}: "
-                        f"{openrouter_exc}"
-                    ) from openrouter_exc
-                logger.warning(
-                    "OpenRouter video create failed for %s -> %s; trying existing providers: %s",
-                    model.value,
-                    openrouter_model,
-                    openrouter_exc,
-                )
 
     if model in _VEO_MODELS:
         try:
@@ -527,8 +492,6 @@ async def _veo_generate(
 
 async def poll_kieai_status(task_id: str) -> str | None:
     """Universal poller for all non-Veo KIE.AI models."""
-    if openrouter_client.is_openrouter_task_id(task_id):
-        return await openrouter_client.poll_video_status(task_id)
     if comet_fallback.is_comet_task_id(task_id):
         return await comet_fallback.poll_status(task_id)
 
@@ -556,8 +519,6 @@ async def poll_kieai_status(task_id: str) -> str | None:
 
 
 async def poll_veo_status(video_id: str) -> str | None:
-    if openrouter_client.is_openrouter_task_id(video_id):
-        return await openrouter_client.poll_video_status(video_id)
     if comet_fallback.is_comet_task_id(video_id):
         return await comet_fallback.poll_status(video_id)
 
@@ -637,16 +598,11 @@ async def poll_comet_status(task_id: str) -> str | None:
     return await comet_fallback.poll_status(task_id)
 
 
-async def poll_openrouter_status(task_id: str) -> str | None:
-    return await openrouter_client.poll_video_status(task_id)
-
-
 POLL_FN_MAP: dict[str, Any] = {
     "kieai": poll_kieai_status,
     "veo":   poll_veo_status,
     "veo_4k": poll_veo_4k_status,
     "comet": poll_comet_status,
-    "openrouter": poll_openrouter_status,
 }
 
 

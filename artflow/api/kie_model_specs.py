@@ -407,13 +407,6 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
         reference_type=KieReferenceType.SINGLE,
         param_builder=_qwen2_size_params,
     ),
-    "openrouter/free": KieModelSpec(
-        model="openrouter/free",
-        media_type=KieMediaType.IMAGE,
-        supported_modes=("text",),
-        optional_params={"aspect_ratio": "aspect_ratio"},
-        defaults={"aspect_ratio": "1:1", "nsfw_checker": False},
-    ),
     # GPT Image 2
     "gpt-image-2-text-to-image": KieModelSpec(
         model="gpt-image-2-text-to-image",

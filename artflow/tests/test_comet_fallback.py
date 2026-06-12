@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from api import comet_fallback
-from api import image_service, video_service
+from api import comet_fallback, image_service, video_service
 from api.image_service import ImageModel
 from api.video_service import VideoModel
 

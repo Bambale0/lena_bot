@@ -40,7 +40,6 @@ from api import comet_fallback
 from api.comet_client import close_client, get_client
 from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import WEB_TASK_PREFIX, is_web_task_id, router as miniapp_router
-from api.openrouter_client import close_client as close_openrouter_client
 from api.realtime import router as realtime_router
 from api.web import router as web_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_processing, is_success
@@ -521,7 +520,6 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Broadcast scheduler shutdown failed")
     await close_client()
-    await close_openrouter_client()
     await redis_client.aclose()
     logger.info("Shutdown complete")
 

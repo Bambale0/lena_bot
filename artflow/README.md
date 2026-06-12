@@ -90,7 +90,7 @@ artflow/
 │
 ├── web/static/prompt-riot/ # Прототип/референс prompt-riot интерфейса
 │
-├── tests/                  # Pytest (34 теста, все проходят)
+├── tests/                  # Pytest suite (backend contracts, providers, web API)
 │   ├── conftest.py
 │   ├── test_bot_tester.py
 │   ├── test_keyboards_and_ui.py
@@ -142,7 +142,7 @@ artflow/
 | Mini App Frontend | React + TypeScript + Vite |
 | Public Web Frontend | HTML + CSS + vanilla JavaScript |
 | Деплой | Docker Compose (app + postgres + redis + nginx) |
-| Тесты | pytest + pytest-asyncio (34 теста) |
+| Тесты | pytest + pytest-asyncio |
 
 ---
 
@@ -226,9 +226,10 @@ artflow/
 Пользователь → выбирает модель → выбирает параметры (ratio, quality, count)
     → отправляет промпт (текст) или фото (референс)
     → бот списывает кредиты → создаёт Generation(status=pending)
-    → отправляет задачу в KIE.AI / CometAPI
+    → отправляет задачу в KIE.AI
+    → если KIE.AI не принял задачу, пробует CometAPI fallback
     → сохраняет task_id, статус → processing
-    → KIE.AI вызывает /webhook/kie
+    → KIE.AI или CometAPI вызывает /webhook/kie
     → бот зеркалирует результат (mirror_url)
     → finish_generation(result_url)
     → отправляет фото пользователю с клавиатурой (remix / repeat / settings)
@@ -332,8 +333,6 @@ DATABASE_URL=postgresql+asyncpg://bot:password@postgres:5432/artflow
 REDIS_URL=redis://redis:6379
 
 # AI провайдеры
-OPENROUTER_API_KEY=...
-OPENROUTER_FORCE_MIGRATED_MODELS=true
 COMET_API_KEY=...
 KIE_AI_KEY=...
 AIVIDEOAPI_KEY=...
@@ -386,7 +385,7 @@ python run_polling.py
 
 ```bash
 pytest tests/ -v
-# 34 теста, все проходят (без реального DB/Redis — используются моки)
+# Тесты используют моки/ASGI-клиент и не требуют реального DB/Redis для основной проверки.
 ```
 
 ---
