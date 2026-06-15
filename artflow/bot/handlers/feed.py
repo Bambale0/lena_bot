@@ -10,7 +10,7 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, BufferedInputFile, InputMediaPhoto, Message
+from aiogram.types import CallbackQuery, BufferedInputFile, InputMediaPhoto, InputMediaVideo, Message
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,7 @@ from bot.states import ImageGenFSM, PromptUseFSM
 from bot.utils.deep_links import build_start_payload
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
-from db.models import User
+from db.models import GenerationType, User
 from db.repository import FeedGenerationCard
 
 logger = logging.getLogger(__name__)
@@ -230,8 +230,9 @@ async def _show_feed_card(
         can_delete=bool(viewer_user_id and card.generation.user_id == viewer_user_id),
     )
     result_url = card.generation.result_url
+    is_video = getattr(card.generation, "gen_type", None) == GenerationType.video
 
-    if result_url and holder.photo:
+    if result_url and not is_video and holder.photo:
         try:
             await holder.edit_media(
                 media=InputMediaPhoto(
@@ -244,6 +245,49 @@ async def _show_feed_card(
             return
         except Exception as e:
             logger.debug("Failed to edit feed media gen=%s: %s", card.generation.id, e)
+
+    if result_url and is_video and getattr(holder, "video", None):
+        try:
+            await holder.edit_media(
+                media=InputMediaVideo(
+                    media=result_url,
+                    caption=caption,
+                    parse_mode="HTML",
+                ),
+                reply_markup=reply_markup,
+            )
+            return
+        except Exception as e:
+            logger.debug("Failed to edit feed video gen=%s: %s", card.generation.id, e)
+
+    if result_url and is_video:
+        try:
+            await holder.answer_video(result_url, caption=caption, reply_markup=reply_markup)
+            return
+        except TelegramBadRequest as e:
+            logger.warning(
+                "Feed video fallback gen=%s url=%s error=%s",
+                card.generation.id,
+                result_url,
+                e,
+            )
+            await holder.answer(
+                _feed_fallback_text(card, caption),
+                reply_markup=reply_markup,
+            )
+            return
+        except Exception as e:
+            logger.warning(
+                "Feed video unexpected fallback gen=%s url=%s error=%s",
+                card.generation.id,
+                result_url,
+                e,
+            )
+            await holder.answer(
+                _feed_fallback_text(card, caption),
+                reply_markup=reply_markup,
+            )
+            return
 
     if result_url:
         try:

@@ -39,8 +39,8 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "wan/2-7-image",              "display_name": "🌊 WAN 2.7 Image",       "gen_type": GenerationType.image, "credits": 4},
     {"model_key": "wan/2-7-image-pro",          "display_name": "🌊 WAN 2.7 Image Pro",   "gen_type": GenerationType.image, "credits": 5},
     {"model_key": "google/nano-banana",         "display_name": "🍌 Nano Banana",         "gen_type": GenerationType.image, "credits": 2},
-    {"model_key": "nano-banana-2",              "display_name": "🍌 Nano Banana 2",        "gen_type": GenerationType.image, "credits": 3},
-    {"model_key": "nano-banana-pro",            "display_name": "🍌 Nano Banana Pro",      "gen_type": GenerationType.image, "credits": 4},
+    {"model_key": "nano-banana-2",              "display_name": "🍌 Nano Banana 2",        "gen_type": GenerationType.image, "credits": 1.5},
+    {"model_key": "nano-banana-pro",            "display_name": "🍌 Nano Banana Pro",      "gen_type": GenerationType.image, "credits": 2},
     {"model_key": "qwen/text-to-image",         "display_name": "🟣 Qwen",             "gen_type": GenerationType.image, "credits": 3},
     {"model_key": "qwen/image-to-image",        "display_name": "🟣 Qwen Edit",             "gen_type": GenerationType.image, "credits": 3},
     {"model_key": "qwen/image-edit",            "display_name": "🟣 Qwen Edit",            "gen_type": GenerationType.image, "credits": 3},
@@ -84,8 +84,8 @@ _IMAGE_VARIANT_COSTS = [
     ("seedream/4.5-edit", "🌸 Seedream 4.5 Edit", [("basic", 3), ("high", 4)]),
     ("wan/2-7-image", "🌊 WAN 2.7 Image", [("1K", 3), ("2K", 4)]),
     ("wan/2-7-image-pro", "🌊 WAN 2.7 Image Pro", [("1K", 4), ("2K", 5), ("4K", 6)]),
-    ("nano-banana-2", "🍌 Nano Banana 2", [("2K", 3), ("4K", 4)]),
-    ("nano-banana-pro", "🍌 Nano Banana Pro", [("2K", 4), ("4K", 5)]),
+    ("nano-banana-2", "🍌 Nano Banana 2", [("2K", 1.5), ("4K", 2.5)]),
+    ("nano-banana-pro", "🍌 Nano Banana Pro", [("2K", 2), ("4K", 3)]),
 ]
 
 # ─── Per-second pricing for video models ─────────────────────────────────────

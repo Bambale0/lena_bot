@@ -1276,7 +1276,7 @@ async def get_feed_generations(
     stmt = (
         select(Generation)
         .where(
-            Generation.gen_type == GenerationType.image,
+            Generation.gen_type.in_((GenerationType.image, GenerationType.video)),
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
             Generation.is_public_feed.is_(True),
@@ -1298,7 +1298,7 @@ async def get_user_feed_generations(
         select(Generation)
         .where(
             Generation.user_id == user_id,
-            Generation.gen_type == GenerationType.image,
+            Generation.gen_type.in_((GenerationType.image, GenerationType.video)),
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
             Generation.is_public_feed.is_(True),
@@ -1319,7 +1319,7 @@ async def get_top_day_generations(
     stmt = (
         select(Generation)
         .where(
-            Generation.gen_type == GenerationType.image,
+            Generation.gen_type.in_((GenerationType.image, GenerationType.video)),
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
             Generation.is_public_feed.is_(True),
@@ -1340,7 +1340,7 @@ async def get_feed_generation_card(
         select(Generation)
         .where(
             Generation.id == gen_id,
-            Generation.gen_type == GenerationType.image,
+            Generation.gen_type.in_((GenerationType.image, GenerationType.video)),
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
             Generation.is_public_feed.is_(True),
@@ -2059,12 +2059,26 @@ def feed_remix_royalty_rub(credits_spent: float | int, rub_per_credit: float | i
 
 
 async def get_user_feed_remix_reward_rub(session: AsyncSession, user_id: int) -> float:
-    result = await session.execute(
+    earned_result = await session.execute(
         select(func.coalesce(func.sum(FeedRemixPayout.amount_rub), 0.0)).where(
             FeedRemixPayout.source_user_id == user_id,
         )
     )
-    return float(result.scalar_one() or 0.0)
+    earned_total = float(earned_result.scalar_one() or 0.0)
+
+    user_result = await session.execute(select(User.referral_balance).where(User.id == user_id))
+    referral_balance = float(user_result.scalar_one() or 0.0)
+
+    pending_result = await session.execute(
+        select(func.coalesce(func.sum(ReferralWithdrawalRequest.amount_rub), 0.0)).where(
+            ReferralWithdrawalRequest.user_id == user_id,
+            ReferralWithdrawalRequest.status == WithdrawalStatus.pending,
+        )
+    )
+    pending_total = float(pending_result.scalar_one() or 0.0)
+    available_balance = max(0.0, referral_balance - pending_total)
+
+    return max(0.0, min(earned_total, available_balance))
 
 
 async def get_user_referral_balance_snapshot(

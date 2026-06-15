@@ -293,3 +293,36 @@ def test_feed_caption() -> None:
     result = feed._feed_caption(card)
     assert "@user" in result
     assert "10" in result
+
+
+@pytest.mark.asyncio
+async def test_show_feed_card_by_id_sends_video_for_video_post() -> None:
+    holder = MagicMock(spec=Message)
+    holder.answer_video = AsyncMock()
+    holder.answer = AsyncMock()
+    holder.photo = None
+    holder.video = None
+    gen = SimpleNamespace(
+        id=42,
+        model="grok-imagine/text-to-video",
+        result_url="https://example.com/video.mp4",
+        likes_count=5,
+        shares_count=2,
+        prompt="a cat",
+        gen_type=GenerationType.video,
+        user_id=1,
+    )
+    card = SimpleNamespace(
+        generation=gen,
+        username="testuser",
+        full_name="Test",
+        aspect_ratio="16:9",
+        quality="base",
+        count=1,
+        reference_url=None,
+        remix_count=0,
+        score=1.0,
+    )
+    with patch("bot.handlers.feed.repo", AsyncMock(get_feed_generation_card=AsyncMock(return_value=card))):
+        await feed.show_feed_card_by_id(message=holder, session=AsyncMock(), gen_id=42)
+    holder.answer_video.assert_awaited_once()
