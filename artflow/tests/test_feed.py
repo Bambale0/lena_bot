@@ -7,14 +7,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import Message
 from PIL import Image
 
 from bot.handlers import feed
-from bot.states import PromptUseFSM
+from bot.states import PromptUseFSM, VideoGenFSM
 from db.models import GenerationType, ModelCost
 from tests.factories import make_callback, make_message
-
 
 # ── show_feed_empty ───────────────────────────────────────────────────────────
 
@@ -145,21 +144,58 @@ async def test_cb_feed_share_not_found() -> None:
 
 @pytest.mark.asyncio
 async def test_cb_feed_use() -> None:
-    """feed:use → вызывает prompt_use_model_kb с правильной моделью."""
+    """feed:use для изображения показывает только модели с референсом."""
     call = make_callback(data="feed:use:42")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
     mock_state = AsyncMock()
-    gen = SimpleNamespace(id=42, prompt="beautiful landscape", model="sdxl")
+    gen = SimpleNamespace(id=42, prompt="beautiful landscape", model="sdxl", gen_type=GenerationType.image)
     # Используем настоящий ModelCost
     model_cost = ModelCost(
         model_key="sdxl", display_name="SDXL", credits=8,
         gen_type=GenerationType.image, is_active=True,
     )
+    model_kb = MagicMock()
     with patch("bot.handlers.feed.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=gen), get_all_model_costs=AsyncMock(return_value=[model_cost]))):
-        with patch("bot.handlers.feed.prompt_use_model_kb", new_callable=AsyncMock, return_value=AsyncMock()):
+        with patch("bot.handlers.feed.prompt_use_model_kb", MagicMock(return_value=model_kb)) as kb:
             await feed.cb_feed_use(call, AsyncMock(), SimpleNamespace(id=42, credits=500, is_banned=False), mock_state)
     mock_state.set_state.assert_called_with(PromptUseFSM.model_select)
+    kb.assert_called_once_with(42, [model_cost], reference_only=True)
+    assert mock_state.update_data.await_args.kwargs["feed_use_gen_type"] == "image"
+
+
+@pytest.mark.asyncio
+async def test_cb_feed_use_video_opens_video_reference_models() -> None:
+    call = make_callback(data="feed:use:42")
+    call.answer = AsyncMock()
+    mock_state = AsyncMock()
+    gen = SimpleNamespace(
+        id=42,
+        prompt="cinematic walk",
+        model="kling-3.0/video",
+        gen_type=GenerationType.video,
+    )
+    model_cost = ModelCost(
+        model_key="kling-3.0/video",
+        display_name="Kling 3.0",
+        credits=8,
+        gen_type=GenerationType.video,
+        is_active=True,
+    )
+    model_kb = MagicMock()
+    with patch("bot.handlers.feed.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=gen), get_all_model_costs=AsyncMock(return_value=[model_cost]))):
+        with patch("bot.handlers.feed.video_models_kb", MagicMock(return_value=model_kb)) as kb:
+            await feed.cb_feed_use(
+                call,
+                AsyncMock(),
+                SimpleNamespace(id=42, credits=500, is_banned=False),
+                mock_state,
+            )
+
+    mock_state.set_state.assert_called_with(VideoGenFSM.model_select)
+    kb.assert_called_once_with([model_cost], "i2v")
+    assert mock_state.update_data.await_args.kwargs["feed_force_reference"] is True
+    assert mock_state.update_data.await_args.kwargs["source_feed_gen_id"] == 42
 
 
 @pytest.mark.asyncio

@@ -67,3 +67,36 @@ async def test_create_omni_character_uses_documented_endpoint(monkeypatch) -> No
 
     assert response["data"]["characterId"] == "character_123"
     assert calls == [("/api/v1/omni/character/create", payload)]
+
+
+@pytest.mark.asyncio
+async def test_suno_voice_helpers_use_documented_endpoints(monkeypatch) -> None:
+    posts: list[tuple[str, dict]] = []
+    gets: list[tuple[str, dict | None]] = []
+
+    async def fake_post(path: str, payload: dict) -> dict:
+        posts.append((path, payload))
+        return {"code": 200, "data": {"taskId": "task_123"}}
+
+    async def fake_get(path: str, params: dict | None = None) -> dict:
+        gets.append((path, params))
+        return {"code": 200, "data": {"taskId": params["taskId"] if params else ""}}
+
+    monkeypatch.setattr(kieai_client, "_retry_post", fake_post)
+    monkeypatch.setattr(kieai_client, "_retry_get", fake_get)
+
+    await kieai_client.create_suno_voice_validation({"voiceUrl": "https://cdn.test/v.mp3"})
+    await kieai_client.get_suno_voice_validation("validate_task")
+    await kieai_client.create_suno_voice({"taskId": "validate_task", "verifyUrl": "https://cdn.test/r.mp3"})
+    await kieai_client.get_suno_voice_record("voice_task")
+    await kieai_client.check_suno_voice({"task_id": "voice_task"})
+
+    assert posts == [
+        ("/api/v1/voice/validate", {"voiceUrl": "https://cdn.test/v.mp3"}),
+        ("/api/v1/voice/generate", {"taskId": "validate_task", "verifyUrl": "https://cdn.test/r.mp3"}),
+        ("/api/v1/voice/check-voice", {"task_id": "voice_task"}),
+    ]
+    assert gets == [
+        ("/api/v1/voice/validate-info", {"taskId": "validate_task"}),
+        ("/api/v1/voice/record-info", {"taskId": "voice_task"}),
+    ]

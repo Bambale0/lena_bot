@@ -9,7 +9,13 @@ from urllib.parse import urlencode
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, URLInputFile
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    URLInputFile,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2093,7 +2099,6 @@ async def cb_image_session_repeat(
         await call.answer("Нечего повторять", show_alert=True)
         return
 
-    data = await state.get_data()
     source_feed_gen_id = getattr(last_gen, "source_feed_gen_id", None)
     reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=None)
 
@@ -2239,6 +2244,7 @@ async def cb_image_session_animate(
         image_url=result_url,
         reference_video_url=None,
         motion_step=None,
+        parent_generation_id=gen_id,
     )
 
     await safe_edit_message(
@@ -2508,9 +2514,10 @@ async def cb_gen_share(call: CallbackQuery, session: AsyncSession, db_user: User
     bot_info = await bot.get_me()
     share_payload = build_start_payload(ref_code=db_user.referral_code, target_kind="feed", target_id=gen.id)
     share_link = f"https://t.me/{bot_info.username}?start={share_payload}"
+    media_label = "Видео" if getattr(gen, "gen_type", None) == GenerationType.video else "Фото"
 
     await call.message.answer(  # type: ignore[union-attr]
-        "📤 <b>Фото добавлено в ленту</b>\n\n"
+        f"📤 <b>{media_label} добавлено в ленту</b>\n\n"
         f"🔗 Ссылка на пост для повтора:\n{share_link}",
         reply_markup=back_to_menu_kb(),
     )
@@ -2555,6 +2562,127 @@ async def cb_gen_prompt(call: CallbackQuery, session: AsyncSession, db_user: Use
 
 # ── Regen ─────────────────────────────────────────────────────────────────────
 
+async def _image_generation_for_result_action(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+):
+    parts = (call.data or "").split(":")
+    gen_id_raw = parts[2] if len(parts) >= 3 else ""
+    if not gen_id_raw.isdigit():
+        await call.answer("Генерация не найдена", show_alert=True)
+        return None
+
+    gen = await repo.get_generation_by_id(session, int(gen_id_raw))
+    gen_type = getattr(getattr(gen, "gen_type", None), "value", getattr(gen, "gen_type", None))
+    if (
+        not gen
+        or getattr(gen, "user_id", None) != db_user.id
+        or (gen_type is not None and gen_type != GenerationType.image.value)
+    ):
+        await call.answer("Генерация не найдена", show_alert=True)
+        return None
+    return gen
+
+
+async def _image_session_for_result_action(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+    gen,
+) -> ImageSession | None:
+    image_session, _ = await _resolve_image_session(session, db_user, state, gen.id)
+    if image_session:
+        return image_session
+
+    prev_session = None
+    if getattr(gen, "image_session_id", None):
+        prev_session = await repo.get_image_session(session, gen.image_session_id, db_user.id)
+
+    image_session = await repo.create_image_session(
+        session=session,
+        user_id=db_user.id,
+        model=gen.model,
+        mode=prev_session.mode if prev_session else "text",
+        aspect_ratio=prev_session.aspect_ratio if prev_session else None,
+        quality=prev_session.quality if prev_session else "basic",
+        count=prev_session.count if prev_session else 1,
+        base_prompt=None,
+        reference_file_id=prev_session.reference_file_id if prev_session else None,
+        reference_file_ids=_stored_reference_file_ids(prev_session) if prev_session else None,
+        reference_url=prev_session.reference_url if prev_session else None,
+    )
+    return image_session
+
+
+@router.callback_query(F.data.startswith("reprompt:image:"))
+async def cb_reprompt_image(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    gen = await _image_generation_for_result_action(call, session, db_user)
+    if not gen:
+        return
+
+    image_session = await _image_session_for_result_action(call, session, state, db_user, gen)
+    if not image_session:
+        await call.answer("Активная серия не найдена", show_alert=True)
+        return
+
+    await _sync_state_with_image_session(state, image_session)
+    await state.update_data(
+        remix_mode=False,
+        remix_parent_generation_id=None,
+        remix_reference_url=None,
+        style_edit_kind=None,
+        source_feed_gen_id=None,
+    )
+    prompt_allowed = not bool(getattr(gen, "source_feed_gen_id", None))
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "✏️ <b>Новый промпт</b>\n\n"
+        f"Серия: <b>{html.escape(get_image_model_label(image_session.model))}</b>\n"
+        f"Настройки сохранены. Отправь новый текст:",
+        reply_markup=image_session_kb(
+            gen.id,
+            prompt=gen.prompt if prompt_allowed else None,
+            allow_publish=prompt_allowed,
+            allow_copy_prompt=prompt_allowed,
+        ),
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data.startswith("reparams:image:"))
+async def cb_reparams_image(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    gen = await _image_generation_for_result_action(call, session, db_user)
+    if not gen:
+        return
+
+    image_session = await _image_session_for_result_action(call, session, state, db_user, gen)
+    if not image_session:
+        await call.answer("Активная серия не найдена", show_alert=True)
+        return
+
+    await _sync_state_with_image_session(state, image_session)
+    prompt_allowed = not bool(getattr(gen, "source_feed_gen_id", None))
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        _session_settings_text(image_session),
+        reply_markup=image_session_settings_kb(image_session.id, image_session.model, image_session.mode),
+    )
+    await state.update_data(source_feed_gen_id=None if prompt_allowed else getattr(gen, "source_feed_gen_id", None))
+    await safe_answer_callback(call)
+
+
 @router.callback_query(F.data.startswith("regen:image:"))
 async def cb_regen_image(
     call: CallbackQuery,
@@ -2565,7 +2693,7 @@ async def cb_regen_image(
 ) -> None:
     gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
     prev = await repo.get_generation_by_id(session, gen_id)
-    if not prev:
+    if not prev or getattr(prev, "user_id", None) != db_user.id:
         await call.answer("Генерация не найдена", show_alert=True)
         return
 

@@ -47,23 +47,23 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "qwen2/text-to-image",        "display_name": "🟣 Qwen 2",            "gen_type": GenerationType.image, "credits": 4},
     {"model_key": "qwen2/image-edit",           "display_name": "🟣 Qwen2 Edit",           "gen_type": GenerationType.image, "credits": 4},
     # ── Видео (KIE.AI) ────────────────────────────────────────────────────────
-    {"model_key": "kling-2.6/text-to-video",   "display_name": "⚙️ Kling 2.6",       "gen_type": GenerationType.video, "credits": 30},
-    {"model_key": "kling-2.6/image-to-video",  "display_name": "⚙️ Kling 2.6 Animate",       "gen_type": GenerationType.video, "credits": 35},
-    {"model_key": "kling-2.6/motion-control",  "display_name": "🕺 Kling 2.6 Motion",     "gen_type": GenerationType.video, "credits": 40},
-    {"model_key": "kling-3.0/video",           "display_name": "⚡ Kling 3.0",             "gen_type": GenerationType.video, "credits": 40},
-    {"model_key": "kling-3.0/motion-control",  "display_name": "🕺 Kling 3.0 Motion",     "gen_type": GenerationType.video, "credits": 50},
-    {"model_key": "wan/2-7-text-to-video",     "display_name": "🌊 WAN Video",          "gen_type": GenerationType.video, "credits": 25},
-    {"model_key": "wan/2-7-image-to-video",    "display_name": "🌊 WAN Animate",          "gen_type": GenerationType.video, "credits": 30},
-    {"model_key": "bytedance/seedance-2",      "display_name": "🌱 Seedance 2",            "gen_type": GenerationType.video, "credits": 35},
-    {"model_key": "bytedance/seedance-2-fast", "display_name": "🌱 Seedance 2 Fast",       "gen_type": GenerationType.video, "credits": 25},
+    {"model_key": "kling-2.6/text-to-video",   "display_name": "⚙️ Kling 2.6",       "gen_type": GenerationType.video, "credits": 5},
+    {"model_key": "kling-2.6/image-to-video",  "display_name": "⚙️ Kling 2.6 Animate",       "gen_type": GenerationType.video, "credits": 6},
+    {"model_key": "kling-2.6/motion-control",  "display_name": "🕺 Kling 2.6 Motion",     "gen_type": GenerationType.video, "credits": 7},
+    {"model_key": "kling-3.0/video",           "display_name": "⚡ Kling 3.0",             "gen_type": GenerationType.video, "credits": 6},
+    {"model_key": "kling-3.0/motion-control",  "display_name": "🕺 Kling 3.0 Motion",     "gen_type": GenerationType.video, "credits": 9},
+    {"model_key": "wan/2-7-text-to-video",     "display_name": "🌊 WAN Video",          "gen_type": GenerationType.video, "credits": 20},
+    {"model_key": "wan/2-7-image-to-video",    "display_name": "🌊 WAN Animate",          "gen_type": GenerationType.video, "credits": 24},
+    {"model_key": "bytedance/seedance-2",      "display_name": "🌱 Seedance 2",            "gen_type": GenerationType.video, "credits": 5},
+    {"model_key": "bytedance/seedance-2-fast", "display_name": "🌱 Seedance 2 Fast",       "gen_type": GenerationType.video, "credits": 4},
     {"model_key": "grok-imagine/text-to-video","display_name": "⚡ Grok Video",              "gen_type": GenerationType.video, "credits": 35},
     {"model_key": "grok-imagine/image-to-video","display_name":"⚡ Grok Animate",              "gen_type": GenerationType.video, "credits": 35},
-    {"model_key": "happyhorse/text-to-video",  "display_name": "🐎 HappyHorse Video",        "gen_type": GenerationType.video, "credits": 25},
-    {"model_key": "happyhorse/image-to-video", "display_name": "🐎 HappyHorse Animate",        "gen_type": GenerationType.video, "credits": 30},
+    {"model_key": "happyhorse/text-to-video",  "display_name": "🐎 HappyHorse Video",        "gen_type": GenerationType.video, "credits": 20},
+    {"model_key": "happyhorse/image-to-video", "display_name": "🐎 HappyHorse Animate",        "gen_type": GenerationType.video, "credits": 25},
     {"model_key": "gemini-omni-video",        "display_name": "✨ Gemini Omni",               "gen_type": GenerationType.video, "credits": 90},
-    {"model_key": "veo3_fast",                 "display_name": "🎬 Veo 3 Fast",            "gen_type": GenerationType.video, "credits": 50},
-    {"model_key": "veo3",                      "display_name": "🎬 Veo 3",                 "gen_type": GenerationType.video, "credits": 70},
-    {"model_key": "veo3_lite",                 "display_name": "🎬 Veo 3 Lite",            "gen_type": GenerationType.video, "credits": 35},
+    {"model_key": "veo3_fast",                 "display_name": "🎬 Veo 3 Fast",            "gen_type": GenerationType.video, "credits": 40},
+    {"model_key": "veo3",                      "display_name": "🎬 Veo 3",                 "gen_type": GenerationType.video, "credits": 55},
+    {"model_key": "veo3_lite",                 "display_name": "🎬 Veo 3 Lite",            "gen_type": GenerationType.video, "credits": 28},
     # ── GPT Image 2 ─────────────────────────────────────────────────────────
     {"model_key": "gpt-image-2-text-to-image",   "display_name": "🤖 GPT Image 2",                 "gen_type": GenerationType.image, "credits": 4},
     {"model_key": "gpt-image-2-image-to-image", "display_name": "🤖 GPT Image 2 Edit",                 "gen_type": GenerationType.image, "credits": 4},
@@ -90,8 +90,8 @@ _IMAGE_VARIANT_COSTS = [
 
 # ─── Per-second pricing for video models ─────────────────────────────────────
 # Format: (model_key, display_name, resolutions, credits_per_second_per_resolution)
-# Base model entry uses the cheapest resolution's per-second rate as default.
-_KLING_VIDEO_VARIANTS = [
+# Base model entry remains a fallback; resolution variants are used for billing.
+_VIDEO_RESOLUTION_VARIANTS = [
     (
         "kling-2.6/text-to-video",
         "⚙️ Kling 2.6",
@@ -113,14 +113,80 @@ _KLING_VIDEO_VARIANTS = [
     (
         "kling-3.0/video",
         "⚡ Kling 3.0",
-        ["2K", "4K"],
-        {"2K": 8, "4K": 10},
+        ["std", "pro", "4K"],
+        {"std": 6, "pro": 8, "4K": 10},
     ),
     (
         "kling-3.0/motion-control",
         "🕺 Kling 3.0 Motion",
         ["720p", "1080p"],
         {"720p": 9, "1080p": 11},
+    ),
+    (
+        "wan/2-7-text-to-video",
+        "🌊 WAN Video",
+        ["720p", "1080p"],
+        {"720p": 20, "1080p": 25},
+    ),
+    (
+        "wan/2-7-image-to-video",
+        "🌊 WAN Animate",
+        ["720p", "1080p"],
+        {"720p": 24, "1080p": 30},
+    ),
+    (
+        "bytedance/seedance-2",
+        "🌱 Seedance 2",
+        ["480p", "720p", "1080p"],
+        {"480p": 5, "720p": 7, "1080p": 9},
+    ),
+    (
+        "bytedance/seedance-2-fast",
+        "🌱 Seedance 2 Fast",
+        ["480p", "720p"],
+        {"480p": 4, "720p": 5},
+    ),
+    (
+        "grok-imagine/text-to-video",
+        "⚡ Grok Video",
+        ["480p", "720p"],
+        {"480p": 35, "720p": 45},
+    ),
+    (
+        "grok-imagine/image-to-video",
+        "⚡ Grok Animate",
+        ["480p", "720p"],
+        {"480p": 35, "720p": 45},
+    ),
+    (
+        "happyhorse/text-to-video",
+        "🐎 HappyHorse Video",
+        ["720p", "1080p"],
+        {"720p": 20, "1080p": 25},
+    ),
+    (
+        "happyhorse/image-to-video",
+        "🐎 HappyHorse Animate",
+        ["720p", "1080p"],
+        {"720p": 25, "1080p": 30},
+    ),
+    (
+        "veo3_fast",
+        "🎬 Veo 3 Fast",
+        ["720p", "1080p"],
+        {"720p": 40, "1080p": 50},
+    ),
+    (
+        "veo3",
+        "🎬 Veo 3",
+        ["720p", "1080p"],
+        {"720p": 55, "1080p": 70},
+    ),
+    (
+        "veo3_lite",
+        "🎬 Veo 3 Lite",
+        ["720p", "1080p"],
+        {"720p": 28, "1080p": 35},
     ),
 ]
 
@@ -139,7 +205,7 @@ def _build_variant_model_costs() -> list[dict]:
                 }
             )
 
-    for model_key, display_name, resolutions, prices_per_sec in _KLING_VIDEO_VARIANTS:
+    for model_key, display_name, resolutions, prices_per_sec in _VIDEO_RESOLUTION_VARIANTS:
         for resolution in resolutions:
             records.append(
                 {
@@ -197,18 +263,11 @@ LEGACY_MODEL_ALIASES_TO_DISABLE = {
     "kling-3.0/video__duration=10__resolution=std",
     "kling-3.0/video__duration=10__resolution=pro",
     "kling-3.0/video__duration=10__resolution=4K",
-    "kling-3.0/video__resolution=std",
-    "kling-3.0/video__resolution=pro",
     # Old duration-only Kling 2.6 variants
     "kling-2.6/text-to-video__duration=5",
     "kling-2.6/text-to-video__duration=10",
     "kling-2.6/image-to-video__duration=5",
     "kling-2.6/image-to-video__duration=10",
-    # Old motion control resolution variants
-    "kling-2.6/motion-control__resolution=720p",
-    "kling-2.6/motion-control__resolution=1080p",
-    "kling-3.0/motion-control__resolution=720p",
-    "kling-3.0/motion-control__resolution=1080p",
 }
 
 

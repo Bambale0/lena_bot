@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -7,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import Response
 
-from api.web import assistant, auth, billing, generations, health, landing, referrals, router as web_router
+from api.web import admin, assistant, auth, billing, generations, health, landing, referrals, router as web_router
 from api.miniapp_routes import (
     AssistantChatRequest,
     FeedRemixRequest,
@@ -26,6 +27,61 @@ async def test_health_payload_has_service_status() -> None:
     payload = await health.health()
 
     assert payload == {"ok": True, "data": {"service": "api-web", "status": "ok"}}
+
+
+def test_web_router_includes_admin_routes() -> None:
+    paths = {getattr(route, "path", "") for route in web_router.routes}
+
+    assert "/admin/overview" in paths
+    assert "/admin/users/{user_id}/credits" in paths
+    assert "/admin/generations/{generation_id}/fail" in paths
+
+
+@pytest.mark.asyncio
+async def test_web_admin_overview_requires_admin(monkeypatch) -> None:
+    monkeypatch.setattr(admin.settings, "ADMIN_IDS", [42], raising=False)
+
+    anonymous = await admin.admin_overview(session=object(), user=None)
+    regular = await admin.admin_overview(session=object(), user=SimpleNamespace(tg_id=7))
+
+    assert anonymous.status_code == 401
+    assert regular.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_web_admin_overview_returns_payload_for_admin(monkeypatch) -> None:
+    payload = {"totals": {"users": 1}}
+    monkeypatch.setattr(admin.settings, "ADMIN_IDS", [42], raising=False)
+    monkeypatch.setattr(admin, "_admin_overview_payload", AsyncMock(return_value=payload))
+
+    response = await admin.admin_overview(session=object(), user=SimpleNamespace(tg_id=42))
+
+    assert response == {"ok": True, "data": payload}
+
+
+@pytest.mark.asyncio
+async def test_web_admin_credit_adjustment_records_admin_source(monkeypatch) -> None:
+    session = object()
+    add_credits = AsyncMock(return_value=15)
+    monkeypatch.setattr(admin.settings, "ADMIN_IDS", [42], raising=False)
+    monkeypatch.setattr(admin.repo, "get_user_by_id", AsyncMock(return_value=SimpleNamespace(id=7, credits=5)))
+    monkeypatch.setattr(admin.repo, "add_credits", add_credits)
+
+    response = await admin.admin_adjust_user_credits(
+        7,
+        admin.AdminCreditAdjustmentRequest(amount=10, note="manual bonus"),
+        session=session,
+        user=SimpleNamespace(tg_id=42),
+    )
+
+    assert response["ok"] is True
+    assert response["data"] == {"user_id": 7, "balance": 15.0, "delta": 10.0}
+    add_credits.assert_awaited_once()
+    assert add_credits.await_args.args[:3] == (session, 7, 10.0)
+    assert add_credits.await_args.kwargs["entry_type"] == "admin_adjustment"
+    assert add_credits.await_args.kwargs["source_type"] == "admin"
+    assert add_credits.await_args.kwargs["source_id"] == "42"
+    assert add_credits.await_args.kwargs["note"] == "manual bonus"
 
 
 def test_model_card_exposes_technical_key_and_capabilities() -> None:
@@ -171,6 +227,7 @@ async def test_password_register_binds_site_referral(monkeypatch) -> None:
             referral_code="REF_123",
         ),
         response=Response(),
+        request=SimpleNamespace(headers={}, client=None),
         session=session,
     )
 
@@ -180,6 +237,134 @@ async def test_password_register_binds_site_referral(monkeypatch) -> None:
     assert create_contact_user.await_args.kwargs["referrer"] is referrer
     add_credits.assert_awaited_once()
     assert add_credits.await_args.args[:3] == (session, 10, auth.settings.REFERRAL_L1_CREDITS)
+
+
+@pytest.mark.asyncio
+async def test_auth_config_exposes_registration_captcha(monkeypatch) -> None:
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_ENABLED", True, raising=False)
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_PROVIDER", "turnstile", raising=False)
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_SITE_KEY", "site-key", raising=False)
+
+    response = await auth.auth_config()
+
+    assert response["ok"] is True
+    assert response["data"]["captcha"] == {
+        "enabled": True,
+        "required": True,
+        "provider": "turnstile",
+        "site_key": "site-key",
+    }
+
+
+@pytest.mark.asyncio
+async def test_password_register_requires_captcha_when_enabled(monkeypatch) -> None:
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_ENABLED", True, raising=False)
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_PROVIDER", "turnstile", raising=False)
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_SITE_KEY", "site-key", raising=False)
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_SECRET_KEY", "secret-key", raising=False)
+
+    response = await auth.password_register(
+        auth.PasswordRegisterRequest(
+            email="new@example.test",
+            password="supersecret",
+            full_name="New User",
+        ),
+        response=Response(),
+        request=SimpleNamespace(headers={}, client=None),
+        session=object(),
+    )
+
+    assert response.status_code == 400
+    assert json.loads(response.body)["error"] == "Подтвердите, что вы не робот"
+
+
+def test_password_register_accepts_turnstile_captcha_aliases() -> None:
+    assert auth.PasswordRegisterRequest(
+        email="new@example.test",
+        password="supersecret",
+        cf_turnstile_response="underscore-token",
+    ).captcha_token == "underscore-token"
+    assert auth.PasswordRegisterRequest(
+        email="new@example.test",
+        password="supersecret",
+        **{"cf-turnstile-response": "dash-token"},
+    ).captcha_token == "dash-token"
+
+
+@pytest.mark.asyncio
+async def test_password_register_verifies_turnstile_token(monkeypatch) -> None:
+    class FakeCaptchaResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {"success": True}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None:
+            pass
+
+        async def post(self, url: str, json: dict):
+            captcha_calls.append((url, json))
+            return FakeCaptchaResponse()
+
+    captcha_calls = []
+    created = SimpleNamespace(
+        id=2,
+        tg_id=-20,
+        username=None,
+        full_name="New User",
+        email="new@example.test",
+        phone=None,
+        photo_url=None,
+        credits=15,
+        referral_code="NEW_REF",
+        language="ru",
+        created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        password_hash="hash",
+        password_set_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_ENABLED", True, raising=False)
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_PROVIDER", "turnstile", raising=False)
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_SITE_KEY", "site-key", raising=False)
+    monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_SECRET_KEY", "secret-key", raising=False)
+    monkeypatch.setattr(auth.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(auth.repo, "get_user_by_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth.repo, "create_contact_user", AsyncMock(return_value=created))
+    monkeypatch.setattr(auth.repo, "set_user_password_hash", AsyncMock(return_value=created))
+    monkeypatch.setattr(auth, "hash_password", lambda password: "hash")
+
+    response = await auth.password_register(
+        auth.PasswordRegisterRequest(
+            email="new@example.test",
+            password="supersecret",
+            full_name="New User",
+            captcha_token="captcha-token",
+        ),
+        response=Response(),
+        request=SimpleNamespace(
+            headers={"cf-connecting-ip": "203.0.113.7"},
+            client=SimpleNamespace(host="198.51.100.1"),
+        ),
+        session=object(),
+    )
+
+    assert response["ok"] is True
+    assert captcha_calls == [
+        (
+            auth.TURNSTILE_VERIFY_URL,
+            {
+                "secret": "secret-key",
+                "response": "captcha-token",
+                "remoteip": "203.0.113.7",
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -194,11 +379,13 @@ def test_enabled_payment_methods_match_topup_providers(monkeypatch) -> None:
     monkeypatch.setattr(billing.settings, "TBANK_PASSWORD", "password", raising=False)
     monkeypatch.setattr(billing.settings, "TELEGRAM_STARS_ENABLED", True, raising=False)
     monkeypatch.setattr(billing.settings, "CRYPTOBOT_TOKEN", "crypto", raising=False)
+    monkeypatch.setattr(billing.settings, "LAVA_API_KEY", "lava", raising=False)
+    monkeypatch.setenv("LAVA_OFFER_ID_CREDITS_100", "offer-1")
 
     methods = billing.enabled_payment_methods()
 
-    assert [item["key"] for item in methods] == ["tbank", "stars", "crypto"]
-    assert [item["label"] for item in methods] == ["Карта", "Telegram", "Крипто"]
+    assert [item["key"] for item in methods] == ["tbank", "stars", "crypto", "lava"]
+    assert [item["label"] for item in methods] == ["Карта", "Telegram", "Крипто", "Lava"]
 
 
 def test_web_router_exposes_realtime_websocket_alias() -> None:

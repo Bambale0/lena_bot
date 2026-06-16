@@ -83,6 +83,12 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     SMTP_USE_SSL: bool = False
 
+    # Web registration CAPTCHA (Cloudflare Turnstile)
+    WEB_CAPTCHA_ENABLED: bool = False
+    WEB_CAPTCHA_PROVIDER: str = "turnstile"
+    WEB_CAPTCHA_SITE_KEY: str = ""
+    WEB_CAPTCHA_SECRET_KEY: str = ""
+
     # KIE.AI photo → prompt (GPT-5.x vision via kie.ai)
     KIE_PHOTO_PROMPT_MODEL: str = "gpt-5-2"
     KIE_PHOTO_PROMPT_FALLBACK: str = "gpt-5-5"
@@ -135,6 +141,26 @@ class Settings(BaseSettings):
         except FileNotFoundError:
             return ""
         return ""
+
+    def lava_has_offer_ids(self) -> bool:
+        if any(key.startswith("LAVA_OFFER_ID_") and value for key, value in os.environ.items()):
+            return True
+        env_path = ".env"
+        try:
+            with open(env_path, "r", encoding="utf-8") as fh:
+                for raw_line in fh:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    if key.strip().startswith("LAVA_OFFER_ID_") and value.strip().strip("\"'"):
+                        return True
+        except FileNotFoundError:
+            return False
+        return False
+
+    def lava_is_enabled(self) -> bool:
+        return bool(self.LAVA_API_KEY and self.lava_has_offer_ids())
 
     @property
     def KIE_API_KEY(self) -> str:

@@ -49,7 +49,7 @@ def _extract_first(payload: dict[str, Any], *keys: str) -> str:
         value = payload.get(key)
         if value:
             return str(value)
-    for container_name in ("data", "result"):
+    for container_name in ("data", "result", "invoice", "payload"):
         container = payload.get(container_name)
         if isinstance(container, dict):
             for key in keys:
@@ -60,16 +60,15 @@ def _extract_first(payload: dict[str, Any], *keys: str) -> str:
 
 
 def extract_invoice_id(payload: dict[str, Any]) -> str:
-    return _extract_first(payload, "id")
+    return _extract_first(payload, "id", "invoiceId", "invoice_id", "contractId", "contract_id")
 
 
 def extract_payment_url(payload: dict[str, Any]) -> str:
-    return _extract_first(payload, "paymentUrl", "payment_url", "url", "link")
+    return _extract_first(payload, "paymentUrl", "payment_url", "paymentLink", "payment_link", "url", "link")
 
 
 def webhook_contract_id(payload: dict[str, Any]) -> str:
-    value = payload.get("contractId")
-    return str(value) if value else ""
+    return extract_invoice_id(payload)
 
 
 def public_invoice_url(invoice_id: str) -> str:
@@ -78,9 +77,9 @@ def public_invoice_url(invoice_id: str) -> str:
 
 
 def is_success_webhook(payload: dict[str, Any]) -> bool:
-    event = str(payload.get("eventType", "")).strip().lower()
-    status = str(payload.get("status", "")).strip().lower()
-    return event == "payment.success" and status in {"completed", "success", "paid"}
+    event = _extract_first(payload, "eventType", "event_type", "type", "event").strip().lower()
+    status = _extract_first(payload, "status").strip().lower()
+    return event in {"payment.success", "invoice.paid"} and (not status or status in {"completed", "success", "paid"})
 
 
 async def _request(method: str, path: str, *, json_payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -125,7 +124,7 @@ async def create_invoice(plan: PricePlan, user_id: int, *, amount_rub: float | N
     if amount_rub is not None:
         payload["amount"] = float(amount_rub)
 
-    data = await _request("POST", "/api/v3/invoice", json_payload=payload)
+    data = await _request("POST", "/api/v2/invoice", json_payload=payload)
     invoice_id = extract_invoice_id(data)
     payment_url = extract_payment_url(data)
     if not invoice_id or not payment_url:

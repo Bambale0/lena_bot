@@ -1,13 +1,16 @@
 const API_BASE = "/api/web";
 const TOKEN_KEY = "apix-premium-web-token";
+const AUTH_HINT_KEY = "apix-premium-auth-hint";
 const LANG_KEY = "apix-premium-language";
 const REFERRAL_KEY = "apix-premium-referral-code";
+const TURNSTILE_SCRIPT_ID = "apix-turnstile-script";
 const FULL_FEED_LIMIT = 240;
 const PROMPT_LIBRARY_LIMIT = 60;
 
 const state = {
   token: "",
   authConfig: null,
+  authChecked: false,
   user: null,
   examples: [],
   models: [],
@@ -19,6 +22,24 @@ const state = {
   history: [],
   prompts: [],
   adminPrompts: [],
+  admin: {
+    section: "overview",
+    overview: null,
+    users: null,
+    generations: null,
+    pricing: null,
+    withdrawals: null,
+    ledger: null,
+    loadingSection: "",
+    loadFailedSection: "",
+    promptsLoaded: false,
+    userQuery: "",
+    generationQuery: "",
+    generationStatus: "all",
+    generationType: "all",
+    pricingQuery: "",
+    withdrawalStatus: "all",
+  },
   assistantHistory: [],
   help: null,
   billing: null,
@@ -64,6 +85,14 @@ function syncLanguageUi() {
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+class ApiRequestError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
 
 const PROMPT_INJECTION_CATEGORIES = [
   {
@@ -185,7 +214,7 @@ async function request(path, options = {}) {
   const response = await fetch(url, { credentials: "same-origin", ...options, headers });
   const json = await response.json().catch(() => ({}));
   if (!response.ok || json.ok === false) {
-    throw new Error(json.error || json.detail || `HTTP ${response.status}`);
+    throw new ApiRequestError(json.error || json.detail || `HTTP ${response.status}`, response.status);
   }
   return unwrap(json);
 }
@@ -196,6 +225,110 @@ async function optionalRequest(path, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+let turnstileScriptPromise = null;
+
+function captchaConfig() {
+  const config = state.authConfig?.captcha;
+  if (!config || config.provider !== "turnstile" || !config.enabled || !config.site_key) return null;
+  return config;
+}
+
+async function ensureCaptchaConfig() {
+  if (!state.authConfig) state.authConfig = await optionalRequest("/auth/config", null);
+  return captchaConfig();
+}
+
+function captchaStatus(form, message) {
+  const status = form.querySelector("[data-password-register-status]");
+  if (status && message) status.textContent = message;
+}
+
+function ensureTurnstileScript() {
+  if (window.turnstile) return Promise.resolve();
+  if (turnstileScriptPromise) return turnstileScriptPromise;
+  turnstileScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.getElementById(TURNSTILE_SCRIPT_ID);
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.id = TURNSTILE_SCRIPT_ID;
+    script.async = true;
+    script.defer = true;
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.addEventListener("load", resolve, { once: true });
+    script.addEventListener("error", reject, { once: true });
+    document.head.appendChild(script);
+  });
+  return turnstileScriptPromise;
+}
+
+async function hydrateCaptchaForm(form) {
+  const widget = form.querySelector("[data-captcha-widget]");
+  if (!widget) return;
+  const hidden = form.querySelector('input[name="captcha_token"]');
+  const config = await ensureCaptchaConfig();
+  if (!config) {
+    widget.hidden = true;
+    if (hidden) hidden.value = "";
+    return;
+  }
+  widget.hidden = false;
+  widget.textContent = "";
+  try {
+    await ensureTurnstileScript();
+  } catch {
+    captchaStatus(form, "Не удалось загрузить капчу. Обновите страницу.");
+    return;
+  }
+  if (!window.turnstile || widget.dataset.turnstileWidgetId) return;
+  const widgetId = window.turnstile.render(widget, {
+    sitekey: config.site_key,
+    theme: "dark",
+    callback(token) {
+      if (hidden) hidden.value = token;
+      captchaStatus(form, "Проверка пройдена. Можно создать аккаунт.");
+    },
+    "expired-callback"() {
+      if (hidden) hidden.value = "";
+      captchaStatus(form, "Капча устарела. Пройдите проверку ещё раз.");
+    },
+    "error-callback"() {
+      if (hidden) hidden.value = "";
+      captchaStatus(form, "Капча не прошла. Попробуйте ещё раз.");
+    },
+  });
+  widget.dataset.turnstileWidgetId = String(widgetId);
+  form.dataset.turnstileWidgetId = String(widgetId);
+}
+
+function hydrateCaptchaForms() {
+  $$("[data-password-register-form]").forEach((form) => {
+    void hydrateCaptchaForm(form);
+  });
+}
+
+function resetCaptcha(form) {
+  const hidden = form.querySelector('input[name="captcha_token"]');
+  if (hidden) hidden.value = "";
+  const widgetId = form.dataset.turnstileWidgetId;
+  if (widgetId && window.turnstile?.reset) window.turnstile.reset(widgetId);
+}
+
+async function registrationCaptchaToken(form) {
+  const config = await ensureCaptchaConfig();
+  if (!config) return "";
+  await hydrateCaptchaForm(form);
+  const token = String(form.querySelector('input[name="captcha_token"]')?.value || "").trim();
+  if (!token) {
+    captchaStatus(form, "Подтвердите, что вы не робот.");
+    throw new Error("Подтвердите, что вы не робот");
+  }
+  return token;
 }
 
 function cleanModelName(value) {
@@ -268,6 +401,49 @@ function omniResolutionKey(value) {
   return raw;
 }
 
+function collectPriceTableValues(priceTable = {}) {
+  const values = [];
+  Object.values(priceTable || {}).forEach((prices) => {
+    Object.values(prices || {}).forEach((value) => {
+      const numeric = Number(value || 0);
+      if (Number.isFinite(numeric) && numeric > 0) values.push(numeric);
+    });
+  });
+  return values;
+}
+
+function videoPriceFromTable(model, duration, resolution) {
+  const priceTable = model?.priceTable || {};
+  const durationKeys = [duration, String(duration)];
+  const resolutionKeys = [];
+  if (resolution) resolutionKeys.push(resolution);
+  if (String(resolution || "").toLowerCase() === "2160p") resolutionKeys.push("4k", "4K");
+  resolutionKeys.push("");
+
+  const seen = new Set();
+  const lookup = (prices) => {
+    if (!prices) return NaN;
+    for (const key of durationKeys) {
+      const numeric = Number(prices?.[key] ?? NaN);
+      if (Number.isFinite(numeric) && numeric > 0) return numeric;
+    }
+    return NaN;
+  };
+
+  for (const key of resolutionKeys) {
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const numeric = lookup(priceTable?.[key]);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  }
+
+  for (const prices of Object.values(priceTable || {})) {
+    const numeric = lookup(prices);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  }
+  return NaN;
+}
+
 function modelPriceRange(model) {
   if (!model) return { min: 0, max: 0 };
   if (model.type === "music") {
@@ -275,23 +451,17 @@ function modelPriceRange(model) {
     return { min: amount, max: amount };
   }
   if (model.type === "video") {
-    const values = [];
-    if (model.key === "gemini-omni-video") {
-      Object.values(model.priceTable || {}).forEach((prices) => {
-        Object.values(prices || {}).forEach((value) => {
-          const numeric = Number(value || 0);
-          if (Number.isFinite(numeric) && numeric > 0) values.push(numeric);
-        });
-      });
-      Object.values(model.videoInputPrices || {}).forEach((value) => {
-        const numeric = Number(value || 0);
-        if (Number.isFinite(numeric) && numeric > 0) values.push(numeric);
-      });
-    } else if (model.creditsPerSec) {
+    const values = collectPriceTableValues(model.priceTable);
+    Object.values(model.videoInputPrices || {}).forEach((value) => {
+      const numeric = Number(value || 0);
+      if (Number.isFinite(numeric) && numeric > 0) values.push(numeric);
+    });
+    if (!values.length && model.creditsPerSec) {
       const durations = (model.durations || []).map((value) => Number(value || 0)).filter((value) => Number.isFinite(value) && value > 0);
       if (durations.length) durations.forEach((duration) => values.push(Number(model.creditsPerSec || 0) * duration));
       else values.push(Number(model.creditsPerSec || 0));
-    } else {
+    }
+    if (!values.length) {
       values.push(Number(model.credits || 0));
     }
     const sane = values.filter((value) => Number.isFinite(value) && value > 0);
@@ -391,6 +561,73 @@ function statusLabel(value) {
   if (source === "failed" || source === "error") return "нужен повтор";
   if (source === "draft") return "черновик";
   return String(value || "в работе").replace(/[-_]/g, " ");
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function resetAdminState() {
+  state.adminPrompts = [];
+  state.admin = {
+    section: "overview",
+    overview: null,
+    users: null,
+    generations: null,
+    pricing: null,
+    withdrawals: null,
+    ledger: null,
+    loadingSection: "",
+    loadFailedSection: "",
+    promptsLoaded: false,
+    userQuery: "",
+    generationQuery: "",
+    generationStatus: "all",
+    generationType: "all",
+    pricingQuery: "",
+    withdrawalStatus: "all",
+  };
+}
+
+function rememberAuthSession(result = {}) {
+  state.token = "";
+  state.user = result.user || state.user || null;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.setItem(AUTH_HINT_KEY, "1");
+}
+
+function forgetAuthSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(AUTH_HINT_KEY);
+  state.token = "";
+  state.user = null;
+  resetAdminState();
+}
+
+function adminUserLabel(user = {}) {
+  return user.full_name || user.username || user.email || `User #${user.id || user.user_id || "—"}`;
+}
+
+function adminStatusTone(value) {
+  const source = String(value || "").toLowerCase();
+  if (["done", "paid", "approved", "success", "active"].includes(source)) return "success";
+  if (["failed", "rejected", "error", "banned", "inactive"].includes(source)) return "danger";
+  if (["pending", "processing"].includes(source)) return "warning";
+  return "muted";
+}
+
+function adminBadge(value, label = "") {
+  const text = label || statusLabel(value);
+  return `<span class="admin-status ${adminStatusTone(value)}">${escapeHtml(text)}</span>`;
 }
 
 function preferredVariant(variants) {
@@ -2266,15 +2503,17 @@ function estimateGenerationCost(model = currentModel(), form = document.querySel
   if (kind === "music") return { amount: Number(model.credits || 0), unit: "за трек" };
   if (kind === "video") {
     const duration = selectedComposerNumber("duration", model.durations?.[0] || 5, form);
+    const rawResolution = selectedComposerValue("resolution", form) || model.resolutions?.[0] || "";
+    const resolution = model.key === "gemini-omni-video" ? omniResolutionKey(rawResolution || "720p") : rawResolution;
     if (model.key === "gemini-omni-video") {
-      const resolution = omniResolutionKey(selectedComposerValue("resolution", form) || model.resolutions?.[0] || "720p");
       const mode = selectedComposerValue("mode", form) || (selectedComposerValue("video_url", form) ? "video" : "image");
-      const table = model.priceTable?.[resolution] || model.priceTable?.["720p"] || {};
       const flat = mode === "video"
         ? Number(model.videoInputPrices?.[resolution] ?? model.videoInputPrices?.["720p"] ?? NaN)
-        : Number(table?.[duration] ?? table?.[String(duration)] ?? NaN);
+        : videoPriceFromTable(model, duration, resolution);
       if (Number.isFinite(flat) && flat > 0) return { amount: flat, unit: "за видео" };
     }
+    const tablePrice = videoPriceFromTable(model, duration, resolution);
+    if (Number.isFinite(tablePrice) && tablePrice > 0) return { amount: tablePrice, unit: "за видео" };
     const amount = model.creditsPerSec ? Number(model.creditsPerSec) * duration : Number(model.credits || 0);
     return { amount, unit: "за видео" };
   }
@@ -2710,21 +2949,25 @@ function renderGallery() {
 
 function renderAuth() {
   const authed = Boolean(state.user);
+  const checking = !state.authChecked && !authed;
+  document.documentElement.classList.toggle("auth-checking", checking);
+  document.documentElement.classList.toggle("auth-ready", state.authChecked || authed);
   const name = state.user?.full_name || state.user?.username || "APIX creator";
   const credits = formatNumber(state.user?.credits || 0);
   $$("[data-account-status]").forEach((accountStatus) => {
     accountStatus.textContent = authed
       ? `${name} · баланс ${credits}`
-      : state.fallbackMode ? "Backend недоступен" : "Гость · войдите или зарегистрируйтесь";
+      : checking ? "Проверяем вход..."
+        : state.fallbackMode ? "Backend недоступен" : "Гость · войдите или зарегистрируйтесь";
   });
     $$("[data-auth-only]").forEach((node) => {
     node.hidden = !authed;
   });
   $$("[data-guest-only]").forEach((node) => {
-    node.hidden = authed;
+    node.hidden = authed || checking;
   });
 $$("[data-user-pill]").forEach((userPill) => {
-    userPill.textContent = authed ? `Баланс ${credits}` : "Войти";
+    userPill.textContent = authed ? `Баланс ${credits}` : checking ? "..." : "Войти";
     if (authed) userPill.dataset.accountTarget = "billing";
     else delete userPill.dataset.accountTarget;
   });
@@ -3206,6 +3449,468 @@ function renderPrompts() {
   `).join("") : `<div class="empty-state">Идеи появятся после входа или обновления каталога.</div>`);
 }
 
+function adminSections() {
+  return [
+    ["overview", "Обзор"],
+    ["users", "Пользователи"],
+    ["generations", "Генерации"],
+    ["finance", "Финансы"],
+    ["pricing", "Тарифы"],
+    ["prompts", "Промпты"],
+    ["ledger", "Журнал"],
+  ];
+}
+
+function adminNeedsLoad(section) {
+  if (state.admin.loadFailedSection === section) return false;
+  if (section === "overview") return !state.admin.overview;
+  if (section === "users") return !state.admin.users;
+  if (section === "generations") return !state.admin.generations;
+  if (section === "pricing") return !state.admin.pricing;
+  if (section === "finance") return !state.admin.withdrawals || !state.admin.overview;
+  if (section === "prompts") return !state.admin.promptsLoaded;
+  if (section === "ledger") return !state.admin.ledger;
+  return false;
+}
+
+function adminToolbarHtml() {
+  const active = state.admin.section || "overview";
+  return `
+    <div class="admin-toolbar">
+      <div class="admin-tabs" role="tablist" aria-label="Разделы админки">
+        ${adminSections().map(([key, label]) => `
+          <button type="button" data-admin-section="${escapeHtml(key)}" aria-pressed="${active === key ? "true" : "false"}">${escapeHtml(label)}</button>
+        `).join("")}
+      </div>
+      <button class="button ghost admin-refresh" type="button" data-admin-refresh>Обновить</button>
+    </div>
+  `;
+}
+
+function adminMetricHtml(label, value, detail = "") {
+  return `
+    <article class="admin-metric">
+      <span>${escapeHtml(label)}</span>
+      <b>${escapeHtml(value)}</b>
+      ${detail ? `<small>${escapeHtml(detail)}</small>` : ""}
+    </article>
+  `;
+}
+
+function adminSeriesHtml(title, series = [], formatter = (value) => formatNumber(value)) {
+  const values = series.map((point) => Number(point.value || 0));
+  const max = Math.max(1, ...values);
+  return `
+    <section class="admin-panel-block">
+      <div class="admin-block-head">
+        <h4>${escapeHtml(title)}</h4>
+        <span>${formatNumber(values.reduce((sum, value) => sum + value, 0))}</span>
+      </div>
+      <div class="admin-series">
+        ${series.map((point) => {
+          const value = Number(point.value || 0);
+          const height = Math.max(5, Math.min(100, Math.round((value / max) * 100)));
+          const label = String(point.date || "").slice(5) || "—";
+          return `<span title="${escapeHtml(`${point.date || ""}: ${formatter(value)}`)}"><i style="height: ${height}%"></i><small>${escapeHtml(label)}</small></span>`;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function adminCompactList(title, items = [], empty = "Нет данных") {
+  return `
+    <section class="admin-panel-block">
+      <div class="admin-block-head">
+        <h4>${escapeHtml(title)}</h4>
+        <span>${formatNumber(items.length)}</span>
+      </div>
+      <div class="admin-compact-list">
+        ${items.length ? items.join("") : `<div class="admin-muted">${escapeHtml(empty)}</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function adminGenerationLine(item = {}) {
+  const owner = item.user || {};
+  return `
+    <article class="admin-list-row">
+      <div>
+        <b>#${escapeHtml(item.id)} · ${escapeHtml(cleanModelName(item.model || "model"))}</b>
+        <small>${escapeHtml(adminUserLabel(owner))} · ${escapeHtml(typeLabel(item.gen_type))} · ${formatDateTime(item.created_at)}</small>
+      </div>
+      ${adminBadge(item.status)}
+    </article>
+  `;
+}
+
+function adminTransactionLine(item = {}) {
+  const owner = item.user || {};
+  return `
+    <article class="admin-list-row">
+      <div>
+        <b>${formatCurrency(item.amount_rub || 0)} · ${formatNumber(item.credits || 0)} поцелуев</b>
+        <small>${escapeHtml(adminUserLabel(owner))} · ${escapeHtml(item.provider || "provider")} · ${formatDateTime(item.created_at)}</small>
+      </div>
+      ${adminBadge(item.status)}
+    </article>
+  `;
+}
+
+function renderAdminOverview() {
+  const data = state.admin.overview;
+  if (!data) return `<div class="empty-state">Загружаю аналитику проекта...</div>`;
+  const totals = data.totals || {};
+  const periods = data.periods || {};
+  const recent = data.recent || {};
+  const settings = data.settings || {};
+  const alerts = data.alerts || [];
+  return `
+    <div class="admin-metrics">
+      ${adminMetricHtml("Выручка", formatCurrency(totals.revenue_total || 0), `30 дней: ${formatCurrency(periods.revenue_30d || 0)}`)}
+      ${adminMetricHtml("Пользователи", formatNumber(totals.users || 0), `+${formatNumber(periods.new_users_7d || 0)} за 7 дней`)}
+      ${adminMetricHtml("Генерации", formatNumber(totals.generations || 0), `${formatNumber(periods.generations_today || 0)} сегодня`)}
+      ${adminMetricHtml("В работе", formatNumber(totals.active_generations || 0), "pending + processing")}
+      ${adminMetricHtml("Баланс у юзеров", formatNumber(totals.credits_on_balance || 0), `Списано: ${formatNumber(totals.credits_spent || 0)}`)}
+      ${adminMetricHtml("Очередь админа", formatNumber((totals.pending_prompts || 0) + (totals.pending_withdrawals || 0)), `${formatNumber(totals.pending_prompts || 0)} идей · ${formatNumber(totals.pending_withdrawals || 0)} выводов`)}
+    </div>
+    <div class="admin-grid admin-grid-wide">
+      <section class="admin-panel-block admin-alert-stack">
+        <div class="admin-block-head">
+          <h4>Здоровье проекта</h4>
+          <span>${escapeHtml(settings.env || "env")}</span>
+        </div>
+        ${alerts.length ? alerts.map((alert) => `
+          <article class="admin-alert ${escapeHtml(alert.level || "info")}">
+            <b>${escapeHtml(alert.title || "Проверка")}</b>
+            <small>${escapeHtml(alert.message || "")}</small>
+          </article>
+        `).join("") : `<div class="admin-alert success"><b>Критичных предупреждений нет</b><small>Основные настройки выглядят включенными.</small></div>`}
+        <div class="admin-settings-list">
+          <span>CAPTCHA: <b>${settings.captcha_enabled ? "включена" : "выключена"}</b></span>
+          <span>KIE secret: <b>${settings.kie_webhook_secret ? "есть" : "нет"}</b></span>
+          <span>Email auth: <b>${settings.email_auth_enabled ? "да" : "нет"}</b></span>
+          <span>Stars: <b>${settings.telegram_stars_enabled ? "да" : "нет"}</b></span>
+        </div>
+      </section>
+      ${adminSeriesHtml("Выручка 14 дней", data.series?.revenue_14d || [], formatCurrency)}
+      ${adminSeriesHtml("Генерации 14 дней", data.series?.generations_14d || [])}
+      ${adminSeriesHtml("Новые пользователи 14 дней", data.series?.users_14d || [])}
+    </div>
+    <div class="admin-grid">
+      <section class="admin-panel-block">
+        <div class="admin-block-head">
+          <h4>Топ моделей</h4>
+          <span>${formatNumber((data.top_models || []).length)}</span>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>Модель</th><th>Тип</th><th>Работ</th><th>Поцелуи</th><th>Fail</th></tr></thead>
+            <tbody>
+              ${(data.top_models || []).map((item) => `
+                <tr>
+                  <td>${escapeHtml(cleanModelName(item.model || "model"))}</td>
+                  <td>${escapeHtml(typeLabel(item.gen_type))}</td>
+                  <td>${formatNumber(item.count || 0)}</td>
+                  <td>${formatNumber(item.credits || 0)}</td>
+                  <td>${formatNumber(item.failed || 0)}</td>
+                </tr>
+              `).join("") || `<tr><td colspan="5">Пока нет генераций.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      ${adminCompactList("Активные генерации", (recent.active_generations || []).map(adminGenerationLine), "Активных задач нет")}
+      ${adminCompactList("Последние оплаты", (recent.transactions || []).slice(0, 8).map(adminTransactionLine), "Оплат пока нет")}
+      ${adminCompactList("Последние работы", (recent.generations || []).slice(0, 8).map(adminGenerationLine), "История пуста")}
+    </div>
+  `;
+}
+
+function renderAdminUsers() {
+  const payload = state.admin.users;
+  const items = payload?.items || [];
+  return `
+    <form class="admin-filterbar" data-admin-user-search-form>
+      <label>
+        <span>Поиск пользователя</span>
+        <input class="admin-input" name="q" type="search" value="${escapeHtml(state.admin.userQuery || "")}" placeholder="id, tg_id, @username, email, телефон" />
+      </label>
+      <button class="button ghost" type="submit">Найти</button>
+    </form>
+    ${payload ? `
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr><th>Пользователь</th><th>Баланс</th><th>Активность</th><th>Статус</th><th>Действия</th></tr></thead>
+          <tbody>
+            ${items.map((item) => `
+              <tr data-admin-user-row="${escapeHtml(item.id)}">
+                <td>
+                  <b>${escapeHtml(adminUserLabel(item))}</b>
+                  <small>ID ${escapeHtml(item.id)} · tg ${escapeHtml(item.tg_id || "—")} · ${escapeHtml(item.email || item.phone || "контакт не указан")}</small>
+                </td>
+                <td>
+                  <b>${formatNumber(item.credits || 0)}</b>
+                  <small>реф: ${formatCurrency(item.referral_balance || 0)}</small>
+                </td>
+                <td>
+                  <b>${formatNumber(item.generations_count || 0)} работ</b>
+                  <small>${formatCurrency(item.paid_rub || 0)} оплат · ${formatDateTime(item.last_generation_at)}</small>
+                </td>
+                <td>${item.is_banned ? adminBadge("banned", "ban") : adminBadge("active", "ok")}</td>
+                <td>
+                  <div class="admin-row-actions">
+                    <input class="admin-input admin-number-input" data-admin-credit-input type="number" step="0.1" placeholder="+/-" aria-label="Изменить баланс" />
+                    <button type="button" data-admin-user-credit>Применить</button>
+                    <button type="button" data-admin-user-ban="${item.is_banned ? "false" : "true"}">${item.is_banned ? "Разбан" : "Бан"}</button>
+                  </div>
+                </td>
+              </tr>
+            `).join("") || `<tr><td colspan="5">Пользователи не найдены.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <p class="admin-muted">Показано ${formatNumber(items.length)} из ${formatNumber(payload.total || items.length)}.</p>
+    ` : `<div class="empty-state">Загружаю пользователей...</div>`}
+  `;
+}
+
+function renderAdminGenerations() {
+  const payload = state.admin.generations;
+  const items = payload?.items || [];
+  return `
+    <form class="admin-filterbar admin-filterbar-grid" data-admin-generation-filter-form>
+      <label>
+        <span>Статус</span>
+        <select class="admin-input" name="status">
+          ${["all", "pending", "processing", "done", "failed"].map((value) => `<option value="${value}" ${state.admin.generationStatus === value ? "selected" : ""}>${escapeHtml(value === "all" ? "все" : statusLabel(value))}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        <span>Тип</span>
+        <select class="admin-input" name="gen_type">
+          ${["all", "image", "video", "music"].map((value) => `<option value="${value}" ${state.admin.generationType === value ? "selected" : ""}>${escapeHtml(value === "all" ? "все" : typeLabel(value))}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        <span>Поиск</span>
+        <input class="admin-input" name="q" type="search" value="${escapeHtml(state.admin.generationQuery || "")}" placeholder="id, модель, task, пользователь" />
+      </label>
+      <button class="button ghost" type="submit">Показать</button>
+    </form>
+    ${payload ? `
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr><th>Работа</th><th>Пользователь</th><th>Статус</th><th>Стоимость</th><th>Время</th><th>Действия</th></tr></thead>
+          <tbody>
+            ${items.map((item) => {
+              const active = ["pending", "processing"].includes(String(item.status || "").toLowerCase());
+              return `
+                <tr>
+                  <td>
+                    <b>#${escapeHtml(item.id)} · ${escapeHtml(cleanModelName(item.model || "model"))}</b>
+                    <small>${escapeHtml(typeLabel(item.gen_type))} · ${escapeHtml(item.task_id || "task не задан")}</small>
+                  </td>
+                  <td>
+                    <b>${escapeHtml(adminUserLabel(item.user || {}))}</b>
+                    <small>ID ${escapeHtml(item.user_id || "—")}</small>
+                  </td>
+                  <td>${adminBadge(item.status)}</td>
+                  <td>${formatNumber(item.credits_spent || 0)}</td>
+                  <td>
+                    <b>${formatDateTime(item.created_at)}</b>
+                    <small>${item.finished_at ? `готово ${formatDateTime(item.finished_at)}` : "ещё не завершено"}</small>
+                  </td>
+                  <td>
+                    <div class="admin-row-actions">
+                      ${item.result_url ? `<a href="${escapeHtml(item.result_url)}" target="_blank" rel="noopener">Открыть</a>` : ""}
+                      ${active ? `<button type="button" data-admin-generation-fail="${escapeHtml(item.id)}">Fail + refund</button>` : ""}
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join("") || `<tr><td colspan="6">Генерации не найдены.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <p class="admin-muted">Показано ${formatNumber(items.length)} из ${formatNumber(payload.total || items.length)}.</p>
+    ` : `<div class="empty-state">Загружаю генерации...</div>`}
+  `;
+}
+
+function renderAdminPricing() {
+  const payload = state.admin.pricing;
+  const models = payload?.models || [];
+  const plans = payload?.price_plans || [];
+  return `
+    <form class="admin-filterbar" data-admin-pricing-search-form>
+      <label>
+        <span>Поиск модели</span>
+        <input class="admin-input" name="q" type="search" value="${escapeHtml(state.admin.pricingQuery || "")}" placeholder="model key или название" />
+      </label>
+      <button class="button ghost" type="submit">Найти</button>
+    </form>
+    ${payload ? `
+      <div class="admin-grid">
+        <section class="admin-panel-block">
+          <div class="admin-block-head">
+            <h4>Стоимость моделей</h4>
+            <span>${formatNumber(models.length)}</span>
+          </div>
+          <div class="admin-table-wrap">
+            <table class="admin-table admin-edit-table">
+              <thead><tr><th>Ключ</th><th>Название</th><th>Тип</th><th>Цена</th><th>Вкл</th><th></th></tr></thead>
+              <tbody>
+                ${models.map((item) => `
+                  <tr data-admin-model-row="${escapeHtml(item.id)}">
+                    <td><b>${escapeHtml(item.model_key)}</b></td>
+                    <td><input class="admin-input" name="display_name" value="${escapeHtml(item.display_name || item.model_key)}" /></td>
+                    <td>${escapeHtml(typeLabel(item.gen_type))}</td>
+                    <td><input class="admin-input admin-number-input" name="credits" type="number" min="0" step="0.01" value="${escapeHtml(item.credits || 0)}" /></td>
+                    <td><input class="admin-checkbox" name="is_active" type="checkbox" ${item.is_active ? "checked" : ""} /></td>
+                    <td><button type="button" data-admin-model-save>Сохранить</button></td>
+                  </tr>
+                `).join("") || `<tr><td colspan="6">Модели не найдены.</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="admin-panel-block">
+          <div class="admin-block-head">
+            <h4>Пакеты пополнения</h4>
+            <span>${formatNumber(plans.length)}</span>
+          </div>
+          <div class="admin-table-wrap">
+            <table class="admin-table admin-edit-table">
+              <thead><tr><th>Ключ</th><th>Название</th><th>Поцелуи</th><th>₽</th><th>Stars</th><th>Порядок</th><th>Вкл</th><th></th></tr></thead>
+              <tbody>
+                ${plans.map((item) => `
+                  <tr data-admin-plan-row="${escapeHtml(item.id)}">
+                    <td><b>${escapeHtml(item.key)}</b></td>
+                    <td><input class="admin-input" name="label" value="${escapeHtml(item.label || item.key)}" /></td>
+                    <td><input class="admin-input admin-number-input" name="credits" type="number" min="0.01" step="0.01" value="${escapeHtml(item.credits || 0)}" /></td>
+                    <td><input class="admin-input admin-number-input" name="price_rub" type="number" min="1" step="1" value="${escapeHtml(item.price_rub || 0)}" /></td>
+                    <td><input class="admin-input admin-number-input" name="price_stars" type="number" min="1" step="1" value="${escapeHtml(item.price_stars || "")}" /></td>
+                    <td><input class="admin-input admin-number-input" name="sort_order" type="number" step="1" value="${escapeHtml(item.sort_order || 0)}" /></td>
+                    <td><input class="admin-checkbox" name="is_active" type="checkbox" ${item.is_active ? "checked" : ""} /></td>
+                    <td><button type="button" data-admin-plan-save>Сохранить</button></td>
+                  </tr>
+                `).join("") || `<tr><td colspan="8">Пакеты не найдены.</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    ` : `<div class="empty-state">Загружаю тарифы и цены...</div>`}
+  `;
+}
+
+function renderAdminFinance() {
+  if (!state.admin.withdrawals || !state.admin.overview) {
+    return `<div class="empty-state">Загружаю финансы, заявки и последние транзакции...</div>`;
+  }
+  const withdrawals = state.admin.withdrawals?.items || [];
+  const transactions = state.admin.overview?.recent?.transactions || [];
+  return `
+    <div class="admin-grid">
+      <section class="admin-panel-block">
+        <div class="admin-block-head">
+          <h4>Заявки на вывод</h4>
+          <span>${formatNumber(withdrawals.length)}</span>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>Пользователь</th><th>Сумма</th><th>Реквизиты</th><th>Статус</th><th>Действия</th></tr></thead>
+            <tbody>
+              ${withdrawals.map((item) => {
+                const pending = String(item.status || "").toLowerCase() === "pending";
+                return `
+                  <tr>
+                    <td>
+                      <b>${escapeHtml(adminUserLabel(item.user || {}))}</b>
+                      <small>ID ${escapeHtml(item.user_id)} · ${formatDateTime(item.created_at)}</small>
+                    </td>
+                    <td>${formatCurrency(item.amount_rub || 0)}</td>
+                    <td><small>${escapeHtml(item.payout_details || "не указано")}</small></td>
+                    <td>${adminBadge(item.status)}</td>
+                    <td>
+                      <div class="admin-row-actions">
+                        ${pending ? `
+                          <button type="button" data-admin-withdrawal-action="approve" data-withdrawal-id="${escapeHtml(item.id)}">ОК</button>
+                          <button type="button" data-admin-withdrawal-action="reject" data-withdrawal-id="${escapeHtml(item.id)}">Отказ</button>
+                        ` : `<span class="admin-muted">${escapeHtml(item.admin_note || "решено")}</span>`}
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join("") || `<tr><td colspan="5">Заявок на вывод нет.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      ${adminCompactList("Последние транзакции", transactions.slice(0, 14).map(adminTransactionLine), "Транзакций пока нет")}
+    </div>
+  `;
+}
+
+function renderAdminPrompts() {
+  const loaded = state.admin.promptsLoaded;
+  if (!loaded) return `<div class="empty-state">Загружаю модерацию промптов...</div>`;
+  return state.adminPrompts.length ? `
+    <div class="admin-prompt-grid">
+      ${state.adminPrompts.map((prompt, index) => `
+        <article class="feature-card admin-card">
+          ${promptPreviewHtml(prompt, index)}
+          <span>${escapeHtml(prompt.category || "идея")} · ${escapeHtml(prompt.status || "pending")}</span>
+          <h3>${escapeHtml(prompt.title || `Идея #${prompt.id}`)}</h3>
+          <p>${escapeHtml(prompt.description || prompt.prompt_text || "")}</p>
+          <div class="card-actions">
+            <button type="button" data-admin-prompt-action="approve" data-prompt-id="${escapeHtml(prompt.id)}">Одобрить</button>
+            <button type="button" data-admin-prompt-action="reject" data-prompt-id="${escapeHtml(prompt.id)}">Отклонить</button>
+            <button type="button" data-admin-prompt-action="deactivate" data-prompt-id="${escapeHtml(prompt.id)}">Скрыть</button>
+          </div>
+        </article>
+      `).join("")}
+    </div>
+  ` : `<div class="empty-state">Новых идей на модерации нет.</div>`;
+}
+
+function renderAdminLedger() {
+  const payload = state.admin.ledger;
+  const items = payload?.items || [];
+  return payload ? `
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr><th>ID</th><th>Пользователь</th><th>Дельта</th><th>Баланс после</th><th>Источник</th><th>Заметка</th><th>Время</th></tr></thead>
+        <tbody>
+          ${items.map((item) => `
+            <tr>
+              <td>${escapeHtml(item.id)}</td>
+              <td>${escapeHtml(item.user_id)}</td>
+              <td><b>${formatNumber(item.delta || 0)}</b></td>
+              <td>${formatNumber(item.balance_after || 0)}</td>
+              <td><small>${escapeHtml(item.entry_type || "")} · ${escapeHtml(item.source_type || "")} ${escapeHtml(item.source_id || "")}</small></td>
+              <td><small>${escapeHtml(item.note || "")}</small></td>
+              <td>${formatDateTime(item.created_at)}</td>
+            </tr>
+          `).join("") || `<tr><td colspan="7">Журнал баланса пуст.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  ` : `<div class="empty-state">Загружаю журнал баланса...</div>`;
+}
+
+function renderAdminSection(section) {
+  if (section === "users") return renderAdminUsers();
+  if (section === "generations") return renderAdminGenerations();
+  if (section === "finance") return renderAdminFinance();
+  if (section === "pricing") return renderAdminPricing();
+  if (section === "prompts") return renderAdminPrompts();
+  if (section === "ledger") return renderAdminLedger();
+  return renderAdminOverview();
+}
+
 function renderAdmin() {
   const board = $("[data-admin-board]");
   if (!board) return;
@@ -3213,19 +3918,16 @@ function renderAdmin() {
     board.innerHTML = `<div class="empty-state">Раздел доступен администраторам.</div>`;
     return;
   }
-  board.innerHTML = state.adminPrompts.length ? state.adminPrompts.map((prompt, index) => `
-    <article class="feature-card admin-card">
-      ${promptPreviewHtml(prompt, index)}
-      <span>${escapeHtml(prompt.category || "идея")} · ${escapeHtml(prompt.status || "pending")}</span>
-      <h3>${escapeHtml(prompt.title || `Идея #${prompt.id}`)}</h3>
-      <p>${escapeHtml(prompt.description || prompt.prompt_text || "")}</p>
-      <div class="card-actions">
-        <button type="button" data-admin-prompt-action="approve" data-prompt-id="${escapeHtml(prompt.id)}">Одобрить</button>
-        <button type="button" data-admin-prompt-action="reject" data-prompt-id="${escapeHtml(prompt.id)}">Отклонить</button>
-        <button type="button" data-admin-prompt-action="deactivate" data-prompt-id="${escapeHtml(prompt.id)}">Скрыть</button>
-      </div>
-    </article>
-  `).join("") : `<div class="empty-state">Новых идей на модерации нет.</div>`;
+  const section = state.admin.section || "overview";
+  const loading = state.admin.loadingSection === section;
+  board.innerHTML = `
+    ${adminToolbarHtml()}
+    ${loading ? `<div class="admin-loading">Обновляю данные...</div>` : ""}
+    <div class="admin-content">${renderAdminSection(section)}</div>
+  `;
+  if (adminNeedsLoad(section) && !state.admin.loadingSection) {
+    window.setTimeout(() => loadAdminSection(section), 0);
+  }
 }
 
 function feedCard(item, index = 0, variant = "panel") {
@@ -3245,17 +3947,6 @@ function feedCard(item, index = 0, variant = "panel") {
     return `
       <article class="gallery-card feed-card feed-card-clean feed-pin-card">
         ${mediaHtml(item, index, { openUrls, openIndex: carouselIndex, eager: true, feedImage: true })}
-        <div class="feed-pin-info">
-          <div class="feed-tile-head">
-            <span class="feed-author">${escapeHtml(author)}</span>
-          </div>
-          <div class="feed-tile-stats">${feedCountsHtml(item)}</div>
-          <div class="feed-clean-actions feed-tile-actions">
-            ${mediaUrl ? `<button type="button" class="feed-action-ghost" aria-label="Открыть" title="Открыть" ${openAttrs}>↗</button>` : ""}
-            ${id ? `<button type="button" aria-label="Лайк" title="Лайк" data-like-feed="${escapeHtml(id)}">♥</button>` : ""}
-            ${id ? `<button type="button" class="feed-action-main" aria-label="Повторить" title="Повторить" data-remix-feed="${escapeHtml(id)}">↻</button>` : `<a class="feed-action-main" aria-label="Создать" title="Создать" href="studio.html">+</a>`}
-          </div>
-        </div>
       </article>
     `;
   }
@@ -3326,6 +4017,7 @@ function renderSettings() {
         <button class="button ghost${activeTopic === "stars" ? " active" : ""}" type="button" data-help-topic="stars" aria-pressed="${activeTopic === "stars" ? "true" : "false"}">Stars</button>
       </div>
       <article class="help-card"><span>${escapeHtml(state.help.topic)} · ${escapeHtml(state.help.language)}</span><p>${escapeHtml(state.help.text)}</p></article>
+      <article class="help-card"><span>Разработчик</span><p>По техническим вопросам сайта, оплат и интеграций можно написать разработчику в Telegram.</p><div class="settings-actions"><a class="button ghost" href="https://t.me/Chillcreative" target="_blank" rel="noopener">@Chillcreative</a></div></article>
     `
     : `
       <div class="settings-actions help-topic-actions">
@@ -3333,6 +4025,7 @@ function renderSettings() {
         <button class="button ghost" type="button" data-help-topic="stars" aria-pressed="false">Stars</button>
       </div>
       <article class="help-card"><span>Помощь</span><p>Войдите и выберите тему. Здесь появятся короткие подсказки по кабинету, балансу и созданию работ.</p></article>
+      <article class="help-card"><span>Разработчик</span><p>По техническим вопросам сайта, оплат и интеграций можно написать разработчику в Telegram.</p><div class="settings-actions"><a class="button ghost" href="https://t.me/Chillcreative" target="_blank" rel="noopener">@Chillcreative</a></div></article>
     `;
 }
 
@@ -3439,6 +4132,8 @@ function ensurePasswordAuthForms() {
           <label><input name="full_name" type="text" autocomplete="name" placeholder="Ваше имя" /></label>
           <label><input name="email" type="email" autocomplete="email" placeholder="you@example.com" required /></label>
           <label><input name="password" type="password" autocomplete="new-password" placeholder="Пароль от 8 символов" minlength="8" required /></label>
+          <div class="captcha-field" data-captcha-widget hidden></div>
+          <input name="captcha_token" type="hidden" value="" />
           <button class="button ghost" type="submit">Создать аккаунт</button>
           <small data-password-register-status>После регистрации откроется профиль сайта.</small>
         </form>
@@ -3447,6 +4142,7 @@ function ensurePasswordAuthForms() {
     const telegramPanel = root.querySelector(".telegram-auth-panel");
     root.insertBefore(panel, telegramPanel || null);
   });
+  hydrateCaptchaForms();
 }
 
 async function passwordLogin(form) {
@@ -3460,9 +4156,7 @@ async function passwordLogin(form) {
         password: String(data.get("password") || ""),
       }),
     });
-    state.token = "";
-    state.user = result.user;
-    localStorage.removeItem(TOKEN_KEY);
+    rememberAuthSession(result);
     clearPendingReferralCode();
     toast("Вход выполнен.", "success");
     await loadPrivate();
@@ -3476,23 +4170,24 @@ async function passwordRegister(form) {
   const status = form.querySelector("[data-password-register-status]");
   const data = new FormData(form);
   try {
+    const captchaToken = await registrationCaptchaToken(form);
     const result = await request("/auth/password-register", {
       method: "POST",
       body: JSON.stringify({
         full_name: String(data.get("full_name") || "").trim() || null,
         email: String(data.get("email") || "").trim(),
         password: String(data.get("password") || ""),
+        captcha_token: captchaToken || null,
         ...referralRequestFields(),
       }),
     });
-    state.token = "";
-    state.user = result.user;
-    localStorage.removeItem(TOKEN_KEY);
+    rememberAuthSession(result);
     clearPendingReferralCode();
     toast("Аккаунт создан.", "success");
     await loadPrivate();
     finalizeAuth("profile");
   } catch (error) {
+    resetCaptcha(form);
     if (status) status.textContent = `Не удалось создать аккаунт: ${error.message}`;
   }
 }
@@ -3535,6 +4230,7 @@ function resetLoginForms() {
   });
   $$("[data-password-login-form], [data-password-register-form]").forEach((form) => {
     form.reset();
+    if (form.matches("[data-password-register-form]")) resetCaptcha(form);
   });
   $$("[data-password-login-status]").forEach((node) => {
     node.textContent = "Для сайта используйте email и пароль от кабинета.";
@@ -3645,9 +4341,7 @@ window.onTelegramAuth = async (user) => {
       method: "POST",
       body: JSON.stringify({ ...user, ...referralRequestFields() }),
     });
-    state.token = "";
-    state.user = result.user;
-    localStorage.removeItem(TOKEN_KEY);
+    rememberAuthSession(result);
     clearPendingReferralCode();
     toast("Вход выполнен. Ваш кабинет открыт.", "success");
     await loadPrivate();
@@ -3747,9 +4441,7 @@ async function verifyContactCode(form) {
       method: "POST",
       body: JSON.stringify({ contact, code, full_name: fullName || null, ...referralRequestFields() }),
     });
-    state.token = "";
-    state.user = result.user;
-    localStorage.removeItem(TOKEN_KEY);
+    rememberAuthSession(result);
     clearPendingReferralCode();
     toast("Вход выполнен. Кабинет открыт.", "success");
     await loadPrivate();
@@ -3761,15 +4453,12 @@ async function verifyContactCode(form) {
 
 function logout() {
   request("/auth/logout", { method: "POST" }).catch(() => {});
-  localStorage.removeItem(TOKEN_KEY);
-  state.token = "";
-  state.user = null;
+  forgetAuthSession();
   state.queue = [];
   state.history = [];
   state.billing = null;
   state.referrals = null;
   state.help = null;
-  state.adminPrompts = [];
   closeRealtime();
   closeLogin();
   resetLoginForms();
@@ -4281,10 +4970,243 @@ async function handleAdminPromptAction(action, promptId) {
     await request(`/admin/prompts/${promptId}/${path}`, options);
     const payload = await request("/admin/prompts?status=pending");
     state.adminPrompts = payload?.items || [];
+    state.admin.promptsLoaded = true;
     renderAdmin();
     toast("Модерация обновлена.", "success");
   } catch (error) {
     toast(`Не удалось обновить идею: ${error.message}`, "danger");
+  }
+}
+
+async function loadAdminSection(section = state.admin.section || "overview", { force = false } = {}) {
+  if (!state.user?.is_admin) return;
+  const validSections = new Set(adminSections().map(([key]) => key));
+  const normalized = validSections.has(section) ? section : "overview";
+  state.admin.section = normalized;
+  if (!force && !adminNeedsLoad(normalized)) {
+    renderAdmin();
+    return;
+  }
+  if (state.admin.loadingSection === normalized) return;
+  state.admin.loadingSection = normalized;
+  state.admin.loadFailedSection = "";
+  renderAdmin();
+  try {
+    if (normalized === "overview") {
+      state.admin.overview = await request("/admin/overview");
+    } else if (normalized === "users") {
+      const params = new URLSearchParams({ limit: "60", offset: "0" });
+      if (state.admin.userQuery) params.set("q", state.admin.userQuery);
+      state.admin.users = await request(`/admin/users?${params.toString()}`);
+    } else if (normalized === "generations") {
+      const params = new URLSearchParams({
+        limit: "70",
+        offset: "0",
+        status: state.admin.generationStatus || "all",
+        gen_type: state.admin.generationType || "all",
+      });
+      if (state.admin.generationQuery) params.set("q", state.admin.generationQuery);
+      state.admin.generations = await request(`/admin/generations?${params.toString()}`);
+    } else if (normalized === "pricing") {
+      const params = new URLSearchParams({ include_inactive: "true" });
+      if (state.admin.pricingQuery) params.set("q", state.admin.pricingQuery);
+      state.admin.pricing = await request(`/admin/pricing?${params.toString()}`);
+    } else if (normalized === "finance") {
+      const [withdrawals, overview] = await Promise.all([
+        request(`/admin/withdrawals?status=${encodeURIComponent(state.admin.withdrawalStatus || "all")}&limit=80`),
+        force || !state.admin.overview ? request("/admin/overview") : Promise.resolve(state.admin.overview),
+      ]);
+      state.admin.withdrawals = withdrawals;
+      state.admin.overview = overview;
+    } else if (normalized === "prompts") {
+      const payload = await request("/admin/prompts?status=pending");
+      state.adminPrompts = payload?.items || [];
+      state.admin.promptsLoaded = true;
+    } else if (normalized === "ledger") {
+      state.admin.ledger = await request("/admin/ledger?limit=80");
+    }
+  } catch (error) {
+    state.admin.loadFailedSection = normalized;
+    toast(`Админка не обновилась: ${error.message}`, "danger");
+  } finally {
+    state.admin.loadingSection = "";
+    renderAdmin();
+  }
+}
+
+function refreshAdmin() {
+  return loadAdminSection(state.admin.section || "overview", { force: true });
+}
+
+function handleAdminUserSearch(form) {
+  const data = new FormData(form);
+  state.admin.userQuery = String(data.get("q") || "").trim();
+  state.admin.users = null;
+  return loadAdminSection("users", { force: true });
+}
+
+function handleAdminGenerationFilter(form) {
+  const data = new FormData(form);
+  state.admin.generationStatus = String(data.get("status") || "all");
+  state.admin.generationType = String(data.get("gen_type") || "all");
+  state.admin.generationQuery = String(data.get("q") || "").trim();
+  state.admin.generations = null;
+  return loadAdminSection("generations", { force: true });
+}
+
+function handleAdminPricingSearch(form) {
+  const data = new FormData(form);
+  state.admin.pricingQuery = String(data.get("q") || "").trim();
+  state.admin.pricing = null;
+  return loadAdminSection("pricing", { force: true });
+}
+
+async function handleAdminUserCredit(button) {
+  const row = button.closest("[data-admin-user-row]");
+  const userId = row?.dataset.adminUserRow;
+  const input = row?.querySelector("[data-admin-credit-input]");
+  const amount = Number(input?.value || 0);
+  if (!userId || !Number.isFinite(amount) || Math.abs(amount) < 0.000001) {
+    toast("Укажите сумму изменения баланса.", "info");
+    return;
+  }
+  button.disabled = true;
+  try {
+    await request(`/admin/users/${encodeURIComponent(userId)}/credits`, {
+      method: "POST",
+      body: JSON.stringify({ amount, note: "Web admin balance adjustment" }),
+    });
+    if (input) input.value = "";
+    state.admin.users = null;
+    state.admin.overview = null;
+    state.admin.ledger = null;
+    await loadAdminSection("users", { force: true });
+    toast("Баланс пользователя обновлён.", "success");
+  } catch (error) {
+    toast(`Не удалось изменить баланс: ${error.message}`, "danger");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handleAdminUserBan(button) {
+  const row = button.closest("[data-admin-user-row]");
+  const userId = row?.dataset.adminUserRow;
+  const banned = button.dataset.adminUserBan === "true";
+  if (!userId) return;
+  button.disabled = true;
+  try {
+    await request(`/admin/users/${encodeURIComponent(userId)}/ban`, {
+      method: "POST",
+      body: JSON.stringify({ banned }),
+    });
+    state.admin.users = null;
+    state.admin.overview = null;
+    await loadAdminSection("users", { force: true });
+    toast(banned ? "Пользователь заблокирован." : "Пользователь разблокирован.", "success");
+  } catch (error) {
+    toast(`Не удалось обновить статус: ${error.message}`, "danger");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handleAdminGenerationFail(button) {
+  const generationId = button.dataset.adminGenerationFail;
+  if (!generationId) return;
+  const confirmed = window.confirm("Пометить генерацию failed и вернуть списанные поцелуи пользователю?");
+  if (!confirmed) return;
+  button.disabled = true;
+  try {
+    await request(`/admin/generations/${encodeURIComponent(generationId)}/fail`, {
+      method: "POST",
+      body: JSON.stringify({ error: "Stopped from web admin", refund: true }),
+    });
+    state.admin.generations = null;
+    state.admin.overview = null;
+    state.admin.ledger = null;
+    await loadAdminSection("generations", { force: true });
+    toast("Генерация остановлена, баланс возвращён.", "success");
+  } catch (error) {
+    toast(`Не удалось остановить генерацию: ${error.message}`, "danger");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handleAdminModelSave(button) {
+  const row = button.closest("[data-admin-model-row]");
+  const modelId = row?.dataset.adminModelRow;
+  if (!modelId) return;
+  const displayName = row.querySelector("[name='display_name']")?.value.trim();
+  const credits = Number(row.querySelector("[name='credits']")?.value || 0);
+  const active = row.querySelector("[name='is_active']")?.checked || false;
+  button.disabled = true;
+  try {
+    await request(`/admin/model-costs/${encodeURIComponent(modelId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: displayName, credits, is_active: active }),
+    });
+    state.admin.pricing = null;
+    state.models = [];
+    await loadAdminSection("pricing", { force: true });
+    toast("Цена модели сохранена.", "success");
+  } catch (error) {
+    toast(`Не удалось сохранить модель: ${error.message}`, "danger");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handleAdminPlanSave(button) {
+  const row = button.closest("[data-admin-plan-row]");
+  const planId = row?.dataset.adminPlanRow;
+  if (!planId) return;
+  const priceStarsValue = row.querySelector("[name='price_stars']")?.value.trim();
+  const body = {
+    label: row.querySelector("[name='label']")?.value.trim(),
+    credits: Number(row.querySelector("[name='credits']")?.value || 0),
+    price_rub: Number(row.querySelector("[name='price_rub']")?.value || 0),
+    price_stars: priceStarsValue ? Number(priceStarsValue) : null,
+    sort_order: Number(row.querySelector("[name='sort_order']")?.value || 0),
+    is_active: row.querySelector("[name='is_active']")?.checked || false,
+  };
+  button.disabled = true;
+  try {
+    await request(`/admin/price-plans/${encodeURIComponent(planId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    state.admin.pricing = null;
+    state.plans = [];
+    await loadAdminSection("pricing", { force: true });
+    toast("Пакет пополнения сохранён.", "success");
+  } catch (error) {
+    toast(`Не удалось сохранить пакет: ${error.message}`, "danger");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handleAdminWithdrawalAction(button) {
+  const withdrawalId = button.dataset.withdrawalId;
+  const action = button.dataset.adminWithdrawalAction;
+  if (!withdrawalId || !action) return;
+  const note = action === "approve" ? "Approved from web admin" : "Rejected from web admin";
+  button.disabled = true;
+  try {
+    await request(`/admin/withdrawals/${encodeURIComponent(withdrawalId)}`, {
+      method: "POST",
+      body: JSON.stringify({ action, note }),
+    });
+    state.admin.withdrawals = null;
+    state.admin.overview = null;
+    await loadAdminSection("finance", { force: true });
+    toast(action === "approve" ? "Заявка одобрена." : "Заявка отклонена.", "success");
+  } catch (error) {
+    toast(`Не удалось обработать заявку: ${error.message}`, "danger");
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -4491,18 +5413,42 @@ async function loadFeedSource(source = "feed") {
 }
 
 async function loadPrivate({ quiet = false } = {}) {
-  const me = await optionalRequest("/me", null);
+  let me = null;
+  try {
+    me = await request("/me");
+  } catch (error) {
+    state.authChecked = true;
+    const authExpired = error?.status === 401 || error?.status === 403;
+    if (authExpired || !state.user) {
+      forgetAuthSession();
+      closeRealtime();
+      renderAuth();
+      renderAccount();
+      if (!quiet && authExpired) toast("Сессия истекла. Войдите снова.", "info");
+      return;
+    }
+    renderAuth();
+    renderAccount();
+    if (!quiet) toast("Не удалось обновить кабинет. Показываю последнюю загруженную сессию.", "info");
+    return;
+  }
   if (!me) {
-    localStorage.removeItem(TOKEN_KEY);
-    state.token = "";
-    state.user = null;
+    state.authChecked = true;
+    forgetAuthSession();
     closeRealtime();
     renderAuth();
     renderAccount();
     if (!quiet) toast("Сессия истекла. Войдите снова.", "info");
     return;
   }
+  state.authChecked = true;
   state.user = me;
+  localStorage.setItem(AUTH_HINT_KEY, "1");
+  renderAuth();
+  renderAccount();
+  syncAccountTabFromHash();
+  syncActiveNavigation();
+  refreshCustomSelects();
   const coreResults = await Promise.allSettled([
     request("/models/image"),
     request("/models/video"),
@@ -4544,13 +5490,20 @@ async function loadPrivate({ quiet = false } = {}) {
     request("/referrals"),
     request("/prompts?limit=24"),
     request("/help?topic=main"),
+    me.is_admin ? request("/admin/overview") : Promise.resolve(null),
     me.is_admin ? request("/admin/prompts?status=pending") : Promise.resolve({ items: [] }),
   ]);
-  const [referrals, prompts, help, adminPrompts] = extraResults.map((result) => result.status === "fulfilled" ? result.value : null);
+  const [referrals, prompts, help, adminOverview, adminPrompts] = extraResults.map((result) => result.status === "fulfilled" ? result.value : null);
   state.referrals = referrals;
   state.prompts = prompts?.items || state.prompts;
   state.help = help || state.help;
-  state.adminPrompts = adminPrompts?.items || [];
+  if (me.is_admin) {
+    state.admin.overview = adminOverview || state.admin.overview;
+    state.adminPrompts = adminPrompts?.items || [];
+    state.admin.promptsLoaded = Boolean(adminPrompts);
+  } else {
+    resetAdminState();
+  }
   renderAccount();
   syncAccountTabFromHash();
   refreshCustomSelects();
@@ -4595,6 +5548,7 @@ function activateAccountTab(tab, { updateHash = false } = {}) {
     pro: "Telegram и синхрон",
     billing: "Баланс и пополнение",
     referrals: "Партнёрка и статистика",
+    admin: "Управление проектом",
     settings: "Настройки и помощь",
   };
   $$("[data-account-tabs] button").forEach((item) => item.classList.toggle("active", item === button));
@@ -4606,6 +5560,9 @@ function activateAccountTab(tab, { updateHash = false } = {}) {
   }
   syncActiveNavigation();
   refreshCustomSelects();
+  if (normalizedTab === "admin" && state.user?.is_admin) {
+    window.setTimeout(() => loadAdminSection(state.admin.section || "overview"), 0);
+  }
   return true;
 }
 
@@ -4875,6 +5832,46 @@ function bindUi() {
     if (languageButton) setLanguage(languageButton.dataset.language);
     const helpButton = target.closest("[data-help-topic]");
     if (helpButton) loadHelp(helpButton.dataset.helpTopic);
+    const adminSectionButton = target.closest("[data-admin-section]");
+    if (adminSectionButton) {
+      loadAdminSection(adminSectionButton.dataset.adminSection || "overview");
+      return;
+    }
+    const adminRefreshButton = target.closest("[data-admin-refresh]");
+    if (adminRefreshButton) {
+      refreshAdmin();
+      return;
+    }
+    const adminUserCreditButton = target.closest("[data-admin-user-credit]");
+    if (adminUserCreditButton) {
+      handleAdminUserCredit(adminUserCreditButton);
+      return;
+    }
+    const adminUserBanButton = target.closest("[data-admin-user-ban]");
+    if (adminUserBanButton) {
+      handleAdminUserBan(adminUserBanButton);
+      return;
+    }
+    const adminGenerationFailButton = target.closest("[data-admin-generation-fail]");
+    if (adminGenerationFailButton) {
+      handleAdminGenerationFail(adminGenerationFailButton);
+      return;
+    }
+    const adminModelSaveButton = target.closest("[data-admin-model-save]");
+    if (adminModelSaveButton) {
+      handleAdminModelSave(adminModelSaveButton);
+      return;
+    }
+    const adminPlanSaveButton = target.closest("[data-admin-plan-save]");
+    if (adminPlanSaveButton) {
+      handleAdminPlanSave(adminPlanSaveButton);
+      return;
+    }
+    const adminWithdrawalButton = target.closest("[data-admin-withdrawal-action]");
+    if (adminWithdrawalButton) {
+      handleAdminWithdrawalAction(adminWithdrawalButton);
+      return;
+    }
     const adminPromptButton = target.closest("[data-admin-prompt-action]");
     if (adminPromptButton) {
       handleAdminPromptAction(adminPromptButton.dataset.adminPromptAction, adminPromptButton.dataset.promptId);
@@ -4883,6 +5880,24 @@ function bindUi() {
   document.addEventListener("submit", (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+    const adminUserSearchForm = target.closest("[data-admin-user-search-form]");
+    if (adminUserSearchForm) {
+      event.preventDefault();
+      handleAdminUserSearch(adminUserSearchForm);
+      return;
+    }
+    const adminGenerationFilterForm = target.closest("[data-admin-generation-filter-form]");
+    if (adminGenerationFilterForm) {
+      event.preventDefault();
+      handleAdminGenerationFilter(adminGenerationFilterForm);
+      return;
+    }
+    const adminPricingSearchForm = target.closest("[data-admin-pricing-search-form]");
+    if (adminPricingSearchForm) {
+      event.preventDefault();
+      handleAdminPricingSearch(adminPricingSearchForm);
+      return;
+    }
     const promptForm = target.closest("[data-prompt-form]");
     if (promptForm) {
       event.preventDefault();
@@ -4966,11 +5981,16 @@ function bindUi() {
 }
 
 async function boot() {
-  localStorage.removeItem(TOKEN_KEY);
+  state.token = localStorage.getItem(TOKEN_KEY) || "";
+  const hasSessionHint = Boolean(state.token || localStorage.getItem(AUTH_HINT_KEY));
   const routeReferralCode = captureReferralCode();
   bindUi();
   applyRouteParams();
   syncActiveNavigation();
+  if (!hasSessionHint) state.authChecked = true;
+  renderAccount();
+  renderAuth();
+  const privateLoad = loadPrivate({ quiet: true });
   await loadPublic();
   renderHeroStack();
   renderModels();
@@ -4978,7 +5998,7 @@ async function boot() {
   renderGallery();
   renderAccount();
   renderAuth();
-  await loadPrivate({ quiet: true });
+  await privateLoad;
   if (state.user) clearPendingReferralCode();
   renderHeroStack();
   renderModels();

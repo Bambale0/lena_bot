@@ -30,6 +30,7 @@ from db.models import (
     PromoRewardType,
     PricePlan,
     ReferralWithdrawalRequest,
+    SunoVoice,
     Transaction,
     TransactionStatus,
     User,
@@ -1024,7 +1025,12 @@ async def create_generation(
     parent_generation_id: int | None = None,
     action_type: ImageGenerationAction | None = None,
     source_feed_gen_id: int | None = None,
+    input_params: dict | list | str | None = None,
 ) -> Generation:
+    if isinstance(input_params, (dict, list)):
+        input_params_value = json.dumps(input_params, ensure_ascii=False)
+    else:
+        input_params_value = input_params
     gen = Generation(
         user_id=user_id,
         model=model,
@@ -1035,6 +1041,7 @@ async def create_generation(
         parent_generation_id=parent_generation_id,
         action_type=action_type,
         source_feed_gen_id=source_feed_gen_id,
+        input_params=input_params_value,
         status=GenerationStatus.pending,
     )
     session.add(gen)
@@ -1192,6 +1199,110 @@ async def get_generation_by_id(session: AsyncSession, gen_id: int) -> Generation
 async def get_generation_by_task_id(session: AsyncSession, task_id: str) -> Generation | None:
     result = await session.execute(select(Generation).where(Generation.task_id == task_id))
     return result.scalar_one_or_none()
+
+
+# ─── Suno voices ─────────────────────────────────────────────────────────────
+
+async def create_suno_voice(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    name: str,
+    source_audio_url: str,
+    validate_task_id: str,
+    language: str = "en",
+    vocal_start_s: float = 0.0,
+    vocal_end_s: float = 10.0,
+    description: str | None = None,
+    style: str | None = None,
+    singer_skill_level: str | None = None,
+) -> SunoVoice:
+    voice = SunoVoice(
+        user_id=user_id,
+        name=name,
+        description=description,
+        style=style,
+        source_audio_url=source_audio_url,
+        validate_task_id=validate_task_id,
+        language=language,
+        vocal_start_s=vocal_start_s,
+        vocal_end_s=vocal_end_s,
+        singer_skill_level=singer_skill_level,
+        status="validating",
+    )
+    session.add(voice)
+    await session.commit()
+    await session.refresh(voice)
+    return voice
+
+
+async def list_suno_voices(session: AsyncSession, user_id: int) -> list[SunoVoice]:
+    result = await session.execute(
+        select(SunoVoice)
+        .where(SunoVoice.user_id == user_id)
+        .order_by(SunoVoice.created_at.desc(), SunoVoice.id.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_suno_voice(session: AsyncSession, user_id: int, voice_id: int) -> SunoVoice | None:
+    result = await session.execute(
+        select(SunoVoice).where(SunoVoice.id == voice_id, SunoVoice.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_suno_voice_by_validate_task_id(
+    session: AsyncSession,
+    validate_task_id: str,
+) -> SunoVoice | None:
+    result = await session.execute(
+        select(SunoVoice).where(SunoVoice.validate_task_id == validate_task_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_suno_voice_by_voice_task_id(
+    session: AsyncSession,
+    voice_task_id: str,
+) -> SunoVoice | None:
+    result = await session.execute(select(SunoVoice).where(SunoVoice.voice_task_id == voice_task_id))
+    return result.scalar_one_or_none()
+
+
+async def update_suno_voice(
+    session: AsyncSession,
+    voice_id: int,
+    **values,
+) -> SunoVoice | None:
+    allowed = {
+        "name",
+        "description",
+        "style",
+        "source_audio_url",
+        "verify_audio_url",
+        "validate_task_id",
+        "voice_task_id",
+        "voice_id",
+        "validate_phrase",
+        "language",
+        "vocal_start_s",
+        "vocal_end_s",
+        "singer_skill_level",
+        "status",
+        "error_msg",
+    }
+    clean_values = {key: value for key, value in values.items() if key in allowed}
+    clean_values["updated_at"] = datetime.now(timezone.utc)
+    result = await session.execute(
+        update(SunoVoice)
+        .where(SunoVoice.id == voice_id)
+        .values(**clean_values)
+        .returning(SunoVoice)
+    )
+    voice = result.scalar_one_or_none()
+    await session.commit()
+    return voice
 
 
 def _feed_score(gen: Generation, remix_count: int) -> float:

@@ -15,7 +15,7 @@ import httpx
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
 from fastapi import APIRouter, Depends, Header, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.miniapp_auth import create_web_auth_token, verify_telegram_login_data
@@ -60,6 +60,20 @@ class PasswordRegisterRequest(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
     full_name: str | None = Field(default=None, max_length=256)
     referral_code: str | None = Field(default=None, max_length=128)
+    captcha_token: str | None = Field(default=None, max_length=4096)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_captcha_aliases(cls, data):
+        if not isinstance(data, dict) or data.get("captcha_token"):
+            return data
+        for key in ("cf_turnstile_response", "cf-turnstile-response"):
+            value = data.get(key)
+            if value:
+                normalized = dict(data)
+                normalized["captcha_token"] = value
+                return normalized
+        return data
 
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -68,6 +82,7 @@ REFERRAL_CODE_RE = re.compile(r"^[A-Za-z0-9_-]{3,128}$")
 PASSWORD_HASH_ITERATIONS = 390_000
 PASSWORD_LOGIN_WINDOW_SECONDS = 15 * 60
 PASSWORD_LOGIN_MAX_FAILURES = 8
+TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 _PASSWORD_LOGIN_FAILURES: dict[str, list[float]] = {}
 
 
@@ -373,6 +388,74 @@ def _show_debug_auth_code() -> bool:
     return bool(getattr(settings, "APIX_WEB_DEV_AUTH", False))
 
 
+def _captcha_provider() -> str:
+    return str(getattr(settings, "WEB_CAPTCHA_PROVIDER", "turnstile") or "turnstile").strip().lower()
+
+
+def _captcha_enabled() -> bool:
+    return bool(getattr(settings, "WEB_CAPTCHA_ENABLED", False))
+
+
+def _captcha_site_key() -> str:
+    return str(getattr(settings, "WEB_CAPTCHA_SITE_KEY", "") or "").strip()
+
+
+def _captcha_secret_key() -> str:
+    return str(getattr(settings, "WEB_CAPTCHA_SECRET_KEY", "") or "").strip()
+
+
+def _captcha_public_config() -> dict:
+    provider = _captcha_provider()
+    site_key = _captcha_site_key()
+    enabled = _captcha_enabled() and provider == "turnstile" and bool(site_key)
+    return {
+        "enabled": enabled,
+        "required": _captcha_enabled(),
+        "provider": provider,
+        "site_key": site_key if enabled else "",
+    }
+
+
+def _request_remote_ip(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    forwarded_for = str(request.headers.get("x-forwarded-for", "") or "").split(",", 1)[0].strip()
+    cf_ip = str(request.headers.get("cf-connecting-ip", "") or "").strip()
+    client_host = getattr(getattr(request, "client", None), "host", None)
+    return cf_ip or forwarded_for or client_host or None
+
+
+async def _verify_registration_captcha(
+    *,
+    token: str | None,
+    request: Request | None,
+) -> tuple[int, str] | None:
+    if not _captcha_enabled():
+        return None
+    if _captcha_provider() != "turnstile":
+        return 503, "Капча настроена некорректно"
+    secret = _captcha_secret_key()
+    if not _captcha_site_key() or not secret:
+        return 503, "Капча регистрации не настроена. Напишите в поддержку."
+    token = str(token or "").strip()
+    if not token:
+        return 400, "Подтвердите, что вы не робот"
+
+    payload = {"secret": secret, "response": token}
+    remote_ip = _request_remote_ip(request)
+    if remote_ip:
+        payload["remoteip"] = remote_ip
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.post(TURNSTILE_VERIFY_URL, json=payload)
+        data = response.json()
+    except Exception:
+        return 503, "Не удалось проверить капчу. Попробуйте ещё раз."
+    if response.status_code != 200 or not data.get("success"):
+        return 400, "Проверка капчи не прошла. Обновите страницу и попробуйте ещё раз."
+    return None
+
+
 def _telegram_auth_enabled() -> bool:
     return bool(_bot_username() and getattr(settings, "BOT_TOKEN", ""))
 
@@ -565,6 +648,7 @@ async def auth_config() -> dict:
         "contact_login_modes": modes,
         "contact_login_hint": _contact_login_hint(modes),
         "password_login": True,
+        "captcha": _captcha_public_config(),
     })
 
 
@@ -655,8 +739,12 @@ async def password_login(
 async def password_register(
     body: PasswordRegisterRequest,
     response: Response,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
+    captcha_error = await _verify_registration_captcha(token=body.captcha_token, request=request)
+    if captcha_error:
+        return error_response(*captcha_error)
     try:
         contact_type, email = _normalize_contact(body.email)
     except ValueError as exc:

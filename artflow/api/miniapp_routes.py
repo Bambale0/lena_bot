@@ -16,7 +16,7 @@ from urllib.parse import urlencode, urljoin, urlparse
 import httpx
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import LabeledPrice
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import Date, String, cast, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,10 +26,30 @@ from api.assistant_service import generate_assistant_reply, generate_prompt_mode
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.midjourney_service import MJDimensions, MJVideoMotion
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_telegram_login_data
+from api.music_service import (
+    SUNO_VOICE_FAILED_STATUSES,
+    SUNO_VOICE_STATUS_AWAITING_VERIFICATION,
+    SUNO_VOICE_STATUS_FAILED,
+    SUNO_VOICE_STATUS_GENERATING,
+    SUNO_VOICE_STATUS_READY,
+    SUNO_VOICE_STATUS_VALIDATING,
+    build_music_generation_payload,
+    check_suno_voice_available,
+    create_suno_voice_generation_task,
+    create_suno_voice_validation_task,
+    extract_suno_provider_voice_id,
+    extract_suno_validate_phrase,
+    extract_suno_voice_error,
+    extract_suno_voice_status,
+    get_suno_voice_record_info,
+    get_suno_voice_validation_info,
+    is_supported_suno_voice_audio,
+    normalize_music_model,
+    upload_suno_voice_audio,
+)
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.public_files import public_url_is_available, preview_public_image_url
 from api.video_service import VideoModel
-from api.music_service import normalize_music_model
 from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS, _IMAGE_MODEL_ORDER, _VIDEO_MODEL_ORDER
 from bot.utils.deep_links import build_start_payload
 from core.config import settings
@@ -78,6 +98,7 @@ MAX_CONCURRENT = 6
 STALE_GENERATION_TIMEOUT = timedelta(minutes=20)
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_PHOTO_PROMPT_BYTES = 20 * 1024 * 1024
+MAX_SUNO_VOICE_AUDIO_BYTES = 30 * 1024 * 1024
 MAX_REFERENCE_REDIRECTS = 3
 WEB_TASK_PREFIX = "web:"
 
@@ -887,7 +908,7 @@ async def _video_model_rate_info(
     model_key: str,
     caps: dict[str, Any],
     fallback_credits: float,
-) -> tuple[bool, int | None]:
+) -> tuple[bool, float | None]:
     is_per_second = _is_per_second_video_model(caps)
     if not is_per_second:
         return False, None
@@ -896,7 +917,57 @@ async def _video_model_rate_info(
     reference_resolution = resolutions[0] if resolutions else None
     variant_cost = await repo.resolve_video_model_cost(session, model_key, resolution=reference_resolution)
     credits_per_sec = variant_cost.credits if variant_cost else fallback_credits
-    return True, int(credits_per_sec)
+    return True, float(credits_per_sec)
+
+
+async def _resolve_video_price_table(
+    session: AsyncSession,
+    model_key: str,
+    caps: dict[str, Any],
+    fallback_credits: float,
+) -> dict[str, dict[int, float]]:
+    static_table = caps.get("price_table") or {}
+    if static_table:
+        return {
+            str(resolution): {int(duration): float(price) for duration, price in prices.items()}
+            for resolution, prices in static_table.items()
+        }
+
+    if not _is_per_second_video_model(caps):
+        return {}
+
+    durations = [
+        int(duration)
+        for duration in caps.get("duration_options", [])
+        if int(duration or 0) > 0
+    ]
+    if not durations:
+        return {}
+
+    resolutions = [str(item) for item in (caps.get("resolutions") or [])]
+    if not resolutions:
+        resolutions = [""]
+
+    table: dict[str, dict[int, float]] = {}
+    for resolution in resolutions:
+        lookup_resolution = resolution or None
+        try:
+            variant_cost = await repo.resolve_video_model_cost(
+                session,
+                model_key,
+                resolution=lookup_resolution,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to resolve video price model=%s resolution=%s: %s",
+                model_key,
+                lookup_resolution,
+                exc,
+            )
+            variant_cost = None
+        rate = float(getattr(variant_cost, "credits", fallback_credits) or fallback_credits)
+        table[resolution] = {duration: rate * duration for duration in durations}
+    return table
 
 
 # ── schemas ───────────────────────────────────────────────────────────────────
@@ -1032,9 +1103,52 @@ class PromptSubmitRequest(BaseModel):
 
 
 class MusicGenRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt: str = Field(..., min_length=1, max_length=5000)
     instrumental: bool = False
     model: str | None = None
+    title: str | None = Field(default=None, max_length=100)
+    style: str | None = Field(default=None, max_length=1000)
+    voice_record_id: int | None = Field(default=None, ge=1)
+
+
+class SunoVoiceOut(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    style: str | None = None
+    source_audio_url: str
+    validate_phrase: str | None = None
+    provider_voice_id: str | None = None
+    status: str
+    error: str | None = None
+    language: str = "en"
+    vocal_start_s: float = 0.0
+    vocal_end_s: float = 10.0
+    created_at: str = ""
+    updated_at: str = ""
+
+    @classmethod
+    def from_voice(cls, voice: Any) -> "SunoVoiceOut":
+        return cls(
+            id=int(getattr(voice, "id", 0)),
+            name=str(getattr(voice, "name", "") or ""),
+            description=getattr(voice, "description", None),
+            style=getattr(voice, "style", None),
+            source_audio_url=str(getattr(voice, "source_audio_url", "") or ""),
+            validate_phrase=getattr(voice, "validate_phrase", None),
+            provider_voice_id=getattr(voice, "voice_id", None),
+            status=str(getattr(voice, "status", "") or ""),
+            error=getattr(voice, "error_msg", None),
+            language=str(getattr(voice, "language", "en") or "en"),
+            vocal_start_s=float(getattr(voice, "vocal_start_s", 0) or 0),
+            vocal_end_s=float(getattr(voice, "vocal_end_s", 10) or 10),
+            created_at=(getattr(voice, "created_at", None) or "").isoformat()
+            if getattr(voice, "created_at", None)
+            else "",
+            updated_at=(getattr(voice, "updated_at", None) or "").isoformat()
+            if getattr(voice, "updated_at", None)
+            else "",
+        )
 
 
 class TopupRequest(BaseModel):
@@ -1487,6 +1601,7 @@ async def list_video_models(
             continue
         caps: dict[str, Any] = VIDEO_CAPS.get(mc.model_key, _MJ_VIDEO_CAPS.get(mc.model_key, {}))
         is_per_sec, credits_per_sec = await _video_model_rate_info(session, mc.model_key, caps, mc.credits)
+        price_table = await _resolve_video_price_table(session, mc.model_key, caps, mc.credits)
         result.append(ModelInfo(
             key=mc.model_key,
             display_name=_friendly_model_name(mc.model_key, mc.display_name),
@@ -1510,10 +1625,7 @@ async def list_video_models(
             max_character_ids=int(caps.get("max_character_ids", 0) or 0),
             has_seed=bool(caps.get("has_seed")),
             video_input_prices={str(k): float(v) for k, v in (caps.get("video_input_prices") or {}).items()},
-            price_table={
-                str(res): {int(duration): float(price) for duration, price in prices.items()}
-                for res, prices in (caps.get("price_table") or {}).items()
-            },
+            price_table=price_table,
         ))
     order = {key: idx for idx, key in enumerate(_VIDEO_MODEL_ORDER)}
     return sorted(result, key=lambda item: (order.get(item.key, 10_000), item.display_name.lower()))
@@ -1858,6 +1970,7 @@ async def create_video_generation(
     gen = await repo.create_generation(
         session, user.id, body.model, GenerationType.video,
         body.prompt, total_credits,
+        input_params=normalized,
     )
 
     try:
@@ -1890,6 +2003,224 @@ async def create_video_generation(
     return _gen_out(gen)
 
 
+# ── Suno custom voices ───────────────────────────────────────────────────────
+
+def _clean_optional_text(value: str | None, limit: int) -> str | None:
+    text = (value or "").strip()
+    return text[:limit] if text else None
+
+
+def _normalize_suno_voice_language(language: str | None) -> str:
+    value = (language or "en").strip().lower()
+    return value if re.fullmatch(r"[a-z]{2,8}", value) else "en"
+
+
+def _validate_suno_voice_segment(start: float, end: float) -> tuple[float, float]:
+    start_s = max(0.0, round(float(start), 2))
+    end_s = round(float(end), 2)
+    duration = end_s - start_s
+    if duration < 3:
+        raise HTTPException(status_code=422, detail="Voice segment must be at least 3 seconds")
+    if duration > 60:
+        raise HTTPException(status_code=422, detail="Voice segment must be at most 60 seconds")
+    return start_s, end_s
+
+
+async def _read_suno_voice_audio(file: UploadFile) -> bytes:
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty audio file")
+    if len(data) > MAX_SUNO_VOICE_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio file is too large")
+    if not is_supported_suno_voice_audio(data, file.content_type, file.filename):
+        raise HTTPException(status_code=422, detail="Only MP3, WAV, M4A, AAC, FLAC and OGG audio are supported")
+    return data
+
+
+def _suno_status_contains(status: str, markers: set[str]) -> bool:
+    normalized = status.strip().lower()
+    return any(marker in normalized for marker in markers)
+
+
+async def _refresh_suno_voice(session: AsyncSession, voice: Any) -> Any:
+    status = str(getattr(voice, "status", "") or "")
+    if status == SUNO_VOICE_STATUS_VALIDATING and getattr(voice, "validate_task_id", None):
+        payload = await get_suno_voice_validation_info(str(voice.validate_task_id))
+        provider_status = extract_suno_voice_status(payload).lower()
+        phrase = extract_suno_validate_phrase(payload) or getattr(voice, "validate_phrase", None)
+        error = extract_suno_voice_error(payload)
+        if _suno_status_contains(provider_status, SUNO_VOICE_FAILED_STATUSES):
+            return await repo.update_suno_voice(
+                session,
+                voice.id,
+                status=SUNO_VOICE_STATUS_FAILED,
+                error_msg=error or "Failed to prepare Suno voice validation phrase",
+            )
+        if phrase or "wait_validating" in provider_status:
+            return await repo.update_suno_voice(
+                session,
+                voice.id,
+                status=SUNO_VOICE_STATUS_AWAITING_VERIFICATION,
+                validate_phrase=phrase,
+                error_msg=None,
+            )
+        return voice
+
+    if status == SUNO_VOICE_STATUS_GENERATING and getattr(voice, "voice_task_id", None):
+        payload = await get_suno_voice_record_info(str(voice.voice_task_id))
+        provider_status = extract_suno_voice_status(payload).lower()
+        provider_voice_id = extract_suno_provider_voice_id(payload) or getattr(voice, "voice_id", None)
+        error = extract_suno_voice_error(payload)
+        if _suno_status_contains(provider_status, SUNO_VOICE_FAILED_STATUSES):
+            return await repo.update_suno_voice(
+                session,
+                voice.id,
+                status=SUNO_VOICE_STATUS_FAILED,
+                error_msg=error or "Failed to create Suno voice",
+            )
+        if provider_voice_id and provider_status == "success":
+            is_available = True
+            try:
+                is_available = await check_suno_voice_available(str(voice.voice_task_id))
+            except Exception as exc:
+                logger.warning("Suno voice availability check failed voice=%s: %s", voice.id, exc)
+            return await repo.update_suno_voice(
+                session,
+                voice.id,
+                status=SUNO_VOICE_STATUS_READY if is_available else SUNO_VOICE_STATUS_GENERATING,
+                voice_id=provider_voice_id,
+                error_msg=None,
+            )
+        return voice
+
+    return voice
+
+
+@router.get("/music/voices", response_model=list[SunoVoiceOut])
+async def list_suno_voices(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> list[SunoVoiceOut]:
+    voices = await repo.list_suno_voices(session, user.id)
+    return [SunoVoiceOut.from_voice(voice) for voice in voices]
+
+
+@router.post("/music/voices", response_model=SunoVoiceOut, status_code=202)
+async def create_suno_voice(
+    file: UploadFile = File(...),
+    name: str = Form(..., min_length=1, max_length=128),
+    description: str | None = Form(default=None, max_length=1000),
+    style: str | None = Form(default=None, max_length=256),
+    language: str = Form(default="en", max_length=8),
+    vocal_start_s: float = Form(default=0.0),
+    vocal_end_s: float = Form(default=10.0),
+    singer_skill_level: str | None = Form(default=None, max_length=32),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> SunoVoiceOut:
+    start_s, end_s = _validate_suno_voice_segment(vocal_start_s, vocal_end_s)
+    data = await _read_suno_voice_audio(file)
+    try:
+        source_audio_url = await upload_suno_voice_audio(
+            data,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
+        validate_task_id = await create_suno_voice_validation_task(
+            voice_url=source_audio_url,
+            vocal_start_s=start_s,
+            vocal_end_s=end_s,
+            language=_normalize_suno_voice_language(language),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Suno voice validation start failed user=%s: %s", user.id, exc)
+        raise HTTPException(status_code=502, detail="Suno voice service error") from exc
+
+    voice = await repo.create_suno_voice(
+        session,
+        user_id=user.id,
+        name=name.strip()[:128],
+        description=_clean_optional_text(description, 1000),
+        style=_clean_optional_text(style, 256),
+        source_audio_url=source_audio_url,
+        validate_task_id=validate_task_id,
+        language=_normalize_suno_voice_language(language),
+        vocal_start_s=start_s,
+        vocal_end_s=end_s,
+        singer_skill_level=_clean_optional_text(singer_skill_level, 32),
+    )
+    return SunoVoiceOut.from_voice(voice)
+
+
+@router.post("/music/voices/{voice_id}/refresh", response_model=SunoVoiceOut)
+async def refresh_suno_voice(
+    voice_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> SunoVoiceOut:
+    voice = await repo.get_suno_voice(session, user.id, voice_id)
+    if not voice:
+        raise HTTPException(status_code=404, detail="Suno voice not found")
+    try:
+        refreshed = await _refresh_suno_voice(session, voice)
+    except Exception as exc:
+        logger.warning("Suno voice refresh failed voice=%s user=%s: %s", voice_id, user.id, exc)
+        raise HTTPException(status_code=502, detail="Suno voice status error") from exc
+    return SunoVoiceOut.from_voice(refreshed or voice)
+
+
+@router.post("/music/voices/{voice_id}/verify", response_model=SunoVoiceOut, status_code=202)
+async def verify_suno_voice(
+    voice_id: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> SunoVoiceOut:
+    voice = await repo.get_suno_voice(session, user.id, voice_id)
+    if not voice:
+        raise HTTPException(status_code=404, detail="Suno voice not found")
+    voice = await _refresh_suno_voice(session, voice)
+    if (
+        str(getattr(voice, "status", "") or "") != SUNO_VOICE_STATUS_AWAITING_VERIFICATION
+        or not getattr(voice, "validate_task_id", None)
+        or not getattr(voice, "validate_phrase", None)
+    ):
+        raise HTTPException(status_code=409, detail="Suno voice is not waiting for verification audio")
+
+    data = await _read_suno_voice_audio(file)
+    try:
+        verify_url = await upload_suno_voice_audio(
+            data,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
+        voice_task_id = await create_suno_voice_generation_task(
+            validate_task_id=str(voice.validate_task_id),
+            verify_url=verify_url,
+            voice_name=str(voice.name),
+            description=getattr(voice, "description", None),
+            style=getattr(voice, "style", None),
+            singer_skill_level=getattr(voice, "singer_skill_level", None),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Suno voice generation start failed voice=%s user=%s: %s", voice_id, user.id, exc)
+        raise HTTPException(status_code=502, detail="Suno voice service error") from exc
+
+    updated = await repo.update_suno_voice(
+        session,
+        voice.id,
+        status=SUNO_VOICE_STATUS_GENERATING,
+        verify_audio_url=verify_url,
+        voice_task_id=voice_task_id,
+        error_msg=None,
+    )
+    return SunoVoiceOut.from_voice(updated or voice)
+
+
 # ── music generation ──────────────────────────────────────────────────────────
 
 @router.post("/generate/music", response_model=GenerationOut, status_code=202)
@@ -1917,6 +2248,37 @@ async def create_music_generation(
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
+    voice = None
+    voice_provider_id = None
+    custom_style = body.style
+    if body.voice_record_id is not None:
+        voice = await repo.get_suno_voice(session, user.id, body.voice_record_id)
+        if not voice:
+            raise HTTPException(status_code=404, detail="Suno voice not found")
+        voice = await _refresh_suno_voice(session, voice)
+        if str(getattr(voice, "status", "") or "") != SUNO_VOICE_STATUS_READY or not getattr(voice, "voice_id", None):
+            raise HTTPException(status_code=409, detail="Suno voice is not ready yet")
+        if body.instrumental:
+            raise HTTPException(status_code=422, detail="Custom voice cannot be used with instrumental mode")
+        if not (body.style or getattr(voice, "style", None)):
+            raise HTTPException(status_code=422, detail="Music style is required when using a custom voice")
+        if not body.title:
+            raise HTTPException(status_code=422, detail="Track title is required when using a custom voice")
+        voice_provider_id = str(getattr(voice, "voice_id", "") or "")
+        custom_style = body.style or getattr(voice, "style", None)
+
+    try:
+        build_music_generation_payload(
+            body.prompt,
+            body.instrumental,
+            model_key=selected_music_key,
+            title=body.title,
+            style=custom_style,
+            voice_id=voice_provider_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     ok = await repo.spend_credits(session, user.id, music_credits)
     if not ok:
         raise HTTPException(status_code=402, detail="Failed to spend credits")
@@ -1927,7 +2289,14 @@ async def create_music_generation(
     )
 
     try:
-        task_id = await create_music_task(body.prompt, body.instrumental, model_key=selected_music_key)
+        task_id = await create_music_task(
+            body.prompt,
+            body.instrumental,
+            model_key=selected_music_key,
+            title=body.title,
+            style=custom_style,
+            voice_id=voice_provider_id,
+        )
     except Exception as exc:
         logger.error("miniapp music gen error user=%s: %s", user.id, exc)
         if await repo.fail_generation(session, gen.id, str(exc)):
@@ -2266,6 +2635,7 @@ async def remix_feed_post(
         parent_generation_id=source.id if gen_type == "image" else None,
         action_type=ImageGenerationAction.remix if gen_type == "image" else None,
         source_feed_gen_id=gen_id,
+        input_params=normalized_video if gen_type == "video" else None,
     )
 
     try:

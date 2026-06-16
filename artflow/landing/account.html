@@ -42,7 +42,7 @@
             <h1>Кабинет для ваших результатов</h1>
             <p class="lead">Создавайте контент, следите за готовностью, храните удачные работы, пополняйте баланс и возвращайтесь к идеям в любой момент.</p>
           </div>
-          <div class="account-status"><span></span><b data-account-status>Гость · войдите через Telegram</b></div>
+          <div class="account-status"><span></span><b data-account-status>Проверяем вход...</b></div>
         </div>
 
         <div class="account-shell" data-auth-only hidden>
@@ -67,7 +67,7 @@
                 <button type="button" data-tab="assistant">Ассистент</button>
                 <button type="button" data-tab="pro">Telegram и синхрон</button>
                 <button type="button" data-tab="settings">Настройки и помощь</button>
-                <button type="button" data-tab="admin" data-admin-only hidden>Админка</button>
+                <button type="button" data-tab="admin" data-admin-only hidden>Управление</button>
               </div>
             </nav>
             <div class="upgrade-box">
@@ -198,12 +198,12 @@
             </section>
 
             <section class="account-panel" data-panel="admin">
-              <div class="feed-panel-intro">
+              <div class="feed-panel-intro admin-panel-intro">
                 <span>Админка</span>
-                <h3>Модерация идей</h3>
-                <p>Проверяйте новые пользовательские идеи и публикуйте только то, что подходит для каталога.</p>
+                <h3>Управление проектом</h3>
+                <p>Аналитика, пользователи, генерации, финансы, тарифы, модерация и быстрые действия для поддержки.</p>
               </div>
-              <div class="feature-board" data-admin-board></div>
+              <div class="admin-dashboard" data-admin-board></div>
             </section>
 
             <section class="account-panel" data-panel="settings">
@@ -233,7 +233,7 @@
           </div>
         </div>
 
-        <section class="guest-product" data-guest-only>
+        <section class="guest-product" data-guest-only hidden>
           <div class="guest-product-hero">
             <span class="eyebrow">Product preview</span>
             <h2>APIX Studio — AI-студия для картинок, видео и музыки</h2>

@@ -159,6 +159,8 @@ _DEFAULT_RATIO: dict[str, str] = {
     GEMINI_OMNI_VIDEO_MODEL: "16:9",
 }
 _DEFAULT_RES: dict[str, str] = {
+    VideoModel.KLING_26_T2V: "720p",
+    VideoModel.KLING_26_I2V: "720p",
     VideoModel.WAN_27_T2V: "1080p",
     VideoModel.WAN_27_I2V: "1080p",
     VideoModel.SEEDANCE_2: "720p",
@@ -169,7 +171,7 @@ _DEFAULT_RES: dict[str, str] = {
     VideoModel.HAPPYHORSE_I2V: "1080p",
     VideoModel.KLING_30: "pro",
     VideoModel.KLING_26_MOTION: "720p",
-    VideoModel.KLING_30_MOTION: "pro",
+    VideoModel.KLING_30_MOTION: "1080p",
     GEMINI_OMNI_VIDEO_MODEL: "720p",
 }
 _MOTION_MODELS = {VideoModel.KLING_26_MOTION, VideoModel.KLING_30_MOTION}
@@ -196,7 +198,48 @@ def _has_gemini_omni_video_input(model_key: str, data: dict) -> bool:
     return model_key == GEMINI_OMNI_VIDEO_MODEL and bool(data.get("reference_video_url"))
 
 
+def _is_feed_video_use(data: dict) -> bool:
+    return data.get("feed_use_gen_type") == "video" and data.get("feed_use_prompt") is not None
+
+
+def _is_video_reuse_prompt(data: dict) -> bool:
+    return data.get("video_reuse_prompt") is not None
+
+
+def _video_params_next_label(data: dict) -> str:
+    return "▶️ Запустить" if _is_feed_video_use(data) or _is_video_reuse_prompt(data) else "▶️ Далее: Промпт"
+
+
+def _video_params_reply_markup(model_key: str, data: dict):
+    return video_params_kb(
+        model_key,
+        data.get("duration"),
+        data.get("aspect_ratio"),
+        data.get("resolution"),
+        data.get("grok_mode"),
+        selected_mode=data.get("mode"),
+        ref_count=_video_ref_count(data),
+        next_label=_video_params_next_label(data),
+    )
+
+
 def _normalize_resolution_for_state(model_key: str, resolution: str | None) -> str | None:
+    if model_key == VideoModel.KLING_30:
+        aliases = {
+            "2K": "pro",
+            "720p": "std",
+            "1080p": "pro",
+            "2160p": "4K",
+        }
+        return aliases.get(resolution, resolution)
+    if model_key == VideoModel.KLING_30_MOTION:
+        aliases = {
+            "std": "720p",
+            "pro": "1080p",
+            "2K": "1080p",
+            "4K": "1080p",
+        }
+        return aliases.get(resolution, resolution)
     if model_key != GEMINI_OMNI_VIDEO_MODEL:
         return resolution
     try:
@@ -251,7 +294,8 @@ def _video_params_hint(model_key: str, data: dict) -> str:
     if data.get("mode") == "image" and not _video_ref_count(data) and model_key == VideoModel.GROK_I2V:
         parts.append("Формат кадра появится после загрузки нужного количества референсов.")
     else:
-        parts.append("Когда всё готово, нажми <b>Далее</b>.")
+        action = "Запустить" if _is_feed_video_use(data) or _is_video_reuse_prompt(data) else "Далее"
+        parts.append(f"Когда всё готово, нажми <b>{action}</b>.")
     return " ".join(parts)
 
 
@@ -308,6 +352,59 @@ def _as_int(value, default: int) -> int:
         return default
 
 
+def _non_empty(value):
+    if value is None or value == "" or value == []:
+        return None
+    return value
+
+
+def _url_list(value) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item or "").strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _first_url_value(inp: dict, keys: tuple[str, ...]):
+    for key in keys:
+        urls = _url_list(inp.get(key))
+        if urls:
+            return urls if len(urls) > 1 else urls[0]
+    return None
+
+
+def _first_scalar(inp: dict, keys: tuple[str, ...]):
+    for key in keys:
+        value = _non_empty(inp.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _merge_repeat_params(*items: dict) -> dict:
+    merged: dict = {}
+    for item in items:
+        for key, value in item.items():
+            if _non_empty(value) is not None:
+                merged[key] = value
+    return merged
+
+
+async def _external_source_feed_id(
+    *,
+    session: AsyncSession,
+    db_user: User,
+    source_feed_gen_id: int | None,
+) -> int | None:
+    if not source_feed_gen_id:
+        return None
+    source = await repo.get_generation_by_id(session, source_feed_gen_id)
+    if source and getattr(source, "user_id", None) == getattr(db_user, "id", None):
+        return None
+    return source_feed_gen_id
+
+
 async def _video_repeat_params_from_task(task_id: str | None) -> dict:
     if not task_id or task_id.startswith("comet:"):
         return {}
@@ -331,20 +428,172 @@ async def _video_repeat_params_from_task(task_id: str | None) -> dict:
         video_ref = video_list[0].get("url")
         video_start = video_list[0].get("start")
         video_end = video_list[0].get("ends")
+    if not video_ref:
+        video_ref = _first_url_value(inp, ("reference_video_url", "referenceVideoUrl", "video_url", "videoUrl"))
+    if not video_ref:
+        video_urls = _url_list(inp.get("video_urls") or inp.get("videoUrls"))
+        if video_urls:
+            video_ref = video_urls[0]
+
+    image_url = _first_url_value(
+        inp,
+        (
+            "image_urls",
+            "imageUrls",
+            "reference_image_urls",
+            "referenceImageUrls",
+            "input_urls",
+            "inputUrls",
+            "image_input",
+            "imageInput",
+            "image_url",
+            "imageUrl",
+            "reference_image_url",
+            "referenceImageUrl",
+            "first_frame_url",
+            "firstFrameUrl",
+            "input_url",
+            "inputUrl",
+        ),
+    )
+    grok_mode = inp.get("mode") if inp.get("mode") in {"fun", "normal", "spicy"} else inp.get("grok_mode")
 
     return {
-        "duration": inp.get("duration"),
-        "aspect_ratio": inp.get("aspect_ratio"),
-        "resolution": inp.get("resolution"),
-        "image_url": inp.get("image_urls") or inp.get("image_url"),
+        "duration": _first_scalar(inp, ("duration", "duration_sec", "durationSec")),
+        "aspect_ratio": _first_scalar(inp, ("aspect_ratio", "aspectRatio", "ratio")),
+        "resolution": _first_scalar(inp, ("resolution",)),
+        "image_url": image_url,
         "reference_video_url": video_ref,
         "video_start": video_start,
         "video_end": video_end,
         "audio_ids": inp.get("audio_ids"),
         "character_ids": inp.get("character_ids"),
         "seed": inp.get("seed"),
-        "grok_mode": inp.get("mode"),
+        "grok_mode": grok_mode,
     }
+
+
+async def _video_repeat_params_for_generation(session: AsyncSession, prev) -> dict:
+    stored = _as_dict(getattr(prev, "input_params", None))
+    provider = await _video_repeat_params_from_task(getattr(prev, "task_id", None))
+    repeat_params = _merge_repeat_params(provider, stored)
+
+    if not repeat_params.get("image_url") and not repeat_params.get("reference_video_url"):
+        parent_id = getattr(prev, "parent_generation_id", None)
+        if parent_id:
+            parent = await repo.get_generation_by_id(session, parent_id)
+            parent_type = getattr(getattr(parent, "gen_type", None), "value", getattr(parent, "gen_type", None))
+            parent_result_url = getattr(parent, "result_url", None)
+            if parent_type == GenerationType.image.value and parent_result_url:
+                repeat_params["image_url"] = parent_result_url
+    return repeat_params
+
+
+def _video_state_from_repeat_params(model_key: str, repeat_params: dict) -> dict:
+    image_url = repeat_params.get("image_url")
+    if isinstance(image_url, list):
+        image_url = [str(item) for item in image_url if item]
+    elif image_url:
+        image_url = str(image_url)
+    else:
+        image_url = None
+
+    reference_video_url = repeat_params.get("reference_video_url")
+    if reference_video_url:
+        reference_video_url = str(reference_video_url)
+
+    caps = VIDEO_CAPS.get(model_key, {})
+    duration = _as_int(repeat_params.get("duration"), _DEFAULT_DURATION.get(model_key, 5))
+    aspect_ratio = repeat_params.get("aspect_ratio") or _DEFAULT_RATIO.get(model_key)
+    resolution = _normalize_resolution_for_state(
+        model_key,
+        repeat_params.get("resolution") or _DEFAULT_RES.get(model_key),
+    )
+    grok_mode = repeat_params.get("grok_mode") or ("normal" if caps.get("mode_options") else None)
+    audio_ids = repeat_params.get("audio_ids") if isinstance(repeat_params.get("audio_ids"), list) else None
+    character_ids = (
+        repeat_params.get("character_ids")
+        if isinstance(repeat_params.get("character_ids"), list)
+        else None
+    )
+    seed = repeat_params.get("seed")
+    try:
+        seed = normalize_gemini_omni_seed(seed)
+    except ValueError:
+        seed = None
+
+    return {
+        "model_key": model_key,
+        "mode": "video" if reference_video_url else ("image" if image_url else "text"),
+        "duration": duration,
+        "aspect_ratio": aspect_ratio,
+        "resolution": resolution,
+        "image_url": image_url,
+        "reference_video_url": reference_video_url,
+        "audio_ids": audio_ids,
+        "character_ids": character_ids,
+        "seed": seed,
+        "grok_mode": grok_mode,
+        "video_clip_start": repeat_params.get("video_start"),
+        "video_clip_end": repeat_params.get("video_end"),
+        "image_file_id": None,
+        "ref_file_ids": [],
+        "motion_step": None,
+    }
+
+
+def _video_state_has_required_input(data: dict) -> bool:
+    model_key = str(data.get("model_key") or "")
+    modes = VIDEO_CAPS.get(model_key, {}).get("modes", ["text"])
+    mode = data.get("mode")
+    if mode == "motion" or ("motion" in modes and "text" not in modes and "image" not in modes):
+        return bool(data.get("image_url") and data.get("reference_video_url"))
+    if mode == "video":
+        return bool(data.get("reference_video_url"))
+    if mode == "image" or ("image" in modes and "text" not in modes):
+        return bool(data.get("image_url"))
+    return bool(data.get("image_url") or data.get("reference_video_url") or "text" in modes)
+
+
+def _video_input_params_from_generation_state(
+    *,
+    model_key: str,
+    data: dict,
+    image_url: str | list[str] | None,
+    duration: int,
+    aspect_ratio: str | None,
+    resolution: str | None,
+    grok_mode: str | None,
+) -> dict:
+    return {
+        "model_key": model_key,
+        "mode": data.get("mode"),
+        "duration": duration,
+        "aspect_ratio": aspect_ratio,
+        "resolution": resolution,
+        "image_url": image_url,
+        "reference_video_url": data.get("reference_video_url"),
+        "video_start": data.get("video_clip_start"),
+        "video_end": data.get("video_clip_end"),
+        "audio_ids": data.get("audio_ids"),
+        "character_ids": data.get("character_ids"),
+        "seed": data.get("seed"),
+        "grok_mode": grok_mode,
+    }
+
+
+def _video_required_upload_mode(model_key: str, data: dict) -> str | None:
+    modes = VIDEO_CAPS.get(model_key, {}).get("modes", ["text"])
+    mode = data.get("mode")
+    if mode in {"image", "video", "motion"} and mode in modes:
+        return str(mode)
+    if "motion" in modes:
+        return "motion"
+    if "image" in modes:
+        return "image"
+    if "video" in modes:
+        return "video"
+    return None
 
 
 def _normalize_aspect_ratio_for_state(model_key: str, mode: str | None, aspect_ratio: str | None, ref_count: int) -> str | None:
@@ -537,8 +786,13 @@ async def cb_video_model(
 
     caps = VIDEO_CAPS.get(model_key, {})
     modes = caps.get("modes", ["text"])
+    state_data = await state.get_data()
+    force_feed_reference = bool(state_data.get("feed_force_reference") and "image" in modes)
 
-    if len(modes) == 1:
+    if force_feed_reference:
+        await state.update_data(mode="image")
+        await _handle_mode(call, state, session, model_key, model_cost.display_name, "image")
+    elif len(modes) == 1:
         await state.update_data(mode=modes[0])
         await _handle_mode(call, state, session, model_key, model_cost.display_name, modes[0])
     else:
@@ -558,7 +812,16 @@ async def _handle_mode(
     if mode == "image":
         await state.set_state(VideoGenFSM.image_upload)
         max_refs = _video_max_refs(model_key)
-        if model_key == GEMINI_OMNI_VIDEO_MODEL:
+        data = await state.get_data()
+        if _is_feed_video_use(data):
+            upload_text = (
+                f"✅ <b>{display_name}</b> · повтор по фото\n\n"
+                "🖼️ Загрузи своё фото/референс. Промпт из ленты применю скрыто, "
+                "а новый ролик соберу по твоему изображению."
+            )
+            if max_refs > 1:
+                upload_text += f"\n\nМожно отправить до {max_refs} фото; после загрузки нажми <b>Готово</b>."
+        elif model_key == GEMINI_OMNI_VIDEO_MODEL:
             upload_text = (
                 f"✅ <b>{display_name}</b> · фото-референсы\n\n"
                 f"🖼️ Загрузи до {max_refs} фото. Можно отправить несколько фото подряд или альбомом, "
@@ -606,6 +869,11 @@ async def cb_video_mode(
 ) -> None:
     parts = call.data.split(":")  # type: ignore[union-attr]
     mode, model_key = parts[1], parts[2]
+    data = await state.get_data()
+    if data.get("feed_force_reference") and "image" in VIDEO_CAPS.get(model_key, {}).get("modes", []):
+        if mode != "image":
+            await call.answer("Для повтора из ленты сначала загрузи своё фото.", show_alert=True)
+            return
     await state.update_data(mode=mode)
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
@@ -695,15 +963,7 @@ async def handle_video_upload(
             f"✅ Видео загружено! (<b>{_video_price_text(model_key, billable_duration, rate_or_flat)}</b>)\n\n"
             f"⚙️ <b>Параметры</b> · {display_name}\n"
             f"{_video_params_hint(model_key, updated)}",
-            reply_markup=video_params_kb(
-                model_key,
-                updated.get("duration"),
-                updated.get("aspect_ratio"),
-                updated.get("resolution"),
-                updated.get("grok_mode"),
-                selected_mode=updated.get("mode"),
-                ref_count=_video_ref_count(updated),
-            ),
+            reply_markup=_video_params_reply_markup(model_key, updated),
         )
         return
 
@@ -714,6 +974,21 @@ async def handle_video_upload(
         credits=rate_or_flat,
         motion_step="prompt",
     )
+    updated = await state.get_data()
+    if _is_video_reuse_prompt(updated):
+        await message.answer("✅ Видео загружено! Запускаю с сохранённым промптом.")
+        await _launch_video_generation_from_state(
+            source_message=message,
+            state=state,
+            session=session,
+            db_user=db_user,
+            bot=bot,
+            prompt=str(updated["video_reuse_prompt"]),
+            source_feed_gen_id=updated.get("source_feed_gen_id"),
+            parent_generation_id=updated.get("parent_generation_id"),
+            hidden_feed_prompt=bool(updated.get("source_feed_gen_id")),
+        )
+        return
     await state.set_state(VideoGenFSM.prompt_input)
     await message.answer(
         f"✅ Видео загружено! (<b>{_video_price_text(model_key, video_duration, rate_or_flat)}</b>)\n\n"
@@ -785,12 +1060,7 @@ async def _after_video_ref_upload(
         await message.answer(
             f"✅ Фото загружено!\n\n⚙️ <b>Параметры</b> · {display_name}\n"
             f"{_video_params_hint(model_key, updated)}",
-            reply_markup=video_params_kb(
-                model_key, updated.get("duration"),
-                updated.get("aspect_ratio"), updated.get("resolution"), updated.get("grok_mode"),
-                selected_mode=updated.get("mode"),
-                ref_count=_video_ref_count(updated),
-            ),
+            reply_markup=_video_params_reply_markup(model_key, updated),
         )
     else:
         await state.set_state(VideoGenFSM.prompt_input)
@@ -832,12 +1102,7 @@ async def _go_to_params_or_prompt(
         await call.message.edit_text(  # type: ignore[union-attr]
             f"⚙️ <b>Параметры</b> · {display_name}\n"
             f"{_video_params_hint(model_key, data)}",
-            reply_markup=video_params_kb(
-                model_key, data.get("duration"),
-                data.get("aspect_ratio"), data.get("resolution"), data.get("grok_mode"),
-                selected_mode=data.get("mode"),
-                ref_count=_video_ref_count(data),
-            ),
+            reply_markup=_video_params_reply_markup(model_key, data),
         )
     else:
         await state.set_state(VideoGenFSM.prompt_input)
@@ -853,11 +1118,7 @@ async def cb_vpar_dur(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(duration=dur)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(
-            data["model_key"], dur, data.get("aspect_ratio"), data.get("resolution"), data.get("grok_mode"),
-            selected_mode=data.get("mode"),
-            ref_count=_video_ref_count(data),
-        )
+        reply_markup=_video_params_reply_markup(data["model_key"], data)
     )
     await call.answer(f"{dur} сек")
 
@@ -868,11 +1129,7 @@ async def cb_vpar_ratio(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(aspect_ratio=ratio)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(
-            data["model_key"], data.get("duration"), ratio, data.get("resolution"), data.get("grok_mode"),
-            selected_mode=data.get("mode"),
-            ref_count=_video_ref_count(data),
-        )
+        reply_markup=_video_params_reply_markup(data["model_key"], data)
     )
     await call.answer(ratio)
 
@@ -883,11 +1140,7 @@ async def cb_vpar_res(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(resolution=res)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(
-            data["model_key"], data.get("duration"), data.get("aspect_ratio"), res, data.get("grok_mode"),
-            selected_mode=data.get("mode"),
-            ref_count=_video_ref_count(data),
-        )
+        reply_markup=_video_params_reply_markup(data["model_key"], data)
     )
     await call.answer(res)
 
@@ -898,15 +1151,7 @@ async def cb_vpar_mode(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(grok_mode=mode)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=video_params_kb(
-            data["model_key"],
-            data.get("duration"),
-            data.get("aspect_ratio"),
-            data.get("resolution"),
-            mode,
-            selected_mode=data.get("mode"),
-            ref_count=_video_ref_count(data),
-        )
+        reply_markup=_video_params_reply_markup(data["model_key"], data)
     )
     await call.answer(mode)
 
@@ -984,20 +1229,18 @@ async def handle_omni_ids_input(message: Message, state: FSMContext, session: As
         f"✅ Сохранено: <b>{escape(saved_text)}</b>\n\n"
         f"⚙️ <b>Параметры</b> · {display_name}\n"
         f"{_video_params_hint(model_key, updated)}",
-        reply_markup=video_params_kb(
-            model_key,
-            updated.get("duration"),
-            updated.get("aspect_ratio"),
-            updated.get("resolution"),
-            updated.get("grok_mode"),
-            selected_mode=updated.get("mode"),
-            ref_count=_video_ref_count(updated),
-        ),
+        reply_markup=_video_params_reply_markup(model_key, updated),
     )
 
 
 @router.callback_query(VideoGenFSM.params_select, F.data == "vpar_next")
-async def cb_vpar_next(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+async def cb_vpar_next(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    bot: Bot,
+) -> None:
     data = await state.get_data()
     model_cost = await _resolve_video_model_cost(
         session,
@@ -1013,6 +1256,35 @@ async def cb_vpar_next(call: CallbackQuery, state: FSMContext, session: AsyncSes
     duration_val = data.get("duration", 5)
     rate_or_flat = float(model_cost.credits if model_cost else data.get("credits", 0))
     await state.update_data(credits=rate_or_flat)
+    if _is_feed_video_use(data):
+        await safe_answer_callback(call, "Запускаю повтор")
+        await _launch_video_generation_from_state(
+            source_message=call.message,  # type: ignore[arg-type]
+            state=state,
+            session=session,
+            db_user=db_user,
+            bot=bot,
+            prompt=str(data["feed_use_prompt"]),
+            source_feed_gen_id=data.get("source_feed_gen_id") or data.get("feed_use_gen_id"),
+            hidden_feed_prompt=True,
+        )
+        return
+
+    if _is_video_reuse_prompt(data):
+        await safe_answer_callback(call, "Запускаю с новыми параметрами")
+        await _launch_video_generation_from_state(
+            source_message=call.message,  # type: ignore[arg-type]
+            state=state,
+            session=session,
+            db_user=db_user,
+            bot=bot,
+            prompt=str(data["video_reuse_prompt"]),
+            source_feed_gen_id=data.get("source_feed_gen_id"),
+            parent_generation_id=data.get("parent_generation_id"),
+            hidden_feed_prompt=bool(data.get("source_feed_gen_id")),
+        )
+        return
+
     await state.set_state(VideoGenFSM.prompt_input)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
@@ -1032,6 +1304,17 @@ async def cb_vpar_back(call: CallbackQuery, state: FSMContext, session: AsyncSes
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
 
+    if data.get("feed_force_reference"):
+        model_costs = await repo.get_all_model_costs(session)
+        await state.set_state(VideoGenFSM.model_select)
+        await call.message.edit_text(  # type: ignore[union-attr]
+            "🎬 <b>Повторить видео</b>\n\n"
+            "Выбери модель для повтора по твоему фото/референсу:",
+            reply_markup=video_models_kb(model_costs, "i2v"),
+        )
+        await call.answer()
+        return
+
     if len(modes) > 1:
         await state.set_state(VideoGenFSM.mode_select)
         await call.message.edit_text(  # type: ignore[union-attr]
@@ -1050,61 +1333,39 @@ async def cb_vpar_back(call: CallbackQuery, state: FSMContext, session: AsyncSes
 
 
 
-# ── Prompt / motion video URL ─────────────────────────────────────────────────
-
-@router.message(VideoGenFSM.prompt_input, F.text)
-async def handle_video_prompt(
-    message: Message, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
-) -> None:
+async def _launch_video_generation_from_state(
+    *,
+    source_message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    bot: Bot,
+    prompt: str,
+    source_feed_gen_id: int | None = None,
+    parent_generation_id: int | None = None,
+    hidden_feed_prompt: bool = False,
+) -> bool:
     data = await state.get_data()
     model_key: str = data["model_key"]
-    motion_step: str | None = data.get("motion_step")
     duration: int = data.get("duration", 5)
     stored_aspect_ratio: str | None = data.get("aspect_ratio")
-    aspect_ratio = _normalize_aspect_ratio_for_state(model_key, data.get("mode"), stored_aspect_ratio, _video_ref_count(data))
+    aspect_ratio = _normalize_aspect_ratio_for_state(
+        model_key,
+        data.get("mode"),
+        stored_aspect_ratio,
+        _video_ref_count(data),
+    )
     if aspect_ratio != stored_aspect_ratio:
         await state.update_data(aspect_ratio=aspect_ratio)
+        data = {**data, "aspect_ratio": aspect_ratio}
+
     stored_resolution: str | None = data.get("resolution")
     resolution = _normalize_resolution_for_state(model_key, stored_resolution)
     if resolution != stored_resolution:
         await state.update_data(resolution=resolution)
         data = {**data, "resolution": resolution}
+
     grok_mode: str = data.get("grok_mode", "normal")
-    prompt = message.text.strip()  # type: ignore[union-attr]
-
-    # Motion Control: step 2 — user sent reference video URL
-    if motion_step == "video_url":
-        await state.update_data(reference_video_url=prompt, motion_step="done")
-        await state.set_state(VideoGenFSM.params_select if _has_params(model_key) else VideoGenFSM.generating)
-        model_cost = await repo.get_model_cost(session, model_key)
-        display_name = model_cost.display_name if model_cost else model_key
-        if _has_params(model_key):
-            updated = await state.get_data()
-            await state.set_state(VideoGenFSM.params_select)
-            await message.answer(
-                f"✅ Ссылка сохранена!\n\n⚙️ <b>Параметры</b> · {display_name}\n"
-                f"{_video_params_hint(model_key, updated)}",
-                reply_markup=video_params_kb(
-                    model_key, updated.get("duration"),
-                    updated.get("aspect_ratio"), updated.get("resolution"), updated.get("grok_mode"),
-                    selected_mode=updated.get("mode"),
-                    ref_count=_video_ref_count(updated),
-                ),
-            )
-        else:
-            await state.set_state(VideoGenFSM.prompt_input)
-            await state.update_data(motion_step="prompt")
-            await message.answer(
-                "✅ Ссылка сохранена!\n\n✍️ Введи промпт (или отправь прочерк \"-\" для пропуска):",
-                reply_markup=back_to_menu_kb(),
-            )
-        return
-
-    # Motion Control: optional prompt step
-    if motion_step == "prompt":
-        prompt = prompt if prompt != "-" else ""
-        await state.update_data(motion_prompt=prompt, motion_step="done")
-
     image_url = await _video_reference_image_url(bot, data)
 
     has_gemini_omni_video_input = _has_gemini_omni_video_input(model_key, data)
@@ -1115,27 +1376,54 @@ async def handle_video_prompt(
         resolution=resolution,
         has_video_input=has_gemini_omni_video_input,
     )
-    motion_credits = data.get("motion_credits")  # pre-calculated for motion control
+    motion_credits = data.get("motion_credits")
     if motion_credits is not None:
         credits = int(motion_credits)
     else:
         rate_or_flat = model_cost.credits if model_cost else int(data.get("credits", 0))
         credits = int(_video_total_credits(model_key, duration, rate_or_flat))
 
+    input_params = _video_input_params_from_generation_state(
+        model_key=model_key,
+        data=data,
+        image_url=image_url,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        grok_mode=grok_mode,
+    )
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
-        await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
+        await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
-        return
+        return False
 
+    source_feed_gen_id = await _external_source_feed_id(
+        session=session,
+        db_user=db_user,
+        source_feed_gen_id=source_feed_gen_id,
+    )
     gen = await repo.create_generation(
-        session, db_user.id, model_key, GenerationType.video, prompt, credits
+        session,
+        db_user.id,
+        model_key,
+        GenerationType.video,
+        prompt,
+        credits,
+        parent_generation_id=parent_generation_id,
+        source_feed_gen_id=source_feed_gen_id,
+        input_params=input_params,
     )
 
     await state.set_state(VideoGenFSM.generating)
     summary = _params_summary(data)
-    status_msg = await message.answer(
-        f"⏳ <b>Генерирую видео...</b>\n"
+    status_title = (
+        "⏳ <b>Запускаю повтор видео...</b>"
+        if hidden_feed_prompt
+        else "⏳ <b>Генерирую видео...</b>"
+    )
+    status_msg = await source_message.answer(
+        f"{status_title}\n"
         f"<b>{model_cost.display_name if model_cost else model_key}</b>"
         + (f" · <i>{summary}</i>" if summary != "по умолчанию" else "") +
         "\n\nЭто займёт 2–10 минут."
@@ -1163,9 +1451,13 @@ async def handle_video_prompt(
         await session.rollback()
         if await repo.fail_generation(session, gen.id, str(e)):
             await repo.add_credits(session, db_user.id, credits)
-        await status_msg.edit_text("❌ Ошибка запуска генерации. 💋 возвращены.\n\nПопробуй другую модель или повтори через минуту.", reply_markup=main_menu_kb())
+        await status_msg.edit_text(
+            "❌ Ошибка запуска генерации. 💋 возвращены.\n\n"
+            "Попробуй другую модель или повтори через минуту.",
+            reply_markup=main_menu_kb(),
+        )
         await state.clear()
-        return
+        return False
 
     await repo.update_generation_task(session, gen.id, result.task_id)
     poll_fn = video_service.get_poll_fn(result.provider)
@@ -1181,15 +1473,24 @@ async def handle_video_prompt(
             await status_msg.delete()
         except Exception:
             pass
-        caption = f"✅ <b>Видео готово!</b>\n\n<i>{prompt[:200]}</i>"
+        caption = "✅ <b>Видео готово!</b>"
+        if hidden_feed_prompt:
+            caption += "\n\nПромпт из ленты применён скрыто."
+        else:
+            caption += f"\n\n<i>{prompt[:200]}</i>"
         if summary != "по умолчанию":
             caption += f"\n<code>{summary}</code>"
         await _send_video_with_fallback(
             bot,
-            chat_id=message.chat.id,
+            chat_id=source_message.chat.id,
             video_url=url,
             caption=caption,
-            reply_markup=after_generation_kb(gen.id, "video"),
+            reply_markup=after_generation_kb(
+                gen.id,
+                "video",
+                allow_publish=not bool(source_feed_gen_id),
+                allow_copy_prompt=not bool(source_feed_gen_id),
+            ),
         )
 
     async def on_failure(err: str) -> None:
@@ -1200,9 +1501,7 @@ async def handle_video_prompt(
                 return
             if await repo.fail_generation(bg_session, gen.id, err):
                 await repo.add_credits(bg_session, db_user.id, credits)
-        await status_msg.edit_text(
-            f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb()
-        )
+        await status_msg.edit_text(f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
 
     if getattr(result, "uses_webhook", False) or result.provider == "kieai":
         await status_msg.edit_text(
@@ -1212,10 +1511,242 @@ async def handle_video_prompt(
         if result.provider == "comet":
             asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))
         await state.clear()
-        return
+        return True
 
     asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))
     await state.clear()
+    return True
+
+
+# ── Prompt / motion video URL ─────────────────────────────────────────────────
+
+@router.message(VideoGenFSM.prompt_input, F.text)
+async def handle_video_prompt(
+    message: Message, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
+) -> None:
+    data = await state.get_data()
+    model_key: str = data["model_key"]
+    motion_step: str | None = data.get("motion_step")
+    prompt = message.text.strip()  # type: ignore[union-attr]
+
+    # Motion Control: step 2 — user sent reference video URL
+    if motion_step == "video_url":
+        await state.update_data(reference_video_url=prompt, motion_step="done")
+        await state.set_state(VideoGenFSM.params_select if _has_params(model_key) else VideoGenFSM.generating)
+        model_cost = await repo.get_model_cost(session, model_key)
+        display_name = model_cost.display_name if model_cost else model_key
+        if _has_params(model_key):
+            updated = await state.get_data()
+            await state.set_state(VideoGenFSM.params_select)
+            await message.answer(
+                f"✅ Ссылка сохранена!\n\n⚙️ <b>Параметры</b> · {display_name}\n"
+                f"{_video_params_hint(model_key, updated)}",
+                reply_markup=_video_params_reply_markup(model_key, updated),
+            )
+        else:
+            await state.set_state(VideoGenFSM.prompt_input)
+            await state.update_data(motion_step="prompt")
+            await message.answer(
+                "✅ Ссылка сохранена!\n\n✍️ Введи промпт (или отправь прочерк \"-\" для пропуска):",
+                reply_markup=back_to_menu_kb(),
+            )
+        return
+
+    # Motion Control: optional prompt step
+    if motion_step == "prompt":
+        prompt = prompt if prompt != "-" else ""
+        await state.update_data(motion_prompt=prompt, motion_step="done")
+
+    updated = await state.get_data()
+    await _launch_video_generation_from_state(
+        source_message=message,
+        state=state,
+        session=session,
+        db_user=db_user,
+        bot=bot,
+        prompt=prompt,
+        source_feed_gen_id=updated.get("source_feed_gen_id"),
+        parent_generation_id=updated.get("parent_generation_id"),
+    )
+
+
+async def _video_generation_for_result_action(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+) -> object | None:
+    parts = (call.data or "").split(":")
+    gen_id_raw = parts[2] if len(parts) >= 3 else ""
+    if not gen_id_raw.isdigit():
+        await call.answer("Генерация не найдена", show_alert=True)
+        return None
+
+    prev = await repo.get_generation_by_id(session, int(gen_id_raw))
+    gen_type = getattr(getattr(prev, "gen_type", None), "value", getattr(prev, "gen_type", None))
+    if (
+        not prev
+        or getattr(prev, "user_id", None) != db_user.id
+        or not getattr(prev, "prompt", None)
+        or (gen_type is not None and gen_type != GenerationType.video.value)
+    ):
+        await call.answer("Генерация не найдена", show_alert=True)
+        return None
+
+    model_key = str(getattr(prev, "model", ""))
+    if model_key not in VIDEO_CAPS:
+        await call.answer("Эту видео-модель нельзя повторить", show_alert=True)
+        return None
+    try:
+        VideoModel(model_key)
+    except ValueError:
+        await call.answer("Эту видео-модель нельзя повторить", show_alert=True)
+        return None
+    return prev
+
+
+async def _restore_video_result_state(
+    *,
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    prev,
+    reuse_prompt: str | None,
+    source_feed_gen_id: int | None,
+) -> tuple[str, str, dict] | None:
+    model_key = str(prev.model)
+    repeat_data = _video_state_from_repeat_params(
+        model_key,
+        await _video_repeat_params_for_generation(session, prev),
+    )
+    model_cost = await _resolve_video_model_cost(
+        session,
+        model_key,
+        duration=repeat_data.get("duration"),
+        resolution=repeat_data.get("resolution"),
+        has_video_input=_has_gemini_omni_video_input(model_key, repeat_data),
+    )
+    if not model_cost:
+        await call.answer("Модель недоступна", show_alert=True)
+        return None
+
+    await state.update_data(
+        **repeat_data,
+        credits=model_cost.credits,
+        parent_generation_id=prev.id,
+        source_feed_gen_id=source_feed_gen_id,
+        video_reuse_prompt=reuse_prompt,
+        feed_use_gen_type=None,
+        feed_use_prompt=None,
+        feed_use_gen_id=None,
+        feed_force_reference=None,
+    )
+    restored = await state.get_data()
+    return model_key, model_cost.display_name, restored
+
+
+@router.callback_query(F.data.startswith("reprompt:video:"))
+async def cb_reprompt_video(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    prev = await _video_generation_for_result_action(call, session, db_user)
+    if not prev:
+        return
+
+    restored = await _restore_video_result_state(
+        call=call,
+        session=session,
+        state=state,
+        prev=prev,
+        reuse_prompt=None,
+        source_feed_gen_id=None,
+    )
+    if not restored:
+        return
+    model_key, display_name, data = restored
+
+    if not _video_state_has_required_input(data):
+        upload_mode = _video_required_upload_mode(model_key, data)
+        if not upload_mode:
+            await call.answer("Не удалось восстановить входные данные", show_alert=True)
+            return
+        await state.update_data(mode=upload_mode)
+        await _handle_mode(call, state, session, model_key, display_name, upload_mode)
+        await safe_answer_callback(call)
+        return
+
+    await state.set_state(VideoGenFSM.prompt_input)
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "✏️ <b>Новый промпт для видео</b>\n\n"
+        f"Модель: <b>{escape(display_name)}</b>\n"
+        f"Параметры: <code>{escape(_params_summary(data))}</code>\n\n"
+        "Введи новый промпт:",
+        reply_markup=back_to_menu_kb(),
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data.startswith("reparams:video:"))
+async def cb_reparams_video(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+    bot: Bot,
+) -> None:
+    prev = await _video_generation_for_result_action(call, session, db_user)
+    if not prev:
+        return
+
+    source_feed_gen_id = getattr(prev, "source_feed_gen_id", None)
+    restored = await _restore_video_result_state(
+        call=call,
+        session=session,
+        state=state,
+        prev=prev,
+        reuse_prompt=str(prev.prompt),
+        source_feed_gen_id=source_feed_gen_id,
+    )
+    if not restored:
+        return
+    model_key, display_name, data = restored
+
+    if not _video_state_has_required_input(data):
+        upload_mode = _video_required_upload_mode(model_key, data)
+        if not upload_mode:
+            await call.answer("Не удалось восстановить входные данные", show_alert=True)
+            return
+        await state.update_data(mode=upload_mode)
+        await _handle_mode(call, state, session, model_key, display_name, upload_mode)
+        await safe_answer_callback(call)
+        return
+
+    if _has_params(model_key):
+        await state.set_state(VideoGenFSM.params_select)
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            f"⚙️ <b>Изменить параметры</b> · {escape(display_name)}\n"
+            f"{_video_params_hint(model_key, data)}",
+            reply_markup=_video_params_reply_markup(model_key, data),
+        )
+        await safe_answer_callback(call)
+        return
+
+    await safe_answer_callback(call, "Запускаю с прежним промптом")
+    await _launch_video_generation_from_state(
+        source_message=call.message,  # type: ignore[arg-type]
+        state=state,
+        session=session,
+        db_user=db_user,
+        bot=bot,
+        prompt=str(prev.prompt),
+        source_feed_gen_id=source_feed_gen_id,
+        parent_generation_id=prev.id,
+        hidden_feed_prompt=bool(source_feed_gen_id),
+    )
 
 
 @router.callback_query(F.data.startswith("regen:video:"))
@@ -1243,7 +1774,7 @@ async def cb_regen_video(
         await call.answer("Эту видео-модель нельзя повторить", show_alert=True)
         return
 
-    repeat_params = await _video_repeat_params_from_task(prev.task_id)
+    repeat_params = await _video_repeat_params_for_generation(session, prev)
     image_url = repeat_params.get("image_url")
     if isinstance(image_url, list):
         image_url = [str(item) for item in image_url if item]
@@ -1294,6 +1825,11 @@ async def cb_regen_video(
         "seed": seed,
         "grok_mode": grok_mode,
     }
+    input_params = {
+        **repeat_data,
+        "video_start": repeat_params.get("video_start"),
+        "video_end": repeat_params.get("video_end"),
+    }
     has_gemini_omni_video_input = _has_gemini_omni_video_input(model_key, repeat_data)
     model_cost = await _resolve_video_model_cost(
         session,
@@ -1312,6 +1848,11 @@ async def cb_regen_video(
         await call.answer("Недостаточно 💋", show_alert=True)
         return
 
+    source_feed_gen_id = await _external_source_feed_id(
+        session=session,
+        db_user=db_user,
+        source_feed_gen_id=getattr(prev, "source_feed_gen_id", None),
+    )
     await safe_answer_callback(call, "🔁 Запускаю ещё вариант")
     gen = await repo.create_generation(
         session,
@@ -1321,7 +1862,8 @@ async def cb_regen_video(
         prev.prompt,
         credits,
         parent_generation_id=prev.id,
-        source_feed_gen_id=getattr(prev, "source_feed_gen_id", None),
+        source_feed_gen_id=source_feed_gen_id,
+        input_params=input_params,
     )
 
     summary = _params_summary(repeat_data)
@@ -1375,7 +1917,11 @@ async def cb_regen_video(
             await status_msg.delete()
         except Exception:
             pass
-        caption = f"✅ <b>Видео готово!</b>\n\n<i>{prev.prompt[:200]}</i>"
+        caption = "✅ <b>Видео готово!</b>"
+        if source_feed_gen_id:
+            caption += "\n\nПромпт из ленты применён скрыто."
+        else:
+            caption += f"\n\n<i>{prev.prompt[:200]}</i>"
         if summary != "по умолчанию":
             caption += f"\n<code>{summary}</code>"
         await _send_video_with_fallback(
@@ -1383,7 +1929,12 @@ async def cb_regen_video(
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
             video_url=url,
             caption=caption,
-            reply_markup=after_generation_kb(gen.id, "video"),
+            reply_markup=after_generation_kb(
+                gen.id,
+                "video",
+                allow_publish=not bool(source_feed_gen_id),
+                allow_copy_prompt=not bool(source_feed_gen_id),
+            ),
         )
 
     async def on_failure(err: str) -> None:

@@ -44,7 +44,19 @@ from api.realtime import router as realtime_router
 from api.web import router as web_router
 from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_processing, is_success
 from api.midjourney_service import MJButton, MJTaskResult
-from api.music_service import extract_music_urls, pop_task
+from api.music_service import (
+    SUNO_VOICE_FAILED_STATUSES,
+    SUNO_VOICE_STATUS_AWAITING_VERIFICATION,
+    SUNO_VOICE_STATUS_FAILED,
+    SUNO_VOICE_STATUS_READY,
+    extract_music_urls,
+    extract_suno_provider_voice_id,
+    extract_suno_validate_phrase,
+    extract_suno_voice_error,
+    extract_suno_voice_status,
+    extract_suno_voice_task_id,
+    pop_task,
+)
 from api.public_files import UPLOAD_ROOT, mirror_url, save_public_file
 from bot.handlers import admin, assistant, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen, stars_payment
 from bot.handlers import settings as settings_handler
@@ -61,7 +73,13 @@ from core.config import settings
 from core.logger import setup_logging
 from db.models import Generation, GenerationType, ImageSession, TransactionStatus
 from payments.cryptobot import verify_webhook_signature
-from payments.lava import cached_payment_url as lava_cached_payment_url, get_invoice as lava_get_invoice, is_success_webhook as lava_is_success_webhook, webhook_contract_id as lava_webhook_contract_id
+from payments.lava import (
+    cached_payment_url as lava_cached_payment_url,
+    extract_payment_url as lava_extract_payment_url,
+    get_invoice as lava_get_invoice,
+    is_success_webhook as lava_is_success_webhook,
+    webhook_contract_id as lava_webhook_contract_id,
+)
 from payments.tbank import verify_notification_token
 from db import repository as repo
 from db.seed import run_seed
@@ -912,7 +930,7 @@ async def lava_pay_redirect(invoice_id: str) -> RedirectResponse:
     if not pay_url:
         try:
             data = await lava_get_invoice(invoice_id)
-            pay_url = str(data.get("paymentUrl") or data.get("payment_url") or "").strip()
+            pay_url = lava_extract_payment_url(data).strip()
         except Exception as exc:
             logger.error("Lava redirect lookup failed for %s: %s", invoice_id, exc)
             raise HTTPException(status_code=502, detail="Payment service error")
@@ -936,7 +954,7 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
 
     external_id = lava_webhook_contract_id(data)
     if not external_id:
-        logger.warning("Lava webhook without contractId: %s", data)
+        logger.warning("Lava webhook without invoice id: %s", data)
         return PlainTextResponse("OK")
 
     async with AsyncSessionLocal() as session:
@@ -1128,8 +1146,10 @@ async def kie_webhook(
                         allow_publish=publish_actions_allowed,
                         allow_copy_prompt=prompt_actions_allowed,
                     )
+                    telegram_safe_video_bytes = 49 * 1024 * 1024
                     video_sent = False
                     video_too_large = False
+                    tmp_video = None
                     try:
                         await bot.send_video(
                             chat_id=user.tg_id,
@@ -1170,21 +1190,35 @@ async def kie_webhook(
                                     "Video file send failed user=%s gen=%s url=%s err=%s",
                                     user.tg_id, gen.id, result_url, video_file_err,
                                 )
-                            finally:
-                                try:
-                                    Path(tmp_video).unlink(missing_ok=True)
-                                except Exception:
-                                    pass
                     if not video_sent:
-                        if video_too_large:
+                        if tmp_video is None:
+                            tmp_video = await _download_url_to_tempfile(result_url, suffix=".mp4")
+                        tmp_video_size = None
+                        if tmp_video:
+                            try:
+                                tmp_video_size = Path(tmp_video).stat().st_size
+                            except Exception:
+                                tmp_video_size = None
+                        if video_too_large and tmp_video_size and tmp_video_size > telegram_safe_video_bytes:
+                            logger.warning(
+                                "Video exceeds safe Telegram upload limit user=%s gen=%s url=%s size_bytes=%s",
+                                user.tg_id, gen.id, result_url, tmp_video_size,
+                            )
+                        elif tmp_video:
                             try:
                                 await bot.send_document(
                                     chat_id=user.tg_id,
-                                    document=URLInputFile(result_url, filename=f"video_{gen.id}.mp4"),
+                                    document=FSInputFile(tmp_video, filename=f"video_{gen.id}.mp4"),
                                     caption="📎 <b>Видео готово файлом</b>",
                                     reply_markup=video_reply_markup,
                                 )
                                 video_sent = True
+                            except TelegramEntityTooLarge as video_doc_err:
+                                video_too_large = True
+                                logger.warning(
+                                    "Video document send too large user=%s gen=%s url=%s err=%s",
+                                    user.tg_id, gen.id, result_url, video_doc_err,
+                                )
                             except Exception as video_doc_err:
                                 logger.warning(
                                     "Video document fallback failed user=%s gen=%s url=%s err=%s",
@@ -1207,8 +1241,83 @@ async def kie_webhook(
                                 reply_markup=video_reply_markup,
                             )
                             logger.info("Video link fallback sent user=%s gen=%s", user.tg_id, gen.id)
+                    if tmp_video:
+                        try:
+                            Path(tmp_video).unlink(missing_ok=True)
+                        except Exception:
+                            pass
             except Exception as e:
                 logger.warning("Failed to send KIE result user=%s gen=%s: %s", user.tg_id, gen.id, e)
+
+    return {"ok": True}
+
+
+def _suno_voice_status_contains(status: str, markers: set[str]) -> bool:
+    normalized = status.strip().lower()
+    return any(marker in normalized for marker in markers)
+
+
+@app.post("/webhook/kie/suno-voice")
+async def kie_suno_voice_webhook(
+    request: Request,
+    secret: str | None = None,
+    stage: str | None = None,
+    x_kie_webhook_secret: str | None = Header(default=None, alias="X-KIE-Webhook-Secret"),
+) -> dict:
+    _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"ok": True}
+
+    task_id = extract_suno_voice_task_id(payload) or extract_task_id(payload)
+    if not task_id:
+        logger.warning("KIE Suno voice webhook without task_id stage=%s payload=%s", stage, payload)
+        return {"ok": True}
+
+    provider_status = extract_suno_voice_status(payload)
+    provider_voice_id = extract_suno_provider_voice_id(payload)
+    validate_phrase = extract_suno_validate_phrase(payload)
+    error_msg = extract_suno_voice_error(payload)
+
+    async with AsyncSessionLocal() as session:
+        voice = await repo.get_suno_voice_by_validate_task_id(session, task_id)
+        is_validation_task = voice is not None
+        if not voice:
+            voice = await repo.get_suno_voice_by_voice_task_id(session, task_id)
+        if not voice:
+            logger.warning("KIE Suno voice webhook unknown task_id=%s stage=%s", task_id, stage)
+            return {"ok": True}
+
+        if _suno_voice_status_contains(provider_status, SUNO_VOICE_FAILED_STATUSES):
+            await repo.update_suno_voice(
+                session,
+                voice.id,
+                status=SUNO_VOICE_STATUS_FAILED,
+                error_msg=error_msg or "Suno voice processing failed",
+            )
+            return {"ok": True}
+
+        if is_validation_task:
+            if validate_phrase or "wait_validating" in provider_status.lower():
+                await repo.update_suno_voice(
+                    session,
+                    voice.id,
+                    status=SUNO_VOICE_STATUS_AWAITING_VERIFICATION,
+                    validate_phrase=validate_phrase or getattr(voice, "validate_phrase", None),
+                    error_msg=None,
+                )
+            return {"ok": True}
+
+        if provider_voice_id and provider_status.lower() == "success":
+            await repo.update_suno_voice(
+                session,
+                voice.id,
+                status=SUNO_VOICE_STATUS_READY,
+                voice_id=provider_voice_id,
+                error_msg=None,
+            )
 
     return {"ok": True}
 

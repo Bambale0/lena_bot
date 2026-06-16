@@ -125,6 +125,24 @@ async function api(path, options = {}) {
   return res.json();
 }
 
+async function apiForm(path, formData, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    method: options.method || "POST",
+    headers: {
+      "X-Telegram-Init-Data": initData(),
+      ...(options.headers || {}),
+    },
+    body: formData,
+  });
+  if (!res.ok) {
+    let detail = `API ${res.status}`;
+    try { const j = await res.json(); detail = j.detail || detail; } catch {}
+    throw Object.assign(new Error(detail), { status: res.status });
+  }
+  return res.json();
+}
+
 function realtimeWsUrl() {
   const data = initData();
   if (!data) return "";
@@ -1839,14 +1857,56 @@ function Music({ user, musicGen, musicModels = [], onGenerateMusic, setTopup, on
   const [instrumental, setInstrumental] = useState(false);
   const [improvingPrompt, setImprovingPrompt] = useState(false);
   const [selectedModelKey, setSelectedModelKey] = useState("");
+  const [voices, setVoices] = useState([]);
+  const [voicesLoading, setVoicesLoading] = useState(false);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [selectedVoiceId, setSelectedVoiceId] = useState("");
+  const [trackTitle, setTrackTitle] = useState("");
+  const [trackStyle, setTrackStyle] = useState("");
+  const [voiceName, setVoiceName] = useState("");
+  const [voiceStyle, setVoiceStyle] = useState("");
+  const [voiceDescription, setVoiceDescription] = useState("");
+  const [verifyTargetId, setVerifyTargetId] = useState(null);
+  const sourceVoiceInputRef = useRef(null);
+  const verifyVoiceInputRef = useRef(null);
 
   const availableModels = Array.isArray(musicModels) ? musicModels.filter(Boolean) : [];
   const selectedModel = availableModels.find((item) => item.key === selectedModelKey) || availableModels[0] || null;
   const musicCredits = Number(selectedModel?.credits || 0);
   const musicTitle = selectedModel?.display_name || "Suno";
+  const readyVoices = voices.filter((voice) => voice.status === "ready" && voice.provider_voice_id);
+  const selectedVoice = voices.find((voice) => String(voice.id) === selectedVoiceId) || null;
+  const activeVoiceIds = voices
+    .filter((voice) => voice.status === "validating" || voice.status === "generating")
+    .map((voice) => voice.id)
+    .join(",");
 
   const genStatus = musicGen?.status;
   const statusColor = genStatus === "done" ? "#4ade80" : genStatus === "failed" ? "#f87171" : "#facc15";
+  const promptLimit = selectedVoice ? 5000 : 500;
+
+  async function loadVoices({ quiet = false } = {}) {
+    if (!quiet) setVoicesLoading(true);
+    try {
+      const data = await api("/music/voices");
+      setVoices(Array.isArray(data) ? data : []);
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось загрузить голоса" });
+    } finally {
+      if (!quiet) setVoicesLoading(false);
+    }
+  }
+
+  async function refreshVoice(id, { quiet = false } = {}) {
+    try {
+      const updated = await api(`/music/voices/${id}/refresh`, { method: "POST" });
+      setVoices((items) => items.map((item) => item.id === updated.id ? updated : item));
+      return updated;
+    } catch (e) {
+      if (!quiet) onNotice?.({ type: "error", message: e.message || "Не удалось обновить голос" });
+      return null;
+    }
+  }
 
   async function handleImprovePrompt() {
     if (!prompt.trim() || improvingPrompt) return;
@@ -1870,10 +1930,106 @@ function Music({ user, musicGen, musicModels = [], onGenerateMusic, setTopup, on
     }
   }, [availableModels, selectedModelKey]);
 
+  useEffect(() => {
+    loadVoices({ quiet: true });
+  }, []);
+
+  useEffect(() => {
+    if (!activeVoiceIds) return undefined;
+    const timer = setInterval(() => {
+      activeVoiceIds.split(",").filter(Boolean).forEach((id) => refreshVoice(Number(id), { quiet: true }));
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [activeVoiceIds]);
+
+  useEffect(() => {
+    if (!selectedVoice) return;
+    setInstrumental(false);
+    if (!trackStyle.trim() && selectedVoice.style) setTrackStyle(selectedVoice.style);
+  }, [selectedVoiceId]);
+
+  async function handleCreateVoiceFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || voiceBusy) return;
+    if (!voiceName.trim()) {
+      onNotice?.({ type: "error", message: "Назови голос" });
+      return;
+    }
+    setVoiceBusy(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("name", voiceName.trim());
+      if (voiceStyle.trim()) form.append("style", voiceStyle.trim());
+      if (voiceDescription.trim()) form.append("description", voiceDescription.trim());
+      const created = await apiForm("/music/voices", form);
+      setVoices((items) => [created, ...items.filter((item) => item.id !== created.id)]);
+      setVoiceName("");
+      setVoiceDescription("");
+      onNotice?.({ type: "success", message: "Голос загружен" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось загрузить голос" });
+    } finally {
+      setVoiceBusy(false);
+    }
+  }
+
+  function requestVoiceVerification(id) {
+    setVerifyTargetId(id);
+    verifyVoiceInputRef.current?.click();
+  }
+
+  async function handleVerifyVoiceFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !verifyTargetId || voiceBusy) return;
+    setVoiceBusy(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const updated = await apiForm(`/music/voices/${verifyTargetId}/verify`, form);
+      setVoices((items) => items.map((item) => item.id === updated.id ? updated : item));
+      onNotice?.({ type: "success", message: "Проверочная запись отправлена" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось отправить запись" });
+    } finally {
+      setVoiceBusy(false);
+      setVerifyTargetId(null);
+    }
+  }
+
   function handleGenerate() {
     if (!prompt.trim()) return;
     if (musicCredits > 0 && user.credits < musicCredits) { setTopup(true); return; }
-    onGenerateMusic({ prompt, instrumental, model: selectedModel?.key || undefined });
+    if (selectedVoice) {
+      if (!trackTitle.trim()) {
+        onNotice?.({ type: "error", message: "Укажи название трека" });
+        return;
+      }
+      if (!trackStyle.trim()) {
+        onNotice?.({ type: "error", message: "Укажи стиль трека" });
+        return;
+      }
+    }
+    onGenerateMusic({
+      prompt,
+      instrumental: selectedVoice ? false : instrumental,
+      model: selectedModel?.key || undefined,
+      voice_record_id: selectedVoice ? selectedVoice.id : undefined,
+      title: selectedVoice ? trackTitle.trim() : undefined,
+      style: selectedVoice ? trackStyle.trim() : undefined,
+    });
+  }
+
+  function voiceStatusLabel(status) {
+    return {
+      validating: "готовится фраза",
+      awaiting_verification: "нужна проверка",
+      generating: "создаётся",
+      ready: "готов",
+      failed: "ошибка",
+    }[status] || status || "ожидает";
   }
 
   return (
@@ -1888,6 +2044,21 @@ function Music({ user, musicGen, musicModels = [], onGenerateMusic, setTopup, on
         <div style={{ marginTop: 8, fontWeight: 700, color: "var(--text)" }}>Стоимость: {musicCredits || "—"} 💋 за трек.</div>
       </div>
 
+      <input
+        ref={sourceVoiceInputRef}
+        type="file"
+        accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/aac,audio/flac,audio/ogg"
+        onChange={handleCreateVoiceFile}
+        hidden
+      />
+      <input
+        ref={verifyVoiceInputRef}
+        type="file"
+        accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/aac,audio/flac,audio/ogg"
+        onChange={handleVerifyVoiceFile}
+        hidden
+      />
+
       {availableModels.length > 0 && (
         <SettingsRow label="Модель">
           <select value={selectedModelKey} onChange={e => setSelectedModelKey(e.target.value)}>
@@ -1899,9 +2070,66 @@ function Music({ user, musicGen, musicModels = [], onGenerateMusic, setTopup, on
       <SettingsRow label="Режим">
         <div className="tabs soft">
           <button className={!instrumental ? "active" : ""} onClick={() => setInstrumental(false)}>🎤 С текстом</button>
-          <button className={instrumental ? "active" : ""} onClick={() => setInstrumental(true)}>🎸 Инструментал</button>
+          <button className={instrumental ? "active" : ""} onClick={() => setInstrumental(true)} disabled={Boolean(selectedVoice)}>🎸 Инструментал</button>
         </div>
       </SettingsRow>
+
+      <SettingsRow label="Голос">
+        <select value={selectedVoiceId} onChange={e => setSelectedVoiceId(e.target.value)}>
+          <option value="">Suno вокал</option>
+          {readyVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
+        </select>
+      </SettingsRow>
+
+      {selectedVoice && (
+        <div className="voiceGenerationFields">
+          <input className="field" value={trackTitle} onChange={e => setTrackTitle(e.target.value)} placeholder="Название трека" maxLength={100} />
+          <input className="field" value={trackStyle} onChange={e => setTrackStyle(e.target.value)} placeholder="Стиль: pop, cinematic, female vocal..." maxLength={1000} />
+        </div>
+      )}
+
+      <div className="voicePanel">
+        <div className="voicePanelHead">
+          <b>Свой голос</b>
+          <button className="ghost" onClick={() => loadVoices()} disabled={voicesLoading || voiceBusy}>{voicesLoading ? "Обновляю..." : "Обновить"}</button>
+        </div>
+        <div className="voiceCreateGrid">
+          <input className="field" value={voiceName} onChange={e => setVoiceName(e.target.value)} placeholder="Название голоса" maxLength={128} />
+          <input className="field" value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)} placeholder="Стиль по умолчанию" maxLength={256} />
+          <textarea className="field" value={voiceDescription} onChange={e => setVoiceDescription(e.target.value)} placeholder="Описание голоса" maxLength={1000} />
+          <button className="refUpload" onClick={() => sourceVoiceInputRef.current?.click()} disabled={voiceBusy || !voiceName.trim()}>
+            {voiceBusy ? "Идёт обработка..." : "Загрузить аудио"}
+          </button>
+        </div>
+        <div className="voiceList">
+          {voices.length ? voices.map((voice) => (
+            <div className={`voiceItem ${voice.status}`} key={voice.id}>
+              <div className="voiceItemTop">
+                <b>{voice.name}</b>
+                <span>{voiceStatusLabel(voice.status)}</span>
+              </div>
+              {voice.style && <small>{voice.style}</small>}
+              {voice.error && <p>{voice.error}</p>}
+              {voice.validate_phrase && voice.status === "awaiting_verification" && (
+                <code>{voice.validate_phrase}</code>
+              )}
+              <div className="voiceActions">
+                {voice.status === "ready" && (
+                  <button className={selectedVoiceId === String(voice.id) ? "active" : ""} onClick={() => setSelectedVoiceId(String(voice.id))}>Выбрать</button>
+                )}
+                {voice.status === "awaiting_verification" && (
+                  <button onClick={() => requestVoiceVerification(voice.id)} disabled={voiceBusy}>Загрузить проверку</button>
+                )}
+                {(voice.status === "validating" || voice.status === "generating" || voice.status === "failed") && (
+                  <button onClick={() => refreshVoice(voice.id)} disabled={voiceBusy}>Обновить статус</button>
+                )}
+              </div>
+            </div>
+          )) : (
+            <div className="voiceEmpty">Голосов пока нет</div>
+          )}
+        </div>
+      </div>
 
       <SettingsRow label="Описание трека">
         <textarea
@@ -1910,7 +2138,7 @@ function Music({ user, musicGen, musicModels = [], onGenerateMusic, setTopup, on
           placeholder={instrumental
             ? "Например: epic orchestral, cinematic, dramatic, Hans Zimmer style..."
             : "Например: upbeat pop song about summer, female vocal, dance vibes..."}
-          maxLength={4000}
+          maxLength={promptLimit}
           style={{ minHeight: 100 }}
         />
       </SettingsRow>

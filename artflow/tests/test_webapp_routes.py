@@ -1489,7 +1489,8 @@ async def test_generate_video_grok_uses_per_second_cost(client, monkeypatch) -> 
             is_prompt_library=False,
         )
 
-    monkeypatch.setattr("api.miniapp_routes.repo.resolve_video_model_cost", AsyncMock(return_value=SimpleNamespace(credits=35)))
+    resolve_video_model_cost = AsyncMock(return_value=SimpleNamespace(credits=45))
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_video_model_cost", resolve_video_model_cost)
     monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
     monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend_credits)
     monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
@@ -1503,14 +1504,15 @@ async def test_generate_video_grok_uses_per_second_cost(client, monkeypatch) -> 
             "prompt": "rainy city",
             "mode": "text",
             "duration": 6,
-            "resolution": "480p",
+            "resolution": "720p",
         },
     )
 
     assert response.status_code == 202
     assert spend_credits.await_count == 1
-    assert spend_credits.await_args.args[1:] == (1, 210)
-    assert response.json()["credits_spent"] == 210
+    assert resolve_video_model_cost.await_args.kwargs["resolution"] == "720p"
+    assert spend_credits.await_args.args[1:] == (1, 270)
+    assert response.json()["credits_spent"] == 270
 
 
 @pytest.mark.asyncio
@@ -1873,24 +1875,35 @@ async def test_webapp_video_models_expose_kling_caps_and_per_second_pricing(clie
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_all_model_costs",
         AsyncMock(return_value=[
-            SimpleNamespace(model_key="kling-3.0/video", display_name="Kling 3.0 Video", credits=8),
-            SimpleNamespace(model_key="kling-3.0/motion-control", display_name="Kling 3.0 Motion", credits=6),
+            SimpleNamespace(model_key="kling-3.0/video", display_name="Kling 3.0 Video", credits=6),
+            SimpleNamespace(model_key="kling-3.0/motion-control", display_name="Kling 3.0 Motion", credits=9),
         ]),
     )
-    monkeypatch.setattr(
-        "api.miniapp_routes.repo.resolve_video_model_cost",
-        AsyncMock(side_effect=[SimpleNamespace(credits=8), SimpleNamespace(credits=6)]),
-    )
+
+    async def fake_video_cost(_session, model_key, *, duration=None, resolution=None):
+        rates = {
+            ("kling-3.0/video", "std"): 6,
+            ("kling-3.0/video", "pro"): 8,
+            ("kling-3.0/video", "4K"): 10,
+            ("kling-3.0/motion-control", "720p"): 9,
+            ("kling-3.0/motion-control", "1080p"): 11,
+        }
+        return SimpleNamespace(credits=rates.get((model_key, resolution), 6))
+
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_video_model_cost", fake_video_cost)
 
     response = await client.get("/api/v1/models/video")
 
     assert response.status_code == 200
     payload = {item["key"]: item for item in response.json()}
     assert payload["kling-3.0/video"]["is_per_second"] is True
-    assert payload["kling-3.0/video"]["credits"] == 8
-    assert payload["kling-3.0/video"]["credits_per_sec"] == 8
+    assert payload["kling-3.0/video"]["credits"] == 6
+    assert payload["kling-3.0/video"]["credits_per_sec"] == 6
     assert payload["kling-3.0/video"]["durations"] == [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     assert payload["kling-3.0/video"]["resolutions"] == ["std", "pro", "4K"]
+    assert payload["kling-3.0/video"]["price_table"]["std"]["5"] == 30
+    assert payload["kling-3.0/video"]["price_table"]["pro"]["5"] == 40
+    assert payload["kling-3.0/video"]["price_table"]["4K"]["5"] == 50
     assert payload["kling-3.0/motion-control"]["modes"] == ["motion"]
     assert payload["kling-3.0/motion-control"]["is_per_second"] is True
     assert payload["kling-3.0/motion-control"]["resolutions"] == ["720p", "1080p"]
@@ -1923,10 +1936,10 @@ async def test_webapp_video_models_expose_grok_as_per_second(client, monkeypatch
             SimpleNamespace(model_key="grok-imagine/text-to-video", display_name="Grok T2V", credits=35),
         ]),
     )
-    monkeypatch.setattr(
-        "api.miniapp_routes.repo.resolve_video_model_cost",
-        AsyncMock(return_value=SimpleNamespace(credits=35)),
-    )
+    async def fake_video_cost(_session, _model_key, *, duration=None, resolution=None):
+        return SimpleNamespace(credits=45 if resolution == "720p" else 35)
+
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_video_model_cost", fake_video_cost)
 
     response = await client.get("/api/v1/models/video")
 
@@ -1935,6 +1948,8 @@ async def test_webapp_video_models_expose_grok_as_per_second(client, monkeypatch
     assert payload["grok-imagine/text-to-video"]["is_per_second"] is True
     assert payload["grok-imagine/text-to-video"]["credits"] == 35
     assert payload["grok-imagine/text-to-video"]["credits_per_sec"] == 35
+    assert payload["grok-imagine/text-to-video"]["price_table"]["480p"]["6"] == 210
+    assert payload["grok-imagine/text-to-video"]["price_table"]["720p"]["6"] == 270
 
 
 @pytest.mark.asyncio
@@ -1986,6 +2001,111 @@ async def test_music_generation_uses_model_cost_from_db(client, monkeypatch) -> 
 
     assert response.status_code == 202
     assert response.json()["credits_spent"] == 37
+
+
+@pytest.mark.asyncio
+async def test_music_generation_validates_custom_voice_before_spend(client, monkeypatch) -> None:
+    spend_credits = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_model_cost",
+        AsyncMock(return_value=SimpleNamespace(model_key="suno/v5.5", credits=37.0, is_active=True)),
+    )
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend_credits)
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_suno_voice",
+        AsyncMock(return_value=SimpleNamespace(id=5, status="ready", voice_id=None)),
+    )
+
+    response = await client.post(
+        "/api/v1/generate/music",
+        json={
+            "prompt": "lyrics",
+            "voice_record_id": 5,
+            "title": "Track",
+            "style": "pop",
+        },
+    )
+
+    assert response.status_code == 409
+    spend_credits.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_suno_voice_starts_validation(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.miniapp_routes.upload_suno_voice_audio",
+        AsyncMock(return_value="https://cdn.example.test/voice.mp3"),
+    )
+    monkeypatch.setattr(
+        "api.miniapp_routes.create_suno_voice_validation_task",
+        AsyncMock(return_value="validate-task-1"),
+    )
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.create_suno_voice",
+        AsyncMock(return_value=SimpleNamespace(
+            id=9,
+            name="Lead vocal",
+            description=None,
+            style="pop",
+            source_audio_url="https://cdn.example.test/voice.mp3",
+            validate_task_id="validate-task-1",
+            validate_phrase=None,
+            voice_id=None,
+            status="validating",
+            error_msg=None,
+            language="en",
+            vocal_start_s=0,
+            vocal_end_s=10,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )),
+    )
+
+    response = await client.post(
+        "/api/v1/music/voices",
+        data={"name": "Lead vocal", "style": "pop"},
+        files={"file": ("voice.mp3", b"ID3payload", "audio/mpeg")},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["id"] == 9
+    assert response.json()["status"] == "validating"
+
+
+@pytest.mark.asyncio
+async def test_refresh_suno_voice_stores_validation_phrase(client, monkeypatch) -> None:
+    voice = SimpleNamespace(
+        id=9,
+        name="Lead vocal",
+        description=None,
+        style="pop",
+        source_audio_url="https://cdn.example.test/voice.mp3",
+        validate_task_id="validate-task-1",
+        validate_phrase=None,
+        voice_id=None,
+        status="validating",
+        error_msg=None,
+        language="en",
+        vocal_start_s=0,
+        vocal_end_s=10,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    updated = SimpleNamespace(**{**voice.__dict__, "status": "awaiting_verification", "validate_phrase": "Sing this phrase"})
+
+    monkeypatch.setattr("api.miniapp_routes.repo.get_suno_voice", AsyncMock(return_value=voice))
+    monkeypatch.setattr(
+        "api.miniapp_routes.get_suno_voice_validation_info",
+        AsyncMock(return_value={"code": 200, "data": {"status": "wait_validating", "validateInfo": "Sing this phrase"}}),
+    )
+    monkeypatch.setattr("api.miniapp_routes.repo.update_suno_voice", AsyncMock(return_value=updated))
+
+    response = await client.post("/api/v1/music/voices/9/refresh")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "awaiting_verification"
+    assert response.json()["validate_phrase"] == "Sing this phrase"
 
 
 @pytest.mark.asyncio

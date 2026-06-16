@@ -46,14 +46,16 @@ VIDEO_CAPS: dict[str, dict] = {
         "modes": ["text"],
         "duration_options": [5, 10],
         "aspect_ratios": ["1:1", "16:9", "9:16"],
-        "has_resolution": False,
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
         "billing_mode": "per_second",
     },
     "kling-2.6/image-to-video": {
         "modes": ["image"],
         "duration_options": [5, 10],
         "aspect_ratios": [],
-        "has_resolution": False,
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
         "billing_mode": "per_second",
     },
     "kling-2.6/motion-control": {
@@ -869,6 +871,7 @@ def video_params_kb(
     *,
     selected_mode: str | None = None,
     ref_count: int | None = None,
+    next_label: str = "▶️ Далее: Промпт",
 ) -> InlineKeyboardMarkup:
     caps = VIDEO_CAPS.get(model_key, {})
     builder = InlineKeyboardBuilder()
@@ -931,7 +934,7 @@ def video_params_kb(
     if caps.get("has_seed"):
         builder.row(InlineKeyboardButton(text="🌱 Seed", callback_data="vpar_omni:seed"))
 
-    builder.row(InlineKeyboardButton(text="▶️ Далее: Промпт", callback_data="vpar_next"))
+    builder.row(InlineKeyboardButton(text=next_label, callback_data="vpar_next"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="vpar_back"))
     return builder.as_markup()
 

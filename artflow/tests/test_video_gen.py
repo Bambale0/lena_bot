@@ -124,6 +124,27 @@ async def test_cb_video_model_single_mode() -> None:
     mock_state.set_state.assert_called_once_with(VideoGenFSM.params_select)
 
 
+@pytest.mark.asyncio
+async def test_cb_video_model_feed_repeat_forces_image_upload() -> None:
+    call = make_callback(data="vid_model:kling-3.0/video")
+    call.answer = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
+    mock_cost = _make_video_model_cost("kling-3.0/video", credits=8, display_name="Kling 3.0")
+    mock_state = _fake_state(
+        feed_use_gen_type="video",
+        feed_use_prompt="hidden prompt",
+        feed_force_reference=True,
+    )
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=mock_cost))):
+        with patch("bot.handlers.video_gen.safe_edit_message", AsyncMock()) as edit:
+            await video_gen.cb_video_model(call, AsyncMock(), mock_state, mock_db_user)
+
+    assert any(call.kwargs == {"mode": "image"} for call in mock_state.update_data.await_args_list)
+    mock_state.set_state.assert_awaited_with(VideoGenFSM.image_upload)
+    assert "повтор по фото" in edit.await_args.args[1]
+
+
 # ── vid_mode ──────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -220,6 +241,57 @@ async def test_handle_omni_ids_input_rejects_multiple_audio_ids() -> None:
 
     msg.answer.assert_awaited_once()
     assert "audio_ids supports at most 1" in msg.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cb_vpar_next_feed_repeat_launches_hidden_prompt() -> None:
+    call = make_callback(data="vpar_next")
+    status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
+    call.message.answer = AsyncMock(return_value=status_msg)
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
+    mock_state = _fake_state(
+        model_key="kling-3.0/video",
+        duration=5,
+        aspect_ratio="16:9",
+        resolution="1080p",
+        mode="image",
+        credits=8,
+        grok_mode="normal",
+        image_file_id="photo_1",
+        ref_file_ids=["photo_1"],
+        feed_use_gen_type="video",
+        feed_use_prompt="hidden source prompt",
+        feed_use_gen_id=88,
+        source_feed_gen_id=88,
+    )
+    mock_cost = _make_video_model_cost("kling-3.0/video", 8, "Kling 3.0")
+    mock_gen = SimpleNamespace(id=103, task_id=None, model="kling-3.0/video")
+    repo_stub = AsyncMock(
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+        get_generation_by_id=AsyncMock(return_value=SimpleNamespace(id=88, user_id=99)),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )
+
+    with patch("bot.handlers.video_gen.repo", repo_stub):
+        with patch("bot.handlers.video_gen.mirror_telegram_file", AsyncMock(return_value="https://cdn.test/ref.jpg")):
+            with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+                generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_feed", provider="kieai", uses_webhook=True)),
+                get_poll_fn=MagicMock(),
+            )) as mock_video_service:
+                await video_gen.cb_vpar_next(call, mock_state, mock_session, mock_db_user, mock_bot)
+
+    assert repo_stub.create_generation.await_args.args[4] == "hidden source prompt"
+    assert repo_stub.create_generation.await_args.kwargs["source_feed_gen_id"] == 88
+    assert mock_video_service.generate_video.await_args.args[1] == "hidden source prompt"
+    assert mock_video_service.generate_video.await_args.kwargs["image_url"] == "https://cdn.test/ref.jpg"
+    assert "hidden source prompt" not in call.message.answer.await_args.args[0]
+    mock_state.clear.assert_awaited_once()
 
 
 # ── handle_image_upload ───────────────────────────────────────────────────────
@@ -369,6 +441,285 @@ async def test_regen_video_restores_kie_image_refs() -> None:
     assert kwargs["audio_ids"] == ["audio_1"]
 
 
+@pytest.mark.asyncio
+async def test_regen_video_restores_reference_image_urls_for_dual_mode_model() -> None:
+    call = make_callback(data="regen:video:777")
+    status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
+    call.message.answer = AsyncMock(return_value=status_msg)
+    mock_state = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
+    prev = SimpleNamespace(
+        id=777,
+        user_id=42,
+        model="bytedance/seedance-2",
+        prompt="same face prompt",
+        task_id="task_prev",
+        source_feed_gen_id=None,
+        input_params=None,
+        parent_generation_id=None,
+    )
+    mock_cost = _make_video_model_cost("bytedance/seedance-2", 8, "Seedance 2")
+    new_gen = SimpleNamespace(id=778, task_id=None, model="bytedance/seedance-2")
+    status_payload = {
+        "data": {
+            "param": {
+                "input": {
+                    "duration": 5,
+                    "aspect_ratio": "9:16",
+                    "resolution": "720p",
+                    "reference_image_urls": [
+                        "https://cdn.test/face-a.jpg",
+                        "https://cdn.test/face-b.jpg",
+                    ],
+                }
+            }
+        }
+    }
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(
+        get_generation_by_id=AsyncMock(return_value=prev),
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=new_gen),
+        update_generation_task=AsyncMock(),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )) as mock_repo:
+        with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            kieai_client=SimpleNamespace(get_task_status=AsyncMock(return_value=status_payload)),
+            generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_new", provider="kieai", uses_webhook=True)),
+            get_poll_fn=MagicMock(),
+        )) as mock_video_service:
+            await video_gen.cb_regen_video(call, AsyncMock(), mock_state, mock_db_user, AsyncMock())
+
+    image_url = mock_video_service.generate_video.await_args.kwargs["image_url"]
+    assert image_url == ["https://cdn.test/face-a.jpg", "https://cdn.test/face-b.jpg"]
+    assert mock_repo.create_generation.await_args.kwargs["input_params"]["image_url"] == image_url
+
+
+@pytest.mark.asyncio
+async def test_regen_video_prefers_saved_input_params_when_provider_omits_refs() -> None:
+    call = make_callback(data="regen:video:777")
+    status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
+    call.message.answer = AsyncMock(return_value=status_msg)
+    mock_state = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
+    saved_params = {
+        "mode": "image",
+        "duration": 5,
+        "aspect_ratio": "9:16",
+        "resolution": "720p",
+        "image_url": "https://cdn.test/saved-face.jpg",
+    }
+    prev = SimpleNamespace(
+        id=777,
+        user_id=42,
+        model="bytedance/seedance-2",
+        prompt="same face prompt",
+        task_id="task_prev",
+        source_feed_gen_id=None,
+        input_params=saved_params,
+        parent_generation_id=None,
+    )
+    mock_cost = _make_video_model_cost("bytedance/seedance-2", 8, "Seedance 2")
+    new_gen = SimpleNamespace(id=778, task_id=None, model="bytedance/seedance-2")
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(
+        get_generation_by_id=AsyncMock(return_value=prev),
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=new_gen),
+        update_generation_task=AsyncMock(),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )):
+        with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            kieai_client=SimpleNamespace(get_task_status=AsyncMock(return_value={"data": {"param": {"input": {}}}})),
+            generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_new", provider="kieai", uses_webhook=True)),
+            get_poll_fn=MagicMock(),
+        )) as mock_video_service:
+            await video_gen.cb_regen_video(call, AsyncMock(), mock_state, mock_db_user, AsyncMock())
+
+    assert mock_video_service.generate_video.await_args.kwargs["image_url"] == "https://cdn.test/saved-face.jpg"
+
+
+@pytest.mark.asyncio
+async def test_handle_video_prompt_persists_reference_input_params() -> None:
+    msg = make_message(text="animate this face")
+    msg.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test", is_banned=False)
+    mock_state = _fake_state(
+        model_key="bytedance/seedance-2",
+        duration=5,
+        aspect_ratio="9:16",
+        resolution="720p",
+        mode="image",
+        credits=8,
+        grok_mode="normal",
+        image_file_id="photo_1",
+        ref_file_ids=["photo_1"],
+    )
+    mock_cost = _make_video_model_cost("bytedance/seedance-2", 8, "Seedance 2")
+    mock_gen = SimpleNamespace(id=778, task_id=None, model="bytedance/seedance-2")
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )) as mock_repo:
+        with patch("bot.handlers.video_gen.mirror_telegram_file", AsyncMock(return_value="https://cdn.test/face.jpg")):
+            with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+                generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_new", provider="kieai", uses_webhook=True)),
+                get_poll_fn=MagicMock(),
+            )):
+                await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
+
+    input_params = mock_repo.create_generation.await_args.kwargs["input_params"]
+    assert input_params["mode"] == "image"
+    assert input_params["image_url"] == "https://cdn.test/face.jpg"
+
+
+@pytest.mark.asyncio
+async def test_reprompt_video_restores_params_and_waits_for_new_prompt() -> None:
+    call = make_callback(data="reprompt:video:777")
+    mock_state = _fake_state(source_feed_gen_id=999)
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
+    prev = SimpleNamespace(
+        id=777,
+        user_id=42,
+        model="gemini-omni-video",
+        gen_type=GenerationType.video,
+        prompt="old hidden prompt",
+        task_id="task_prev",
+        source_feed_gen_id=88,
+    )
+    mock_cost = _make_video_model_cost("gemini-omni-video", 90, "Gemini Omni")
+    status_payload = {
+        "data": {
+            "param": {
+                "input": {
+                    "duration": "8",
+                    "aspect_ratio": "9:16",
+                    "resolution": "720p",
+                    "image_urls": ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+                    "audio_ids": ["audio_1"],
+                }
+            }
+        }
+    }
+
+    with (
+        patch("bot.handlers.video_gen.repo", AsyncMock(
+            get_generation_by_id=AsyncMock(return_value=prev),
+            resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        )),
+        patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            kieai_client=SimpleNamespace(get_task_status=AsyncMock(return_value=status_payload)),
+        )),
+        patch("bot.handlers.video_gen.safe_edit_message", AsyncMock()) as edit_message,
+    ):
+        await video_gen.cb_reprompt_video(call, AsyncMock(), mock_state, mock_db_user)
+
+    mock_state.set_state.assert_awaited_with(VideoGenFSM.prompt_input)
+    updated = await mock_state.get_data()
+    assert updated["parent_generation_id"] == 777
+    assert updated["source_feed_gen_id"] is None
+    assert updated["video_reuse_prompt"] is None
+    assert updated["image_url"] == ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"]
+    assert "Новый промпт" in edit_message.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_reparams_video_restores_prompt_and_shows_launch_button() -> None:
+    call = make_callback(data="reparams:video:777")
+    mock_state = _fake_state()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
+    prev = SimpleNamespace(
+        id=777,
+        user_id=42,
+        model="gemini-omni-video",
+        gen_type=GenerationType.video,
+        prompt="same prompt",
+        task_id="task_prev",
+        source_feed_gen_id=88,
+    )
+    mock_cost = _make_video_model_cost("gemini-omni-video", 90, "Gemini Omni")
+    status_payload = {
+        "data": {
+            "param": {
+                "input": {
+                    "duration": "8",
+                    "aspect_ratio": "9:16",
+                    "resolution": "720p",
+                    "image_urls": ["https://cdn.test/a.jpg"],
+                }
+            }
+        }
+    }
+
+    with (
+        patch("bot.handlers.video_gen.repo", AsyncMock(
+            get_generation_by_id=AsyncMock(return_value=prev),
+            resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        )),
+        patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            kieai_client=SimpleNamespace(get_task_status=AsyncMock(return_value=status_payload)),
+        )),
+        patch("bot.handlers.video_gen.safe_edit_message", AsyncMock()) as edit_message,
+    ):
+        await video_gen.cb_reparams_video(call, AsyncMock(), mock_state, mock_db_user, AsyncMock())
+
+    mock_state.set_state.assert_awaited_with(VideoGenFSM.params_select)
+    updated = await mock_state.get_data()
+    assert updated["video_reuse_prompt"] == "same prompt"
+    assert updated["source_feed_gen_id"] == 88
+    markup = edit_message.await_args.kwargs["reply_markup"]
+    texts = {button.text for row in markup.inline_keyboard for button in row}
+    assert "▶️ Запустить" in texts
+
+
+@pytest.mark.asyncio
+async def test_handle_video_prompt_keeps_reprompt_parent_generation() -> None:
+    msg = make_message(text="new prompt")
+    msg.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test", is_banned=False)
+    mock_state = _fake_state(
+        model_key="kling-3.0/video",
+        duration=5,
+        aspect_ratio="16:9",
+        resolution="1080p",
+        mode="text",
+        credits=10,
+        grok_mode="normal",
+        parent_generation_id=777,
+    )
+    mock_cost = _make_video_model_cost("kling-3.0/video", 10, "Kling 3.0")
+    mock_gen = SimpleNamespace(id=778, task_id=None, model="kling-3.0/video")
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )) as mock_repo:
+        with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_abc", provider="kieai", uses_webhook=True)),
+            get_poll_fn=MagicMock(),
+        )):
+            await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
+
+    assert mock_repo.create_generation.await_args.kwargs["parent_generation_id"] == 777
+
+
 # ── _params_summary ───────────────────────────────────────────────────────────
 
 def test_params_summary_with_all_params() -> None:
@@ -453,18 +804,19 @@ async def test_handle_video_prompt_grok_spends_per_second_price() -> None:
     mock_db_user = SimpleNamespace(id=42, credits=100, language="ru", username="test", full_name="Test", is_banned=False)
     mock_state = _fake_state(
         model_key="grok-imagine/text-to-video", duration=6,
-        aspect_ratio="16:9", resolution="480p",
-        mode="text", credits=35, grok_mode="normal",
+        aspect_ratio="16:9", resolution="720p",
+        mode="text", credits=45, grok_mode="normal",
     )
-    mock_cost = _make_video_model_cost("grok-imagine/text-to-video", 35, "Grok T2V")
+    mock_cost = _make_video_model_cost("grok-imagine/text-to-video", 45, "Grok T2V")
     mock_gen = SimpleNamespace(id=101, task_id=None, model="grok-imagine/text-to-video")
     spend_credits = AsyncMock(return_value=True)
+    resolve_video_model_cost = AsyncMock(return_value=mock_cost)
 
     with patch("bot.handlers.video_gen.repo", AsyncMock(
         spend_credits=spend_credits,
         create_generation=AsyncMock(return_value=mock_gen),
         update_generation_task=AsyncMock(),
-        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        resolve_video_model_cost=resolve_video_model_cost,
         fail_generation=AsyncMock(),
         add_credits=AsyncMock(),
     )):
@@ -475,7 +827,14 @@ async def test_handle_video_prompt_grok_spends_per_second_price() -> None:
             with patch("bot.handlers.video_gen.polling", new=SimpleNamespace(poll_until_done=AsyncMock())):
                 await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
 
-    assert spend_credits.await_args.args[1:] == (42, 210)
+    assert resolve_video_model_cost.await_args.kwargs["resolution"] == "720p"
+    assert spend_credits.await_args.args[1:] == (42, 270)
+
+
+def test_video_state_resolution_normalizes_kling_motion_aliases() -> None:
+    assert video_gen._normalize_resolution_for_state("kling-3.0/video", "2K") == "pro"
+    assert video_gen._normalize_resolution_for_state("kling-3.0/video", "720p") == "std"
+    assert video_gen._normalize_resolution_for_state("kling-3.0/motion-control", "pro") == "1080p"
 
 
 @pytest.mark.asyncio

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import inspect
+import mimetypes
 from typing import Any
 from urllib.parse import urlparse
-import mimetypes
 
 import httpx
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,29 +19,80 @@ from api.miniapp_routes import (
     VideoGenRequest,
     _is_supported_reference_image,
     _reconcile_user_active_generations,
-    create_image_generation as miniapp_create_image_generation,
-    create_music_generation as miniapp_create_music_generation,
-    create_video_generation as miniapp_create_video_generation,
-    get_feed_share_link as miniapp_get_feed_share_link,
-    get_generation as miniapp_get_generation,
-    list_image_models as miniapp_list_image_models,
-    list_music_models as miniapp_list_music_models,
-    list_payment_methods as miniapp_list_payment_methods,
-    list_payment_options as miniapp_list_payment_options,
-    list_plans as miniapp_list_plans,
-    list_video_models as miniapp_list_video_models,
     miniapp_improve_prompt,
     miniapp_photo_prompt,
+)
+from api.miniapp_routes import (
+    create_image_generation as miniapp_create_image_generation,
+)
+from api.miniapp_routes import (
+    create_music_generation as miniapp_create_music_generation,
+)
+from api.miniapp_routes import (
+    create_suno_voice as miniapp_create_suno_voice,
+)
+from api.miniapp_routes import (
+    create_video_generation as miniapp_create_video_generation,
+)
+from api.miniapp_routes import (
+    get_feed_share_link as miniapp_get_feed_share_link,
+)
+from api.miniapp_routes import (
+    list_image_models as miniapp_list_image_models,
+)
+from api.miniapp_routes import (
+    list_music_models as miniapp_list_music_models,
+)
+from api.miniapp_routes import (
+    list_payment_methods as miniapp_list_payment_methods,
+)
+from api.miniapp_routes import (
+    list_payment_options as miniapp_list_payment_options,
+)
+from api.miniapp_routes import (
+    list_plans as miniapp_list_plans,
+)
+from api.miniapp_routes import (
+    list_suno_voices as miniapp_list_suno_voices,
+)
+from api.miniapp_routes import (
+    list_video_models as miniapp_list_video_models,
+)
+from api.miniapp_routes import (
     publish_generation_to_library as miniapp_publish_generation,
-    remove_feed_post as miniapp_remove_feed_post,
-    remove_from_library as miniapp_remove_from_library,
+)
+from api.miniapp_routes import (
+    refresh_suno_voice as miniapp_refresh_suno_voice,
+)
+from api.miniapp_routes import (
     remix_feed_post as miniapp_remix_feed_post,
+)
+from api.miniapp_routes import (
+    remove_feed_post as miniapp_remove_feed_post,
+)
+from api.miniapp_routes import (
+    remove_from_library as miniapp_remove_from_library,
+)
+from api.miniapp_routes import (
     share_generation as miniapp_share_generation,
+)
+from api.miniapp_routes import (
     share_to_library as miniapp_share_to_library,
+)
+from api.miniapp_routes import (
     topup_crypto as miniapp_topup_crypto,
+)
+from api.miniapp_routes import (
     topup_lava as miniapp_topup_lava,
+)
+from api.miniapp_routes import (
     topup_stars as miniapp_topup_stars,
+)
+from api.miniapp_routes import (
     topup_tbank as miniapp_topup_tbank,
+)
+from api.miniapp_routes import (
+    verify_suno_voice as miniapp_verify_suno_voice,
 )
 from api.public_files import save_public_file
 from api.web.deps import error_response, get_web_user_or_none, ok
@@ -151,6 +202,75 @@ async def generate_music(
     if auth_error := _auth_required(user):
         return auth_error
     return await _call_miniapp(miniapp_create_music_generation, body=body, session=session, user=user, surface="web")
+
+
+@router.get("/music/voices")
+async def suno_voices(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_list_suno_voices, session=session, user=user)
+
+
+@router.post("/music/voices", status_code=202)
+async def create_suno_voice(
+    file: UploadFile = File(...),
+    name: str = Form(..., min_length=1, max_length=128),
+    description: str | None = Form(default=None, max_length=1000),
+    style: str | None = Form(default=None, max_length=256),
+    language: str = Form(default="en", max_length=8),
+    vocal_start_s: float = Form(default=0.0),
+    vocal_end_s: float = Form(default=10.0),
+    singer_skill_level: str | None = Form(default=None, max_length=32),
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(
+        miniapp_create_suno_voice,
+        file=file,
+        name=name,
+        description=description,
+        style=style,
+        language=language,
+        vocal_start_s=vocal_start_s,
+        vocal_end_s=vocal_end_s,
+        singer_skill_level=singer_skill_level,
+        session=session,
+        user=user,
+    )
+
+
+@router.post("/music/voices/{voice_id}/refresh")
+async def refresh_suno_voice(
+    voice_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_refresh_suno_voice, voice_id=voice_id, session=session, user=user)
+
+
+@router.post("/music/voices/{voice_id}/verify", status_code=202)
+async def verify_suno_voice(
+    voice_id: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(
+        miniapp_verify_suno_voice,
+        voice_id=voice_id,
+        file=file,
+        session=session,
+        user=user,
+    )
 
 
 @router.get("/generations/active")

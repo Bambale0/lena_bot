@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.assistant_service import generate_prompt_moderation_decision
 from api.image_service import ImageModel
-from api.public_files import ensure_public_image_url, local_upload_path_from_url, mirror_telegram_file
+from api.public_files import (
+    ensure_public_image_url,
+    local_upload_path_from_url,
+    mirror_telegram_file,
+)
 from bot.filters.admin import IsAdmin
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.prompts import (
@@ -26,8 +30,8 @@ from bot.keyboards.prompts import (
     prompt_use_reference_kb,
     prompts_home_kb,
 )
-from bot.states.prompt import PromptModerateFSM, PromptUploadFSM
 from bot.states import PromptUseFSM
+from bot.states.prompt import PromptModerateFSM, PromptUploadFSM
 from bot.utils.deep_links import build_start_payload
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
@@ -436,14 +440,26 @@ async def cb_prompt_pick_model(
     state: FSMContext,
 ) -> None:
     _, id_raw, model_key = call.data.split(":", 2)  # type: ignore[union-attr]
+    data = await state.get_data()
+    is_feed_use = data.get("feed_use_prompt") is not None
     await state.update_data(use_model_key=model_key)
     await state.set_state(PromptUseFSM.reference_upload)
+    if is_feed_use:
+        text = (
+            "🖼 <b>Твой референс</b>\n\n"
+            "Отправь фото, по которому нужно повторить пост из ленты.\n"
+            "Промпт автора применю скрыто, а лицо/объект возьму из твоего фото."
+        )
+    else:
+        text = (
+            "🖼 <b>Референс (необязательно)</b>\n\n"
+            "Отправь фото-референс, чтобы задать стиль,\n"
+            "или нажми <b>«Без референса»</b> для запуска прямо сейчас."
+        )
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "🖼 <b>Референс (необязательно)</b>\n\n"
-        "Отправь фото-референс, чтобы задать стиль,\n"
-        "или нажми <b>«Без референса»</b> для запуска прямо сейчас.",
-        reply_markup=prompt_use_reference_kb(int(id_raw)),
+        text,
+        reply_markup=prompt_use_reference_kb(int(id_raw), allow_skip=not is_feed_use),
     )
     await call.answer()
 
@@ -464,50 +480,7 @@ async def cb_prompt_skip_ref(
 
     # Feed use flow: prompt comes from state directly
     if data.get("feed_use_prompt") is not None:
-        prompt_text: str = data["feed_use_prompt"]
-        source_feed_gen_id = data.get("feed_use_gen_id")
-        model_cost = await repo.resolve_image_model_cost(
-            session, model_key, quality=_default_quality_for_model(model_key),
-        )
-        if not model_cost:
-            await call.answer("Модель недоступна", show_alert=True)
-            await state.clear()
-            return
-        if db_user.credits < model_cost.credits:
-            await call.answer(
-                f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
-                show_alert=True,
-            )
-            await state.clear()
-            return
-        image_session = await repo.create_image_session(
-            session=session,
-            user_id=db_user.id,
-            model=model_key,
-            mode="text",
-            aspect_ratio=None,
-            quality=_default_quality_for_model(model_key),
-            count=_default_count_for_model(model_key),
-            base_prompt=prompt_text,
-            reference_file_id=None,
-            reference_url=None,
-        )
-        await state.clear()
-        await _launch_session_generation(
-            source_message=call.message,  # type: ignore[arg-type]
-            state=state,
-            session=session,
-            db_user=db_user,
-            image_session=image_session,
-            prompt=prompt_text,
-            action_type=ImageGenerationAction.initial,
-            reference_url=None,
-            parent_generation_id=None,
-            source_feed_gen_id=source_feed_gen_id,
-            launching_text="⏳ <b>Запускаю генерацию...</b>",
-            queued_text="⏳ <b>Генерация запущена.</b> Результат придёт сюда автоматически.",
-        )
-        await call.answer()
+        await call.answer("Для повтора из ленты сначала загрузи своё фото.", show_alert=True)
         return
 
     # Prompt library flow

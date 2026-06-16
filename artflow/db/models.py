@@ -110,6 +110,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     generations: Mapped[list[Generation]] = relationship(back_populates="user", lazy="noload")
+    suno_voices: Mapped[list["SunoVoice"]] = relationship(back_populates="user", lazy="noload")
     transactions: Mapped[list[Transaction]] = relationship(back_populates="user", lazy="noload")
     withdrawal_requests: Mapped[list[ReferralWithdrawalRequest]] = relationship(back_populates="user", lazy="noload")
     feed_remix_payouts: Mapped[list["FeedRemixPayout"]] = relationship(foreign_keys="FeedRemixPayout.source_user_id", back_populates="source_user", lazy="noload")
@@ -157,6 +158,7 @@ class Generation(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     result_url: Mapped[str | None] = mapped_column(Text)
     result_urls: Mapped[str | None] = mapped_column(Text)
+    input_params: Mapped[str | None] = mapped_column(Text)
     is_public_feed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_prompt_library: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     source_feed_gen_id: Mapped[int | None] = mapped_column(
@@ -214,6 +216,38 @@ class ImageSession(Base):
     )
 
     user: Mapped["User"] = relationship(lazy="noload")
+
+
+class SunoVoice(Base):
+    """User-owned Suno custom voice created through KIE.AI voice verification."""
+
+    __tablename__ = "suno_voices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    style: Mapped[str | None] = mapped_column(String(256))
+    source_audio_url: Mapped[str] = mapped_column(Text, nullable=False)
+    verify_audio_url: Mapped[str | None] = mapped_column(Text)
+    validate_task_id: Mapped[str | None] = mapped_column(String(256), index=True)
+    voice_task_id: Mapped[str | None] = mapped_column(String(256), index=True)
+    voice_id: Mapped[str | None] = mapped_column(String(256), index=True)
+    validate_phrase: Mapped[str | None] = mapped_column(Text)
+    language: Mapped[str] = mapped_column(String(8), default="en", nullable=False, server_default="en")
+    vocal_start_s: Mapped[float] = mapped_column(Float, default=0.0, nullable=False, server_default="0")
+    vocal_end_s: Mapped[float] = mapped_column(Float, default=10.0, nullable=False, server_default="10")
+    singer_skill_level: Mapped[str | None] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(32), default="validating", nullable=False, index=True)
+    error_msg: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="suno_voices", lazy="noload")
 
 
 class Transaction(Base):

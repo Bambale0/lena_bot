@@ -4,7 +4,7 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from db.models import ModelCost, PromptStatus, UserPrompt
+from db.models import ModelCost, UserPrompt
 from db.prompt_repository import COLLECTION_TAGS
 
 PAGE_SIZE = 8
@@ -86,15 +86,22 @@ def my_prompt_detail_kb(prompt_id: int, status: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def prompt_use_model_kb(prompt_id: int, model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
+def prompt_use_model_kb(
+    prompt_id: int,
+    model_costs: list[ModelCost],
+    *,
+    reference_only: bool = False,
+) -> InlineKeyboardMarkup:
     from bot.keyboards.models import HIDDEN_IMAGE_MODELS, IMAGE_CAPS
 
     builder = InlineKeyboardBuilder()
     for mc in model_costs:
+        caps = IMAGE_CAPS.get(mc.model_key)
         if (
             mc.gen_type.value == "image"
-            and mc.model_key in IMAGE_CAPS
+            and caps is not None
             and mc.model_key not in HIDDEN_IMAGE_MODELS
+            and (not reference_only or "image" in caps.get("modes", []))
         ):
             builder.row(
                 InlineKeyboardButton(
@@ -106,11 +113,12 @@ def prompt_use_model_kb(prompt_id: int, model_costs: list[ModelCost]) -> InlineK
     return builder.as_markup()
 
 
-def prompt_use_reference_kb(prompt_id: int) -> InlineKeyboardMarkup:
+def prompt_use_reference_kb(prompt_id: int, *, allow_skip: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="▶ Без референса", callback_data=f"prompt_skip_ref:{prompt_id}")
-    )
+    if allow_skip:
+        builder.row(
+            InlineKeyboardButton(text="▶ Без референса", callback_data=f"prompt_skip_ref:{prompt_id}")
+        )
     builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="prompts:open"))
     return builder.as_markup()
 

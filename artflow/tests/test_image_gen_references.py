@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from bot.handlers import image_gen
+from db.models import GenerationType
 
 
 @pytest.mark.asyncio
@@ -1014,3 +1015,128 @@ async def test_gen_library_allows_self_feed_source() -> None:
         await image_gen.cb_gen_library(call, session_obj, SimpleNamespace(id=42))
 
     repo_stub.share_to_library.assert_awaited_once_with(session_obj, 10424, 42)
+
+
+@pytest.mark.asyncio
+async def test_gen_share_labels_video_posts() -> None:
+    call = SimpleNamespace(
+        data="gen:share:77",
+        answer=AsyncMock(),
+        message=SimpleNamespace(answer=AsyncMock()),
+    )
+    session_obj = AsyncMock()
+    existing = SimpleNamespace(id=77, user_id=42, source_feed_gen_id=None)
+    shared = SimpleNamespace(id=77, gen_type=GenerationType.video)
+    repo_stub = SimpleNamespace(
+        get_generation_by_id=AsyncMock(return_value=existing),
+        share_to_feed=AsyncMock(return_value=shared),
+    )
+    bot = AsyncMock()
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="TestBot"))
+
+    with patch("bot.handlers.image_gen.repo", new=repo_stub):
+        await image_gen.cb_gen_share(
+            call,
+            session_obj,
+            SimpleNamespace(id=42, referral_code="REF"),
+            bot,
+        )
+
+    text = call.message.answer.await_args.args[0]
+    assert "Видео добавлено в ленту" in text
+    assert "Фото добавлено" not in text
+
+
+@pytest.mark.asyncio
+async def test_reprompt_image_restores_session_and_clears_feed_source() -> None:
+    call = SimpleNamespace(
+        data="reprompt:image:777",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    gen = SimpleNamespace(
+        id=777,
+        user_id=42,
+        model="nano-banana-pro",
+        gen_type=GenerationType.image,
+        prompt="hidden prompt",
+        source_feed_gen_id=88,
+    )
+    image_session = SimpleNamespace(
+        id=7,
+        model="nano-banana-pro",
+        mode="image",
+        aspect_ratio="9:16",
+        quality="2K",
+        count=1,
+        reference_file_id="face_ref",
+        reference_file_ids='["face_ref"]',
+    )
+    repo_stub = SimpleNamespace(get_generation_by_id=AsyncMock(return_value=gen))
+
+    with (
+        patch("bot.handlers.image_gen.repo", new=repo_stub),
+        patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 777))),
+        patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()) as edit_message,
+    ):
+        await image_gen.cb_reprompt_image(
+            call,
+            AsyncMock(),
+            state,
+            SimpleNamespace(id=42),
+    )
+
+    state.set_state.assert_awaited_with(image_gen.ImageGenFSM.session_active)
+    assert any(call.kwargs.get("source_feed_gen_id") is None for call in state.update_data.await_args_list)
+    assert "Новый промпт" in edit_message.await_args.args[1]
+    markup = edit_message.await_args.kwargs["reply_markup"]
+    texts = {button.text for row in markup.inline_keyboard for button in row}
+    assert "📤 В ленту" not in texts
+
+
+@pytest.mark.asyncio
+async def test_reparams_image_opens_session_settings() -> None:
+    call = SimpleNamespace(
+        data="reparams:image:777",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    gen = SimpleNamespace(
+        id=777,
+        user_id=42,
+        model="nano-banana-pro",
+        gen_type=GenerationType.image,
+        prompt="own prompt",
+        source_feed_gen_id=None,
+    )
+    image_session = SimpleNamespace(
+        id=7,
+        model="nano-banana-pro",
+        mode="text",
+        aspect_ratio="9:16",
+        quality="2K",
+        count=1,
+        reference_file_id=None,
+        reference_file_ids=None,
+    )
+    repo_stub = SimpleNamespace(get_generation_by_id=AsyncMock(return_value=gen))
+
+    with (
+        patch("bot.handlers.image_gen.repo", new=repo_stub),
+        patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 777))),
+        patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()) as edit_message,
+    ):
+        await image_gen.cb_reparams_image(
+            call,
+            AsyncMock(),
+            state,
+            SimpleNamespace(id=42),
+        )
+
+    state.set_state.assert_awaited_with(image_gen.ImageGenFSM.session_active)
+    assert "Настройки активной серии" in edit_message.await_args.args[1]
+    markup = edit_message.await_args.kwargs["reply_markup"]
+    callbacks = {button.callback_data for row in markup.inline_keyboard for button in row if button.callback_data}
+    assert f"img_sset:model:{image_session.id}" in callbacks

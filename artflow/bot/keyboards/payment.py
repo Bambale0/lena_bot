@@ -24,7 +24,7 @@ def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
         )
 
     currency_texts = {
-        "usd": "💵 Доллар" if lang == "ru" else "💵 Dollar",
+        "usd": "💸 Lava" if settings.lava_is_enabled() else ("💵 Доллар" if lang == "ru" else "💵 Dollar"),
         "rub": "₽ Рубль" if lang == "ru" else "₽ Ruble",
         "crypto": "🪙 Крипта" if lang == "ru" else "🪙 Crypto",
     }
@@ -48,6 +48,8 @@ def rub_methods_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     )
     if settings.TELEGRAM_STARS_ENABLED:
         builder.row(InlineKeyboardButton(text="⭐ Telegram Stars", callback_data="topup:stars"))
+    if settings.lava_is_enabled():
+        builder.row(InlineKeyboardButton(text="💸 Lava", callback_data="topup:lava"))
     builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:topup"))
     return builder.as_markup()
 

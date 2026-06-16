@@ -10,15 +10,21 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, BufferedInputFile, InputMediaPhoto, InputMediaVideo, Message
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InputMediaPhoto,
+    InputMediaVideo,
+    Message,
+)
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.feed import empty_feed_kb, feed_card_kb
 from bot.keyboards.main_menu import back_to_menu_kb
-from bot.keyboards.models import IMAGE_CAPS
+from bot.keyboards.models import IMAGE_CAPS, video_models_kb
 from bot.keyboards.prompts import prompt_use_model_kb
-from bot.states import ImageGenFSM, PromptUseFSM
+from bot.states import ImageGenFSM, PromptUseFSM, VideoGenFSM
 from bot.utils.deep_links import build_start_payload
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
@@ -471,12 +477,37 @@ async def cb_feed_use(
         return
 
     model_costs = await repo.get_all_model_costs(session)
+    if getattr(gen, "gen_type", None) == GenerationType.video:
+        await state.set_state(VideoGenFSM.model_select)
+        await state.update_data(
+            feed_use_gen_id=gen_id,
+            feed_use_prompt=gen.prompt,
+            feed_use_model=gen.model,
+            feed_use_gen_type="video",
+            source_feed_gen_id=gen_id,
+            feed_force_reference=True,
+        )
+        await call.message.answer(  # type: ignore[union-attr]
+            "🎬 <b>Повторить видео</b>\n\n"
+            "Выбери видео-модель. Следующим шагом загрузи своё фото/референс — "
+            "по нему повторим ролик с промптом из ленты.",
+            reply_markup=video_models_kb(model_costs, "i2v"),
+        )
+        await safe_answer_callback(call)
+        return
+
     await state.set_state(PromptUseFSM.model_select)
-    await state.update_data(feed_use_gen_id=gen_id, feed_use_prompt=gen.prompt, feed_use_model=gen.model)
+    await state.update_data(
+        feed_use_gen_id=gen_id,
+        feed_use_prompt=gen.prompt,
+        feed_use_model=gen.model,
+        feed_use_gen_type="image",
+    )
     await call.message.answer(  # type: ignore[union-attr]
-        "🎨 <b>Повторить генерацию</b>\n\n"
-        "<i>Выбери модель:</i>",
-        reply_markup=prompt_use_model_kb(gen_id, model_costs),
+        "🎨 <b>Повторить изображение</b>\n\n"
+        "Выбери модель для работы по фото. Потом загрузи свой референс — "
+        "промпт автора применю скрыто.",
+        reply_markup=prompt_use_model_kb(gen_id, model_costs, reference_only=True),
     )
     await safe_answer_callback(call)
 
@@ -580,8 +611,8 @@ async def cb_feed_remix(
     db_user: User,
     state: FSMContext,
 ) -> None:
-    from bot.keyboards.models import image_session_kb
     from bot.handlers.image_gen import _supports_img2img
+    from bot.keyboards.models import image_session_kb
 
     gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
     gen = await repo.get_generation_by_id(session, gen_id)

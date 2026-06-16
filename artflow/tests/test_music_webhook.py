@@ -94,3 +94,37 @@ async def test_kie_music_webhook_fails_closed_in_production_without_secret(monke
         response = await client.post("/webhook/kie/music", json={"data": {"taskId": "music-task-1"}})
 
     assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_kie_suno_voice_webhook_updates_ready_voice(monkeypatch) -> None:
+    update_suno_voice = AsyncMock()
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.repo, "get_suno_voice_by_validate_task_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        main.repo,
+        "get_suno_voice_by_voice_task_id",
+        AsyncMock(return_value=SimpleNamespace(id=12, status="generating")),
+    )
+    monkeypatch.setattr(main.repo, "update_suno_voice", update_suno_voice)
+
+    payload = {
+        "code": 200,
+        "data": {
+            "taskId": "voice-task-1",
+            "status": "success",
+            "voiceId": "voice_abc",
+        },
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/webhook/kie/suno-voice", json=payload)
+
+    assert response.status_code == 200
+    update_suno_voice.assert_awaited_once()
+    assert update_suno_voice.await_args.args[1:] == (12,)
+    assert update_suno_voice.await_args.kwargs == {
+        "status": "ready",
+        "voice_id": "voice_abc",
+        "error_msg": None,
+    }

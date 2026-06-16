@@ -177,6 +177,31 @@ async def create_omni_character(payload: dict[str, Any]) -> dict[str, Any]:
     return await _retry_post("/api/v1/omni/character/create", payload)
 
 
+async def create_suno_voice_validation(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST /api/v1/voice/validate — создать проверочную фразу Suno Voice."""
+    return await _retry_post("/api/v1/voice/validate", payload)
+
+
+async def get_suno_voice_validation(task_id: str) -> dict[str, Any]:
+    """GET /api/v1/voice/validate-info — статус проверочной фразы Suno Voice."""
+    return await _retry_get("/api/v1/voice/validate-info", params={"taskId": task_id})
+
+
+async def create_suno_voice(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST /api/v1/voice/generate — создать пользовательский Suno Voice."""
+    return await _retry_post("/api/v1/voice/generate", payload)
+
+
+async def get_suno_voice_record(task_id: str) -> dict[str, Any]:
+    """GET /api/v1/voice/record-info — статус пользовательского Suno Voice."""
+    return await _retry_get("/api/v1/voice/record-info", params={"taskId": task_id})
+
+
+async def check_suno_voice(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST /api/v1/voice/check-voice — проверить готовность Suno Voice к генерации."""
+    return await _retry_post("/api/v1/voice/check-voice", payload)
+
+
 async def create_veo_task(payload: dict[str, Any]) -> dict[str, Any]:
     """POST /api/v1/veo/generate — только для Veo 3."""
     return await _retry_post("/api/v1/veo/generate", payload)
