@@ -38,6 +38,13 @@ async def fake_user():
     )
 
 
+def stub_image_quality_prices(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.resolve_image_model_cost",
+        AsyncMock(return_value=None),
+    )
+
+
 @pytest.fixture
 async def client():
     app.dependency_overrides[get_session] = fake_session
@@ -498,6 +505,7 @@ async def test_webapp_video_models_include_mode_options(client, monkeypatch) -> 
 
 @pytest.mark.asyncio
 async def test_webapp_image_models_allow_fractional_credits(client, monkeypatch) -> None:
+    stub_image_quality_prices(monkeypatch)
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_all_model_costs",
         AsyncMock(return_value=[
@@ -1389,6 +1397,7 @@ async def test_generate_image_rejects_missing_reference_for_image_only_model(cli
 
 @pytest.mark.asyncio
 async def test_image_models_include_max_refs_and_single_count_for_nano_banana_2(client, monkeypatch) -> None:
+    stub_image_quality_prices(monkeypatch)
     model_costs = [SimpleNamespace(model_key="nano-banana-2", display_name="Nano Banana 2", credits=4)]
     monkeypatch.setattr("api.miniapp_routes.repo.get_all_model_costs", AsyncMock(return_value=model_costs))
 
@@ -1402,6 +1411,7 @@ async def test_image_models_include_max_refs_and_single_count_for_nano_banana_2(
 
 @pytest.mark.asyncio
 async def test_image_models_include_updated_wan_reference_limit(client, monkeypatch) -> None:
+    stub_image_quality_prices(monkeypatch)
     model_costs = [SimpleNamespace(model_key="wan/2-7-image-pro", display_name="WAN 2.7 Pro", credits=4)]
     monkeypatch.setattr("api.miniapp_routes.repo.get_all_model_costs", AsyncMock(return_value=model_costs))
 
@@ -1415,6 +1425,7 @@ async def test_image_models_include_updated_wan_reference_limit(client, monkeypa
 
 @pytest.mark.asyncio
 async def test_image_models_include_standard_wan_reference_limit(client, monkeypatch) -> None:
+    stub_image_quality_prices(monkeypatch)
     model_costs = [SimpleNamespace(model_key="wan/2-7-image", display_name="WAN 2.7", credits=4)]
     monkeypatch.setattr("api.miniapp_routes.repo.get_all_model_costs", AsyncMock(return_value=model_costs))
 
@@ -1844,6 +1855,7 @@ async def test_feed_remix_midjourney_blend_uses_source_ref_and_reference_urls(cl
 
 @pytest.mark.asyncio
 async def test_webapp_image_models_expose_single_ref_caps_and_no_false_count(client, monkeypatch) -> None:
+    stub_image_quality_prices(monkeypatch)
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_all_model_costs",
         AsyncMock(return_value=[

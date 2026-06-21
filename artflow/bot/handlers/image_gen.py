@@ -14,7 +14,6 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
-    URLInputFile,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +22,7 @@ from api import image_service
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
 from api.photo_prompt_service import generate_prompt_from_photo
-from api.public_files import mirror_telegram_file
+from api.public_files import local_upload_path_from_url, mirror_telegram_file
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     IMAGE_CAPS,
@@ -45,6 +44,11 @@ from bot.keyboards.models import (
 )
 from bot.states import ImageGenFSM
 from bot.ui.router import render_screen
+from bot.utils.telegram_images import (
+    send_image_group_to_message,
+    send_image_to_message,
+    send_original_document_to_message,
+)
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db import repository as repo
@@ -98,6 +102,39 @@ def _kie_callback_url() -> str:
         params["secret"] = settings.KIE_WEBHOOK_SECRET
     query = f"?{urlencode(params)}" if params else ""
     return f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}{query}"
+
+
+def _sha256_local_url(url: str | None) -> str | None:
+    path = local_upload_path_from_url(url)
+    if path is None or not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _filter_reference_echoes(result_urls: list[str], reference_url: str | list[str] | None) -> list[str]:
+    refs: list[str] = []
+    if isinstance(reference_url, str) and reference_url.strip():
+        refs = [reference_url.strip()]
+    elif isinstance(reference_url, list):
+        refs = [str(item).strip() for item in reference_url if str(item or "").strip()]
+    if not refs:
+        return result_urls
+
+    ref_hashes = {_sha256_local_url(ref) for ref in refs}
+    filtered: list[str] = []
+    for url in result_urls:
+        item = str(url or "").strip()
+        if not item or item in refs:
+            continue
+        item_hash = _sha256_local_url(item)
+        if item_hash and item_hash in ref_hashes:
+            continue
+        filtered.append(item)
+    return filtered
 
 
 def _direct_image_result_urls(result: image_service.ImageResult) -> list[str]:
@@ -749,12 +786,13 @@ async def _launch_session_generation(
 
     if not getattr(result, "is_async", True):
         result_urls = _direct_image_result_urls(result)
+        result_urls = _filter_reference_echoes(result_urls, reference_url)
         if not result_urls:
-            err = "CometAPI image fallback returned no result URL"
+            err = "Provider returned reference image instead of generated result"
             if await repo.fail_generation(session, gen.id, err):
                 await repo.add_credits(session, db_user.id, credits)
             await status_msg.edit_text(
-                "❌ Ошибка генерации. 💋 возвращены.",
+                "❌ Генератор вернул референс вместо нового результата. 💋 возвращены.",
                 reply_markup=image_session_kb(parent_generation_id, allow_publish=publish_actions_allowed),
             )
             return False
@@ -770,32 +808,63 @@ async def _launch_session_generation(
 
         caption = (
             "✅ <b>Готово!</b>\n\n"
-            "🎨 <b>Серия активна.</b>\n"
-            "Теперь просто отправляй новый текст или фото — настройки сохранятся."
+            + (f"🖼️ <b>Вариантов:</b> {len(result_urls)}\n\n" if len(result_urls) > 1 else "")
+            + "🎨 <b>Серия активна.</b>\n"
+            + "Теперь просто отправляй новый текст или фото — настройки сохранятся."
         )
-        for idx, url in enumerate(result_urls):
-            try:
-                await source_message.answer_photo(
-                    URLInputFile(url, filename=f"image_{gen.id}_{idx + 1}.jpg"),
-                    caption=caption if idx == 0 else None,
-                )
-            except Exception:
-                try:
-                    await source_message.answer_document(
-                        URLInputFile(url, filename=f"image_{gen.id}_{idx + 1}.jpg"),
+        deliveries = []
+        if len(result_urls) > 1:
+            group_delivery = await send_image_group_to_message(
+                message=source_message,
+                result_urls=result_urls,
+                generation_prefix=gen.id,
+                caption=caption,
+                log_prefix="image-gen-direct-group",
+            )
+            if group_delivery.delivered:
+                deliveries = [group_delivery]
+            else:
+                for idx, url in enumerate(result_urls):
+                    delivery = await send_image_to_message(
+                        message=source_message,
+                        result_url=url,
+                        generation_id=f"{gen.id}_{idx + 1}",
                         caption=caption if idx == 0 else None,
+                        log_prefix="image-gen-direct",
                     )
-                except Exception:
-                    logger.warning("Failed to send direct image result user=%s gen=%s idx=%s", db_user.tg_id, gen.id, idx)
+                    deliveries.append(delivery)
+                    if not delivery.delivered:
+                        logger.warning("Failed to send direct image result user=%s gen=%s idx=%s", db_user.tg_id, gen.id, idx)
+        else:
+            delivery = await send_image_to_message(
+                message=source_message,
+                result_url=result_urls[0],
+                generation_id=f"{gen.id}_1",
+                caption=caption,
+                log_prefix="image-gen-direct",
+            )
+            deliveries = [delivery]
+            if not delivery.delivered:
+                logger.warning("Failed to send direct image result user=%s gen=%s", db_user.tg_id, gen.id)
 
-        for idx, url in enumerate(result_urls):
-            try:
-                await source_message.answer_document(
-                    URLInputFile(url, filename=f"source_{gen.id}_{idx + 1}.png"),
-                    caption="📎 <b>Исходник файлом</b>" if idx == 0 else None,
+        preview_fallback_used = any(item.mode == "document" for item in deliveries)
+        should_send_originals = bool(result_urls)
+        if should_send_originals:
+            await source_message.answer(
+                "📎 <b>Оригиналы ниже файлами</b> — можно скачать без сжатия."
+                if not preview_fallback_used
+                else "📎 <b>Telegram не принял часть превью как фото.</b> Ниже дублирую оригиналы файлами без потери качества.",
+            )
+            for idx, url in enumerate(result_urls):
+                sent = await send_original_document_to_message(
+                    message=source_message,
+                    result_url=url,
+                    generation_id=f"{gen.id}_{idx + 1}",
+                    caption=(f"Исходник {idx + 1}/{len(result_urls)}" if len(result_urls) > 1 else "Исходник"),
+                    log_prefix="image-gen-source-document",
                 )
-            except Exception:
-                logger.warning("Failed to send direct image source document user=%s gen=%s idx=%s", db_user.tg_id, gen.id, idx)
+                if not sent:
+                    logger.warning("Failed to send direct image source document user=%s gen=%s idx=%s", db_user.tg_id, gen.id, idx)
 
         await source_message.answer(
             "Что делаем дальше?",

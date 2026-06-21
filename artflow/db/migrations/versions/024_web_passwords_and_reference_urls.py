@@ -4,9 +4,8 @@ Revision ID: 024_web_passwords_reference_urls
 Revises: 023_web_contact_auth
 Create Date: 2026-06-09 12:00:00.000000
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "024_web_passwords_reference_urls"
 down_revision = "023_web_contact_auth"

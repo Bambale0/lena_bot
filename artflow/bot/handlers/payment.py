@@ -10,8 +10,16 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
-from bot.keyboards.payment import crypto_pay_kb, crypto_plans_kb, lava_plans_kb, payment_link_kb, rub_methods_kb, rub_plans_kb, topup_kb
 from bot.keyboards.main_menu import back_to_menu_kb
+from bot.keyboards.payment import (
+    crypto_pay_kb,
+    crypto_plans_kb,
+    lava_plans_kb,
+    payment_link_kb,
+    rub_methods_kb,
+    rub_plans_kb,
+    topup_kb,
+)
 from bot.states import PromoFSM
 from core.config import settings
 from db import repository as repo

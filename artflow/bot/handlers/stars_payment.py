@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 import math
 
-from aiogram import F, Router, Bot
-from aiogram.types import CallbackQuery, Message, LabeledPrice, PreCheckoutQuery
+from aiogram import Bot, F, Router
+from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t

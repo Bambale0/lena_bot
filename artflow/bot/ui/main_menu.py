@@ -8,7 +8,6 @@ from bot.services.session_service import MainMenuContext
 from bot.ui.common import ScreenRender
 from core.config import settings
 
-
 _IMAGE_MODEL_LABELS = {
     "grok-imagine/text-to-image": "Grok Imagine",
     "grok-imagine/image-to-image": "Grok Imagine Edit",

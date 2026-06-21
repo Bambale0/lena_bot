@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from api import image_service
-from api import public_files
+from api import image_service, public_files
 from api.image_service import ImageModel, _build_input, normalize_quality_for_aspect_ratio
-
 
 JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"
 

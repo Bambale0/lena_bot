@@ -5,9 +5,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-import main
 
-from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_processing, is_success
+import main
+from api.kie_webhook import (
+    extract_error,
+    extract_result_urls,
+    extract_task_id,
+    is_processing,
+    is_success,
+)
 
 
 def test_extract_task_id_from_nested_data_payload() -> None:

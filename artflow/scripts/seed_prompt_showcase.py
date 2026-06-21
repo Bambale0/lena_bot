@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import httpx
+from PIL import Image, ImageDraw, ImageFilter
 from sqlalchemy import select, update
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -28,7 +29,6 @@ from db.models import (
 )
 from db.prompt_repository import create_prompt, get_prompt_by_id
 from db.session import AsyncSessionLocal
-
 
 SEED_AUTHOR_TG_ID = 9900001001
 SEED_AUTHOR_USERNAME = "apix_showcase"
@@ -252,8 +252,6 @@ def _theme_palette(key: str) -> tuple[tuple[int, int, int], tuple[int, int, int]
 
 
 def _vertical_gradient(width: int, height: int, top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
-    from PIL import Image
-
     image = Image.new("RGB", (width, height))
     pixels = image.load()
     for y in range(height):
@@ -273,8 +271,6 @@ def _draw_glow_circle(draw: ImageDraw.ImageDraw, center: tuple[int, int], radius
 
 
 def _render_local_fallback(item: ShowcaseItem) -> str:
-    from PIL import Image, ImageDraw, ImageFilter
-
     width, height = POLLINATIONS_SIZE
     top, bottom, accent = _theme_palette(item.key)
     image = _vertical_gradient(width, height, top, bottom).convert("RGBA")

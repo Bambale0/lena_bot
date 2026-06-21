@@ -6,12 +6,11 @@ from fastapi import Depends, Header, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import settings
 from api.miniapp_auth import verify_web_auth_token
 from api.web_auth_constants import WEB_AUTH_COOKIE_NAME
+from core.config import settings
 from db import repository as repo
 from db.session import get_session
-
 
 _MISSING = object()
 

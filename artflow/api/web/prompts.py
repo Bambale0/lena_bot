@@ -6,26 +6,26 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.public_files import local_upload_path_from_url, public_url_is_available
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import PromptCard, PromptCreateRequest, PromptRejectRequest
-from api.public_files import local_upload_path_from_url, public_url_is_available
 from core.config import settings
 from db import repository as repo
 from db.models import PromptCategory, PromptStatus
 from db.prompt_repository import (
     MAX_ACTIVE_PROMPTS_PER_USER,
     approve_prompt,
-    count_approved_prompts,
     count_active_prompts_by_author,
+    count_approved_prompts,
     create_prompt,
     deactivate_prompt,
     derive_description,
     derive_title,
-    get_prompt_by_id,
     get_approved_prompts,
     get_author_prompts,
-    get_popular_prompts,
     get_pending_prompts,
+    get_popular_prompts,
+    get_prompt_by_id,
     get_prompts_by_tag,
     get_top_prompts,
     infer_category,

@@ -6,9 +6,8 @@ Create Date: 2026-05-05
 """
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "004_image_session_last_prompt"
 down_revision = "003_image_sessions"

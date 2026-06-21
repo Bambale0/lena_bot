@@ -54,9 +54,10 @@ async def _make_throttling_middleware(redis_client: object | None):
         return ThrottlingMiddleware(redis_client)
 
     # Заглушка — не throttlит, но и не падает
+    from typing import Any, Awaitable, Callable
+
     from aiogram import BaseMiddleware
     from aiogram.types import TelegramObject
-    from typing import Any, Awaitable, Callable
 
     class NoopThrottle(BaseMiddleware):
         async def __call__(

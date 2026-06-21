@@ -1,23 +1,19 @@
 from __future__ import annotations
 
 import html
-import io
 import logging
 import re
 
-import aiohttp
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
-    BufferedInputFile,
     CallbackQuery,
     InputMediaPhoto,
     InputMediaVideo,
     Message,
 )
-from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.feed import empty_feed_kb, feed_card_kb
@@ -26,6 +22,12 @@ from bot.keyboards.models import IMAGE_CAPS, video_models_kb
 from bot.keyboards.prompts import prompt_use_model_kb
 from bot.states import ImageGenFSM, PromptUseFSM, VideoGenFSM
 from bot.utils.deep_links import build_start_payload
+from bot.utils.telegram_images import (
+    TELEGRAM_PHOTO_TARGET_BYTES,
+    fallback_document_caption,
+    prepare_photo_upload,
+    send_image_to_message,
+)
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import GenerationType, User
@@ -33,11 +35,6 @@ from db.repository import FeedGenerationCard
 
 logger = logging.getLogger(__name__)
 router = Router(name="feed")
-
-TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024
-TELEGRAM_PHOTO_TARGET_BYTES = 9 * 1024 * 1024
-TELEGRAM_PHOTO_MAX_DIMENSION_SUM = 10000
-_JPEG_QUALITIES = (88, 82, 76, 70, 64, 58, 52, 46, 40, 34, 28)
 
 
 def _model_label(model_key: str) -> str:
@@ -119,88 +116,14 @@ def _feed_fallback_text(card: FeedGenerationCard, caption: str) -> str:
     )
 
 
-def _feed_result_extension(result_url: str) -> str:
-    filename = result_url.split("?", 1)[0].rsplit("/", 1)[-1]
-    return filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
-
-
-def _flatten_for_jpeg(image: Image.Image) -> Image.Image:
-    if image.mode in {"RGBA", "LA"} or (image.mode == "P" and "transparency" in image.info):
-        rgba = image.convert("RGBA")
-        background = Image.new("RGB", rgba.size, (255, 255, 255))
-        background.paste(rgba, mask=rgba.getchannel("A"))
-        return background
-    if image.mode != "RGB":
-        return image.convert("RGB")
-    return image
-
-
-def _fit_telegram_photo_dimensions(image: Image.Image) -> Image.Image:
-    width, height = image.size
-    if width + height <= TELEGRAM_PHOTO_MAX_DIMENSION_SUM:
-        return image
-
-    scale = TELEGRAM_PHOTO_MAX_DIMENSION_SUM / float(width + height)
-    new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
-    return image.resize(new_size, Image.Resampling.LANCZOS)
-
-
-def _encode_jpeg_under_limit(image: Image.Image, *, target_bytes: int) -> bytes:
-    current = _fit_telegram_photo_dimensions(_flatten_for_jpeg(image))
-    smallest: bytes | None = None
-
-    for _ in range(6):
-        for quality in _JPEG_QUALITIES:
-            buffer = io.BytesIO()
-            current.save(buffer, format="JPEG", quality=quality, optimize=True, progressive=True)
-            data = buffer.getvalue()
-            if smallest is None or len(data) < len(smallest):
-                smallest = data
-            if len(data) <= target_bytes:
-                return data
-
-        width, height = current.size
-        if width <= 1 or height <= 1:
-            break
-        current = current.resize(
-            (max(1, int(width * 0.85)), max(1, int(height * 0.85))),
-            Image.Resampling.LANCZOS,
-        )
-
-    return smallest or b""
-
-
-def _prepare_feed_photo_upload(
-    *,
-    data: bytes,
-    result_url: str,
-    generation_id: int,
-) -> BufferedInputFile:
-    ext = _feed_result_extension(result_url)
-    filename = f"gen_{generation_id}.{ext}"
-    if len(data) <= TELEGRAM_PHOTO_TARGET_BYTES:
-        return BufferedInputFile(data, filename=filename)
-
-    try:
-        with Image.open(io.BytesIO(data)) as image:
-            image = ImageOps.exif_transpose(image)
-            image.load()
-            preview = _encode_jpeg_under_limit(image, target_bytes=TELEGRAM_PHOTO_TARGET_BYTES)
-    except (OSError, UnidentifiedImageError) as e:
-        logger.warning("Failed to prepare feed preview gen=%s url=%s error=%s", generation_id, result_url, e)
-        return BufferedInputFile(data, filename=filename)
-
-    if not preview:
-        logger.warning("Prepared empty feed preview gen=%s url=%s", generation_id, result_url)
-        return BufferedInputFile(data, filename=filename)
-
-    logger.info(
-        "Compressed feed preview gen=%s from=%s to=%s bytes",
-        generation_id,
-        len(data),
-        len(preview),
+def _prepare_feed_photo_upload(*, data: bytes, result_url: str, generation_id: int) -> object:
+    return prepare_photo_upload(
+        data=data,
+        result_url=result_url,
+        generation_id=generation_id,
+        target_bytes=TELEGRAM_PHOTO_TARGET_BYTES,
     )
-    return BufferedInputFile(preview, filename=f"gen_{generation_id}.jpg")
+
 
 
 async def _cards_for_source(session: AsyncSession, source: str) -> list[FeedGenerationCard]:
@@ -296,46 +219,21 @@ async def _show_feed_card(
             return
 
     if result_url:
-        try:
-            # Download image and send as file to ensure preview works
-            async with aiohttp.ClientSession() as http:
-                async with http.get(result_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status == 200:
-                        data = await resp.read()
-                        photo = _prepare_feed_photo_upload(
-                            data=data,
-                            result_url=result_url,
-                            generation_id=card.generation.id,
-                        )
-                        await holder.answer_photo(photo, caption=caption, reply_markup=reply_markup)
-                        return
-            # Fallback: try direct URL
-            await holder.answer_photo(result_url, caption=caption, reply_markup=reply_markup)
+        delivery = await send_image_to_message(
+            message=holder,
+            result_url=result_url,
+            generation_id=card.generation.id,
+            caption=caption,
+            reply_markup=reply_markup,
+            log_prefix="feed-photo",
+        )
+        if delivery.delivered:
             return
-        except TelegramBadRequest as e:
-            logger.warning(
-                "Feed photo fallback gen=%s url=%s error=%s",
-                card.generation.id,
-                result_url,
-                e,
-            )
-            await holder.answer(
-                _feed_fallback_text(card, caption),
-                reply_markup=reply_markup,
-            )
-            return
-        except Exception as e:
-            logger.warning(
-                "Feed photo unexpected fallback gen=%s url=%s error=%s",
-                card.generation.id,
-                result_url,
-                e,
-            )
-            await holder.answer(
-                _feed_fallback_text(card, caption),
-                reply_markup=reply_markup,
-            )
-            return
+        await holder.answer(
+            _feed_fallback_text(card, fallback_document_caption(caption)),
+            reply_markup=reply_markup,
+        )
+        return
 
     await safe_edit_message(holder, caption, reply_markup=reply_markup)
 

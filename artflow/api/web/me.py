@@ -4,8 +4,15 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.web.auth import (
+    EMAIL_RE,
+    TG_USERNAME_RE,
+    _normalize_contact,
+    hash_password,
+    verify_password,
+    web_referral_link,
+)
 from api.web.deps import error_response, get_web_user_or_none, ok
-from api.web.auth import EMAIL_RE, TG_USERNAME_RE, hash_password, verify_password, web_referral_link, _normalize_contact
 from api.web.schemas import UserMe
 from core.config import settings
 from db import repository as repo

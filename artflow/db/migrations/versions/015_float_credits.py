@@ -1,9 +1,8 @@
 """Migration 015 — float credits for fractional pricing."""
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "015_float_credits"
 down_revision = "014_language_and_stars"

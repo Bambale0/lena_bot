@@ -4,10 +4,9 @@ Revision ID: 006_prompt_library_showcase
 Revises: 005_merge_image_session_heads
 Create Date: 2026-05-06
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 revision = "006_prompt_library_showcase"
 down_revision = "005_merge_image_session_heads"

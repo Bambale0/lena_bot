@@ -48,9 +48,9 @@ from api.music_service import (
     upload_suno_voice_audio,
 )
 from api.photo_prompt_service import generate_prompt_from_photo
-from api.public_files import public_url_is_available, preview_public_image_url
+from api.public_files import preview_public_image_url, public_url_is_available
 from api.video_service import VideoModel
-from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS, _IMAGE_MODEL_ORDER, _VIDEO_MODEL_ORDER
+from bot.keyboards.models import _IMAGE_MODEL_ORDER, _VIDEO_MODEL_ORDER, IMAGE_CAPS, VIDEO_CAPS
 from bot.utils.deep_links import build_start_payload
 from core.config import settings
 from core.gemini_omni import (
@@ -1422,9 +1422,9 @@ async def miniapp_create_referral_withdrawal(
             detail=f"Доступно к выводу {exc.available_amount:.2f}₽",
         ) from exc
 
-    from main import bot
     from bot.handlers.balance import withdrawal_request_admin_kb
     from bot.i18n import t
+    from main import bot
 
     admin_text = t(
         "withdraw_admin_notify", getattr(user, "language", "ru") or "ru",

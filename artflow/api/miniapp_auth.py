@@ -8,14 +8,13 @@ import json
 import time
 from urllib.parse import parse_qsl, unquote
 
-from fastapi import Depends, HTTPException, Header
+from fastapi import Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from db import repository as repo
 from db.models import User
 from db.session import get_session
-
 
 TELEGRAM_INIT_DATA_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 WEB_AUTH_TOKEN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60

@@ -161,6 +161,27 @@ def ensure_public_image_url(url: str | None) -> str | None:
     return public_upload_url(image_path.name)
 
 
+def ensure_provider_safe_png_url(url: str | None) -> str | None:
+    """
+    Return a PNG URL for local uploaded images so stricter providers like
+    Nano Banana always receive a stable raster format.
+    """
+    image_url = ensure_public_image_url(url) or url
+    path = local_upload_path_from_url(image_url)
+    if not image_url or not path or not path.exists() or not path.is_file():
+        return image_url
+
+    try:
+        with Image.open(path) as image:
+            png_path = path.with_suffix('.png')
+            if not png_path.exists():
+                normalized = image.convert('RGBA' if 'A' in image.getbands() else 'RGB')
+                normalized.save(png_path, format='PNG')
+        return public_upload_url(png_path.name)
+    except Exception:
+        return image_url
+
+
 def preview_public_image_url(url: str | None, *, max_size: int = 768, quality: int = 82) -> str | None:
     path = local_upload_path_from_url(ensure_public_image_url(url) or url)
     if not url or not path or not path.exists() or not path.is_file():

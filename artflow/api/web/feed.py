@@ -3,7 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.public_files import local_upload_path_from_url, preview_public_image_url, public_url_is_available
+from api.public_files import (
+    local_upload_path_from_url,
+    preview_public_image_url,
+    public_url_is_available,
+)
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import FeedCard
 from db import repository as repo

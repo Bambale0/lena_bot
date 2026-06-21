@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from alembic import op
 
-
 revision = "013_music_gen_type"
 down_revision = "012_feed_remix_royalty"
 branch_labels = None

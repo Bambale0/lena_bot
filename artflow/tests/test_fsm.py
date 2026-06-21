@@ -1,21 +1,17 @@
 """FSM-тесты — проверка переходов состояний для ImageGen, VideoGen, Midjourney, Music."""
 from __future__ import annotations
 
-import pytest
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
-from aiogram.types import CallbackQuery, Message
+import pytest
 
 from bot.states import (
     ImageGenFSM,
-    VideoGenFSM,
     MidjourneyFSM,
     MusicFSM,
     PromptUseFSM,
+    VideoGenFSM,
 )
-from tests.factories import make_callback, make_message
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ImageGenFSM

@@ -5,9 +5,9 @@ import json
 from bot.keyboards.models import (
     IMAGE_SCENARIOS,
     image_active_kb,
-    image_session_kb,
     image_models_kb,
     image_scenarios_kb,
+    image_session_kb,
 )
 from bot.ui.common import ScreenRender
 from db.models import ImageSession, ModelCost

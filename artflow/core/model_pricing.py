@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Iterable
 
-
 QUALITY_LABELS: dict[str, str] = {
     "basic": "2K",
     "high": "4K",

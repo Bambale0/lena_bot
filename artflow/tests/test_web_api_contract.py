@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import Response
 
-from api.web import admin, assistant, auth, billing, generations, health, landing, referrals, router as web_router
 from api.miniapp_routes import (
     AssistantChatRequest,
     FeedRemixRequest,
@@ -18,6 +17,8 @@ from api.miniapp_routes import (
     provider_task_id,
     task_id_for_surface,
 )
+from api.web import admin, assistant, auth, billing, generations, health, landing, referrals
+from api.web import router as web_router
 from api.web.schemas import FeedCard, ModelCostCard, TransactionCard, UserMe
 from db.models import GenerationType, PaymentProvider, TransactionStatus
 

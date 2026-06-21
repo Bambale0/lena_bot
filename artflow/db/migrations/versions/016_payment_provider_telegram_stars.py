@@ -6,7 +6,6 @@ Create Date: 2026-05-11 16:40:00
 """
 from alembic import op
 
-
 revision = "016_stars_provider"
 down_revision = "015_float_credits"
 

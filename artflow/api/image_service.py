@@ -19,7 +19,7 @@ from typing import Any
 
 from api import comet_fallback, kieai_client
 from api.kie_model_specs import IMAGE_SPECS, build_kie_input, resolve_model_for_reference
-from api.public_files import local_upload_path_from_url
+from api.public_files import ensure_provider_safe_png_url, local_upload_path_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -119,18 +119,20 @@ _REFERENCE_LOCK_PREFIX = (
     "The user's prompt is the primary instruction for visible changes. Preserve identity and unmentioned details, but do not preserve reference details that conflict with the prompt.\n\n"
     "Preserve unless explicitly changed:\n"
     "- recognizable face identity, facial proportions, age impression, and natural skin tone\n"
-    "- body proportions, hands, clothing, accessories, background, and lighting only when the prompt does not ask to change them\n\n"
+    "- body proportions, hands, clothing, garment cut, accessories, styling, coverage level, background, and lighting only when the prompt does not ask to change them\n\n"
     "When requested by the prompt, actively change and prioritize:\n"
     "- hairstyle, hair length, volume, texture, waves or curls, hair color, and hair placement\n"
     "- makeup, lashes, brows, lips, skin finish, retouching, glowing skin, beauty lighting, and glamour styling\n"
     "- pose, head tilt, body angle, gesture, expression, camera angle, framing, crop, and composition\n"
     "- outfit, accessories, background, scene, mood, realism level, editorial/fashion/beauty style, and lighting setup\n\n"
-    "If the prompt asks for long voluminous hair, wavy hair, smooth glowing retouched skin, makeup, a glamorous/editorial look, or the head tilted to the side, apply it even if the reference shows different hair, bare skin, a plain realistic texture, or a straight-on pose.\n"
+    "If the prompt asks for long voluminous hair, wavy hair, smooth glowing retouched skin, makeup, a glamorous/editorial look, or the head tilted to the side, apply it even if the reference shows different hair, a plain realistic texture, or a straight-on pose.\n"
+    "Preserve the referenced outfit, garment cut, accessories, styling, and coverage level unless the user explicitly asks to change outfit or coverage. Do not add extra clothing or make the look more covered on your own.\n"
     "Do not replace the person with a different person. Keep the likeness believable while following the requested transformation."
 )
 
 _REFERENCE_LOCK_PROMPT_FIRST_SUFFIX = (
     "PROMPT-DIRECTED REFERENCE EDITING. Keep the same recognizable person and preserve unmentioned details. "
+    "Preserve the referenced outfit, garment cut, accessories, styling, and coverage level unless the user explicitly asks to change them. Do not add extra clothing or increase coverage on your own. "
     "The user instruction is the primary edit request: if it asks to change hairstyle, hair length, hair texture, hair color, makeup, skin finish, retouching, outfit, pose, head tilt, expression, background, lighting, framing, or glamour/editorial styling, apply that change even when the reference differs. "
     "Do not replace the person with a different person."
 )
@@ -450,13 +452,20 @@ def _build_input(
         quality_value = normalized_quality
         resolution_value = normalized_quality if normalized_quality in {"1K", "2K", "4K"} else resolution_value
 
-    prompt_with_reference_lock = _apply_reference_detail_preservation(resolved_for_validation, prompt, image_url)
+    prepared_reference_urls = image_url
+    if model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}:
+        if isinstance(image_url, str):
+            prepared_reference_urls = ensure_provider_safe_png_url(image_url)
+        elif isinstance(image_url, list):
+            prepared_reference_urls = [ensure_provider_safe_png_url(url) or url for url in image_url]
+
+    prompt_with_reference_lock = _apply_reference_detail_preservation(resolved_for_validation, prompt, prepared_reference_urls)
     normalized_prompt = _normalize_prompt_for_model(resolved_for_validation, prompt_with_reference_lock)
 
     return build_kie_input(
         model=model.value,
         prompt=normalized_prompt,
-        reference_urls=image_url,
+        reference_urls=prepared_reference_urls,
         params={
             "aspect_ratio": ratio_value,
             "n": n,

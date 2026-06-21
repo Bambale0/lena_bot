@@ -4,7 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.services.session_service import get_main_menu_context
 from bot.ui.common import ScreenRender
-from bot.ui.image_menu import render_active_image_session, render_image_advanced_menu, render_image_scenarios
+from bot.ui.image_menu import (
+    render_active_image_session,
+    render_image_advanced_menu,
+    render_image_scenarios,
+)
 from bot.ui.main_menu import render_main_menu
 from bot.ui.music_menu import render_music_menu
 from db import repository as repo

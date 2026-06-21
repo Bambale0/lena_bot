@@ -3,8 +3,7 @@ from __future__ import annotations
 import pytest
 from PIL import Image
 
-from api import public_files
-from api import video_service
+from api import public_files, video_service
 from api.video_service import VideoModel
 
 

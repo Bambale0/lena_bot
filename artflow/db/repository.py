@@ -2,33 +2,35 @@
 from __future__ import annotations
 
 import json
-import secrets
 import logging
-from inspect import isawaitable
+import secrets
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+from decimal import ROUND_HALF_UP, Decimal
+from inspect import isawaitable
 
-from sqlalchemy import Date, cast, select, update, desc, func, case, or_
+from sqlalchemy import Date, cast, desc, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from core.model_pricing import image_pricing_keys, video_pricing_keys
-from core.config import settings
 from api.public_files import mirror_url
+from core.model_pricing import image_pricing_keys, video_pricing_keys
 from db.models import (
+    CreditLedgerEntry,
+    FeedRemixPayout,
     Generation,
+    GenerationStatus,
+    GenerationType,
     ImageGenerationAction,
     ImageSession,
     ImageSessionStatus,
-    GenerationStatus,
-    GenerationType,
     ModelCost,
     PaymentProvider,
+    PricePlan,
     PromoCode,
     PromoRedemption,
     PromoRewardType,
-    PricePlan,
     ReferralWithdrawalRequest,
     SunoVoice,
     Transaction,
@@ -36,8 +38,6 @@ from db.models import (
     User,
     WebAuthCode,
     WithdrawalStatus,
-    CreditLedgerEntry,
-    FeedRemixPayout,
 )
 
 logger = logging.getLogger(__name__)
@@ -244,22 +244,30 @@ async def create_user(
         language=language,
     )
     session.add(user)
-    await session.flush()
-    if welcome_credits:
-        await _insert_credit_ledger(
-            session,
-            user_id=user.id,
-            delta=welcome_credits,
-            balance_after=welcome_credits,
-            entry_type="welcome_bonus",
-            source_type="user",
-            source_id=str(tg_id),
-            note="Welcome bonus credits on signup",
-        )
-    await session.commit()
-    await session.refresh(user)
-    logger.info("User created: tg_id=%s", tg_id)
-    return user
+    try:
+        await session.flush()
+        if welcome_credits:
+            await _insert_credit_ledger(
+                session,
+                user_id=user.id,
+                delta=welcome_credits,
+                balance_after=welcome_credits,
+                entry_type="welcome_bonus",
+                source_type="user",
+                source_id=str(tg_id),
+                note="Welcome bonus credits on signup",
+            )
+        await session.commit()
+        await session.refresh(user)
+        logger.info("User created: tg_id=%s", tg_id)
+        return user
+    except IntegrityError as exc:
+        await session.rollback()
+        existing = await get_user_by_tg_id(session, tg_id)
+        if existing is None:
+            raise
+        logger.warning("create_user race handled: tg_id=%s err=%s", tg_id, exc.__class__.__name__)
+        return existing
 
 
 async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
@@ -794,18 +802,17 @@ async def redeem_promo_code(
 
 
 async def count_users(session: AsyncSession) -> float:
-    from sqlalchemy import func
     result = await session.execute(select(func.count()).select_from(User))
     return result.scalar_one()
 
 
 async def get_all_user_ids(session: AsyncSession) -> list[int]:
-    result = await session.execute(select(User.tg_id).where(User.is_banned == False))
+    result = await session.execute(select(User.tg_id).where(User.is_banned.is_(False)))
     return list(result.scalars().all())
 
 
 async def get_broadcast_recipient_ids(session: AsyncSession, segment: str = "all") -> list[int]:
-    base = select(User.tg_id).where(User.is_banned == False)
+    base = select(User.tg_id).where(User.is_banned.is_(False))
 
     if segment == "all":
         result = await session.execute(base)
@@ -816,7 +823,7 @@ async def get_broadcast_recipient_ids(session: AsyncSession, segment: str = "all
             select(User.tg_id)
             .join(Transaction, Transaction.user_id == User.id)
             .where(
-                User.is_banned == False,
+                User.is_banned.is_(False),
                 Transaction.status == TransactionStatus.paid,
             )
             .distinct()
@@ -1819,7 +1826,6 @@ async def count_user_active_generations(session: AsyncSession, user_id: int) -> 
 
 
 async def count_generations_today(session: AsyncSession) -> float:
-    from sqlalchemy import func, cast, Date
     today = datetime.now(timezone.utc).date()
     result = await session.execute(
         select(func.count())
@@ -2259,7 +2265,6 @@ async def set_withdrawal_status(
 
 
 async def get_revenue_today(session: AsyncSession) -> float:
-    from sqlalchemy import func, cast, Date
     today = datetime.now(timezone.utc).date()
     result = await session.execute(
         select(func.coalesce(func.sum(Transaction.amount_rub), 0))
@@ -2276,7 +2281,7 @@ async def get_revenue_today(session: AsyncSession) -> float:
 async def get_active_price_plans(session: AsyncSession) -> list[PricePlan]:
     result = await session.execute(
         select(PricePlan)
-        .where(PricePlan.is_active == True)
+        .where(PricePlan.is_active.is_(True))
         .order_by(PricePlan.sort_order)
     )
     return list(result.scalars().all())
@@ -2323,7 +2328,7 @@ async def toggle_price_plan(session: AsyncSession, key: str) -> bool | None:
 async def get_all_model_costs(session: AsyncSession) -> list[ModelCost]:
     result = await session.execute(
         select(ModelCost)
-        .where(ModelCost.is_active == True)
+        .where(ModelCost.is_active.is_(True))
         .order_by(ModelCost.gen_type, ModelCost.display_name, ModelCost.model_key)
     )
     return list(result.scalars().all())
@@ -2339,7 +2344,7 @@ async def get_model_cost(session: AsyncSession, model_key: str) -> ModelCost | N
 async def get_first_active_model_cost(session: AsyncSession, keys: list[str]) -> ModelCost | None:
     result = await session.execute(
         select(ModelCost)
-        .where(ModelCost.is_active == True, ModelCost.model_key.in_(keys))
+        .where(ModelCost.is_active.is_(True), ModelCost.model_key.in_(keys))
     )
     costs = {cost.model_key: cost for cost in result.scalars().all()}
     for key in keys:
@@ -2379,9 +2384,3 @@ async def set_model_cost(session: AsyncSession, model_key: str, credits: float) 
     )
     await session.commit()
     return result.scalar_one_or_none() is not None
-
-async def get_generation_by_id(session, generation_id: int):
-    result = await session.execute(
-        select(Generation).where(Generation.id == generation_id)
-    )
-    return result.scalar_one_or_none()

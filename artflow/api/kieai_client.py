@@ -16,6 +16,7 @@ from typing import Any
 
 import httpx
 
+from core.admin_alerts import send_admin_alert_once
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -65,8 +66,12 @@ async def _retry_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             resp = await client.post(path, json=payload)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            await _maybe_alert_credit_issue(f"kie.ai POST {path}", data)
+            return data
         except httpx.HTTPStatusError as e:
+            body = e.response.text if e.response is not None else str(e)
+            await _maybe_alert_credit_issue(f"kie.ai POST {path}", body)
             if e.response.status_code < 500:
                 raise
             logger.warning("kie.ai POST %s HTTP %s (attempt %d)", path, e.response.status_code, attempt + 1)
@@ -75,6 +80,36 @@ async def _retry_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         await asyncio.sleep(1.5 ** attempt)
     raise RuntimeError(f"kie.ai: max retries exceeded for POST {path}")
 
+
+
+
+def _looks_like_insufficient_credits(payload: Any) -> bool:
+    message = str(payload).lower()
+    return any(
+        marker in message
+        for marker in (
+            "credits insufficient",
+            "insufficient credits",
+            "balance isn’t enough",
+            "balance isn't enough",
+            "please top up",
+            "payment required",
+            "current balance",
+        )
+    )
+
+
+async def _maybe_alert_credit_issue(source: str, payload: Any) -> None:
+    if not _looks_like_insufficient_credits(payload):
+        return
+    try:
+        await send_admin_alert_once(
+            alert_key=f"provider-credits:{source}",
+            title="У провайдера закончились кредиты",
+            message=f"Источник: {source}\nДетали: {str(payload)[:900]}",
+        )
+    except Exception as exc:
+        logger.warning("Failed to dispatch provider credit alert for %s: %s", source, exc)
 
 def _ensure_dict(resp: Any) -> dict[str, Any]:
     """Ensure response is a dict, return empty dict if None."""
@@ -91,8 +126,12 @@ async def _retry_get(path: str, params: dict[str, Any] | None = None) -> dict[st
         try:
             resp = await client.get(path, params=params)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            await _maybe_alert_credit_issue(f"kie.ai GET {path}", data)
+            return data
         except httpx.HTTPStatusError as e:
+            body = e.response.text if e.response is not None else str(e)
+            await _maybe_alert_credit_issue(f"kie.ai GET {path}", body)
             if e.response.status_code < 500:
                 raise
             logger.warning("kie.ai GET %s HTTP %s (attempt %d)", path, e.response.status_code, attempt + 1)

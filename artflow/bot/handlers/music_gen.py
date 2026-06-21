@@ -1,18 +1,16 @@
 
-from aiogram import Router, F
-from aiogram.types import Message
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.music_service import create_music_task, register_miniapp_task, register_task
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.states import MusicFSM
 from bot.ui.router import render_screen
 from bot.utils.telegram_ui import safe_answer_callback
 from db import repository as repo
 from db.models import GenerationType, User
-
-from api.music_service import create_music_task, register_miniapp_task, register_task
 
 MUSIC_MODEL_KEY = "suno/v5.5"
 DEFAULT_MUSIC_CREDITS = 20

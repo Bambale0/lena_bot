@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from api import kieai_client
@@ -100,3 +102,27 @@ async def test_suno_voice_helpers_use_documented_endpoints(monkeypatch) -> None:
         ("/api/v1/voice/validate-info", {"taskId": "validate_task"}),
         ("/api/v1/voice/record-info", {"taskId": "voice_task"}),
     ]
+
+
+
+def test_looks_like_insufficient_credits_matches_provider_messages() -> None:
+    assert kieai_client._looks_like_insufficient_credits({"message": "Credits insufficient. Please top up."}) is True
+    assert kieai_client._looks_like_insufficient_credits("Current balance isn't enough for this task") is True
+    assert kieai_client._looks_like_insufficient_credits({"message": "temporary provider timeout"}) is False
+
+
+@pytest.mark.asyncio
+async def test_maybe_alert_credit_issue_calls_admin_alert_once(monkeypatch) -> None:
+    alert = AsyncMock()
+    monkeypatch.setattr(kieai_client, "send_admin_alert_once", alert)
+
+    await kieai_client._maybe_alert_credit_issue(
+        "kie.ai POST /api/v1/jobs/createTask",
+        {"message": "insufficient credits, please top up"},
+    )
+
+    alert.assert_awaited_once()
+    kwargs = alert.await_args.kwargs
+    assert kwargs["alert_key"] == "provider-credits:kie.ai POST /api/v1/jobs/createTask"
+    assert "закончились кредиты" in kwargs["title"].lower()
+    assert "insufficient credits" in kwargs["message"].lower()

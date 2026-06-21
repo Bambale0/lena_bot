@@ -21,6 +21,8 @@ venv/
 pgdata/
 redisdata/
 static/upload/*
+data/db_backup_state.json
+data/db_backups/
 logs/
 .logs/*
 !.logs/.gitkeep

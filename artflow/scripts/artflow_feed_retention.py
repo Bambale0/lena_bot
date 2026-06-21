@@ -19,7 +19,6 @@ from sqlalchemy import select, update
 from db.models import Generation
 from db.session import AsyncSessionLocal
 
-
 UPLOAD_DIR = REPO_ROOT / "static" / "upload"
 
 
@@ -199,7 +198,7 @@ async def main() -> int:
             removed_files += 1
             removed_bytes += size
 
-    print(f"mode=apply")
+    print("mode=apply")
     print(f"removed_generations={len(candidate_ids)}")
     print(f"removed_files={removed_files}")
     print(f"removed_mb={removed_bytes / 1024 / 1024:.1f}")

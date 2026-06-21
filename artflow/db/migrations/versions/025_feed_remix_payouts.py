@@ -6,9 +6,8 @@ Create Date: 2026-06-10
 """
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "025_feed_remix_payouts"
 down_revision = "024_web_passwords_reference_urls"

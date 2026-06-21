@@ -11,12 +11,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from api.webapp_auth import get_webapp_user
 from bot.handlers.marketplace import _prompts_for_source
 from db.models import Generation, GenerationStatus, GenerationType, PromptStatus, User, UserPrompt
 from db.prompt_repository import COLLECTION_TAGS
 from db.session import AsyncSessionLocal, get_session
 from main import app
-
 
 SEED_AUTHOR_TG_ID = 9900001001
 MIN_PROMPTS_PER_TAG = 2

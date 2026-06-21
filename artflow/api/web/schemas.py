@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from api.public_files import public_url_is_available, preview_public_image_url
+from api.public_files import preview_public_image_url, public_url_is_available
 from core.config import settings
 
 

@@ -1,7 +1,9 @@
 import asyncio
+
 from sqlalchemy import select
-from db.session import AsyncSessionLocal
+
 from db.models import ModelCost
+from db.session import AsyncSessionLocal
 
 FRIENDLY = {
     'grok-imagine/text-to-image': '⚡ Grok Imagine',

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from aiogram.types import FSInputFile
 
 from bot.handlers.marketplace import _prompt_photo_source

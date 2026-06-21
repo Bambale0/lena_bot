@@ -16,7 +16,6 @@ from api.miniapp_auth import (
     verify_web_auth_token,
 )
 
-
 BOT_TOKEN = "123456:test-token"
 
 

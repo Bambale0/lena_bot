@@ -19,22 +19,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import midjourney_service as mj
 from api import polling
-from api.public_files import mirror_telegram_file
 from api.midjourney_service import (
     MJBotType,
     MJButton,
-    MJDimensions,
     MJSpeed,
     MJTaskResult,
     MJTaskStatus,
     MJVideoMotion,
 )
+from api.public_files import mirror_telegram_file
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.midjourney import (
     mj_action_buttons_kb,
     mj_blend_submit_kb,
     mj_bot_type_kb,
-    mj_dimensions_kb,
     mj_reference_upload_kb,
     mj_skip_prompt_kb,
     mj_speed_kb,

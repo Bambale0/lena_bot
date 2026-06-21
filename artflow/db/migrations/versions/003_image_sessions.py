@@ -6,11 +6,10 @@ Create Date: 2026-05-05
 """
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from alembic import op
 from sqlalchemy import inspect
-
+from sqlalchemy.dialects import postgresql
 
 revision = "003_image_sessions"
 down_revision = "002"

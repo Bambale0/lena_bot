@@ -4,9 +4,8 @@ Revision ID: 019_generation_result_urls
 Revises: 018_credit_ledger
 Create Date: 2026-05-16 13:45:00.000000
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "019_generation_result_urls"
 down_revision = "018_credit_ledger"

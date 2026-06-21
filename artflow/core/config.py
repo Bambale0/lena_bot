@@ -27,6 +27,10 @@ class Settings(BaseSettings):
 
     # DB
     DATABASE_URL: str = ""
+    DB_BACKUP_ENABLED: bool = True
+    DB_BACKUP_INTERVAL_SECONDS: int = 21600
+    DB_BACKUP_DIR: str = "data/db_backups"
+    DB_BACKUP_KEEP_LAST: int = 4
     REDIS_URL: str = "redis://redis:6379"
 
     # CometAPI (Kling, Seedream, Gemini, Grok, Seedance, Veo, WAN)

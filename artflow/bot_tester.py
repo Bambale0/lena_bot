@@ -10,16 +10,16 @@ Telegram Bot Tester — интерактивный симулятор польз
 Без зависимостей — только Python stdlib.
 """
 
-import sys
-import json
-import time
-import threading
 import argparse
-import urllib.request
-import urllib.parse
+import json
+import sys
+import threading
+import time
 import urllib.error
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from queue import Queue, Empty
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from queue import Empty, Queue
 
 TG = "https://api.telegram.org/bot"
 TOKEN = ""
@@ -54,7 +54,6 @@ def poll_loop():
             for upd in resp.get("result", []):
                 offset = upd["update_id"] + 1
                 msg = upd.get("message") or upd.get("callback_query", {}).get("message")
-                cb = upd.get("callback_query")
 
                 if msg and msg.get("from", {}).get("id") != USER_ID:
                     event = {
@@ -453,7 +452,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"events": events})
 
         else:
-            self.send_response(404); self.end_headers()
+            self.send_response(404)
+            self.end_headers()
 
     def do_POST(self):
         body = self.read_body()
@@ -469,7 +469,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(resp)
 
         else:
-            self.send_response(404); self.end_headers()
+            self.send_response(404)
+            self.end_headers()
 
     def do_OPTIONS(self):
         self.send_response(200)

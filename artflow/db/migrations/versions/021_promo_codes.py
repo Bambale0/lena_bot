@@ -4,10 +4,9 @@ Revision ID: 021_promo_codes
 Revises: 020_user_photo_url
 Create Date: 2026-05-28 15:10:00.000000
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 revision = "021_promo_codes"
 down_revision = "020_user_photo_url"

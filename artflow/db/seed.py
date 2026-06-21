@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select, func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.gemini_omni import (
@@ -17,7 +17,7 @@ from core.gemini_omni import (
     GEMINI_OMNI_VIDEO_MODEL,
 )
 from core.model_pricing import duration_label, pricing_variant_key, quality_label, resolution_label
-from db.models import GenerationType, ModelCost, PricePlan, UserPrompt
+from db.models import GenerationType, ModelCost, PricePlan
 from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -324,7 +324,7 @@ async def _seed_model_costs(session: AsyncSession) -> None:
 async def _disable_legacy_model_aliases(session: AsyncSession) -> None:
     result = await session.execute(
         update(ModelCost)
-        .where(ModelCost.model_key.in_(LEGACY_MODEL_ALIASES_TO_DISABLE), ModelCost.is_active == True)
+        .where(ModelCost.model_key.in_(LEGACY_MODEL_ALIASES_TO_DISABLE), ModelCost.is_active.is_(True))
         .values(is_active=False)
         .returning(ModelCost.model_key)
     )

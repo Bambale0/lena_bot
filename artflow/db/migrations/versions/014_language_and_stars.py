@@ -4,8 +4,8 @@ Revision ID: 014_language_and_stars
 Revises: 013_music_gen_type
 Create Date: 2026-05-11 03:00:00
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "014_language_and_stars"
 down_revision = "013_music_gen_type"

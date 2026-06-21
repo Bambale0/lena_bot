@@ -3,8 +3,9 @@ import asyncio
 import json
 from pathlib import Path
 
-from db.session import AsyncSessionLocal
 from db.models import User
+from db.session import AsyncSessionLocal
+
 
 async def main():
     parser = argparse.ArgumentParser()

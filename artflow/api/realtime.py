@@ -7,7 +7,15 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, WebSocketException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+    WebSocketException,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.miniapp_auth import _verify_init_data, verify_web_auth_token

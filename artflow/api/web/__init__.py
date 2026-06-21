@@ -2,7 +2,23 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from api.web import admin, assistant, auth, billing, feed, generations, health, history, landing, me, models, prompts, realtime, referrals, sessions
+from api.web import (
+    admin,
+    assistant,
+    auth,
+    billing,
+    feed,
+    generations,
+    health,
+    history,
+    landing,
+    me,
+    models,
+    prompts,
+    realtime,
+    referrals,
+    sessions,
+)
 
 router = APIRouter()
 router.include_router(health.router)

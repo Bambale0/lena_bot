@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from api import public_files
-
 
 JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"
 PNG = b"\x89PNG\r\n\x1a\n\x00\x00"

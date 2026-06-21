@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import html
+import hashlib
 import hmac
 import json
 import logging
@@ -13,10 +13,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
+import redis.asyncio as aioredis
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramEntityTooLarge, TelegramForbiddenError
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import (
     BotCommand,
@@ -26,24 +27,25 @@ from aiogram.types import (
     Update,
     URLInputFile,
 )
-from aiogram.exceptions import TelegramEntityTooLarge
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-import redis.asyncio as aioredis
-
 from api import comet_fallback
 from api.comet_client import close_client, get_client
-from api.miniapp_auth import get_miniapp_user
-from api.miniapp_routes import WEB_TASK_PREFIX, is_web_task_id, router as miniapp_router
-from api.realtime import router as realtime_router
-from api.web import router as web_router
-from api.kie_webhook import extract_error, extract_result_urls, extract_task_id, is_processing, is_success
+from api.kie_webhook import (
+    extract_error,
+    extract_result_urls,
+    extract_task_id,
+    is_processing,
+    is_success,
+)
 from api.midjourney_service import MJButton, MJTaskResult
+from api.miniapp_auth import get_miniapp_user
+from api.miniapp_routes import WEB_TASK_PREFIX, is_web_task_id
+from api.miniapp_routes import router as miniapp_router
 from api.music_service import (
     SUNO_VOICE_FAILED_STATUSES,
     SUNO_VOICE_STATUS_AWAITING_VERIFICATION,
@@ -57,33 +59,61 @@ from api.music_service import (
     extract_suno_voice_task_id,
     pop_task,
 )
-from api.public_files import UPLOAD_ROOT, mirror_url, save_public_file
-from bot.handlers import admin, assistant, balance, feed, image_gen, marketplace, midjourney, music_gen, payment, start, video_gen, stars_payment
+from api.public_files import UPLOAD_ROOT, local_upload_path_from_url, mirror_url, save_public_file
+from api.realtime import router as realtime_router
+from api.web import router as web_router
+from bot.handlers import (
+    admin,
+    assistant,
+    balance,
+    feed,
+    image_gen,
+    marketplace,
+    midjourney,
+    music_gen,
+    payment,
+    stars_payment,
+    start,
+    video_gen,
+)
 from bot.handlers import settings as settings_handler
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
-from bot.keyboards.feed import get_generation_result_keyboard
 from bot.keyboards.midjourney import mj_action_buttons_kb
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.states import MidjourneyFSM
+from bot.utils.telegram_images import (
+    send_image_group_to_chat,
+    send_image_to_chat,
+    send_original_document_to_chat,
+)
 from bot.utils.telegram_ui import is_benign_telegram_error
 from core.broadcast_scheduler import run_broadcast_scheduler
 from core.config import settings
+from core.db_backup_scheduler import run_database_backup_scheduler
 from core.logger import setup_logging
-from db.models import Generation, GenerationType, ImageSession, TransactionStatus
+from db import repository as repo
+from db.models import Generation, GenerationType, ImageSession, TransactionStatus, User
+from db.seed import run_seed
+from db.session import AsyncSessionLocal
 from payments.cryptobot import verify_webhook_signature
 from payments.lava import (
     cached_payment_url as lava_cached_payment_url,
+)
+from payments.lava import (
     extract_payment_url as lava_extract_payment_url,
+)
+from payments.lava import (
     get_invoice as lava_get_invoice,
+)
+from payments.lava import (
     is_success_webhook as lava_is_success_webhook,
+)
+from payments.lava import (
     webhook_contract_id as lava_webhook_contract_id,
 )
 from payments.tbank import verify_notification_token
-from db import repository as repo
-from db.seed import run_seed
-from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +126,52 @@ _MJ_VIDEO_MODEL = "midjourney-video"
 _PROMPT_MENU_PREVIEW_MAX = 700
 _TELEGRAM_UPDATE_DEDUPE_TTL = 3600
 _recent_telegram_updates: dict[int, float] = {}
+
+
+def _sha256_file(path: Path | None) -> str | None:
+    if path is None or not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _image_session_reference_urls(image_session: ImageSession | None) -> list[str]:
+    if image_session is None:
+        return []
+    refs: list[str] = []
+    reference_url = getattr(image_session, "reference_url", None)
+    if isinstance(reference_url, str) and reference_url.strip():
+        refs.append(reference_url.strip())
+    raw_many = getattr(image_session, "reference_urls", None)
+    if isinstance(raw_many, str) and raw_many.strip():
+        try:
+            parsed = json.loads(raw_many)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            refs.extend(str(item).strip() for item in parsed if str(item or "").strip())
+    return list(dict.fromkeys(refs))
+
+
+def _is_reference_echo_url(result_url: str, reference_urls: list[str]) -> bool:
+    result_url = str(result_url or "").strip()
+    if not result_url:
+        return False
+    result_path = local_upload_path_from_url(result_url)
+    result_hash = _sha256_file(result_path)
+    for ref_url in reference_urls:
+        ref_url = str(ref_url or "").strip()
+        if not ref_url:
+            continue
+        if ref_url == result_url:
+            return True
+        ref_path = local_upload_path_from_url(ref_url)
+        if result_hash and ref_path is not None and _sha256_file(ref_path) == result_hash:
+            return True
+    return False
 
 
 def _sanitize_provider_error(raw: str | None, *, fallback: str = "Ошибка на стороне генератора") -> str:
@@ -526,17 +602,26 @@ async def lifespan(app: FastAPI):
 
     broadcast_scheduler_stop = asyncio.Event()
     broadcast_scheduler_task = asyncio.create_task(run_broadcast_scheduler(broadcast_scheduler_stop, bot))
+    db_backup_scheduler_stop = asyncio.Event()
+    db_backup_scheduler_task = asyncio.create_task(run_database_backup_scheduler(db_backup_scheduler_stop, bot))
 
     yield
 
     # Shutdown
     if broadcast_scheduler_stop is not None:
         broadcast_scheduler_stop.set()
+    if db_backup_scheduler_stop is not None:
+        db_backup_scheduler_stop.set()
     if broadcast_scheduler_task is not None:
         try:
             await broadcast_scheduler_task
         except Exception:
             logger.exception("Broadcast scheduler shutdown failed")
+    if db_backup_scheduler_task is not None:
+        try:
+            await db_backup_scheduler_task
+        except Exception:
+            logger.exception("DB backup scheduler shutdown failed")
     await close_client()
     await redis_client.aclose()
     logger.info("Shutdown complete")
@@ -566,6 +651,7 @@ class UploadStaticFiles(StaticFiles):
         except StarletteHTTPException as exc:
             if exc.status_code != 404:
                 raise
+            logger.warning("Missing static upload requested: %s", path)
             return Response(
                 content=_TRANSPARENT_PNG,
                 media_type="image/png",
@@ -823,7 +909,6 @@ async def cryptobot_webhook(request: Request) -> dict:
     if data.get("update_type") != "invoice_paid":
         return {"ok": True}
 
-    payload: str = data["payload"]["payload"]  # "plan_key:user_id"
     external_id = str(data["payload"]["invoice_id"])
 
     async with AsyncSessionLocal() as session:
@@ -1043,11 +1128,11 @@ async def kie_webhook(
             return {"ok": True}
 
         urls = _extract_video_result_urls(payload) if gen.gen_type == GenerationType.video else extract_result_urls(payload)
-        if gen.gen_type == GenerationType.image and gen.image_session_id:
-            image_session = await session.get(ImageSession, gen.image_session_id)
-            reference_url = (getattr(image_session, "reference_url", None) or "").strip() if image_session else ""
-            if reference_url:
-                filtered_urls = [url for url in urls if str(url or "").strip() != reference_url]
+        image_session = await session.get(ImageSession, gen.image_session_id) if gen.gen_type == GenerationType.image and gen.image_session_id else None
+        if image_session is not None:
+            reference_urls = _image_session_reference_urls(image_session)
+            if reference_urls:
+                filtered_urls = [url for url in urls if not _is_reference_echo_url(str(url or "").strip(), reference_urls)]
                 if filtered_urls:
                     urls = filtered_urls
 
@@ -1073,6 +1158,23 @@ async def kie_webhook(
             except Exception as e:
                 logger.warning("Failed to mirror KIE result task_id=%s url=%s: %s", task_id, url, e)
                 result_urls.append(url)
+        if image_session is not None:
+            reference_urls = _image_session_reference_urls(image_session)
+            if reference_urls:
+                result_urls = [url for url in result_urls if not _is_reference_echo_url(url, reference_urls)]
+
+        if not result_urls:
+            err = "Provider returned reference image instead of generated result"
+            user_err = "Генератор вернул референс вместо нового результата"
+            if await repo.fail_generation(session, gen.id, err):
+                await repo.add_credits(session, gen.user_id, gen.credits_spent)
+            if bot and _should_notify_generation_in_bot(gen):
+                try:
+                    await bot.send_message(user.tg_id, f"❌ {user_err}. Кредиты возвращены.", reply_markup=back_to_menu_kb())
+                except Exception as e:
+                    logger.warning("Failed to notify reference-echo user=%s: %s", user.tg_id, e)
+            return {"ok": True}
+
         result_url = result_urls[0]
 
         await repo.finish_generation(session, gen.id, result_url, result_urls=result_urls)
@@ -1087,7 +1189,11 @@ async def kie_webhook(
 
         if bot and _should_notify_generation_in_bot(gen):
             try:
-                from bot.keyboards.models import after_generation_kb, image_session_kb, public_prompt_text
+                from bot.keyboards.models import (
+                    after_generation_kb,
+                    image_session_kb,
+                    public_prompt_text,
+                )
 
                 publish_actions_allowed = await _prompt_actions_allowed_for_generation(session, gen)
                 prompt_actions_allowed = publish_actions_allowed and not _is_repeat_generation(gen)
@@ -1095,38 +1201,74 @@ async def kie_webhook(
                 prompt_menu_preview = _prompt_menu_preview_for_generation(gen, prompt_for_copy)
                 caption = _kie_result_caption(gen)
                 if gen.gen_type == GenerationType.image:
+                    if len(result_urls) > 1:
+                        caption += f"\n\n🖼️ <b>Вариантов:</b> {len(result_urls)}"
                     caption += (
                         "\n\n🎨 <b>Серия активна.</b>\n"
                         "Теперь просто отправляй новый текст или фото — настройки сохранятся."
                     )
-                    for idx, url in enumerate(result_urls):
-                        is_first = idx == 0
-                        img_caption = caption if is_first else None
-                        try:
-                            await bot.send_photo(
-                                chat_id=user.tg_id,
-                                photo=URLInputFile(url, filename=f"image_{gen.id}_{idx + 1}.jpg"),
-                                caption=img_caption,
-                            )
-                        except Exception:
-                            try:
-                                await bot.send_document(
+                    deliveries = []
+                    if len(result_urls) > 1:
+                        group_delivery = await send_image_group_to_chat(
+                            bot=bot,
+                            chat_id=user.tg_id,
+                            result_urls=result_urls,
+                            generation_prefix=gen.id,
+                            caption=caption,
+                            log_prefix="main-image-group",
+                        )
+                        if group_delivery.delivered:
+                            deliveries = [group_delivery]
+                        else:
+                            for idx, url in enumerate(result_urls):
+                                is_first = idx == 0
+                                img_caption = caption if is_first else None
+                                delivery = await send_image_to_chat(
+                                    bot=bot,
                                     chat_id=user.tg_id,
-                                    document=URLInputFile(url, filename=f"image_{gen.id}_{idx + 1}.jpg"),
+                                    result_url=url,
+                                    generation_id=f"{gen.id}_{idx + 1}",
                                     caption=img_caption,
+                                    log_prefix="main-image-result",
                                 )
-                            except Exception:
-                                logger.warning("Failed to send image result user=%s gen=%s idx=%s", user.tg_id, gen.id, idx)
+                                deliveries.append(delivery)
+                                if not delivery.delivered:
+                                    logger.warning("Failed to send image result user=%s gen=%s idx=%s", user.tg_id, gen.id, idx)
+                    else:
+                        delivery = await send_image_to_chat(
+                            bot=bot,
+                            chat_id=user.tg_id,
+                            result_url=result_urls[0],
+                            generation_id=f"{gen.id}_1",
+                            caption=caption,
+                            log_prefix="main-image-result",
+                        )
+                        deliveries = [delivery]
+                        if not delivery.delivered:
+                            logger.warning("Failed to send image result user=%s gen=%s", user.tg_id, gen.id)
 
-                    for idx, url in enumerate(result_urls):
-                        try:
-                            await bot.send_document(
+                    preview_fallback_used = any(item.mode == "document" for item in deliveries)
+                    should_send_originals = bool(result_urls)
+                    if should_send_originals:
+                        await bot.send_message(
+                            chat_id=user.tg_id,
+                            text=(
+                                "📎 <b>Оригиналы ниже файлами</b> — можно скачать без сжатия."
+                                if not preview_fallback_used
+                                else "📎 <b>Telegram не принял часть превью как фото.</b> Ниже дублирую оригиналы файлами без потери качества."
+                            ),
+                        )
+                        for idx, url in enumerate(result_urls):
+                            sent = await send_original_document_to_chat(
+                                bot=bot,
                                 chat_id=user.tg_id,
-                                document=URLInputFile(url, filename=f"source_{gen.id}_{idx + 1}.png"),
-                                caption="📎 <b>Исходник файлом</b>" if idx == 0 else None,
+                                result_url=url,
+                                generation_id=f"{gen.id}_{idx + 1}",
+                                caption=(f"Исходник {idx + 1}/{len(result_urls)}" if len(result_urls) > 1 else "Исходник"),
+                                log_prefix="main-source-document",
                             )
-                        except Exception:
-                            logger.warning("Failed to send source document user=%s gen=%s idx=%s", user.tg_id, gen.id, idx)
+                            if not sent:
+                                logger.warning("Failed to send source document user=%s gen=%s idx=%s", user.tg_id, gen.id, idx)
 
                     await bot.send_message(
                         chat_id=user.tg_id,

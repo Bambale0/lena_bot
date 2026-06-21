@@ -4,9 +4,8 @@ Revision ID: 023_web_contact_auth
 Revises: 022_payment_provider_lava
 Create Date: 2026-06-04 12:00:00.000000
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "023_web_contact_auth"
 down_revision = "022_payment_provider_lava"

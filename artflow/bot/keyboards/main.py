@@ -1,4 +1,4 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def get_main_menu_keyboard(balance: int = 0, *, is_admin: bool = False) -> InlineKeyboardMarkup:

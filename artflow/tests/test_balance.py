@@ -1,10 +1,10 @@
 """Тесты хендлеров balance — пополнение, вывод, история, рефералы."""
 from __future__ import annotations
 
-import pytest
-from aiogram.types import CallbackQuery, Message
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from bot.handlers import balance
 from db.models import GenerationType

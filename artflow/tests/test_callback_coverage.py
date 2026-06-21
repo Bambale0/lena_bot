@@ -117,7 +117,7 @@ def test_no_duplicate_functions_in_keyboards_models():
 
 def test_feed_kb_smoke():
     """Smoke test for feed keyboards."""
-    from bot.keyboards.feed import feed_card_kb, empty_feed_kb
+    from bot.keyboards.feed import empty_feed_kb, feed_card_kb
     kb1 = empty_feed_kb()
     kb2 = feed_card_kb(gen_id=1, index=0, source="feed", has_next=False)
     assert kb1 is not None

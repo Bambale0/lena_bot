@@ -11,7 +11,10 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.assistant_service import generate_assistant_reply, generate_freeform_prompt_moderation_review
+from api.assistant_service import (
+    generate_assistant_reply,
+    generate_freeform_prompt_moderation_review,
+)
 from bot.services.assistant_moderator import is_admin_tg_id, try_handle_admin_request
 from bot.states import AssistantFSM
 from bot.ui.router import render_screen
