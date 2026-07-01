@@ -32,11 +32,7 @@ COMPACT_FEED_KEYS = {
 
 
 def _local_available_media(urls: list[str]) -> list[str]:
-    return [
-        url
-        for url in urls
-        if local_upload_path_from_url(url) is not None and public_url_is_available(url)
-    ]
+    return [url for url in urls if public_url_is_available(url)]
 
 
 def _feed_payload(card, *, require_local: bool = True) -> dict | None:

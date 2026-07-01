@@ -29,10 +29,21 @@ def public_upload_url(filename: str) -> str:
     return f"{base}/{path}/{filename}"
 
 
+def _configured_public_hosts() -> set[str]:
+    hosts: set[str] = set()
+    for value in (settings.WEBHOOK_URL, getattr(settings, "WEB_PUBLIC_URL", "")):
+        host = urlparse(str(value or "")).netloc.lower()
+        if host:
+            hosts.add(host)
+    return hosts
+
+
 def local_upload_path_from_url(url: str | None) -> Path | None:
     if not url:
         return None
     parsed = urlparse(url)
+    if parsed.scheme and parsed.netloc and parsed.netloc.lower() not in _configured_public_hosts():
+        return None
     path = unquote(parsed.path if parsed.scheme else url)
     upload_prefix = "/" + settings.STATIC_UPLOAD_URL_PATH.strip("/") + "/"
     if not path.startswith(upload_prefix):

@@ -26,6 +26,10 @@ def iso_datetime(value: datetime | None) -> str:
     return value.isoformat() if value else ""
 
 
+def _credits_out(value: float | int | None) -> float:
+    return round(float(value or 0), 2)
+
+
 def generation_result_urls(generation: Any) -> list[str]:
     raw = getattr(generation, "result_urls", None)
     urls: list[str] = []
@@ -129,7 +133,7 @@ class UserMe(BaseModel):
             email=getattr(user, "email", None),
             phone=getattr(user, "phone", None),
             photo_url=getattr(user, "photo_url", None),
-            credits=float(getattr(user, "credits", 0) or 0),
+            credits=_credits_out(getattr(user, "credits", 0)),
             referral_code=str(getattr(user, "referral_code", "") or ""),
             referral_link=referral_link,
             language=str(getattr(user, "language", "ru") or "ru"),

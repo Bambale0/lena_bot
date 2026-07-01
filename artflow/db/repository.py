@@ -1339,7 +1339,7 @@ def _feed_score(gen: Generation, remix_count: int) -> float:
     return float(score)
 
 
-async def _feed_cards_from_stmt(session: AsyncSession, stmt) -> list[FeedGenerationCard]:
+async def _feed_cards_from_stmt(session: AsyncSession, stmt, *, require_media: bool = True) -> list[FeedGenerationCard]:
     remix_counts = (
         select(
             Generation.parent_generation_id.label("parent_id"),
@@ -1371,7 +1371,7 @@ async def _feed_cards_from_stmt(session: AsyncSession, stmt) -> list[FeedGenerat
     )
     cards: list[FeedGenerationCard] = []
     for gen, username, full_name, author_photo_url, aspect_ratio, quality, count, reference_url, reference_urls, remix_count in result.all():
-        if not _feed_media_url_is_available(gen.result_url):
+        if require_media and not _feed_media_url_is_available(gen.result_url):
             continue
         remix_total = int(remix_count or 0)
         cards.append(
@@ -1466,6 +1466,8 @@ async def get_top_day_generations(
 async def get_feed_generation_card(
     session: AsyncSession,
     gen_id: int,
+    *,
+    require_media: bool = True,
 ) -> FeedGenerationCard | None:
     stmt = (
         select(Generation)
@@ -1478,7 +1480,7 @@ async def get_feed_generation_card(
         )
         .limit(1)
     )
-    cards = await _feed_cards_from_stmt(session, stmt)
+    cards = await _feed_cards_from_stmt(session, stmt, require_media=require_media)
     return cards[0] if cards else None
 
 

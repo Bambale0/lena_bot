@@ -1229,6 +1229,10 @@ class TelegramLoginRequest(BaseModel):
 
 # ── user ─────────────────────────────────────────────────────────────────────
 
+def _credits_out(value: float | int | None) -> float:
+    return round(float(value or 0), 2)
+
+
 def _user_profile(user: User) -> UserProfile:
     return UserProfile(
         id=user.id,
@@ -1236,10 +1240,10 @@ def _user_profile(user: User) -> UserProfile:
         username=user.username,
         full_name=user.full_name,
         photo_url=getattr(user, "photo_url", None),
-        credits=user.credits,
+        credits=_credits_out(user.credits),
         referral_code=user.referral_code,
         referral_link=_telegram_start_link(user.referral_code),
-        referral_balance=user.referral_balance,
+        referral_balance=_credits_out(user.referral_balance),
         referral_withdraw_min_rub=settings.REFERRAL_WITHDRAW_MIN_RUB,
         language=getattr(user, "language", "ru") or "ru",
     )

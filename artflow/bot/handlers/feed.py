@@ -29,6 +29,7 @@ from bot.utils.telegram_images import (
     send_image_to_message,
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from api.public_files import public_url_is_available
 from db import repository as repo
 from db.models import GenerationType, User
 from db.repository import FeedGenerationCard
@@ -108,12 +109,13 @@ def _feed_caption(card: FeedGenerationCard, *, position: int | None = None) -> s
 
 def _feed_fallback_text(card: FeedGenerationCard, caption: str) -> str:
     result_url = html.escape(card.generation.result_url or "")
-    link = f'\n\n🔗 <a href="{result_url}">Открыть результат</a>' if result_url else ""
-    return (
-        f"{caption}\n\n"
-        "⚠️ Telegram не смог открыть превью как фото, но пост доступен по ссылке."
-        f"{link}"
-    )
+    if result_url and public_url_is_available(result_url):
+        link = f'\n\n🔗 <a href="{result_url}">Открыть результат</a>'
+        note = "⚠️ Telegram не смог открыть превью как фото, но пост доступен по ссылке."
+    else:
+        link = ""
+        note = "⚠️ Файл превью недоступен после восстановления, но пост и скрытый промпт доступны для повтора."
+    return f"{caption}\n\n{note}{link}"
 
 
 def _prepare_feed_photo_upload(*, data: bytes, result_url: str, generation_id: int) -> object:
@@ -160,6 +162,10 @@ async def _show_feed_card(
     )
     result_url = card.generation.result_url
     is_video = getattr(card.generation, "gen_type", None) == GenerationType.video
+
+    if result_url and not public_url_is_available(result_url):
+        await holder.answer(_feed_fallback_text(card, caption), reply_markup=reply_markup)
+        return
 
     if result_url and not is_video and holder.photo:
         try:
@@ -268,7 +274,7 @@ async def show_feed_card_by_id(
     gen_id: int,
     viewer_user_id: int | None = None,
 ) -> None:
-    card = await repo.get_feed_generation_card(session, gen_id)
+    card = await repo.get_feed_generation_card(session, gen_id, require_media=False)
     if not card:
         await message.answer("Пост не найден или уже скрыт.", reply_markup=empty_feed_kb())
         return
