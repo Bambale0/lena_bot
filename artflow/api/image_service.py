@@ -37,6 +37,7 @@ class ImageModel(StrEnum):
     # Nano Banana
     NANO_BANANA   = "google/nano-banana"
     NANO_BANANA_2 = "nano-banana-2"
+    NANO_BANANA_2_LITE = "nano-banana-2-lite"
     NANO_BANANA_PRO = "nano-banana-pro"
     # Qwen
     QWEN_T2I      = "qwen/text-to-image"
@@ -93,6 +94,7 @@ _PROMPT_MAX_LENGTH_BY_MODEL: dict[str, int] = {
 _REFERENCE_LOCK_MODELS: set[str] = {
     ImageModel.NANO_BANANA.value,
     ImageModel.NANO_BANANA_2.value,
+    ImageModel.NANO_BANANA_2_LITE.value,
     ImageModel.NANO_BANANA_PRO.value,
     ImageModel.GROK_I2I.value,
     ImageModel.QWEN_I2I.value,
@@ -182,6 +184,7 @@ MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.WAN_27_PRO:       ["1:1", "16:9", "4:3", "21:9", "3:4", "9:16", "8:1", "1:8"],
     ImageModel.NANO_BANANA:      ["auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"],
     ImageModel.NANO_BANANA_2:    ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+    ImageModel.NANO_BANANA_2_LITE: ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
     ImageModel.NANO_BANANA_PRO:  ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
     ImageModel.QWEN_T2I:         ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
     ImageModel.QWEN_I2I:         ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
@@ -437,7 +440,9 @@ def _build_input(
 
     if model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} and quality_value not in {"1K", "2K", "4K"}:
         quality_value = "1K" if model == ImageModel.NANO_BANANA_2 else "2K"
-    elif model not in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I} and quality_value in {"1K", "2K", "4K"}:
+    elif model in {ImageModel.NANO_BANANA_2_LITE} and quality_value not in {"1K", "2K"}:
+        quality_value = "1K"
+    elif model not in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.NANO_BANANA_2_LITE, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I} and quality_value in {"1K", "2K", "4K"}:
         quality_value = "basic"
 
     normalized_quality = normalize_quality_for_aspect_ratio(model, ratio_value, quality_value)

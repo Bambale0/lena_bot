@@ -115,27 +115,22 @@ def upgrade() -> None:
     )
 
     # ── Seed: model costs ──────────────────────────────────────────────────
-    op.bulk_insert(
-        sa.table(
-            "model_costs",
-            sa.column("model_key", sa.String),
-            sa.column("display_name", sa.String),
-            sa.column("gen_type", sa.String),
-            sa.column("credits", sa.Integer),
-            sa.column("is_active", sa.Boolean),
-        ),
-        [
-            # Images
-            {"model_key": "seedream-4.5", "display_name": "🌸 Seedream 4.5", "gen_type": "image", "credits": 2, "is_active": True},
-            {"model_key": "nano-banano-pro", "display_name": "🍌 Nano Banano Pro (Gemini 3 Pro)", "gen_type": "image", "credits": 4, "is_active": True},
-            {"model_key": "nano-banano-2", "display_name": "🍌 Nano Banano 2 (Gemini 3.1 Flash)", "gen_type": "image", "credits": 2, "is_active": True},
-            {"model_key": "wan-2.7", "display_name": "🌊 WAN 2.7", "gen_type": "image", "credits": 3, "is_active": True},
-            {"model_key": "gpt-image-1", "display_name": "🤖 GPT Imagine 2", "gen_type": "image", "credits": 4, "is_active": True},
-            # Video
-            {"model_key": "grok-video", "display_name": "🐦 Grok Video", "gen_type": "video", "credits": 40, "is_active": True},
-            {"model_key": "kling-3.0", "display_name": "⚡ Kling 3.0", "gen_type": "video", "credits": 30, "is_active": True},
-            {"model_key": "kling-2.6-motion", "display_name": "🎭 Kling 2.6 Motion", "gen_type": "video", "credits": 35, "is_active": True},
-        ],
+    op.execute(
+        sa.text(
+            """
+            INSERT INTO model_costs
+                (model_key, display_name, gen_type, credits, is_active)
+            VALUES
+                ('seedream-4.5', '🌸 Seedream 4.5', 'image'::generationtype, 2, true),
+                ('nano-banano-pro', '🍌 Nano Banano Pro (Gemini 3 Pro)', 'image'::generationtype, 4, true),
+                ('nano-banano-2', '🍌 Nano Banano 2 (Gemini 3.1 Flash)', 'image'::generationtype, 2, true),
+                ('wan-2.7', '🌊 WAN 2.7', 'image'::generationtype, 3, true),
+                ('gpt-image-1', '🤖 GPT Imagine 2', 'image'::generationtype, 4, true),
+                ('grok-video', '🐦 Grok Video', 'video'::generationtype, 40, true),
+                ('kling-3.0', '⚡ Kling 3.0', 'video'::generationtype, 30, true),
+                ('kling-2.6-motion', '🎭 Kling 2.6 Motion', 'video'::generationtype, 35, true)
+            """
+        )
     )
 
 

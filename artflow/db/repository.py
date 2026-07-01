@@ -8,13 +8,15 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from inspect import isawaitable
+from urllib.parse import urlparse
 
 from sqlalchemy import Date, cast, desc, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from api.public_files import mirror_url
+from api.public_files import mirror_url, public_url_is_available
+from core.config import settings
 from core.model_pricing import image_pricing_keys, video_pricing_keys
 from db.models import (
     CreditLedgerEntry,
@@ -43,6 +45,15 @@ from db.models import (
 logger = logging.getLogger(__name__)
 
 ACTIVE_GENERATION_WINDOW = timedelta(minutes=45)
+EXPIRED_FEED_MEDIA_HOSTS = {"tempfile.aiquickdraw.com"}
+
+
+def _feed_media_url_is_available(url: str | None) -> bool:
+    if not public_url_is_available(url):
+        return False
+    if url and urlparse(url).netloc.lower() in EXPIRED_FEED_MEDIA_HOSTS:
+        return False
+    return True
 
 
 async def _publish_generation_update(gen: Generation | None) -> None:
@@ -1110,7 +1121,7 @@ async def finish_generation(
 
     await _publish_generation_update(gen)
 
-    # Pay 5% royalty to the author of the source feed post (if remixed from feed)
+    # Pay a fixed reward to the author of the source feed post (if remixed from feed).
 
     if not gen.source_feed_gen_id:
         return gen
@@ -1360,6 +1371,8 @@ async def _feed_cards_from_stmt(session: AsyncSession, stmt) -> list[FeedGenerat
     )
     cards: list[FeedGenerationCard] = []
     for gen, username, full_name, author_photo_url, aspect_ratio, quality, count, reference_url, reference_urls, remix_count in result.all():
+        if not _feed_media_url_is_available(gen.result_url):
+            continue
         remix_total = int(remix_count or 0)
         cards.append(
             FeedGenerationCard(
@@ -2167,12 +2180,10 @@ async def _active_price_plan_rub_per_credit(session: AsyncSession) -> float:
 
 
 def feed_remix_royalty_rub(credits_spent: float | int, rub_per_credit: float | int) -> float:
-    credits_value = Decimal(str(credits_spent or 0))
-    rub_rate = Decimal(str(rub_per_credit or 0))
-    if credits_value <= 0 or rub_rate <= 0:
+    if Decimal(str(credits_spent or 0)) <= 0:
         return 0.0
-    royalty = (credits_value * rub_rate * Decimal("0.05")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    return float(royalty)
+    reward = Decimal(str(settings.FEED_REMIX_REWARD_RUB or 0))
+    return float(reward.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if reward > 0 else 0.0
 
 
 async def get_user_feed_remix_reward_rub(session: AsyncSession, user_id: int) -> float:

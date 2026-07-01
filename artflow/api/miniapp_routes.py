@@ -100,6 +100,7 @@ MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_PHOTO_PROMPT_BYTES = 20 * 1024 * 1024
 MAX_SUNO_VOICE_AUDIO_BYTES = 30 * 1024 * 1024
 MAX_REFERENCE_REDIRECTS = 3
+FEED_REMIX_MAX_REFS = 4
 WEB_TASK_PREFIX = "web:"
 
 _TELEGRAM_STARS_RUB_PER_STAR = 10.5
@@ -2418,6 +2419,7 @@ async def remix_feed_post(
 
     user_refs = _normalize_public_urls(body.image_url, *(body.reference_urls or []))
     source_refs = _normalize_public_urls(body.source_image_url) or _generation_result_urls(source)
+    repeat_refs = _normalize_public_urls(*(source_refs + user_refs))[:FEED_REMIX_MAX_REFS]
 
     if body.model in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS):
         source_prompt = (source.prompt or "").strip()
@@ -2433,7 +2435,7 @@ async def remix_feed_post(
         motion_value = "low"
 
         if body.model == "midjourney-imagine":
-            refs = user_refs or source_refs
+            refs = repeat_refs or user_refs or source_refs
             max_refs = int(caps.get("max_refs", 1) or 1)
             if len(refs) > max_refs:
                 raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
@@ -2441,7 +2443,7 @@ async def remix_feed_post(
             if not source_prompt:
                 raise HTTPException(status_code=422, detail="Prompt is required")
         elif body.model == "midjourney-blend":
-            refs = (source_refs + user_refs) if source_refs else user_refs
+            refs = repeat_refs or user_refs or source_refs
             max_refs = int(caps.get("max_refs", 5) or 5)
             if len(refs) < 2:
                 raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
@@ -2449,7 +2451,7 @@ async def remix_feed_post(
                 raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
             normalized_ratio = _normalize_choice(body.aspect_ratio, caps.get("aspect_ratios", []), field_name="aspect ratio")
         else:
-            video_refs = user_refs or source_refs
+            video_refs = repeat_refs or user_refs or source_refs
             max_refs = int(_MJ_VIDEO_CAPS.get(body.model, {}).get("max_refs", 1) or 1)
             if not video_refs:
                 raise HTTPException(status_code=422, detail="Midjourney Video requires a reference image")
@@ -2543,7 +2545,7 @@ async def remix_feed_post(
     normalized_quality = body.quality or "basic"
 
     if gen_type == "video":
-        video_refs = user_refs or source_refs
+        video_refs = repeat_refs or user_refs or source_refs
         fallback_image_url = video_refs[0] if video_refs else None
         normalized_video = _normalize_video_request(
             model_key=body.model,
@@ -2572,7 +2574,7 @@ async def remix_feed_post(
             resolution=normalized_video["resolution"],
         )
     else:
-        image_refs = user_refs or source_refs
+        image_refs = repeat_refs or user_refs or source_refs
         if image_refs:
             normalized_image_url = image_refs[0] if len(image_refs) == 1 else image_refs
         else:

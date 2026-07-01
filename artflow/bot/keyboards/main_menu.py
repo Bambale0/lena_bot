@@ -27,6 +27,9 @@ def main_menu_kb(
             InlineKeyboardButton(text="🎨 Вернуться к серии", callback_data="menu:image"),
         )
     builder.row(
+        InlineKeyboardButton(text="🔥 Nano Banana 2 Lite", callback_data="img_model:nano-banana-2-lite"),
+    )
+    builder.row(
         InlineKeyboardButton(text="🎨 Изображение", callback_data="menu:image"),
         InlineKeyboardButton(text="🎬 Видео", callback_data="menu:video"),
     )

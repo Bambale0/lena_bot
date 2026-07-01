@@ -29,6 +29,42 @@ def upgrade() -> None:
             ["id"],
         )
 
+    if not inspector.has_table("user_prompts"):
+        op.create_table(
+            "user_prompts",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("author_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False, index=True),
+            sa.Column("title", sa.String(length=60), nullable=False),
+            sa.Column("description", sa.String(length=200), nullable=False),
+            sa.Column(
+                "category",
+                sa.Enum("art", "business", "marketing", "photo", "other", name="promptcategory"),
+                nullable=False,
+            ),
+            sa.Column("prompt_text", sa.Text(), nullable=False),
+            sa.Column("preview_url", sa.Text(), nullable=True),
+            sa.Column("model", sa.String(length=64), nullable=True),
+            sa.Column("tags", postgresql.ARRAY(sa.Text()), nullable=False, server_default="{}"),
+            sa.Column("likes", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("is_public", sa.Boolean(), nullable=False, server_default=sa.true()),
+            sa.Column(
+                "status",
+                sa.Enum("pending", "approved", "rejected", "deactivated", name="promptstatus"),
+                nullable=False,
+                server_default="pending",
+                index=True,
+            ),
+            sa.Column("reject_reason", sa.String(length=500), nullable=True),
+            sa.Column("uses_count", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        )
+        op.alter_column("user_prompts", "tags", server_default=None)
+        op.alter_column("user_prompts", "likes", server_default=None)
+        op.alter_column("user_prompts", "is_public", server_default=None)
+        op.alter_column("user_prompts", "status", server_default=None)
+        op.alter_column("user_prompts", "uses_count", server_default=None)
+        return
+
     prompt_columns = {col["name"] for col in inspector.get_columns("user_prompts")}
     if "preview_url" not in prompt_columns:
         op.add_column("user_prompts", sa.Column("preview_url", sa.Text(), nullable=True))

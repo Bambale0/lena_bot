@@ -1310,8 +1310,14 @@ function Studio({
     setModeOption((current.mode_options || [])[0] || "normal");
   }, [current?.key, scenario]);
 
-  const remixSourceRefUrl = isRemix && remixSource?.gen_type === "image" ? normalizeAbsoluteUrl(remixSource?.result_url || "") : "";
-  const isRemixSourceRef = (url) => remixSourceRefUrl && normalizeAbsoluteUrl(url) === remixSourceRefUrl;
+  const remixSourceRefUrls = isRemix
+    ? generationResultUrls(remixSource || {})
+      .map((url) => normalizeAbsoluteUrl(url))
+      .filter(Boolean)
+      .slice(0, 4)
+    : [];
+  const remixSourceRefUrl = remixSourceRefUrls[0] || "";
+  const isRemixSourceRef = (url) => remixSourceRefUrls.includes(normalizeAbsoluteUrl(url));
 
   async function handleFileUpload(e) {
     const files = Array.from(e.target.files || []);
@@ -1320,10 +1326,11 @@ function Studio({
     setUploading(true);
     setRefError("");
     try {
-      const limit = Math.max(1, Number(current?.max_refs || 1) || 1);
+      const limit = Math.max(1, Math.min(isRemix ? 4 : Infinity, Number(current?.max_refs || 1) || 1));
       const baseRefs = normalizedRefUrls.filter((url) => !isRemixSourceRef(url));
       const existing = baseRefs.length;
-      const availableSlots = Math.max(0, limit - existing);
+      const sourceSlots = isRemix ? remixSourceRefUrls.length : 0;
+      const availableSlots = Math.max(0, limit - sourceSlots - existing);
       const queue = limit <= 1 ? files.slice(0, 1) : files.slice(0, availableSlots);
 
       if (!queue.length) {
@@ -1396,7 +1403,7 @@ function Studio({
     .map((value) => normalizeAbsoluteUrl(value))
     .filter(Boolean);
   const normalizedRefUrl = normalizedRefUrls[0] || "";
-  const maxRefs = Math.max(1, Number(current?.max_refs || 1) || 1);
+  const maxRefs = Math.max(1, Math.min(isRemix ? 4 : Infinity, Number(current?.max_refs || 1) || 1));
   const hasValidRefUrl = normalizedRefUrls.every((value) => isAbsoluteHttpUrl(value));
   const isPerSecond = Boolean(current?.is_per_second);
   const requiresPrompt = current?.key !== "midjourney-blend";
@@ -1499,7 +1506,9 @@ function Studio({
     }
 
     const effectiveRefUrls = mode === "image"
-      ? (userProvidedRefUrls.length ? userProvidedRefUrls.slice(0, maxRefs) : remixSourceRefUrl ? [remixSourceRefUrl] : [])
+      ? (isRemix
+        ? [...remixSourceRefUrls, ...userProvidedRefUrls].slice(0, maxRefs)
+        : userProvidedRefUrls.slice(0, maxRefs))
       : [];
     const effectiveRefUrl = effectiveRefUrls[0] || null;
 
@@ -3770,6 +3779,7 @@ function App() {
       model: feedItem.model,
       gen_type: feedItem.gen_type || "image",
       result_url: feedItem.result_url || null,
+      result_urls: generationResultUrls(feedItem).slice(0, 4),
     });
     setGeneration(null);
     generationScreen.current = targetScreen;

@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     # KIE.AI callbacks
     KIE_WEBHOOK_PATH: str = "/webhook/kie"
     KIE_WEBHOOK_SECRET: str = ""
+    KIE_WEBHOOK_HMAC_KEY: str = ""
 
     # Public static uploads used as stable references for KIE and Telegram.
     STATIC_UPLOAD_DIR: str = "static/upload"
@@ -109,8 +110,9 @@ class Settings(BaseSettings):
     REFERRAL_FREEZE: bool = False
 
     # Credits
-    WELCOME_BONUS_CREDITS: int = 15
-    REFERRAL_L1_CREDITS: int = 5   # бонус кредитами при регистрации реферала
+    WELCOME_BONUS_CREDITS: int = 6
+    REFERRAL_L1_CREDITS: int = 3   # бонус поцелуями при регистрации реферала
+    FEED_REMIX_REWARD_RUB: float = 5.0
     REFERRAL_WITHDRAW_MIN_RUB: float = 1000.0
     REFERRAL_EXCHANGE_MIN_RUB: float = 100.0
     REFERRAL_EXCHANGE_RUB_PER_CREDIT: float = 10.0

@@ -40,6 +40,7 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "wan/2-7-image-pro",          "display_name": "🌊 WAN 2.7 Image Pro",   "gen_type": GenerationType.image, "credits": 5},
     {"model_key": "google/nano-banana",         "display_name": "🍌 Nano Banana",         "gen_type": GenerationType.image, "credits": 2},
     {"model_key": "nano-banana-2",              "display_name": "🍌 Nano Banana 2",        "gen_type": GenerationType.image, "credits": 1.5},
+    {"model_key": "nano-banana-2-lite",         "display_name": "🍌 Nano Banana 2 Lite 🔥", "gen_type": GenerationType.image, "credits": 1.0},
     {"model_key": "nano-banana-pro",            "display_name": "🍌 Nano Banana Pro",      "gen_type": GenerationType.image, "credits": 2},
     {"model_key": "qwen/text-to-image",         "display_name": "🟣 Qwen",             "gen_type": GenerationType.image, "credits": 3},
     {"model_key": "qwen/image-to-image",        "display_name": "🟣 Qwen Edit",             "gen_type": GenerationType.image, "credits": 3},

@@ -360,6 +360,15 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
         optional_params={"aspect_ratio": "aspect_ratio", "quality": "resolution"},
         defaults={"aspect_ratio": "auto", "resolution": "2K", "output_format": "jpg"},
     ),
+    "nano-banana-2-lite": KieModelSpec(
+        model="nano-banana-2-lite",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("text", "image"),
+        reference_field="image_urls",
+        reference_type=KieReferenceType.LIST,
+        optional_params={"aspect_ratio": "aspect_ratio"},
+        defaults={"aspect_ratio": "auto"},
+    ),
     "nano-banana-pro": KieModelSpec(
         model="nano-banana-pro",
         media_type=KieMediaType.IMAGE,

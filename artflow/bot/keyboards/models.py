@@ -265,6 +265,13 @@ IMAGE_CAPS: dict[str, dict] = {
         "quality_options": [("2K", "2K"), ("4K", "4K")],
         "max_refs": 14,
     },
+    ImageModel.NANO_BANANA_2_LITE: {
+        "modes": ["text", "image"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_2_LITE, []),
+        "aspect_ratio_modes": ["text", "image"],
+        "counts": [1],
+        "max_refs": 10,
+    },
     ImageModel.NANO_BANANA_PRO: {
         "modes": ["text", "image"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_PRO, []),
@@ -332,6 +339,7 @@ IMAGE_MODEL_DESC: dict[str, str] = {
     ImageModel.SEEDREAM_45: "🌟 Seedream 4.5 · реализм · детали",
     ImageModel.SEEDREAM_45_EDIT: "🌟 Seedream 4.5 Edit · редактирование по фото",
     ImageModel.NANO_BANANA: "🍌 Nano Banana · быстрые изображения",
+    ImageModel.NANO_BANANA_2_LITE: "🍌 Nano Banana 2 Lite 🔥 · быстрый старт",
     ImageModel.NANO_BANANA_PRO: "🍌 Nano Banana Pro · точное следование промпту · работа по референсу",
     ImageModel.NANO_BANANA_2: "🍌 Nano Banana 2 · быстрый стиль · иллюстрации",
     ImageModel.WAN_27: "🌊 WAN 2.7 · базовая версия",
@@ -375,6 +383,7 @@ NANA_BANANO_MODEL_CHOICES = (
 _IMAGE_MODEL_ORDER: list[str] = [
     ImageModel.NANO_BANANA_PRO,
     ImageModel.NANO_BANANA_2,
+    ImageModel.NANO_BANANA_2_LITE,
     ImageModel.SEEDREAM_45,
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.WAN_27_PRO,

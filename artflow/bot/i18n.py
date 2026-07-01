@@ -88,7 +88,7 @@ _RU = {
         "  — {l1_pct}% с оплат друзей L1\n"
         "  — {l2_pct}% с оплат друзей L2\n"
         "  — {l3_pct}% с оплат друзей L3\n"
-        "• С повторов из ленты ты получаешь 5% от стоимости генерации в рублях\n"
+        "• С повторов из ленты ты получаешь 5₽ за каждый повтор\n"
         "• Эти деньги копятся отдельно на партнёрском балансе\n"
         "• Их можно вывести деньгами или купить 💋 по обычному курсу: {rate}"
     ),
@@ -309,6 +309,7 @@ _EN = {
         "  — {l1_pct}% from L1 friends' payments\n"
         "  — {l2_pct}% from L2 friends' payments\n"
         "  — {l3_pct}% from L3 friends' payments\n"
+        "• From feed reuses, you receive 5 RUB per reuse\n"
         "• This money is stored separately in your partner balance\n"
         "• You can withdraw it in cash or buy 💋 at the standard rate: {rate}"
     ),

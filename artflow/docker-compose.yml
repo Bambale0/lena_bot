@@ -1,12 +1,8 @@
-version: "3.9"
-
 services:
   app:
     build: .
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
     env_file: .env
-    ports:
-      - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -25,7 +21,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5433:5432"   # 5433 снаружи чтобы не конфликтовать с локальным postgres
+      - "127.0.0.1:5433:5432"   # 5433 снаружи чтобы не конфликтовать с локальным postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bot -d artflow"]
       interval: 5s
@@ -38,7 +34,7 @@ services:
     volumes:
       - redisdata:/data
     ports:
-      - "6379:6379"   # для локального доступа при dev-режиме
+      - "127.0.0.1:6379:6379"   # для локального доступа при dev-режиме
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -54,6 +50,7 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       - app
     restart: unless-stopped
