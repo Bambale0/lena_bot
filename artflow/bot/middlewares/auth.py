@@ -257,8 +257,35 @@ class AuthMiddleware(BaseMiddleware):
             else:
                 logger.info("Referral late-bind without resolvable referrer: tg_id=%s ref_code=%s entrypoint=%s", tg_user.id, start_payload.raw or ref_code, entrypoint)
 
+            # Referral code not found — notify user
+            if bot:
+                try:
+                    await _notify_referral(
+                        bot,
+                        tg_user.id,
+                        "ℹ️ Реферальный бонус не начислен.\n"
+                        "Код приглашения не найден или ссылка некорректна.\n\n"
+                        "💡 Попросите у партнёра новую ссылку.",
+                    )
+                except Exception:
+                    pass
+
         elif db_user.is_banned:
             return  # Просто игнорируем забаненных
+
+        # User has ref_code but already has a referrer — notify them
+        if ref_code and db_user and db_user.referrer_id and not db_user.is_banned:
+            if bot:
+                try:
+                    await _notify_referral(
+                        bot,
+                        tg_user.id,
+                        "ℹ️ Реферальный бонус не начислен.\n"
+                        "Вы уже зарегистрированы в боте.\n"
+                        "💡 Если вы ещё не нажимали «Запустить» — удалите чат с ботом и перейдите по ссылке заново.",
+                    )
+                except Exception:
+                    pass
 
         data["db_user"] = db_user
         return await handler(event, data)
