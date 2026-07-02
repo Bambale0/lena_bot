@@ -1,0 +1,30 @@
+name: Deploy Лена
+
+on:
+  push:
+    branches: [miniapp-mvp]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LENA_HOST || secrets.DEPLOY_HOST }}
+          port: ${{ secrets.LENA_PORT || 22 }}
+          username: ${{ secrets.DEPLOY_USER || 'root' }}
+          key: ${{ secrets.LENA_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd /root/mkdir/lena_bot
+            git fetch --all
+            git pull --ff-only origin miniapp-mvp
+            cd artflow
+            docker compose up -d --build
+            sleep 3
+            echo 'Containers:'
+            docker ps --filter name=artflow --format 'table {{.Names}}\t{{.Status}}'
+            echo '✅ Deploy OK'
