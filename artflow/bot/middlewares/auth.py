@@ -244,13 +244,7 @@ class AuthMiddleware(BaseMiddleware):
                 if bound:
                     logger.info("Referral late-bind success: tg_id=%s -> referrer_id=%s", tg_user.id, referrer.id)
                     await repo.add_credits(session, referrer.id, settings.REFERRAL_L1_CREDITS, entry_type="referral_signup_bonus", source_type="user", source_id=str(tg_user.id), note="L1 referral signup bonus")
-                    logger.info("Referral L1 late bind: %s -> %s", tg_user.id, referrer.tg_id)
-                    await _notify_referral(
-                        bot,
-                        referrer.tg_id,
-                        "🎉 По твоей ссылке пришёл новый пользователь!\n"
-                        f"+{settings.REFERRAL_L1_CREDITS} 💋 начислено.",
-                    )
+                    logger.info("Referral L1 late bind: %s -> %s (notif skipped - existing user)", tg_user.id, referrer.tg_id)
                     db_user = await repo.get_user_by_tg_id(session, tg_user.id)
                 else:
                     logger.info("Referral late-bind skipped: tg_id=%s user_id=%s already_bound_or_race=true", tg_user.id, db_user.id)
