@@ -107,10 +107,11 @@ def _feed_caption(card: FeedGenerationCard, *, position: int | None = None) -> s
     )
 
 
-def _feed_fallback_text(card: FeedGenerationCard, caption: str) -> str:
-    result_url = html.escape(card.generation.result_url or "")
-    if result_url and public_url_is_available(result_url):
-        link = f'\n\n🔗 <a href="{result_url}">Открыть результат</a>'
+def _feed_fallback_text(card: FeedGenerationCard, caption: str, *, result_url: str | None = None) -> str:
+    url = result_url or card.generation.result_url
+    escaped_url = html.escape(url or "")
+    if escaped_url and public_url_is_available(url):
+        link = f'\n\n🔗 <a href="{escaped_url}">Открыть результат</a>'
         note = "⚠️ Telegram не смог открыть превью как фото, но пост доступен по ссылке."
     else:
         link = ""
@@ -151,6 +152,7 @@ async def _show_feed_card(
     index: int,
     total: int,
     viewer_user_id: int | None = None,
+    session: AsyncSession | None = None,
 ) -> None:
     caption = _feed_caption(card, position=index + 1 if source == "top" else None)
     reply_markup = feed_card_kb(
@@ -163,8 +165,32 @@ async def _show_feed_card(
     result_url = card.generation.result_url
     is_video = getattr(card.generation, "gen_type", None) == GenerationType.video
 
+    # Attempt to mirror broken URLs on-the-fly
     if result_url and not public_url_is_available(result_url):
-        await holder.answer(_feed_fallback_text(card, caption), reply_markup=reply_markup)
+        logger.info("Feed card gen=%s url=%s unavailable, attempting mirror...", card.generation.id, result_url)
+        try:
+            from api.public_files import mirror_url
+
+            mirrored = await mirror_url(result_url)
+            if mirrored and mirrored != result_url:
+                logger.info("Feed card gen=%s mirrored from %s -> %s", card.generation.id, result_url, mirrored)
+                result_url = mirrored
+                # Persist the mirrored URL so it stays fixed
+                if session:
+                    from sqlalchemy import update
+                    from db.models import Generation
+
+                    await session.execute(
+                        update(Generation)
+                        .where(Generation.id == card.generation.id)
+                        .values(result_url=mirrored)
+                    )
+                    await session.commit()
+        except Exception as exc:
+            logger.warning("Feed card mirror attempt gen=%s failed: %s", card.generation.id, exc)
+
+    if result_url and not public_url_is_available(result_url):
+        await holder.answer(_feed_fallback_text(card, caption, result_url=result_url), reply_markup=reply_markup)
         return
 
     if result_url and not is_video and holder.photo:
@@ -259,6 +285,7 @@ async def show_feed_from_source(
     idx = index % len(cards)
     await _show_feed_card(
         holder=holder,
+        session=session,
         card=cards[idx],
         source=source,
         index=idx,
@@ -278,7 +305,7 @@ async def show_feed_card_by_id(
     if not card:
         await message.answer("Пост не найден или уже скрыт.", reply_markup=empty_feed_kb())
         return
-    await _show_feed_card(holder=message, card=card, source="feed", index=0, total=1, viewer_user_id=viewer_user_id)
+    await _show_feed_card(holder=message, session=session, card=card, source="feed", index=0, total=1, viewer_user_id=viewer_user_id)
 
 
 @router.message(Command("feed"))
@@ -569,6 +596,9 @@ async def cb_feed_remix(
 
 @router.callback_query(F.data.startswith("feed:publish:"))
 async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_user: User, bot: Bot | None = None) -> None:
+    from api.public_files import mirror_url
+    import json
+
     generation_id = int(call.data.split(":")[-1])
     gen = await repo.get_generation_by_id(session, generation_id)
 
@@ -579,8 +609,29 @@ async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_u
         await call.answer("Этот результат нельзя добавить в библиотеку", show_alert=True)
         return
 
+    # Mirror external URLs to local storage before publishing to feed
+    original_urls = [gen.result_url] if gen.result_url else []
+    if gen.result_urls:
+        try:
+            parsed = json.loads(gen.result_urls)
+            if isinstance(parsed, list):
+                original_urls = [str(u) for u in parsed if u] or original_urls
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    clean_urls: list[str] = []
+    for url in original_urls:
+        mirrored = await mirror_url(url)
+        if mirrored:
+            clean_urls.append(mirrored)
+        else:
+            clean_urls.append(url)
+    new_result_url = clean_urls[0] if clean_urls else (gen.result_url or "")
+
     gen.is_public_feed = True
     gen.is_prompt_library = True
+    gen.result_url = new_result_url
+    gen.result_urls = json.dumps(clean_urls, ensure_ascii=False)
     await session.commit()
 
     if bot and call.message:

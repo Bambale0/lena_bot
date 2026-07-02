@@ -1495,6 +1495,29 @@ def _own_or_empty_feed_source_clause(user_id: int):
 
 
 async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
+    gen = await get_generation_by_id(session, gen_id)
+    if not gen:
+        return None
+
+    # Mirror external URLs to local storage so feed images don't expire
+    original_urls = [gen.result_url] if gen.result_url else []
+    if gen.result_urls:
+        try:
+            parsed = json.loads(gen.result_urls)
+            if isinstance(parsed, list):
+                original_urls = [str(u) for u in parsed if u] or original_urls
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    clean_urls: list[str] = []
+    for url in original_urls:
+        mirrored = await mirror_url(url)
+        if mirrored:
+            clean_urls.append(mirrored)
+        else:
+            clean_urls.append(url)
+    new_result_url = clean_urls[0] if clean_urls else (gen.result_url or "")
+
     result = await session.execute(
         update(Generation)
         .where(
@@ -1504,7 +1527,11 @@ async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Gen
             Generation.result_url.is_not(None),
             _own_or_empty_feed_source_clause(user_id),
         )
-        .values(is_public_feed=True)
+        .values(
+            is_public_feed=True,
+            result_url=new_result_url,
+            result_urls=json.dumps(clean_urls, ensure_ascii=False),
+        )
         .returning(Generation.id)
     )
     updated_id = result.scalar_one_or_none()
