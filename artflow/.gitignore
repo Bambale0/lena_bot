@@ -49,3 +49,4 @@ yarn-error.log*
 *.zip
 .bin
 .log
+nginx.conf.bak3

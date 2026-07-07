@@ -105,7 +105,7 @@ SUPPORTS_I2V: set[VideoModel] = {
     for spec in VIDEO_SPECS.values()
     if "image" in spec.supported_modes and spec.model in set(item.value for item in VideoModel)
 }
-SUPPORTS_I2V.update({VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE})
+SUPPORTS_I2V.update({VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE})  # VEO_3 removed: API says "Reference to video only supports Veo Fast and Veo Lite"
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

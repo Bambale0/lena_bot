@@ -645,6 +645,11 @@ _TRANSPARENT_PNG = (
 
 
 class UploadStaticFiles(StaticFiles):
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return
+        await super().__call__(scope, receive, send)
+
     async def get_response(self, path: str, scope) -> Response:
         try:
             return await super().get_response(path, scope)
@@ -1662,7 +1667,7 @@ if LANDING_DIR.exists():
         async def _landing_alias(file_name=file_name):
             return FileResponse(LANDING_DIR / file_name)
         app.add_api_route(route_path, _landing_alias, methods=["GET", "HEAD"], include_in_schema=False)
-    app.mount("/", StaticFiles(directory=str(LANDING_DIR), html=True), name="landing")
+    app.mount("/", UploadStaticFiles(directory=str(LANDING_DIR), html=True), name="landing")
 else:
     @app.get("/", response_class=PlainTextResponse)
     async def landing_not_built() -> str:

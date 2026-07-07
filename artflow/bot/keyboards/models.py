@@ -179,13 +179,12 @@ VIDEO_CAPS: dict[str, dict] = {
         "max_refs": 3,
         "billing_mode": "per_second",
     },
-    "veo3": {
-        "modes": ["text", "image"],
+    "veo3": {  # VEO3 does NOT support I2V (API: "Reference to video only supports Veo Fast and Veo Lite")
+        "modes": ["text"],
         "duration_options": [5, 10, 15],
         "aspect_ratios": ["16:9", "9:16"],
         "has_resolution": True,
         "resolutions": ["720p", "1080p"],
-        "max_refs": 3,
         "billing_mode": "per_second",
     },
     "veo3_lite": {
