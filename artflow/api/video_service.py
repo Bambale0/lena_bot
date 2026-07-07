@@ -39,6 +39,7 @@ class VideoModel(StrEnum):
     # Seedance
     SEEDANCE_2      = "bytedance/seedance-2"
     SEEDANCE_2_FAST = "bytedance/seedance-2-fast"
+    SEEDANCE_2_MINI = "bytedance/seedance-2-mini"
     # Grok
     GROK_T2V        = "grok-imagine/text-to-video"
     GROK_I2V        = "grok-imagine/image-to-video"

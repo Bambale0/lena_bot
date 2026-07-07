@@ -186,6 +186,23 @@ def _seedance_params(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def _seedance_mini_params(params: dict[str, Any]) -> dict[str, Any]:
+    out = {
+        "resolution": params.get("resolution") or "720p",
+        "aspect_ratio": params.get("aspect_ratio") or "16:9",
+        "duration": params.get("duration") or 5,
+        "generate_audio": bool(params.get("generate_audio", True)),
+    }
+    video_url = params.get("reference_video_url")
+    if video_url:
+        out["reference_video_urls"] = [video_url]
+    audio_url = params.get("reference_audio_url")
+    if audio_url:
+        out["reference_audio_urls"] = [audio_url]
+    return out
+
+
 def _grok_duration(value: Any, *, default: int = 6) -> str:
     try:
         duration = int(value)
@@ -512,7 +529,15 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         reference_type=KieReferenceType.LIST,
         param_builder=_seedance_params,
     ),
-    "grok-imagine/text-to-video": KieModelSpec(
+        "bytedance/seedance-2-mini": KieModelSpec(
+        model="bytedance/seedance-2-mini",
+        media_type=KieMediaType.VIDEO,
+        supported_modes=("text", "image"),
+        reference_field="first_frame_url",
+        reference_type=KieReferenceType.FIRST_LAST,
+        param_builder=_seedance_mini_params,
+    ),
+"grok-imagine/text-to-video": KieModelSpec(
         model="grok-imagine/text-to-video",
         media_type=KieMediaType.VIDEO,
         supported_modes=("text",),
