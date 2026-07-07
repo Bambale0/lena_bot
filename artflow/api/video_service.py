@@ -33,6 +33,8 @@ class VideoModel(StrEnum):
     KLING_26_MOTION = "kling-2.6/motion-control"
     KLING_30        = "kling-3.0/video"
     KLING_30_MOTION = "kling-3.0/motion-control"
+    KLING_V3_TURBO_T2V = "kling/v3-turbo-text-to-video"
+    KLING_V3_TURBO_I2V = "kling/v3-turbo-image-to-video"
     # WAN
     WAN_27_T2V      = "wan/2-7-text-to-video"
     WAN_27_I2V      = "wan/2-7-image-to-video"

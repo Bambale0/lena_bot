@@ -75,7 +75,25 @@ VIDEO_CAPS: dict[str, dict] = {
         "resolution_labels": {"std": "std · 720p", "pro": "pro · 1080p", "4K": "4K · 2160p"},
         "billing_mode": "per_second",
     },
-    "kling-3.0/motion-control": {
+        "kling/v3-turbo-text-to-video": {
+        "modes": ["text"],
+        "duration_options": [3, 5, 8, 10, 15],
+        "aspect_ratios": ["16:9", "9:16", "1:1"],
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
+        "billing_mode": "per_second",
+    },
+    "kling/v3-turbo-image-to-video": {
+        "modes": ["image"],
+        "duration_options": [3, 5, 8, 10, 15],
+        "aspect_ratios": [],
+        "has_resolution": True,
+        "resolutions": ["720p", "1080p"],
+        "max_refs": 1,
+        "billing_mode": "per_second",
+    },
+
+"kling-3.0/motion-control": {
         "modes": ["motion"],
         "duration_options": [],
         "aspect_ratios": [],
@@ -412,7 +430,9 @@ VIDEO_MODEL_DESC: dict[str, str] = {
     VideoModel.KLING_26_T2V: "🎬 Kling 2.6 · текст в видео",
     VideoModel.KLING_26_I2V: "🖼️ Kling 2.6 Animate · оживление фото",
     VideoModel.KLING_26_MOTION: "🎥 Kling Motion · движение камеры и ракурсы",
-    VideoModel.KLING_30_MOTION: "🎥 Kling 3.0 Motion · движение камеры и ракурсы",
+        VideoModel.KLING_V3_TURBO_T2V: "⚡ Kling V3 Turbo T2V · сверхбыстрое видео",
+    VideoModel.KLING_V3_TURBO_I2V: "⚡ Kling V3 Turbo I2V · анимация по фото",
+VideoModel.KLING_30_MOTION: "🎥 Kling 3.0 Motion · движение камеры и ракурсы",
     VideoModel.WAN_27_T2V: "🎭 WAN Video · выразительные сцены",
     VideoModel.WAN_27_I2V: "🖼️ WAN Animate · анимация по фото",
     VideoModel.SEEDANCE_2: "🌊 Seedance 2 · плавная анимация",
@@ -452,7 +472,9 @@ _VIDEO_MODEL_ORDER: list[str] = [
     VideoModel.HAPPYHORSE_I2V,
     VideoModel.KLING_26_MOTION,
     VideoModel.KLING_30_MOTION,
-    VideoModel.KLING_26_T2V,
+        VideoModel.KLING_V3_TURBO_T2V,
+    VideoModel.KLING_V3_TURBO_I2V,
+VideoModel.KLING_26_T2V,
     # Kling 3.0 and Veo are listed above but also appear in i2v group
 ]
 
@@ -476,7 +498,8 @@ _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
             VideoModel.SEEDANCE_2,
             VideoModel.WAN_27_T2V,
             VideoModel.GROK_T2V,
-            VideoModel.KLING_26_T2V,
+                        VideoModel.KLING_V3_TURBO_T2V,
+VideoModel.KLING_26_T2V,
         ],
     ),
     (
@@ -487,6 +510,8 @@ _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
             VideoModel.VEO_3_FAST,
             VideoModel.VEO_3_LITE,
             VideoModel.KLING_26_I2V,
+            VideoModel.KLING_V3_TURBO_I2V,
+
             VideoModel.WAN_27_I2V,
             VideoModel.GROK_I2V,
             VideoModel.HAPPYHORSE_I2V,

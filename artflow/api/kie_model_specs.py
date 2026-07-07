@@ -496,7 +496,23 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         defaults={"character_orientation": "image", "background_source": "input_video"},
         param_builder=_kling_motion_params,
     ),
-    "wan/2-7-text-to-video": KieModelSpec(
+        "kling/v3-turbo-text-to-video": KieModelSpec(
+        model="kling/v3-turbo-text-to-video",
+        media_type=KieMediaType.VIDEO,
+        supported_modes=("text",),
+        optional_params={"aspect_ratio": "aspect_ratio", "duration": "duration", "resolution": "resolution"},
+        defaults={"aspect_ratio": "16:9", "duration": 5, "resolution": "720p"},
+    ),
+    "kling/v3-turbo-image-to-video": KieModelSpec(
+        model="kling/v3-turbo-image-to-video",
+        media_type=KieMediaType.VIDEO,
+        supported_modes=("image",),
+        reference_field="image_urls",
+        reference_type=KieReferenceType.LIST,
+        optional_params={"duration": "duration", "resolution": "resolution"},
+        defaults={"duration": 5, "resolution": "720p"},
+    ),
+"wan/2-7-text-to-video": KieModelSpec(
         model="wan/2-7-text-to-video",
         media_type=KieMediaType.VIDEO,
         supported_modes=("text",),
