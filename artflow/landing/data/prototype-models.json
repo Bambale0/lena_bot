@@ -1,10 +1,10 @@
 {
   "models": [
     {
-      "key": "gpt-image-2-text-to-image",
-      "name": "GPT Image 2",
+      "key": "grok-imagine/text-to-image",
+      "name": "⚡ Grok Imagine",
       "type": "image",
-      "credits": 2,
+      "credits": 2.0,
       "capabilities": [
         "text",
         "image"
@@ -12,10 +12,153 @@
       "active": true
     },
     {
-      "key": "gpt-image-2-image-to-image",
-      "name": "GPT Image 2 Edit",
+      "key": "grok-imagine/image-to-image",
+      "name": "⚡ Grok Imagine Edit",
       "type": "image",
-      "credits": 2,
+      "credits": 2.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image",
+      "name": "🌊 WAN 2.7 Image",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image-pro__quality=1K",
+      "name": "🌊 WAN 2.7 Image Pro · 1K",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image-pro__quality=2K",
+      "name": "🌊 WAN 2.7 Image Pro · 2K",
+      "type": "image",
+      "credits": 2.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image-pro__quality=4K",
+      "name": "🌊 WAN 2.7 Image Pro · 4K",
+      "type": "image",
+      "credits": 2.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image__quality=1K",
+      "name": "🌊 WAN 2.7 Image · 1K",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image__quality=2K",
+      "name": "🌊 WAN 2.7 Image · 2K",
+      "type": "image",
+      "credits": 2.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image-pro",
+      "name": "🌊 WAN Pro",
+      "type": "image",
+      "credits": 2.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "seedream/4.5-text-to-image",
+      "name": "🌸 Seedream 4.5",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "seedream/4.5-edit",
+      "name": "🌸 Seedream 4.5 Edit",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "seedream/4.5-edit__quality=basic",
+      "name": "🌸 Seedream 4.5 Edit · 2K",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "seedream/4.5-edit__quality=high",
+      "name": "🌸 Seedream 4.5 Edit · 4K",
+      "type": "image",
+      "credits": 2.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "seedream/4.5-text-to-image__quality=basic",
+      "name": "🌸 Seedream 4.5 · 2K",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "seedream/4.5-text-to-image__quality=high",
+      "name": "🌸 Seedream 4.5 · 4K",
+      "type": "image",
+      "credits": 2.5,
       "capabilities": [
         "text",
         "image"
@@ -24,7 +167,40 @@
     },
     {
       "key": "nano-banana-2",
-      "name": "Nano Banana 2",
+      "name": "🍌 Nano Banana 2",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "nano-banana-2-lite",
+      "name": "🍌 Nano Banana 2 Lite 🔥",
+      "type": "image",
+      "credits": 1.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "nano-banana-2__quality=2K",
+      "name": "🍌 Nano Banana 2 · 2K",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "nano-banana-2__quality=4K",
+      "name": "🍌 Nano Banana 2 · 4K",
       "type": "image",
       "credits": 2.5,
       "capabilities": [
@@ -35,9 +211,9 @@
     },
     {
       "key": "nano-banana-pro",
-      "name": "Nano Banana Pro",
+      "name": "🍌 Nano Banana Pro",
       "type": "image",
-      "credits": 2.5,
+      "credits": 2.0,
       "capabilities": [
         "text",
         "image"
@@ -45,8 +221,74 @@
       "active": true
     },
     {
-      "key": "seedream/4.5-text-to-image",
-      "name": "Seedream 4.5",
+      "key": "nano-banana-pro__quality=2K",
+      "name": "🍌 Nano Banana Pro · 2K",
+      "type": "image",
+      "credits": 2.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "nano-banana-pro__quality=4K",
+      "name": "🍌 Nano Banana Pro · 4K",
+      "type": "image",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "midjourney-describe",
+      "name": "🔍 Midjourney Describe",
+      "type": "image",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "midjourney-action",
+      "name": "🖌️ Midjourney Action",
+      "type": "image",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "midjourney-imagine",
+      "name": "🖌️ Midjourney Imagine",
+      "type": "image",
+      "credits": 10.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "midjourney-blend",
+      "name": "🖼️ Midjourney Blend",
+      "type": "image",
+      "credits": 12.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "qwen/text-to-image",
+      "name": "🟣 Qwen",
       "type": "image",
       "credits": 1.5,
       "capabilities": [
@@ -56,21 +298,10 @@
       "active": true
     },
     {
-      "key": "grok-imagine/text-to-image",
-      "name": "Grok Imagine",
-      "type": "image",
-      "credits": 2,
-      "capabilities": [
-        "text",
-        "image"
-      ],
-      "active": true
-    },
-    {
       "key": "qwen2/text-to-image",
-      "name": "Qwen 2",
+      "name": "🟣 Qwen 2",
       "type": "image",
-      "credits": 2,
+      "credits": 2.0,
       "capabilities": [
         "text",
         "image"
@@ -78,10 +309,65 @@
       "active": true
     },
     {
-      "key": "kling-3.0/video",
-      "name": "Kling 3.0",
+      "key": "qwen2/image-edit",
+      "name": "🟣 Qwen 2 Edit",
+      "type": "image",
+      "credits": 2.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "qwen/image-to-image",
+      "name": "🟣 Qwen Edit",
+      "type": "image",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "qwen/image-edit",
+      "name": "🟣 Qwen Edit Pro",
+      "type": "image",
+      "credits": 2.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "gpt-image-2-text-to-image",
+      "name": "🤖 GPT Image 2",
+      "type": "image",
+      "credits": 2.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "gpt-image-2-image-to-image",
+      "name": "🤖 GPT Image 2 Edit",
+      "type": "image",
+      "credits": 2.0,
+      "capabilities": [
+        "text",
+        "image"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling/v3-turbo-image-to-video",
+      "name": "Kling V3 Turbo I2V",
       "type": "video",
-      "credits": 3,
+      "credits": 3.0,
       "capabilities": [
         "text",
         "image",
@@ -90,10 +376,670 @@
       "active": true
     },
     {
-      "key": "kling-3.0/motion-control",
-      "name": "Kling 3.0 Motion",
+      "key": "kling/v3-turbo-image-to-video__resolution=1080p",
+      "name": "Kling V3 Turbo I2V 1080p",
       "type": "video",
-      "credits": 5,
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling/v3-turbo-image-to-video__resolution=720p",
+      "name": "Kling V3 Turbo I2V 720p",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling/v3-turbo-text-to-video",
+      "name": "Kling V3 Turbo T2V",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling/v3-turbo-text-to-video__resolution=1080p",
+      "name": "Kling V3 Turbo T2V 1080p",
+      "type": "video",
+      "credits": 7.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling/v3-turbo-text-to-video__resolution=720p",
+      "name": "Kling V3 Turbo T2V 720p",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2-mini",
+      "name": "Seedance 2 Mini",
+      "type": "video",
+      "credits": 9.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2-mini__resolution=480p",
+      "name": "Seedance 2 Mini 480p",
+      "type": "video",
+      "credits": 4.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2-mini__resolution=720p",
+      "name": "Seedance 2 Mini 720p",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "veo3_lite",
+      "name": "veo3_lite",
+      "type": "video",
+      "credits": 1.5,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-2.6/text-to-video",
+      "name": "⚙️ Kling 2.6",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-2.6/image-to-video",
+      "name": "⚙️ Kling 2.6 Animate",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-2.6/image-to-video__resolution=1080p",
+      "name": "⚙️ Kling 2.6 Animate · 1080p · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-2.6/image-to-video__resolution=720p",
+      "name": "⚙️ Kling 2.6 Animate · 720p · за сек",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-2.6/text-to-video__resolution=1080p",
+      "name": "⚙️ Kling 2.6 · 1080p · за сек",
+      "type": "video",
+      "credits": 7.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-2.6/text-to-video__resolution=720p",
+      "name": "⚙️ Kling 2.6 · 720p · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "grok-imagine/image-to-video",
+      "name": "⚡ Grok Animate",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "grok-imagine/image-to-video__resolution=480p",
+      "name": "⚡ Grok Animate · 480p · за сек",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "grok-imagine/image-to-video__resolution=720p",
+      "name": "⚡ Grok Animate · 720p · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "grok-imagine/text-to-video",
+      "name": "⚡ Grok Video",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "grok-imagine/text-to-video__resolution=480p",
+      "name": "⚡ Grok Video · 480p · за сек",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "grok-imagine/text-to-video__resolution=720p",
+      "name": "⚡ Grok Video · 720p · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/video",
+      "name": "⚡ Kling 3.0",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/video__resolution=2K",
+      "name": "⚡ Kling 3.0 · 2K · за сек",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/video__resolution=4K",
+      "name": "⚡ Kling 3.0 · 4K · за сек",
+      "type": "video",
+      "credits": 10.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/video__resolution=pro",
+      "name": "⚡ Kling 3.0 · Pro · за сек",
+      "type": "video",
+      "credits": 8.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/video__resolution=std",
+      "name": "⚡ Kling 3.0 · Std · за сек",
+      "type": "video",
+      "credits": 6.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video",
+      "name": "✨ Gemini Omni",
+      "type": "video",
+      "credits": 12.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=10__resolution=1080p",
+      "name": "✨ Gemini Omni · 10 сек · 1080p",
+      "type": "video",
+      "credits": 30.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=10__resolution=4k",
+      "name": "✨ Gemini Omni · 10 сек · 4K",
+      "type": "video",
+      "credits": 48.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=10__resolution=720p",
+      "name": "✨ Gemini Omni · 10 сек · 720p",
+      "type": "video",
+      "credits": 24.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=4__resolution=1080p",
+      "name": "✨ Gemini Omni · 4 сек · 1080p",
+      "type": "video",
+      "credits": 18.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=4__resolution=4k",
+      "name": "✨ Gemini Omni · 4 сек · 4K",
+      "type": "video",
+      "credits": 36.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=4__resolution=720p",
+      "name": "✨ Gemini Omni · 4 сек · 720p",
+      "type": "video",
+      "credits": 12.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=6__resolution=1080p",
+      "name": "✨ Gemini Omni · 6 сек · 1080p",
+      "type": "video",
+      "credits": 22.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=6__resolution=4k",
+      "name": "✨ Gemini Omni · 6 сек · 4K",
+      "type": "video",
+      "credits": 40.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=6__resolution=720p",
+      "name": "✨ Gemini Omni · 6 сек · 720p",
+      "type": "video",
+      "credits": 18.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=8__resolution=1080p",
+      "name": "✨ Gemini Omni · 8 сек · 1080p",
+      "type": "video",
+      "credits": 26.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=8__resolution=4k",
+      "name": "✨ Gemini Omni · 8 сек · 4K",
+      "type": "video",
+      "credits": 44.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__duration=8__resolution=720p",
+      "name": "✨ Gemini Omni · 8 сек · 720p",
+      "type": "video",
+      "credits": 20.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__resolution=1080p",
+      "name": "✨ Gemini Omni · видео-референс · 1080p",
+      "type": "video",
+      "credits": 38.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__resolution=4k",
+      "name": "✨ Gemini Omni · видео-референс · 4K",
+      "type": "video",
+      "credits": 54.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "gemini-omni-video__resolution=720p",
+      "name": "✨ Gemini Omni · видео-референс · 720p",
+      "type": "video",
+      "credits": 32.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image-to-video",
+      "name": "🌊 WAN Animate",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image-to-video__resolution=1080p",
+      "name": "🌊 WAN Animate · 1080p · за сек",
+      "type": "video",
+      "credits": 30.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-image-to-video__resolution=720p",
+      "name": "🌊 WAN Animate · 720p · за сек",
+      "type": "video",
+      "credits": 24.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-text-to-video",
+      "name": "🌊 WAN Video",
+      "type": "video",
+      "credits": 2.5,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-text-to-video__resolution=1080p",
+      "name": "🌊 WAN Video · 1080p · за сек",
+      "type": "video",
+      "credits": 25.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "wan/2-7-text-to-video__resolution=720p",
+      "name": "🌊 WAN Video · 720p · за сек",
+      "type": "video",
+      "credits": 20.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2",
+      "name": "🌱 Seedance 2",
+      "type": "video",
+      "credits": 9.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2-fast",
+      "name": "🌱 Seedance 2 Fast",
+      "type": "video",
+      "credits": 9.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2-fast__resolution=480p",
+      "name": "🌱 Seedance 2 Fast · 480p · за сек",
+      "type": "video",
+      "credits": 4.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2-fast__resolution=720p",
+      "name": "🌱 Seedance 2 Fast · 720p · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2__resolution=1080p",
+      "name": "🌱 Seedance 2 · 1080p · за сек",
+      "type": "video",
+      "credits": 9.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2__resolution=480p",
+      "name": "🌱 Seedance 2 · 480p · за сек",
+      "type": "video",
+      "credits": 4.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "bytedance/seedance-2__resolution=720p",
+      "name": "🌱 Seedance 2 · 720p · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "midjourney-video",
+      "name": "🎞️ Midjourney Video",
+      "type": "video",
+      "credits": 15.0,
       "capabilities": [
         "text",
         "image",
@@ -103,7 +1049,7 @@
     },
     {
       "key": "veo3",
-      "name": "Veo",
+      "name": "🎬 Veo",
       "type": "video",
       "credits": 3.5,
       "capabilities": [
@@ -114,10 +1060,273 @@
       "active": true
     },
     {
+      "key": "veo3_fast__resolution=1080p",
+      "name": "🎬 Veo 3 Fast · 1080p · за сек",
+      "type": "video",
+      "credits": 50.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "veo3_fast__resolution=720p",
+      "name": "🎬 Veo 3 Fast · 720p · за сек",
+      "type": "video",
+      "credits": 40.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "veo3_lite__resolution=1080p",
+      "name": "🎬 Veo 3 Lite · 1080p · за сек",
+      "type": "video",
+      "credits": 35.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "veo3_lite__resolution=720p",
+      "name": "🎬 Veo 3 Lite · 720p · за сек",
+      "type": "video",
+      "credits": 28.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "veo3__resolution=1080p",
+      "name": "🎬 Veo 3 · 1080p · за сек",
+      "type": "video",
+      "credits": 7.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "veo3__resolution=720p",
+      "name": "🎬 Veo 3 · 720p · за сек",
+      "type": "video",
+      "credits": 3.5,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "veo3_fast",
+      "name": "🎬 Veo Fast",
+      "type": "video",
+      "credits": 2.5,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "happyhorse/image-to-video",
+      "name": "🐎 HappyHorse Animate",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "happyhorse/image-to-video__resolution=1080p",
+      "name": "🐎 HappyHorse Animate · 1080p · за сек",
+      "type": "video",
+      "credits": 10.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "happyhorse/image-to-video__resolution=720p",
+      "name": "🐎 HappyHorse Animate · 720p · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "happyhorse/text-to-video",
+      "name": "🐎 HappyHorse Video",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "happyhorse/text-to-video__resolution=1080p",
+      "name": "🐎 HappyHorse Video · 1080p · за сек",
+      "type": "video",
+      "credits": 8.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "happyhorse/text-to-video__resolution=720p",
+      "name": "🐎 HappyHorse Video · 720p · за сек",
+      "type": "video",
+      "credits": 4.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-2.6/motion-control__resolution=1080p",
+      "name": "🕺 Kling 2.6 Motion · 1080p · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-2.6/motion-control__resolution=720p",
+      "name": "🕺 Kling 2.6 Motion · 720p · за сек",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/motion-control",
+      "name": "🕺 Kling 3.0 Motion",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/motion-control__resolution=1080p",
+      "name": "🕺 Kling 3.0 Motion · 1080p · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/motion-control__resolution=2K",
+      "name": "🕺 Kling 3.0 Motion · 2K · за сек",
+      "type": "video",
+      "credits": 4.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/motion-control__resolution=4K",
+      "name": "🕺 Kling 3.0 Motion · 4K · за сек",
+      "type": "video",
+      "credits": 5.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-3.0/motion-control__resolution=720p",
+      "name": "🕺 Kling 3.0 Motion · 720p · за сек",
+      "type": "video",
+      "credits": 4.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
+      "key": "kling-2.6/motion-control",
+      "name": "🕺 Kling Motion",
+      "type": "video",
+      "credits": 3.0,
+      "capabilities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "active": true
+    },
+    {
       "key": "suno/v4.5",
-      "name": "Suno",
+      "name": "🎵 Suno 4.5",
       "type": "music",
-      "credits": 10,
+      "credits": 10.0,
+      "capabilities": [
+        "text",
+        "audio"
+      ],
+      "active": true
+    },
+    {
+      "key": "suno/v5.5",
+      "name": "🎵 Suno 5.5",
+      "type": "music",
+      "credits": 10.0,
       "capabilities": [
         "text",
         "audio"
