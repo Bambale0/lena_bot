@@ -32,6 +32,8 @@ DEFAULT_PRICE_PLANS = [
 # ── Стоимость моделей ─────────────────────────────────────────────────────────
 DEFAULT_MODEL_COSTS = [
     # ── Изображения (KIE.AI) ──────────────────────────────────────────────────
+    {"model_key": "seedream/5-pro-text-to-image", "display_name": "🌸 Seedream 5.0 Pro",        "gen_type": GenerationType.image, "credits": 5},
+    {"model_key": "seedream/5-pro-image-to-image", "display_name": "🌸 Seedream 5.0 Pro Edit",   "gen_type": GenerationType.image, "credits": 5},
     {"model_key": "seedream/4.5-text-to-image", "display_name": "🌸 Seedream 4.5",        "gen_type": GenerationType.image, "credits": 3},
     {"model_key": "seedream/4.5-edit",          "display_name": "🌸 Seedream 4.5 Edit",   "gen_type": GenerationType.image, "credits": 3},
     {"model_key": "grok-imagine/text-to-image", "display_name": "⚡ Grok Imagine",    "gen_type": GenerationType.image, "credits": 3},
@@ -81,6 +83,8 @@ DEFAULT_MODEL_COSTS = [
 
 
 _IMAGE_VARIANT_COSTS = [
+    ("seedream/5-pro-text-to-image", "🌸 Seedream 5.0 Pro", [("basic", 5), ("high", 6)]),
+    ("seedream/5-pro-image-to-image", "🌸 Seedream 5.0 Pro Edit", [("basic", 5), ("high", 6)]),
     ("seedream/4.5-text-to-image", "🌸 Seedream 4.5", [("basic", 3), ("high", 4)]),
     ("seedream/4.5-edit", "🌸 Seedream 4.5 Edit", [("basic", 3), ("high", 4)]),
     ("wan/2-7-image", "🌊 WAN 2.7 Image", [("1K", 3), ("2K", 4)]),
@@ -197,10 +201,11 @@ def _build_variant_model_costs() -> list[dict]:
 
     for model_key, display_name, tiers in _IMAGE_VARIANT_COSTS:
         for quality, credits in tiers:
+            label = "1K" if model_key.startswith("seedream/5-pro") and quality == "basic" else "2K" if model_key.startswith("seedream/5-pro") and quality == "high" else quality_label(quality)
             records.append(
                 {
                     "model_key": pricing_variant_key(model_key, quality=quality),
-                    "display_name": f"{display_name} · {quality_label(quality)}",
+                    "display_name": f"{display_name} · {label}",
                     "gen_type": GenerationType.image,
                     "credits": credits,
                 }

@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 class ImageModel(StrEnum):
-    # Seedream 4.5
+    # Seedream
+    SEEDREAM_5_PRO_T2I = "seedream/5-pro-text-to-image"
+    SEEDREAM_5_PRO_I2I = "seedream/5-pro-image-to-image"
     SEEDREAM_45      = "seedream/4.5-text-to-image"
     SEEDREAM_45_EDIT = "seedream/4.5-edit"
     # Grok Imagine
@@ -59,6 +61,8 @@ _SUPPORTS_IMG2IMG: set[ImageModel] = {
 
 # Models with quality param
 _QUALITY_MODELS: set[ImageModel] = {
+    ImageModel.SEEDREAM_5_PRO_T2I,
+    ImageModel.SEEDREAM_5_PRO_I2I,
     ImageModel.SEEDREAM_45,
     ImageModel.SEEDREAM_45_EDIT,
     ImageModel.GPT_IMAGE_2_T2I,
@@ -78,6 +82,7 @@ _SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
     ImageModel.GPT_IMAGE_2_I2I,
 }
 _KIE_UPLOAD_REFERENCE_MODELS = {
+    ImageModel.SEEDREAM_5_PRO_I2I.value,
     "seedream/4.5-edit",
     ImageModel.QWEN_I2I.value,
     ImageModel.QWEN_EDIT.value,
@@ -85,6 +90,8 @@ _KIE_UPLOAD_REFERENCE_MODELS = {
 }
 
 _PROMPT_MAX_LENGTH_BY_MODEL: dict[str, int] = {
+    ImageModel.SEEDREAM_5_PRO_T2I.value: 3000,
+    ImageModel.SEEDREAM_5_PRO_I2I.value: 3000,
     ImageModel.SEEDREAM_45.value: 3000,
     ImageModel.SEEDREAM_45_EDIT.value: 3000,
     ImageModel.QWEN_EDIT.value: 2000,
@@ -110,6 +117,7 @@ _PROMPT_FIRST_REFERENCE_LOCK_MODELS: set[str] = {
 }
 
 _REFERENCE_FLEX_MODELS: set[str] = {
+    ImageModel.SEEDREAM_5_PRO_I2I.value,
     ImageModel.SEEDREAM_45_EDIT.value,
     ImageModel.WAN_27.value,
     ImageModel.WAN_27_PRO.value,
@@ -176,6 +184,8 @@ _MULTI_REFERENCE_FLEX_PREFIX = (
 
 # Aspect ratio options per model
 MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
+    ImageModel.SEEDREAM_5_PRO_T2I: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"],
+    ImageModel.SEEDREAM_5_PRO_I2I: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"],
     ImageModel.SEEDREAM_45:      ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"],
     ImageModel.SEEDREAM_45_EDIT: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"],
     ImageModel.GROK_T2I:         ["1:1", "2:3", "3:2", "16:9", "9:16"],

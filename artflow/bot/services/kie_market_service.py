@@ -608,6 +608,8 @@ def is_kie_market_model(model: str) -> bool:
         "nano-banana-2",
         "nano-banana-pro",
         "google/nano-banana",
+        "seedream/5-pro-text-to-image",
+        "seedream/5-pro-image-to-image",
         "seedream/4.5-text-to-image",
         "seedream/4.5-edit",
         "grok-imagine/text-to-image",

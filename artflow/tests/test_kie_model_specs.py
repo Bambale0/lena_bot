@@ -385,3 +385,37 @@ def test_build_kie_input_gemini_omni_multimodal_payload() -> None:
     assert inp["audio_ids"] == ["audio_1"]
     assert inp["character_ids"] == ["character_1", "character_2"]
     assert inp["seed"] == 123
+
+
+
+def test_build_kie_input_seedream_5_pro_text_contract() -> None:
+    resolved_model, inp = build_kie_input(
+        model="seedream/5-pro-text-to-image",
+        prompt="Photorealistic product ad",
+        params={"aspect_ratio": "16:9", "quality": "high", "output_format": "jpeg"},
+    )
+
+    assert resolved_model == "seedream/5-pro-text-to-image"
+    assert inp["prompt"] == "Photorealistic product ad"
+    assert inp["aspect_ratio"] == "16:9"
+    assert inp["quality"] == "high"
+    assert inp["output_format"] == "png"
+    assert inp["nsfw_checker"] is False
+    assert "image_urls" not in inp
+
+
+def test_build_kie_input_seedream_5_pro_image_contract() -> None:
+    resolved_model, inp = build_kie_input(
+        model="seedream/5-pro-image-to-image",
+        prompt="Keep the identity, change lighting to sunset",
+        reference_urls=["https://example.test/ref1.webp", "https://example.test/ref2.png"],
+        params={"aspect_ratio": "3:4", "quality": "basic"},
+    )
+
+    assert resolved_model == "seedream/5-pro-image-to-image"
+    assert inp["prompt"] == "Keep the identity, change lighting to sunset"
+    assert inp["image_urls"] == ["https://example.test/ref1.webp", "https://example.test/ref2.png"]
+    assert inp["aspect_ratio"] == "3:4"
+    assert inp["quality"] == "basic"
+    assert inp["output_format"] == "png"
+    assert inp["nsfw_checker"] is False

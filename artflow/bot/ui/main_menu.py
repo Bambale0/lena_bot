@@ -16,6 +16,8 @@ _IMAGE_MODEL_LABELS = {
     "qwen/image-edit": "Qwen Edit Pro",
     "qwen2/text-to-image": "Qwen2",
     "qwen2/image-edit": "Qwen2 Edit",
+    "seedream/5-pro-text-to-image": "Seedream 5.0 Pro",
+    "seedream/5-pro-image-to-image": "Seedream 5.0 Pro Edit",
     "seedream/4.5-text-to-image": "Seedream 4.5",
     "seedream/4.5-edit": "Seedream 4.5 Edit",
     "wan/2-7-image": "WAN 2.7",
@@ -60,7 +62,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
     builder.row(
         InlineKeyboardButton(
             text="📱 " + ("Открыть приложение" if lang == "ru" else "Open App"),
-            web_app=WebAppInfo(url=f"{settings.WEBHOOK_URL.rstrip('/')}/app"),
+            web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?v=1778285569"),
         ),
     )
 

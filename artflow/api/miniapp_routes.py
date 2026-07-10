@@ -89,7 +89,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["miniapp"])
 
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 async def health() -> dict:
     return {"status": "ok"}
 
@@ -148,6 +148,8 @@ _MJ_VIDEO_CAPS: dict[str, dict[str, Any]] = {
 }
 
 _FRIENDLY_MODEL_NAMES: dict[str, str] = {
+    "seedream/5-pro-text-to-image": "Seedream 5.0 Pro",
+    "seedream/5-pro-image-to-image": "Seedream 5.0 Pro Edit",
     "seedream/4.5-text-to-image": "Seedream 4.5",
     "seedream/4.5-edit": "Seedream 4.5 Edit",
     "grok-imagine/text-to-image": "Grok Imagine",
@@ -1301,7 +1303,7 @@ async def get_my_feed(
     user: User = Depends(get_miniapp_user),
 ) -> list[dict]:
     """Current user's public image feed posts."""
-    cards = await repo.get_user_feed_generations(session, user.id, limit=max(1, min(limit, 500)))
+    cards = await repo.get_user_feed_generations(session, user.id, limit=max(1, limit))
     return [_feed_card_out(card, user) for card in cards]
 
 
@@ -2348,7 +2350,7 @@ async def get_history(
 @router.get("/feed")
 async def get_feed(
     source: str = Query(default="recent", pattern="^(recent|top_day|top)$"),
-    limit: int = Query(default=40, ge=1, le=300),
+    limit: int = Query(default=10000, ge=1),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> list[dict]:

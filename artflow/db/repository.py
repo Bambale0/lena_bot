@@ -1511,7 +1511,7 @@ async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Gen
 
     clean_urls: list[str] = []
     for url in original_urls:
-        mirrored = await mirror_url(url)
+        mirrored = await mirror_url(url, subdir="feed")
         if mirrored:
             clean_urls.append(mirrored)
         else:

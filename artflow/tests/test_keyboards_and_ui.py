@@ -19,6 +19,7 @@ from bot.keyboards.payment import rub_methods_kb, topup_kb
 from bot.keyboards.prompts import prompt_use_model_kb
 from bot.ui.image_menu import render_active_image_session
 from bot.ui.main_menu import render_main_menu
+from core.config import settings
 from db.models import GenerationType, ModelCost
 
 
@@ -44,6 +45,23 @@ def test_main_menus_show_webapp_button_at_top() -> None:
 
     assert all(button.web_app is None for button in flatten_buttons(legacy_markup)[1:])
     assert all(button.web_app is None for button in flatten_buttons(ui_markup)[1:])
+
+
+def test_main_menu_keyboard_uses_public_web_url(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "WEB_PUBLIC_URL", "https://miniapp.example", raising=False)
+
+    markup = main_menu_kb(balance=100)
+
+    assert markup.inline_keyboard[0][0].web_app.url == "https://miniapp.example/app?v=1778285569"
+
+
+def test_render_main_menu_uses_public_web_url(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "WEB_PUBLIC_URL", "https://miniapp.example", raising=False)
+    context = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
+
+    render = render_main_menu(context)
+
+    assert render.reply_markup.inline_keyboard[0][0].web_app.url == "https://miniapp.example/app?v=1778285569"
 
 
 def test_back_to_menu_keyboard_has_main_callback() -> None:

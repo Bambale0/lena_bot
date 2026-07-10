@@ -71,6 +71,16 @@ async def test_missing_static_upload_returns_placeholder() -> None:
 
 
 @pytest.mark.asyncio
+async def test_miniapp_rejects_sensitive_spa_fallback_paths() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        dotfile_response = await client.get("/app/.env")
+        traversal_response = await client.get("/app/../.env")
+
+    assert dotfile_response.status_code == 404
+    assert traversal_response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_webapp_me_rejects_missing_init_data_without_override() -> None:
     app.dependency_overrides.clear()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -2162,3 +2172,31 @@ async def test_prompt_improve_music_uses_music_template(client) -> None:
     improved = response.json()["prompt"]
     assert "Original music track" in improved
     assert "Premium detailed image" not in improved
+
+
+
+@pytest.mark.asyncio
+async def test_webapp_image_models_expose_seedream_5_pro_caps(client, monkeypatch) -> None:
+    stub_image_quality_prices(monkeypatch)
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_all_model_costs",
+        AsyncMock(return_value=[
+            SimpleNamespace(model_key="seedream/5-pro-text-to-image", display_name="Seedream 5 Pro", credits=5),
+            SimpleNamespace(model_key="seedream/5-pro-image-to-image", display_name="Seedream 5 Pro Edit", credits=5),
+        ]),
+    )
+
+    response = await client.get("/api/v1/models/image")
+
+    assert response.status_code == 200
+    payload = {item["key"]: item for item in response.json()}
+    assert payload["seedream/5-pro-text-to-image"]["display_name"] == "Seedream 5.0 Pro"
+    assert payload["seedream/5-pro-text-to-image"]["modes"] == ["text"]
+    assert payload["seedream/5-pro-text-to-image"]["aspect_ratios"] == ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"]
+    assert payload["seedream/5-pro-text-to-image"]["quality_options"] == [
+        {"value": "basic", "label": "🔷 1K"},
+        {"value": "high", "label": "💎 2K"},
+    ]
+    assert payload["seedream/5-pro-image-to-image"]["display_name"] == "Seedream 5.0 Pro Edit"
+    assert payload["seedream/5-pro-image-to-image"]["modes"] == ["image"]
+    assert payload["seedream/5-pro-image-to-image"]["max_refs"] == 10

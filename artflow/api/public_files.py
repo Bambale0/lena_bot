@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import mimetypes
+import shutil
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
@@ -23,10 +24,18 @@ def get_static_upload_directory() -> Path:
     return UPLOAD_ROOT
 
 
+def _safe_upload_relative_path(filename: str) -> Path:
+    rel = Path(str(filename).strip("/"))
+    if rel.is_absolute() or ".." in rel.parts or not rel.name:
+        raise ValueError("invalid upload filename")
+    return rel
+
+
 def public_upload_url(filename: str) -> str:
     base = settings.WEBHOOK_URL.rstrip("/")
     path = settings.STATIC_UPLOAD_URL_PATH.strip("/")
-    return f"{base}/{path}/{filename}"
+    rel = str(_safe_upload_relative_path(filename)).replace("\\", "/")
+    return f"{base}/{path}/{rel}"
 
 
 def _configured_public_hosts() -> set[str]:
@@ -48,10 +57,12 @@ def local_upload_path_from_url(url: str | None) -> Path | None:
     upload_prefix = "/" + settings.STATIC_UPLOAD_URL_PATH.strip("/") + "/"
     if not path.startswith(upload_prefix):
         return None
-    filename = Path(path.removeprefix(upload_prefix)).name
-    if not filename:
+    rel_raw = path.removeprefix(upload_prefix)
+    try:
+        rel = _safe_upload_relative_path(rel_raw)
+    except ValueError:
         return None
-    return UPLOAD_ROOT / filename
+    return UPLOAD_ROOT / rel
 
 
 def public_url_is_available(url: str | None) -> bool:
@@ -305,7 +316,7 @@ def ensure_video_reference_aspect_url(
         return image_url
 
 
-def save_public_file(data: bytes, content_type: str | None = None) -> str:
+def save_public_file(data: bytes, content_type: str | None = None, *, subdir: str | None = None) -> str:
     upload_dir = get_static_upload_directory()
     if is_video_content_type(content_type):
         ext = detect_video_extension(data, content_type)
@@ -315,9 +326,12 @@ def save_public_file(data: bytes, content_type: str | None = None) -> str:
         ext = detect_image_extension(data, content_type)
     digest = hashlib.sha256(data).hexdigest()[:32]
     filename = f"{digest}{ext}"
-    path = upload_dir / filename
+    rel_name = f"{subdir.strip('/')}/{filename}" if subdir else filename
+    rel = _safe_upload_relative_path(rel_name)
+    path = upload_dir / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
-    return public_upload_url(filename)
+    return public_upload_url(str(rel))
 
 
 def _download_public_url(url: str) -> tuple[bytes, str | None]:
@@ -328,14 +342,33 @@ def _download_public_url(url: str) -> tuple[bytes, str | None]:
     return data, content_type
 
 
-async def mirror_url(url: str) -> str:
-    """Mirror external public URLs into local static storage when possible."""
+async def mirror_url(url: str, *, subdir: str | None = None) -> str:
+    """Mirror public URLs into local static storage when possible.
+
+    Pass ``subdir="feed"`` for public feed media so long-lived feed files are
+    isolated from temporary user uploads and safer to back up/retain.
+    """
     if not url:
         return url
 
     local_path = local_upload_path_from_url(url)
     if local_path is not None:
         suffix = local_path.suffix.lower()
+        if subdir:
+            try:
+                rel = local_path.relative_to(UPLOAD_ROOT)
+            except ValueError:
+                rel = Path(local_path.name)
+            if rel.parts and rel.parts[0] == subdir and local_path.exists():
+                return url
+            if not local_path.exists() or not local_path.is_file():
+                return url
+            target_dir = get_static_upload_directory() / subdir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / local_path.name
+            if target.resolve() != local_path.resolve():
+                await asyncio.to_thread(shutil.copy2, local_path, target)
+            return public_upload_url(f"{subdir}/{target.name}")
         if suffix in {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".mp4", ".webm", ".mov"}:
             return url
         return ensure_public_image_url(url) or url
@@ -346,7 +379,7 @@ async def mirror_url(url: str) -> str:
         return url
 
     try:
-        return save_public_file(data, content_type)
+        return save_public_file(data, content_type, subdir=subdir)
     except Exception:
         return url
 

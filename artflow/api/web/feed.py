@@ -63,7 +63,7 @@ def _compact_feed_payload(payload: dict) -> dict:
 
 
 async def _feed_payloads(session: AsyncSession, source: str, limit: int, *, compact: bool = False) -> list[dict]:
-    repo_limit = min(max(limit * 4, limit, 120), 1000)
+    repo_limit = max(limit * 4, limit, 120)
     if source in {"top", "top_day"}:
         cards = await repo.get_top_day_generations(session, limit=repo_limit)
     else:
@@ -90,7 +90,7 @@ async def _feed_payloads(session: AsyncSession, source: str, limit: int, *, comp
 @router.get("/feed")
 async def feed(
     source: str = Query(default="feed", pattern="^(feed|recent|top|top_day)$"),
-    limit: int = Query(default=40, ge=1, le=300),
+    limit: int = Query(default=10000, ge=1),
     compact: bool = Query(default=False),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
@@ -99,7 +99,7 @@ async def feed(
 
 @router.get("/feed/top")
 async def feed_top(
-    limit: int = Query(default=40, ge=1, le=300),
+    limit: int = Query(default=10000, ge=1),
     compact: bool = Query(default=False),
     session: AsyncSession = Depends(get_session),
 ) -> dict:

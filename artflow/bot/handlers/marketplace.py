@@ -610,12 +610,12 @@ async def fsm_prompt_use_reference(
             db_user=db_user,
             image_session=image_session,
             prompt=prompt_text,
-            action_type=ImageGenerationAction.initial,
+            action_type=ImageGenerationAction.repeat,
             reference_url=reference_url if mode == "image" else None,
-            parent_generation_id=None,
+            parent_generation_id=source_feed_gen_id,
             source_feed_gen_id=source_feed_gen_id,
-            launching_text="⏳ <b>Запускаю генерацию...</b>",
-            queued_text="⏳ <b>Генерация запущена.</b> Результат придёт сюда автоматически.",
+            launching_text="⏳ <b>Запускаю повтор из ленты...</b>",
+            queued_text="⏳ <b>Повтор из ленты запущен.</b> Результат придёт сюда автоматически.",
         )
         return
 

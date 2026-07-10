@@ -71,6 +71,58 @@ async def test_telegram_webhook_acks_blocked_user_updates(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_telegram_webhook_accepts_telegram_ip_fallback_without_secret(monkeypatch) -> None:
+    class CountingDispatcher:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def feed_update(self, bot, update) -> None:
+            self.calls += 1
+
+    dispatcher = CountingDispatcher()
+    monkeypatch.setattr(main, "dp", dispatcher)
+    monkeypatch.setattr(main, "bot", object())
+    monkeypatch.setattr(main, "redis_client", None)
+    main._recent_telegram_updates.clear()
+
+    update = {
+        "update_id": 987655,
+        "message": {
+            "message_id": 10,
+            "date": 1779638390,
+            "chat": {"id": 123, "type": "private", "first_name": "Test"},
+            "from": {"id": 123, "is_bot": False, "first_name": "Test"},
+            "text": "/start",
+        },
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            main.settings.WEBHOOK_PATH,
+            headers={"X-Forwarded-For": "91.108.5.111"},
+            json=update,
+        )
+
+    await asyncio.sleep(0)
+    assert response.status_code == 200
+    assert dispatcher.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_rejects_non_telegram_ip_without_secret() -> None:
+    update = {"update_id": 987656}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            main.settings.WEBHOOK_PATH,
+            headers={"X-Forwarded-For": "203.0.113.10"},
+            json=update,
+        )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_telegram_webhook_ignores_duplicate_update(monkeypatch) -> None:
     class CountingDispatcher:
         def __init__(self) -> None:

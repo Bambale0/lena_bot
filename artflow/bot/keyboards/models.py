@@ -228,6 +228,23 @@ VIDEO_CAPS: dict[str, dict] = {
 # ── Image capabilities ────────────────────────────────────────────────────────
 
 IMAGE_CAPS: dict[str, dict] = {
+    ImageModel.SEEDREAM_5_PRO_T2I: {
+        "modes": ["text"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.SEEDREAM_5_PRO_T2I, []),
+        "aspect_ratio_modes": ["text"],
+        "counts": [1],
+        "has_quality": True,
+        "quality_options": [("basic", "🔷 1K"), ("high", "💎 2K")],
+    },
+    ImageModel.SEEDREAM_5_PRO_I2I: {
+        "modes": ["image"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.SEEDREAM_5_PRO_I2I, []),
+        "aspect_ratio_modes": ["image"],
+        "counts": [1],
+        "has_quality": True,
+        "quality_options": [("basic", "🔷 1K"), ("high", "💎 2K")],
+        "max_refs": 10,
+    },
     ImageModel.SEEDREAM_45: {
         "modes": ["text"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.SEEDREAM_45, []),
@@ -362,6 +379,8 @@ IMAGE_CAPS: dict[str, dict] = {
 # ── Model descriptions ────────────────────────────────────────────────────────
 
 IMAGE_MODEL_DESC: dict[str, str] = {
+    ImageModel.SEEDREAM_5_PRO_T2I: "🌸 Seedream 5.0 Pro · фотореализм · детали",
+    ImageModel.SEEDREAM_5_PRO_I2I: "🌸 Seedream 5.0 Pro Edit · фотореалистичное редактирование по фото",
     ImageModel.SEEDREAM_45: "🌟 Seedream 4.5 · реализм · детали",
     ImageModel.SEEDREAM_45_EDIT: "🌟 Seedream 4.5 Edit · редактирование по фото",
     ImageModel.NANO_BANANA: "🍌 Nano Banana · быстрые изображения",
@@ -410,6 +429,8 @@ _IMAGE_MODEL_ORDER: list[str] = [
     ImageModel.NANO_BANANA_PRO,
     ImageModel.NANO_BANANA_2,
     ImageModel.NANO_BANANA_2_LITE,
+    ImageModel.SEEDREAM_5_PRO_T2I,
+    ImageModel.SEEDREAM_5_PRO_I2I,
     ImageModel.SEEDREAM_45,
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.WAN_27_PRO,

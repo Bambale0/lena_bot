@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import mimetypes
@@ -17,15 +18,16 @@ import redis.asyncio as aioredis
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest, TelegramEntityTooLarge, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramEntityTooLarge, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import (
     BotCommand,
     BotCommandScopeAllPrivateChats,
     FSInputFile,
-    MenuButtonCommands,
+    MenuButtonWebApp,
     Update,
     URLInputFile,
+    WebAppInfo,
 )
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -126,6 +128,18 @@ _MJ_VIDEO_MODEL = "midjourney-video"
 _PROMPT_MENU_PREVIEW_MAX = 700
 _TELEGRAM_UPDATE_DEDUPE_TTL = 3600
 _recent_telegram_updates: dict[int, float] = {}
+_TELEGRAM_WEBHOOK_IP_RANGES = tuple(
+    ipaddress.ip_network(network)
+    for network in (
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.12.0/22",
+        "91.108.16.0/22",
+        "91.108.20.0/22",
+        "91.108.56.0/22",
+        "149.154.160.0/20",
+    )
+)
 
 
 def _sha256_file(path: Path | None) -> str | None:
@@ -333,6 +347,17 @@ def _claim_telegram_update_memory(update_id: int) -> bool:
     return True
 
 
+def _is_telegram_webhook_source(x_forwarded_for: str | None) -> bool:
+    if not x_forwarded_for:
+        return False
+    raw_ip = x_forwarded_for.split(",", 1)[0].strip()
+    try:
+        source_ip = ipaddress.ip_address(raw_ip)
+    except ValueError:
+        return False
+    return any(source_ip in network for network in _TELEGRAM_WEBHOOK_IP_RANGES)
+
+
 async def _claim_telegram_update(update_id: int) -> bool:
     if redis_client is not None:
         try:
@@ -478,7 +503,19 @@ async def _download_url_to_tempfile(url: str, suffix: str = ".bin") -> str | Non
         return None
 
 
-async def _set_bot_commands(bot: Bot) -> None:
+MINIAPP_ENTRY_VERSION = "1778285569"
+
+
+def _miniapp_entry_url() -> str:
+    return f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?v={MINIAPP_ENTRY_VERSION}"
+
+
+async def _retry_set_bot_commands(bot: Bot, delay_seconds: int) -> None:
+    await asyncio.sleep(delay_seconds)
+    await _set_bot_commands(bot, schedule_retry=False)
+
+
+async def _set_bot_commands(bot: Bot, *, schedule_retry: bool = True) -> None:
     commands = [
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="menu", description="Открыть меню"),
@@ -491,8 +528,28 @@ async def _set_bot_commands(bot: Bot) -> None:
         commands.insert(3, BotCommand(command="starshelp", description="Telegram Stars"))
     if settings.ADMIN_IDS:
         commands.append(BotCommand(command="admin", description="Админ-панель"))
-    await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
-    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    retry_after = 0
+    try:
+        await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+    except TelegramRetryAfter as exc:
+        retry_after = max(retry_after, int(exc.retry_after))
+        logger.warning("Telegram setMyCommands rate-limited during startup, retry_after=%s", exc.retry_after)
+
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="Открыть APIX",
+                web_app=WebAppInfo(url=_miniapp_entry_url()),
+            ),
+        )
+    except TelegramRetryAfter as exc:
+        retry_after = max(retry_after, int(exc.retry_after))
+        logger.warning("Telegram setChatMenuButton rate-limited during startup, retry_after=%s", exc.retry_after)
+
+    if retry_after and schedule_retry:
+        delay_seconds = min(retry_after + 2, 3600)
+        logger.warning("Scheduling Telegram command/menu retry in %s seconds", delay_seconds)
+        asyncio.create_task(_retry_set_bot_commands(bot, delay_seconds))
 
 
 async def _accrue_referral_commissions(session, user: "User", amount_rub: float, bot_instance: Bot | None = None) -> None:
@@ -711,10 +768,19 @@ if WEBAPP_DIST.exists():
 
     @app.api_route("/app/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     async def miniapp_files(path: str) -> FileResponse:
+        parts = [part for part in path.split("/") if part]
+        if (
+            any(part.startswith(".") for part in parts)
+            or any(part in {"__pycache__", "node_modules"} for part in parts)
+            or ".." in parts
+        ):
+            raise HTTPException(status_code=404, detail="Not found")
         candidate = (WEBAPP_DIST / path).resolve()
         dist_root = WEBAPP_DIST.resolve()
         if dist_root in candidate.parents and candidate.is_file():
             return FileResponse(candidate)
+        if dist_root not in candidate.parents:
+            raise HTTPException(status_code=404, detail="Not found")
         return FileResponse(WEBAPP_DIST / "index.html")
 else:
     @app.get("/app", response_class=PlainTextResponse, include_in_schema=False)
@@ -790,9 +856,12 @@ async def _process_telegram_update(update: Update) -> None:
 async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
+    x_forwarded_for: str | None = Header(default=None),
 ) -> dict:
     if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid secret")
+        if not _is_telegram_webhook_source(x_forwarded_for):
+            raise HTTPException(status_code=403, detail="Invalid secret")
+        logger.warning("Accepted Telegram webhook via source IP fallback: %s", x_forwarded_for)
 
     body = await request.json()
     update = Update.model_validate(body)
@@ -1646,7 +1715,7 @@ async def kie_music_webhook(
     return {"ok": True}
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health() -> dict:
     return {"status": "ok", "service": "apix"}
 
@@ -1667,7 +1736,7 @@ if LANDING_DIR.exists():
         async def _landing_alias(file_name=file_name):
             return FileResponse(LANDING_DIR / file_name)
         app.add_api_route(route_path, _landing_alias, methods=["GET", "HEAD"], include_in_schema=False)
-    app.mount("/", UploadStaticFiles(directory=str(LANDING_DIR), html=True), name="landing")
+    app.mount("/", StaticFiles(directory=str(LANDING_DIR), html=True), name="landing")
 else:
     @app.get("/", response_class=PlainTextResponse)
     async def landing_not_built() -> str:

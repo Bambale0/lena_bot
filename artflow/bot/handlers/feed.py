@@ -131,8 +131,8 @@ def _prepare_feed_photo_upload(*, data: bytes, result_url: str, generation_id: i
 
 async def _cards_for_source(session: AsyncSession, source: str) -> list[FeedGenerationCard]:
     if source == "top":
-        return await repo.get_top_day_generations(session, limit=10)
-    return await repo.get_feed_generations(session, limit=30)
+        return await repo.get_top_day_generations(session, limit=10000)
+    return await repo.get_feed_generations(session, limit=10000)
 
 
 async def _show_feed_empty(holder: Message, *, top_day: bool = False) -> None:
@@ -171,7 +171,7 @@ async def _show_feed_card(
         try:
             from api.public_files import mirror_url
 
-            mirrored = await mirror_url(result_url)
+            mirrored = await mirror_url(result_url, subdir="feed")
             if mirrored and mirrored != result_url:
                 logger.info("Feed card gen=%s mirrored from %s -> %s", card.generation.id, result_url, mirrored)
                 result_url = mirrored
@@ -610,10 +610,12 @@ async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_u
         return
 
     # Mirror external URLs to local storage before publishing to feed
-    original_urls = [gen.result_url] if gen.result_url else []
-    if gen.result_urls:
+    current_result_url = getattr(gen, "result_url", None)
+    current_result_urls = getattr(gen, "result_urls", None)
+    original_urls = [current_result_url] if current_result_url else []
+    if current_result_urls:
         try:
-            parsed = json.loads(gen.result_urls)
+            parsed = json.loads(current_result_urls)
             if isinstance(parsed, list):
                 original_urls = [str(u) for u in parsed if u] or original_urls
         except (json.JSONDecodeError, TypeError):
@@ -621,12 +623,12 @@ async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_u
 
     clean_urls: list[str] = []
     for url in original_urls:
-        mirrored = await mirror_url(url)
+        mirrored = await mirror_url(url, subdir="feed")
         if mirrored:
             clean_urls.append(mirrored)
         else:
             clean_urls.append(url)
-    new_result_url = clean_urls[0] if clean_urls else (gen.result_url or "")
+    new_result_url = clean_urls[0] if clean_urls else (current_result_url or '')
 
     gen.is_public_feed = True
     gen.is_prompt_library = True

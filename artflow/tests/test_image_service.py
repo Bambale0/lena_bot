@@ -283,3 +283,28 @@ async def test_generate_image_uploads_local_qwen_reference_before_create_task(tm
     assert result.task_id == "task_qwen"
     assert created_payloads[0]["model"] == "qwen/image-to-image"
     assert created_payloads[0]["input"]["image_url"] == "https://kie-files.test/qwen-ref.jpg"
+
+
+
+def test_seedream_5_pro_models_are_first_class_image_models() -> None:
+    assert image_service.ImageModel.SEEDREAM_5_PRO_T2I.value == "seedream/5-pro-text-to-image"
+    assert image_service.ImageModel.SEEDREAM_5_PRO_I2I.value == "seedream/5-pro-image-to-image"
+    assert image_service.MODEL_ASPECT_RATIOS[image_service.ImageModel.SEEDREAM_5_PRO_T2I] == [
+        "1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"
+    ]
+
+
+def test_build_input_seedream_5_pro_image_uses_reference_and_quality() -> None:
+    _resolved_model, payload = _build_input(
+        image_service.ImageModel.SEEDREAM_5_PRO_I2I,
+        prompt="Make it cinematic",
+        image_url=["https://example.test/a.jpg", "https://example.test/b.webp"],
+        aspect_ratio="9:16",
+        n=1,
+        quality="high",
+    )
+
+    assert payload["image_urls"] == ["https://example.test/a.jpg", "https://example.test/b.webp"]
+    assert payload["aspect_ratio"] == "9:16"
+    assert payload["quality"] == "high"
+    assert payload["output_format"] == "png"

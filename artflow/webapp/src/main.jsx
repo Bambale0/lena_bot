@@ -685,7 +685,6 @@ function Home({ user, referrals, feed, prompts, historyCount, setScreen, setTopu
           <button className="toolCard" onClick={() => setScreen("referrals")}><b>₽</b><span>Партнёрский кабинет</span></button>
         </div>
       </section>
-      <PromptFeed prompts={prompts} setScreen={setScreen} onPromptUse={onPromptUse} />
       {!!midjourneyItems.length && (
         <section className="block">
           <div className="title">
@@ -878,7 +877,6 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemo
           <span>Лайков: {totalLikes}</span>
         </div>
       </div>
-      <PromptFeed prompts={prompts} setScreen={setScreen} onPromptUse={onPromptUse} onOpenAll={onOpenPrompts} />
       {feedLoading ? <Spinner /> : (
         <div className="feedList">
           {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} onNotice={onNotice} onRemoved={onRemoved} />)}
@@ -2312,10 +2310,6 @@ function MidjourneyModule({
         </div>
       </section>
 
-      {!!mjPrompts.length && (
-        <PromptFeed prompts={mjPrompts} setScreen={setScreen} onPromptUse={onPromptUse} onOpenAll={onOpenPrompts} />
-      )}
-
       <Studio
         imageModels={imageModels}
         videoModels={videoModels}
@@ -3439,8 +3433,8 @@ function App() {
   const imageModels = useApi(() => api("/models/image").then(x => items(x).length ? items(x) : x), fallbackImageModels);
   const videoModels = useApi(() => api("/models/video").then(x => items(x).length ? items(x) : x), fallbackVideoModels);
   const musicModels = useApi(() => api("/models/music").then(x => items(x).length ? items(x) : x), []);
-  const feed = useApi(() => api("/feed?limit=300").then(items), fallbackFeed);
-  const myFeed = useApi(() => api("/me/feed?limit=200").then(items), []);
+  const feed = useApi(() => api("/feed?limit=10000").then(items), fallbackFeed);
+  const myFeed = useApi(() => api("/me/feed?limit=10000").then(items), []);
   const history = useApi(() => api("/history?limit=50").then(items), []);
   const prompts = useApi(() => api("/prompts?limit=30").then(items), []);
   const midjourneyItems = useApi(() => api("/public/midjourney").then(items), []);

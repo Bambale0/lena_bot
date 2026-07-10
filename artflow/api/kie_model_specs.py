@@ -312,6 +312,23 @@ def _gemini_omni_video_params(params: dict[str, Any]) -> dict[str, Any]:
 
 
 IMAGE_SPECS: dict[str, KieModelSpec] = {
+    "seedream/5-pro-text-to-image": KieModelSpec(
+        model="seedream/5-pro-text-to-image",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("text",),
+        optional_params={"aspect_ratio": "aspect_ratio", "quality": "quality"},
+        defaults={"aspect_ratio": "1:1", "quality": "basic", "output_format": "png", "nsfw_checker": False},
+        remix_model="seedream/5-pro-image-to-image",
+    ),
+    "seedream/5-pro-image-to-image": KieModelSpec(
+        model="seedream/5-pro-image-to-image",
+        media_type=KieMediaType.IMAGE,
+        supported_modes=("image",),
+        reference_field="image_urls",
+        reference_type=KieReferenceType.LIST,
+        optional_params={"aspect_ratio": "aspect_ratio", "quality": "quality"},
+        defaults={"aspect_ratio": "1:1", "quality": "basic", "output_format": "png", "nsfw_checker": False},
+    ),
     "seedream/4.5-text-to-image": KieModelSpec(
         model="seedream/4.5-text-to-image",
         media_type=KieMediaType.IMAGE,

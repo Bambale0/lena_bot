@@ -15,7 +15,7 @@ def main_menu_kb(
     builder.row(
         InlineKeyboardButton(
             text="📱 Открыть приложение",
-            web_app=WebAppInfo(url=f"{settings.WEBHOOK_URL.rstrip('/')}/app?v=1778285568"),
+            web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?v=1778285569"),
         ),
     )
     if balance is not None:
