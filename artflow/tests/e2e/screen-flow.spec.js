@@ -18,21 +18,25 @@ async function expectNoHorizontalOverflow(page) {
 }
 
 test.describe("public discovery screens", () => {
-  test("home explains the product and login modal is usable", async ({ page }, testInfo) => {
+  test("home routes the guest into Studio and then opens login", async ({ page }, testInfo) => {
     await installApiMocks(page, { authenticated: false });
     await page.goto("/");
 
     await expect(page.locator("h1")).toContainText("Создайте картинку, видео или музыку");
-    await expect(page.getByRole("link", { name: "Начать создание", exact: true })).toBeVisible();
+    const startLink = page.getByRole("link", { name: "Начать создание", exact: true });
+    await expect(startLink).toBeVisible();
     await expect(page.getByRole("link", { name: "Выбрать модель", exact: true })).toBeVisible();
 
-    await page.locator("[data-open-login]:visible").first().click();
+    await startLink.click();
+    await expect(page).toHaveURL(/\/studio\.html\?type=image&flow=text$/);
+    await expect(page.locator("[data-guest-only]")).toBeVisible();
+    await page.locator("[data-guest-only] [data-open-login]").click();
     await expect(page.locator("[data-login-modal]")).toBeVisible();
     await expect(page.locator("#login-title")).toContainText("Откройте кабинет APIX");
     await page.locator("[data-close-login]").click();
     await expect(page.locator("[data-login-modal]")).toBeHidden();
 
-    await attachScreen(page, testInfo, "home-guest");
+    await attachScreen(page, testInfo, "home-to-studio-login");
   });
 
   test("models catalog loads data and filters by media type", async ({ page }, testInfo) => {
