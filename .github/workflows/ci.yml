@@ -1,15 +1,85 @@
-name: Deploy Лена
+name: Miniapp CI and deploy
 
 on:
+  pull_request:
+    branches: [miniapp-mvp]
   push:
     branches: [miniapp-mvp]
 
+concurrency:
+  group: miniapp-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  deploy:
+  backend-quality:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: artflow
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            artflow/requirements.txt
+            artflow/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Ruff maintained baseline
+        run: |
+          ruff check \
+            api/assistant_service.py \
+            api/image_service.py \
+            api/photo_prompt_service.py \
+            api/video_service.py \
+            bot/handlers/video_gen.py \
+            tests/test_midjourney.py \
+            tests/test_photo_prompt_service.py \
+            tests/test_video_gen.py \
+            tests/test_webapp_routes.py \
+            tests/test_kie_model_specs.py
+
+      - name: Python compile check
+        run: python -m compileall api bot core db main.py
+
+      - name: Standalone site syntax check
+        run: node --check landing/js/prototype-premium.js
+
+      - name: Pytest
+        run: pytest -q
+
+  webapp-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: artflow/webapp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: artflow/webapp/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Telegram Mini App
+        run: npm run build
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/miniapp-mvp'
+    needs: [backend-quality, webapp-build]
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -18,13 +88,15 @@ jobs:
           username: ${{ secrets.DEPLOY_USER || 'root' }}
           key: ${{ secrets.LENA_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
           script: |
-            set -e
+            set -euo pipefail
             cd /root/mkdir/lena_bot
-            git fetch --all
+            git fetch origin miniapp-mvp
+            git checkout miniapp-mvp
             git pull --ff-only origin miniapp-mvp
             cd artflow
             docker compose up -d --build
-            sleep 3
-            echo 'Containers:'
-            docker ps --filter name=artflow --format 'table {{.Names}}\t{{.Status}}'
-            echo '✅ Deploy OK'
+            docker compose ps
+            curl --fail --silent --show-error \
+              --retry 12 --retry-delay 5 --retry-all-errors \
+              https://apixbotai.com/api/web/health
+            echo 'Deploy and health check passed'
