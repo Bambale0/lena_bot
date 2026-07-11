@@ -22,10 +22,12 @@ module.exports = defineConfig({
     {
       name: "desktop-chromium",
       use: { ...devices["Desktop Chrome"] },
+      grepInvert: /@mobile-only/,
     },
     {
       name: "mobile-chromium",
       use: { ...devices["Pixel 5"] },
+      grep: /@mobile-only/,
     },
   ],
   webServer: {
