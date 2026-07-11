@@ -1,70 +1,50 @@
 # APIX — screen-by-screen UX and E2E audit
 
 Дата: 2026-07-11  
-Ветка baseline: `miniapp-mvp`  
+Baseline: `miniapp-mvp`  
 Канонический standalone frontend: `landing/*.html`, `landing/css/prototype-premium.css`, `landing/js/prototype-premium.js`.
 
 ## 1. Область проверки
 
-В проекте существуют две разные пользовательские поверхности:
+В проекте две отдельные поверхности:
 
 1. **Standalone сайт** — публичные страницы, Studio и web-кабинет в `landing/`.
-2. **Telegram Mini App** — React/Vite приложение в `webapp/`, публикуемое по `/app`.
+2. **Telegram Mini App** — React/Vite приложение в `webapp/`, доступное по `/app`.
 
-Их нельзя смешивать в одном UX-аудите. Этот документ фиксирует основной web-путь standalone сайта. Mini App проверяется отдельной сборкой и отдельным мобильным smoke.
+Этот аудит покрывает standalone сайт. Mini App проверяется отдельной сборкой; поведение внутри Telegram WebView требует отдельного device smoke.
 
 ## 2. Карта экранов
 
-| Экран | URL | Основная задача пользователя |
+| Экран | URL | Главная задача |
 |---|---|---|
 | Главная | `/` | Понять продукт и выбрать сценарий |
-| Studio | `/studio.html` | Запустить картинку, видео или музыку |
-| Каталог моделей | `/models.html` | Выбрать модель по задаче и цене |
-| Страница модели | `/model.html?model=<key>` | Изучить модель и перейти в Studio |
-| Лента | `/gallery.html` | Найти пример и повторить идею |
+| Studio | `/studio.html` | Создать картинку, видео или музыку |
+| Модели | `/models.html` | Выбрать модель по задаче и цене |
+| Модель | `/model.html?model=<key>` | Изучить возможности и запустить тест |
+| Лента | `/gallery.html` | Найти идею и повторить результат |
 | Кабинет | `/account.html` | Управлять работами и аккаунтом |
 | Очередь | `/account.html#queue` | Следить за активными задачами |
 | История | `/account.html#library` | Открывать и скачивать результаты |
 | Billing | `/account.html#billing` | Проверить баланс и пополнить credits |
-| Referrals | `/account.html#referrals` | Получить ссылку, статистику и выплаты |
-| Prompts | `/account.html#prompts` | Хранить и отправлять идеи на модерацию |
-| Feed | `/account.html#feed` | Работать с лентой из кабинета |
+| Referrals | `/account.html#referrals` | Ссылка, статистика и выплаты |
+| Prompts | `/account.html#prompts` | Сохранять и публиковать идеи |
 | Assistant | `/account.html#assistant` | Получить помощь по идее или продукту |
 | Profile | `/account.html#profile` | Изменить данные и пароль |
 | Admin | `/account.html#admin` | Управлять проектом и модерацией |
-| Telegram Mini App | `/app` | Мобильная работа внутри Telegram |
+| Mini App | `/app` | Работать внутри Telegram |
 
-## 3. Основные пользовательские маршруты
-
-### 3.1. Гость → понимание продукта → вход
+## 3. Главный E2E-маршрут
 
 ```text
 Главная
-→ выбор сценария
-→ Studio / Models / Gallery
-→ объяснение ограничений гостя
+→ выбрать сценарий
 → вход
-→ возврат к выбранному сценарию
-```
-
-Критерии:
-
-- первый экран объясняет image/video/music;
-- CTA не приводит к пустой странице;
-- после входа сохраняется выбранный сценарий;
-- пользователь понимает, зачем нужна авторизация.
-
-### 3.2. Первая генерация изображения
-
-```text
-Вход
 → Studio
-→ Картинка с нуля
-→ промпт
-→ модель
-→ формат и качество
-→ проверка стоимости
-→ запуск
+→ заполнить prompt
+→ выбрать модель и параметры
+→ review modal
+→ подтвердить стоимость
+→ создать задачу
 → очередь
 → результат
 → история / скачать / повторить
@@ -72,253 +52,122 @@
 
 Критерии:
 
-- запуск невозможен без обязательных данных;
-- цена и итоговые параметры видны до списания;
-- двойной клик не создаёт две задачи;
-- результат появляется без ручного refresh;
-- ошибка показывает возврат credits.
+- пользователь понимает следующее действие;
+- обязательные данные проверяются до запроса;
+- review показывает модель, сценарий, параметры, references и стоимость;
+- повторное нажатие не создаёт вторую задачу;
+- результат обновляется без ручного refresh;
+- ошибка показывает понятную причину и возврат credits.
 
-### 3.3. Работа по референсу
+## 4. Проверенные сильные стороны
 
-```text
-Studio
-→ Картинка по референсу
-→ загрузить JPEG/PNG/WebP
-→ preview
-→ prompt-from-photo при необходимости
-→ модель с поддержкой reference/edit
-→ запуск
-```
+### Главная
 
-Критерии:
-
-- неподдерживаемый файл отклоняется до API;
-- пользователь видит, сколько референсов принято;
-- модель без reference capability недоступна;
-- сломанное preview имеет fallback.
-
-### 3.4. Видео и музыка
-
-```text
-Studio
-→ Video или Music
-→ только релевантные поля
-→ стоимость
-→ запуск
-→ очередь
-→ video/audio result
-```
-
-Критерии:
-
-- image-only поля не мешают music/video;
-- duration/resolution влияют на стоимость;
-- готовый media result можно открыть и скачать.
-
-### 3.5. Billing
-
-```text
-Кабинет
-→ Баланс
-→ пакет
-→ способ оплаты
-→ pending
-→ webhook paid/failed/refunded
-→ обновлённый баланс
-```
-
-Критерии:
-
-- показываются только включённые провайдеры;
-- повторный клик не создаёт хаос из invoice;
-- webhook идемпотентен;
-- баланс обновляется без refresh.
-
-### 3.6. Referrals
-
-```text
-Кабинет
-→ Партнёрка
-→ скопировать ссылку
-→ регистрация реферала
-→ оплата реферала
-→ комиссия
-→ заявка на вывод
-```
-
-Критерии:
-
-- нельзя пригласить самого себя;
-- нельзя создать цикл;
-- видны L1/L2/L3, pending и minimum withdrawal;
-- refund откатывает комиссию один раз.
-
-### 3.7. Admin
-
-```text
-Администратор
-→ Управление
-→ пользователи / генерации / тарифы / withdrawals / prompts
-→ действие
-→ подтверждение
-→ audit/ledger
-```
-
-Критерии:
-
-- обычный пользователь не видит навигацию;
-- backend возвращает 403 независимо от скрытия кнопки;
-- финансовое действие фиксируется в audit/ledger.
-
-## 4. Screen-by-screen findings
-
-### 4.1. Главная
-
-**Что уже хорошо**
-
-- оффер объясняет image/video/music;
-- основные сценарии разведены отдельными карточками;
-- есть переходы в модели и Studio;
+- оффер ясно объясняет картинки, видео и музыку;
+- сценарии разделены на отдельные карточки;
+- есть прямые переходы в Studio, модели и ленту;
 - canonical и social preview используют основной домен.
 
-**Разрывы**
+### Studio
 
-- **P0:** CTA «Начать создание» ведёт в Studio, но гостю Studio показывает auth gate вместо формы. Это не технический тупик, но обещание CTA и следующий экран не совпадают.
-- **P1:** после входа необходимо гарантированно возвращать пользователя к выбранному `type/flow/model`, а не в общий кабинет.
-- **P1:** auth microcopy на разных страницах различается: «Email или Telegram», «Email или телефон» и разные placeholders.
+- отдельные маршруты для `text`, `reference`, `edit`, `video`, `music`;
+- основные настройки расположены выше advanced controls;
+- reference upload ограничен JPEG, PNG и WebP;
+- **review modal уже реализован** и показывает сценарий, модель, формат, качество, количество, references, prompt и стоимость;
+- запуск происходит только после второго явного подтверждения;
+- есть переходы в очередь и ленту.
 
-### 4.2. Studio
+### Models
 
-**Что уже хорошо**
+- каталог загружается динамически;
+- работают фильтры image/video/music;
+- показывается стоимость;
+- варианты model family группируются для пользователя.
 
-- есть отдельные маршруты text/reference/edit/video/music;
-- основные параметры находятся выше advanced settings;
-- reference upload ограничен JPEG/PNG/WebP;
-- есть queue/result links.
+### Gallery
 
-**Разрывы**
-
-- **P0:** выбор сценария и composer скрыты через `data-auth-only`; гость не может спокойно собрать черновик и войти только перед запуском.
-- **P0:** textarea содержит готовый промпт как значение, а не placeholder. Пользователь может запустить чужой пример и потратить credits.
-- **P0:** в статическом screen contract нет отдельного review блока с моделью, ценой, refs, параметрами и балансом после запуска.
-- **P1:** в одном composer присутствуют image/video/music controls; JS обязан безошибочно скрывать нерелевантные поля для каждого режима.
-- **P1:** launch CTA должен иметь явные `disabled`, `busy` и idempotency states.
-
-### 4.3. Models
-
-**Что уже хорошо**
-
-- есть фильтры image/video/music;
-- показатели и карточки загружаются динамически;
-- пользователь видит стоимость и переход к обучению.
-
-**Разрывы**
-
-- **P1:** нужно явно отличать loading, empty и API error, а не оставлять пустой grid.
-- **P1:** варианты одной model family должны группироваться, чтобы пользователь не видел технические дубли.
-- **P2:** карточка должна объяснять, требует ли модель reference и какие ограничения имеет.
-
-### 4.4. Model detail
-
-**Что уже хорошо**
-
-- экран выделен отдельно и может быть SEO-входом;
-- предусмотрен переход к тесту в Studio.
-
-**Разрывы**
-
-- **P1:** базовая разметка содержит только «Загружаем модель и примеры...». При API error нужен полноценный retry/fallback.
-- **P1:** неизвестный `model` должен показывать 404-like state, а не бесконечную загрузку.
-- **P2:** canonical всех моделей сейчас общий `/model.html`; для SEO нужна осознанная стратегия параметрических страниц.
-
-### 4.5. Gallery
-
-**Что уже хорошо**
-
-- доступны recent/top-day сценарии;
+- лента публична;
+- работают `feed` и `top_day`;
 - есть быстрые переходы в image/reference/video/music;
-- лента публична для гостя.
+- карточки отображают реальные media previews.
 
-**Разрывы**
+### Account
 
-- **P1:** detail/remix/use-reference должны объяснять, что произойдёт после клика;
-- **P1:** карточка без media должна иметь устойчивый fallback;
-- **P1:** auth copy отличается от остальных страниц.
+- hash-routing открывает нужный раздел напрямую;
+- queue, history, billing, referrals, prompts, assistant, profile и admin находятся в одной оболочке;
+- admin navigation имеет отдельный permission marker.
 
-### 4.6. Account
+## 5. Реальные UX-разрывы
 
-**Что уже хорошо**
+### P0
 
-- queue, library, billing, referrals, prompts, assistant, profile и admin собраны в одной оболочке;
-- hash-routing позволяет открывать нужный раздел напрямую;
-- admin navigation имеет отдельный marker.
+1. **Гость не может собрать черновик Studio.** Composer и выбор сценария скрыты до входа. Главный CTA «Начать создание» приводит к auth gate. Это не пустой экран, но создаёт лишний шаг до первого контакта с продуктом.
+2. **Защита от случайного запуска.** Ранее textarea содержала готовый prompt как значение. Исправлено: пример перенесён в placeholder, поле открывается пустым.
+3. **Exactly-once launch.** Review существует, но submit, confirm и API должны сохранять busy/idempotency state до получения ответа.
 
-**Разрывы**
+### P1
 
-- **P1:** экран очень плотный; на mobile sidebar должен превращаться в компактную навигацию без горизонтального overflow;
-- **P1:** queue/history/billing/referrals требуют независимых loading/error/empty states;
-- **P1:** скрытие admin кнопки не является защитой — E2E и API tests должны отдельно проверять 403;
-- **P2:** account не должен индексироваться и рекламироваться через sitemap.
+1. После входа нужно гарантированно сохранять `type`, `flow`, `model`, prompt draft и references.
+2. Auth microcopy различается между страницами: «Email или Telegram», «Email или телефон», разные placeholders.
+3. Все динамические блоки должны отдельно иметь loading, empty, error и retry states.
+4. `model.html` должен показывать понятный not-found/error state, а не бесконечное «Загружаем модель».
+5. Account на мобильном требует отдельной проверки sidebar, hash navigation и экранной клавиатуры.
+6. Скрытие admin-кнопки не является защитой: backend обязан возвращать 403.
 
-### 4.7. Telegram Mini App
+### P2
 
-**Что уже хорошо**
+1. Нужна отдельная SEO-стратегия для параметрических страниц `model.html?model=...`.
+2. Требуется accessibility pass: keyboard navigation, focus states, labels, `aria-live` для статусов.
+3. Для Mini App нужен device smoke внутри реального Telegram WebView.
 
-- отдельный React/Vite frontend;
-- отдельная сборка;
-- backend проверяет Telegram initData;
-- `/app` не смешан с standalone страницами.
+## 6. Автоматизированное E2E-покрытие
 
-**Разрывы**
+Playwright suite находится в `tests/e2e/`. API и WebSocket замоканы, поэтому тесты не списывают credits и не вызывают AI/payment providers.
 
-- **P1:** нужен отдельный device smoke внутри Telegram WebView;
-- **P1:** safe-area, системная клавиатура и back button нельзя полноценно проверить обычным desktop браузером;
-- **P1:** auth fallback вне Telegram должен быть понятным и не показывать demo state как production.
-
-## 5. Автоматизированное E2E-покрытие
-
-Playwright suite расположен в `tests/e2e/` и использует детерминированные mock API/WebSocket. Он не списывает реальные credits и не вызывает AI/payment providers.
-
-| Тест | Что проверяет |
+| Тест | Проверка |
 |---|---|
-| Home guest | Hero, основные CTA, login modal |
-| Models | Загрузка каталога и фильтр video |
-| Gallery | Загрузка real-like feed cards и top-day switch |
+| Home guest | Hero, CTA, login modal |
+| Models | Каталог и фильтр video |
+| Gallery | Media cards и top-day switch |
 | Studio guest | Явный auth gate вместо blank screen |
-| Studio authenticated | Заполнение prompt и POST generation API |
+| Studio authenticated | Prompt → review modal → один generation request |
 | Account | Hash routing billing → referrals |
-| Admin visibility | Admin navigation только для admin user |
-| Mobile 390 px | Отсутствие горизонтального overflow на ключевых страницах |
-| API failure | Public shell остаётся видимым при ошибке landing API |
+| Admin visibility | Admin navigation только для admin |
+| Mobile 390 px | Нет горизонтального overflow |
+| API failure | Public shell остаётся видимым при ошибке API |
 
-Каждый ключевой тест прикладывает screenshot в Playwright report. При падении сохраняются trace, screenshot и video.
+При падении CI сохраняет:
 
-## 6. Что mock E2E не заменяет
+- HTML Playwright report;
+- screenshots;
+- trace;
+- video;
+- screen captures ключевых страниц.
 
-Следующие сценарии требуют staging или production-like среды:
+## 7. Что mock E2E не заменяет
 
-- реальный Telegram Login и initData;
-- реальный Telegram WebView;
-- реальные TBank/Stars/Crypto/Lava webhooks;
-- фактический KIE/Comet generation lifecycle;
-- nginx WebSocket upgrade;
-- provider URLs, большие video/audio files;
-- push-уведомления в Telegram;
-- восстановление после рестарта app/Redis/Postgres.
+На staging или production-like окружении отдельно проверить:
 
-Для них нужен отдельный staging smoke с тестовыми аккаунтами и нулевыми/минимальными расходами.
+- реальный Telegram Login;
+- initData и Telegram WebView;
+- TBank, Stars, Crypto и Lava sandbox/webhooks;
+- фактическую KIE/Comet generation lifecycle;
+- WebSocket upgrade через nginx;
+- большие video/audio results;
+- Telegram notifications;
+- восстановление после рестарта app, Redis и Postgres.
 
-## 7. Рекомендуемый порядок UX-доработки
+## 8. Рекомендуемый порядок UX-доработки
 
-1. Убрать готовый prompt из значения textarea и оставить его примером-placeholder.
-2. Разрешить гостю собрать черновик Studio; открывать вход перед фактическим запуском.
-3. Добавить review step: model, price, refs, settings, balance after run.
-4. Установить disabled/busy/idempotency states на launch/payment/actions.
-5. Унифицировать auth microcopy на всех страницах.
-6. Добавить явные loading/error/empty/retry states.
-7. После стабилизации screen flow — улучшать декоративный visual.
+1. Закрепить пустой prompt по умолчанию и inline validation.
+2. Сохранять выбранный сценарий и draft через auth flow.
+3. Укрепить review: balance-after, busy state, duplicate-submit protection.
+4. Добавить независимые loading/error/empty/retry states.
+5. Унифицировать auth microcopy.
+6. Пройти staging smoke реальных интеграций.
+7. Только затем продолжать декоративную полировку.
 
-## 8. Команды
+## 9. Команды
 
 Из `artflow/tests/e2e/`:
 
@@ -328,19 +177,29 @@ npx playwright install chromium
 npm test
 ```
 
-Результаты:
+Из `artflow/`:
 
-- `playwright-report/` — HTML report;
-- `test-results/` — trace, screenshot, video и вложенные screen captures.
+```bash
+python -m compileall api bot core db main.py
+node --check landing/js/prototype-premium.js
+pytest -q
+```
 
-## 9. Definition of done
+Из `artflow/webapp/`:
 
-Экран или flow считается готовым, когда:
+```bash
+npm ci
+npm run build
+```
 
-- пользователь понимает следующее действие;
+## 10. Definition of done
+
+Экран или flow готов, когда:
+
+- следующее действие очевидно;
 - normal/loading/empty/error/unauthorized states определены;
-- цена и последствия действия видны заранее;
-- мобильный viewport не ломается;
-- protected action проверяется backend, а не только UI;
-- E2E проходит на desktop и mobile;
-- реальный staging smoke пройден для интеграций, которые нельзя безопасно замокать.
+- стоимость и последствия видны до подтверждения;
+- protected action проверяется backend;
+- desktop и mobile E2E проходят;
+- реальные интеграции проверены staging smoke;
+- production deploy заблокирован при падении любого quality gate.
