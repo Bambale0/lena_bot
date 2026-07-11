@@ -20,6 +20,7 @@
 - В production отключён `X-Dev-Tg-Id` fallback.
 - Cookie авторизации имеет `HttpOnly`, `SameSite=Lax` и `Secure` в production.
 - В URL и логах отсутствуют `token=`, `init_data=` и `initData=`.
+- После входа сохраняется выбранный `type`, `flow`, `model` и prompt draft.
 
 ## 3. Studio
 
@@ -27,6 +28,7 @@
 - Обязательные поля валидируются до запуска.
 - Кнопка запуска заблокирована до заполнения обязательных данных.
 - Модель, параметры и стоимость видны до списания.
+- Готовый пример prompt не находится в textarea как пользовательское значение.
 - Загрузка JPEG, PNG и WebP работает; неподдерживаемый файл отклоняется.
 - Ошибки API отображаются рядом с формой или понятным уведомлением.
 - На viewport 390 px нет горизонтального скролла и перекрытий.
@@ -71,6 +73,7 @@
 ## 8. Admin
 
 - Admin-раздел виден только пользователям из `ADMIN_IDS`.
+- Не-admin получает 403 от административных API независимо от скрытия кнопки.
 - Поиск пользователей и генераций работает.
 - Изменение баланса и тарифов фиксируется в audit/ledger.
 - Reject требует причины.
@@ -84,7 +87,22 @@
 - Bottom navigation, safe area и клавиатура телефона не перекрывают форму.
 - Build проходит командой `npm run build`.
 
-## 10. Автоматические проверки
+## 10. Screen-by-screen E2E
+
+Playwright использует mock API/WebSocket, поэтому не вызывает реальные генерации, платежи и Telegram login.
+
+- Guest Home: hero, CTA и login modal.
+- Models: каталог и media filters.
+- Gallery: feed cards и top-day switch.
+- Guest Studio: явный auth gate, а не blank screen.
+- Authenticated Studio: prompt → generation request.
+- Account: hash routing billing → referrals.
+- Admin navigation: видна только admin user.
+- Mobile 390 px: нет горизонтального overflow.
+- API failure: public shell остаётся доступным.
+- На ключевых экранах сохраняются screenshots в Playwright report.
+
+## 11. Автоматические проверки
 
 Из `artflow/`:
 
@@ -101,6 +119,14 @@ npm ci
 npm run build
 ```
 
+Из `artflow/tests/e2e/`:
+
+```bash
+npm install
+npx playwright install chromium
+npm test
+```
+
 Инфраструктура:
 
 ```bash
@@ -108,12 +134,16 @@ nginx -t
 docker compose config
 ```
 
-Manual smoke:
+## 12. Staging/manual smoke
+
+Mock E2E не заменяет реальные интеграции. Перед production release проверить:
 
 - `GET /api/web/health`;
-- `/`;
-- `/studio.html`;
-- `/account.html` guest/auth states;
-- WebSocket generation lifecycle;
+- реальный Telegram Login;
+- `/app` внутри Telegram WebView;
+- Studio generation с тестовой моделью;
+- WebSocket lifecycle через nginx;
+- payment sandbox/webhook;
 - `/static/upload/missing.jpg` fallback;
-- viewport 390 px.
+- большой video/audio result;
+- viewport 390 px на реальном Android/iPhone WebView.
