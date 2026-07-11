@@ -57,7 +57,16 @@ jobs:
         run: node --check landing/js/prototype-premium.js
 
       - name: Pytest
-        run: pytest -q
+        run: pytest -q --maxfail=1 --tb=short | tee pytest.log
+
+      - name: Upload pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artflow/pytest.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   webapp-build:
     runs-on: ubuntu-latest
