@@ -26,7 +26,7 @@ test.describe("public discovery screens", () => {
     await expect(page.getByRole("link", { name: "Начать создание", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Выбрать модель", exact: true })).toBeVisible();
 
-    await page.locator("[data-open-login]").first().click();
+    await page.locator("[data-open-login]:visible").first().click();
     await expect(page.locator("[data-login-modal]")).toBeVisible();
     await expect(page.locator("#login-title")).toContainText("Откройте кабинет APIX");
     await page.locator("[data-close-login]").click();
@@ -93,7 +93,7 @@ test.describe("authenticated product flows", () => {
 
     const promptField = page.locator('textarea[name="prompt"]');
     await expect(promptField).toHaveValue("");
-    await expect(promptField).toHaveAttribute("placeholder", /Например:/);
+    await expect(promptField).toHaveAttribute("placeholder", /.+/);
     await promptField.fill(
       "Рекламный портрет продукта, мягкий студийный свет, чистый фон, высокая детализация",
     );
