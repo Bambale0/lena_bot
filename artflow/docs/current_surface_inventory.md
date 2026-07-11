@@ -1,151 +1,98 @@
-# APIX Current Surface Inventory
+# APIX: актуальная карта frontend-поверхностей
 
-Дата: 2026-05-17
+Дата актуализации: 2026-07-11.
 
-Документ фиксирует baseline standalone site перед доведением Prompt Riot spec pack.
+Этот документ является каноническим источником для разработчиков и AI-агентов. Если старый документ противоречит этой карте, использовать правила ниже.
 
-## Frontend Surfaces
+## 1. Самостоятельный сайт
 
-| Surface | Path | Code | Notes |
-|---|---|---|---|
-| Public/app SPA | `/` | `landing/index.html`, `landing/js/riot-site.js`, `landing/css/riot-site.css` | Current Prompt Riot standalone entrypoint. |
-| Legacy landing pages | `/account.html`, `/features.html`, `/guide.html`, `/contact.html` | `landing/*.html`, `landing/js/main.js`, `landing/css/styles.css` | Static legacy pages; not primary app-mode. |
-| Telegram Mini App | `/app` | `web/static/prompt-riot/`, `webapp/` | Separate surface; do not mix with standalone site. |
+Путь в репозитории: `landing/`.
 
-## Current SPA Routes
+Публичные URL:
 
-`landing/js/riot-site.js` currently registers:
+- `/` — главная продуктовая страница;
+- `/studio.html` — создание изображений, видео и музыки;
+- `/models.html` — каталог моделей;
+- `/model.html?model=<model_key>` — описание и обучение по модели;
+- `/gallery.html` — публичная лента;
+- `/account.html` — закрытый кабинет пользователя.
 
-- `home`
-- `examples`
-- `features`
-- `studio`
-- `prompts`
-- `feed`
-- `works`
-- `billing`
-- `profile`
-
-Implemented baseline capabilities:
-
-- guest/public home with hero, examples, feed preview, prompt preview;
-- authenticated dashboard;
-- image/video/music/assistant studio forms;
-- model picker, dynamic settings, review summary;
-- reference upload/link handling;
-- local queue persisted in `localStorage`;
-- realtime WebSocket with first-message auth;
-- polling fallback for active queue items;
-- feed/prompt actions with busy state;
-- Telegram Login Widget auth.
-
-Known UX gaps to close:
-
-- detail drawers for feed/prompt/result;
-- richer billing transaction/referral panels;
-- explicit inline validation messages and disabled launch state;
-- richer mobile app shell and bottom tabs;
-- admin moderation route for web admins.
-
-## Web API Endpoints
-
-Mounted in `main.py`:
+Канонические frontend-файлы:
 
 ```text
-app.include_router(web_router, prefix="/api/web")
+landing/css/prototype-premium.css
+landing/js/prototype-premium.js
 ```
 
-Current `api/web/` endpoints:
+Файлы `riot-site.*`, `styles.css` и `main.js` считаются архивными/совместимыми. Не добавлять в них новые функции и не использовать их как источник истины.
 
-- `GET /api/web/health`
-- `GET /api/web/auth/config`
-- `POST /api/web/auth/telegram-login`
-- `GET /api/web/me`
-- `GET /api/web/models`
-- `GET /api/web/price-plans`
-- `GET /api/web/feed`
-- `GET /api/web/feed/top`
-- `POST /api/web/feed/{generation_id}/like`
-- `POST /api/web/feed/{generation_id}/share`
-- `GET /api/web/prompts`
-- `GET /api/web/prompts/{prompt_id}`
-- `POST /api/web/prompts/{prompt_id}/like`
-- `POST /api/web/prompts/{prompt_id}/use`
-- `POST /api/web/prompts`
-- `GET /api/web/history`
-- `GET /api/web/image-sessions/active`
-- `POST /api/web/image-sessions`
-- `POST /api/web/image-sessions/{session_id}/archive`
+## 2. Telegram Mini App
 
-Known API gaps to close:
+Путь в репозитории: `webapp/`.
 
-- grouped `/api/web/models` contract;
-- `/api/web/billing/transactions`;
-- `/api/web/referrals`;
-- admin prompt moderation endpoints;
-- richer serializers for `result_urls`, prompt visibility, action eligibility, language and payment/referral state.
+Стек: React, TypeScript, Vite.
 
-## Generation API Used By Site
+Production URL: `/app`.
 
-Current standalone SPA calls compatible `/api/v1/*` endpoints:
+Mini App является отдельным клиентом. Изменения standalone-сайта не должны автоматически переноситься в `webapp/`, и наоборот.
 
-- `GET /api/v1/models/image`
-- `GET /api/v1/models/video`
-- `GET /api/v1/models/music`
-- `GET /api/v1/history`
-- `GET /api/v1/generations/{id}`
-- `POST /api/v1/generate/image`
-- `POST /api/v1/generate/video`
-- `POST /api/v1/generate/music`
-- `POST /api/v1/assistant`
-- `POST /api/v1/photo-prompt`
-- `POST /api/v1/prompt/improve`
-- `POST /api/v1/feed/{gen_id}/remix`
+## 3. Backend API
 
-## Realtime
+Standalone-сайт использует `/api/web/*`:
 
-Mounted in `main.py`:
+- auth и профиль;
+- модели и тарифы;
+- генерации;
+- история и очередь;
+- feed и prompts;
+- billing и referrals;
+- assistant;
+- admin.
+
+Общие генеративные операции переиспользуют реализацию Mini App через совместимые адаптеры в `api/web/generations.py`.
+
+Realtime endpoint сайта:
 
 ```text
-app.include_router(realtime_router)
+/api/web/ws/generations
 ```
 
-Endpoint:
+Токен передаётся первым WebSocket-сообщением, а не в URL.
 
-```text
-GET /api/v1/ws/generations
-```
+## 4. Защищённые поверхности
 
-Current behavior:
+Не индексировать:
 
-- accepts WebSocket connection;
-- reads auth from first JSON message `{ "type": "auth", "token": "..." }`;
-- retains legacy header/query auth compatibility;
-- sends `generation.snapshot` for active `pending`/`processing` history items;
-- accepts `ping` and responds with `pong`;
-- exposes `publish_generation_event(gen)` for lifecycle push.
+- `/account.html`;
+- `/app` и `/app/*`;
+- `/api/*`;
+- `/static/upload/*`.
 
-Risk to monitor:
+Публичные canonical и sitemap должны использовать домен `https://apixbotai.com`.
 
-- legacy query auth remains supported for compatibility, but standalone site uses first-message auth and should not put tokens into URLs.
+## 5. Проверки перед PR
 
-## Stable Media Handling
-
-Current serializers in `api/web/schemas.py` and `api/realtime.py` use `api.public_files.public_url_is_available`.
-
-Behavior:
-
-- missing local `/static/upload/*` files are hidden from payloads;
-- external CDN/provider URLs are treated as available;
-- frontend media frames show a visible fallback on broken load.
-
-## Verification Baseline
-
-Required before delivery on code changes:
+Из директории `artflow/`:
 
 ```bash
-node --check landing/js/riot-site.js
-python -m compileall api db main.py
-tools/codex_static_checks.sh
+python -m compileall api bot core db main.py
+node --check landing/js/prototype-premium.js
+pytest -q
 ```
 
+Для Telegram Mini App:
+
+```bash
+cd webapp
+npm ci
+npm run build
+```
+
+## 6. Правила внесения изменений
+
+1. Не смешивать standalone-сайт и Telegram Mini App в одной задаче без явной необходимости.
+2. Не менять обязательные поля существующих `/api/v1/*` контрактов несовместимо.
+3. Не хранить auth token, initData и секреты в URL или логах.
+4. Цены, модели и способы оплаты получать из API, а не дублировать статическим текстом.
+5. Любой production deploy должен зависеть от успешных backend-тестов и frontend-build.
+6. Новые пользовательские сценарии должны иметь loading, empty, error и disabled состояния.

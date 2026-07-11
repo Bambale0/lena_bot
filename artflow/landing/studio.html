@@ -13,6 +13,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="css/prototype-premium.css?v=20260614_typography_tune" />
     <script src="js/prototype-premium.js?v=20260610_web_referrals" defer></script>
+    <script src="js/studio-safety.js?v=20260711_empty_prompt" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -46,7 +47,6 @@
             <div class="account-status"><span></span><b data-account-status>Проверяем вход...</b></div>
           </div>
         </div>
-
 
         <section class="studio-route-picker" data-auth-only hidden>
           <div class="studio-route-picker-head">
@@ -112,7 +112,7 @@
               </div>
               <label class="prompt-field">
                 <span>Что создаём</span>
-                <textarea name="prompt" rows="4" required>Элегантный портрет для обложки: мягкий лилово-розовый свет, чистый фон, уверенный взгляд, премиальная подача</textarea>
+                <textarea name="prompt" rows="4" required placeholder="Например: элегантный портрет для обложки, мягкий лилово-розовый свет, чистый фон, уверенный взгляд, премиальная подача"></textarea>
               </label>
               <div class="composer-row composer-row-primary">
                 <label><span>Модель</span><select name="model" data-account-model-select data-no-custom-select="true" required></select></label>
