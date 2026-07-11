@@ -2,6 +2,7 @@ User-agent: *
 Allow: /
 Disallow: /api/
 Disallow: /app/
+Disallow: /account.html
 Disallow: /static/upload/
 
-Sitemap: https://apix.chillcreative.ru/sitemap.xml
+Sitemap: https://apixbotai.com/sitemap.xml
