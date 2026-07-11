@@ -23,8 +23,8 @@ test.describe("public discovery screens", () => {
     await page.goto("/");
 
     await expect(page.locator("h1")).toContainText("Создайте картинку, видео или музыку");
-    await expect(page.locator('a[href="studio.html?type=image&flow=text"]')).toBeVisible();
-    await expect(page.locator('a[href="models.html"]')).toBeVisible();
+    await expect(page.getByRole("link", { name: "Начать создание", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Выбрать модель", exact: true })).toBeVisible();
 
     await page.locator("[data-open-login]").first().click();
     await expect(page.locator("[data-login-modal]")).toBeVisible();
@@ -56,11 +56,12 @@ test.describe("public discovery screens", () => {
     await page.goto("/gallery.html");
 
     await expect(page.locator("h1")).toContainText("Живые примеры APIX");
-    await expect(page.locator("[data-gallery-grid]")).toContainText(/Премиальный|creator/i);
+    await expect(page.locator("[data-gallery-grid] img").first()).toBeVisible();
 
     const topDay = page.locator('[data-feed-source="top_day"]');
     await topDay.click();
     await expect(topDay).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("[data-gallery-grid] img").first()).toBeVisible();
 
     await attachScreen(page, testInfo, "gallery-top-day");
   });
@@ -81,7 +82,7 @@ test.describe("public discovery screens", () => {
 });
 
 test.describe("authenticated product flows", () => {
-  test("image creation reaches the generation API", async ({ page }, testInfo) => {
+  test("image creation review reaches the generation API once", async ({ page }, testInfo) => {
     const calls = await installApiMocks(page, { authenticated: true });
     await page.goto("/studio.html?type=image&flow=text");
 
@@ -94,6 +95,11 @@ test.describe("authenticated product flows", () => {
       "Рекламный портрет продукта, мягкий студийный свет, чистый фон, высокая детализация",
     );
     await page.locator("[data-generate-button]").click();
+
+    const reviewDialog = page.getByRole("dialog", { name: "Запускаем эту работу?" });
+    await expect(reviewDialog).toBeVisible();
+    await expect(reviewDialog).toContainText("Стоимость");
+    await reviewDialog.getByRole("button", { name: "Запустить", exact: true }).click();
 
     await expect.poll(() => calls.generate.length).toBe(1);
     expect(calls.generate[0].path).toContain("/generate/image");
@@ -131,7 +137,7 @@ test.describe("authenticated product flows", () => {
 });
 
 test.describe("resilience and responsive UX", () => {
-  test("public screens do not overflow a 390px viewport", async ({ page }, testInfo) => {
+  test("@mobile-only public screens do not overflow a 390px viewport", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await installApiMocks(page, { authenticated: false });
 
@@ -155,8 +161,9 @@ test.describe("resilience and responsive UX", () => {
     await installApiMocks(page, { authenticated: false, failPaths: ["/landing"] });
     await page.goto("/");
 
-    await expect(page.locator("h1")).toBeVisible();
-    await expect(page.locator("main")).toContainText("APIX");
+    await expect(page.locator("h1")).toContainText("Создайте картинку, видео или музыку");
+    const contentLength = await page.locator("main").evaluate((node) => node.textContent.trim().length);
+    expect(contentLength).toBeGreaterThan(100);
     expect(pageErrors).toEqual([]);
   });
 });
