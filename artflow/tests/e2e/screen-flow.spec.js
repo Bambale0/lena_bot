@@ -91,7 +91,10 @@ test.describe("authenticated product flows", () => {
     await expect(page.locator("[data-account-model-select]")).toBeVisible();
     await expect.poll(async () => page.locator("[data-account-model-select] option").count()).toBeGreaterThan(0);
 
-    await page.locator('textarea[name="prompt"]').fill(
+    const promptField = page.locator('textarea[name="prompt"]');
+    await expect(promptField).toHaveValue("");
+    await expect(promptField).toHaveAttribute("placeholder", /Например:/);
+    await promptField.fill(
       "Рекламный портрет продукта, мягкий студийный свет, чистый фон, высокая детализация",
     );
     await page.locator("[data-generate-button]").click();
