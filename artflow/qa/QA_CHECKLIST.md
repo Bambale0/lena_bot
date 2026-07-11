@@ -1,122 +1,119 @@
-# QA Checklist — APIX Prompt Riot Site
+# QA Checklist — APIX Site and Mini App
 
-## 1. Public
+Дата актуализации: 2026-07-11.
 
-- `/` opens.
-- Hero explains product.
-- CTA login works.
-- Feed preview loads or shows graceful empty.
-- Prompt preview loads or shows graceful empty.
-- No stale price/model text.
-- Social preview meta present.
+## 1. Public site
 
-## 2. Auth
+- `/` открывается без ошибок.
+- Hero объясняет продукт и ведёт в реальный сценарий.
+- `/studio.html`, `/models.html`, `/model.html` и `/gallery.html` открываются.
+- Feed и модели загружаются либо показывают понятное empty/error состояние.
+- Цены и доступность моделей приходят из API.
+- Canonical и social preview используют `https://apixbotai.com`.
+- `/account.html` отсутствует в sitemap и закрыт от индексации через robots policy.
 
-- Guest cannot run generation.
-- Login gate appears for protected action.
-- Telegram login success shows profile.
-- Login failure has retry.
-- No `token=` in URL.
-- No `init_data=` in logs.
+## 2. Авторизация
+
+- Гость не может запускать генерации и административные действия.
+- Telegram Login работает и создаёт защищённую сессию.
+- Email/password flow показывает понятные ошибки и retry state.
+- В production отключён `X-Dev-Tg-Id` fallback.
+- Cookie авторизации имеет `HttpOnly`, `SameSite=Lax` и `Secure` в production.
+- В URL и логах отсутствуют `token=`, `init_data=` и `initData=`.
 
 ## 3. Studio
 
-- Stepper visible.
-- Required fields validated.
-- Run disabled until ready.
-- Model and cost shown before run.
-- Review panel shows refs/settings.
-- Form errors near fields.
-- Mobile 390px no horizontal scroll.
+- Тип результата и сценарий выбираются предсказуемо.
+- Обязательные поля валидируются до запуска.
+- Кнопка запуска заблокирована до заполнения обязательных данных.
+- Модель, параметры и стоимость видны до списания.
+- Загрузка JPEG, PNG и WebP работает; неподдерживаемый файл отклоняется.
+- Ошибки API отображаются рядом с формой или понятным уведомлением.
+- На viewport 390 px нет горизонтального скролла и перекрытий.
 
-## 4. Queue
+## 4. Генерации и очередь
 
-- Queue item appears after run.
-- WS connected state is not noisy.
-- Lost WS uses polling fallback.
-- Done updates result/history/balance.
-- Failed shows reason and refund state.
-- No duplicate toast for same generation.
+- После запуска появляется элемент очереди.
+- WebSocket получает auth первым сообщением, без токена в URL.
+- При потере WebSocket включается polling fallback.
+- Статусы `pending`, `processing`, `done`, `failed` отображаются корректно.
+- Ошибка провайдера возвращает кредиты один раз.
+- Повторный webhook не завершает и не оплачивает операцию повторно.
+- Готовый результат обновляет историю и баланс без ручного refresh.
 
-## 5. Results
+## 5. Результаты
 
-- Image result card renders.
-- Video result card renders.
-- Music result card renders.
-- Broken media URL shows fallback.
-- Multi-result gallery shows all URLs.
-- Detail drawer opens.
-- Next actions prefill studio correctly.
+- Отображаются image, video и music результаты.
+- Все элементы `result_urls` доступны пользователю.
+- Сломанная media URL показывает fallback, а не ломает страницу.
+- Скачивание доступно только владельцу генерации.
+- Publish, share, remix и повторный запуск защищены от двойного клика.
 
-## 6. Feed
+## 6. Feed и prompts
 
-- Recent filter works.
-- Top day filter works.
-- Detail opens.
-- Like disabled during request.
-- Share disabled during request.
-- Remix explains author idea usage.
-- Unsupported media action disabled with reason.
+- Фильтры ленты работают.
+- Like/share/remix имеют busy state.
+- Неподдерживаемое действие отключено с объяснением.
+- Prompt library загружается и применяет идею в Studio.
+- Submit flow показывает `pending`, `approved` и `rejected`.
+- Администратор может модерировать prompt; обычный пользователь — нет.
 
-## 7. Prompts
+## 7. Billing и referrals
 
-- Catalog loads.
-- Popular loads.
-- Best loads.
-- My prompts loads.
-- Tag/category filter works.
-- Prompt detail opens.
-- Use prompt prefills studio.
-- Submit flow reaches pending status.
-- Rejected prompt shows reason.
+- Показываются только включённые способы оплаты.
+- Повторный клик не создаёт несколько независимых pending-операций.
+- Webhook подтверждает платёж идемпотентно.
+- Статусы `pending`, `paid`, `failed`, `refunded` видны пользователю.
+- После успешной оплаты баланс обновляется без refresh.
+- Реферальная цепочка не допускает самореферал и циклы.
+- Комиссии корректно начисляются и откатываются при refund.
 
-## 8. Billing
+## 8. Admin
 
-- Balance shown.
-- Plans loaded dynamically.
-- Only enabled methods shown.
-- Payment click creates pending state.
-- Double-click does not create UI chaos.
-- Paid updates balance without refresh.
-- Failed/refunded visible.
+- Admin-раздел виден только пользователям из `ADMIN_IDS`.
+- Поиск пользователей и генераций работает.
+- Изменение баланса и тарифов фиксируется в audit/ledger.
+- Reject требует причины.
+- Опасные действия имеют подтверждение.
 
-## 9. Profile/referrals
+## 9. Telegram Mini App
 
-- Telegram identity visible.
-- Referral link copy works.
-- Fallback copy works.
-- Levels visible.
-- Withdrawal validation visible.
-- Pending withdrawals shown.
+- `/app` отдаёт собранный React/Vite frontend.
+- Telegram initData проверяется на backend.
+- Прямое открытие вне Telegram показывает корректный fallback.
+- Bottom navigation, safe area и клавиатура телефона не перекрывают форму.
+- Build проходит командой `npm run build`.
 
-## 10. Admin
+## 10. Автоматические проверки
 
-- Admin link visible only for admin.
-- Pending prompts visible.
-- Approve works.
-- Reject requires reason.
-- Deactivate works.
-
-## 11. Accessibility
-
-- Keyboard navigation works.
-- Focus states visible.
-- Labels present.
-- `aria-live` for queue/status.
-- Color not the only status indicator.
-
-## 12. Release commands
+Из `artflow/`:
 
 ```bash
-node --check landing/js/riot-site.js
-tools/codex_static_checks.sh
-nginx -t
+python -m compileall api bot core db main.py
+node --check landing/js/prototype-premium.js
+pytest -q
 ```
 
-Manual:
+Из `artflow/webapp/`:
 
-- `/api/web/health`
-- `/`
-- `/api/v1/ws/generations`
-- missing `/static/upload/missing.jpg`
-- viewport 390px
+```bash
+npm ci
+npm run build
+```
+
+Инфраструктура:
+
+```bash
+nginx -t
+docker compose config
+```
+
+Manual smoke:
+
+- `GET /api/web/health`;
+- `/`;
+- `/studio.html`;
+- `/account.html` guest/auth states;
+- WebSocket generation lifecycle;
+- `/static/upload/missing.jpg` fallback;
+- viewport 390 px.
