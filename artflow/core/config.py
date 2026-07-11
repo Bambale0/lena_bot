@@ -1,7 +1,7 @@
 # core/config.py
 import os
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -125,6 +125,14 @@ class Settings(BaseSettings):
     # Polling
     POLLING_INTERVAL: float = 3.0
     POLLING_TIMEOUT: int = 600
+
+    @field_validator("ENV", mode="before")
+    @classmethod
+    def normalize_environment(cls, value: str | None) -> str:
+        normalized = str(value or "development").strip().lower()
+        if normalized == "prod":
+            return "production"
+        return normalized or "development"
 
     def lava_offer_id_for_plan(self, plan_key: str) -> str:
         normalized = (plan_key or "").strip().upper().replace("-", "_")
