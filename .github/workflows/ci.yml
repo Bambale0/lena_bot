@@ -88,9 +88,43 @@ jobs:
       - name: Build Telegram Mini App
         run: npm run build
 
+  site-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: artflow/tests/e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: artflow/tests/e2e/package.json
+
+      - name: Install Playwright test dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run screen and flow E2E
+        run: npm test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artflow/tests/e2e/playwright-report
+            artflow/tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/miniapp-mvp'
-    needs: [backend-quality, webapp-build]
+    needs: [backend-quality, webapp-build, site-e2e]
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
