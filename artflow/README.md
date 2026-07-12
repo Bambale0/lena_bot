@@ -438,33 +438,48 @@ pytest tests/ -v
 
 ---
 
-## Известные проблемы
+## Диагностика
 
-### КРИТИЧНО: PostgreSQL не запущен
+### PostgreSQL connection refused
 
-Из логов (`bot.log`):
+`ConnectionRefusedError: [Errno 111] Connection refused` означает, что app не
+может подключиться к PostgreSQL. Это диагностический сценарий, а не текущий
+статус прода. В продакшне PostgreSQL запущен как Docker Compose service
+`postgres` и доступен на хосте через `127.0.0.1:5433`.
+
+Пример лога:
 
 ```
 ConnectionRefusedError: [Errno 111] Connection refused
 INFO: 91.108.5.111 - "POST /webhook/telegram HTTP/1.0" 500 Internal Server Error
 ```
 
-Все входящие Telegram-обновления падают с HTTP 500 — бот полностью нефункционален. Telegram-сервер получает ошибку и будет периодически повторять попытки.
+Если база недоступна, входящие Telegram-обновления могут падать с HTTP 500,
+пока app снова не получит подключение к PostgreSQL.
 
-**Решение:**
+Проверить текущее состояние:
 
 ```bash
-# Проверить статус
+cd /root/mkdir/lena_bot/artflow
 docker compose ps
-systemctl status postgresql  # если не docker
+docker compose exec postgres pg_isready -U bot -d artflow
+docker compose exec app python - <<'PY'
+import asyncio
+from db.session import engine
 
-# Запустить
-docker compose up postgres -d
+async def main():
+    async with engine.connect() as conn:
+        result = await conn.exec_driver_sql("select 1")
+        print(result.scalar())
 
-# Проверить подключение
-docker compose exec app python -c "
-import asyncio, asyncpg
-asyncio.run(asyncpg.connect('postgresql://bot:password@postgres:5432/artflow'))
-print('OK')
-"
+asyncio.run(main())
+PY
+```
+
+Если PostgreSQL остановлен, поднять его:
+
+```bash
+cd /root/mkdir/lena_bot/artflow
+docker compose up -d postgres
+docker compose up -d --force-recreate app
 ```
