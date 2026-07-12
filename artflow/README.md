@@ -358,15 +358,33 @@ REFERRAL_L2_CREDITS=10
 ### Продакшн (Docker Compose)
 
 ```bash
-cp .env.example .env   # заполнить переменные
+cd /root/mkdir/lena_bot/artflow
+cp .env.example .env   # заполнить переменные при первом деплое
 docker compose up -d
 
 # Применить миграции
 docker compose exec app alembic upgrade head
 
 # Собрать фронтенд
-cd webapp && npm ci && npm run build
+cd webapp
+npm ci
+npm run build
 ```
+
+Production serves the Mini App from `webapp/dist` through the Docker Compose
+`app` and `nginx` containers. After frontend changes, rebuild `webapp/dist` and
+restart the app container:
+
+```bash
+cd /root/mkdir/lena_bot/artflow
+docker run --rm -v "$PWD:/workspace" -w /workspace/webapp node:22-alpine sh -lc "npm ci && npm run build"
+docker compose restart app
+curl -I https://apix.chillcreative.ru/app
+curl https://apix.chillcreative.ru/api/v1/health
+```
+
+CI runs backend quality checks and the frontend build on `main`, `master`,
+`develop`, and `miniapp-mvp`, and on pull requests.
 
 ### Локальная разработка (polling)
 

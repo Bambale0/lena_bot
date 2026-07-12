@@ -1,22 +1,36 @@
 # Telegram Mini App Deploy
 
-Build frontend:
+Production runs from:
 
 ```bash
-cd /root/lena/lena_bot/artflow
-cd webapp
-npm install
-npm run build
-cd ..
+/root/mkdir/lena_bot/artflow
 ```
 
-The built `webapp/dist` directory is committed, so a plain `git pull` also
-keeps `/app` available. Rebuild it after frontend changes.
+CI builds the Mini App frontend on `main`, `master`, `develop`, and
+`miniapp-mvp`, and on every pull request. The webapp job uses Node.js 22,
+`npm ci`, and `npm run build` from `webapp/`.
 
-Restart webhook service:
+Build frontend after pulling frontend or CI changes:
 
 ```bash
-systemctl restart artflow-webhook
+cd /root/mkdir/lena_bot/artflow/webapp
+npm ci
+npm run build
+```
+
+The production host does not require Node.js to be installed globally. If
+`npm` is not available on the host, build with the Node container instead:
+
+```bash
+cd /root/mkdir/lena_bot/artflow
+docker run --rm -v "$PWD:/workspace" -w /workspace/webapp node:22-alpine sh -lc "npm ci && npm run build"
+```
+
+Restart the production app container:
+
+```bash
+cd /root/mkdir/lena_bot/artflow
+docker compose restart app
 ```
 
 Check production:
@@ -24,9 +38,11 @@ Check production:
 ```bash
 curl -I https://apix.chillcreative.ru/app
 curl https://apix.chillcreative.ru/api/v1/health
+docker compose ps
 ```
 
-Outside Telegram the app opens with demo data. Real `/api/v1/*` mini-app endpoints require valid Telegram WebApp `initData`.
+Outside Telegram the app opens with demo data. Real `/api/v1/*` Mini App
+endpoints require valid Telegram WebApp `initData`.
 
 ## Shared bot data
 
