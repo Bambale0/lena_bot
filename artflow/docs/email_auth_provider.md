@@ -54,7 +54,7 @@ SMTP_USE_SSL=false
 2. Set SPF / DKIM / optional DMARC
 3. Put real Resend credentials into `.env`
 4. Set `WEB_AUTH_EMAIL_ENABLED=true`
-5. Restart `artflow-webhook.service`
+5. Restart with `docker compose up -d --force-recreate app`
 6. Smoke test `POST /api/web/auth/contact/request`
 
 ## Expected smoke result

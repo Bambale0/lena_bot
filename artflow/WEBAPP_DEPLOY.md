@@ -6,8 +6,7 @@ Production runs from:
 /root/mkdir/lena_bot/artflow
 ```
 
-CI builds the Mini App frontend on `main`, `master`, `develop`, and
-`miniapp-mvp`, and on every pull request. The webapp job uses Node.js 22,
+CI builds the Mini App frontend on `main` and on every pull request. The webapp job uses Node.js 22,
 `npm ci`, and `npm run build` from `webapp/`.
 
 Build frontend after pulling frontend or CI changes:
@@ -36,8 +35,8 @@ docker compose restart app
 Check production:
 
 ```bash
-curl -I https://apix.chillcreative.ru/app
-curl https://apix.chillcreative.ru/api/v1/health
+curl -I https://apixbotai.com/app
+curl https://apixbotai.com/api/v1/health
 docker compose ps
 ```
 

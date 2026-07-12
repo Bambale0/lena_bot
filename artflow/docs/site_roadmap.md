@@ -2,7 +2,7 @@
 
 Дата: 2026-05-16
 
-Документ описывает roadmap standalone-сайта APIX на `apix.chillcreative.ru`.
+Документ описывает roadmap standalone-сайта APIX на `apixbotai.com`.
 Фокус: публичная витрина и web-студия в `landing/`, web API в `api/web/`,
 shared generation API в `/api/v1/*`.
 

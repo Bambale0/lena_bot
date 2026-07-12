@@ -1,7 +1,7 @@
 # APIX Prompt Riot Zine — Полная продуктовая спецификация
 
 Дата: 2026-05-16  
-Проект: APIX standalone site на `apix.chillcreative.ru`  
+Проект: APIX standalone site на `apixbotai.com`  
 Зона разработки: `landing/`, `api/web/`, совместимые расширения `/api/v1/*`  
 Стиль: Prompt Riot Zine
 

@@ -1,6 +1,6 @@
 # Mini-App API — Эндпоинты генерации
 
-Base URL: `https://apix.chillcreative.ru/api/v1`
+Base URL: `https://apixbotai.com/api/v1`
 
 ## Авторизация
 
@@ -143,7 +143,7 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 {
   "id": 1001,
   "status": "done",
-  "result_url": "https://apix.chillcreative.ru/static/upload/abc123.jpg",
+  "result_url": "https://apixbotai.com/static/upload/abc123.jpg",
   "credits_spent": 2,
   ...
 }

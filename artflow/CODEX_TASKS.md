@@ -4,8 +4,8 @@
 
 Репозиторий: `Bambale0/lena_bot`
 Рабочая папка проекта: `artflow/`
-Продовый домен: `https://apix.chillcreative.ru`
-Nginx уже поднят и проксирует backend на порт `7777`.
+Продовый домен: `https://apixbotai.com`
+Nginx уже поднят и проксирует backend в Docker Compose service `app` на порт `8000`.
 Telegram bot работает через webhook, не через polling.
 
 Важно: mini app и kanban сюда не относятся. Их не трогать.
@@ -125,7 +125,7 @@ def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
 4. выбрать параметры
 5. отправить prompt
 6. бот должен написать: задача запущена, результат придёт автоматически
-7. KIE должен вызвать `https://apix.chillcreative.ru/webhook/kie`
+7. KIE должен вызвать `https://apixbotai.com/webhook/kie`
 8. бот должен отправить фото пользователю с кнопками активной серии
 
 ---
@@ -161,7 +161,7 @@ callback_url = f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}"
 
 ```json
 {
-  "callBackUrl": "https://apix.chillcreative.ru/webhook/kie"
+  "callBackUrl": "https://apixbotai.com/webhook/kie"
 }
 ```
 
@@ -482,14 +482,14 @@ alembic upgrade head
 ### Service restart
 
 ```bash
-systemctl restart artflow-webhook
-journalctl -u artflow-webhook -f
+docker compose up -d --force-recreate app
+docker compose logs -f app
 ```
 
 ### Health check
 
 ```bash
-curl -i https://apix.chillcreative.ru/health
+curl -i https://apixbotai.com/api/v1/health
 ```
 
 Ожидаемо:
@@ -503,7 +503,7 @@ curl -i https://apix.chillcreative.ru/health
 Этот запрос должен вернуть `200` и `{"ok":true}`. В логах допустим warning `unknown task_id=test`, это нормально.
 
 ```bash
-curl -i -X POST "https://apix.chillcreative.ru/webhook/kie" \
+curl -i -X POST "https://apixbotai.com/webhook/kie" \
   -H "Content-Type: application/json" \
   -d '{"taskId":"test","code":200,"data":{"resultUrls":["https://example.com/test.jpg"]}}'
 ```
@@ -511,7 +511,7 @@ curl -i -X POST "https://apix.chillcreative.ru/webhook/kie" \
 Если используется `KIE_WEBHOOK_SECRET`, тестировать так:
 
 ```bash
-curl -i -X POST "https://apix.chillcreative.ru/webhook/kie?secret=$KIE_WEBHOOK_SECRET" \
+curl -i -X POST "https://apixbotai.com/webhook/kie?secret=$KIE_WEBHOOK_SECRET" \
   -H "Content-Type: application/json" \
   -d '{"taskId":"test","code":200,"data":{"resultUrls":["https://example.com/test.jpg"]}}'
 ```

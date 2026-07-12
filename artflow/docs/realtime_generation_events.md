@@ -30,7 +30,7 @@ The URL itself intentionally has no token/query parameters, so reverse proxy
 access logs cannot leak auth data:
 
 ```text
-wss://apix.chillcreative.ru/api/v1/ws/generations
+wss://apixbotai.com/api/v1/ws/generations
 ```
 
 ## Messages
@@ -98,7 +98,7 @@ proxy_set_header Connection "upgrade";
 proxy_read_timeout 3600s;
 ```
 
-The production nginx template in `deploy/apix.chillcreative.ru.nginx.conf`
+The production nginx template in `deploy/nginx-apixbotai.com.conf`
 contains a dedicated `/api/v1/ws/` location with these headers. It also strips
 legacy query strings before proxying to uvicorn, while forwarding old `token`
 or `init_data` values through internal headers for already-open stale clients.

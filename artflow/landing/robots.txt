@@ -4,4 +4,4 @@ Disallow: /api/
 Disallow: /app/
 Disallow: /static/upload/
 
-Sitemap: https://apix.chillcreative.ru/sitemap.xml
+Sitemap: https://apixbotai.com/sitemap.xml

@@ -379,12 +379,11 @@ restart the app container:
 cd /root/mkdir/lena_bot/artflow
 docker run --rm -v "$PWD:/workspace" -w /workspace/webapp node:22-alpine sh -lc "npm ci && npm run build"
 docker compose restart app
-curl -I https://apix.chillcreative.ru/app
-curl https://apix.chillcreative.ru/api/v1/health
+curl -I https://apixbotai.com/app
+curl https://apixbotai.com/api/v1/health
 ```
 
-CI runs backend quality checks and the frontend build on `main`, `master`,
-`develop`, and `miniapp-mvp`, and on pull requests.
+CI runs backend quality checks and the frontend build on `main` and on pull requests.
 
 ### Локальная разработка (polling)
 
