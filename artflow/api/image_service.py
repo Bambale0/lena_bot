@@ -89,99 +89,6 @@ _KIE_UPLOAD_REFERENCE_MODELS = {
     ImageModel.QWEN2_EDIT.value,
 }
 
-_PROMPT_MAX_LENGTH_BY_MODEL: dict[str, int] = {
-    ImageModel.SEEDREAM_5_PRO_T2I.value: 3000,
-    ImageModel.SEEDREAM_5_PRO_I2I.value: 3000,
-    ImageModel.SEEDREAM_45.value: 3000,
-    ImageModel.SEEDREAM_45_EDIT.value: 3000,
-    ImageModel.QWEN_EDIT.value: 2000,
-}
-
-
-_REFERENCE_LOCK_MODELS: set[str] = {
-    ImageModel.NANO_BANANA.value,
-    ImageModel.NANO_BANANA_2.value,
-    ImageModel.NANO_BANANA_2_LITE.value,
-    ImageModel.NANO_BANANA_PRO.value,
-    ImageModel.GROK_I2I.value,
-    ImageModel.QWEN_I2I.value,
-    ImageModel.QWEN_EDIT.value,
-    ImageModel.QWEN2_EDIT.value,
-    ImageModel.GPT_IMAGE_2_I2I.value,
-}
-
-_PROMPT_FIRST_REFERENCE_LOCK_MODELS: set[str] = {
-    ImageModel.QWEN_I2I.value,
-    ImageModel.QWEN_EDIT.value,
-    ImageModel.QWEN2_EDIT.value,
-}
-
-_REFERENCE_FLEX_MODELS: set[str] = {
-    ImageModel.SEEDREAM_5_PRO_I2I.value,
-    ImageModel.SEEDREAM_45_EDIT.value,
-    ImageModel.WAN_27.value,
-    ImageModel.WAN_27_PRO.value,
-}
-
-_REFERENCE_LOCK_PREFIX = (
-    "PROMPT-DIRECTED REFERENCE TRANSFORMATION. HIGHEST PRIORITY.\n\n"
-    "Use the reference image(s) to keep the same recognizable person, not to freeze the whole source photo.\n"
-    "The user's prompt is the primary instruction for visible changes. Preserve identity and unmentioned details, but do not preserve reference details that conflict with the prompt.\n\n"
-    "Preserve unless explicitly changed:\n"
-    "- recognizable face identity, facial proportions, age impression, and natural skin tone\n"
-    "- body proportions, hands, clothing, garment cut, accessories, styling, coverage level, background, and lighting only when the prompt does not ask to change them\n\n"
-    "When requested by the prompt, actively change and prioritize:\n"
-    "- hairstyle, hair length, volume, texture, waves or curls, hair color, and hair placement\n"
-    "- makeup, lashes, brows, lips, skin finish, retouching, glowing skin, beauty lighting, and glamour styling\n"
-    "- pose, head tilt, body angle, gesture, expression, camera angle, framing, crop, and composition\n"
-    "- outfit, accessories, background, scene, mood, realism level, editorial/fashion/beauty style, and lighting setup\n\n"
-    "If the prompt asks for long voluminous hair, wavy hair, smooth glowing retouched skin, makeup, a glamorous/editorial look, or the head tilted to the side, apply it even if the reference shows different hair, a plain realistic texture, or a straight-on pose.\n"
-    "Preserve the referenced outfit, garment cut, accessories, styling, and coverage level unless the user explicitly asks to change outfit or coverage. Do not add extra clothing or make the look more covered on your own.\n"
-    "Do not replace the person with a different person. Keep the likeness believable while following the requested transformation."
-)
-
-_REFERENCE_LOCK_PROMPT_FIRST_SUFFIX = (
-    "PROMPT-DIRECTED REFERENCE EDITING. Keep the same recognizable person and preserve unmentioned details. "
-    "Preserve the referenced outfit, garment cut, accessories, styling, and coverage level unless the user explicitly asks to change them. Do not add extra clothing or increase coverage on your own. "
-    "The user instruction is the primary edit request: if it asks to change hairstyle, hair length, hair texture, hair color, makeup, skin finish, retouching, outfit, pose, head tilt, expression, background, lighting, framing, or glamour/editorial styling, apply that change even when the reference differs. "
-    "Do not replace the person with a different person."
-)
-
-_REFERENCE_FLEX_PREFIX = (
-    "REFERENCE IDENTITY PRESERVATION WITH TRANSFORMATION. HIGH PRIORITY.\n\n"
-    "Keep the same person from the reference with recognizable face identity, natural skin tone, and overall likeness.\n"
-    "But still follow the user's prompt as the main transformation instruction for pose, framing, composition, camera angle, expression, action, background, styling, outfit, and scene details.\n\n"
-    "Important rules:\n"
-    "- preserve identity, not the exact original photo composition\n"
-    "- do not simply recreate the same pose, same hair, same skin texture, or same framing unless the prompt asks for it\n"
-    "- allow clear changes in body position, gesture, camera distance, and scene layout\n"
-    "- if the prompt asks for makeup, retouched/glowing skin, longer or wavy hair, beauty lighting, or a glamorous/editorial finish, apply those style changes\n"
-    "- if the prompt requests a new setting, mood, clothing, or action, apply it while keeping the same person recognizable\n"
-    "- use the reference background only when the prompt explicitly asks to keep or preserve it\n"
-    "- if the prompt asks for a new background, scene, location, mood, or set design, replace the reference background completely\n"
-    "- do not carry over reference background artifacts, clutter, text, books, wall decor, glitches, or props unless requested\n"
-    "- prioritize the requested scene and composition over the original reference environment\n"
-    "- avoid background-only edits; perform the actual transformation requested in the prompt\n"
-    "- keep the face believable and consistent, but do not freeze the full image"
-)
-
-_MULTI_REFERENCE_FLEX_PREFIX = (
-    "MULTI-REFERENCE IDENTITY AND DETAIL CONTROL. HIGHEST PRIORITY.\n\n"
-    "Use the first reference image as the primary identity source for the main person: face, head shape, natural skin tone, body proportions, and likeness.\n"
-    "Use the additional reference images only for the details requested by the user, such as clothing, lingerie, accessories, fabric, color, pattern, object design, scene, or style.\n\n"
-    "Important rules:\n"
-    "- do not replace the first person's face with a face from any later reference\n"
-    "- do not copy another person's identity, body, expression, age, or facial features from clothing or style references\n"
-    "- do not lock the first reference hairstyle, skin texture, pose, or framing when the prompt asks to change them\n"
-    "- if the prompt asks for makeup, retouched/glowing skin, longer or wavy hair, beauty lighting, or a glamorous/editorial finish, apply those style changes\n"
-    "- if a later reference shows a garment on another person, transfer only the garment design, fabric, fit, color, and visible construction\n"
-    "- keep the first reference background only when the user explicitly asks to preserve it\n"
-    "- if the prompt asks for a new background, scene, location, mood, or set design, remove old reference background clutter, glitches, books, wall decor, and props\n"
-    "- use additional references as background or scene sources only when the prompt specifically asks for that\n"
-    "- preserve the main person's recognizable identity while applying the requested visual details from the other references\n"
-    "- if references conflict, identity from the first reference wins; requested outfit/product/style details from later references come second"
-)
-
 # Aspect ratio options per model
 MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.SEEDREAM_5_PRO_T2I: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"],
@@ -212,52 +119,6 @@ class ImageResult:
     result_urls: list[str] = field(default_factory=list)
     image_bytes: bytes | None = None
     mime_type: str = "image/png"
-
-
-def _apply_reference_detail_preservation(
-    model: ImageModel | str,
-    prompt: str,
-    image_url: str | list[str] | None,
-) -> str:
-    if not image_url:
-        return prompt
-    model_key = model.value if isinstance(model, ImageModel) else str(model)
-    if any(marker in prompt for marker in (
-        "STRICT REFERENCE ADHERENCE",
-        "STRICT IDENTITY AND DETAIL PRESERVATION",
-        "STRICT REFERENCE PRESERVATION",
-        "PROMPT-DIRECTED REFERENCE TRANSFORMATION",
-        "PROMPT-DIRECTED REFERENCE EDITING",
-        "REFERENCE IDENTITY PRESERVATION WITH TRANSFORMATION",
-        "MULTI-REFERENCE IDENTITY AND DETAIL CONTROL",
-    )):
-        return prompt
-    reference_count = len(_reference_list(image_url))
-    if model_key in _REFERENCE_FLEX_MODELS and reference_count > 1:
-        return _MULTI_REFERENCE_FLEX_PREFIX + "\n\n" + prompt.strip()
-    if model_key in _REFERENCE_FLEX_MODELS:
-        return _REFERENCE_FLEX_PREFIX + "\n\n" + prompt.strip()
-    if model_key in _PROMPT_FIRST_REFERENCE_LOCK_MODELS:
-        return prompt.strip() + "\n\n" + _REFERENCE_LOCK_PROMPT_FIRST_SUFFIX
-    if model_key in _REFERENCE_LOCK_MODELS:
-        return _REFERENCE_LOCK_PREFIX + "\n\n" + prompt.strip()
-    return prompt
-
-
-def _normalize_prompt_for_model(model: ImageModel | str, prompt: str) -> str:
-    model_key = model.value if isinstance(model, ImageModel) else str(model)
-    max_length = _PROMPT_MAX_LENGTH_BY_MODEL.get(model_key)
-    if not max_length or len(prompt) <= max_length:
-        return prompt
-
-    trimmed = prompt[:max_length].rstrip()
-    logger.warning(
-        "Truncating prompt for %s from %s to %s chars to satisfy provider limit",
-        model_key,
-        len(prompt),
-        len(trimmed),
-    )
-    return trimmed
 
 
 def normalize_quality_for_aspect_ratio(
@@ -474,12 +335,9 @@ def _build_input(
         elif isinstance(image_url, list):
             prepared_reference_urls = [ensure_provider_safe_png_url(url) or url for url in image_url]
 
-    prompt_with_reference_lock = _apply_reference_detail_preservation(resolved_for_validation, prompt, prepared_reference_urls)
-    normalized_prompt = _normalize_prompt_for_model(resolved_for_validation, prompt_with_reference_lock)
-
     return build_kie_input(
         model=model.value,
-        prompt=normalized_prompt,
+        prompt=prompt,
         reference_urls=prepared_reference_urls,
         params={
             "aspect_ratio": ratio_value,

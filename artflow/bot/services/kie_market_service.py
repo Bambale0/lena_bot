@@ -19,10 +19,9 @@ import hashlib
 import hmac
 import json
 import logging
-from typing import Any
 from pathlib import Path
+from typing import Any
 
-import aiohttp
 import httpx
 
 from core.config import settings
@@ -139,7 +138,7 @@ def _maybe_alert_credit_issue(source: str, payload: Any) -> None:
     if any(marker in message for marker in markers):
         try:
             from core.admin_alerts import send_admin_alert_once
-            import asyncio
+
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(
@@ -189,7 +188,7 @@ async def create_task(
         "model": model,
         "callBackUrl": callback_url or settings.KIE_WEBHOOK_PATH,
         "input": {
-            "prompt": prompt.strip(),
+            "prompt": prompt,
             "image_urls": image_urls or [],
             "aspect_ratio": aspect_ratio,
         },
@@ -588,7 +587,7 @@ def build_create_task_payload(
     payload: dict[str, Any] = {
         "model": model,
         "input": {
-            "prompt": prompt.strip(),
+            "prompt": prompt,
             "image_urls": image_urls or [],
             "aspect_ratio": aspect_ratio,
         },

@@ -1814,12 +1814,6 @@ function Studio({
         </SettingsRow>
       )}
 
-      <div className="studioActions">
-        <button className="secondaryBtn" disabled={!prompt.trim() || improvingPrompt || isRemix || !requiresPrompt} onClick={handleImprovePrompt}>
-          {improvingPrompt ? "⏳ Улучшаю..." : "✨ Улучшить промпт"}
-        </button>
-      </div>
-
       <button
         className="primary studioGenerate"
         disabled={!current || (!isRemix && requiresPrompt && !prompt.trim()) || (styleEditOpen && !styleEditReady) || (requiresReference && !normalizedRefUrl) || !hasValidRefUrl}
@@ -2151,9 +2145,6 @@ function Music({ user, musicGen, musicModels = [], onGenerateMusic, setTopup, on
       </SettingsRow>
 
       <div style={{ display: "grid", gap: 10, marginBottom: 10 }}>
-        <button className="ghost" onClick={handleImprovePrompt} disabled={!prompt.trim() || improvingPrompt}>
-          {improvingPrompt ? "⏳ Улучшаю описание..." : "✨ Улучшить описание трека"}
-        </button>
         <div style={{ fontSize: 12, color: "var(--text-ghost)" }}>
           💡 Промпт лучше писать на английском. Генерация занимает ~1–2 мин.
         </div>

@@ -272,7 +272,7 @@ async def test_image_service_uses_comet_fallback_after_kie_create_error(monkeypa
     assert result.result_urls == ["https://cdn.example.test/image.jpg"]
     assert comet_calls[0]["reference_urls"] == ["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"]
     assert comet_calls[0]["resolution"] == "2K"
-    assert "MULTI-REFERENCE IDENTITY AND DETAIL CONTROL" in comet_calls[0]["prompt"]
+    assert comet_calls[0]["prompt"] == "new editorial look"
 
 
 @pytest.mark.asyncio

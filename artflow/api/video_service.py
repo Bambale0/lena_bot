@@ -461,7 +461,7 @@ async def _veo_generate(
         "prompt": prompt,
         "model": model.value,
         "aspect_ratio": aspect_ratio or "16:9",
-        "enableTranslation": True,
+        "enableTranslation": False,
         "enableFallback": enable_fallback,
     }
     if resolution:

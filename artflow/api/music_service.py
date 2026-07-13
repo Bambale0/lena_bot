@@ -359,7 +359,6 @@ def build_music_generation_payload(
     title: str | None = None,
     voice_id: str | None = None,
 ) -> dict[str, Any]:
-    clean_prompt = prompt.strip()
     clean_style = (style or "").strip()
     clean_title = (title or "").strip()
     clean_voice_id = (voice_id or "").strip()
@@ -372,11 +371,11 @@ def build_music_generation_payload(
             raise ValueError("Music style is required in custom mode")
         if not clean_title:
             raise ValueError("Track title is required in custom mode")
-    elif len(clean_prompt) > 500:
+    elif len(prompt) > 500:
         raise ValueError("Non-custom Suno prompts are limited to 500 characters")
 
     body = {
-        "prompt": clean_prompt,
+        "prompt": prompt,
         "customMode": custom_mode,
         "instrumental": instrumental,
         "model": normalize_music_model(model_key),

@@ -1090,7 +1090,7 @@ def get_image_capabilities(model_key: str) -> dict:
     caps.setdefault("counts", [1])
     caps.setdefault("has_quality", bool(caps.get("quality_options")))
     caps.setdefault("supports_reference", "image" in caps.get("modes", []) or bool(caps.get("max_refs")))
-    caps.setdefault("supports_prompt_enhance", True)
+    caps.setdefault("supports_prompt_enhance", False)
     return caps
 
 
@@ -1141,9 +1141,6 @@ def image_dynamic_settings_kb(model_key: str, mode: str | None = None) -> Inline
 
     if "count" in settings:
         builder.button(text="🔢 Варианты", callback_data=f"img_dyn:count:{model_key}")
-
-    if "prompt_enhance" in settings:
-        builder.button(text="✨ Улучшить промпт", callback_data=f"img_dyn:enhance:{model_key}")
 
     builder.button(text="✅ Продолжить", callback_data=f"img_dyn:continue:{model_key}")
     builder.button(text="← Назад", callback_data="img_menu:advanced")

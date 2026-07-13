@@ -394,24 +394,15 @@ def _kie_callback_url() -> str:
 
 
 def _improve_image_prompt(prompt: str) -> str:
-    return (
-        f"{prompt}. Premium detailed image, cinematic composition, soft realistic light, "
-        f"clean background, sharp focus, high detail, balanced colors, professional visual style."
-    )
+    return prompt
 
 
 def _improve_video_prompt(prompt: str) -> str:
-    return (
-        f"{prompt}. Cinematic video scene, clear subject action, smooth camera movement, "
-        f"natural motion, expressive lighting, detailed environment, high quality, coherent sequence."
-    )
+    return prompt
 
 
 def _improve_music_prompt(prompt: str) -> str:
-    return (
-        f"{prompt}. Original music track, clear genre, mood and tempo, memorable melody, "
-        f"rich arrangement, polished production, expressive atmosphere, studio quality, coherent structure."
-    )
+    return prompt
 
 
 async def _reconcile_generation_status(session: AsyncSession, gen):
@@ -1514,8 +1505,8 @@ async def miniapp_improve_prompt(
     body: PromptImproveRequest,
     user: User = Depends(get_miniapp_user),
 ):
-    """Lightweight prompt improver for miniapp studio."""
-    prompt = body.prompt.strip()
+    """Return prompt unchanged; generation payloads must use user text verbatim."""
+    prompt = body.prompt
     kind = body.kind
 
     if kind == "video":
@@ -1719,7 +1710,7 @@ async def create_image_generation(
     Poll `GET /api/v1/generations/{id}` until `status` is `done` or `failed`.
     """
     all_refs = _normalize_public_urls(body.reference_url, *body.reference_urls)
-    effective_prompt = body.prompt.strip()
+    user_prompt = body.prompt
     prompt_source = None
     if body.prompt_id is not None:
         from db.prompt_repository import get_prompt_by_id
@@ -1727,7 +1718,6 @@ async def create_image_generation(
         prompt_source = await get_prompt_by_id(session, body.prompt_id)
         if not _is_prompt_public_approved(prompt_source):
             raise HTTPException(status_code=404, detail="Prompt not found or not public")
-        effective_prompt = prompt_source.prompt_text.strip()
 
     if body.model in _MJ_STUDIO_IMAGE_MODELS:
         caps: dict[str, Any] = _MJ_IMAGE_CAPS.get(body.model, {})
@@ -1740,7 +1730,7 @@ async def create_image_generation(
             raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
         if body.model == "midjourney-blend" and len(all_refs) < 2:
             raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
-        if body.model == "midjourney-imagine" and not effective_prompt:
+        if body.model == "midjourney-imagine" and not user_prompt:
             raise HTTPException(status_code=422, detail="Prompt is required")
         if user.credits < model_cost.credits:
             raise HTTPException(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}")
@@ -1751,13 +1741,12 @@ async def create_image_generation(
         ok = await repo.spend_credits(session, user.id, model_cost.credits)
         if not ok:
             raise HTTPException(status_code=402, detail="Failed to spend credits")
-        gen_prompt = effective_prompt or f"blend:{len(all_refs)}"
+        gen_prompt = user_prompt or f"blend:{len(all_refs)}"
         image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None, reference_urls=all_refs)
         gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, model_cost.credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial)
         try:
             if body.model == "midjourney-imagine":
-                submitted_prompt = f"{all_refs[0]} {effective_prompt}".strip() if all_refs else effective_prompt
-                task_id = await midjourney_service.imagine(submitted_prompt, reference_url=all_refs[0] if all_refs else None)
+                task_id = await midjourney_service.imagine(user_prompt, reference_url=all_refs[0] if all_refs else None)
             else:
                 blend_images = [await _data_uri_from_url(url) for url in all_refs]
                 task_id = await midjourney_service.blend(blend_images, dimensions=MJDimensions(_MJ_BLEND_DIMENSIONS.get(normalized_ratio or "1:1", "SQUARE")))
@@ -1824,7 +1813,7 @@ async def create_image_generation(
         aspect_ratio=normalized_ratio,
         quality=normalized_quality,
         count=body.count,
-        base_prompt=effective_prompt,
+        base_prompt=user_prompt,
         reference_file_id=None,
         reference_url=all_refs[0] if all_refs else None,
         reference_urls=all_refs,
@@ -1832,7 +1821,7 @@ async def create_image_generation(
 
     gen = await repo.create_generation(
         session, user.id, body.model, GenerationType.image,
-        effective_prompt, model_cost.credits,
+        user_prompt, model_cost.credits,
         image_session_id=image_session.id,
         action_type=ImageGenerationAction.initial,
     )
@@ -1846,7 +1835,7 @@ async def create_image_generation(
     try:
         result = await image_service.generate_image(
             model,
-            effective_prompt,
+            user_prompt,
             image_url=ref_urls,
             aspect_ratio=normalized_ratio,
             n=body.count,
@@ -1863,7 +1852,7 @@ async def create_image_generation(
         gen = await _finish_direct_image_result(session, gen, result, surface=surface)
     else:
         await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
-    await repo.update_image_session_last_prompt(session, image_session.id, effective_prompt)
+    await repo.update_image_session_last_prompt(session, image_session.id, user_prompt)
     await _mark_prompt_used_after_generation(
         session,
         prompt_id=getattr(prompt_source, "id", None),
@@ -1907,7 +1896,7 @@ async def create_video_generation(
         ok = await repo.spend_credits(session, user.id, model_cost.credits)
         if not ok:
             raise HTTPException(status_code=402, detail="Failed to spend credits")
-        prompt = body.prompt.strip()
+        prompt = body.prompt
         gen = await repo.create_generation(session, user.id, body.model, GenerationType.video, prompt or "mj-video", model_cost.credits)
         try:
             task_id = await midjourney_service.submit_video(image=image_urls[0], motion=MJVideoMotion(motion_value), prompt=prompt)

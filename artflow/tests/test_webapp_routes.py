@@ -1159,7 +1159,7 @@ async def test_generate_image_passes_multiple_reference_urls(client, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_generate_image_from_prompt_library_uses_saved_prompt_and_rewards(client, monkeypatch) -> None:
+async def test_generate_image_from_prompt_library_keeps_user_prompt_and_rewards(client, monkeypatch) -> None:
     from db.models import PromptCategory, PromptStatus
 
     prompt = SimpleNamespace(
@@ -1188,7 +1188,7 @@ async def test_generate_image_from_prompt_library_uses_saved_prompt_and_rewards(
     image_generate = AsyncMock(return_value=SimpleNamespace(task_id="img_task_prompt"))
 
     async def fake_create_generation(_session, _user_id, model, gen_type, prompt_text, credits_spent, **_kwargs):
-        assert prompt_text == "library prompt text"
+        assert prompt_text == "user-visible prompt"
         return SimpleNamespace(
             id=503,
             model=model,
@@ -1223,8 +1223,8 @@ async def test_generate_image_from_prompt_library_uses_saved_prompt_and_rewards(
     )
 
     assert response.status_code == 202
-    assert response.json()["prompt"] == "library prompt text"
-    assert image_generate.await_args.args[1] == "library prompt text"
+    assert response.json()["prompt"] == "user-visible prompt"
+    assert image_generate.await_args.args[1] == "user-visible prompt"
     use_prompt.assert_awaited_once()
     assert use_prompt.await_args.args[1:] == (44, 1)
     assert use_prompt.await_args.kwargs["credits_spent"] == 4
@@ -2165,13 +2165,11 @@ async def test_topup_stars_reuses_pending_transaction(client, monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_prompt_improve_music_uses_music_template(client) -> None:
+async def test_prompt_improve_returns_prompt_unchanged(client) -> None:
     response = await client.post("/api/v1/prompt/improve", json={"kind": "music", "prompt": "lofi rain"})
 
     assert response.status_code == 200
-    improved = response.json()["prompt"]
-    assert "Original music track" in improved
-    assert "Premium detailed image" not in improved
+    assert response.json()["prompt"] == "lofi rain"
 
 
 
