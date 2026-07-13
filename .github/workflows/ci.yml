@@ -83,6 +83,11 @@ jobs:
             cd /root/mkdir/lena_bot
             git fetch --all
             git pull --ff-only origin main
+            docker run --rm \
+              -v "$PWD/artflow/webapp:/app" \
+              -w /app \
+              node:22-alpine \
+              sh -lc "npm ci && npm run build"
             cd artflow
             docker compose up -d --build
             docker compose ps

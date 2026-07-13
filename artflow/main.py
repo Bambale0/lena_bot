@@ -725,7 +725,7 @@ class UploadStaticFiles(StaticFiles):
 async def miniapp_no_cache(request, call_next):
     response = await call_next(request)
     path = request.url.path
-    if path.startswith("/app/assets/"):
+    if path.startswith("/app/assets/") and response.status_code < 400:
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         if "Pragma" in response.headers:
             del response.headers["Pragma"]
@@ -780,6 +780,8 @@ if WEBAPP_DIST.exists():
         if dist_root in candidate.parents and candidate.is_file():
             return FileResponse(candidate)
         if dist_root not in candidate.parents:
+            raise HTTPException(status_code=404, detail="Not found")
+        if parts and parts[0] == "assets":
             raise HTTPException(status_code=404, detail="Not found")
         return FileResponse(WEBAPP_DIST / "index.html")
 else:

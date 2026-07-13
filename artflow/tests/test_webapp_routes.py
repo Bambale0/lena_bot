@@ -81,6 +81,15 @@ async def test_miniapp_rejects_sensitive_spa_fallback_paths() -> None:
 
 
 @pytest.mark.asyncio
+async def test_miniapp_missing_asset_does_not_fallback_to_index() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/app/assets/missing-build-file.js")
+
+    assert response.status_code == 404
+    assert "immutable" not in response.headers.get("cache-control", "")
+
+
+@pytest.mark.asyncio
 async def test_webapp_me_rejects_missing_init_data_without_override() -> None:
     app.dependency_overrides.clear()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
