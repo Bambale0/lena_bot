@@ -61,7 +61,7 @@ bot/
   i18n.py                     # ru/en тексты
 
 api/
-  image_service.py            # image generation facade: KIE primary, Comet fallback
+  image_service.py            # image generation facade: KIE/Comet routing and fallback
   video_service.py            # video generation facade: KIE/Veo primary, Comet fallback
   music_service.py            # KIE Suno music generation
   midjourney_service.py       # CometAPI Midjourney endpoints
@@ -336,8 +336,8 @@ return/send pending status
 Provider layer:
 
 - `ImageModel` enum - только поддерживаемые ключи.
-- `api/kie_model_specs.py` - source of truth для provider payload.
-- `api/image_service.py` - подготавливает refs, усиливает prompt для сохранения identity, отправляет в KIE, fallback в CometAPI.
+- `api/kie_model_specs.py` - source of truth для KIE-compatible provider payload.
+- `api/image_service.py` - подготавливает refs и выбирает provider: `nano-banana-2`/`nano-banana-pro` идут в CometAPI primary, остальные KIE image-модели идут в KIE.AI с CometAPI fallback при ошибке старта задачи.
 - local uploaded refs для некоторых моделей надо сначала загрузить/provider-friendly URL.
 
 ### 8.4 Video generation
@@ -661,7 +661,7 @@ The site talks to `/api/web/*`, not `/api/v1/*`.
 
 ### 12.1 KIE.AI
 
-KIE is the primary provider for many image/video/music tasks.
+KIE is the primary provider for many image/video/music tasks, but provider routing is per model. `nano-banana-2` and `nano-banana-pro` use CometAPI as the primary image provider; `nano-banana-2-lite` remains on the KIE/KIE Market path.
 
 Patterns:
 
@@ -683,7 +683,8 @@ Patterns:
 
 CometAPI is used for:
 
-- fallback image/video generation;
+- primary image generation for `nano-banana-2` and `nano-banana-pro`;
+- fallback image/video generation for supported KIE create/start failures;
 - assistant chat fallback;
 - Midjourney wrapper;
 - direct inline/base64 result persistence.

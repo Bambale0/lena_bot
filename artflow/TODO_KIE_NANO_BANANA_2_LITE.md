@@ -13,6 +13,8 @@
 - [x] 8. Add "🔥 NEW" badge to model display name in seed data
 - [x] 9. Add weekly promo button to main menu keyboard
 - [x] 10. Verify all changes are consistent
+- [x] 11. Route `nano-banana-2` and `nano-banana-pro` to CometAPI as primary provider (`f07627e`)
+- [x] 12. Update provider documentation after CometAPI routing change
 
 ## Files Modified
 
@@ -23,6 +25,12 @@
 5. **`bot/services/kie_market_service.py`** — New file: full KIE Market adapter
 6. **`db/seed.py`** — Added seed entry with 🔥 badge, 1.0 credit cost
 7. **`bot/keyboards/main_menu.py`** — Added weekly promo button for Nano Banana 2 Lite
+
+## Current Provider Status
+
+- `nano-banana-2-lite` remains on the KIE/KIE Market path.
+- `nano-banana-2` and `nano-banana-pro` use CometAPI as the primary provider.
+- Other KIE image models keep the existing KIE.AI primary + CometAPI fallback behavior where supported.
 
 ## New Service File
 

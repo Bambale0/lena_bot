@@ -98,13 +98,14 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 }
 ```
 
-**Поля `quality` для разных моделей:**
-| Модель | Значения |
-|--------|---------|
-| seedream/4.5-text-to-image | `basic` (2K), `high` (4K) |
-| nano-banana-pro | `2K`, `4K` |
-| nano-banana-2 | `2K`, `4K` |
-| остальные | `basic` |
+**Поля `quality` и provider route для разных моделей:**
+| Модель | Значения | Provider route |
+|--------|----------|----------------|
+| seedream/4.5-text-to-image | `basic` (2K), `high` (4K) | KIE.AI primary, CometAPI fallback при ошибке старта |
+| nano-banana-pro | `2K`, `4K` | CometAPI primary |
+| nano-banana-2 | `2K`, `4K` | CometAPI primary |
+| nano-banana-2-lite | `1K`, `2K` | KIE/KIE Market |
+| остальные | `basic` | по backend model routing |
 
 ---
 

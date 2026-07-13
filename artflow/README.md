@@ -47,7 +47,7 @@ artflow/
 │
 ├── api/
 │   ├── web/               # Standalone web API /api/web/* для сайта
-│   ├── image_service.py    # Интеграция с KIE.AI (изображения)
+│   ├── image_service.py    # Изображения: KIE.AI + CometAPI routing/fallback
 │   ├── video_service.py    # Интеграция с KIE.AI/CometAPI (видео)
 │   ├── music_service.py    # Интеграция с KIE.AI (музыка)
 │   ├── midjourney_service.py
@@ -154,7 +154,8 @@ artflow/
 | Seedream 4.5 | KIE.AI | 3 |
 | Grok Imagine T2I / I2I | KIE.AI | 3 |
 | WAN 2.7 Image Pro | KIE.AI | 5 |
-| Nano Banana / 2 / Pro | KIE.AI | 2–4 |
+| Nano Banana legacy / 2 Lite | KIE.AI / KIE Market | 1–2 |
+| Nano Banana 2 / Pro | CometAPI | 2–4 |
 | Midjourney (imagine/blend/describe) | CometAPI | 10–12 |
 
 ### Видео
@@ -226,10 +227,11 @@ artflow/
 Пользователь → выбирает модель → выбирает параметры (ratio, quality, count)
     → отправляет промпт (текст) или фото (референс)
     → бот списывает кредиты → создаёт Generation(status=pending)
-    → отправляет задачу в KIE.AI
-    → если KIE.AI не принял задачу, пробует CometAPI fallback
+    → выбирает provider в image_service.py
+      • nano-banana-2/pro → CometAPI primary
+      • остальные KIE image-модели → KIE.AI primary, CometAPI fallback при createTask error
     → сохраняет task_id, статус → processing
-    → KIE.AI или CometAPI вызывает /webhook/kie
+    → KIE.AI webhook или direct CometAPI result завершает генерацию
     → бот зеркалирует результат (mirror_url)
     → finish_generation(result_url)
     → отправляет фото пользователю с клавиатурой (remix / repeat / settings)

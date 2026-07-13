@@ -163,11 +163,13 @@ services/
 Для Mini App провайдеры должны идти так:
 
 ```text
-KIE.AI primary
-CometAPI fallback when KIE does not accept/start the task
+Per-model provider routing in api/image_service.py / api/video_service.py
+Image nano-banana-2 and nano-banana-pro: CometAPI primary
+Other KIE image/video models: KIE.AI primary
+CometAPI fallback only when supported KIE create/start fails
 ```
 
-Это правило должно быть зафиксировано в одном месте, например `services/generation_provider_policy.py`, и использоваться всеми поверхностями.
+Это правило должно быть зафиксировано в одном месте и использоваться всеми поверхностями. Сейчас image routing живёт в `api/image_service.py`, поэтому Mini App не должен дублировать provider-логику на фронте.
 
 Нельзя делать отдельную provider-логику в Mini App и отдельную в боте. Иначе пользователь увидит разные цены, статусы и ошибки для одной модели.
 

@@ -29,7 +29,8 @@ Telegram bot работает через webhook, не через polling.
 - PostgreSQL + SQLAlchemy async
 - Alembic
 - Redis используется для aiogram FSM
-- KIE.AI используется для image/video generation
+- KIE.AI используется для многих image/video generation моделей
+- `nano-banana-2` и `nano-banana-pro` используют CometAPI как primary provider
 - Telegram webhook endpoint: `settings.WEBHOOK_PATH`
 - KIE webhook endpoint должен быть: `settings.KIE_WEBHOOK_PATH`, по умолчанию `/webhook/kie`
 
@@ -54,7 +55,7 @@ payload["callBackUrl"] = callback_url
 
 Важно: KIE ожидает ключ `callBackUrl` с большой `B`.
 
-3. В `api/image_service.py` `generate_image()` должен принимать `callback_url` и передавать его в `kieai_client.create_task(...)`.
+3. В `api/image_service.py` `generate_image()` должен принимать `callback_url`. Для KIE image-моделей он передается в `kieai_client.create_task(...)`; `nano-banana-2` и `nano-banana-pro` идут в CometAPI primary и не вызывают KIE.
 
 4. В `main.py` должен быть endpoint:
 
@@ -145,7 +146,7 @@ def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
 
 Требования:
 
-1. При создании KIE-задачи для изображений обязательно передавать callback URL:
+1. При создании KIE-задачи для изображений обязательно передавать callback URL. Исключение: `nano-banana-2` и `nano-banana-pro`, потому что они маршрутизируются в CometAPI primary.
 
 ```python
 callback_url = f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}"
@@ -171,7 +172,7 @@ callback_url = f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}"
 
 5. После `createTask` сохранять `task_id` в `Generation.task_id`.
 
-6. Handler Telegram после createTask должен только сообщить пользователю, что задача запущена. Результат отправляет только KIE webhook.
+6. Handler Telegram после createTask должен только сообщить пользователю, что задача запущена. Для KIE-задач результат отправляет KIE webhook; для прямых CometAPI image results backend завершает generation без ожидания KIE webhook.
 
 ---
 
