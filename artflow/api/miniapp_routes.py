@@ -2580,7 +2580,7 @@ async def remix_feed_post(
             resolution=normalized_video["resolution"],
         )
     else:
-        image_refs = repeat_refs or user_refs or source_refs
+        image_refs = user_refs or repeat_refs or source_refs
         if image_refs:
             normalized_image_url = image_refs[0] if len(image_refs) == 1 else image_refs
         else:

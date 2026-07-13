@@ -1495,11 +1495,30 @@ def _own_or_empty_feed_source_clause(user_id: int):
 
 
 async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:
+    result = await session.execute(
+        update(Generation)
+        .where(
+            Generation.id == gen_id,
+            Generation.user_id == user_id,
+            Generation.status == GenerationStatus.done,
+            Generation.result_url.is_not(None),
+            _own_or_empty_feed_source_clause(user_id),
+        )
+        .values(
+            is_public_feed=True,
+        )
+        .returning(Generation.id)
+    )
+    updated_id = result.scalar_one_or_none()
+    await session.commit()
+    if not updated_id:
+        return None
+
     gen = await get_generation_by_id(session, gen_id)
     if not gen:
         return None
 
-    # Mirror external URLs to local storage so feed images don't expire
+    # Mirror external URLs to local storage so feed images don't expire.
     original_urls = [gen.result_url] if gen.result_url else []
     if gen.result_urls:
         try:
@@ -1512,31 +1531,20 @@ async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Gen
     clean_urls: list[str] = []
     for url in original_urls:
         mirrored = await mirror_url(url, subdir="feed")
-        if mirrored:
-            clean_urls.append(mirrored)
-        else:
-            clean_urls.append(url)
-    new_result_url = clean_urls[0] if clean_urls else (gen.result_url or "")
+        clean_urls.append(mirrored or url)
 
-    result = await session.execute(
-        update(Generation)
-        .where(
-            Generation.id == gen_id,
-            Generation.user_id == user_id,
-            Generation.status == GenerationStatus.done,
-            Generation.result_url.is_not(None),
-            _own_or_empty_feed_source_clause(user_id),
+    if clean_urls:
+        await session.execute(
+            update(Generation)
+            .where(Generation.id == updated_id)
+            .values(
+                result_url=clean_urls[0],
+                result_urls=json.dumps(clean_urls, ensure_ascii=False),
+            )
         )
-        .values(
-            is_public_feed=True,
-            result_url=new_result_url,
-            result_urls=json.dumps(clean_urls, ensure_ascii=False),
-        )
-        .returning(Generation.id)
-    )
-    updated_id = result.scalar_one_or_none()
-    await session.commit()
-    return await get_generation_by_id(session, gen_id) if updated_id else None
+        await session.commit()
+        gen = await get_generation_by_id(session, gen_id)
+    return gen
 
 
 async def remove_from_feed(session: AsyncSession, gen_id: int, user_id: int) -> Generation | None:

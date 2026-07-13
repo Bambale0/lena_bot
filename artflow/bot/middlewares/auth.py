@@ -268,7 +268,7 @@ class AuthMiddleware(BaseMiddleware):
             return  # Просто игнорируем забаненных
 
         # User has ref_code but already has a referrer — notify them
-        if ref_code and db_user and db_user.referrer_id and not db_user.is_banned:
+        if ref_code and db_user and getattr(db_user, "referrer_id", None) and not db_user.is_banned:
             if bot:
                 try:
                     await _notify_referral(
