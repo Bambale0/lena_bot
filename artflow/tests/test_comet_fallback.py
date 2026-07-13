@@ -276,11 +276,22 @@ async def test_image_service_uses_comet_fallback_after_kie_create_error(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_image_service_passes_nano_banana_params_to_comet_fallback(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("model", "expected_model_key"),
+    [
+        (ImageModel.NANO_BANANA_2, "nano-banana-2"),
+        (ImageModel.NANO_BANANA_PRO, "nano-banana-pro"),
+    ],
+)
+async def test_image_service_uses_comet_primary_for_nano_banana_models(
+    monkeypatch,
+    model: ImageModel,
+    expected_model_key: str,
+) -> None:
     comet_calls: list[dict] = []
 
     async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
-        raise RuntimeError("kie down")
+        raise AssertionError("nano-banana-2/pro must use CometAPI directly")
 
     async def fake_generate_image(**kwargs):
         comet_calls.append(kwargs)
@@ -290,7 +301,7 @@ async def test_image_service_passes_nano_banana_params_to_comet_fallback(monkeyp
     monkeypatch.setattr(image_service.comet_fallback, "generate_image", fake_generate_image)
 
     result = await image_service.generate_image(
-        ImageModel.NANO_BANANA_2,
+        model,
         "new editorial look",
         image_url=["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"],
         aspect_ratio="16:9",
@@ -300,7 +311,7 @@ async def test_image_service_passes_nano_banana_params_to_comet_fallback(monkeyp
 
     assert result.is_async is False
     assert result.url == "https://cdn.example.test/image.jpg"
-    assert comet_calls[0]["model_key"] == "nano-banana-2"
+    assert comet_calls[0]["model_key"] == expected_model_key
     assert comet_calls[0]["reference_urls"] == ["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"]
     assert comet_calls[0]["aspect_ratio"] == "16:9"
     assert comet_calls[0]["resolution"] == "4K"

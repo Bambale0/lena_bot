@@ -88,6 +88,10 @@ _KIE_UPLOAD_REFERENCE_MODELS = {
     ImageModel.QWEN_EDIT.value,
     ImageModel.QWEN2_EDIT.value,
 }
+_COMET_PRIMARY_IMAGE_MODELS = {
+    ImageModel.NANO_BANANA_2,
+    ImageModel.NANO_BANANA_PRO,
+}
 
 # Aspect ratio options per model
 MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
@@ -230,6 +234,31 @@ async def generate_image(
     except (TypeError, ValueError):
         comet_count = 1
 
+    async def generate_comet_result() -> ImageResult:
+        result = await comet_fallback.generate_image(
+            model_key=resolved_model,
+            prompt=str(inp.get("prompt") or prompt),
+            reference_urls=prepared_image_url,
+            aspect_ratio=comet_aspect_ratio,
+            count=comet_count,
+            resolution=comet_resolution,
+        )
+        if not result.urls:
+            raise RuntimeError(f"CometAPI image returned no result URLs for {resolved_model}")
+        return ImageResult(
+            is_async=False,
+            task_id=result.task_id,
+            url=result.urls[0],
+            result_urls=result.urls,
+        )
+
+    if model in _COMET_PRIMARY_IMAGE_MODELS:
+        logger.info("CometAPI primary image generation for %s", resolved_model)
+        try:
+            return await generate_comet_result()
+        except Exception as comet_exc:
+            raise RuntimeError(f"Image generation failed via CometAPI for {resolved_model}: {comet_exc}") from comet_exc
+
     try:
         resp = await kieai_client.create_task({"model": resolved_model, "input": inp}, callback_url=callback_url)
         if not isinstance(resp, dict):
@@ -258,26 +287,12 @@ async def generate_image(
             kie_exc,
         )
         try:
-            result = await comet_fallback.generate_image(
-                model_key=resolved_model,
-                prompt=str(inp.get("prompt") or prompt),
-                reference_urls=prepared_image_url,
-                aspect_ratio=comet_aspect_ratio,
-                count=comet_count,
-                resolution=comet_resolution,
-            )
+            return await generate_comet_result()
         except Exception as comet_exc:
             raise RuntimeError(
                 f"Image generation failed via KIE.AI and CometAPI fallback: "
                 f"KIE={kie_exc}; CometAPI={comet_exc}"
             ) from comet_exc
-
-        return ImageResult(
-            is_async=False,
-            task_id=result.task_id,
-            url=result.urls[0],
-            result_urls=result.urls,
-        )
 
 
 def _build_input(
