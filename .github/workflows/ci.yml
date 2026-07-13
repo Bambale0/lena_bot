@@ -85,6 +85,13 @@ jobs:
             git pull --ff-only origin main
             cd artflow
             docker compose up -d --build
-            sleep 3
             docker compose ps
-            curl -fsS https://apixbotai.com/api/v1/health
+            for i in $(seq 1 20); do
+              if curl -fsS https://apixbotai.com/api/v1/health; then
+                exit 0
+              fi
+              echo "Waiting for APIX healthcheck ($i/20)..."
+              sleep 3
+            done
+            docker compose logs --tail=120 app
+            exit 1
