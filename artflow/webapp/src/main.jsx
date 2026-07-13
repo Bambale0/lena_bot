@@ -4,6 +4,7 @@ import "./style.css";
 
 const API_BASE = "/api/v1";
 const REALTIME_MAX_FAILURES = 5;
+window.__APIX_MINIAPP_BUILD_ID__ = "20260713-miniapp-asset-cache-bust";
 
 // ── fallbacks ────────────────────────────────────────────────────────────────
 
