@@ -193,6 +193,26 @@ function captureReferralCode() {
   return code;
 }
 
+
+function normalizeReferralLink(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (["apix.chillcreative.ru", "www.apix.chillcreative.ru"].includes(url.hostname)) {
+      url.protocol = "https:";
+      url.hostname = "apixbotai.com";
+      url.port = "";
+    }
+    if (url.hostname === "www.apixbotai.com") {
+      url.hostname = "apixbotai.com";
+    }
+    return url.toString();
+  } catch {
+    return raw.replace(/https?:\/\/(www\.)?apix\.chillcreative\.ru/gi, "https://apixbotai.com");
+  }
+}
+
 function pendingReferralCode() {
   return cleanReferralCode(localStorage.getItem(REFERRAL_KEY) || "");
 }
@@ -3379,12 +3399,13 @@ function renderReferrals() {
   const exchangeMin = Number(ref?.exchange_min_rub || 100);
   const exchangeSampleRub = exchangeRate > 0 ? exchangeRate * 10 : 100;
   const exchangeSampleCredits = exchangeRate > 0 ? exchangeSampleRub / exchangeRate : 10;
+  const referralLink = normalizeReferralLink(ref?.referral_link || "");
   root.innerHTML = `
     <div>
       <span>Рефералы</span>
       <h3>${ref ? "Приглашайте друзей и получайте бонусы" : "Пригласите друзей и получайте бонусы"}</h3>
-      <p>${ref ? `Ссылка: ${escapeHtml(ref.referral_link || "")}` : "После входа здесь появятся ссылка, уровни, начисления, доступно к выводу и история заявок."}</p>
-      ${ref?.referral_link ? `<button class="button ghost" type="button" data-copy-referral="${escapeHtml(ref.referral_link)}">Скопировать ссылку</button>` : ""}
+      <p>${ref ? `Ссылка: ${escapeHtml(referralLink)}` : "После входа здесь появятся ссылка, уровни, начисления, доступно к выводу и история заявок."}</p>
+      ${referralLink ? `<button class="button ghost" type="button" data-copy-referral="${escapeHtml(referralLink)}">Скопировать ссылку</button>` : ""}
       <div class="ref-actions">
         <form class="withdrawal-form ref-action" data-withdrawal-form>
           <div class="ref-action-head">
