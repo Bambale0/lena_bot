@@ -1152,7 +1152,7 @@ function preferredReferralLink(...candidates) {
 
 function siteReferralFallback(code) {
   const ref = String(code || "").trim();
-  return ref ? `https://apix.chillcreative.ru/account.html?ref=${encodeURIComponent(ref)}` : "https://apix.chillcreative.ru/account.html";
+  return ref ? `https://apixbotai.com/account.html?ref=${encodeURIComponent(ref)}` : "https://apixbotai.com/account.html";
 }
 
 function modeOptionLabel(x) {

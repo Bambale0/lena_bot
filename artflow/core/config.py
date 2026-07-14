@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     ENV: str = "development"
     APIX_WEB_DEV_AUTH: bool = False
-    WEB_PUBLIC_URL: str = "https://apix.chillcreative.ru"
+    WEB_PUBLIC_URL: str = "https://apixbotai.com"
 
     # DB
     DATABASE_URL: str = ""
