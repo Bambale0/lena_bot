@@ -503,7 +503,7 @@ async def _download_url_to_tempfile(url: str, suffix: str = ".bin") -> str | Non
         return None
 
 
-MINIAPP_ENTRY_VERSION = "1778285569"
+MINIAPP_ENTRY_VERSION = "1784062572"
 
 
 def _miniapp_entry_url() -> str:

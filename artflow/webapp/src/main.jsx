@@ -1143,6 +1143,18 @@ function isTelegramDeepLink(value) {
   }
 }
 
+function preferredReferralLink(...candidates) {
+  for (const value of candidates) {
+    if (isAbsoluteHttpUrl(value)) return normalizeAbsoluteUrl(value);
+  }
+  return "";
+}
+
+function siteReferralFallback(code) {
+  const ref = String(code || "").trim();
+  return ref ? `https://apix.chillcreative.ru/account.html?ref=${encodeURIComponent(ref)}` : "https://apix.chillcreative.ru/account.html";
+}
+
 function modeOptionLabel(x) {
   return {
     fun: "Fun",
@@ -2465,11 +2477,12 @@ function pct(value) {
 }
 
 function Referrals({ user, stats, loading, reload, onNotice }) {
-  const referralLink = isTelegramDeepLink(stats.referral_link)
-    ? stats.referral_link
-    : isTelegramDeepLink(user.referral_link)
-      ? user.referral_link
-      : `https://t.me/apix_ai_bot?start=${user.referral_code || stats.referral_code || ""}`;
+  const referralCode = user.referral_code || stats.referral_code || "";
+  const referralLink = preferredReferralLink(
+    stats.referral_link,
+    user.referral_link,
+    siteReferralFallback(referralCode),
+  );
   const available = Number(stats.balance?.available_to_withdraw || 0);
   const withdrawMinAmount = Number(stats.withdraw_min_rub || user.referral_withdraw_min_rub || 1000);
   const exchangeMinAmount = Number(stats.exchange_min_rub || 100);
@@ -2947,9 +2960,10 @@ function ThemePicker({ value, onChange, resolvedTheme }) {
 }
 
 function Profile({ user, history, myFeed = [], setScreen, setTopup, theme, setTheme, resolvedTheme, onNotice, reloadUser }) {
-  const referralLink = isTelegramDeepLink(user.referral_link)
-    ? user.referral_link
-    : `https://t.me/apix_ai_bot?start=${user.referral_code || ""}`;
+  const referralLink = preferredReferralLink(
+    user.referral_link,
+    siteReferralFallback(user.referral_code),
+  );
   const [language, setLanguage] = useState(user.language || "ru");
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarInputRef = useRef(null);
