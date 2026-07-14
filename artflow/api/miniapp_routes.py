@@ -14,6 +14,9 @@ from typing import Any
 from urllib.parse import urlencode, urljoin, urlparse
 
 import httpx
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import LabeledPrice
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -50,8 +53,13 @@ from api.music_service import (
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.public_files import preview_public_image_url, public_url_is_available
 from api.video_service import VideoModel
-from bot.keyboards.models import _IMAGE_MODEL_ORDER, _VIDEO_MODEL_ORDER, IMAGE_CAPS, VIDEO_CAPS
+from bot.keyboards.models import _IMAGE_MODEL_ORDER, _VIDEO_MODEL_ORDER, IMAGE_CAPS, VIDEO_CAPS, image_session_kb
 from bot.utils.deep_links import build_start_payload
+from bot.utils.telegram_images import (
+    send_image_group_to_chat,
+    send_image_to_chat,
+    send_original_document_to_chat,
+)
 from core.config import settings
 from core.gemini_omni import (
     GEMINI_OMNI_MAX_AUDIO_IDS,
@@ -488,6 +496,138 @@ async def _finish_direct_image_result(session: AsyncSession, gen, result, *, sur
     if gen.image_session_id:
         await repo.update_image_session_last_result(session, gen.image_session_id, result_urls[0], gen.id)
     return await repo.get_generation_by_id(session, gen.id)
+
+
+def _direct_result_should_notify_bot(gen, *, surface: str) -> bool:
+    if str(surface or "").lower() == "web":
+        return False
+    task_id = getattr(gen, "task_id", None)
+    return not is_web_task_id(task_id)
+
+
+def _direct_result_prompt_actions_allowed(gen) -> bool:
+    if getattr(gen, "source_feed_gen_id", None):
+        return False
+    action_type = getattr(gen, "action_type", None)
+    action_value = str(getattr(action_type, "value", action_type) or "")
+    return action_value != "repeat" and not action_value.endswith(".repeat")
+
+
+async def _notify_direct_image_result_in_bot(
+    *,
+    user: User,
+    gen,
+    result_urls: list[str],
+    surface: str = "miniapp",
+) -> None:
+    if not result_urls or not _direct_result_should_notify_bot(gen, surface=surface):
+        return
+
+    tg_id = getattr(user, "tg_id", None)
+    if not tg_id:
+        return
+
+    bot = Bot(
+        token=settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    try:
+        caption = (
+            "✅ <b>Готово!</b>\n\n"
+            + (f"🖼️ <b>Вариантов:</b> {len(result_urls)}\n\n" if len(result_urls) > 1 else "")
+            + "🎨 <b>Серия активна.</b>\n"
+            + "Теперь просто отправляй новый текст или фото — настройки сохранятся."
+        )
+
+        deliveries = []
+        if len(result_urls) > 1:
+            group_delivery = await send_image_group_to_chat(
+                bot=bot,
+                chat_id=tg_id,
+                result_urls=result_urls,
+                generation_prefix=gen.id,
+                caption=caption,
+                log_prefix="miniapp-direct-image-group",
+            )
+            if group_delivery.delivered:
+                deliveries = [group_delivery]
+            else:
+                for idx, url in enumerate(result_urls):
+                    delivery = await send_image_to_chat(
+                        bot=bot,
+                        chat_id=tg_id,
+                        result_url=url,
+                        generation_id=f"{gen.id}_{idx + 1}",
+                        caption=caption if idx == 0 else None,
+                        log_prefix="miniapp-direct-image-result",
+                    )
+                    deliveries.append(delivery)
+                    if not delivery.delivered:
+                        logger.warning("Failed to send miniapp direct image user=%s gen=%s idx=%s", tg_id, gen.id, idx)
+        else:
+            delivery = await send_image_to_chat(
+                bot=bot,
+                chat_id=tg_id,
+                result_url=result_urls[0],
+                generation_id=f"{gen.id}_1",
+                caption=caption,
+                log_prefix="miniapp-direct-image-result",
+            )
+            deliveries = [delivery]
+            if not delivery.delivered:
+                logger.warning("Failed to send miniapp direct image user=%s gen=%s", tg_id, gen.id)
+
+        preview_fallback_used = any(item.mode == "document" for item in deliveries)
+        preview_delivered = any(item.delivered for item in deliveries)
+        original_delivery_ok = True
+        await bot.send_message(
+            chat_id=tg_id,
+            text=(
+                "📎 <b>Оригиналы ниже файлами</b> — можно скачать без сжатия."
+                if not preview_fallback_used
+                else "📎 <b>Telegram не принял часть превью как фото.</b> Ниже дублирую оригиналы файлами без потери качества."
+            ),
+        )
+        for idx, url in enumerate(result_urls):
+            sent = await send_original_document_to_chat(
+                bot=bot,
+                chat_id=tg_id,
+                result_url=url,
+                generation_id=f"{gen.id}_{idx + 1}",
+                caption=(f"Исходник {idx + 1}/{len(result_urls)}" if len(result_urls) > 1 else "Исходник"),
+                log_prefix="miniapp-direct-source-document",
+            )
+            if not sent:
+                original_delivery_ok = False
+                logger.warning("Failed to send miniapp direct source user=%s gen=%s idx=%s", tg_id, gen.id, idx)
+
+        if not preview_delivered or not original_delivery_ok:
+            await bot.send_message(
+                chat_id=tg_id,
+                text=(
+                    "✅ <b>Результат готов.</b>\n\n"
+                    "Telegram не принял часть файлов, поэтому оставляю прямую ссылку:\n"
+                    f"{chr(10).join(result_urls)}"
+                ),
+            )
+
+        prompt_actions_allowed = _direct_result_prompt_actions_allowed(gen)
+        await bot.send_message(
+            chat_id=tg_id,
+            text="Что делаем дальше?",
+            reply_markup=image_session_kb(
+                gen.id,
+                prompt=getattr(gen, "prompt", None) if prompt_actions_allowed else None,
+                allow_publish=not bool(getattr(gen, "source_feed_gen_id", None)),
+                allow_copy_prompt=prompt_actions_allowed,
+            ),
+        )
+    except (TelegramBadRequest, TelegramForbiddenError) as exc:
+        logger.warning("Failed to notify miniapp direct result user=%s gen=%s: %s", tg_id, getattr(gen, "id", None), exc)
+    except Exception as exc:
+        logger.warning("Unexpected miniapp direct result notify error user=%s gen=%s: %s", tg_id, getattr(gen, "id", None), exc)
+    finally:
+        await bot.session.close()
 
 
 async def _reconcile_user_active_generations(session: AsyncSession, user_id: int) -> None:
@@ -1850,6 +1990,12 @@ async def create_image_generation(
 
     if not getattr(result, "is_async", True):
         gen = await _finish_direct_image_result(session, gen, result, surface=surface)
+        await _notify_direct_image_result_in_bot(
+            user=user,
+            gen=gen,
+            result_urls=_generation_result_urls(gen),
+            surface=surface,
+        )
     else:
         await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
     await repo.update_image_session_last_prompt(session, image_session.id, user_prompt)
@@ -2672,6 +2818,12 @@ async def remix_feed_post(
 
     if gen_type == "image" and not getattr(result, "is_async", True):
         gen = await _finish_direct_image_result(session, gen, result, surface=surface)
+        await _notify_direct_image_result_in_bot(
+            user=user,
+            gen=gen,
+            result_urls=_generation_result_urls(gen),
+            surface=surface,
+        )
     else:
         await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
     await repo.increment_feed_share(session, gen_id)
