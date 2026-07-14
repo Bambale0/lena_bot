@@ -1324,6 +1324,8 @@ async def kie_webhook(
                             logger.warning("Failed to send image result user=%s gen=%s", user.tg_id, gen.id)
 
                     preview_fallback_used = any(item.mode == "document" for item in deliveries)
+                    preview_delivered = any(item.delivered for item in deliveries)
+                    original_delivery_ok = True
                     should_send_originals = bool(result_urls)
                     if should_send_originals:
                         await bot.send_message(
@@ -1344,7 +1346,19 @@ async def kie_webhook(
                                 log_prefix="main-source-document",
                             )
                             if not sent:
+                                original_delivery_ok = False
                                 logger.warning("Failed to send source document user=%s gen=%s idx=%s", user.tg_id, gen.id, idx)
+
+                    if not preview_delivered or not original_delivery_ok:
+                        links = "\n".join(result_urls)
+                        await bot.send_message(
+                            chat_id=user.tg_id,
+                            text=(
+                                "✅ <b>Результат готов.</b>\n\n"
+                                "Telegram не принял часть файлов, поэтому оставляю прямую ссылку:\n"
+                                f"{links}"
+                            ),
+                        )
 
                     await bot.send_message(
                         chat_id=user.tg_id,

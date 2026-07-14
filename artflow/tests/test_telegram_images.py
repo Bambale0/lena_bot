@@ -39,6 +39,46 @@ async def test_send_image_to_message_falls_back_to_document_on_image_process_fai
 
 
 @pytest.mark.asyncio
+async def test_send_image_to_message_falls_back_to_document_on_photo_timeout(monkeypatch) -> None:
+    message = MagicMock()
+    message.answer_photo = AsyncMock(side_effect=RuntimeError("Request timeout error"))
+    message.answer_document = AsyncMock()
+
+    monkeypatch.setattr(telegram_images, "download_image_bytes", AsyncMock(return_value=_png_bytes()))
+
+    result = await telegram_images.send_image_to_message(
+        message=message,
+        result_url="https://example.test/result.png",
+        generation_id=43,
+        caption="Готово",
+    )
+
+    assert result.delivered is True
+    assert result.mode == "document"
+    message.answer_document.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_image_to_message_falls_back_to_document_on_remote_bad_request(monkeypatch) -> None:
+    message = MagicMock()
+    message.answer_photo = AsyncMock(side_effect=[TelegramBadRequest(method="sendPhoto", message="Bad Request: failed to get HTTP URL content")])
+    message.answer_document = AsyncMock()
+
+    monkeypatch.setattr(telegram_images, "download_image_bytes", AsyncMock(side_effect=[None, _png_bytes()]))
+
+    result = await telegram_images.send_image_to_message(
+        message=message,
+        result_url="https://example.test/result.png",
+        generation_id=44,
+        caption="Готово",
+    )
+
+    assert result.delivered is True
+    assert result.mode == "document"
+    message.answer_document.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_send_image_group_to_message_uses_media_group(monkeypatch) -> None:
     message = MagicMock()
     message.answer_media_group = AsyncMock()

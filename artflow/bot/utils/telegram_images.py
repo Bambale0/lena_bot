@@ -148,6 +148,14 @@ async def _send_with_downloaded_payload(
                 return ImageDeliveryResult(delivered=False, mode=None)
         except Exception as exc:
             logger.warning("%s unexpected photo-upload error gen=%s url=%s error=%s", log_prefix, generation_id, result_url, exc)
+            try:
+                await send_document(
+                    BufferedInputFile(data, filename=f"gen_{generation_id}.{_result_extension(result_url)}"),
+                    fallback_document_caption(caption),
+                )
+                return ImageDeliveryResult(delivered=True, mode="document")
+            except Exception as doc_exc:
+                logger.warning("%s document-upload failed gen=%s url=%s error=%s", log_prefix, generation_id, result_url, doc_exc)
     return ImageDeliveryResult(delivered=False, mode=None)
 
 
@@ -308,21 +316,31 @@ async def send_image_to_message(
         return ImageDeliveryResult(delivered=True, mode="photo")
     except TelegramBadRequest as exc:
         logger.warning("%s remote-photo failed gen=%s url=%s error=%s", log_prefix, generation_id, result_url, exc)
-        if image_process_failed(exc):
-            data = await download_image_bytes(result_url)
-            if data:
-                try:
-                    await message.answer_document(
-                        BufferedInputFile(data, filename=f"gen_{generation_id}.{_result_extension(result_url)}"),
-                        caption=fallback_document_caption(caption),
-                        reply_markup=reply_markup,
-                    )
-                    return ImageDeliveryResult(delivered=True, mode="document")
-                except Exception as doc_exc:
-                    logger.warning("%s remote-document failed gen=%s url=%s error=%s", log_prefix, generation_id, result_url, doc_exc)
+        data = await download_image_bytes(result_url)
+        if data:
+            try:
+                await message.answer_document(
+                    BufferedInputFile(data, filename=f"gen_{generation_id}.{_result_extension(result_url)}"),
+                    caption=fallback_document_caption(caption),
+                    reply_markup=reply_markup,
+                )
+                return ImageDeliveryResult(delivered=True, mode="document")
+            except Exception as doc_exc:
+                logger.warning("%s remote-document failed gen=%s url=%s error=%s", log_prefix, generation_id, result_url, doc_exc)
         return ImageDeliveryResult(delivered=False, mode=None)
     except Exception as exc:
         logger.warning("%s remote-photo unexpected error gen=%s url=%s error=%s", log_prefix, generation_id, result_url, exc)
+        data = await download_image_bytes(result_url)
+        if data:
+            try:
+                await message.answer_document(
+                    BufferedInputFile(data, filename=f"gen_{generation_id}.{_result_extension(result_url)}"),
+                    caption=fallback_document_caption(caption),
+                    reply_markup=reply_markup,
+                )
+                return ImageDeliveryResult(delivered=True, mode="document")
+            except Exception as doc_exc:
+                logger.warning("%s remote-document failed gen=%s url=%s error=%s", log_prefix, generation_id, result_url, doc_exc)
         return ImageDeliveryResult(delivered=False, mode=None)
 
 
@@ -358,20 +376,31 @@ async def send_image_to_chat(
         return ImageDeliveryResult(delivered=True, mode="photo")
     except TelegramBadRequest as exc:
         logger.warning("%s remote-photo failed gen=%s url=%s error=%s", log_prefix, generation_id, result_url, exc)
-        if image_process_failed(exc):
-            data = await download_image_bytes(result_url)
-            if data:
-                try:
-                    await bot.send_document(
-                        chat_id=chat_id,
-                        document=BufferedInputFile(data, filename=f"gen_{generation_id}.{_result_extension(result_url)}"),
-                        caption=fallback_document_caption(caption),
-                        reply_markup=reply_markup,
-                    )
-                    return ImageDeliveryResult(delivered=True, mode="document")
-                except Exception as doc_exc:
-                    logger.warning("%s remote-document failed gen=%s url=%s error=%s", log_prefix, generation_id, result_url, doc_exc)
+        data = await download_image_bytes(result_url)
+        if data:
+            try:
+                await bot.send_document(
+                    chat_id=chat_id,
+                    document=BufferedInputFile(data, filename=f"gen_{generation_id}.{_result_extension(result_url)}"),
+                    caption=fallback_document_caption(caption),
+                    reply_markup=reply_markup,
+                )
+                return ImageDeliveryResult(delivered=True, mode="document")
+            except Exception as doc_exc:
+                logger.warning("%s remote-document failed gen=%s url=%s error=%s", log_prefix, generation_id, result_url, doc_exc)
         return ImageDeliveryResult(delivered=False, mode=None)
     except Exception as exc:
         logger.warning("%s remote-photo unexpected error gen=%s url=%s error=%s", log_prefix, generation_id, result_url, exc)
+        data = await download_image_bytes(result_url)
+        if data:
+            try:
+                await bot.send_document(
+                    chat_id=chat_id,
+                    document=BufferedInputFile(data, filename=f"gen_{generation_id}.{_result_extension(result_url)}"),
+                    caption=fallback_document_caption(caption),
+                    reply_markup=reply_markup,
+                )
+                return ImageDeliveryResult(delivered=True, mode="document")
+            except Exception as doc_exc:
+                logger.warning("%s remote-document failed gen=%s url=%s error=%s", log_prefix, generation_id, result_url, doc_exc)
         return ImageDeliveryResult(delivered=False, mode=None)

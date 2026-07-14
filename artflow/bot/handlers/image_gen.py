@@ -848,6 +848,8 @@ async def _launch_session_generation(
                 logger.warning("Failed to send direct image result user=%s gen=%s", db_user.tg_id, gen.id)
 
         preview_fallback_used = any(item.mode == "document" for item in deliveries)
+        preview_delivered = any(item.delivered for item in deliveries)
+        original_delivery_ok = True
         should_send_originals = bool(result_urls)
         if should_send_originals:
             await source_message.answer(
@@ -864,7 +866,16 @@ async def _launch_session_generation(
                     log_prefix="image-gen-source-document",
                 )
                 if not sent:
+                    original_delivery_ok = False
                     logger.warning("Failed to send direct image source document user=%s gen=%s idx=%s", db_user.tg_id, gen.id, idx)
+
+        if not preview_delivered or not original_delivery_ok:
+            links = "\n".join(result_urls)
+            await source_message.answer(
+                "✅ <b>Результат готов.</b>\n\n"
+                "Telegram не принял часть файлов, поэтому оставляю прямую ссылку:\n"
+                f"{links}",
+            )
 
         await source_message.answer(
             "Что делаем дальше?",
