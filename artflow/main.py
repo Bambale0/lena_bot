@@ -1378,6 +1378,18 @@ async def kie_webhook(
                         allow_publish=publish_actions_allowed,
                         allow_copy_prompt=prompt_actions_allowed,
                     )
+                    try:
+                        await bot.send_message(
+                            chat_id=user.tg_id,
+                            text="✅ <b>Видео готово.</b> Отправляю ролик ниже.",
+                            reply_markup=video_reply_markup,
+                        )
+                        logger.info("Video ready notification sent user=%s gen=%s", user.tg_id, gen.id)
+                    except Exception as notify_err:
+                        logger.warning(
+                            "Video ready notification failed user=%s gen=%s err=%s",
+                            user.tg_id, gen.id, notify_err,
+                        )
                     telegram_safe_video_bytes = 49 * 1024 * 1024
                     video_sent = False
                     video_too_large = False
@@ -1390,6 +1402,7 @@ async def kie_webhook(
                             reply_markup=video_reply_markup,
                         )
                         video_sent = True
+                        logger.info("Video URL sent user=%s gen=%s", user.tg_id, gen.id)
                     except TelegramEntityTooLarge as video_url_err:
                         video_too_large = True
                         logger.warning(
@@ -1411,6 +1424,7 @@ async def kie_webhook(
                                     reply_markup=video_reply_markup,
                                 )
                                 video_sent = True
+                                logger.info("Video file sent user=%s gen=%s", user.tg_id, gen.id)
                             except TelegramEntityTooLarge as video_file_err:
                                 video_too_large = True
                                 logger.warning(
@@ -1445,6 +1459,7 @@ async def kie_webhook(
                                     reply_markup=video_reply_markup,
                                 )
                                 video_sent = True
+                                logger.info("Video document sent user=%s gen=%s", user.tg_id, gen.id)
                             except TelegramEntityTooLarge as video_doc_err:
                                 video_too_large = True
                                 logger.warning(
