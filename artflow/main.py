@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import ipaddress
 import json
 import logging
 import mimetypes
@@ -18,7 +17,12 @@ import redis.asyncio as aioredis
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest, TelegramEntityTooLarge, TelegramForbiddenError, TelegramRetryAfter
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramEntityTooLarge,
+    TelegramForbiddenError,
+    TelegramRetryAfter,
+)
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import (
     BotCommand,
@@ -96,7 +100,14 @@ from core.config import settings
 from core.db_backup_scheduler import run_database_backup_scheduler
 from core.logger import setup_logging
 from db import repository as repo
-from db.models import Generation, GenerationType, ImageSession, TransactionStatus, User
+from db.models import (
+    Generation,
+    GenerationType,
+    ImageSession,
+    PaymentProvider,
+    TransactionStatus,
+    User,
+)
 from db.seed import run_seed
 from db.session import AsyncSessionLocal
 from payments.cryptobot import verify_webhook_signature
@@ -104,10 +115,22 @@ from payments.lava import (
     cached_payment_url as lava_cached_payment_url,
 )
 from payments.lava import (
+    extract_amount_rub as lava_extract_amount_rub,
+)
+from payments.lava import (
+    extract_currency as lava_extract_currency,
+)
+from payments.lava import (
+    extract_invoice_id as lava_extract_invoice_id,
+)
+from payments.lava import (
     extract_payment_url as lava_extract_payment_url,
 )
 from payments.lava import (
     get_invoice as lava_get_invoice,
+)
+from payments.lava import (
+    is_paid_invoice as lava_is_paid_invoice,
 )
 from payments.lava import (
     is_success_webhook as lava_is_success_webhook,
@@ -128,18 +151,6 @@ _MJ_VIDEO_MODEL = "midjourney-video"
 _PROMPT_MENU_PREVIEW_MAX = 700
 _TELEGRAM_UPDATE_DEDUPE_TTL = 3600
 _recent_telegram_updates: dict[int, float] = {}
-_TELEGRAM_WEBHOOK_IP_RANGES = tuple(
-    ipaddress.ip_network(network)
-    for network in (
-        "91.108.4.0/22",
-        "91.108.8.0/22",
-        "91.108.12.0/22",
-        "91.108.16.0/22",
-        "91.108.20.0/22",
-        "91.108.56.0/22",
-        "149.154.160.0/20",
-    )
-)
 
 
 def _sha256_file(path: Path | None) -> str | None:
@@ -240,6 +251,17 @@ def _verify_midjourney_webhook_secret(secret: str | None) -> None:
         return
     if not secret or not hmac.compare_digest(secret, expected_secret):
         raise HTTPException(status_code=403, detail="Invalid Midjourney webhook secret")
+
+
+def _verify_telegram_webhook_secret(secret: str | None) -> None:
+    expected_secret = (settings.WEBHOOK_SECRET or "").strip()
+    if not expected_secret:
+        if _is_production_env():
+            logger.error("Telegram webhook secret is required in production")
+            raise HTTPException(status_code=503, detail="Telegram webhook secret is not configured")
+        return
+    if not secret or not hmac.compare_digest(secret.strip(), expected_secret):
+        raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
 
 
 def _midjourney_button_state(buttons: list[MJButton]) -> list[dict[str, str]]:
@@ -345,17 +367,6 @@ def _claim_telegram_update_memory(update_id: int) -> bool:
         return False
     _recent_telegram_updates[update_id] = now + _TELEGRAM_UPDATE_DEDUPE_TTL
     return True
-
-
-def _is_telegram_webhook_source(x_forwarded_for: str | None) -> bool:
-    if not x_forwarded_for:
-        return False
-    raw_ip = x_forwarded_for.split(",", 1)[0].strip()
-    try:
-        source_ip = ipaddress.ip_address(raw_ip)
-    except ValueError:
-        return False
-    return any(source_ip in network for network in _TELEGRAM_WEBHOOK_IP_RANGES)
 
 
 async def _claim_telegram_update(update_id: int) -> bool:
@@ -858,12 +869,8 @@ async def _process_telegram_update(update: Update) -> None:
 async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
-    x_forwarded_for: str | None = Header(default=None),
 ) -> dict:
-    if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
-        if not _is_telegram_webhook_source(x_forwarded_for):
-            raise HTTPException(status_code=403, detail="Invalid secret")
-        logger.warning("Accepted Telegram webhook via source IP fallback: %s", x_forwarded_for)
+    _verify_telegram_webhook_secret(x_telegram_bot_api_secret_token)
 
     body = await request.json()
     update = Update.model_validate(body)
@@ -1119,6 +1126,43 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
         return PlainTextResponse("OK")
 
     async with AsyncSessionLocal() as session:
+        tx = await repo.get_transaction_by_external_id(session, external_id)
+        if not tx:
+            logger.warning("Lava webhook for unknown invoice id: %s", external_id)
+            return PlainTextResponse("OK")
+        if tx.provider != PaymentProvider.lava:
+            logger.warning("Lava webhook invoice id belongs to another provider: %s", external_id)
+            return PlainTextResponse("OK")
+        if tx.status != TransactionStatus.pending:
+            return PlainTextResponse("OK")
+
+        try:
+            invoice = await lava_get_invoice(external_id)
+        except Exception as exc:
+            logger.error("Lava invoice verification failed for %s: %s", external_id, exc)
+            return PlainTextResponse("OK")
+
+        verified_invoice_id = lava_extract_invoice_id(invoice)
+        if verified_invoice_id and not hmac.compare_digest(str(verified_invoice_id), str(external_id)):
+            logger.warning("Lava invoice id mismatch webhook=%s verified=%s", external_id, verified_invoice_id)
+            return PlainTextResponse("OK")
+        if not lava_is_paid_invoice(invoice):
+            logger.warning("Lava webhook claimed paid but invoice is not paid: %s", external_id)
+            return PlainTextResponse("OK")
+        currency = lava_extract_currency(invoice)
+        if currency and currency != "RUB":
+            logger.warning("Lava invoice currency mismatch invoice=%s currency=%s", external_id, currency)
+            return PlainTextResponse("OK")
+        amount_rub = lava_extract_amount_rub(invoice)
+        if amount_rub is not None and round(amount_rub, 2) != round(float(tx.amount_rub), 2):
+            logger.warning(
+                "Lava invoice amount mismatch invoice=%s expected=%s actual=%s",
+                external_id,
+                tx.amount_rub,
+                amount_rub,
+            )
+            return PlainTextResponse("OK")
+
         confirmed = await repo.confirm_transaction_and_add_credits(
             session,
             external_id,

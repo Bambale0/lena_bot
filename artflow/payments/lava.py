@@ -71,6 +71,20 @@ def webhook_contract_id(payload: dict[str, Any]) -> str:
     return extract_invoice_id(payload)
 
 
+def extract_amount_rub(payload: dict[str, Any]) -> float | None:
+    raw = _extract_first(payload, "amount", "amountRub", "amount_rub", "paidAmount", "paid_amount", "price")
+    if not raw:
+        return None
+    try:
+        return float(str(raw).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def extract_currency(payload: dict[str, Any]) -> str:
+    return _extract_first(payload, "currency", "currencyCode", "currency_code").strip().upper()
+
+
 def public_invoice_url(invoice_id: str) -> str:
     base = (getattr(settings, "WEBHOOK_URL", "") or settings.LAVA_API_BASE_URL).rstrip("/")
     return f"{base}/pay/lava/{invoice_id}"
@@ -80,6 +94,12 @@ def is_success_webhook(payload: dict[str, Any]) -> bool:
     event = _extract_first(payload, "eventType", "event_type", "type", "event").strip().lower()
     status = _extract_first(payload, "status").strip().lower()
     return event in {"payment.success", "invoice.paid"} and (not status or status in {"completed", "success", "paid"})
+
+
+def is_paid_invoice(payload: dict[str, Any]) -> bool:
+    event = _extract_first(payload, "eventType", "event_type", "type", "event").strip().lower()
+    status = _extract_first(payload, "status").strip().lower()
+    return event in {"payment.success", "invoice.paid"} or status in {"completed", "success", "paid"}
 
 
 async def _request(method: str, path: str, *, json_payload: dict[str, Any] | None = None) -> dict[str, Any]:
