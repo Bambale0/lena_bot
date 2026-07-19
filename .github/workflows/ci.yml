@@ -7,7 +7,7 @@ on:
 
 jobs:
   backend-quality:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, apix-ci]
     defaults:
       run:
         working-directory: artflow
@@ -43,7 +43,7 @@ jobs:
         run: pytest -q
 
   webapp:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, apix-ci]
     defaults:
       run:
         working-directory: artflow/webapp
@@ -63,7 +63,7 @@ jobs:
         run: npm run build
 
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, apix-ci]
     needs:
       - backend-quality
       - webapp
