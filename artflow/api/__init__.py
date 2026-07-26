@@ -14,3 +14,11 @@ from api import kieai_client as _kieai_client
 from api.grok15_adapter import install_grok15_adapter
 
 install_grok15_adapter(_kieai_client)
+
+# Mini App historically had a separate naming dictionary. Import it once during
+# package bootstrap and replace that presentation layer with the same catalog
+# used by Telegram. Provider keys and pricing rows remain unchanged.
+from api import miniapp_routes as _miniapp_routes
+from bot.ui.model_labels import install_miniapp_model_labels
+
+install_miniapp_model_labels(_miniapp_routes)
