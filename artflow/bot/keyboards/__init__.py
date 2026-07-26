@@ -105,25 +105,23 @@ def _configure_veo_31() -> None:
         max_refs=2,
         supports_material_reference=False,
     )
-    VIDEO_CAPS[VideoModel.VEO_3_FAST].update(
+    reference_common = {
         **common,
-        max_refs=3,
-        supports_material_reference=True,
-        generation_types=[
+        "generation_types": [
             "TEXT_2_VIDEO",
             "FIRST_AND_LAST_FRAMES_2_VIDEO",
             "REFERENCE_2_VIDEO",
         ],
+    }
+    VIDEO_CAPS[VideoModel.VEO_3_FAST].update(
+        **reference_common,
+        max_refs=3,
+        supports_material_reference=True,
     )
     VIDEO_CAPS[VideoModel.VEO_3_LITE].update(
-        **common,
+        **reference_common,
         max_refs=3,
         supports_material_reference=True,
-        generation_types=[
-            "TEXT_2_VIDEO",
-            "FIRST_AND_LAST_FRAMES_2_VIDEO",
-            "REFERENCE_2_VIDEO",
-        ],
     )
 
     VIDEO_MODEL_DESC[VideoModel.VEO_3] = (
