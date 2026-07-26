@@ -5,32 +5,12 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.services.session_service import MainMenuContext
 from bot.ui.common import ScreenRender
+from bot.ui.model_labels import model_display_name
 from core.config import settings
-
-_IMAGE_MODEL_LABELS = {
-    "grok-imagine/text-to-image": "Grok Imagine",
-    "grok-imagine/image-to-image": "Grok Imagine Edit",
-    "qwen/text-to-image": "Qwen",
-    "qwen/image-to-image": "Qwen Edit",
-    "qwen/image-edit": "Qwen Edit Pro",
-    "qwen2/text-to-image": "Qwen2",
-    "qwen2/image-edit": "Qwen2 Edit",
-    "seedream/5-pro-text-to-image": "Seedream 5.0 Pro",
-    "seedream/5-pro-image-to-image": "Seedream 5.0 Pro Edit",
-    "seedream/4.5-text-to-image": "Seedream 4.5",
-    "seedream/4.5-edit": "Seedream 4.5 Edit",
-    "wan/2-7-image": "WAN 2.7",
-    "wan/2-7-image-pro": "WAN 2.7 Pro",
-    "gpt-image-2-text-to-image": "GPT Image 2",
-    "gpt-image-2-image-to-image": "GPT Image 2 Edit",
-    "google/nano-banana": "Nano Banana",
-    "nano-banana-pro": "Nano Banana Pro",
-    "nano-banana-2": "Nano Banana 2",
-}
 
 
 def _pretty_image_model(model_key: str) -> str:
-    return _IMAGE_MODEL_LABELS.get(model_key, model_key.replace("-", " ").replace("/", " · ").title())
+    return model_display_name(model_key)
 
 
 def _pretty_ratio(value: str | None, lang: str) -> str:
