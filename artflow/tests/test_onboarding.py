@@ -1,0 +1,36 @@
+from types import SimpleNamespace
+
+from bot.handlers.start import _onboarding_text, onboarding_kb
+
+
+def callbacks(markup):
+    return [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+
+
+def test_onboarding_explains_flow_and_balance():
+    user = SimpleNamespace(full_name="Игорь", username=None, credits=25)
+    text = _onboarding_text(user, "ru")
+
+    assert "Привет, Игорь" in text
+    assert "25 кредитов" in text
+    assert "Стоимость всегда показывается до запуска" in text
+
+
+def test_onboarding_routes_to_first_result_and_mini_app():
+    markup = onboarding_kb("ru")
+
+    assert callbacks(markup) == [
+        "menu:image",
+        "menu:video",
+        "menu:music",
+        "menu:assistant",
+        "onboarding:skip",
+    ]
+    app_button = markup.inline_keyboard[2][0]
+    assert app_button.web_app is not None
+    assert app_button.web_app.url.endswith("/app")
