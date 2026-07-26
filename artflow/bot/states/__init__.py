@@ -21,8 +21,9 @@ class ImageGenFSM(StatesGroup):
 
 class VideoGenFSM(StatesGroup):
     model_select = State()
-    mode_select = State()           # text / image
-    image_upload = State()          # optional i2v
+    mode_select = State()           # text / image / video
+    image_upload = State()          # image references and motion assets
+    video_upload = State()          # dedicated reference video upload
     params_select = State()         # duration + aspect_ratio + resolution
     motion_select = State()         # only for Kling motion
     omni_ids_input = State()        # Gemini Omni audio_ids / character_ids / seed
