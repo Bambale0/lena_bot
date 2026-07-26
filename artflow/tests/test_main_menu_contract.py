@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from bot.keyboards.main_menu import main_menu_kb
+from bot.ui.image_menu import render_image_advanced_menu, render_image_scenarios
 from bot.ui.main_menu import render_main_menu
 from bot.ui.navigation_v2 import render_create_hub, render_more_hub
 
@@ -42,10 +43,9 @@ def test_v2_main_menu_has_mini_app_and_six_primary_entrypoints():
         "💎 Баланс · 100",
         "☰ Ещё",
     ]
-    assert "APIX — твоя AI-студия" in screen.text
-    assert "изображения" in screen.text.lower()
-    assert "видео со звуком" in screen.text.lower()
-    assert "стоимость" in screen.text.lower()
+    assert "Фото и изображения" in screen.text
+    assert "Стоимость показывается до запуска" in screen.text
+    assert "Mini App" in screen.text
 
 
 def test_legacy_builder_matches_v2_home_callbacks():
@@ -71,11 +71,11 @@ def test_v2_main_menu_keeps_secondary_features_off_home_screen():
 
 def test_v2_create_hub_preserves_all_creation_entrypoints_and_explains_them():
     screen = render_create_hub(lang="ru", is_admin=False)
-    assert callbacks(screen.reply_markup) == ["menu:image", "menu:video", "menu:music", "menu:assistant", "menu:main"]
-    assert "Изображение" in screen.text
-    assert "Видео" in screen.text
-    assert "Музыка" in screen.text
-    assert "Стоимость" in screen.text
+    cb = callbacks(screen.reply_markup)
+    assert cb == ["menu:image", "menu:video", "menu:music", "menu:assistant", "menu:main"]
+    assert "Карточки товаров" in screen.text
+    assert "оживляй фотографии" in screen.text
+    assert "не знаешь, какую модель выбрать" in screen.text
 
     admin_cb = callbacks(render_create_hub(lang="ru", is_admin=True).reply_markup)
     assert "menu:mj" in admin_cb
@@ -83,13 +83,38 @@ def test_v2_create_hub_preserves_all_creation_entrypoints_and_explains_them():
 
 def test_v2_more_hub_preserves_secondary_features_and_explains_them():
     screen = render_more_hub(lang="ru", is_admin=False)
-    assert callbacks(screen.reply_markup) == ["menu:prompts", "menu:referral", "menu:settings", "menu:help", "menu:main"]
-    assert "Библиотека промптов" in screen.text
-    assert "Партнёрская программа" in screen.text
-    assert "Mini App" in screen.text
+    cb = callbacks(screen.reply_markup)
+    assert cb == ["menu:prompts", "menu:referral", "menu:settings", "menu:help", "menu:main"]
+    assert "готовые идеи" in screen.text
+    assert "зарабатывай" in screen.text
+    assert "полная студия" in screen.text
 
     admin_cb = callbacks(render_more_hub(lang="ru", is_admin=True).reply_markup)
     assert "menu:admin" in admin_cb
+
+
+def test_image_entry_is_task_first_not_model_first():
+    screen = render_image_scenarios()
+    assert "Что нужно сделать" in screen.text
+    assert "Не нужно разбираться" in screen.text
+    assert "Создать быстро" in screen.text
+    assert "Изменить готовое фото" in screen.text
+    assert "Все нейросети" in screen.text
+    assert callbacks(screen.reply_markup) == [
+        "img_scn:fast",
+        "img_scn:edit",
+        "img:photo2prompt",
+        "img_menu:advanced",
+        "menu:main",
+    ]
+
+
+def test_image_advanced_mode_warns_and_guides_model_choice():
+    screen = render_image_advanced_menu([])
+    assert "Экспертный выбор модели" in screen.text
+    assert "Для большинства задач" in screen.text
+    assert "Nano Banana" in screen.text
+    assert "Цена указана прямо на кнопке" in screen.text
 
 
 def test_v2_main_menu_preserves_active_work_shortcuts():
@@ -108,4 +133,5 @@ def test_v2_main_menu_preserves_active_work_shortcuts():
     assert cb[:2] == ["menu:image", "img_session:new"]
     assert "menu:create" in cb
     assert "menu:history" in cb
-    assert "активная серия" in screen.text.lower()
+    assert "Продолжить работу" in screen.text
+    assert "Nano Banana 2" in screen.text
