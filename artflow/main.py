@@ -619,7 +619,10 @@ async def lifespan(app: FastAPI):
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    await _set_bot_commands(bot)
+    if settings.TELEGRAM_STARTUP_COMMANDS_ENABLED:
+        await _set_bot_commands(bot)
+    else:
+        logger.info("Telegram startup command/menu registration skipped")
     dp = Dispatcher(storage=storage)
 
     # Middlewares (порядок важен)

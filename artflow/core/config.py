@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     WEBHOOK_URL: str = "https://testapi.chillcreative.ru"
     WEBHOOK_PATH: str = "/webhook/telegram"
     WEBHOOK_SECRET: str = ""
+    TELEGRAM_STARTUP_COMMANDS_ENABLED: bool = False
 
     # Admin
     ADMIN_IDS: list[int] = []
