@@ -56,13 +56,6 @@ def _pretty_count(value: int, lang: str) -> str:
 
 
 def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_text: bool = False) -> ScreenRender:
-    """Render the compact APIX v2 home screen.
-
-    Existing callback identifiers are intentionally reused so the first UX v2
-    slice stays compatible with the current handlers while the deeper flows are
-    migrated incrementally.
-    """
-
     builder = InlineKeyboardBuilder()
 
     if context.active_image_session:
@@ -70,7 +63,6 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
         quality = _pretty_quality(session.quality, lang)
         ratio = _pretty_ratio(session.aspect_ratio, lang)
         count = session.count or 1
-
         builder.row(
             InlineKeyboardButton(
                 text="🔥 " + ("Продолжить работу" if lang == "ru" else "Continue work"),
@@ -81,7 +73,6 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
                 callback_data="img_session:new",
             ),
         )
-
         if force_main_text:
             text = t("main_menu", lang)
         else:
@@ -96,45 +87,20 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
     else:
         text = t("main_menu", lang)
 
-    # Primary jobs-to-be-done. The current image entry acts as the first
-    # implementation slice for the future unified "Create" wizard.
     builder.row(
-        InlineKeyboardButton(
-            text="✨ " + ("Создать" if lang == "ru" else "Create"),
-            callback_data="menu:image",
-        ),
-        InlineKeyboardButton(
-            text="🤖 " + ("AI-ассистент" if lang == "ru" else "AI Assistant"),
-            callback_data="menu:assistant",
-        ),
+        InlineKeyboardButton(text="✨ " + ("Создать" if lang == "ru" else "Create"), callback_data="menu:create"),
+        InlineKeyboardButton(text="🤖 " + ("AI-ассистент" if lang == "ru" else "AI Assistant"), callback_data="menu:assistant"),
     )
     builder.row(
-        InlineKeyboardButton(
-            text="📂 " + ("Мои работы" if lang == "ru" else "My work"),
-            callback_data="menu:history",
-        ),
-        InlineKeyboardButton(
-            text="🔥 " + ("Лента" if lang == "ru" else "Feed"),
-            callback_data="menu:feed",
-        ),
+        InlineKeyboardButton(text="📂 " + ("Мои работы" if lang == "ru" else "My work"), callback_data="menu:history"),
+        InlineKeyboardButton(text="🔥 " + ("Лента" if lang == "ru" else "Feed"), callback_data="menu:feed"),
     )
     builder.row(
         InlineKeyboardButton(
             text="💎 " + (f"Баланс · {context.balance}" if lang == "ru" else f"Balance · {context.balance}"),
             callback_data="menu:balance",
         ),
-        InlineKeyboardButton(
-            text="☰ " + ("Ещё" if lang == "ru" else "More"),
-            callback_data="menu:settings",
-        ),
+        InlineKeyboardButton(text="☰ " + ("Ещё" if lang == "ru" else "More"), callback_data="menu:more"),
     )
-
-    if context.is_admin:
-        builder.row(
-            InlineKeyboardButton(
-                text="👑 " + ("Админ" if lang == "ru" else "Admin"),
-                callback_data="menu:admin",
-            ),
-        )
 
     return ScreenRender(text=text, reply_markup=builder.as_markup())
