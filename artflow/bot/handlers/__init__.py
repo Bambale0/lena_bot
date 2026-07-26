@@ -7,10 +7,12 @@ from aiogram import Router
 from aiogram.types import InlineKeyboardButton
 
 from bot.keyboards import models as _model_keyboards
+from bot.services.grok_versions import install_grok_versions
 from bot.services.video_reference_support import install_video_reference_support
 from bot.ui.model_labels import model_display_name, public_model_items
 
 install_video_reference_support()
+install_grok_versions()
 
 
 def _public_model_button(mc, prefix: str, model_costs: list) -> InlineKeyboardButton:
