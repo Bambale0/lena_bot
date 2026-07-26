@@ -10,10 +10,15 @@ from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.ui.navigation_v2 import render_create_hub, render_more_hub
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from core.config import settings
 from db import repository as repo
 from db.models import User
 
 router = Router(name="settings")
+
+
+def _is_admin_user(db_user: User) -> bool:
+    return bool(getattr(db_user, "tg_id", None) in settings.ADMIN_IDS)
 
 
 def language_kb(current_lang: str) -> InlineKeyboardBuilder:
@@ -34,7 +39,7 @@ def language_kb(current_lang: str) -> InlineKeyboardBuilder:
 @router.callback_query(F.data == "menu:create")
 async def cb_create_hub(call: CallbackQuery, db_user: User) -> None:
     lang = db_user.language or "ru"
-    screen = render_create_hub(lang=lang, is_admin=bool(getattr(db_user, "is_admin", False)))
+    screen = render_create_hub(lang=lang, is_admin=_is_admin_user(db_user))
     await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
@@ -42,7 +47,7 @@ async def cb_create_hub(call: CallbackQuery, db_user: User) -> None:
 @router.callback_query(F.data == "menu:more")
 async def cb_more_hub(call: CallbackQuery, db_user: User) -> None:
     lang = db_user.language or "ru"
-    screen = render_more_hub(lang=lang, is_admin=bool(getattr(db_user, "is_admin", False)))
+    screen = render_more_hub(lang=lang, is_admin=_is_admin_user(db_user))
     await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
