@@ -11,7 +11,7 @@ def test_veo_quality_capabilities_match_generation_endpoint() -> None:
     assert caps["duration_options"] == []
     assert caps["has_resolution"] is False
     assert caps["resolutions"] == []
-    assert caps["aspect_ratios"] == ["16:9", "9:16", "auto"]
+    assert caps["aspect_ratios"] == ["16:9", "9:16"]
     assert caps["max_refs"] == 2
     assert caps["supports_first_last_frames"] is True
     assert caps["supports_material_reference"] is False

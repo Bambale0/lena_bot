@@ -210,6 +210,16 @@ def _normalize_veo_generation_type(
     return mode
 
 
+def _normalize_veo_aspect_ratio(
+    generation_type: VideoGenerationType,
+    aspect_ratio: str | None,
+) -> str:
+    selected_ratio = aspect_ratio or "16:9"
+    if generation_type != VideoGenerationType.TEXT and selected_ratio == "auto":
+        return "16:9"
+    return selected_ratio
+
+
 def _validate_veo_request(
     model: VideoModel,
     generation_type: VideoGenerationType,
@@ -519,7 +529,7 @@ async def _veo_generate(
         images.append(last_frame_url)
 
     selected_type = _normalize_veo_generation_type(model, images, generation_type)
-    selected_ratio = aspect_ratio or "16:9"
+    selected_ratio = _normalize_veo_aspect_ratio(selected_type, aspect_ratio)
     _validate_veo_request(
         model,
         selected_type,

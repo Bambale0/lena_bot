@@ -233,6 +233,32 @@ async def test_veo_material_mode_accepts_fast_model(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_veo_material_mode_normalizes_legacy_auto_ratio(monkeypatch) -> None:
+    sent: list[dict] = []
+
+    async def fake_create_veo(payload: dict) -> dict:
+        sent.append(payload)
+        return {"code": 200, "data": {"taskId": "veo_reference_task"}}
+
+    monkeypatch.setattr(video_service.kieai_client, "create_veo_task", fake_create_veo)
+
+    await video_service._veo_generate(
+        VideoModel.VEO_3_LITE,
+        "Use the materials",
+        [
+            "https://cdn.example.test/a.png",
+            "https://cdn.example.test/b.png",
+            "https://cdn.example.test/c.png",
+        ],
+        "auto",
+        generation_type=VideoGenerationType.REFERENCE,
+    )
+
+    assert sent[0]["aspect_ratio"] == "16:9"
+    assert sent[0]["generationType"] == "REFERENCE_2_VIDEO"
+
+
+@pytest.mark.asyncio
 async def test_veo_4k_uses_current_official_endpoint(monkeypatch) -> None:
     calls: list[tuple[str, dict]] = []
 

@@ -38,7 +38,7 @@ _GPT_IMAGE_2_QUALITY_OPTIONS = [
     ("4K", "💎 4K (высокое)"),
     ("1K", "⚡ 1K (быстро)"),
 ]
-_VEO_RATIOS = ["16:9", "9:16", "auto"]
+_VEO_RATIOS = ["16:9", "9:16"]
 
 
 def _configure_gpt_image_2() -> None:
