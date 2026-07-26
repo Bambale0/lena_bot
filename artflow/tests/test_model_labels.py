@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from api.image_service import ImageModel
 from api.video_service import VideoModel
+from bot.keyboards import models as model_keyboards
 from bot.ui.model_labels import (
     all_known_model_keys,
     apply_model_labels,
@@ -113,3 +114,15 @@ def test_miniapp_uses_shared_catalog_instead_of_legacy_names():
     assert module._friendly_model_name("grok-imagine/image-to-video") == "🆕 NEW · Grok Imagine Video 1.5"
     assert "Edit" not in module._friendly_model_name("gpt-image-2-image-to-image")
     assert "Animate" not in module._friendly_model_name("happyhorse/image-to-video")
+
+
+def test_actual_legacy_button_renderer_ignores_stale_database_name():
+    cost = SimpleNamespace(
+        model_key="grok-imagine/image-to-video",
+        display_name="⚡ Grok Animate",
+        credits=0.6,
+    )
+    button = model_keyboards._model_button(cost, "vid_model", [cost])
+    assert button.text == "🆕 NEW · Grok Imagine Video 1.5 · 0.6 💋/сек"
+    assert button.callback_data == "vid_model:grok-imagine/image-to-video"
+    assert "Animate" not in button.text
