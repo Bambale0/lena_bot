@@ -10,7 +10,14 @@ from api.image_service import (
     ImageModel,
     _SQUARE_4K_UNSUPPORTED_MODELS,
 )
-from bot.keyboards.models import HIDDEN_IMAGE_MODELS, IMAGE_CAPS, IMAGE_MODEL_DESC
+from api.video_service import VideoModel
+from bot.keyboards.models import (
+    HIDDEN_IMAGE_MODELS,
+    IMAGE_CAPS,
+    IMAGE_MODEL_DESC,
+    VIDEO_CAPS,
+    VIDEO_MODEL_DESC,
+)
 
 
 _GPT_IMAGE_2_STABLE_RATIOS = [
@@ -31,6 +38,7 @@ _GPT_IMAGE_2_QUALITY_OPTIONS = [
     ("4K", "💎 4K (высокое)"),
     ("1K", "⚡ 1K (быстро)"),
 ]
+_VEO_RATIOS = ["16:9", "9:16", "auto"]
 
 
 def _configure_gpt_image_2() -> None:
@@ -72,4 +80,62 @@ def _configure_gpt_image_2() -> None:
     )
 
 
+def _configure_veo_31() -> None:
+    """Expose only controls accepted by the Veo 3.1 generation endpoint.
+
+    Veo generation does not accept a user-selected duration or a direct output
+    resolution. 1080P and 4K are separate post-generation operations.
+    """
+    common = {
+        "modes": ["text", "image"],
+        "duration_options": [],
+        "aspect_ratios": list(_VEO_RATIOS),
+        "has_resolution": False,
+        "resolutions": [],
+        "billing_mode": "flat",
+        "supports_first_last_frames": True,
+        "generation_types": [
+            "TEXT_2_VIDEO",
+            "FIRST_AND_LAST_FRAMES_2_VIDEO",
+        ],
+    }
+
+    VIDEO_CAPS[VideoModel.VEO_3].update(
+        **common,
+        max_refs=2,
+        supports_material_reference=False,
+    )
+    VIDEO_CAPS[VideoModel.VEO_3_FAST].update(
+        **common,
+        max_refs=3,
+        supports_material_reference=True,
+        generation_types=[
+            "TEXT_2_VIDEO",
+            "FIRST_AND_LAST_FRAMES_2_VIDEO",
+            "REFERENCE_2_VIDEO",
+        ],
+    )
+    VIDEO_CAPS[VideoModel.VEO_3_LITE].update(
+        **common,
+        max_refs=3,
+        supports_material_reference=True,
+        generation_types=[
+            "TEXT_2_VIDEO",
+            "FIRST_AND_LAST_FRAMES_2_VIDEO",
+            "REFERENCE_2_VIDEO",
+        ],
+    )
+
+    VIDEO_MODEL_DESC[VideoModel.VEO_3] = (
+        "🏆 Veo 3.1 Quality · текст, первый кадр или первый+последний"
+    )
+    VIDEO_MODEL_DESC[VideoModel.VEO_3_FAST] = (
+        "🏆 Veo 3.1 Fast · кадры и material references · 1080P/4K после генерации"
+    )
+    VIDEO_MODEL_DESC[VideoModel.VEO_3_LITE] = (
+        "🏆 Veo 3.1 Lite · кадры и material references · экономичный режим"
+    )
+
+
 _configure_gpt_image_2()
+_configure_veo_31()
