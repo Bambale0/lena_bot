@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.i18n import t
 from bot.services.session_service import MainMenuContext
 from bot.ui.common import ScreenRender
+from core.config import settings
 
 _IMAGE_MODEL_LABELS = {
     "grok-imagine/text-to-image": "Grok Imagine",
@@ -57,6 +58,13 @@ def _pretty_count(value: int, lang: str) -> str:
 
 def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_text: bool = False) -> ScreenRender:
     builder = InlineKeyboardBuilder()
+
+    builder.row(
+        InlineKeyboardButton(
+            text="📱 " + ("Открыть APIX" if lang == "ru" else "Open APIX"),
+            web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app"),
+        )
+    )
 
     if context.active_image_session:
         session = context.active_image_session
