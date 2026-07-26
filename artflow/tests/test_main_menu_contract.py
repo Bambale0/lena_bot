@@ -18,10 +18,12 @@ def labels(markup):
     return [button.text for row in markup.inline_keyboard for button in row]
 
 
-def test_v2_main_menu_has_six_primary_entrypoints():
+def test_v2_main_menu_has_mini_app_and_six_primary_entrypoints():
     ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
     markup = render_main_menu(ctx).reply_markup
 
+    assert markup.inline_keyboard[0][0].web_app is not None
+    assert markup.inline_keyboard[0][0].web_app.url.endswith("/app")
     assert callbacks(markup) == [
         "menu:create",
         "menu:assistant",
@@ -31,6 +33,7 @@ def test_v2_main_menu_has_six_primary_entrypoints():
         "menu:more",
     ]
     assert labels(markup) == [
+        "📱 Открыть APIX",
         "✨ Создать",
         "🤖 AI-ассистент",
         "📂 Мои работы",
