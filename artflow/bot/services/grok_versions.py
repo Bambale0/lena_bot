@@ -1,9 +1,4 @@
-"""Runtime separation for Grok Imagine Video and Grok Imagine Video 1.5.
-
-The legacy Grok provider routes stay untouched. Grok 1.5 is exposed as a
-separate selectable model while reusing the configured Grok pricing until a
-separate tariff is supplied in admin settings.
-"""
+"""Runtime separation for Grok Imagine Video and Grok Imagine Video 1.5."""
 from __future__ import annotations
 
 from copy import copy
@@ -11,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from api import kieai_client, video_service
+from bot.keyboards import models as model_keyboards
 from bot.keyboards.models import VIDEO_CAPS, VIDEO_MODEL_DESC
 from bot.ui.model_labels import model_display_name
 from db import repository as repo
@@ -93,12 +89,7 @@ def _install_repository_aliases() -> None:
 
     original_resolve = repo.resolve_video_model_cost
     if not getattr(original_resolve, "__grok_versions__", False):
-        async def resolve_video_model_cost(
-            session: Any,
-            model_key: str,
-            *args: Any,
-            **kwargs: Any,
-        ):
+        async def resolve_video_model_cost(session: Any, model_key: str, *args: Any, **kwargs: Any):
             row = await original_resolve(session, model_key, *args, **kwargs)
             if row is not None or model_key != GROK_15:
                 return row
@@ -158,6 +149,18 @@ def _install_generation_route() -> None:
     video_service.generate_video = generate_video
 
 
+def _install_picker_groups() -> None:
+    """Add Grok 1.5 to both relevant legacy picker categories."""
+    for group_key, model_keys in model_keyboards._VIDEO_GROUPS:
+        if group_key in {"fast", "i2v"} and GROK_15 not in model_keys:
+            legacy_anchor = GROK_LEGACY_T2V if group_key == "fast" else GROK_LEGACY_I2V
+            try:
+                index = [str(getattr(item, "value", item)) for item in model_keys].index(legacy_anchor) + 1
+            except ValueError:
+                index = len(model_keys)
+            model_keys.insert(index, GROK_15)
+
+
 def install_grok_versions() -> None:
     """Restore Grok 1 and register Grok 1.5 as a separate public model."""
     VIDEO_CAPS[GROK_LEGACY_T2V] = {
@@ -194,5 +197,6 @@ def install_grok_versions() -> None:
     VIDEO_MODEL_DESC[GROK_LEGACY_I2V] = "⚡ Grok Imagine Video · оживление изображений"
     VIDEO_MODEL_DESC[GROK_15] = "🆕 NEW · Grok Imagine Video 1.5 · текст или до 7 фото · нативный звук"
 
+    _install_picker_groups()
     _install_repository_aliases()
     _install_generation_route()
