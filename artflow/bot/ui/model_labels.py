@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import Any
+
 
 _MODEL_LABELS: dict[str, str] = {
     # Images: one public product name, internal route chosen from input materials.
@@ -45,6 +48,7 @@ _MODEL_LABELS: dict[str, str] = {
     "veo3_lite": "🎞 Veo 3 Lite",
     # Other
     "suno/v5.5": "🎵 Suno 5.5",
+    "suno/v5.0": "🎵 Suno 5.0",
     "suno/v4.5": "🎵 Suno 4.5",
     "midjourney-imagine": "🖌 Midjourney Imagine",
     "midjourney-action": "🖌 Midjourney Action",
@@ -53,7 +57,7 @@ _MODEL_LABELS: dict[str, str] = {
     "midjourney-video": "🎞 Midjourney Video",
 }
 
-# Canonical route used when a family is shown once in model pickers.
+# Canonical route used when a family is shown once in public model pickers.
 _CANONICAL_MODEL_KEYS: dict[str, str] = {
     "seedream/5-pro-image-to-image": "seedream/5-pro-text-to-image",
     "seedream/4.5-edit": "seedream/4.5-text-to-image",
@@ -70,7 +74,7 @@ _CANONICAL_MODEL_KEYS: dict[str, str] = {
 
 
 def model_display_name(model_key: str, fallback: str | None = None) -> str:
-    """Return one consistent user-facing model label across bot screens."""
+    """Return one consistent user-facing model label across bot and Mini App."""
     key = str(model_key or "").strip()
     if key in _MODEL_LABELS:
         return _MODEL_LABELS[key]
@@ -86,9 +90,43 @@ def canonical_model_key(model_key: str) -> str:
 
 
 def is_internal_variant(model_key: str) -> bool:
-    """True when the route must be hidden from public model pickers."""
+    """True when the route must be hidden from public family pickers."""
     key = str(model_key or "").strip()
     return canonical_model_key(key) != key
+
+
+def public_model_items(items: Iterable[Any]) -> list[Any]:
+    """Deduplicate ORM/dict model rows by public family and apply canonical labels.
+
+    Internal provider routes remain in storage and are still used for pricing and
+    dispatch. Only public pickers receive the collapsed list.
+    """
+    result: list[Any] = []
+    seen: set[str] = set()
+    for item in items:
+        key = str(getattr(item, "model_key", None) or (item.get("model_key") if isinstance(item, dict) else ""))
+        family = canonical_model_key(key)
+        if family in seen:
+            continue
+        seen.add(family)
+        label = model_display_name(key, getattr(item, "display_name", None))
+        if isinstance(item, dict):
+            clone = dict(item)
+            clone["display_name"] = label
+            result.append(clone)
+        else:
+            try:
+                item.display_name = label
+            except Exception:
+                pass
+            result.append(item)
+    return result
+
+
+def install_miniapp_model_labels(module: Any) -> None:
+    """Replace Mini App legacy naming with the same catalog used by Telegram."""
+    module._FRIENDLY_MODEL_NAMES = dict(_MODEL_LABELS)
+    module._friendly_model_name = model_display_name
 
 
 def all_known_model_keys() -> set[str]:
