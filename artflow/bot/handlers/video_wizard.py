@@ -12,6 +12,7 @@ from bot.handlers import video_gen as legacy
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.models import VIDEO_CAPS, model_cost_display_text, video_models_kb
 from bot.states import VideoGenFSM
+from bot.ui.model_labels import model_display_name
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import User
@@ -127,9 +128,10 @@ async def choose_video_scenario(call: CallbackQuery, state: FSMContext, session:
     badges = ["⭐ Рекомендуем", "💎 Качество", "⚡ Альтернатива"]
     for index, model in enumerate(recommended[:3]):
         label = badges[index] if index < len(badges) else "Вариант"
+        public_name = model_display_name(model.model_key, model.display_name)
         builder.row(
             InlineKeyboardButton(
-                text=f"{label}: {model.display_name} · {model_cost_display_text(model, model_costs=costs)}",
+                text=f"{label}: {public_name} · {model_cost_display_text(model, model_costs=costs)}",
                 callback_data=f"vid_model:{model.model_key}",
             )
         )
@@ -220,10 +222,11 @@ async def review_video_prompt(
     elif data.get("mode") == "motion":
         materials = "фото + видео"
 
+    public_name = model_display_name(model_key, model_cost.display_name)
     await message.answer(
         "✅ <b>Проверь задачу перед запуском</b>\n\n"
         f"🎯 Сценарий: <b>{mode_labels.get(data.get('mode'), data.get('mode') or 'видео')}</b>\n"
-        f"🤖 Модель: <b>{escape(model_cost.display_name)}</b>\n"
+        f"🤖 Модель: <b>{escape(public_name)}</b>\n"
         f"📎 Материалы: <b>{materials}</b>\n"
         f"⚙️ Параметры: <code>{escape(legacy._params_summary(data))}</code>\n"
         f"✍️ Запрос: <i>{escape(prompt[:700])}</i>\n\n"
