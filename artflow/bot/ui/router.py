@@ -10,6 +10,7 @@ from bot.ui.image_menu import (
     render_image_scenarios,
 )
 from bot.ui.main_menu import render_main_menu
+from bot.ui.model_labels import public_model_items
 from bot.ui.music_menu import render_music_menu
 from db import repository as repo
 from db.models import User
@@ -55,7 +56,7 @@ async def render_screen(
 
     if screen == "image_advanced":
         model_costs = payload.get("model_costs") or await repo.get_all_model_costs(session)
-        return render_image_advanced_menu(model_costs)
+        return render_image_advanced_menu(public_model_items(model_costs))
 
     if screen == "music":
         music_cost = payload.get("music_cost")
