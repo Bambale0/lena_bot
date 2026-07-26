@@ -64,7 +64,6 @@ def render_more_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRender
             web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app"),
         )
     )
-    builder.row(InlineKeyboardButton(text="🧑‍💻 @chillcreative", url="https://t.me/chillcreative"))
     if is_admin:
         builder.row(InlineKeyboardButton(text="👑 " + ("Админ-панель" if lang == "ru" else "Admin panel"), callback_data="menu:admin"))
     builder.row(InlineKeyboardButton(text="🏠 " + ("На главную" if lang == "ru" else "Home"), callback_data="menu:main"))
@@ -80,8 +79,6 @@ def render_more_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRender
             "Язык интерфейса и персональные параметры.\n\n"
             "❓ <b>Как пользоваться</b>\n"
             "Короткая инструкция по изображениям, видео, музыке, оплате и работе с AI.\n\n"
-            "🧑‍💻 <b>Разработчик</b>\n"
-            "Технические вопросы, интеграции и доработка проекта: @chillcreative\n\n"
             "Mini App также доступен прямо отсюда — там удобнее работать с большим количеством моделей и референсов."
         )
     else:
@@ -90,8 +87,7 @@ def render_more_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRender
             "📚 <b>Prompt library</b> — ready ideas and reusable templates.\n"
             "👥 <b>Partner program</b> — invite users and earn rewards.\n"
             "⚙️ <b>Settings</b> — language and personal options.\n"
-            "❓ <b>How it works</b> — a quick guide to creation, payments and AI.\n"
-            "🧑‍💻 <b>Developer</b> — technical questions and integrations: @chillcreative.\n\n"
+            "❓ <b>How it works</b> — a quick guide to creation, payments and AI.\n\n"
             "Open the Mini App here when you need the full visual workspace."
         )
     return ScreenRender(text=text, reply_markup=builder.as_markup())
