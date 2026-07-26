@@ -24,37 +24,30 @@ class VideoGenFSM(StatesGroup):
     mode_select = State()           # text / image
     image_upload = State()          # optional i2v
     params_select = State()         # duration + aspect_ratio + resolution
-    motion_select = State()         # only for Kling 2.6 Motion
+    motion_select = State()         # only for Kling motion
     omni_ids_input = State()        # Gemini Omni audio_ids / character_ids / seed
     omni_audio_input = State()      # Gemini Omni audio ID utility
     omni_character_image = State()  # Gemini Omni character utility, reference image
     omni_character_input = State()  # Gemini Omni character utility, metadata
     prompt_input = State()
+    review = State()                # final task + price review before charging
     generating = State()
 
 
 class MidjourneyFSM(StatesGroup):
-    # Imagine flow
-    bot_type_select = State()      # MID_JOURNEY / NIJI_JOURNEY
-    speed_select = State()         # FAST / RELAX / TURBO
-    reference_upload = State()     # optional reference image
+    bot_type_select = State()
+    speed_select = State()
+    reference_upload = State()
     prompt_input = State()
     image_upload = State()
     generating = State()
-
     viewing_result = State()
     action_polling = State()
     waiting_modal_input = State()
-
-    # Blend flow
     blend_collecting = State()
     blend_generating = State()
-
-    # Describe flow
     describe_upload = State()
     describe_polling = State()
-
-    # MJ Video flow
     video_upload = State()
     video_speed_select = State()
     video_prompt = State()
