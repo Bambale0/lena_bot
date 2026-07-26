@@ -29,15 +29,30 @@ jobs:
         run: |
           ruff check \
             api/assistant_service.py \
+            api/advanced_video_service.py \
             api/image_service.py \
+            api/kling_grok_service.py \
+            api/llm_provider_service.py \
+            api/media_gateway.py \
+            api/midjourney_full_service.py \
+            api/midjourney_service.py \
             api/photo_prompt_service.py \
+            api/provider_contract_catalog.py \
+            api/provider_spec_overrides.py \
+            api/suno_full_service.py \
             api/video_service.py \
             bot/handlers/video_gen.py \
+            scripts/check_provider_contract_coverage.py \
+            scripts/check_provider_contracts_ci.py \
             tests/test_midjourney.py \
             tests/test_photo_prompt_service.py \
+            tests/test_provider_contract_catalog.py \
             tests/test_video_gen.py \
             tests/test_webapp_routes.py \
             tests/test_kie_model_specs.py
+
+      - name: Provider contract inventory
+        run: python scripts/check_provider_contracts_ci.py
 
       - name: Pytest
         run: pytest -q
