@@ -10,32 +10,12 @@ from bot.keyboards.models import (
     image_session_kb,
 )
 from bot.ui.common import ScreenRender
+from bot.ui.model_labels import model_display_name
 from db.models import ImageSession, ModelCost
-
-_IMAGE_MODEL_LABELS = {
-    "grok-imagine/text-to-image": "Grok Imagine",
-    "grok-imagine/image-to-image": "Grok Imagine Edit",
-    "qwen/text-to-image": "Qwen",
-    "qwen/image-to-image": "Qwen Edit",
-    "qwen/image-edit": "Qwen Edit Pro",
-    "qwen2/text-to-image": "Qwen2",
-    "qwen2/image-edit": "Qwen2 Edit",
-    "seedream/5-pro-text-to-image": "Seedream 5.0 Pro",
-    "seedream/5-pro-image-to-image": "Seedream 5.0 Pro Edit",
-    "seedream/4.5-text-to-image": "Seedream 4.5",
-    "seedream/4.5-edit": "Seedream 4.5 Edit",
-    "wan/2-7-image": "WAN 2.7",
-    "wan/2-7-image-pro": "WAN 2.7 Pro",
-    "gpt-image-2-text-to-image": "GPT Image 2",
-    "gpt-image-2-image-to-image": "GPT Image 2 Edit",
-    "google/nano-banana": "Nano Banana",
-    "nano-banana-pro": "Nano Banana Pro",
-    "nano-banana-2": "Nano Banana 2",
-}
 
 
 def _pretty_image_model(model_key: str) -> str:
-    return _IMAGE_MODEL_LABELS.get(model_key, model_key.replace("-", " ").replace("/", " · ").title())
+    return model_display_name(model_key)
 
 
 def _pretty_ratio(value: str | None) -> str:
@@ -74,10 +54,10 @@ def render_image_advanced_menu(model_costs: list[ModelCost]) -> ScreenRender:
         "🧠 <b>Экспертный выбор модели</b>\n\n"
         "Здесь можно выбрать конкретную нейросеть вручную. Для большинства задач быстрее вернуться назад и использовать готовый сценарий.\n\n"
         "<b>Как ориентироваться:</b>\n"
-        "• нужна универсальная генерация или редактирование — выбирай Nano Banana или GPT Image;\n"
-        "• важны детали, текст и коммерческие изображения — GPT Image или Seedream;\n"
-        "• нужна скорость и эксперименты — Grok или Qwen;\n"
-        "• несколько референсов и сложная композиция — модель с поддержкой нескольких фото.\n\n"
+        "• 🔥 <b>HOT · Seedream 5 Pro</b> — коммерческие изображения, фотореализм и высокая детализация;\n"
+        "• Nano Banana и GPT Image 2 — универсальная генерация и редактирование;\n"
+        "• Grok Imagine и Qwen — быстрые эксперименты и альтернативные стили;\n"
+        "• модели с несколькими референсами — сложная композиция и сохранение персонажей.\n\n"
         "Цена указана прямо на кнопке. После выбора APIX покажет только те параметры, которые поддерживает эта модель."
     )
     return ScreenRender(text=text, reply_markup=image_models_kb(model_costs))
