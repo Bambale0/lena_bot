@@ -1,9 +1,8 @@
 """Shared media preparation for provider-bound generation requests.
 
 Local APIX uploads are validated before provider billing, probed for image/video
-metadata and moved to KIE file storage. External HTTPS URLs are preserved
-because providers fetch them directly; callers may pass trusted metadata when
-pre-validating remote uploads at the Telegram/Mini App boundary.
+or audio metadata and moved to KIE file storage. External HTTPS URLs are
+preserved because providers fetch them directly.
 """
 from __future__ import annotations
 
@@ -73,12 +72,7 @@ VIDEO_POLICY = MediaPolicy(
     kind=MediaKind.VIDEO,
     upload_path="videos/apix-refs",
     allowed_mime_types=frozenset(
-        {
-            "video/mp4",
-            "video/quicktime",
-            "video/x-matroska",
-            "video/webm",
-        }
+        {"video/mp4", "video/quicktime", "video/x-matroska", "video/webm"}
     ),
 )
 AUDIO_POLICY = MediaPolicy(
@@ -160,19 +154,19 @@ def _probe_image(path: Path) -> MediaProbe:
         raise ValueError(f"Could not read image metadata for {path.name}: {exc}") from exc
 
 
-def _probe_video_sync(path: Path) -> MediaProbe:
-    command = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=width,height:format=duration",
-        "-of",
-        "json",
-        str(path),
-    ]
+def _run_ffprobe(path: Path, *, video_stream: bool) -> dict:
+    command = ["ffprobe", "-v", "error"]
+    if video_stream:
+        command.extend(["-select_streams", "v:0"])
+    command.extend(
+        [
+            "-show_entries",
+            "stream=width,height:format=duration" if video_stream else "format=duration",
+            "-of",
+            "json",
+            str(path),
+        ]
+    )
     try:
         process = subprocess.run(
             command,
@@ -182,18 +176,25 @@ def _probe_video_sync(path: Path) -> MediaProbe:
             timeout=20,
         )
     except FileNotFoundError as exc:
-        raise RuntimeError("ffprobe is required for provider video validation") from exc
+        raise RuntimeError("ffprobe is required for provider media validation") from exc
     except subprocess.TimeoutExpired as exc:
-        raise ValueError(f"Video metadata probe timed out for {path.name}") from exc
+        raise ValueError(f"Media metadata probe timed out for {path.name}") from exc
     except subprocess.CalledProcessError as exc:
         details = (exc.stderr or exc.stdout or "ffprobe failed").strip()
-        raise ValueError(f"Could not read video metadata for {path.name}: {details}") from exc
-
+        raise ValueError(f"Could not read media metadata for {path.name}: {details}") from exc
     try:
         payload = json.loads(process.stdout or "{}")
-        streams = payload.get("streams") or []
-        stream = streams[0] if streams and isinstance(streams[0], dict) else {}
-        format_data = payload.get("format") if isinstance(payload.get("format"), dict) else {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed ffprobe output for {path.name}") from exc
+    return payload if isinstance(payload, dict) else {}
+
+
+def _probe_video_sync(path: Path) -> MediaProbe:
+    payload = _run_ffprobe(path, video_stream=True)
+    streams = payload.get("streams") or []
+    stream = streams[0] if streams and isinstance(streams[0], dict) else {}
+    format_data = payload.get("format") if isinstance(payload.get("format"), dict) else {}
+    try:
         duration_raw = format_data.get("duration")
         duration = float(duration_raw) if duration_raw not in (None, "") else None
         return MediaProbe(
@@ -202,7 +203,18 @@ def _probe_video_sync(path: Path) -> MediaProbe:
             duration_seconds=duration,
         )
     except (TypeError, ValueError, KeyError) as exc:
-        raise ValueError(f"Malformed ffprobe output for {path.name}") from exc
+        raise ValueError(f"Malformed ffprobe video metadata for {path.name}") from exc
+
+
+def _probe_audio_sync(path: Path) -> MediaProbe:
+    payload = _run_ffprobe(path, video_stream=False)
+    format_data = payload.get("format") if isinstance(payload.get("format"), dict) else {}
+    try:
+        duration_raw = format_data.get("duration")
+        duration = float(duration_raw) if duration_raw not in (None, "") else None
+        return MediaProbe(duration_seconds=duration)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Malformed ffprobe audio metadata for {path.name}") from exc
 
 
 async def probe_local_media(path: Path, kind: MediaKind) -> MediaProbe:
@@ -210,6 +222,8 @@ async def probe_local_media(path: Path, kind: MediaKind) -> MediaProbe:
         return await asyncio.to_thread(_probe_image, path)
     if kind == MediaKind.VIDEO:
         return await asyncio.to_thread(_probe_video_sync, path)
+    if kind == MediaKind.AUDIO:
+        return await asyncio.to_thread(_probe_audio_sync, path)
     return MediaProbe()
 
 
@@ -266,11 +280,7 @@ def _validate_external_url(url: str) -> None:
         raise ValueError(f"Provider media URL must be HTTP(S): {url!r}")
 
 
-async def prepare_media_url(
-    url: str | None,
-    *,
-    policy: MediaPolicy,
-) -> str | None:
+async def prepare_media_url(url: str | None, *, policy: MediaPolicy) -> str | None:
     if not url:
         return None
     value = str(url).strip()
