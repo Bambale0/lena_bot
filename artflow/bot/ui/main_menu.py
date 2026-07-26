@@ -38,7 +38,7 @@ def _home_text(context: MainMenuContext, lang: str, *, show_session: bool) -> st
         base = (
             "✨ <b>APIX — your AI creative studio</b>\n\n"
             "Create images, animate photos, generate video with sound, make music and turn rough ideas into strong prompts.\n\n"
-            "📱 <b>Mini App</b> — the full visual workspace with models, references, feed and payments.\n"
+            "😊 <b>App</b> — the full visual workspace with models, references, feed and payments.\n"
             "✨ <b>Create</b> — a quick guided flow inside the bot.\n"
             "🤖 <b>AI Assistant</b> — describe the goal and let APIX help choose the path.\n\n"
             f"💎 Balance: <b>{context.balance} credits</b>. The exact price is shown before every launch."
@@ -47,7 +47,7 @@ def _home_text(context: MainMenuContext, lang: str, *, show_session: bool) -> st
         base = (
             "✨ <b>APIX — твоя AI-студия</b>\n\n"
             "Создавай изображения, оживляй фото, генерируй видео со звуком, делай музыку и превращай сырые идеи в сильные промпты.\n\n"
-            "📱 <b>Mini App</b> — полноценная визуальная студия с моделями, референсами, лентой и оплатой.\n"
+            "😊 <b>Приложение</b> — полноценная визуальная студия с моделями, референсами, лентой и оплатой.\n"
             "✨ <b>Создать</b> — быстрый пошаговый запуск прямо в боте.\n"
             "🤖 <b>AI-ассистент</b> — опиши задачу обычными словами, и APIX поможет выбрать путь.\n\n"
             f"💎 На балансе: <b>{context.balance} кредитов</b>. Точную стоимость покажем до запуска."
@@ -74,7 +74,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
-            text="📱 " + ("Открыть Mini App" if lang == "ru" else "Open Mini App"),
+            text="😊 " + ("Приложение" if lang == "ru" else "App"),
             web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app"),
         )
     )
