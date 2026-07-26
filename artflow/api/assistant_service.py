@@ -5,20 +5,22 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+# Kept as a module attribute for backward-compatible tests and monkeypatches.
 import httpx
 
+from api import llm_provider_service as llm
 from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_KIE_BASE = "https://api.kie.ai"
 _COMET_DEFAULT_ASSISTANT_MODEL = "gpt-5.4"
 _COMET_DEFAULT_ASSISTANT_FALLBACK = "gpt-5.4-mini"
 
 _SYSTEM_PROMPT = (
     "Ты — AI-ассистент внутри Telegram-бота APIX. "
     "Помогай кратко, по делу и дружелюбно. "
-    "Ты хорошо разбираешься в генерации изображений, видео, музыки, Midjourney, промптах, оплатах, референсах и сценариях использования APIX. "
+    "Ты хорошо разбираешься в генерации изображений, видео, музыки, Midjourney, "
+    "промптах, оплатах, референсах и сценариях использования APIX. "
     "Если вопрос не про APIX, всё равно старайся помочь как обычный полезный ассистент. "
     "Не придумывай факты о состоянии аккаунта пользователя, если их нет в сообщениях. "
     "Отвечай на языке пользователя. Обычно это русский. "
@@ -27,36 +29,41 @@ _SYSTEM_PROMPT = (
 
 _ADMIN_SYSTEM_PROMPT = (
     "Пользователь может быть администратором APIX. "
-    "Если он спрашивает про модерацию, жалобы, баны, выплаты, промпты на проверке или админские сценарии, "
-    "отвечай как опытный модератор и операционный помощник. "
+    "Если он спрашивает про модерацию, жалобы, баны, выплаты, промпты на проверке "
+    "или админские сценарии, отвечай как опытный модератор и операционный помощник. "
     "Не обещай, что уже выполнил действие, если из контекста не видно результата."
 )
 
 _PROMPT_MODERATION_SYSTEM_PROMPT = (
     "Ты — AI-модератор Telegram-бота APIX и витрины пользовательских промптов. "
-    "Твоя задача — дать рекомендацию модератору по конкретному промпту. "
-    "Оцени текст на предмет спама, мошенничества, агрессии, незаконного или опасного контента, "
-    "явно сексуального контента, бессмысленного мусора, очень низкого качества и попыток обмана пользователей. "
-    "Если данных недостаточно или случай спорный, выбирай ручную проверку, а не категоричный отказ. "
-    "Ответ верни на русском, компактно, в формате:\n"
-    "Вердикт: ...\n"
-    "Причины: ...\n"
-    "Риск: низкий/средний/высокий\n"
-    "Рекомендация: ..."
+    "Оцени текст на спам, мошенничество, агрессию, незаконный или опасный контент, "
+    "явно сексуальный контент, шок-контент, бессмысленный мусор и попытки обмана. "
+    "Если данных недостаточно или случай спорный, выбирай ручную проверку."
 )
 
-
-_PROMPT_MODERATION_DECISION_SYSTEM_PROMPT = (
-    "Ты — автоматический AI-модератор Telegram-бота APIX. "
-    "Тебе нужно принять решение по пользовательскому промпту для публикации в витрине. "
-    "Проверяй спам, мошенничество, манипуляции, незаконный и опасный контент, явную сексуализацию, "
-    "шок-контент, бессмысленный мусор, токсичный abuse-контент и попытки обмануть пользователей. "
-    "Если промпт нормальный, полезный и безопасный — approve. "
-    "Если промпт явно плохой или нарушает правила — reject. "
-    "Если случай спорный или контекста мало — manual_review. "
-    "Верни СТРОГО JSON без markdown и без пояснений вокруг, формат: "
-    '{"decision":"approve|reject|manual_review","risk":"low|medium|high","reason":"...","recommendation":"..."}'
+_MODERATION_REVIEW_SYSTEM_PROMPT = (
+    f"{_PROMPT_MODERATION_SYSTEM_PROMPT} "
+    "Дай компактную рекомендацию модератору на русском языке в формате: "
+    "Вердикт, причины, риск и рекомендация. Не утверждай, что действие уже выполнено."
 )
+
+_MODERATION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "enum": ["approve", "reject", "manual_review"],
+        },
+        "risk": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+        },
+        "reason": {"type": "string"},
+        "recommendation": {"type": "string"},
+    },
+    "required": ["decision", "risk", "reason", "recommendation"],
+    "additionalProperties": False,
+}
 
 
 @dataclass(frozen=True)
@@ -66,23 +73,174 @@ class PromptModerationDecision:
     reason: str
     recommendation: str
     raw: str
+    provider: str = ""
+    model: str = ""
 
 
-async def generate_assistant_reply(messages: list[dict[str, str]], *, admin_mode: bool = False) -> str:
+@dataclass(frozen=True)
+class AssistantReply:
+    text: str
+    provider: str
+    model: str
+    usage: dict[str, Any]
+    tool_calls: tuple[dict[str, Any], ...] = ()
+
+
+def _normalize_comet_text_model(model: str | None) -> str | None:
+    value = str(model or "").strip()
+    if not value:
+        return None
+    parts = value.split("-")
+    if len(parts) >= 3 and parts[0] == "gpt" and parts[1].isdigit() and parts[2].isdigit():
+        return f"gpt-{parts[1]}.{parts[2]}" + (
+            "-" + "-".join(parts[3:]) if len(parts) > 3 else ""
+        )
+    return value
+
+
+def _kie_route(model: str) -> llm.LLMRoute:
+    provider = (
+        llm.LLMProvider.KIE_CLAUDE
+        if str(model).startswith("claude-")
+        else llm.LLMProvider.KIE_RESPONSES
+    )
+    return llm.LLMRoute(provider=provider, model=str(model))
+
+
+def _assistant_routes(*, web_search: bool = False) -> list[llm.LLMRoute]:
+    routes: list[llm.LLMRoute] = []
+    seen: set[tuple[str, str]] = set()
+
+    for model in (
+        getattr(settings, "KIE_ASSISTANT_MODEL", ""),
+        getattr(settings, "KIE_ASSISTANT_FALLBACK", ""),
+    ):
+        value = str(model or "").strip()
+        if not value:
+            continue
+        route = _kie_route(value)
+        if web_search and route.provider == llm.LLMProvider.KIE_CLAUDE:
+            continue
+        key = (route.provider.value, route.model)
+        if key not in seen:
+            seen.add(key)
+            routes.append(route)
+
+    if web_search:
+        return routes
+
+    for model in (
+        getattr(settings, "COMET_ASSISTANT_MODEL", None),
+        getattr(settings, "COMET_ASSISTANT_FALLBACK", None),
+        _normalize_comet_text_model(getattr(settings, "KIE_ASSISTANT_MODEL", None)),
+        _normalize_comet_text_model(getattr(settings, "KIE_ASSISTANT_FALLBACK", None)),
+        _COMET_DEFAULT_ASSISTANT_MODEL,
+        _COMET_DEFAULT_ASSISTANT_FALLBACK,
+    ):
+        value = _normalize_comet_text_model(model)
+        if not value:
+            continue
+        route = llm.LLMRoute(llm.LLMProvider.COMET_CHAT, value)
+        key = (route.provider.value, route.model)
+        if key not in seen:
+            seen.add(key)
+            routes.append(route)
+    return routes
+
+
+def _moderation_routes() -> list[llm.LLMRoute]:
+    models = [
+        getattr(settings, "COMET_ASSISTANT_MODEL", None),
+        getattr(settings, "COMET_ASSISTANT_FALLBACK", None),
+        _COMET_DEFAULT_ASSISTANT_MODEL,
+        _COMET_DEFAULT_ASSISTANT_FALLBACK,
+    ]
+    result: list[llm.LLMRoute] = []
+    seen: set[str] = set()
+    for model in models:
+        value = _normalize_comet_text_model(model)
+        if value and value not in seen:
+            seen.add(value)
+            result.append(llm.LLMRoute(llm.LLMProvider.COMET_CHAT, value))
+    return result
+
+
+def _request_messages(messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+    normalized: list[dict[str, Any]] = []
+    for item in messages[-12:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "user")
+        if role not in {"user", "assistant", "system"}:
+            role = "user"
+        normalized.append({"role": role, "content": item.get("content", "")})
+    if not normalized:
+        raise ValueError("At least one assistant message is required")
+    return tuple(normalized)
+
+
+async def generate_assistant_result(
+    messages: list[dict[str, Any]],
+    *,
+    admin_mode: bool = False,
+    web_search: bool = False,
+    function_tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
+    reasoning_effort: llm.ReasoningEffort = llm.ReasoningEffort.MEDIUM,
+) -> AssistantReply:
     system_prompt = _SYSTEM_PROMPT
     if admin_mode:
         system_prompt = f"{system_prompt} {_ADMIN_SYSTEM_PROMPT}"
-    return sanitize_assistant_reply(await _generate_text_reply(messages, system_prompt=system_prompt))
+
+    request = llm.LLMRequest(
+        messages=_request_messages(messages),
+        system_prompt=system_prompt,
+        reasoning_effort=reasoning_effort,
+        web_search=bool(web_search),
+        function_tools=tuple(function_tools or ()),
+        tool_choice=tool_choice,
+    )
+    result = await llm.call_with_fallbacks(
+        _assistant_routes(web_search=web_search),
+        request,
+        kie_api_key=str(getattr(settings, "KIE_AI_KEY", "")),
+        comet_api_key=str(getattr(settings, "COMET_API_KEY", "")),
+        comet_base_url=str(
+            getattr(settings, "COMET_BASE_URL", "https://api.cometapi.com")
+        ),
+    )
+    text = sanitize_assistant_reply(result.text)
+    logger.info(
+        "assistant generated via provider=%s model=%s",
+        result.provider.value,
+        result.model,
+    )
+    return AssistantReply(
+        text=text,
+        provider=result.provider.value,
+        model=result.model,
+        usage=dict(result.usage),
+        tool_calls=result.tool_calls,
+    )
+
+
+async def generate_assistant_reply(
+    messages: list[dict[str, Any]],
+    *,
+    admin_mode: bool = False,
+) -> str:
+    return (await generate_assistant_result(messages, admin_mode=admin_mode)).text
 
 
 def sanitize_assistant_reply(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
         return "Готово. Чем ещё помочь?"
-
     text = text.removeprefix("КОНТЕКСТ").removeprefix("CONTEXT").strip()
     lines = text.splitlines()
-    has_debug_shape = any(line.strip().lower().startswith(("role:", "content:")) for line in lines)
+    has_debug_shape = any(
+        line.strip().lower().startswith(("role:", "content:")) for line in lines
+    )
     if has_debug_shape:
         lines = [
             line.strip()
@@ -95,6 +253,53 @@ def sanitize_assistant_reply(value: Any) -> str:
     return text or "Готово. Чем ещё помочь?"
 
 
+def _moderation_details(
+    *,
+    prompt_id: int | None,
+    title: str,
+    description: str,
+    prompt_text: str,
+    tags: list[str] | None,
+    model: str | None,
+    extra_context: str | None = None,
+) -> str:
+    return "\n".join(
+        [
+            f"ID: {prompt_id if prompt_id is not None else '—'}",
+            f"Название: {title or '—'}",
+            f"Описание: {description or '—'}",
+            f"Модель: {model or '—'}",
+            f"Теги: {', '.join(tags or []) or '—'}",
+            f"Контекст: {extra_context or '—'}",
+            "Текст промпта:",
+            prompt_text or "—",
+        ]
+    )
+
+
+async def _generate_moderation_review_text(details: str) -> str:
+    request = llm.LLMRequest(
+        messages=({"role": "user", "content": details},),
+        system_prompt=_MODERATION_REVIEW_SYSTEM_PROMPT,
+        reasoning_effort=llm.ReasoningEffort.MEDIUM,
+    )
+    result = await llm.call_with_fallbacks(
+        _assistant_routes(),
+        request,
+        kie_api_key=str(getattr(settings, "KIE_AI_KEY", "")),
+        comet_api_key=str(getattr(settings, "COMET_API_KEY", "")),
+        comet_base_url=str(
+            getattr(settings, "COMET_BASE_URL", "https://api.cometapi.com")
+        ),
+    )
+    logger.info(
+        "moderation review generated via provider=%s model=%s",
+        result.provider.value,
+        result.model,
+    )
+    return sanitize_assistant_reply(result.text)
+
+
 async def generate_prompt_moderation_review(
     *,
     prompt_id: int,
@@ -104,19 +309,15 @@ async def generate_prompt_moderation_review(
     tags: list[str] | None,
     model: str | None,
 ) -> str:
-    details = [
-        f"ID: {prompt_id}",
-        f"Название: {title or '—'}",
-        f"Описание: {description or '—'}",
-        f"Модель: {model or '—'}",
-        f"Теги: {', '.join(tags or []) or '—'}",
-        "Текст промпта:",
-        prompt_text or "—",
-    ]
-    return await _generate_text_reply(
-        [{"role": "user", "content": "\n".join(details)}],
-        system_prompt=_PROMPT_MODERATION_SYSTEM_PROMPT,
+    details = _moderation_details(
+        prompt_id=prompt_id,
+        title=title,
+        description=description,
+        prompt_text=prompt_text,
+        tags=tags,
+        model=model,
     )
+    return await _generate_moderation_review_text(details)
 
 
 async def generate_freeform_prompt_moderation_review(
@@ -125,17 +326,16 @@ async def generate_freeform_prompt_moderation_review(
     model: str | None = None,
     extra_context: str | None = None,
 ) -> str:
-    details = [
-        "Режим: проверка произвольного промпта перед генерацией",
-        f"Модель: {model or '—'}",
-        f"Контекст: {extra_context or '—'}",
-        "Текст промпта:",
-        prompt_text or "—",
-    ]
-    return await _generate_text_reply(
-        [{"role": "user", "content": "\n".join(details)}],
-        system_prompt=_PROMPT_MODERATION_SYSTEM_PROMPT,
+    details = _moderation_details(
+        prompt_id=None,
+        title="",
+        description="",
+        prompt_text=prompt_text,
+        tags=None,
+        model=model,
+        extra_context=extra_context,
     )
+    return await _generate_moderation_review_text(details)
 
 
 async def generate_prompt_moderation_decision(
@@ -147,296 +347,83 @@ async def generate_prompt_moderation_decision(
     tags: list[str] | None = None,
     model: str | None = None,
 ) -> PromptModerationDecision:
-    details = [
-        f"ID: {prompt_id if prompt_id is not None else '—'}",
-        f"Название: {title or '—'}",
-        f"Описание: {description or '—'}",
-        f"Модель: {model or '—'}",
-        f"Теги: {', '.join(tags or []) or '—'}",
-        "Текст промпта:",
-        prompt_text or "—",
-    ]
-    raw = await _generate_text_reply(
-        [{"role": "user", "content": "\n".join(details)}],
-        system_prompt=_PROMPT_MODERATION_DECISION_SYSTEM_PROMPT,
+    details = _moderation_details(
+        prompt_id=prompt_id,
+        title=title,
+        description=description,
+        prompt_text=prompt_text,
+        tags=tags,
+        model=model,
     )
-    payload = _parse_prompt_moderation_json(raw)
-    decision = str(payload.get("decision") or "manual_review").strip().lower()
-    if decision not in {"approve", "reject", "manual_review"}:
-        decision = "manual_review"
-    risk = str(payload.get("risk") or "medium").strip().lower()
-    if risk not in {"low", "medium", "high"}:
-        risk = "medium"
-    reason = str(payload.get("reason") or "Недостаточно уверенный ответ модели.").strip()
-    recommendation = str(payload.get("recommendation") or "Отправить на ручную проверку.").strip()
-    return PromptModerationDecision(
-        decision=decision,
-        risk=risk,
-        reason=reason,
-        recommendation=recommendation,
-        raw=raw,
+    request = llm.LLMRequest(
+        messages=({"role": "user", "content": details},),
+        system_prompt=_PROMPT_MODERATION_SYSTEM_PROMPT,
+        reasoning_effort=llm.ReasoningEffort.MEDIUM,
+        response_format=llm.strict_json_schema("prompt_moderation", _MODERATION_SCHEMA),
     )
+    try:
+        result = await llm.call_with_fallbacks(
+            _moderation_routes(),
+            request,
+            kie_api_key=str(getattr(settings, "KIE_AI_KEY", "")),
+            comet_api_key=str(getattr(settings, "COMET_API_KEY", "")),
+            comet_base_url=str(
+                getattr(settings, "COMET_BASE_URL", "https://api.cometapi.com")
+            ),
+        )
+        payload = llm.parse_strict_json(result)
+        return PromptModerationDecision(
+            decision=str(payload["decision"]),
+            risk=str(payload["risk"]),
+            reason=str(payload["reason"]).strip(),
+            recommendation=str(payload["recommendation"]).strip(),
+            raw=result.text,
+            provider=result.provider.value,
+            model=result.model,
+        )
+    except Exception as exc:
+        logger.exception("Strict prompt moderation failed; forcing manual review")
+        return PromptModerationDecision(
+            decision="manual_review",
+            risk="medium",
+            reason="Автоматическая проверка не завершилась надёжно.",
+            recommendation="Отправить промпт на ручную проверку.",
+            raw=str(exc),
+        )
 
 
 def _parse_prompt_moderation_json(raw: str) -> dict[str, Any]:
-    text = (raw or "").strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:].strip()
+    """Backward-compatible strict parser used by older callers/tests."""
     try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        pass
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        snippet = text[start:end + 1]
-        parsed = json.loads(snippet)
-        if isinstance(parsed, dict):
-            return parsed
-    raise RuntimeError(f"Prompt moderation decision parse failed: {raw!r}")
-
-
-async def _generate_text_reply(messages: list[dict[str, str]], *, system_prompt: str) -> str:
-    """Try KIE first and fall back directly to CometAPI.
-
-    KIE currently serves the Responses API for GPT-style assistant models, but its
-    chat-completions fallback for the same model family returns 422 unsupported,
-    and the KIE Claude endpoint has been intermittently failing with 404/500.
-    To keep assistant replies reliable, use the KIE Responses path and then
-    CometAPI text models.
-    """
-    seen: set[str] = set()
-    kie_models: list[str] = []
-    for model in (settings.KIE_ASSISTANT_MODEL, settings.KIE_ASSISTANT_FALLBACK):
-        if not model or model in seen:
-            continue
-        seen.add(model)
-        if str(model).startswith("claude-"):
-            logger.info("assistant: skipping KIE Claude fallback for %s; using Comet fallback instead", model)
-            continue
-        kie_models.append(model)
-
-    for model in kie_models:
-        try:
-            return await _call_kie_responses(model, messages, system_prompt=system_prompt)
-        except Exception as exc:
-            logger.warning("assistant: %s responses failed — %s", model, exc)
-
-    for model in _comet_assistant_models():
-        try:
-            reply = await _call_comet_chat(model, messages, system_prompt=system_prompt)
-            logger.info("assistant: generated via CometAPI %s", model)
-            return reply
-        except Exception as exc:
-            logger.warning("assistant: CometAPI %s fallback failed — %s", model, exc)
-
-    raise RuntimeError("Assistant models are unavailable right now.")
-
-
-def _normalize_comet_text_model(model: str | None) -> str | None:
-    value = str(model or "").strip()
-    if not value:
-        return None
-    parts = value.split("-")
-    if len(parts) >= 3 and parts[0] == "gpt" and parts[1].isdigit() and parts[2].isdigit():
-        return f"gpt-{parts[1]}.{parts[2]}" + ("-" + "-".join(parts[3:]) if len(parts) > 3 else "")
-    return value
-
-
-def _comet_assistant_models() -> list[str]:
-    candidates = [
-        getattr(settings, "COMET_ASSISTANT_MODEL", None),
-        getattr(settings, "COMET_ASSISTANT_FALLBACK", None),
-        _normalize_comet_text_model(getattr(settings, "KIE_ASSISTANT_MODEL", None)),
-        _normalize_comet_text_model(getattr(settings, "KIE_ASSISTANT_FALLBACK", None)),
-        _COMET_DEFAULT_ASSISTANT_MODEL,
-        _COMET_DEFAULT_ASSISTANT_FALLBACK,
-    ]
-    models: list[str] = []
-    seen: set[str] = set()
-    for model in candidates:
-        normalized = _normalize_comet_text_model(model)
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            models.append(normalized)
-    return models
-
-
-def _to_input_messages(messages: list[dict[str, str]], *, system_prompt: str) -> list[dict[str, Any]]:
-    input_messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": [{"type": "input_text", "text": system_prompt}],
-        }
-    ]
-    for item in messages[-12:]:
-        role = item.get("role") or "user"
-        if role not in {"user", "assistant", "system"}:
-            role = "user"
-        input_messages.append(
-            {
-                "role": role,
-                "content": [{"type": "input_text", "text": item.get("content", "")}],
-            }
-        )
-    return input_messages
-
-
-def _extract_output_text(data: dict[str, Any]) -> str:
-    if data.get("code") and data.get("code") != 200:
-        raise RuntimeError(f"{data!r}")
-    output = data.get("output") or []
-    for item in output:
-        if item.get("type") != "message":
-            continue
-        for content in item.get("content") or []:
-            if content.get("type") == "output_text" and content.get("text"):
-                return str(content["text"]).strip()
-    raise RuntimeError(f"Assistant response did not contain output_text: {data!r}")
+        parsed = json.loads(str(raw or "").strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Prompt moderation decision parse failed: {raw!r}") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError("Prompt moderation decision must be a JSON object")
+    return parsed
 
 
 def _extract_chat_output_text(data: dict[str, Any]) -> str:
-    if data.get("code") and data.get("code") != 200:
-        raise RuntimeError(f"{data!r}")
-
-    choices = data.get("choices") or []
-    if not choices:
-        raise RuntimeError(f"Assistant chat response did not contain choices: {data!r}")
-
-    content = ((choices[0] or {}).get("message") or {}).get("content")
-    if isinstance(content, str) and content.strip():
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text" and item.get("text"):
-                parts.append(str(item["text"]).strip())
-        text = "\n".join(part for part in parts if part).strip()
-        if text:
-            return text
-    raise RuntimeError(f"Assistant chat response did not contain text: {data!r}")
+    route = llm.LLMRoute(llm.LLMProvider.COMET_CHAT, "compat")
+    return llm._extract_chat_result(data, route).text
 
 
-def _to_chat_messages(messages: list[dict[str, str]], *, system_prompt: str) -> list[dict[str, str]]:
-    chat_messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-    for item in messages[-12:]:
-        role = item.get("role") or "user"
-        if role not in {"user", "assistant", "system"}:
-            role = "user"
-        chat_messages.append({"role": role, "content": item.get("content", "")})
-    return chat_messages
-
-
-async def _call_kie_responses(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
-    url = f"{_KIE_BASE}/codex/v1/responses"
-    payload = {
-        "model": model,
-        "stream": False,
-        "input": _to_input_messages(messages, system_prompt=system_prompt),
-        "reasoning": {"effort": "medium"},
-    }
-
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        resp = await client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {settings.KIE_AI_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        resp.raise_for_status()
-        return _extract_output_text(resp.json())
-
-
-async def _call_kie_claude(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
-    url = f"{_KIE_BASE}/claude/v1/messages"
-    payload = {
-        "model": model,
-        "messages": [
-            *[
-                {
-                    "role": (item.get("role") or "user") if (item.get("role") or "user") in {"user", "assistant"} else "user",
-                    "content": item.get("content", ""),
-                }
-                for item in messages[-12:]
-            ]
-        ],
-        "thinkingFlag": True,
-        "stream": False,
-        "max_tokens": 4096,
-    }
-    if system_prompt:
-        payload["messages"] = [{"role": "user", "content": system_prompt}, *payload["messages"]]
-
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        resp = await client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {settings.KIE_AI_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("error"):
-            raise RuntimeError(f"{data!r}")
-        content = data.get("content") or []
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text" and item.get("text"):
-                parts.append(str(item["text"]).strip())
-        text_out = "\n".join(part for part in parts if part).strip()
-        if text_out:
-            return text_out
-        raise RuntimeError(f"Assistant claude response did not contain text: {data!r}")
-
-
-async def _call_kie_chat(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
-    url = f"{_KIE_BASE}/{model}/v1/chat/completions"
-    payload = {
-        "messages": _to_chat_messages(messages, system_prompt=system_prompt),
-        "reasoning_effort": "medium",
-    }
-
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        resp = await client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {settings.KIE_AI_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        resp.raise_for_status()
-        return _extract_chat_output_text(resp.json())
-
-
-async def _call_comet_chat(model: str, messages: list[dict[str, str]], *, system_prompt: str) -> str:
-    url = f"{str(getattr(settings, 'COMET_BASE_URL', 'https://api.cometapi.com')).rstrip('/')}/v1/chat/completions"
-    payload: dict[str, Any] = {
-        "model": model,
-        "messages": _to_chat_messages(messages, system_prompt=system_prompt),
-        "stream": False,
-        "max_completion_tokens": 4096,
-    }
-    if model.startswith("gpt-"):
-        payload["reasoning_effort"] = "medium"
-
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        resp = await client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {getattr(settings, 'COMET_API_KEY', '')}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        resp.raise_for_status()
-        return _extract_chat_output_text(resp.json())
-
+async def _generate_text_reply(
+    messages: list[dict[str, Any]],
+    *,
+    system_prompt: str,
+) -> str:
+    request = llm.LLMRequest(
+        messages=_request_messages(messages),
+        system_prompt=system_prompt,
+    )
+    result = await llm.call_with_fallbacks(
+        _assistant_routes(),
+        request,
+        kie_api_key=str(getattr(settings, "KIE_AI_KEY", "")),
+        comet_api_key=str(getattr(settings, "COMET_API_KEY", "")),
+        comet_base_url=str(
+            getattr(settings, "COMET_BASE_URL", "https://api.cometapi.com")
+        ),
+    )
+    return result.text

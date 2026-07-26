@@ -1,7 +1,7 @@
 # core/config.py
 import os
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # aivideoapi.ai (HappyHorse)
     AIVIDEOAPI_KEY: str = ""
 
-    # kie.ai (Wan 2.7 Image Pro)
+    # kie.ai
     KIE_AI_KEY: str = ""
 
     # KIE.AI callbacks
@@ -111,13 +111,13 @@ class Settings(BaseSettings):
 
     # Credits
     WELCOME_BONUS_CREDITS: int = 6
-    REFERRAL_L1_CREDITS: int = 3   # бонус поцелуями при регистрации реферала
+    REFERRAL_L1_CREDITS: int = 3
     FEED_REMIX_REWARD_RUB: float = 5.0
     REFERRAL_WITHDRAW_MIN_RUB: float = 1000.0
     REFERRAL_EXCHANGE_MIN_RUB: float = 100.0
     REFERRAL_EXCHANGE_RUB_PER_CREDIT: float = 10.0
 
-    # Реферальные комиссии с оплат (%)
+    # Referral commissions
     REFERRAL_COMMISSION_L1: float = 0.30
     REFERRAL_COMMISSION_L2: float = 0.07
     REFERRAL_COMMISSION_L3: float = 0.03
@@ -125,6 +125,24 @@ class Settings(BaseSettings):
     # Polling
     POLLING_INTERVAL: float = 3.0
     POLLING_TIMEOUT: int = 600
+
+    @model_validator(mode="after")
+    def require_provider_webhook_security(self) -> "Settings":
+        env = str(self.ENV or "").strip().lower()
+        if env in {"prod", "production"}:
+            if self.KIE_AI_KEY and not self.KIE_WEBHOOK_HMAC_KEY.strip():
+                raise ValueError(
+                    "KIE_WEBHOOK_HMAC_KEY is required in production when KIE_AI_KEY is configured"
+                )
+            if self.BOT_TOKEN and not self.WEBHOOK_SECRET.strip():
+                raise ValueError("WEBHOOK_SECRET is required in production")
+            if self.MIDJOURNEY_WEBHOOK_PATH and self.COMET_API_KEY and not (
+                self.MIDJOURNEY_WEBHOOK_SECRET or self.WEBHOOK_SECRET
+            ).strip():
+                raise ValueError(
+                    "MIDJOURNEY_WEBHOOK_SECRET or WEBHOOK_SECRET is required in production"
+                )
+        return self
 
     def lava_offer_id_for_plan(self, plan_key: str) -> str:
         normalized = (plan_key or "").strip().upper().replace("-", "_")
@@ -170,7 +188,6 @@ class Settings(BaseSettings):
 
     @property
     def KIE_API_KEY(self) -> str:
-        """Backward-compatible alias for legacy music code."""
         return self.KIE_AI_KEY
 
 

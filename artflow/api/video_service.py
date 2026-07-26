@@ -1,11 +1,20 @@
 # api/video_service.py
-"""Video generation service — KIE.AI/Veo primary with CometAPI fallback."""
+"""Video generation service with exact provider/model contracts.
+
+The service intentionally does not substitute a different model when a provider
+request fails. A task either runs with the model selected by the user or fails
+with a structured error so billing/refund logic can remain truthful.
+"""
 from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlencode
 
 try:
     from enum import StrEnum
@@ -13,11 +22,9 @@ except ImportError:
     class StrEnum(str, Enum):
         pass
 
-from typing import Any
-
 from api import comet_fallback, kieai_client
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
-from api.public_files import ensure_video_reference_aspect_url
+from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
 from core.gemini_omni import (
     build_gemini_omni_audio_payload,
     build_gemini_omni_character_payload,
@@ -28,53 +35,61 @@ logger = logging.getLogger(__name__)
 
 class VideoModel(StrEnum):
     # Kling
-    KLING_26_T2V    = "kling-2.6/text-to-video"
-    KLING_26_I2V    = "kling-2.6/image-to-video"
+    KLING_26_T2V = "kling-2.6/text-to-video"
+    KLING_26_I2V = "kling-2.6/image-to-video"
     KLING_26_MOTION = "kling-2.6/motion-control"
-    KLING_30        = "kling-3.0/video"
+    KLING_30 = "kling-3.0/video"
     KLING_30_MOTION = "kling-3.0/motion-control"
     KLING_V3_TURBO_T2V = "kling/v3-turbo-text-to-video"
     KLING_V3_TURBO_I2V = "kling/v3-turbo-image-to-video"
     # WAN
-    WAN_27_T2V      = "wan/2-7-text-to-video"
-    WAN_27_I2V      = "wan/2-7-image-to-video"
+    WAN_27_T2V = "wan/2-7-text-to-video"
+    WAN_27_I2V = "wan/2-7-image-to-video"
     # Seedance
-    SEEDANCE_2      = "bytedance/seedance-2"
+    SEEDANCE_2 = "bytedance/seedance-2"
     SEEDANCE_2_FAST = "bytedance/seedance-2-fast"
     SEEDANCE_2_MINI = "bytedance/seedance-2-mini"
     # Grok
-    GROK_T2V        = "grok-imagine/text-to-video"
-    GROK_I2V        = "grok-imagine/image-to-video"
+    GROK_T2V = "grok-imagine/text-to-video"
+    GROK_I2V = "grok-imagine/image-to-video"
     # HappyHorse
-    HAPPYHORSE_T2V  = "happyhorse/text-to-video"
-    HAPPYHORSE_I2V  = "happyhorse/image-to-video"
+    HAPPYHORSE_T2V = "happyhorse/text-to-video"
+    HAPPYHORSE_I2V = "happyhorse/image-to-video"
     # Gemini Omni
     GEMINI_OMNI_VIDEO = "gemini-omni-video"
-    # Veo (special endpoint)
-    VEO_3           = "veo3"
-    VEO_3_FAST      = "veo3_fast"
-    VEO_3_LITE      = "veo3_lite"
+    # Veo 3.1 special endpoint
+    VEO_3 = "veo3"
+    VEO_3_FAST = "veo3_fast"
+    VEO_3_LITE = "veo3_lite"
+
+
+class VideoGenerationType(StrEnum):
+    """Official Veo 3.1 generation modes."""
+
+    TEXT = "TEXT_2_VIDEO"
+    FIRST_LAST = "FIRST_AND_LAST_FRAMES_2_VIDEO"
+    REFERENCE = "REFERENCE_2_VIDEO"
 
 
 class MotionDirection(StrEnum):
-    PAN_LEFT  = "pan_left"
+    PAN_LEFT = "pan_left"
     PAN_RIGHT = "pan_right"
-    TILT_UP   = "tilt_up"
+    TILT_UP = "tilt_up"
     TILT_DOWN = "tilt_down"
-    ZOOM_IN   = "zoom_in"
-    ZOOM_OUT  = "zoom_out"
+    ZOOM_IN = "zoom_in"
+    ZOOM_OUT = "zoom_out"
     ORBIT_LEFT = "orbit_left"
-    ROLL_CW   = "roll_clockwise"
+    ROLL_CW = "roll_clockwise"
 
     def label(self) -> str:
         return {
-            "pan_left":       "◄ Pan Left",
-            "pan_right":      "► Pan Right",
-            "tilt_up":        "▲ Tilt Up",
-            "tilt_down":      "▼ Tilt Down",
-            "zoom_in":        "🔍 Zoom In",
-            "zoom_out":       "🔎 Zoom Out",
-            "orbit_left":     "↺ Orbit",
+            "pan_left": "◄ Pan Left",
+            "pan_right": "► Pan Right",
+            "tilt_up": "▲ Tilt Up",
+            "tilt_down": "▼ Tilt Down",
+            "zoom_in": "🔍 Zoom In",
+            "zoom_out": "🔎 Zoom Out",
+            "orbit_left": "↺ Orbit",
             "roll_clockwise": "↻ Roll",
         }.get(self.value, self.value)
 
@@ -82,7 +97,7 @@ class MotionDirection(StrEnum):
 @dataclass
 class VideoResult:
     task_id: str
-    provider: str  # "kieai" | "veo" | "comet"
+    provider: str  # kieai | veo | veo_4k | comet (legacy tasks only)
     uses_webhook: bool = False
 
 
@@ -99,62 +114,145 @@ class GeminiOmniCharacterResult:
     image_url: str | None
 
 
-# ── Model sets ────────────────────────────────────────────────────────────────
 _VEO_MODELS = {VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE}
+_VEO_REFERENCE_MODELS = {VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE}
 _MOTION_MODELS = {VideoModel.KLING_26_MOTION, VideoModel.KLING_30_MOTION}
 
 SUPPORTS_I2V: set[VideoModel] = {
     VideoModel(spec.model)
     for spec in VIDEO_SPECS.values()
-    if "image" in spec.supported_modes and spec.model in set(item.value for item in VideoModel)
+    if "image" in spec.supported_modes and spec.model in {item.value for item in VideoModel}
 }
-SUPPORTS_I2V.update({VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE})  # VEO_3 removed: API says "Reference to video only supports Veo Fast and Veo Lite"
+# All Veo variants support one/two-frame image-to-video. Only Fast/Lite support
+# material/reference mode, which is validated separately.
+SUPPORTS_I2V.update(_VEO_MODELS)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+def _reference_list(value: str | list[str] | None) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return [str(item) for item in value if item]
 
-async def _prepare_video_reference_url(url: str | None) -> str | None:
+
+def _content_type_for_path(path: Path) -> str:
+    guessed, _ = mimetypes.guess_type(path.name)
+    return guessed or "application/octet-stream"
+
+
+async def _upload_local_media(url: str | None, *, upload_path: str) -> str | None:
     if not url:
         return None
-    return ensure_video_reference_aspect_url(url) or url
+    path = local_upload_path_from_url(url)
+    if not path or not path.exists() or not path.is_file():
+        return url
+    uploaded = await kieai_client.upload_file_stream(
+        path.read_bytes(),
+        filename=path.name,
+        content_type=_content_type_for_path(path),
+        upload_path=upload_path,
+    )
+    if not uploaded:
+        raise RuntimeError(f"KIE media upload returned no URL for {path.name}")
+    return uploaded
 
 
-async def _prepare_video_reference_urls(urls: str | list[str] | None) -> str | list[str] | None:
+async def _prepare_video_reference_url(url: str | None) -> str | None:
+    """Fit an image reference to provider limits and upload local media to KIE."""
+    if not url:
+        return None
+    fitted = ensure_video_reference_aspect_url(url) or url
+    return await _upload_local_media(fitted, upload_path="images/apix-video-refs")
+
+
+async def _prepare_video_reference_urls(
+    urls: str | list[str] | None,
+) -> str | list[str] | None:
     if not urls:
         return None
     if isinstance(urls, str):
         return await _prepare_video_reference_url(urls)
-    prepared = [url for url in [await _prepare_video_reference_url(str(item)) for item in urls if item] if url]
+    prepared = [
+        item
+        for item in [await _prepare_video_reference_url(str(url)) for url in urls if url]
+        if item
+    ]
     return prepared or None
 
 
-def _is_provider_validation_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return any(
-        marker in message
-        for marker in (
-            "422",
-            "image aspect ratio",
-            "aspect ratio must be",
-            "input parameters are not correct",
-        )
+async def _prepare_reference_video_url(url: str | None) -> str | None:
+    return await _upload_local_media(url, upload_path="videos/apix-video-refs")
+
+
+def _normalize_veo_generation_type(
+    model: VideoModel,
+    image_urls: list[str],
+    requested: VideoGenerationType | str | None,
+) -> VideoGenerationType:
+    if requested is None:
+        if not image_urls:
+            return VideoGenerationType.TEXT
+        if len(image_urls) <= 2:
+            return VideoGenerationType.FIRST_LAST
+        return VideoGenerationType.REFERENCE
+
+    try:
+        mode = requested if isinstance(requested, VideoGenerationType) else VideoGenerationType(str(requested))
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in VideoGenerationType)
+        raise ValueError(f"Unsupported Veo generation type. Allowed: {allowed}") from exc
+
+    if mode == VideoGenerationType.TEXT and image_urls:
+        raise ValueError("Veo TEXT_2_VIDEO does not accept imageUrls")
+    if mode != VideoGenerationType.TEXT and not image_urls:
+        raise ValueError(f"Veo {mode.value} requires imageUrls")
+    return mode
+
+
+def _validate_veo_request(
+    model: VideoModel,
+    generation_type: VideoGenerationType,
+    image_urls: list[str],
+    aspect_ratio: str,
+    enable_fallback: bool,
+) -> None:
+    if aspect_ratio not in {"16:9", "9:16", "auto"}:
+        raise ValueError("Veo aspect_ratio must be 16:9, 9:16 or auto")
+
+    if generation_type == VideoGenerationType.FIRST_LAST:
+        if not 1 <= len(image_urls) <= 2:
+            raise ValueError("Veo first/last-frame mode requires one or two images")
+
+    if generation_type == VideoGenerationType.REFERENCE:
+        if model not in _VEO_REFERENCE_MODELS:
+            raise ValueError("Veo material/reference mode is supported only by Fast and Lite")
+        if not 1 <= len(image_urls) <= 3:
+            raise ValueError("Veo material/reference mode supports one to three images")
+
+    if enable_fallback and aspect_ratio != "16:9":
+        raise ValueError("Veo provider fallback is supported only for 16:9 requests")
+
+
+def _exact_model_failure(model: VideoModel, error: Exception) -> RuntimeError:
+    return RuntimeError(
+        f"{model.value} generation failed via its configured provider; "
+        f"cross-model fallback is disabled: {error}"
     )
+
 
 async def generate_video(
     model: VideoModel,
     prompt: str,
     image_url: str | list[str] | None = None,
     last_frame_url: str | None = None,
-    image_bytes: bytes | None = None,   # not used by kie.ai (kept for signature compat)
+    image_bytes: bytes | None = None,  # kept for backward-compatible call sites
     motion: MotionDirection | None = None,
     duration: int = 5,
     aspect_ratio: str | None = None,
     resolution: str | None = None,
-    # Motion Control specific
     reference_video_url: str | None = None,
-    # Grok mode
     grok_mode: str = "normal",
-    # Gemini Omni extras
     audio_ids: list[str] | None = None,
     character_ids: list[str] | None = None,
     video_start: float | int | None = None,
@@ -162,9 +260,16 @@ async def generate_video(
     seed: int | None = None,
     callback_url: str | None = None,
     enable_fallback: bool = False,
+    source_task_id: str | None = None,
+    veo_generation_type: VideoGenerationType | str | None = None,
+    watermark: str | None = None,
+    enable_translation: bool = False,
 ) -> VideoResult:
+    del image_bytes  # the URL/file-upload path is the canonical provider contract
+
     image_url = await _prepare_video_reference_urls(image_url)
     last_frame_url = await _prepare_video_reference_url(last_frame_url)
+    reference_video_url = await _prepare_reference_video_url(reference_video_url)
 
     if model in _VEO_MODELS:
         try:
@@ -173,32 +278,15 @@ async def generate_video(
                 prompt,
                 image_url,
                 aspect_ratio,
-                resolution=resolution,
+                last_frame_url=last_frame_url,
+                generation_type=veo_generation_type,
+                watermark=watermark,
                 callback_url=callback_url,
                 enable_fallback=enable_fallback,
+                enable_translation=enable_translation,
             )
-        except Exception as kie_exc:
-            logger.warning("Veo primary create failed for %s; trying CometAPI fallback: %s", model.value, kie_exc)
-            if _is_provider_validation_error(kie_exc):
-                raise
-            return await _comet_fallback_generate(
-                kie_exc=kie_exc,
-                model=model,
-                prompt=prompt,
-                image_url=image_url,
-                last_frame_url=last_frame_url,
-                duration=duration,
-                aspect_ratio=aspect_ratio,
-                resolution=resolution,
-                reference_video_url=reference_video_url,
-                grok_mode=grok_mode,
-                audio_ids=audio_ids,
-                character_ids=character_ids,
-                video_start=video_start,
-                video_end=video_end,
-                seed=seed,
-                callback_url=callback_url,
-            )
+        except Exception as exc:
+            raise _exact_model_failure(model, exc) from exc
 
     try:
         return await _kieai_generate(
@@ -217,77 +305,12 @@ async def generate_video(
             video_start=video_start,
             video_end=video_end,
             seed=seed,
+            source_task_id=source_task_id,
             callback_url=callback_url,
         )
-    except Exception as kie_exc:
-        logger.warning("KIE.AI video create failed for %s; trying CometAPI fallback: %s", model.value, kie_exc)
-        if _is_provider_validation_error(kie_exc):
-            raise
-        return await _comet_fallback_generate(
-            kie_exc=kie_exc,
-            model=model,
-            prompt=prompt,
-            image_url=image_url,
-            last_frame_url=last_frame_url,
-            duration=duration,
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-            reference_video_url=reference_video_url,
-            grok_mode=grok_mode,
-            audio_ids=audio_ids,
-            character_ids=character_ids,
-            video_start=video_start,
-            video_end=video_end,
-            seed=seed,
-            callback_url=callback_url,
-        )
+    except Exception as exc:
+        raise _exact_model_failure(model, exc) from exc
 
-
-# ── Universal KIE.AI generator ────────────────────────────────────────────────
-
-async def _comet_fallback_generate(
-    *,
-    kie_exc: Exception,
-    model: VideoModel,
-    prompt: str,
-    image_url: str | list[str] | None,
-    last_frame_url: str | None,
-    duration: int,
-    aspect_ratio: str | None,
-    resolution: str | None,
-    reference_video_url: str | None,
-    grok_mode: str | None,
-    audio_ids: list[str] | None,
-    character_ids: list[str] | None,
-    video_start: float | int | None,
-    video_end: float | int | None,
-    seed: int | None,
-    callback_url: str | None,
-) -> VideoResult:
-    try:
-        fallback = await comet_fallback.generate_video(
-            model_key=model.value,
-            prompt=prompt,
-            reference_urls=image_url,
-            last_frame_url=last_frame_url,
-            reference_video_url=reference_video_url,
-            duration=duration,
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-            grok_mode=grok_mode,
-            audio_ids=audio_ids,
-            character_ids=character_ids,
-            video_start=video_start,
-            video_end=video_end,
-            seed=seed,
-            callback_url=callback_url,
-        )
-    except Exception as comet_exc:
-        raise RuntimeError(
-            f"Video generation failed via KIE.AI and CometAPI fallback: "
-            f"KIE={kie_exc}; CometAPI={comet_exc}"
-        ) from comet_exc
-    return VideoResult(task_id=fallback.task_id, provider=fallback.provider, uses_webhook=fallback.uses_webhook)
 
 async def _kieai_generate(
     model: VideoModel,
@@ -305,8 +328,11 @@ async def _kieai_generate(
     video_start: float | int | None,
     video_end: float | int | None,
     seed: int | None,
+    source_task_id: str | None,
     callback_url: str | None,
 ) -> VideoResult:
+    del motion  # motion providers consume media/mode fields from their model spec
+
     resolved_model, inp = build_kie_input(
         model=model.value,
         prompt=prompt,
@@ -326,13 +352,26 @@ async def _kieai_generate(
         },
     )
 
-    resp = await kieai_client.create_task({"model": resolved_model, "input": inp}, callback_url=callback_url)
+    if resolved_model == VideoModel.GROK_I2V.value:
+        task_id = str(source_task_id or "").strip()
+        if not task_id:
+            raise ValueError("Grok image-to-video requires source_task_id from a prior Grok task")
+        inp["task_id"] = task_id
+        if aspect_ratio:
+            inp["aspect_ratio"] = aspect_ratio
+
+    resp = await kieai_client.create_task(
+        {"model": resolved_model, "input": inp},
+        callback_url=callback_url,
+    )
     if not isinstance(resp, dict):
         raise RuntimeError(f"KIE.AI video: invalid createTask response for {resolved_model}: {resp!r}")
 
     code = resp.get("code")
     if code not in (None, 200, "200"):
-        raise RuntimeError(f"KIE.AI video createTask failed for {resolved_model}: {code} {resp.get('msg')}")
+        raise RuntimeError(
+            f"KIE.AI video createTask failed for {resolved_model}: {code} {resp.get('msg')}"
+        )
 
     data = resp.get("data")
     if data is None:
@@ -350,7 +389,15 @@ async def _kieai_generate(
 
 def _result_urls_from_dict(value: dict[str, Any]) -> list[str]:
     urls: list[str] = []
-    for key in ("resultUrls", "result_urls", "videoUrls", "video_urls", "urls"):
+    for key in (
+        "resultUrls",
+        "result_urls",
+        "videoUrls",
+        "video_urls",
+        "fullResultUrls",
+        "originUrls",
+        "urls",
+    ):
         items = value.get(key)
         if isinstance(items, list):
             urls.extend(str(item) for item in items if item)
@@ -427,6 +474,11 @@ async def create_gemini_omni_character(
         audio_ids=audio_ids,
         character_name=character_name,
     )
+    # Keep the public Python argument backward compatible while sending the
+    # official provider field name.
+    if "descriptions" in payload:
+        payload["description"] = payload.pop("descriptions")
+
     resp = await kieai_client.create_omni_character(payload)
     if not isinstance(resp, dict):
         raise RuntimeError(f"Gemini Omni character: invalid response: {resp!r}")
@@ -446,33 +498,50 @@ async def create_gemini_omni_character(
     )
 
 
-# ── Veo 3 ─────────────────────────────────────────────────────────────────────
-
 async def _veo_generate(
     model: VideoModel,
     prompt: str,
     image_url: str | list[str] | None,
     aspect_ratio: str | None,
-    resolution: str | None = None,
+    *,
+    last_frame_url: str | None = None,
+    generation_type: VideoGenerationType | str | None = None,
+    watermark: str | None = None,
+    resolution: str | None = None,  # compatibility only; upgrades use dedicated endpoints
     callback_url: str | None = None,
     enable_fallback: bool = False,
+    enable_translation: bool = False,
 ) -> VideoResult:
+    del resolution
+
+    images = _reference_list(image_url)
+    if last_frame_url and last_frame_url not in images:
+        images.append(last_frame_url)
+
+    selected_type = _normalize_veo_generation_type(model, images, generation_type)
+    selected_ratio = aspect_ratio or "16:9"
+    _validate_veo_request(
+        model,
+        selected_type,
+        images,
+        selected_ratio,
+        enable_fallback,
+    )
+
     payload: dict[str, Any] = {
         "prompt": prompt,
         "model": model.value,
-        "aspect_ratio": aspect_ratio or "16:9",
-        "enableTranslation": False,
-        "enableFallback": enable_fallback,
+        "aspect_ratio": selected_ratio,
+        "enableTranslation": bool(enable_translation),
+        "enableFallback": bool(enable_fallback),
+        "generationType": selected_type.value,
     }
-    if resolution:
-        payload["resolution"] = resolution
+    if images:
+        payload["imageUrls"] = images
+    if watermark:
+        payload["watermark"] = watermark
     if callback_url:
         payload["callBackUrl"] = callback_url
-    if image_url:
-        payload["imageUrls"] = image_url if isinstance(image_url, list) else [image_url]
-        payload["generationType"] = "REFERENCE_2_VIDEO"
-    else:
-        payload["generationType"] = "TEXT_2_VIDEO"
 
     resp = await kieai_client.create_veo_task(payload)
     if not isinstance(resp, dict):
@@ -483,19 +552,73 @@ async def _veo_generate(
     data = resp.get("data")
     if not isinstance(data, dict):
         data = {}
-    # Veo 3.1 returns taskId in data
     task_id = str(data.get("taskId") or resp.get("taskId") or "").strip()
     if not task_id:
         raise RuntimeError(f"Veo3: empty taskId in createTask response: {resp!r}")
-    logger.info("Veo task taskId: %s", task_id)
+    logger.info("Veo task %s/%s: %s", model.value, selected_type.value, task_id)
     return VideoResult(task_id=task_id, provider="veo", uses_webhook=bool(callback_url))
 
 
-# ── Poll functions ────────────────────────────────────────────────────────────
+async def extend_veo_video(
+    task_id: str,
+    prompt: str,
+    *,
+    seed: int | None = None,
+    watermark: str | None = None,
+    model: VideoModel | str = VideoModel.VEO_3_FAST,
+    callback_url: str | None = None,
+) -> VideoResult:
+    raw_model = model.value if isinstance(model, VideoModel) else str(model)
+    model_map = {
+        VideoModel.VEO_3.value: "quality",
+        VideoModel.VEO_3_FAST.value: "fast",
+        VideoModel.VEO_3_LITE.value: "lite",
+        "quality": "quality",
+        "fast": "fast",
+        "lite": "lite",
+    }
+    provider_model = model_map.get(raw_model)
+    if not provider_model:
+        raise ValueError("Veo extend model must be quality, fast or lite")
+
+    payload: dict[str, Any] = {
+        "taskId": str(task_id).strip(),
+        "prompt": prompt,
+        "model": provider_model,
+    }
+    if not payload["taskId"]:
+        raise ValueError("Veo extend task_id is required")
+    if seed is not None:
+        payload["seeds"] = int(seed)
+    if watermark:
+        payload["watermark"] = watermark
+    if callback_url:
+        payload["callBackUrl"] = callback_url
+
+    resp = await kieai_client.post("/api/v1/veo/extend", payload)
+    data = resp.get("data") if isinstance(resp, dict) else None
+    new_task_id = str((data or {}).get("taskId") or "").strip() if isinstance(data, dict) else ""
+    if not isinstance(resp, dict) or resp.get("code") not in (None, 200, "200") or not new_task_id:
+        raise RuntimeError(f"Veo extend failed: {resp!r}")
+    return VideoResult(task_id=new_task_id, provider="veo", uses_webhook=bool(callback_url))
+
+
+async def get_veo_1080p_url(task_id: str, index: int = 0) -> str:
+    query = urlencode({"taskId": str(task_id).strip(), "index": max(0, int(index))})
+    resp = await kieai_client.get(f"/api/v1/veo/get-1080p-video?{query}")
+    if not isinstance(resp, dict) or resp.get("code") not in (None, 200, "200"):
+        raise RuntimeError(f"Veo 1080P request failed: {resp!r}")
+    data = resp.get("data") or {}
+    result_url = data.get("resultUrl") if isinstance(data, dict) else None
+    if not isinstance(result_url, str) or not result_url:
+        raise RuntimeError(f"Veo 1080P response has no resultUrl: {resp!r}")
+    return result_url
+
 
 async def poll_kieai_status(task_id: str) -> str | None:
     """Universal poller for all non-Veo KIE.AI models."""
     if comet_fallback.is_comet_task_id(task_id):
+        # Legacy tasks created before exact-model routing remain readable.
         return await comet_fallback.poll_status(task_id)
 
     resp = await kieai_client.get_task_status(task_id)
@@ -505,20 +628,20 @@ async def poll_kieai_status(task_id: str) -> str | None:
     if state == "success":
         result_json_str = data.get("resultJson", "{}")
         try:
-            parsed = json.loads(result_json_str)
+            parsed = json.loads(result_json_str) if isinstance(result_json_str, str) else result_json_str
         except json.JSONDecodeError:
             parsed = {}
-        urls = _result_urls_from_dict(parsed) if isinstance(parsed, dict) else []
+        urls = _result_urls_from_value(parsed)
         if not urls:
-            urls = _result_urls_from_dict(data)
+            urls = _result_urls_from_value(data)
         if urls:
             return urls[0]
-        raise RuntimeError("KIE.AI: success but no resultUrls in resultJson")
+        raise RuntimeError("KIE.AI: success but no result URL")
 
     if state == "fail":
         raise RuntimeError(f"KIE.AI task failed: {data.get('failMsg', 'unknown error')}")
 
-    return None  # waiting / queuing / generating
+    return None
 
 
 async def poll_veo_status(video_id: str) -> str | None:
@@ -537,10 +660,9 @@ async def poll_veo_status(video_id: str) -> str | None:
 
     if success_flag is True or success_flag in (1, "1", "true", "success"):
         urls = _result_urls_from_value(data)
-        url = urls[0] if urls else None
-        if url:
-            return url
-        raise RuntimeError("Veo3: success but no videoUrl")
+        if urls:
+            return urls[0]
+        raise RuntimeError("Veo3: success but no video URL")
 
     if success_flag is False or success_flag in (2, 3, "2", "3", "fail", "failed", "error"):
         error = data.get("failMsg") or data.get("errorMessage") or data.get("msg") or "unknown error"
@@ -548,62 +670,44 @@ async def poll_veo_status(video_id: str) -> str | None:
 
     return None
 
-# ── Veo 3.1 4K enhancement ──────────────────────────────────────────────────
 
 async def generate_video_4k(
     task_id: str,
     index: int = 0,
     callback_url: str | None = None,
 ) -> VideoResult:
-    """Request 4K enhancement for a previously generated Veo video.
+    payload: dict[str, Any] = {
+        "taskId": str(task_id).strip(),
+        "index": max(0, int(index)),
+    }
+    if not payload["taskId"]:
+        raise ValueError("Veo 4K task_id is required")
+    if callback_url:
+        payload["callBackUrl"] = callback_url
 
-    After a Veo video is generated, call this to get a 4K version.
-    The result will be delivered via callback or can be polled.
-    """
-    resp = await kieai_client.create_veo_4k_task(task_id, index=index, callback_url=callback_url)
-    if not isinstance(resp, dict):
-        resp = {}
-    data = resp.get("data")
-    if not isinstance(data, dict):
-        data = {}
-    new_task_id = str(data.get("taskId") or resp.get("taskId") or "")
-    logger.info("Veo 4K enhancement taskId: %s", new_task_id)
-    return VideoResult(task_id=new_task_id, provider="veo_4k")
+    resp = await kieai_client.post("/api/v1/veo/get-4k-video", payload)
+    data = resp.get("data") if isinstance(resp, dict) else None
+    new_task_id = str((data or {}).get("taskId") or payload["taskId"]).strip() if isinstance(data, dict) else ""
+    if not isinstance(resp, dict) or resp.get("code") not in (None, 200, "200") or not new_task_id:
+        raise RuntimeError(f"Veo 4K request failed: {resp!r}")
+    logger.info("Veo 4K taskId: %s", new_task_id)
+    return VideoResult(task_id=new_task_id, provider="veo_4k", uses_webhook=bool(callback_url))
 
 
 async def poll_veo_4k_status(task_id: str) -> str | None:
-    """Poll 4K enhancement status. Returns video URL when done."""
-    resp = await kieai_client.get_veo_4k_status(task_id)
-    if not isinstance(resp, dict):
-        raise RuntimeError(f"Veo3 4K: invalid status response: {resp!r}")
-    data = resp.get("data")
-    if data is None:
-        data = {}
-    elif not isinstance(data, dict):
-        raise RuntimeError(f"Veo3 4K: invalid status data: {data!r}")
-    success_flag = data.get("successFlag")
-
-    if success_flag is True or success_flag in (1, "1", "true", "success"):
-        urls = _result_urls_from_value(data)
-        url = urls[0] if urls else None
-        if url:
-            return url
-        raise RuntimeError("Veo3 4K: success but no videoUrl in response")
-
-    if success_flag is False or success_flag in (2, 3, "2", "3", "fail", "failed", "error"):
-        error = data.get("msg") or data.get("errorMessage") or data.get("failMsg") or "unknown error"
-        raise RuntimeError(f"Veo3 4K failed: {error}")
-
-    return None
+    # Veo record-info is the authoritative endpoint for regular, extend, 1080P
+    # and 4K tasks.
+    return await poll_veo_status(task_id)
 
 
 async def poll_comet_status(task_id: str) -> str | None:
+    # Compatibility for tasks created before exact-model fallback was disabled.
     return await comet_fallback.poll_status(task_id)
 
 
 POLL_FN_MAP: dict[str, Any] = {
     "kieai": poll_kieai_status,
-    "veo":   poll_veo_status,
+    "veo": poll_veo_status,
     "veo_4k": poll_veo_4k_status,
     "comet": poll_comet_status,
 }
