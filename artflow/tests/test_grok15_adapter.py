@@ -2,20 +2,33 @@ from api.grok15_adapter import (
     GROK_15_PROVIDER_MODEL,
     normalize_grok15_payload,
 )
-from api.video_service import VideoModel
 from bot.keyboards.models import VIDEO_CAPS, VIDEO_MODEL_DESC
+from bot.services.grok_versions import GROK_15, install_grok_versions
 
 
-def test_grok15_translates_legacy_text_payload():
+def test_legacy_grok_payload_is_untouched():
+    payload = {
+        "model": "grok-imagine/text-to-video",
+        "input": {
+            "prompt": "A cinematic robot walking through rain",
+            "duration": 30,
+            "aspect_ratio": "16:9",
+            "resolution": "720p",
+            "mode": "spicy",
+        },
+    }
+    assert normalize_grok15_payload(payload) is payload
+
+
+def test_grok15_normalizes_dedicated_text_payload():
     payload = normalize_grok15_payload(
         {
-            "model": "grok-imagine/text-to-video",
+            "model": GROK_15_PROVIDER_MODEL,
             "input": {
                 "prompt": "A cinematic robot walking through rain",
                 "duration": 30,
                 "aspect_ratio": "16:9",
                 "resolution": "720p",
-                "mode": "spicy",
             },
         }
     )
@@ -35,7 +48,7 @@ def test_grok15_translates_legacy_text_payload():
 def test_grok15_supports_up_to_seven_image_references():
     payload = normalize_grok15_payload(
         {
-            "model": "grok-imagine/image-to-video",
+            "model": GROK_15_PROVIDER_MODEL,
             "input": {
                 "prompt": "Bring the scene to life",
                 "image_urls": [f"https://example.com/{index}.png" for index in range(9)],
@@ -59,13 +72,20 @@ def test_non_grok_payload_is_untouched():
     assert normalize_grok15_payload(payload) is payload
 
 
-def test_grok15_ui_capabilities_match_provider_contract():
-    caps = VIDEO_CAPS[VideoModel.GROK_T2V]
+def test_grok_versions_have_separate_ui_capabilities():
+    install_grok_versions()
 
-    assert caps["modes"] == ["text", "image"]
-    assert caps["max_refs"] == 7
-    assert caps["aspect_ratios"] == ["auto", "1:1", "16:9", "9:16", "3:2", "2:3"]
-    assert caps["resolutions"] == ["480p", "720p"]
-    assert max(caps["duration_options"]) == 15
-    assert caps["native_audio"] is True
-    assert "1.5 Preview" in VIDEO_MODEL_DESC[VideoModel.GROK_T2V]
+    legacy = VIDEO_CAPS["grok-imagine/text-to-video"]
+    new = VIDEO_CAPS[GROK_15]
+
+    assert legacy["modes"] == ["text"]
+    assert max(legacy["duration_options"]) == 30
+    assert legacy["mode_options"] == ["fun", "normal", "spicy"]
+
+    assert new["modes"] == ["text", "image"]
+    assert new["max_refs"] == 7
+    assert new["aspect_ratios"] == ["auto", "1:1", "16:9", "9:16", "3:2", "2:3"]
+    assert new["resolutions"] == ["480p", "720p"]
+    assert max(new["duration_options"]) == 15
+    assert new["native_audio"] is True
+    assert "1.5" in VIDEO_MODEL_DESC[GROK_15]
