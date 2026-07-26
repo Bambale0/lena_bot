@@ -19,6 +19,8 @@ install_grok15_adapter(_kieai_client)
 # package bootstrap and replace that presentation layer with the same catalog
 # used by Telegram. Provider keys and pricing rows remain unchanged.
 from api import miniapp_routes as _miniapp_routes
-from bot.ui.model_labels import install_miniapp_model_labels
+from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
+from db import repository as _repository
 
 install_miniapp_model_labels(_miniapp_routes)
+install_repository_model_labels(_repository)
