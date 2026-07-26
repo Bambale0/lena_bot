@@ -2,6 +2,7 @@ from api.grok15_adapter import (
     GROK_15_PROVIDER_MODEL,
     normalize_grok15_payload,
 )
+from bot.keyboards import models as model_keyboards
 from bot.keyboards.models import VIDEO_CAPS, VIDEO_MODEL_DESC
 from bot.services.grok_versions import GROK_15, install_grok_versions
 
@@ -72,7 +73,7 @@ def test_non_grok_payload_is_untouched():
     assert normalize_grok15_payload(payload) is payload
 
 
-def test_grok_versions_have_separate_ui_capabilities():
+def test_grok_versions_have_separate_ui_capabilities_and_picker_entries():
     install_grok_versions()
 
     legacy = VIDEO_CAPS["grok-imagine/text-to-video"]
@@ -89,3 +90,9 @@ def test_grok_versions_have_separate_ui_capabilities():
     assert max(new["duration_options"]) == 15
     assert new["native_audio"] is True
     assert "1.5" in VIDEO_MODEL_DESC[GROK_15]
+
+    groups = {key: [str(getattr(item, "value", item)) for item in items] for key, items in model_keyboards._VIDEO_GROUPS}
+    assert GROK_15 in groups["fast"]
+    assert GROK_15 in groups["i2v"]
+    assert "grok-imagine/text-to-video" in groups["fast"]
+    assert "grok-imagine/image-to-video" in groups["i2v"]
