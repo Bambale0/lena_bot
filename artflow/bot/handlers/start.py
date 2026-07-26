@@ -115,8 +115,7 @@ def _help_text(lang: str) -> str:
             "🎬 <b>Video</b>\nChoose a task, add source media if needed, review settings and price, then launch.\n\n"
             "🎵 <b>Music</b>\nSuno creates a track from your description. Cost depends on the active model.\n\n"
             "🤖 <b>AI Assistant</b>\nUse /assistant for prompt ideas, content planning and quick bot help.\n\n"
-            "💬 <b>Support</b>\nSupport: @LeLu88\n"
-            "🧑‍💻 <b>Developer</b>\nTechnical questions and development: @chillcreative"
+            "💬 <b>Support</b>\nSupport: @LeLu88"
         )
     return (
         "❓ <b>Помощь — как пользоваться APIX</b>\n\n"
@@ -126,8 +125,7 @@ def _help_text(lang: str) -> str:
         "🎬 <b>Видео</b>\nВыбери задачу, добавь исходные материалы при необходимости, проверь параметры и стоимость, затем запусти генерацию.\n\n"
         "🎵 <b>Музыка</b>\nSuno делает трек по описанию. Стоимость зависит от активной модели.\n\n"
         "🤖 <b>AI-ассистент</b>\nКоманда /assistant помогает с идеями, промптами и вопросами по боту.\n\n"
-        "💬 <b>Поддержка</b>\nСаппорт: @LeLu88\n"
-        "🧑‍💻 <b>Разработчик</b>\nТехнические вопросы и разработка: @chillcreative"
+        "💬 <b>Поддержка</b>\nСаппорт: @LeLu88"
     )
 
 
