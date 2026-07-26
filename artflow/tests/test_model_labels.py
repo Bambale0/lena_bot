@@ -1,11 +1,23 @@
+from dataclasses import dataclass
+from types import SimpleNamespace
+
 from api.image_service import ImageModel
 from api.video_service import VideoModel
 from bot.ui.model_labels import (
     all_known_model_keys,
+    apply_model_labels,
     canonical_model_key,
+    install_miniapp_model_labels,
     is_internal_variant,
     model_display_name,
+    public_model_items,
 )
+
+
+@dataclass
+class FakeCost:
+    model_key: str
+    display_name: str
 
 
 def test_seedream_5_pro_is_one_hot_public_model():
@@ -45,10 +57,8 @@ def test_all_text_and_reference_route_pairs_share_public_name():
 
 def test_every_runtime_image_and_video_model_has_explicit_public_label():
     known = all_known_model_keys()
-    missing_images = {item.value for item in ImageModel} - known
-    missing_videos = {item.value for item in VideoModel} - known
-    assert missing_images == set()
-    assert missing_videos == set()
+    assert {item.value for item in ImageModel} - known == set()
+    assert {item.value for item in VideoModel} - known == set()
 
 
 def test_every_runtime_model_label_starts_with_emoji_or_badge():
@@ -63,3 +73,43 @@ def test_motion_and_quality_variants_remain_distinct_products():
     assert model_display_name("kling-3.0/motion-control") != model_display_name("kling-3.0/video")
     assert model_display_name("wan/2-7-image-pro") != model_display_name("wan/2-7-image")
     assert model_display_name("veo3_fast") != model_display_name("veo3")
+
+
+def test_public_picker_collapses_internal_routes():
+    rows = [
+        FakeCost("seedream/5-pro-text-to-image", "old text"),
+        FakeCost("seedream/5-pro-image-to-image", "old edit"),
+        FakeCost("grok-imagine/text-to-video", "old video"),
+        FakeCost("grok-imagine/image-to-video", "old animate"),
+    ]
+    public = public_model_items(rows)
+    assert [item.model_key for item in public] == [
+        "seedream/5-pro-text-to-image",
+        "grok-imagine/text-to-video",
+    ]
+    assert [item.display_name for item in public] == [
+        "🔥 HOT · Seedream 5 Pro",
+        "🆕 NEW · Grok Imagine Video 1.5",
+    ]
+
+
+def test_label_only_normalization_preserves_internal_routes():
+    rows = [
+        FakeCost("kling-2.6/text-to-video", "Kling text"),
+        FakeCost("kling-2.6/image-to-video", "Kling animate"),
+    ]
+    normalized = apply_model_labels(rows)
+    assert len(normalized) == 2
+    assert normalized[0].display_name == normalized[1].display_name == "🎬 Kling 2.6"
+
+
+def test_miniapp_uses_shared_catalog_instead_of_legacy_names():
+    module = SimpleNamespace(
+        _FRIENDLY_MODEL_NAMES={"seedream/5-pro-image-to-image": "Seedream Edit"},
+        _friendly_model_name=lambda key, display=None: display or key,
+    )
+    install_miniapp_model_labels(module)
+    assert module._friendly_model_name("seedream/5-pro-image-to-image") == "🔥 HOT · Seedream 5 Pro"
+    assert module._friendly_model_name("grok-imagine/image-to-video") == "🆕 NEW · Grok Imagine Video 1.5"
+    assert "Edit" not in module._friendly_model_name("gpt-image-2-image-to-image")
+    assert "Animate" not in module._friendly_model_name("happyhorse/image-to-video")
