@@ -110,22 +110,24 @@ def _help_text(lang: str) -> str:
         return (
             "❓ <b>Help — How to use APIX</b>\n\n"
             "📱 <b>Open App</b> — the fastest way to work with references, feed and payments.\n"
-            "In chat, you can also use the bot menus below.\n\n"
-            "🎨 <b>Images</b>\nChoose a model → add a reference if needed → send a prompt → get the result.\n\n"
-            "🎬 <b>Video</b>\nChoose a model → text or image mode → send a prompt → wait 1–5 min.\n\n"
+            "In chat, choose the result you want; APIX selects the correct internal route automatically.\n\n"
+            "🎨 <b>Images</b>\nChoose a task and a model family. Send text to create from scratch or attach an image to edit it. You do not need to choose a separate Edit model.\n\n"
+            "🎬 <b>Video</b>\nChoose a task, add source media if needed, review settings and price, then launch.\n\n"
             "🎵 <b>Music</b>\nSuno creates a track from your description. Cost depends on the active model.\n\n"
             "🤖 <b>AI Assistant</b>\nUse /assistant for prompt ideas, content planning and quick bot help.\n\n"
-            "💬 <b>Support</b>\nContact: @LeLu88"
+            "💬 <b>Support</b>\nSupport: @LeLu88\n"
+            "🧑‍💻 <b>Developer</b>\nTechnical questions and development: @chillcreative"
         )
     return (
         "❓ <b>Помощь — как пользоваться APIX</b>\n\n"
         "📱 <b>Открыть приложение</b> — самый удобный способ работать с референсами, лентой и оплатой.\n"
-        "Но и через меню в боте тоже можно всё основное.\n\n"
-        "🎨 <b>Изображения</b>\nВыбери модель → при необходимости добавь референс → отправь промпт → получи результат.\n\n"
-        "🎬 <b>Видео</b>\nВыбери модель → режим текст/изображение → отправь промпт → жди 1–5 минут.\n\n"
+        "В боте сначала выбирай результат, а внутренний режим APIX определит сам.\n\n"
+        "🎨 <b>Изображения</b>\nВыбери задачу и семейство модели. Отправь текст для создания с нуля или приложи фото для редактирования. Отдельную модель Edit выбирать не нужно.\n\n"
+        "🎬 <b>Видео</b>\nВыбери задачу, добавь исходные материалы при необходимости, проверь параметры и стоимость, затем запусти генерацию.\n\n"
         "🎵 <b>Музыка</b>\nSuno делает трек по описанию. Стоимость зависит от активной модели.\n\n"
-        "🤖 <b>AI-ассистент</b>\nКоманда /assistant помогает с идеями, промптами и быстрыми вопросами по боту.\n\n"
-        "💬 <b>Поддержка</b>\nСаппорт: @LeLu88"
+        "🤖 <b>AI-ассистент</b>\nКоманда /assistant помогает с идеями, промптами и вопросами по боту.\n\n"
+        "💬 <b>Поддержка</b>\nСаппорт: @LeLu88\n"
+        "🧑‍💻 <b>Разработчик</b>\nТехнические вопросы и разработка: @chillcreative"
     )
 
 
