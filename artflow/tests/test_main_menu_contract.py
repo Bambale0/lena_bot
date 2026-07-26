@@ -20,7 +20,8 @@ def labels(markup):
 
 def test_v2_main_menu_has_mini_app_and_six_primary_entrypoints():
     ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
-    markup = render_main_menu(ctx).reply_markup
+    screen = render_main_menu(ctx)
+    markup = screen.reply_markup
 
     assert markup.inline_keyboard[0][0].web_app is not None
     assert markup.inline_keyboard[0][0].web_app.url.endswith("/app")
@@ -33,14 +34,18 @@ def test_v2_main_menu_has_mini_app_and_six_primary_entrypoints():
         "menu:more",
     ]
     assert labels(markup) == [
-        "📱 Открыть APIX",
+        "📱 Открыть Mini App",
         "✨ Создать",
         "🤖 AI-ассистент",
         "📂 Мои работы",
-        "🔥 Лента",
+        "🔥 Лента идей",
         "💎 Баланс · 100",
         "☰ Ещё",
     ]
+    assert "APIX — твоя AI-студия" in screen.text
+    assert "изображения" in screen.text.lower()
+    assert "видео со звуком" in screen.text.lower()
+    assert "стоимость" in screen.text.lower()
 
 
 def test_legacy_builder_matches_v2_home_callbacks():
@@ -64,17 +69,24 @@ def test_v2_main_menu_keeps_secondary_features_off_home_screen():
     assert "menu:settings" not in cb
 
 
-def test_v2_create_hub_preserves_all_creation_entrypoints():
-    cb = callbacks(render_create_hub(lang="ru", is_admin=False).reply_markup)
-    assert cb == ["menu:image", "menu:video", "menu:music", "menu:assistant", "menu:main"]
+def test_v2_create_hub_preserves_all_creation_entrypoints_and_explains_them():
+    screen = render_create_hub(lang="ru", is_admin=False)
+    assert callbacks(screen.reply_markup) == ["menu:image", "menu:video", "menu:music", "menu:assistant", "menu:main"]
+    assert "Изображение" in screen.text
+    assert "Видео" in screen.text
+    assert "Музыка" in screen.text
+    assert "Стоимость" in screen.text
 
     admin_cb = callbacks(render_create_hub(lang="ru", is_admin=True).reply_markup)
     assert "menu:mj" in admin_cb
 
 
-def test_v2_more_hub_preserves_secondary_features():
-    cb = callbacks(render_more_hub(lang="ru", is_admin=False).reply_markup)
-    assert cb == ["menu:prompts", "menu:referral", "menu:settings", "menu:help", "menu:main"]
+def test_v2_more_hub_preserves_secondary_features_and_explains_them():
+    screen = render_more_hub(lang="ru", is_admin=False)
+    assert callbacks(screen.reply_markup) == ["menu:prompts", "menu:referral", "menu:settings", "menu:help", "menu:main"]
+    assert "Библиотека промптов" in screen.text
+    assert "Партнёрская программа" in screen.text
+    assert "Mini App" in screen.text
 
     admin_cb = callbacks(render_more_hub(lang="ru", is_admin=True).reply_markup)
     assert "menu:admin" in admin_cb
@@ -91,7 +103,9 @@ def test_v2_main_menu_preserves_active_work_shortcuts():
         ),
         is_admin=False,
     )
-    cb = callbacks(render_main_menu(ctx).reply_markup)
+    screen = render_main_menu(ctx)
+    cb = callbacks(screen.reply_markup)
     assert cb[:2] == ["menu:image", "img_session:new"]
     assert "menu:create" in cb
     assert "menu:history" in cb
+    assert "активная серия" in screen.text.lower()
