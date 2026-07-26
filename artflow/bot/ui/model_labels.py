@@ -5,7 +5,6 @@ from typing import Any
 
 
 _MODEL_LABELS: dict[str, str] = {
-    # Images: one public product name, internal route chosen from input materials.
     "seedream/5-pro-text-to-image": "🔥 HOT · Seedream 5 Pro",
     "seedream/5-pro-image-to-image": "🔥 HOT · Seedream 5 Pro",
     "seedream/4.5-text-to-image": "🌸 Seedream 4.5",
@@ -25,7 +24,6 @@ _MODEL_LABELS: dict[str, str] = {
     "qwen2/image-edit": "🟣 Qwen 2 Image",
     "gpt-image-2-text-to-image": "🤖 GPT Image 2",
     "gpt-image-2-image-to-image": "🤖 GPT Image 2",
-    # Video: T2V/I2V are routes, not separate products.
     "kling-2.6/text-to-video": "🎬 Kling 2.6",
     "kling-2.6/image-to-video": "🎬 Kling 2.6",
     "kling-2.6/motion-control": "🎥 Kling 2.6 Motion Control",
@@ -46,7 +44,6 @@ _MODEL_LABELS: dict[str, str] = {
     "veo3_fast": "🎞 Veo 3 Fast",
     "veo3": "🎞 Veo 3",
     "veo3_lite": "🎞 Veo 3 Lite",
-    # Other
     "suno/v5.5": "🎵 Suno 5.5",
     "suno/v5.0": "🎵 Suno 5.0",
     "suno/v4.5": "🎵 Suno 4.5",
@@ -57,7 +54,6 @@ _MODEL_LABELS: dict[str, str] = {
     "midjourney-video": "🎞 Midjourney Video",
 }
 
-# Canonical route used when a family is shown once in public model pickers.
 _CANONICAL_MODEL_KEYS: dict[str, str] = {
     "seedream/5-pro-image-to-image": "seedream/5-pro-text-to-image",
     "seedream/4.5-edit": "seedream/4.5-text-to-image",
@@ -74,7 +70,6 @@ _CANONICAL_MODEL_KEYS: dict[str, str] = {
 
 
 def model_display_name(model_key: str, fallback: str | None = None) -> str:
-    """Return one consistent user-facing model label across bot and Mini App."""
     key = str(model_key or "").strip()
     if key in _MODEL_LABELS:
         return _MODEL_LABELS[key]
@@ -84,32 +79,22 @@ def model_display_name(model_key: str, fallback: str | None = None) -> str:
 
 
 def canonical_model_key(model_key: str) -> str:
-    """Collapse internal text/edit or text/video routes into one public model key."""
     key = str(model_key or "").strip()
     return _CANONICAL_MODEL_KEYS.get(key, key)
 
 
 def is_internal_variant(model_key: str) -> bool:
-    """True when the route must be hidden from public family pickers."""
     key = str(model_key or "").strip()
     return canonical_model_key(key) != key
 
 
-def public_model_items(items: Iterable[Any]) -> list[Any]:
-    """Deduplicate ORM/dict model rows by public family and apply canonical labels.
-
-    Internal provider routes remain in storage and are still used for pricing and
-    dispatch. Only public pickers receive the collapsed list.
-    """
+def apply_model_labels(items: Iterable[Any]) -> list[Any]:
+    """Apply canonical labels without removing mode-specific provider rows."""
     result: list[Any] = []
-    seen: set[str] = set()
     for item in items:
         key = str(getattr(item, "model_key", None) or (item.get("model_key") if isinstance(item, dict) else ""))
-        family = canonical_model_key(key)
-        if family in seen:
-            continue
-        seen.add(family)
-        label = model_display_name(key, getattr(item, "display_name", None))
+        fallback = item.get("display_name") if isinstance(item, dict) else getattr(item, "display_name", None)
+        label = model_display_name(key, fallback)
         if isinstance(item, dict):
             clone = dict(item)
             clone["display_name"] = label
@@ -123,8 +108,21 @@ def public_model_items(items: Iterable[Any]) -> list[Any]:
     return result
 
 
+def public_model_items(items: Iterable[Any]) -> list[Any]:
+    """Deduplicate public model pickers while retaining internal rows in storage."""
+    result: list[Any] = []
+    seen: set[str] = set()
+    for item in apply_model_labels(items):
+        key = str(getattr(item, "model_key", None) or (item.get("model_key") if isinstance(item, dict) else ""))
+        family = canonical_model_key(key)
+        if family in seen:
+            continue
+        seen.add(family)
+        result.append(item)
+    return result
+
+
 def install_miniapp_model_labels(module: Any) -> None:
-    """Replace Mini App legacy naming with the same catalog used by Telegram."""
     module._FRIENDLY_MODEL_NAMES = dict(_MODEL_LABELS)
     module._friendly_model_name = model_display_name
 
