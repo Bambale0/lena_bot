@@ -60,7 +60,7 @@ def render_more_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRender
     )
     builder.row(
         InlineKeyboardButton(
-            text="📱 " + ("Открыть Mini App" if lang == "ru" else "Open Mini App"),
+            text="😊 " + ("Приложение" if lang == "ru" else "App"),
             web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app"),
         )
     )
@@ -79,7 +79,7 @@ def render_more_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRender
             "Язык интерфейса и персональные параметры.\n\n"
             "❓ <b>Как пользоваться</b>\n"
             "Короткая инструкция по изображениям, видео, музыке, оплате и работе с AI.\n\n"
-            "Mini App также доступен прямо отсюда — там удобнее работать с большим количеством моделей и референсов."
+            "Приложение также доступно прямо отсюда — там удобнее работать с большим количеством моделей и референсов."
         )
     else:
         text = (
@@ -88,6 +88,6 @@ def render_more_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRender
             "👥 <b>Partner program</b> — invite users and earn rewards.\n"
             "⚙️ <b>Settings</b> — language and personal options.\n"
             "❓ <b>How it works</b> — a quick guide to creation, payments and AI.\n\n"
-            "Open the Mini App here when you need the full visual workspace."
+            "Open the App here when you need the full visual workspace."
         )
     return ScreenRender(text=text, reply_markup=builder.as_markup())
