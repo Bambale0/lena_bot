@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
+from bot.keyboards.main_menu import main_menu_kb
 from bot.ui.main_menu import render_main_menu
+from bot.ui.navigation_v2 import render_create_hub, render_more_hub
 
 
 def callbacks(markup):
@@ -13,29 +15,20 @@ def callbacks(markup):
 
 
 def labels(markup):
-    return [
-        button.text
-        for row in markup.inline_keyboard
-        for button in row
-    ]
+    return [button.text for row in markup.inline_keyboard for button in row]
 
 
 def test_v2_main_menu_has_six_primary_entrypoints():
-    ctx = SimpleNamespace(
-        balance=100,
-        active_image_session=None,
-        is_admin=False,
-    )
-
+    ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
     markup = render_main_menu(ctx).reply_markup
 
     assert callbacks(markup) == [
-        "menu:image",
+        "menu:create",
         "menu:assistant",
         "menu:history",
         "menu:feed",
         "menu:balance",
-        "menu:settings",
+        "menu:more",
     ]
     assert labels(markup) == [
         "✨ Создать",
@@ -47,13 +40,15 @@ def test_v2_main_menu_has_six_primary_entrypoints():
     ]
 
 
-def test_v2_main_menu_keeps_secondary_features_off_home_screen():
-    ctx = SimpleNamespace(
-        balance=100,
-        active_image_session=None,
-        is_admin=False,
+def test_legacy_builder_matches_v2_home_callbacks():
+    ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
+    assert callbacks(render_main_menu(ctx).reply_markup) == callbacks(
+        main_menu_kb(balance=100, has_active_image_session=False, is_admin=False)
     )
 
+
+def test_v2_main_menu_keeps_secondary_features_off_home_screen():
+    ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
     cb = callbacks(render_main_menu(ctx).reply_markup)
 
     assert "menu:video" not in cb
@@ -63,6 +58,23 @@ def test_v2_main_menu_keeps_secondary_features_off_home_screen():
     assert "menu:help" not in cb
     assert "menu:topup" not in cb
     assert "menu:mj" not in cb
+    assert "menu:settings" not in cb
+
+
+def test_v2_create_hub_preserves_all_creation_entrypoints():
+    cb = callbacks(render_create_hub(lang="ru", is_admin=False).reply_markup)
+    assert cb == ["menu:image", "menu:video", "menu:music", "menu:assistant", "menu:main"]
+
+    admin_cb = callbacks(render_create_hub(lang="ru", is_admin=True).reply_markup)
+    assert "menu:mj" in admin_cb
+
+
+def test_v2_more_hub_preserves_secondary_features():
+    cb = callbacks(render_more_hub(lang="ru", is_admin=False).reply_markup)
+    assert cb == ["menu:prompts", "menu:referral", "menu:settings", "menu:help", "menu:main"]
+
+    admin_cb = callbacks(render_more_hub(lang="ru", is_admin=True).reply_markup)
+    assert "menu:admin" in admin_cb
 
 
 def test_v2_main_menu_preserves_active_work_shortcuts():
@@ -76,17 +88,7 @@ def test_v2_main_menu_preserves_active_work_shortcuts():
         ),
         is_admin=False,
     )
-
     cb = callbacks(render_main_menu(ctx).reply_markup)
-
     assert cb[:2] == ["menu:image", "img_session:new"]
-    assert "menu:image" in cb
+    assert "menu:create" in cb
     assert "menu:history" in cb
-
-
-def test_v2_admin_entrypoint_is_role_gated():
-    user_ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
-    admin_ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=True)
-
-    assert "menu:admin" not in callbacks(render_main_menu(user_ctx).reply_markup)
-    assert callbacks(render_main_menu(admin_ctx).reply_markup)[-1] == "menu:admin"
