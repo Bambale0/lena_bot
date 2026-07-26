@@ -86,6 +86,29 @@ def test_gpt_image_2_capabilities_are_unified_for_all_surfaces() -> None:
     assert text_caps["aspect_ratio_modes"] == ["text", "image"]
     assert text_caps["max_refs"] == 16
     assert edit_caps["max_refs"] == 16
+    assert text_caps["quality_options"] == [
+        ("2K", "🔷 2K (стандарт)"),
+        ("4K", "💎 4K (высокое)"),
+        ("1K", "⚡ 1K (быстро)"),
+    ]
+    assert image_service.MODEL_ASPECT_RATIOS[ImageModel.GPT_IMAGE_2_T2I] == [
+        "auto",
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "2:1",
+        "1:2",
+        "21:9",
+    ]
+    assert image_service.normalize_quality_for_aspect_ratio(
+        ImageModel.GPT_IMAGE_2_T2I,
+        "1:1",
+        "4K",
+    ) == "4K"
     assert ImageModel.GPT_IMAGE_2_I2I in HIDDEN_IMAGE_MODELS
 
 
