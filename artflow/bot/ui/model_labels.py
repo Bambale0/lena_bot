@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 _MODEL_LABELS: dict[str, str] = {
-    # Images: provider text/edit variants intentionally share one public name.
+    # Images: one public product name, internal route chosen from input materials.
     "seedream/5-pro-text-to-image": "🔥 HOT · Seedream 5 Pro",
     "seedream/5-pro-image-to-image": "🔥 HOT · Seedream 5 Pro",
     "seedream/4.5-text-to-image": "🌸 Seedream 4.5",
@@ -17,12 +17,12 @@ _MODEL_LABELS: dict[str, str] = {
     "nano-banana-pro": "🍌 Nano Banana Pro",
     "qwen/text-to-image": "🟣 Qwen Image",
     "qwen/image-to-image": "🟣 Qwen Image",
-    "qwen/image-edit": "🟣 Qwen Image",
+    "qwen/image-edit": "🟣 Qwen Image Edit Pro",
     "qwen2/text-to-image": "🟣 Qwen 2 Image",
     "qwen2/image-edit": "🟣 Qwen 2 Image",
     "gpt-image-2-text-to-image": "🤖 GPT Image 2",
     "gpt-image-2-image-to-image": "🤖 GPT Image 2",
-    # Video: text/image provider routes intentionally share one public name.
+    # Video: T2V/I2V are routes, not separate products.
     "kling-2.6/text-to-video": "🎬 Kling 2.6",
     "kling-2.6/image-to-video": "🎬 Kling 2.6",
     "kling-2.6/motion-control": "🎥 Kling 2.6 Motion Control",
@@ -53,43 +53,24 @@ _MODEL_LABELS: dict[str, str] = {
     "midjourney-video": "🎞 Midjourney Video",
 }
 
-# One public model family can have several provider endpoints.
-_MODEL_VARIANTS: dict[str, dict[str, str]] = {
-    "seedream-5-pro": {
-        "text": "seedream/5-pro-text-to-image",
-        "image": "seedream/5-pro-image-to-image",
-    },
-    "seedream-4.5": {
-        "text": "seedream/4.5-text-to-image",
-        "image": "seedream/4.5-edit",
-    },
-    "grok-image": {
-        "text": "grok-imagine/text-to-image",
-        "image": "grok-imagine/image-to-image",
-    },
-    "gpt-image-2": {
-        "text": "gpt-image-2-text-to-image",
-        "image": "gpt-image-2-image-to-image",
-    },
-    "grok-video-1.5": {
-        "text": "grok-imagine/text-to-video",
-        "image": "grok-imagine/image-to-video",
-    },
-    "kling-v3-turbo": {
-        "text": "kling/v3-turbo-text-to-video",
-        "image": "kling/v3-turbo-image-to-video",
-    },
-}
-
-_VARIANT_TO_FAMILY = {
-    variant: family
-    for family, variants in _MODEL_VARIANTS.items()
-    for variant in variants.values()
+# Canonical route used when a family is shown once in model pickers.
+_CANONICAL_MODEL_KEYS: dict[str, str] = {
+    "seedream/5-pro-image-to-image": "seedream/5-pro-text-to-image",
+    "seedream/4.5-edit": "seedream/4.5-text-to-image",
+    "grok-imagine/image-to-image": "grok-imagine/text-to-image",
+    "qwen/image-to-image": "qwen/text-to-image",
+    "qwen2/image-edit": "qwen2/text-to-image",
+    "gpt-image-2-image-to-image": "gpt-image-2-text-to-image",
+    "kling-2.6/image-to-video": "kling-2.6/text-to-video",
+    "kling/v3-turbo-image-to-video": "kling/v3-turbo-text-to-video",
+    "wan/2-7-image-to-video": "wan/2-7-text-to-video",
+    "grok-imagine/image-to-video": "grok-imagine/text-to-video",
+    "happyhorse/image-to-video": "happyhorse/text-to-video",
 }
 
 
 def model_display_name(model_key: str, fallback: str | None = None) -> str:
-    """Return one consistent public model name without exposing provider routes."""
+    """Return one consistent user-facing model label across bot screens."""
     key = str(model_key or "").strip()
     if key in _MODEL_LABELS:
         return _MODEL_LABELS[key]
@@ -98,18 +79,17 @@ def model_display_name(model_key: str, fallback: str | None = None) -> str:
     return key.replace("-", " ").replace("/", " · ").title()
 
 
-def model_family_key(model_key: str) -> str:
-    """Return a stable public family key for a provider model variant."""
+def canonical_model_key(model_key: str) -> str:
+    """Collapse internal text/edit or text/video routes into one public model key."""
     key = str(model_key or "").strip()
-    return _VARIANT_TO_FAMILY.get(key, key)
+    return _CANONICAL_MODEL_KEYS.get(key, key)
 
 
-def resolve_model_variant(model_or_family: str, *, has_image: bool = False) -> str:
-    """Choose the provider endpoint automatically from the user's input materials."""
-    key = str(model_or_family or "").strip()
-    family = _VARIANT_TO_FAMILY.get(key, key)
-    variants = _MODEL_VARIANTS.get(family)
-    if not variants:
-        return key
-    route = "image" if has_image and "image" in variants else "text"
-    return variants.get(route) or next(iter(variants.values()))
+def is_internal_variant(model_key: str) -> bool:
+    """True when the route must be hidden from public model pickers."""
+    key = str(model_key or "").strip()
+    return canonical_model_key(key) != key
+
+
+def all_known_model_keys() -> set[str]:
+    return set(_MODEL_LABELS)
