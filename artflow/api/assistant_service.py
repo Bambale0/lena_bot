@@ -41,6 +41,12 @@ _PROMPT_MODERATION_SYSTEM_PROMPT = (
     "Если данных недостаточно или случай спорный, выбирай ручную проверку."
 )
 
+_MODERATION_REVIEW_SYSTEM_PROMPT = (
+    f"{_PROMPT_MODERATION_SYSTEM_PROMPT} "
+    "Дай компактную рекомендацию модератору на русском языке в формате: "
+    "Вердикт, причины, риск и рекомендация. Не утверждай, что действие уже выполнено."
+)
+
 _MODERATION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -113,7 +119,6 @@ def _assistant_routes(*, web_search: bool = False) -> list[llm.LLMRoute]:
         if not value:
             continue
         route = _kie_route(value)
-        # Claude does not expose built-in web search through this KIE route.
         if web_search and route.provider == llm.LLMProvider.KIE_CLAUDE:
             continue
         key = (route.provider.value, route.model)
@@ -272,6 +277,29 @@ def _moderation_details(
     )
 
 
+async def _generate_moderation_review_text(details: str) -> str:
+    request = llm.LLMRequest(
+        messages=({"role": "user", "content": details},),
+        system_prompt=_MODERATION_REVIEW_SYSTEM_PROMPT,
+        reasoning_effort=llm.ReasoningEffort.MEDIUM,
+    )
+    result = await llm.call_with_fallbacks(
+        _assistant_routes(),
+        request,
+        kie_api_key=str(getattr(settings, "KIE_AI_KEY", "")),
+        comet_api_key=str(getattr(settings, "COMET_API_KEY", "")),
+        comet_base_url=str(
+            getattr(settings, "COMET_BASE_URL", "https://api.cometapi.com")
+        ),
+    )
+    logger.info(
+        "moderation review generated via provider=%s model=%s",
+        result.provider.value,
+        result.model,
+    )
+    return sanitize_assistant_reply(result.text)
+
+
 async def generate_prompt_moderation_review(
     *,
     prompt_id: int,
@@ -289,11 +317,7 @@ async def generate_prompt_moderation_review(
         tags=tags,
         model=model,
     )
-    reply = await generate_assistant_result(
-        [{"role": "user", "content": details}],
-        reasoning_effort=llm.ReasoningEffort.MEDIUM,
-    )
-    return reply.text
+    return await _generate_moderation_review_text(details)
 
 
 async def generate_freeform_prompt_moderation_review(
@@ -311,11 +335,7 @@ async def generate_freeform_prompt_moderation_review(
         model=model,
         extra_context=extra_context,
     )
-    reply = await generate_assistant_result(
-        [{"role": "user", "content": details}],
-        reasoning_effort=llm.ReasoningEffort.MEDIUM,
-    )
-    return reply.text
+    return await _generate_moderation_review_text(details)
 
 
 async def generate_prompt_moderation_decision(
