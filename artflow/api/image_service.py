@@ -81,12 +81,19 @@ _SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.GPT_IMAGE_2_I2I,
 }
+_GPT_IMAGE_2_MODELS = {
+    ImageModel.GPT_IMAGE_2_T2I,
+    ImageModel.GPT_IMAGE_2_I2I,
+}
+_GPT_IMAGE_2_MODEL_KEYS = {model.value for model in _GPT_IMAGE_2_MODELS}
+_MAX_GPT_IMAGE_2_REFERENCES = 16
 _KIE_UPLOAD_REFERENCE_MODELS = {
     ImageModel.SEEDREAM_5_PRO_I2I.value,
     "seedream/4.5-edit",
     ImageModel.QWEN_I2I.value,
     ImageModel.QWEN_EDIT.value,
     ImageModel.QWEN2_EDIT.value,
+    ImageModel.GPT_IMAGE_2_I2I.value,
 }
 _COMET_PRIMARY_IMAGE_MODELS = {
     ImageModel.NANO_BANANA_2,
@@ -156,6 +163,31 @@ def _restore_reference_shape(original: str | list[str] | None, urls: list[str]) 
     return urls
 
 
+def _effective_model_for_request(
+    model: ImageModel,
+    image_url: str | list[str] | None,
+) -> ImageModel:
+    """Use GPT Image 2 Edit automatically whenever references are present."""
+    if model == ImageModel.GPT_IMAGE_2_T2I and _reference_list(image_url):
+        return ImageModel.GPT_IMAGE_2_I2I
+    return model
+
+
+def _validate_reference_count(
+    model: ImageModel,
+    image_url: str | list[str] | None,
+) -> None:
+    refs = _reference_list(image_url)
+    effective_model = _effective_model_for_request(model, image_url)
+    if effective_model == ImageModel.GPT_IMAGE_2_I2I:
+        if not refs:
+            raise ValueError("GPT Image 2 Edit requires at least one reference image")
+        if len(refs) > _MAX_GPT_IMAGE_2_REFERENCES:
+            raise ValueError(
+                f"GPT Image 2 supports at most {_MAX_GPT_IMAGE_2_REFERENCES} reference images"
+            )
+
+
 def _content_type_for_path(path: Path) -> str:
     guessed, _ = mimetypes.guess_type(path.name)
     if guessed and guessed.startswith("image/"):
@@ -188,23 +220,41 @@ async def _prepare_reference_urls_for_model(
     if not urls:
         return image_url
 
-    resolved_model = resolve_model_for_reference(model.value)
+    effective_model = _effective_model_for_request(model, image_url)
+    resolved_model = resolve_model_for_reference(effective_model.value)
     if resolved_model not in _KIE_UPLOAD_REFERENCE_MODELS:
         return image_url
 
+    strict_local_upload = resolved_model == ImageModel.GPT_IMAGE_2_I2I.value
     prepared: list[str] = []
     changed = False
     for url in urls:
-        uploaded_url: str | None = None
+        local_path = local_upload_path_from_url(url)
+        if not local_path or not local_path.exists() or not local_path.is_file():
+            prepared.append(url)
+            continue
+
         try:
             uploaded_url = await _upload_local_kie_reference(url)
         except Exception as exc:
+            if strict_local_upload:
+                raise RuntimeError(
+                    f"Failed to upload GPT Image 2 reference to KIE storage: {local_path.name}"
+                ) from exc
             logger.warning("Failed to upload local reference to KIE storage url=%s: %s", url, exc)
-        if uploaded_url:
-            prepared.append(uploaded_url)
-            changed = True
-        else:
             prepared.append(url)
+            continue
+
+        if not uploaded_url:
+            if strict_local_upload:
+                raise RuntimeError(
+                    f"KIE file upload returned no URL for GPT Image 2 reference: {local_path.name}"
+                )
+            prepared.append(url)
+            continue
+
+        prepared.append(uploaded_url)
+        changed = True
 
     if changed:
         logger.info("Uploaded %d local reference(s) to KIE storage for %s", len(prepared), resolved_model)
@@ -212,7 +262,6 @@ async def _prepare_reference_urls_for_model(
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
-
 async def generate_image(
     model: ImageModel,
     prompt: str,
@@ -225,6 +274,16 @@ async def generate_image(
     quality: str = "basic",             # "basic"=2K / "high"=4K (Seedream)
     callback_url: str | None = None,
 ) -> ImageResult:
+    _validate_reference_count(model, image_url)
+    effective_model = _effective_model_for_request(model, image_url)
+    if effective_model != model:
+        logger.info(
+            "Routing %s with %d reference(s) to %s",
+            model.value,
+            len(_reference_list(image_url)),
+            effective_model.value,
+        )
+
     prepared_image_url = await _prepare_reference_urls_for_model(model, image_url)
     resolved_model, inp = _build_input(model, prompt, prepared_image_url, aspect_ratio, n, quality)
     comet_aspect_ratio = str(inp.get("aspect_ratio") or inp.get("image_size") or "") or None
@@ -281,6 +340,13 @@ async def generate_image(
         logger.info("KIE.AI image task %s: %s", resolved_model, task_id)
         return ImageResult(is_async=True, task_id=task_id)
     except Exception as kie_exc:
+        if resolved_model in _GPT_IMAGE_2_MODEL_KEYS:
+            raise RuntimeError(
+                f"GPT Image 2 generation failed via KIE.AI for {resolved_model}; "
+                "fallback disabled to prevent model substitution: "
+                f"{kie_exc}"
+            ) from kie_exc
+
         logger.warning(
             "KIE.AI image create failed for %s; trying CometAPI fallback: %s",
             resolved_model,
@@ -303,39 +369,59 @@ def _build_input(
     n: int,
     quality: str,
 ) -> tuple[str, dict[str, Any]]:
+    _validate_reference_count(model, image_url)
+    effective_model = _effective_model_for_request(model, image_url)
+
     ratio_value = aspect_ratio
-    if model in {ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I} and ratio_value == "auto":
-        # KIE's GPT Image 2 docs show `auto`, but in practice our paid 2K/4K
-        # flow can fail on that combo. Treat stale `auto` input as "unspecified"
-        # so we don't force an invalid provider fallback.
+    if effective_model in _GPT_IMAGE_2_MODELS and ratio_value == "auto":
+        # Keep the existing production guard: KIE may reject `auto` when the
+        # paid 2K/4K resolution option is sent at the same time.
         ratio_value = None
-    resolved_for_validation = resolve_model_for_reference(model.value) if image_url else model.value
+    resolved_for_validation = resolve_model_for_reference(effective_model.value) if image_url else effective_model.value
     try:
         ratio_model = ImageModel(resolved_for_validation)
     except ValueError:
-        ratio_model = model
+        ratio_model = effective_model
     allowed_ratios = MODEL_ASPECT_RATIOS.get(ratio_model, [])
     if ratio_value and allowed_ratios and ratio_value not in allowed_ratios:
-        logger.warning("Invalid aspect ratio for %s: %s. Falling back to %s", model.value, ratio_value, allowed_ratios[0])
+        logger.warning(
+            "Invalid aspect ratio for %s: %s. Falling back to %s",
+            effective_model.value,
+            ratio_value,
+            allowed_ratios[0],
+        )
         ratio_value = allowed_ratios[0]
 
     quality_value = quality
     resolution_value = None
-    if model in {ImageModel.WAN_27, ImageModel.WAN_27_PRO, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I}:
+    if effective_model in {
+        ImageModel.WAN_27,
+        ImageModel.WAN_27_PRO,
+        ImageModel.NANO_BANANA_2,
+        ImageModel.NANO_BANANA_PRO,
+        ImageModel.GPT_IMAGE_2_T2I,
+        ImageModel.GPT_IMAGE_2_I2I,
+    }:
         resolution_value = quality_value if quality_value in {"1K", "2K", "4K"} else None
 
-    if model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} and quality_value not in {"1K", "2K", "4K"}:
-        quality_value = "1K" if model == ImageModel.NANO_BANANA_2 else "2K"
-    elif model in {ImageModel.NANO_BANANA_2_LITE} and quality_value not in {"1K", "2K"}:
+    if effective_model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} and quality_value not in {"1K", "2K", "4K"}:
+        quality_value = "1K" if effective_model == ImageModel.NANO_BANANA_2 else "2K"
+    elif effective_model in {ImageModel.NANO_BANANA_2_LITE} and quality_value not in {"1K", "2K"}:
         quality_value = "1K"
-    elif model not in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.NANO_BANANA_2_LITE, ImageModel.GPT_IMAGE_2_T2I, ImageModel.GPT_IMAGE_2_I2I} and quality_value in {"1K", "2K", "4K"}:
+    elif effective_model not in {
+        ImageModel.NANO_BANANA_2,
+        ImageModel.NANO_BANANA_PRO,
+        ImageModel.NANO_BANANA_2_LITE,
+        ImageModel.GPT_IMAGE_2_T2I,
+        ImageModel.GPT_IMAGE_2_I2I,
+    } and quality_value in {"1K", "2K", "4K"}:
         quality_value = "basic"
 
-    normalized_quality = normalize_quality_for_aspect_ratio(model, ratio_value, quality_value)
+    normalized_quality = normalize_quality_for_aspect_ratio(effective_model, ratio_value, quality_value)
     if normalized_quality != quality_value:
         logger.info(
             "Adjusting %s quality from %s to %s for unsupported aspect ratio %s",
-            model.value,
+            effective_model.value,
             quality_value,
             normalized_quality,
             ratio_value,
@@ -344,14 +430,14 @@ def _build_input(
         resolution_value = normalized_quality if normalized_quality in {"1K", "2K", "4K"} else resolution_value
 
     prepared_reference_urls = image_url
-    if model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}:
+    if effective_model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}:
         if isinstance(image_url, str):
             prepared_reference_urls = ensure_provider_safe_png_url(image_url)
         elif isinstance(image_url, list):
             prepared_reference_urls = [ensure_provider_safe_png_url(url) or url for url in image_url]
 
-    return build_kie_input(
-        model=model.value,
+    resolved_model, payload = build_kie_input(
+        model=effective_model.value,
         prompt=prompt,
         reference_urls=prepared_reference_urls,
         params={
@@ -361,10 +447,14 @@ def _build_input(
             "resolution": resolution_value,
         },
     )
+    if effective_model in _GPT_IMAGE_2_MODELS:
+        # GPT Image 2's current KIE schema documents prompt/input_urls,
+        # aspect_ratio and resolution. Do not send legacy checker fields.
+        payload.pop("nsfw_checker", None)
+    return resolved_model, payload
 
 
 # ── Poll functions ────────────────────────────────────────────────────────────
-
 async def poll_kieai_result_urls(task_id: str) -> list[str] | None:
     """Universal poller for all KIE.AI image models."""
     resp = await kieai_client.get_task_status(task_id)
