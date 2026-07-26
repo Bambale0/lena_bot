@@ -39,17 +39,15 @@ _GPT_IMAGE_2_QUALITY_OPTIONS = [
     ("1K", "⚡ 1K (быстро)"),
 ]
 _VEO_RATIOS = ["16:9", "9:16"]
+_GROK_15_RATIOS = ["auto", "1:1", "16:9", "9:16", "3:2", "2:3"]
+_GROK_15_DURATIONS = [4, 6, 8, 10, 12, 15]
 
 
 def _configure_gpt_image_2() -> None:
     """Expose GPT Image 2 as one model with automatic text/edit routing."""
-    # Mutate the existing lists in place: IMAGE_CAPS keeps references to these
-    # same list objects when bot.keyboards.models is initialized.
     MODEL_ASPECT_RATIOS[ImageModel.GPT_IMAGE_2_T2I][:] = _GPT_IMAGE_2_STABLE_RATIOS
     MODEL_ASPECT_RATIOS[ImageModel.GPT_IMAGE_2_I2I][:] = _GPT_IMAGE_2_STABLE_RATIOS
 
-    # Current KIE capabilities allow square 4K for GPT Image 2. Preserve the
-    # downgrade only for providers where that limitation still applies.
     _SQUARE_4K_UNSUPPORTED_MODELS.discard(ImageModel.GPT_IMAGE_2_T2I)
     _SQUARE_4K_UNSUPPORTED_MODELS.discard(ImageModel.GPT_IMAGE_2_I2I)
 
@@ -71,9 +69,6 @@ def _configure_gpt_image_2() -> None:
         has_quality=True,
     )
 
-    # The text model now auto-routes to the edit endpoint when references are
-    # present. Keep the legacy edit key working for saved sessions/API clients,
-    # but avoid showing two near-identical buttons to new users.
     HIDDEN_IMAGE_MODELS.add(ImageModel.GPT_IMAGE_2_I2I)
     IMAGE_MODEL_DESC[ImageModel.GPT_IMAGE_2_T2I] = (
         "🤖 GPT Image 2 · текст или до 16 фото-референсов · 1K/2K/4K"
@@ -81,11 +76,7 @@ def _configure_gpt_image_2() -> None:
 
 
 def _configure_veo_31() -> None:
-    """Expose only controls accepted by the Veo 3.1 generation endpoint.
-
-    Veo generation does not accept a user-selected duration or a direct output
-    resolution. 1080P and 4K are separate post-generation operations.
-    """
+    """Expose only controls accepted by the Veo 3.1 generation endpoint."""
     common = {
         "modes": ["text", "image"],
         "duration_options": [],
@@ -135,5 +126,33 @@ def _configure_veo_31() -> None:
     )
 
 
+def _configure_grok_15() -> None:
+    """Expose the current Grok Imagine Video 1.5 Preview contract.
+
+    Legacy internal model keys remain valid for saved sessions and pricing. The
+    API bootstrap translates both keys to `grok-imagine-video-1-5-preview`.
+    """
+    common = {
+        "modes": ["text", "image"],
+        "duration_options": list(_GROK_15_DURATIONS),
+        "aspect_ratios": list(_GROK_15_RATIOS),
+        "has_resolution": True,
+        "resolutions": ["480p", "720p"],
+        "max_refs": 7,
+        "billing_mode": "per_second",
+        "native_audio": True,
+    }
+    VIDEO_CAPS[VideoModel.GROK_T2V].update(**common, mode_options=[])
+    VIDEO_CAPS[VideoModel.GROK_I2V].update(**common, mode_options=[])
+
+    VIDEO_MODEL_DESC[VideoModel.GROK_T2V] = (
+        "⚡ Grok Imagine Video 1.5 Preview · текст или до 7 фото · нативный звук"
+    )
+    VIDEO_MODEL_DESC[VideoModel.GROK_I2V] = (
+        "⚡ Grok Imagine Video 1.5 Preview · фото в видео · нативный звук"
+    )
+
+
 _configure_gpt_image_2()
 _configure_veo_31()
+_configure_grok_15()
