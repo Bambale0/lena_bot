@@ -1,12 +1,7 @@
-# api/midjourney_service.py
-"""
-Midjourney через CometAPI — полный набор операций.
+"""Backward-compatible Midjourney facade over the current Comet contract.
 
-Workflow:
-  imagine  → webhook/fetch → action → fetch (poll) [→ modal → fetch]
-  blend    → webhook/fetch
-  describe → webhook/fetch
-  video    → webhook/fetch
+Existing Telegram and Mini App imports keep their public names while corrected
+video payloads, provider statuses and newly documented operations are exposed.
 """
 from __future__ import annotations
 
@@ -25,6 +20,7 @@ from typing import Any
 import httpx
 
 from api import comet_client
+from api import midjourney_full_service as full
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -36,14 +32,11 @@ def _midjourney_notify_hook() -> str:
     secret = (settings.MIDJOURNEY_WEBHOOK_SECRET or settings.WEBHOOK_SECRET).strip()
     if not base_url or not path:
         return ""
-
     url = f"{base_url}{path if path.startswith('/') else '/' + path}"
     if not secret:
         return url
     return f"{url}?{urlencode({'secret': secret})}"
 
-
-# ── Enums ─────────────────────────────────────────────────────────────────────
 
 class MJBotType(StrEnum):
     MIDJOURNEY = "MID_JOURNEY"
@@ -67,14 +60,17 @@ class MJSpeed(StrEnum):
 
 class MJTaskStatus(StrEnum):
     PENDING = "PENDING"
+    NOT_START = "NOT_START"
+    SUBMITTED = "SUBMITTED"
     IN_PROGRESS = "IN_PROGRESS"
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
+    CANCEL = "CANCEL"
     MODAL = "MODAL"
 
     @classmethod
     def terminal(cls) -> set["MJTaskStatus"]:
-        return {cls.SUCCESS, cls.FAILURE, cls.MODAL}
+        return {cls.SUCCESS, cls.FAILURE, cls.CANCEL, cls.MODAL}
 
 
 class MJDimensions(StrEnum):
@@ -91,8 +87,6 @@ class MJVideoMotion(StrEnum):
         return {"low": "🐢 Low", "high": "🏎 High"}[self.value]
 
 
-# ── Data classes ──────────────────────────────────────────────────────────────
-
 @dataclass
 class MJButton:
     custom_id: str
@@ -106,13 +100,13 @@ class MJButton:
         return f"{self.emoji}{self.label}".strip()
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "MJButton":
+    def from_dict(cls, payload: dict[str, Any]) -> "MJButton":
         return cls(
-            custom_id=d.get("customId", ""),
-            label=d.get("label", ""),
-            emoji=d.get("emoji", ""),
-            btn_type=d.get("type", 2),
-            style=d.get("style", 1),
+            custom_id=str(payload.get("customId") or ""),
+            label=str(payload.get("label") or ""),
+            emoji=str(payload.get("emoji") or ""),
+            btn_type=int(payload.get("type") or 2),
+            style=int(payload.get("style") or 1),
         )
 
 
@@ -142,37 +136,38 @@ class MJTaskResult:
         return self.status == MJTaskStatus.MODAL
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "MJTaskResult":
-        raw_status = str(d.get("status") or "").strip().upper()
-        if raw_status not in MJTaskStatus._value2member_map_:
-            if raw_status:
-                logger.warning("Unknown MJ task status %r for task %s; fallback to PENDING", raw_status, d.get("id", ""))
-            raw_status = MJTaskStatus.PENDING
-        raw_buttons = d.get("buttons") or []
-        properties = d.get("properties") if isinstance(d.get("properties"), dict) else {}
-        prompt = (
-            d.get("prompt")
-            or d.get("promptEn")
-            or d.get("prompt_en")
+    def from_dict(cls, payload: dict[str, Any]) -> "MJTaskResult":
+        raw = str(payload.get("status") or "PENDING").upper()
+        try:
+            status = MJTaskStatus(raw)
+        except ValueError:
+            status = MJTaskStatus.PENDING
+        properties = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+        prompt = str(
+            payload.get("prompt")
+            or payload.get("promptEn")
+            or payload.get("prompt_en")
             or properties.get("finalPrompt")
             or properties.get("finalZhPrompt")
             or ""
         )
         return cls(
-            task_id=str(d.get("id", "")),
-            status=MJTaskStatus(raw_status),
-            progress=d.get("progress", ""),
-            image_url=d.get("imageUrl", ""),
-            image_urls=[url for url in (d.get("image_urls") or []) if isinstance(url, str) and url],
-            video_url=d.get("videoUrl", ""),
-            video_urls=[url for url in (d.get("video_urls") or []) if isinstance(url, str) and url],
+            task_id=str(payload.get("id") or payload.get("taskId") or ""),
+            status=status,
+            progress=str(payload.get("progress") or ""),
+            image_url=str(payload.get("imageUrl") or ""),
+            image_urls=[str(url) for url in (payload.get("image_urls") or []) if url],
+            video_url=str(payload.get("videoUrl") or ""),
+            video_urls=[str(url) for url in (payload.get("video_urls") or []) if url],
             prompt=prompt,
-            fail_reason=d.get("failReason", ""),
-            buttons=[MJButton.from_dict(b) for b in raw_buttons if isinstance(b, dict) and b.get("customId")],
+            fail_reason=str(payload.get("failReason") or ""),
+            buttons=[
+                MJButton.from_dict(item)
+                for item in (payload.get("buttons") or [])
+                if isinstance(item, dict) and item.get("customId")
+            ],
         )
 
-
-# ── Core API calls ────────────────────────────────────────────────────────────
 
 async def imagine(
     prompt: str,
@@ -182,50 +177,45 @@ async def imagine(
     reference_url: str | None = None,
     state: str | None = None,
 ) -> str:
-    """Submit imagine task. Returns task_id."""
-    prefix = speed.path_prefix()
     payload: dict[str, Any] = {
         "botType": bot_type.value,
-        "prompt": prompt,
+        "prompt": str(prompt).strip(),
         "accountFilter": {"modes": [speed.value]},
     }
+    if not payload["prompt"]:
+        raise ValueError("prompt is required")
     notify_hook = _midjourney_notify_hook()
     if notify_hook:
         payload["notifyHook"] = notify_hook
     if base64_array:
-        payload["base64Array"] = base64_array
+        payload["base64Array"] = list(base64_array)
     if state:
         payload["state"] = state
-
     try:
-        resp = await comet_client.post(f"{prefix}/mj/submit/imagine", payload)
+        response = await comet_client.post(f"{speed.path_prefix()}/mj/submit/imagine", payload)
     except httpx.HTTPStatusError as exc:
-        should_retry_without_base64 = (
+        retry_without_base64 = (
             bool(base64_array)
             and bool(reference_url)
+            and exc.response is not None
             and exc.response.status_code in {400, 401, 403, 404, 422}
         )
-        if not should_retry_without_base64:
+        if not retry_without_base64:
             raise
-
         fallback_payload = dict(payload)
         fallback_payload.pop("base64Array", None)
-        logger.warning(
-            "MJ imagine rejected image reference payload, retrying with URL-only prompt: status=%s reference_url=%s",
-            exc.response.status_code,
-            reference_url,
+        response = await comet_client.post(
+            f"{speed.path_prefix()}/mj/submit/imagine",
+            fallback_payload,
         )
-        resp = await comet_client.post(f"{prefix}/mj/submit/imagine", fallback_payload)
-
-    task_id = str(resp["result"])
-    logger.info("MJ imagine submitted: task_id=%s, prompt=%.60s", task_id, prompt)
-    return task_id
+    return full._task_id_from_response(response, "imagine")
 
 
 async def fetch_task(task_id: str) -> MJTaskResult:
-    """Poll single task status."""
-    resp = await comet_client.get(f"/mj/task/{task_id}/fetch")
-    return MJTaskResult.from_dict(resp)
+    response = await comet_client.get(f"/mj/task/{str(task_id).strip()}/fetch")
+    if not isinstance(response, dict):
+        raise RuntimeError(f"Midjourney fetch returned invalid payload: {response!r}")
+    return MJTaskResult.from_dict(response)
 
 
 async def action(
@@ -234,37 +224,30 @@ async def action(
     enable_remix: bool = False,
     state: str | None = None,
 ) -> str:
-    """Submit action (upscale / variation / zoom / pan / reroll). Returns new task_id."""
-    payload: dict[str, Any] = {
-        "taskId": task_id,
-        "customId": custom_id,
-        "enableRemix": enable_remix,
-    }
-    if state:
-        payload["state"] = state
-
-    resp = await comet_client.post("/mj/submit/action", payload)
-    new_task_id = str(resp["result"])
-    logger.info("MJ action submitted: parent=%s → new=%s, customId=%.40s", task_id, new_task_id, custom_id)
-    return new_task_id
+    return await full.action(
+        task_id,
+        custom_id,
+        enable_remix=enable_remix,
+        state=state,
+    )
 
 
-async def modal(
+async def change(
     task_id: str,
-    prompt: str = "",
-    mask_base64: str = "",
+    action_type: full.MidjourneyChangeAction | str,
+    *,
+    index: int | None = None,
+    state: str | None = None,
 ) -> str:
-    """Submit modal input (Vary Region / Custom Zoom). Returns new task_id."""
-    payload: dict[str, Any] = {"taskId": task_id}
-    if prompt:
-        payload["prompt"] = prompt
-    if mask_base64:
-        payload["maskBase64"] = mask_base64
+    return await full.change(task_id, action_type, index=index, state=state)
 
-    resp = await comet_client.post("/mj/submit/modal", payload)
-    new_task_id = str(resp["result"])
-    logger.info("MJ modal submitted: parent=%s → new=%s", task_id, new_task_id)
-    return new_task_id
+
+async def modal(task_id: str, prompt: str = "", mask_base64: str = "") -> str:
+    return await full.modal(task_id, prompt=prompt, mask_base64=mask_base64)
+
+
+async def submit_editor(provider_payload: dict[str, Any]) -> str:
+    return await full.submit_editor(provider_payload)
 
 
 async def blend(
@@ -272,19 +255,18 @@ async def blend(
     dimensions: MJDimensions = MJDimensions.SQUARE,
     bot_type: MJBotType = MJBotType.MIDJOURNEY,
 ) -> str:
-    """Blend 2–5 images. Returns task_id."""
     payload: dict[str, Any] = {
         "botType": bot_type.value,
-        "base64Array": base64_array,
+        "base64Array": list(base64_array),
         "dimensions": dimensions.value,
     }
     notify_hook = _midjourney_notify_hook()
     if notify_hook:
         payload["notifyHook"] = notify_hook
-    resp = await comet_client.post("/mj/submit/blend", payload)
-    task_id = str(resp["result"])
-    logger.info("MJ blend submitted: task_id=%s, images=%d", task_id, len(base64_array))
-    return task_id
+    if not 2 <= len(base64_array) <= 5:
+        raise ValueError("Midjourney blend requires 2-5 images")
+    response = await comet_client.post("/mj/submit/blend", payload)
+    return full._task_id_from_response(response, "blend")
 
 
 async def describe(
@@ -292,79 +274,64 @@ async def describe(
     link: str | None = None,
     bot_type: MJBotType = MJBotType.MIDJOURNEY,
 ) -> str:
-    """Describe image → get prompt candidates. Returns task_id."""
+    if bool(base64) == bool(link):
+        raise ValueError("Provide exactly one of base64 or link")
     payload: dict[str, Any] = {"botType": bot_type.value}
     notify_hook = _midjourney_notify_hook()
     if notify_hook:
         payload["notifyHook"] = notify_hook
     if base64:
         payload["base64"] = base64
-    elif link:
-        payload["link"] = link
     else:
-        raise ValueError("Нужен base64 или link")
-
-    resp = await comet_client.post("/mj/submit/describe", payload)
-    task_id = str(resp["result"])
-    logger.info("MJ describe submitted: task_id=%s", task_id)
-    return task_id
+        payload["link"] = link
+    response = await comet_client.post("/mj/submit/describe", payload)
+    return full._task_id_from_response(response, "describe")
 
 
 async def submit_video(
     image: str,
     motion: MJVideoMotion = MJVideoMotion.LOW,
     prompt: str = "",
-    video_type: str = "vid_1.1_i2v_720",
+    video_type: str = "vid_1.1_i2v_480",
 ) -> str:
-    """Convert image to video. Returns task_id."""
-    payload: dict[str, Any] = {
-        "image": image,
-        "motion": motion.value,
-        "videoType": video_type,
-    }
-    notify_hook = _midjourney_notify_hook()
-    if notify_hook:
-        payload["notifyHook"] = notify_hook
-    if prompt:
-        payload["prompt"] = prompt
-
-    resp = await comet_client.post("/mj/submit/video", payload)
-    task_id = str(resp["result"])
-    logger.info("MJ video submitted: task_id=%s", task_id)
-    return task_id
+    return await full.submit_video(
+        image,
+        prompt=prompt,
+        video_type=video_type,
+        mode=full.MidjourneyVideoMode.FAST,
+        animate_mode=full.MidjourneyAnimateMode.MANUAL,
+        motion=full.MidjourneyMotion(motion.value),
+    )
 
 
 async def list_by_condition(task_ids: list[str]) -> list[MJTaskResult]:
-    """Batch status check by list of task IDs."""
-    resp_list = await comet_client.post("/mj/task/list-by-condition", {"ids": task_ids})
-    if not isinstance(resp_list, list):
+    response = await comet_client.post("/mj/task/list-by-condition", {"ids": task_ids})
+    if isinstance(response, dict):
+        response = response.get("data") or response.get("result") or []
+    if not isinstance(response, list):
         return []
-    return [MJTaskResult.from_dict(item) for item in resp_list]
+    return [MJTaskResult.from_dict(item) for item in response if isinstance(item, dict)]
 
-
-# ── Polling helpers ───────────────────────────────────────────────────────────
 
 async def poll_mj_image(task_id: str) -> str | None:
-    """
-    Совместим с api.polling.poll_until_done.
-    Возвращает imageUrl при SUCCESS, None если ещё идёт,
-    при FAILURE/MODAL — бросает RuntimeError.
-    """
     result = await fetch_task(task_id)
     if result.status == MJTaskStatus.SUCCESS:
-        return result.image_url or "done"
-    if result.status == MJTaskStatus.FAILURE:
+        return result.image_url or (result.image_urls[0] if result.image_urls else "done")
+    if result.status in {MJTaskStatus.FAILURE, MJTaskStatus.CANCEL}:
         raise RuntimeError(result.fail_reason or "Midjourney task failed")
     if result.status == MJTaskStatus.MODAL:
-        raise RuntimeError("__MODAL__")  # обработчик поймает и перейдёт в waiting_modal
-    return None  # ещё в процессе
+        raise RuntimeError("__MODAL__")
+    return None
 
 
 async def poll_mj_video(task_id: str) -> str | None:
-    """Polling для видео-задачи MJ."""
     result = await fetch_task(task_id)
     if result.status == MJTaskStatus.SUCCESS:
-        return result.video_url or (result.video_urls[0] if result.video_urls else "") or result.image_url or "done"
-    if result.status == MJTaskStatus.FAILURE:
-        raise RuntimeError(result.fail_reason or "MJ video task failed")
+        if result.video_urls:
+            return result.video_urls[0]
+        if result.video_url:
+            return result.video_url
+        raise RuntimeError("Midjourney video task succeeded without video URL")
+    if result.status in {MJTaskStatus.FAILURE, MJTaskStatus.CANCEL}:
+        raise RuntimeError(result.fail_reason or "Midjourney video task failed")
     return None
