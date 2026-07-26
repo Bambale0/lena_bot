@@ -89,7 +89,6 @@ def is_internal_variant(model_key: str) -> bool:
 
 
 def apply_model_labels(items: Iterable[Any]) -> list[Any]:
-    """Apply canonical labels without removing mode-specific provider rows."""
     result: list[Any] = []
     for item in items:
         key = str(getattr(item, "model_key", None) or (item.get("model_key") if isinstance(item, dict) else ""))
@@ -109,7 +108,6 @@ def apply_model_labels(items: Iterable[Any]) -> list[Any]:
 
 
 def public_model_items(items: Iterable[Any]) -> list[Any]:
-    """Deduplicate public model pickers while retaining internal rows in storage."""
     result: list[Any] = []
     seen: set[str] = set()
     for item in apply_model_labels(items):
@@ -125,6 +123,20 @@ def public_model_items(items: Iterable[Any]) -> list[Any]:
 def install_miniapp_model_labels(module: Any) -> None:
     module._FRIENDLY_MODEL_NAMES = dict(_MODEL_LABELS)
     module._friendly_model_name = model_display_name
+
+
+def install_repository_model_labels(repo_module: Any) -> None:
+    """Normalize names returned to every UI without changing keys or prices."""
+    original = repo_module.get_all_model_costs
+    if getattr(original, "__apix_public_labels__", False):
+        return
+
+    async def get_all_model_costs(*args: Any, **kwargs: Any):
+        rows = await original(*args, **kwargs)
+        return apply_model_labels(rows)
+
+    get_all_model_costs.__apix_public_labels__ = True
+    repo_module.get_all_model_costs = get_all_model_costs
 
 
 def all_known_model_keys() -> set[str]:
