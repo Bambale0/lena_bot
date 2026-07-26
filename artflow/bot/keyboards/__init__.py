@@ -5,12 +5,15 @@ registry without duplicating them across Telegram and Mini App handlers.
 """
 from __future__ import annotations
 
+from aiogram.types import InlineKeyboardButton
+
 from api.image_service import (
     MODEL_ASPECT_RATIOS,
     ImageModel,
     _SQUARE_4K_UNSUPPORTED_MODELS,
 )
 from api.video_service import VideoModel
+from bot.keyboards import models as _models
 from bot.keyboards.models import (
     HIDDEN_IMAGE_MODELS,
     IMAGE_CAPS,
@@ -18,6 +21,7 @@ from bot.keyboards.models import (
     VIDEO_CAPS,
     VIDEO_MODEL_DESC,
 )
+from bot.ui.model_labels import model_display_name, public_model_items
 
 
 _GPT_IMAGE_2_STABLE_RATIOS = [
@@ -146,13 +150,41 @@ def _configure_grok_15() -> None:
     VIDEO_CAPS[VideoModel.GROK_I2V].update(**common, mode_options=[])
 
     VIDEO_MODEL_DESC[VideoModel.GROK_T2V] = (
-        "⚡ Grok Imagine Video 1.5 Preview · текст или до 7 фото · нативный звук"
+        "🆕 NEW · Grok Imagine Video 1.5 · текст или до 7 фото · нативный звук"
     )
-    VIDEO_MODEL_DESC[VideoModel.GROK_I2V] = (
-        "⚡ Grok Imagine Video 1.5 Preview · фото в видео · нативный звук"
-    )
+    VIDEO_MODEL_DESC[VideoModel.GROK_I2V] = VIDEO_MODEL_DESC[VideoModel.GROK_T2V]
+
+
+def _install_public_model_pickers() -> None:
+    """Make every legacy and v2 picker use canonical public model labels.
+
+    This runs in ``bot.keyboards`` package initialization, before handlers import
+    picker functions directly. Provider route keys remain untouched in callback
+    data, while buttons never expose stale Edit/Animate/T2V/I2V names.
+    """
+    original_image_models_kb = _models.image_models_kb
+    original_video_models_kb = _models.video_models_kb
+
+    def public_model_button(mc, prefix: str, model_costs: list) -> InlineKeyboardButton:
+        price = _models.model_cost_display_text(mc, model_costs=model_costs)
+        name = model_display_name(mc.model_key, getattr(mc, "display_name", None))
+        return InlineKeyboardButton(
+            text=f"{name} · {price}",
+            callback_data=f"{prefix}:{mc.model_key}",
+        )
+
+    def public_image_models_kb(model_costs: list):
+        return original_image_models_kb(public_model_items(model_costs))
+
+    def public_video_models_kb(model_costs: list, group_key: str | None = None):
+        return original_video_models_kb(public_model_items(model_costs), group_key=group_key)
+
+    _models._model_button = public_model_button
+    _models.image_models_kb = public_image_models_kb
+    _models.video_models_kb = public_video_models_kb
 
 
 _configure_gpt_image_2()
 _configure_veo_31()
 _configure_grok_15()
+_install_public_model_pickers()
