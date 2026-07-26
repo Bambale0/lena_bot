@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any, Callable
 
+from api import video_service
+from api.advanced_video_service import SeedanceModel, create_seedance_task
 from api.kie_model_specs import VIDEO_SPECS
-from api.video_service import VideoModel
+from api.video_service import VideoModel, VideoResult
 from bot.keyboards.models import VIDEO_CAPS, VIDEO_MODEL_DESC
 
 
@@ -19,6 +21,9 @@ VIDEO_REFERENCE_LIMITS: dict[str, dict[str, int]] = {
     VideoModel.SEEDANCE_2_FAST.value: {"min_duration": 2, "max_duration": 15, "max_refs": 3},
     VideoModel.SEEDANCE_2_MINI.value: {"min_duration": 2, "max_duration": 15, "max_refs": 3},
 }
+
+_INSTALLED = False
+_ORIGINAL_GENERATE_VIDEO = video_service.generate_video
 
 
 def _reference_video_list(value: Any) -> list[str]:
@@ -44,8 +49,51 @@ def _wrap_seedance_builder(builder: Callable[[dict[str, Any]], dict[str, Any]] |
     return wrapped
 
 
+async def _generate_video_with_references(
+    model: VideoModel,
+    prompt: str,
+    *args,
+    reference_video_url=None,
+    duration: int = 5,
+    aspect_ratio: str | None = None,
+    resolution: str | None = None,
+    callback_url: str | None = None,
+    **kwargs,
+):
+    refs = _reference_video_list(reference_video_url)
+    if model.value in SEEDANCE_VIDEO_REFERENCE_MODELS and refs:
+        task = await create_seedance_task(
+            SeedanceModel(model.value),
+            prompt,
+            reference_video_urls=refs[:3],
+            duration=duration,
+            aspect_ratio=aspect_ratio or "16:9",
+            resolution=resolution or "720p",
+            generate_audio=True,
+            callback_url=callback_url,
+        )
+        return VideoResult(task_id=task.task_id, provider="kieai", uses_webhook=task.uses_webhook)
+
+    return await _ORIGINAL_GENERATE_VIDEO(
+        model,
+        prompt,
+        *args,
+        reference_video_url=reference_video_url,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        callback_url=callback_url,
+        **kwargs,
+    )
+
+
 def install_video_reference_support() -> None:
     """Expose provider-documented video reference modes without changing model keys."""
+    global _INSTALLED
+    if _INSTALLED:
+        return
+    _INSTALLED = True
+
     for model_key in SEEDANCE_VIDEO_REFERENCE_MODELS:
         caps = VIDEO_CAPS.setdefault(model_key, {})
         modes = list(caps.get("modes") or [])
@@ -78,6 +126,8 @@ def install_video_reference_support() -> None:
     VIDEO_MODEL_DESC[VideoModel.SEEDANCE_2_MINI] = (
         "🚀 Seedance 2 Mini · текст, фото или видео-референсы · до 3 видео"
     )
+
+    video_service.generate_video = _generate_video_with_references
 
 
 def supports_video_reference(model_key: str) -> bool:
