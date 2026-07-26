@@ -1,18 +1,15 @@
-"""Compatibility adapter for KIE Grok Imagine Video 1.5 Preview.
+"""KIE Grok Imagine Video 1.5 Preview adapter.
 
-APIX keeps the legacy internal Grok model keys for saved sessions and pricing,
-but sends the current provider contract to KIE:
-`grok-imagine-video-1-5-preview` via `/api/v1/jobs/createTask`.
+Grok Imagine Video (legacy provider routes) and Grok Imagine Video 1.5 are
+separate products. Only the dedicated 1.5 runtime key is normalized to the
+preview provider contract.
 """
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-LEGACY_GROK_MODELS = {
-    "grok-imagine/text-to-video",
-    "grok-imagine/image-to-video",
-}
 GROK_15_PROVIDER_MODEL = "grok-imagine-video-1-5-preview"
+GROK_15_MODELS = {GROK_15_PROVIDER_MODEL}
 GROK_15_ASPECT_RATIOS = {"auto", "1:1", "16:9", "9:16", "3:2", "2:3"}
 GROK_15_RESOLUTIONS = {"480p", "720p"}
 
@@ -26,9 +23,9 @@ def _url_list(value: Any) -> list[str]:
 
 
 def normalize_grok15_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Translate legacy APIX Grok payloads to the official 1.5 contract."""
+    """Normalize only dedicated Grok 1.5 requests to the official contract."""
     model = str(payload.get("model") or "")
-    if model not in LEGACY_GROK_MODELS:
+    if model not in GROK_15_MODELS:
         return payload
 
     source = payload.get("input")
@@ -70,7 +67,7 @@ def normalize_grok15_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def install_grok15_adapter(kieai_client_module: Any) -> None:
-    """Wrap create_task once so all bot, Mini App and API flows use Grok 1.5."""
+    """Wrap create_task once so bot, Mini App and API share Grok 1.5 rules."""
     current = kieai_client_module.create_task
     if getattr(current, "__grok15_adapter__", False):
         return
