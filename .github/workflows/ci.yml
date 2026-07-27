@@ -2,7 +2,7 @@ name: APIX CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
   pull_request:
 
 jobs:
@@ -82,36 +82,80 @@ jobs:
     needs:
       - backend-quality
       - webapp
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/v2' && vars.AUTODEPLOY_ENABLED == 'true'
+    timeout-minutes: 35
+    environment:
+      name: production
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/root/mkdir/lena_bot' }}
+      DEPLOY_APP_SUBDIR: ${{ vars.DEPLOY_APP_SUBDIR || 'artflow' }}
+      DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH || 'v2' }}
+      DEPLOY_PUBLIC_HEALTH_URL: ${{ vars.DEPLOY_PUBLIC_HEALTH_URL || 'https://apixbotai.com/api/v1/health' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy APIX via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.LENA_HOST || secrets.DEPLOY_HOST }}
-          port: ${{ secrets.LENA_PORT || 22 }}
-          username: ${{ secrets.DEPLOY_USER || 'root' }}
-          key: ${{ secrets.LENA_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
-          script: |
-            set -e
-            cd /root/mkdir/lena_bot
-            git fetch --all
-            git pull --ff-only origin main
-            docker run --rm \
-              -v "$PWD/artflow/webapp:/app" \
-              -w /app \
-              node:22-alpine \
-              sh -lc "npm ci && npm run build"
-            cd artflow
-            docker compose up -d --build
-            docker compose ps
-            for i in $(seq 1 20); do
-              if curl -fsS https://apixbotai.com/api/v1/health; then
-                exit 0
-              fi
-              echo "Waiting for APIX healthcheck ($i/20)..."
-              sleep 3
-            done
-            docker compose logs --tail=120 app
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          : "${DEPLOY_HOST:?Missing production secret DEPLOY_HOST}"
+          : "${DEPLOY_SSH_PRIVATE_KEY:?Missing production secret DEPLOY_SSH_PRIVATE_KEY}"
+          : "${DEPLOY_KNOWN_HOSTS:?Missing production secret DEPLOY_KNOWN_HOSTS}"
+          : "${DEPLOY_USER:?Missing production variable DEPLOY_USER}"
+          : "${DEPLOY_PORT:?Missing production variable DEPLOY_PORT}"
+          : "${DEPLOY_PATH:?Missing production variable DEPLOY_PATH}"
+          : "${DEPLOY_APP_SUBDIR:?Missing production variable DEPLOY_APP_SUBDIR}"
+          : "${DEPLOY_BRANCH:?Missing production variable DEPLOY_BRANCH}"
+          : "${DEPLOY_PUBLIC_HEALTH_URL:?Missing production variable DEPLOY_PUBLIC_HEALTH_URL}"
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "GITHUB_SHA must be a full 40-character Git commit SHA" >&2
             exit 1
+          }
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy APIX via SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf -v remote_command \
+            'DEPLOY_PATH=%q DEPLOY_APP_SUBDIR=%q DEPLOY_BRANCH=%q DEPLOY_PUBLIC_HEALTH_URL=%q bash -s -- %q' \
+            "$DEPLOY_PATH" "$DEPLOY_APP_SUBDIR" "$DEPLOY_BRANCH" "$DEPLOY_PUBLIC_HEALTH_URL" "$GITHUB_SHA"
+
+          ssh \
+            -i "$HOME/.ssh/id_ed25519" \
+            -p "$DEPLOY_PORT" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "$remote_command" \
+            < artflow/scripts/deploy-production.sh
+
+      - name: Record deployment summary
+        shell: bash
+        run: |
+          {
+            echo "## APIX production deployment"
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Target: \`${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/${DEPLOY_APP_SUBDIR}\`"
+            echo "- Branch: \`${DEPLOY_BRANCH}\`"
+            echo "- Health: \`${DEPLOY_PUBLIC_HEALTH_URL}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
