@@ -48,6 +48,16 @@ for _key, _description in list(_model_keyboards.IMAGE_MODEL_DESC.items()):
     _label = model_display_name(str(_key), _description)
     _model_keyboards.IMAGE_MODEL_DESC[_key] = f"{_label} · {_suffix}" if _suffix else _label
 
+# Image UX v2: direct task-first flow first, legacy expert flow second.
+from . import image_gen as _legacy_image_gen
+from . import image_wizard_v2 as _image_wizard_v2
+
+_image_router = Router(name="image_v2")
+_image_router.include_router(_image_wizard_v2.router)
+_image_router.include_router(_legacy_image_gen.router)
+_legacy_image_gen.router = _image_router
+
+# Video UX v2: scenario wizard first, legacy technical flow second.
 from . import video_gen as _legacy_video_gen
 from . import video_references as _video_references
 from . import video_wizard as _video_wizard
