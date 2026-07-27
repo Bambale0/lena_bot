@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import json
 
-from bot.keyboards.models import (
-    IMAGE_SCENARIOS,
-    image_active_kb,
-    image_models_kb,
-    image_scenarios_kb,
-    image_session_kb,
-)
+from aiogram.types import InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from bot.keyboards.models import image_active_kb, image_models_kb, image_session_kb
 from bot.ui.common import ScreenRender
 from bot.ui.model_labels import model_display_name
 from db.models import ImageSession, ModelCost
@@ -32,33 +29,47 @@ def _pretty_quality(value: str | None) -> str:
     return value.upper() if value.lower() in {"1k", "2k", "4k"} else value
 
 
+def _image_start_kb():
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✨ Создать с нуля", callback_data="img_v2:text"),
+        InlineKeyboardButton(text="🪄 Изменить фото", callback_data="img_v2:edit"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📸 Фото → промпт", callback_data="img:photo2prompt"),
+        InlineKeyboardButton(text="🧠 Выбрать модель", callback_data="img_menu:advanced"),
+    )
+    builder.row(InlineKeyboardButton(text="🏠 На главную", callback_data="menu:main"))
+    return builder.as_markup()
+
+
 def render_image_scenarios() -> ScreenRender:
     text = (
-        "🎨 <b>Что нужно сделать с изображением?</b>\n\n"
-        "Не нужно разбираться в названиях нейросетей. Сначала выбери задачу — APIX сам предложит подходящий путь.\n\n"
-        "⚡ <b>Создать быстро</b>\n"
-        "Опиши идею обычными словами. Подходит для артов, рекламы, карточек товара, персонажей и постов.\n\n"
-        "🪄 <b>Изменить готовое фото</b>\n"
-        "Пришли один или несколько референсов и напиши, что поменять: фон, одежду, стиль, объект или детали.\n\n"
-        "📸 <b>Получить промпт из фото</b>\n"
-        "APIX разберёт изображение и подготовит описание, которое можно использовать для новой генерации.\n\n"
-        "🧠 <b>Все нейросети</b>\n"
-        "Экспертный режим. Открывай его только когда действительно нужна конкретная модель или тонкая настройка.\n\n"
-        "👇 Выбери ближайший к твоей задаче вариант:"
+        "🎨 <b>Создание изображений</b>\n\n"
+        "Выбери только результат. Модель, режим и базовые параметры APIX подберёт автоматически.\n\n"
+        "✨ <b>Создать с нуля</b>\n"
+        "Напиши идею обычными словами — реклама, персонаж, карточка товара, пост или иллюстрация.\n\n"
+        "🪄 <b>Изменить фото</b>\n"
+        "Сначала отправь изображение, затем напиши, что изменить: фон, одежду, объект, стиль или детали.\n\n"
+        "📸 <b>Фото → промпт</b>\n"
+        "Получи подробное описание загруженной фотографии.\n\n"
+        "🧠 <b>Выбрать модель</b>\n"
+        "Экспертный режим со всеми моделями и ручными настройками.\n\n"
+        "Обычно достаточно первых двух кнопок 👇"
     )
-    return ScreenRender(text=text, reply_markup=image_scenarios_kb())
+    return ScreenRender(text=text, reply_markup=_image_start_kb())
 
 
 def render_image_advanced_menu(model_costs: list[ModelCost]) -> ScreenRender:
     text = (
         "🧠 <b>Экспертный выбор модели</b>\n\n"
-        "Здесь можно выбрать конкретную нейросеть вручную. Для большинства задач быстрее вернуться назад и использовать готовый сценарий.\n\n"
-        "<b>Как ориентироваться:</b>\n"
-        "• 🔥 <b>HOT · Seedream 5 Pro</b> — коммерческие изображения, фотореализм и высокая детализация;\n"
-        "• Nano Banana и GPT Image 2 — универсальная генерация и редактирование;\n"
-        "• Grok Imagine и Qwen — быстрые эксперименты и альтернативные стили;\n"
-        "• модели с несколькими референсами — сложная композиция и сохранение персонажей.\n\n"
-        "Цена указана прямо на кнопке. После выбора APIX покажет только те параметры, которые поддерживает эта модель."
+        "Выбирай конкретную нейросеть только когда это действительно важно. "
+        "APIX сам переключит генерацию на редактирование, если ты добавишь фото.\n\n"
+        "🔥 <b>Seedream 5 Pro</b> — коммерческий фотореализм и детали.\n"
+        "🍌 <b>Nano Banana</b> — универсальная работа с идеями и референсами.\n"
+        "🤖 <b>GPT Image 2</b> — точное следование сложному запросу.\n"
+        "⚡ <b>Grok</b> и 🟣 <b>Qwen</b> — быстрые альтернативные варианты.\n\n"
+        "Цена указана на кнопке. После выбора откроются только поддерживаемые настройки."
     )
     return ScreenRender(text=text, reply_markup=image_models_kb(model_costs))
 
@@ -107,15 +118,11 @@ def render_active_image_session(
 
     text = (
         "🎨 <b>Текущая работа</b>\n\n"
-        f"🤖 Модель: <b>{model_label}</b>\n"
-        f"📐 Формат: <b>{ratio}</b>\n"
-        f"💎 Качество: <b>{quality_label}</b>\n"
-        f"🔢 Результатов за запуск: <b>{count_label}</b>\n"
-        f"📎 Референсы: <b>{reference_label}</b>\n\n"
-        "<b>Что можно сделать дальше:</b>\n"
-        "• отправить новый текст — изменить идею, сохранив текущие настройки;\n"
-        "• отправить фото — добавить или заменить визуальный референс;\n"
-        "• нажать «Ещё вариант» — повторить текущий запрос;\n"
-        "• открыть «Настройки» — сменить модель, формат или качество."
+        "Отправь текст — сделаю новый вариант с текущими настройками.\n"
+        "Отправь фото — использую его как референс и автоматически включу редактирование.\n\n"
+        f"🤖 <b>{model_label}</b>\n"
+        f"📐 {ratio} · 💎 {quality_label} · 🔢 {count_label}\n"
+        f"📎 Референсы: {reference_label}\n\n"
+        "Тонкие параметры доступны в кнопке «Настройки»."
     )
     return ScreenRender(text=text, reply_markup=reply_markup)
