@@ -8,9 +8,11 @@ from aiogram.types import InlineKeyboardButton
 
 from bot.keyboards import models as _model_keyboards
 from bot.services.grok_versions import install_grok_versions
+from bot.services.image_family_routing import install_image_family_routing
 from bot.services.video_reference_support import install_video_reference_support
 from bot.ui.model_labels import model_display_name, public_model_items
 
+install_image_family_routing()
 install_video_reference_support()
 install_grok_versions()
 
