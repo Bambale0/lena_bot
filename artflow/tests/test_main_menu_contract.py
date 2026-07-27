@@ -40,7 +40,7 @@ def test_v2_main_menu_has_mini_app_and_six_primary_entrypoints():
         "🤖 AI-ассистент",
         "📂 Мои работы",
         "🔥 Лента идей",
-        "💎 Баланс · 100",
+        "💋 Баланс · 100",
         "☰ Ещё",
     ]
     assert "Фото и изображения" in screen.text

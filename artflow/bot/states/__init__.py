@@ -10,6 +10,7 @@ class ImageGenFSM(StatesGroup):
     aspect_ratio_select = State()
     count_select = State()
     prompt_input = State()
+    review = State()
     generating = State()
     session_active = State()
     remix_prompt = State()

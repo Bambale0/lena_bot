@@ -5,8 +5,28 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from api.image_errors import image_generation_user_error, telegram_image_error_text
 from bot.handlers import image_gen
 from db.models import GenerationType
+
+
+def test_banana_safety_error_is_user_friendly() -> None:
+    error = (
+        "CometAPI Gemini image fallback returned no image URLs for nano-banana-pro: "
+        "{'candidates': [{'finishReason': 'IMAGE_SAFETY'}]}"
+    )
+
+    assert "safety/moderation" in image_generation_user_error(error)
+    assert "💋 возвращены" in telegram_image_error_text(error)
+
+
+def test_banana_no_image_error_is_user_friendly() -> None:
+    error = (
+        "CometAPI Gemini image fallback returned no image URLs for nano-banana-2: "
+        "{'candidates': [{'finishReason': 'NO_IMAGE'}]}"
+    )
+
+    assert "не смогла собрать изображение" in image_generation_user_error(error)
 
 
 @pytest.mark.asyncio
@@ -118,6 +138,111 @@ async def test_dynamic_continue_keeps_carried_reference_without_upload_prompt() 
     state.set_state.assert_awaited_once_with(image_gen.ImageGenFSM.prompt_input)
     assert "Референс уже сохранён" in edit_message.await_args.args[1]
     assert state.update_data.await_args.kwargs["mode"] == "image"
+
+
+@pytest.mark.asyncio
+async def test_prompt_reference_photo_with_caption_launches_prompt_handler() -> None:
+    message = SimpleNamespace(
+        photo=[SimpleNamespace(file_id="ref_1", file_size=100)],
+        caption="сделай студийный свет",
+    )
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "model_key": "seedream/5-pro-text-to-image",
+        "ref_file_ids": [],
+    })
+
+    with patch("bot.handlers.image_gen.handle_prompt", AsyncMock()) as handle_prompt:
+        await image_gen.handle_prompt_reference_upload(
+            message,
+            state,
+            AsyncMock(),
+            SimpleNamespace(id=42),
+            AsyncMock(),
+        )
+
+    state.update_data.assert_awaited_with(
+        image_file_id="ref_1",
+        ref_file_ids=["ref_1"],
+        mode="image",
+        image_mode="image",
+    )
+    handle_prompt.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_prompt_input_shows_review_before_launching_generation() -> None:
+    message = SimpleNamespace(text="нарисуй красный рюкзак", caption=None, answer=AsyncMock())
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={"mode": "text", "image_mode": "text"})
+    image_session = SimpleNamespace(
+        id=7,
+        model="seedream/5-pro-text-to-image",
+        mode="text",
+        aspect_ratio="1:1",
+        quality="basic",
+        count=1,
+    )
+
+    with (
+        patch("bot.handlers.image_gen._ensure_active_image_session_from_state", AsyncMock(return_value=image_session)),
+        patch("bot.handlers.image_gen._session_reference_url", AsyncMock(return_value=None)),
+        patch("bot.handlers.image_gen._promote_reference_mode_if_needed", AsyncMock(return_value="text")),
+        patch(
+            "bot.handlers.image_gen.repo.resolve_image_model_cost",
+            AsyncMock(return_value=SimpleNamespace(credits=2)),
+        ),
+        patch("bot.handlers.image_gen._launch_session_generation", AsyncMock()) as launch,
+    ):
+        await image_gen.handle_prompt(
+            message,
+            state,
+            AsyncMock(),
+            SimpleNamespace(id=42),
+            AsyncMock(),
+        )
+
+    launch.assert_not_awaited()
+    state.set_state.assert_awaited_with(image_gen.ImageGenFSM.review)
+    assert "Проверь задачу" in message.answer.await_args.args[0]
+    assert message.answer.await_args.kwargs["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
+async def test_model_selection_opens_task_first_composer_for_any_model() -> None:
+    call = SimpleNamespace(
+        data="img_model:gpt-image-2-text-to-image",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    state.get_state = AsyncMock(return_value=None)
+    state.get_data = AsyncMock(return_value={})
+
+    with (
+        patch(
+            "bot.handlers.image_wizard_v2.repo.resolve_image_model_cost",
+            AsyncMock(return_value=SimpleNamespace(credits=2)),
+        ),
+        patch("bot.handlers.image_wizard_v2.safe_edit_message", AsyncMock()) as edit_message,
+        patch("bot.handlers.image_wizard_v2.safe_answer_callback", AsyncMock()),
+    ):
+        await image_gen.cb_image_model(call, state, AsyncMock())
+
+    state.set_state.assert_awaited_with(image_gen.ImageGenFSM.prompt_input)
+    text = edit_message.await_args.args[1]
+    callbacks = [
+        button.callback_data
+        for row in edit_message.await_args.kwargs["reply_markup"].inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert "GPT Image 2" in text
+    assert "Можно сразу отправлять" in text
+    assert "Выбери параметры" not in text
+    assert "img_v2:ratio" in callbacks
+    assert "img_v2:quality" in callbacks
+    assert "img_v2:refs" in callbacks
 
 
 @pytest.mark.asyncio
@@ -477,14 +602,66 @@ async def test_repeat_variant_uses_saved_user_references_not_last_result() -> No
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 101))),
+        patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()) as edit_message,
+        patch("bot.handlers.image_gen._launch_session_generation", launch),
+        patch("bot.handlers.image_gen.repo", new=repo_stub),
+    ):
+        await image_gen.cb_image_session_repeat(
+            call,
+            AsyncMock(),
+            state,
+            SimpleNamespace(id=42),
+            AsyncMock(),
+        )
+
+    launch.assert_not_awaited()
+    text = edit_message.await_args.args[1]
+    assert "Повтор генерации" in text
+    assert "Референсы: <b>2/" in text
+    assert "Формат: <b>9:16</b>" in text
+    assert "same prompt" in text
+    state.update_data.assert_awaited()
+    assert state.update_data.await_args.kwargs["pending_action_type"] == image_gen.ImageGenerationAction.repeat.value
+
+
+@pytest.mark.asyncio
+async def test_repeat_launch_uses_saved_user_references_not_last_result() -> None:
+    call = SimpleNamespace(
+        data="img_repeat:launch",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "image_session_id": 7,
+        "pending_image_prompt": "same prompt",
+        "pending_parent_generation_id": 101,
+    })
+    image_session = SimpleNamespace(
+        id=7,
+        model="nano-banana-pro",
+        mode="image",
+        reference_file_id="face_ref_1",
+        reference_file_ids='["face_ref_1", "face_ref_2"]',
+        reference_url=None,
+        last_result_url="https://example.test/generated-wrong-face.jpg",
+        last_generation_id=101,
+        count=1,
+        aspect_ratio="9:16",
+        quality="2K",
+    )
+    launch = AsyncMock(return_value=True)
+
+    with (
+        patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
         patch("bot.handlers.image_gen._telegram_file_url", AsyncMock(side_effect=[
             "https://example.test/face-1.jpg",
             "https://example.test/face-2.jpg",
         ])),
         patch("bot.handlers.image_gen._launch_session_generation", launch),
-        patch("bot.handlers.image_gen.repo", new=repo_stub),
+        patch("bot.handlers.image_gen.safe_answer_callback", AsyncMock()),
     ):
-        await image_gen.cb_image_session_repeat(
+        await image_gen.cb_image_repeat_launch(
             call,
             AsyncMock(),
             state,
@@ -940,13 +1117,11 @@ async def test_session_repeat_uses_last_generation_source_not_stale_state() -> N
     state.get_data = AsyncMock(return_value={"source_feed_gen_id": 77})
     image_session = SimpleNamespace(id=7, model="wan/2-7-image-pro", mode="text")
     last_gen = SimpleNamespace(id=99, prompt="own prompt", source_feed_gen_id=None)
-    launch = AsyncMock(return_value=True)
     repo_stub = SimpleNamespace(get_last_session_generation=AsyncMock(return_value=last_gen))
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
-        patch("bot.handlers.image_gen._session_reference_url", AsyncMock(return_value=None)),
-        patch("bot.handlers.image_gen._launch_session_generation", launch),
+        patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
     ):
         await image_gen.cb_image_session_repeat(
@@ -957,7 +1132,7 @@ async def test_session_repeat_uses_last_generation_source_not_stale_state() -> N
             AsyncMock(),
         )
 
-    assert launch.await_args.kwargs["source_feed_gen_id"] is None
+    assert state.update_data.await_args.kwargs["pending_source_feed_gen_id"] is None
 
 
 @pytest.mark.asyncio

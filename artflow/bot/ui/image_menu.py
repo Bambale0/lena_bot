@@ -29,35 +29,44 @@ def _pretty_quality(value: str | None) -> str:
     return value.upper() if value.lower() in {"1k", "2k", "4k"} else value
 
 
-def _image_start_kb():
+def _image_start_kb(*, show_continue: bool = False):
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✨ Создать с нуля", callback_data="img_v2:text"),
-        InlineKeyboardButton(text="🪄 Изменить фото", callback_data="img_v2:edit"),
+        InlineKeyboardButton(text="📐 Формат", callback_data="img_v2:ratio"),
+        InlineKeyboardButton(text="💎 Качество", callback_data="img_v2:quality"),
     )
     builder.row(
-        InlineKeyboardButton(text="📸 Фото → промпт", callback_data="img:photo2prompt"),
-        InlineKeyboardButton(text="🧠 Выбрать модель", callback_data="img_menu:advanced"),
+        InlineKeyboardButton(text="📎 Референсы", callback_data="img_v2:refs"),
+        InlineKeyboardButton(text="🧠 Сменить модель", callback_data="img_menu:advanced"),
     )
-    builder.row(InlineKeyboardButton(text="🏠 На главную", callback_data="menu:main"))
+    if show_continue:
+        builder.row(InlineKeyboardButton(text="✅ Продолжить", callback_data="img_v2:continue"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:create"))
     return builder.as_markup()
 
 
-def render_image_scenarios() -> ScreenRender:
+def render_image_scenarios(
+    *,
+    model_title: str = "Seedream 5 Pro",
+    reference_count: int = 0,
+    max_refs: int = 10,
+    aspect_ratio: str = "1:1",
+    quality: str = "1K",
+    show_continue: bool = False,
+) -> ScreenRender:
     text = (
-        "🎨 <b>Создание изображений</b>\n\n"
-        "Выбери только результат. Модель, режим и базовые параметры APIX подберёт автоматически.\n\n"
-        "✨ <b>Создать с нуля</b>\n"
-        "Напиши идею обычными словами — реклама, персонаж, карточка товара, пост или иллюстрация.\n\n"
-        "🪄 <b>Изменить фото</b>\n"
-        "Сначала отправь изображение, затем напиши, что изменить: фон, одежду, объект, стиль или детали.\n\n"
-        "📸 <b>Фото → промпт</b>\n"
-        "Получи подробное описание загруженной фотографии.\n\n"
-        "🧠 <b>Выбрать модель</b>\n"
-        "Экспертный режим со всеми моделями и ручными настройками.\n\n"
-        "Обычно достаточно первых двух кнопок 👇"
+        f"🎨 <b>{model_title}</b>\n\n"
+        "Можно сразу отправлять:\n\n"
+        "📝 текст — создать изображение с нуля;\n"
+        "🖼 фото — использовать как референс;\n"
+        "🖼 фото + подпись — сразу подготовить задачу;\n"
+        "📚 несколько фото — собрать композицию или сохранить персонажа.\n\n"
+        "APIX сам выберет подходящий внутренний режим.\n\n"
+        f"Референсы: {reference_count}/{max_refs}\n"
+        f"Формат: {aspect_ratio}\n"
+        f"Качество: {quality}"
     )
-    return ScreenRender(text=text, reply_markup=_image_start_kb())
+    return ScreenRender(text=text, reply_markup=_image_start_kb(show_continue=show_continue))
 
 
 def render_image_advanced_menu(model_costs: list[ModelCost]) -> ScreenRender:

@@ -149,16 +149,21 @@ def test_grok_payloads_contain_only_documented_fields() -> None:
     }
 
 
-def test_grok_rejects_multiple_reference_images() -> None:
-    with pytest.raises(ValueError, match="at most 1 reference"):
-        _build_input(
-            ImageModel.GROK_I2I,
-            "Edit",
-            ["https://example.test/a.png", "https://example.test/b.png"],
-            None,
-            1,
-            "basic",
-        )
+def test_grok_accepts_multiple_reference_images() -> None:
+    _, payload = _build_input(
+        ImageModel.GROK_I2I,
+        "Edit",
+        ["https://example.test/a.png", "https://example.test/b.png"],
+        None,
+        1,
+        "basic",
+    )
+
+    assert payload["image_urls"] == [
+        "https://example.test/a.png",
+        "https://example.test/b.png",
+    ]
+    assert payload["image_url"] == "https://example.test/a.png"
 
 
 def test_wan_image_emits_all_official_controls() -> None:

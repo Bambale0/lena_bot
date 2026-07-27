@@ -273,7 +273,7 @@ IMAGE_CAPS: dict[str, dict] = {
         "aspect_ratios": [],
         "aspect_ratio_modes": [],
         "counts": [1],
-        "max_refs": 1,
+        "max_refs": 7,
     },
     ImageModel.WAN_27: {
         "modes": ["text", "image"],

@@ -24,7 +24,7 @@ def main_menu_kb(
         InlineKeyboardButton(text="📂 Мои работы", callback_data="menu:history"),
         InlineKeyboardButton(text="🔥 Лента", callback_data="menu:feed"),
     )
-    balance_label = f"💎 Баланс · {balance}" if balance is not None else "💎 Баланс"
+    balance_label = f"💋 Баланс · {balance}" if balance is not None else "💋 Баланс"
     builder.row(
         InlineKeyboardButton(text=balance_label, callback_data="menu:balance"),
         InlineKeyboardButton(text="☰ Ещё", callback_data="menu:more"),

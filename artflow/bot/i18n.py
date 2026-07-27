@@ -35,7 +35,7 @@ _RU = {
     "language_changed_en": "✅ Language changed to English!",
 
     # Баланс
-    "balance_title": "💎 <b>Твой баланс</b>",
+    "balance_title": "💋 <b>Твой баланс</b>",
     "balance_credits": "💋: {credits}",
     "user_tg_id": "🆔 ID: <code>{tg_id}</code>",
     "balance_subscription": "Подписка: {status}",
@@ -256,7 +256,7 @@ _EN = {
     "language_changed_en": "✅ Language changed to English!",
 
     # Balance
-    "balance_title": "💎 <b>Your Balance</b>",
+    "balance_title": "💋 <b>Your Balance</b>",
     "balance_credits": "💋: {credits}",
     "user_tg_id": "🆔 ID: <code>{tg_id}</code>",
     "balance_subscription": "Subscription: {status}",

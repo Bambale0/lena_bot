@@ -41,7 +41,7 @@ def _home_text(context: MainMenuContext, lang: str, *, show_session: bool) -> st
             "😊 <b>App</b> — the full visual workspace with models, references, feed and payments.\n"
             "✨ <b>Create</b> — a quick guided flow inside the bot.\n"
             "🤖 <b>AI Assistant</b> — describe the goal and let APIX help choose the path.\n\n"
-            f"💎 Balance: <b>{context.balance} credits</b>. The exact price is shown before every launch."
+            f"💋 Balance: <b>{context.balance} credits</b>. The exact price is shown before every launch."
         )
     else:
         base = (
@@ -50,7 +50,7 @@ def _home_text(context: MainMenuContext, lang: str, *, show_session: bool) -> st
             "😊 <b>Приложение</b> — полноценная визуальная студия с моделями, референсами, лентой и оплатой.\n"
             "✨ <b>Создать</b> — быстрый пошаговый запуск прямо в боте.\n"
             "🤖 <b>AI-ассистент</b> — опиши задачу обычными словами, и APIX поможет выбрать путь.\n\n"
-            f"💎 На балансе: <b>{context.balance} кредитов</b>. Точную стоимость покажем до запуска."
+            f"💋 На балансе: <b>{context.balance} кредитов</b>. Точную стоимость покажем до запуска."
         )
 
     if not show_session or not context.active_image_session:
@@ -94,7 +94,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
         InlineKeyboardButton(text="🔥 " + ("Лента идей" if lang == "ru" else "Ideas feed"), callback_data="menu:feed"),
     )
     builder.row(
-        InlineKeyboardButton(text="💎 " + (f"Баланс · {context.balance}" if lang == "ru" else f"Balance · {context.balance}"), callback_data="menu:balance"),
+        InlineKeyboardButton(text="💋 " + (f"Баланс · {context.balance}" if lang == "ru" else f"Balance · {context.balance}"), callback_data="menu:balance"),
         InlineKeyboardButton(text="☰ " + ("Ещё" if lang == "ru" else "More"), callback_data="menu:more"),
     )
     if context.is_admin:
