@@ -146,8 +146,8 @@ async def test_begin_repeat_preserves_original_refs_and_waits_for_user() -> None
     assert state.data["repeat_source_reference_file_ids"] == ["old-file-1", "old-file-2"]
     assert state.data["repeat_new_reference_file_ids"] == []
     assert state.data["repeat_max_refs"] == 5
-    assert state.data["repeat_aspect_ratio"] == "1:1"
-    assert state.data["repeat_ratio_options"] == ["1:1", "16:9", "9:16"]
+    assert state.data["repeat_aspect_ratio"] == "9:16"
+    assert state.data["repeat_ratio_options"] == ["9:16", "16:9", "1:1"]
     call.message.answer.assert_awaited_once()
 
 
@@ -160,21 +160,21 @@ async def test_repeat_ratio_can_be_changed_before_launch() -> None:
             "repeat_max_refs": 5,
             "repeat_model_key": "test/multi-ref",
             "repeat_reference_required": False,
-            "repeat_aspect_ratio": "1:1",
-            "repeat_ratio_options": ["1:1", "16:9", "9:16"],
+            "repeat_aspect_ratio": "9:16",
+            "repeat_ratio_options": ["9:16", "16:9", "1:1"],
         }
     )
     call = _call()
-    call.data = "repeat_refs:ratio:9:16"
+    call.data = "repeat_refs:ratio:1:1"
 
     with patch.object(repeat_references.image_gen, "get_image_model_label", return_value="Test Model"):
         await repeat_references._repeat_refs_ratio(call, state)
 
-    assert state.data["repeat_aspect_ratio"] == "9:16"
+    assert state.data["repeat_aspect_ratio"] == "1:1"
     call.message.answer.assert_awaited_once()
     markup = call.message.answer.await_args.kwargs["reply_markup"]
     ratio_buttons = [button for row in markup.inline_keyboard for button in row if button.callback_data and button.callback_data.startswith("repeat_refs:ratio:")]
-    assert [button.text for button in ratio_buttons] == ["1:1", "16:9", "✅ 9:16"]
+    assert [button.text for button in ratio_buttons] == ["9:16", "16:9", "✅ 1:1"]
 
 
 @pytest.mark.asyncio

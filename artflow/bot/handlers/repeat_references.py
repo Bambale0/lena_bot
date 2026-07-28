@@ -66,10 +66,10 @@ def _repeat_ratio_options(model_key: str) -> list[str]:
         remix_model = getattr(spec, "remix_model", None) if spec else None
         ratios = list(IMAGE_CAPS.get(str(remix_model), {}).get("aspect_ratios") or [])
     ratios = list(dict.fromkeys(str(ratio) for ratio in ratios if ratio))
-    if "1:1" not in ratios:
-        ratios.insert(0, "1:1")
+    if "9:16" not in ratios:
+        ratios.insert(0, "9:16")
     else:
-        ratios.insert(0, ratios.pop(ratios.index("1:1")))
+        ratios.insert(0, ratios.pop(ratios.index("9:16")))
     return ratios
 
 
@@ -93,7 +93,7 @@ def _repeat_refs_keyboard(
     added: int,
     max_refs: int,
     required: bool,
-    selected_ratio: str = "1:1",
+    selected_ratio: str = "9:16",
     ratio_options: list[str] | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -102,7 +102,7 @@ def _repeat_refs_keyboard(
             text=f"{'✅ ' if ratio == selected_ratio else ''}{ratio}",
             callback_data=f"repeat_refs:ratio:{ratio}",
         )
-        for ratio in (ratio_options or ["1:1"])
+        for ratio in (ratio_options or ["9:16"])
     ]
     for offset in range(0, len(ratio_buttons), 3):
         builder.row(*ratio_buttons[offset : offset + 3])
@@ -134,8 +134,8 @@ def _repeat_keyboard_from_data(data: dict[str, Any], *, total: int, added: int) 
         added=added,
         max_refs=int(data.get("repeat_max_refs") or 1),
         required=bool(data.get("repeat_reference_required")),
-        selected_ratio=str(data.get("repeat_aspect_ratio") or "1:1"),
-        ratio_options=list(data.get("repeat_ratio_options") or ["1:1"]),
+        selected_ratio=str(data.get("repeat_aspect_ratio") or "9:16"),
+        ratio_options=list(data.get("repeat_ratio_options") or ["9:16"]),
     )
 
 
@@ -156,7 +156,7 @@ def _repeat_refs_text(data: dict[str, Any]) -> str:
         f"Модель: <b>{image_gen.get_image_model_label(model_key)}</b>\n"
         f"Референсы: <b>{total}/{max_refs}</b> "
         f"(исходных {base_count}, новых {added_count})\n\n"
-        f"Формат: <b>{data.get('repeat_aspect_ratio') or '1:1'}</b>\n\n"
+        f"Формат: <b>{data.get('repeat_aspect_ratio') or '9:16'}</b>\n\n"
         "Промпт, модель, формат, качество и количество вариантов сохранены.\n"
         "Отправляй фото сюда по одному или альбомом — я соберу их в один повтор.\n\n"
         f"{requirement}"
@@ -217,7 +217,7 @@ async def _begin_repeat_collection(
         repeat_reuse_session_id=(int(source_session.id) if reuse_session and source_session else None),
         repeat_source_session_id=(int(source_session.id) if source_session else None),
         repeat_mode=(str(getattr(source_session, "mode", "text") or "text") if source_session else "text"),
-        repeat_aspect_ratio="1:1",
+        repeat_aspect_ratio="9:16",
         repeat_ratio_options=_repeat_ratio_options(model_key),
         repeat_quality=(
             str(getattr(source_session, "quality", "") or "")
@@ -391,7 +391,7 @@ async def _repeat_refs_hint(call: CallbackQuery) -> None:
 async def _repeat_refs_ratio(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     ratio = (call.data or "").removeprefix("repeat_refs:ratio:")
-    options = list(data.get("repeat_ratio_options") or ["1:1"])
+    options = list(data.get("repeat_ratio_options") or ["9:16"])
     if ratio not in options:
         await call.answer("Этот формат недоступен для выбранной модели", show_alert=True)
         return
@@ -478,7 +478,7 @@ async def _repeat_refs_run(
     combined_file_ids = combined_file_ids[:max_refs]
 
     target_mode = "image" if references else str(data.get("repeat_mode") or "text")
-    aspect_ratio = str(data.get("repeat_aspect_ratio") or "1:1")
+    aspect_ratio = str(data.get("repeat_aspect_ratio") or "9:16")
     quality = image_gen._normalize_session_quality(
         str(data.get("repeat_model_key") or generation.model),
         aspect_ratio,
