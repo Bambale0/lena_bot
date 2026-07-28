@@ -1,0 +1,131 @@
+name: Merge main into v2 integration
+
+on:
+  push:
+    branches:
+      - agent/merge-v2-main
+
+permissions:
+  contents: write
+
+jobs:
+  merge-main:
+    runs-on: [self-hosted, linux, x64, apix-ci]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/merge-v2-main
+
+      - name: Merge current main and resolve known conflicts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "main is already contained in the integration branch"
+            exit 0
+          fi
+
+          git merge --no-ff --no-commit origin/main || true
+
+          # Keep current main security/runtime changes, then re-apply the one UX-v2 startup flag.
+          git checkout --theirs -- artflow/main.py artflow/.env.example
+
+          # Keep UX-v2 versions and layer the newer main changes on top.
+          git checkout --ours -- \
+            .github/workflows/ci.yml \
+            artflow/bot/handlers/__init__.py \
+            artflow/docker-compose.yml
+
+          python - <<'PY'
+          from pathlib import Path
+
+          # main.py: preserve current main and add optional Telegram startup registration.
+          path = Path("artflow/main.py")
+          text = path.read_text(encoding="utf-8")
+          old = "    await _set_bot_commands(bot)\n    dp = Dispatcher(storage=storage)"
+          new = (
+              "    if settings.TELEGRAM_STARTUP_COMMANDS_ENABLED:\n"
+              "        await _set_bot_commands(bot)\n"
+              "    else:\n"
+              "        logger.info(\"Telegram startup command/menu registration skipped\")\n"
+              "    dp = Dispatcher(storage=storage)"
+          )
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "TELEGRAM_STARTUP_COMMANDS_ENABLED" not in text:
+              raise SystemExit("main.py startup command anchor not found")
+          path.write_text(text, encoding="utf-8")
+
+          # .env.example: expose the matching configuration flag.
+          path = Path("artflow/.env.example")
+          text = path.read_text(encoding="utf-8")
+          marker = "WEB_PUBLIC_URL=https://apixbotai.com\n"
+          line = "TELEGRAM_STARTUP_COMMANDS_ENABLED=false\n"
+          if line not in text:
+              if marker not in text:
+                  raise SystemExit(".env.example WEB_PUBLIC_URL anchor not found")
+              text = text.replace(marker, marker + line, 1)
+          path.write_text(text, encoding="utf-8")
+
+          # Handler bootstrap: install repeat interceptors on legacy routers before wrapping them in UX v2.
+          path = Path("artflow/bot/handlers/__init__.py")
+          text = path.read_text(encoding="utf-8")
+          old = (
+              "from . import image_gen as _legacy_image_gen\n"
+              "from . import image_wizard_v2 as _image_wizard_v2"
+          )
+          new = (
+              "from . import image_gen as _legacy_image_gen\n"
+              "from . import repeat_reference_marketplace as _repeat_reference_marketplace  # noqa: F401\n"
+              "from . import repeat_references as _repeat_references  # noqa: F401\n"
+              "from . import image_wizard_v2 as _image_wizard_v2"
+          )
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "repeat_references" not in text:
+              raise SystemExit("handler bootstrap anchor not found")
+          path.write_text(text, encoding="utf-8")
+
+          # Docker Compose: keep UX-v2 external nginx networks and current main persistence/migrations.
+          path = Path("artflow/docker-compose.yml")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              "    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1",
+              "    command: sh -c \"alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1\"",
+              1,
+          )
+          text = text.replace(
+              "    volumes:\n      - .:/app",
+              "    volumes:\n      - ./data:/app/data\n      - ./static/upload:/app/static/upload",
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+
+          # CI: retain hardened deployment from v2, but target the actual production main branch and self-hosted runner.
+          path = Path(".github/workflows/ci.yml")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace("branches: [main, v2]", "branches: [main]")
+          text = text.replace("runs-on: ubuntu-latest", "runs-on: [self-hosted, linux, x64, apix-ci]")
+          text = text.replace("refs/heads/v2", "refs/heads/main")
+          text = text.replace("DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH || 'v2' }}", "DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH || 'main' }}")
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          # Do not merge the temporary resolver workflow into main.
+          rm -f .github/workflows/merge-main-into-v2.yml
+
+          git add -A
+          unresolved="$(git diff --name-only --diff-filter=U)"
+          if [ -n "$unresolved" ]; then
+            echo "Unresolved merge conflicts:" >&2
+            echo "$unresolved" >&2
+            exit 1
+          fi
+
+          git commit -m "merge: integrate UX v2 with current main"
+          git push origin HEAD:agent/merge-v2-main
