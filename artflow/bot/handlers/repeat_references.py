@@ -16,15 +16,14 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards.models import IMAGE_CAPS
-from bot.utils.telegram_ui import safe_answer_callback
-from db import repository as repo
-from db.models import GenerationType, ImageGenerationAction, User
-
 # Import the existing routers and handlers first. New handlers are then inserted
 # at the beginning of their observer lists, so the old one-click repeat remains
 # the fallback for single-reference/text-only models.
 from bot.handlers import feed, image_gen
+from bot.keyboards.models import IMAGE_CAPS
+from bot.utils.telegram_ui import safe_answer_callback
+from db import repository as repo
+from db.models import GenerationType, ImageGenerationAction, User
 
 
 class RepeatReferenceFSM(StatesGroup):
@@ -59,6 +58,21 @@ def _repeat_max_refs(model_key: str) -> int:
     return 1
 
 
+def _repeat_ratio_options(model_key: str) -> list[str]:
+    caps = IMAGE_CAPS.get(model_key, {})
+    ratios = list(caps.get("aspect_ratios") or [])
+    if not ratios:
+        spec = image_gen.IMAGE_SPECS.get(model_key)
+        remix_model = getattr(spec, "remix_model", None) if spec else None
+        ratios = list(IMAGE_CAPS.get(str(remix_model), {}).get("aspect_ratios") or [])
+    ratios = list(dict.fromkeys(str(ratio) for ratio in ratios if ratio))
+    if "1:1" not in ratios:
+        ratios.insert(0, "1:1")
+    else:
+        ratios.insert(0, ratios.pop(ratios.index("1:1")))
+    return ratios
+
+
 def _supports_repeat_reference_collection(model_key: str) -> bool:
     return image_gen._supports_img2img(model_key) and _repeat_max_refs(model_key) > 1
 
@@ -73,8 +87,25 @@ def _source_reference_file_ids(image_session: Any | None) -> list[str]:
     return refs
 
 
-def _repeat_refs_keyboard(*, total: int, added: int, max_refs: int, required: bool) -> InlineKeyboardMarkup:
+def _repeat_refs_keyboard(
+    *,
+    total: int,
+    added: int,
+    max_refs: int,
+    required: bool,
+    selected_ratio: str = "1:1",
+    ratio_options: list[str] | None = None,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    ratio_buttons = [
+        InlineKeyboardButton(
+            text=f"{'✅ ' if ratio == selected_ratio else ''}{ratio}",
+            callback_data=f"repeat_refs:ratio:{ratio}",
+        )
+        for ratio in (ratio_options or ["1:1"])
+    ]
+    for offset in range(0, len(ratio_buttons), 3):
+        builder.row(*ratio_buttons[offset : offset + 3])
     if total > 0 or not required:
         builder.row(
             InlineKeyboardButton(
@@ -97,6 +128,17 @@ def _repeat_refs_keyboard(*, total: int, added: int, max_refs: int, required: bo
     return builder.as_markup()
 
 
+def _repeat_keyboard_from_data(data: dict[str, Any], *, total: int, added: int) -> InlineKeyboardMarkup:
+    return _repeat_refs_keyboard(
+        total=total,
+        added=added,
+        max_refs=int(data.get("repeat_max_refs") or 1),
+        required=bool(data.get("repeat_reference_required")),
+        selected_ratio=str(data.get("repeat_aspect_ratio") or "1:1"),
+        ratio_options=list(data.get("repeat_ratio_options") or ["1:1"]),
+    )
+
+
 def _repeat_refs_text(data: dict[str, Any]) -> str:
     base_count = len(_url_list(data.get("repeat_base_reference_urls")))
     added_count = len(list(data.get("repeat_new_reference_file_ids") or []))
@@ -114,6 +156,7 @@ def _repeat_refs_text(data: dict[str, Any]) -> str:
         f"Модель: <b>{image_gen.get_image_model_label(model_key)}</b>\n"
         f"Референсы: <b>{total}/{max_refs}</b> "
         f"(исходных {base_count}, новых {added_count})\n\n"
+        f"Формат: <b>{data.get('repeat_aspect_ratio') or '1:1'}</b>\n\n"
         "Промпт, модель, формат, качество и количество вариантов сохранены.\n"
         "Отправляй фото сюда по одному или альбомом — я соберу их в один повтор.\n\n"
         f"{requirement}"
@@ -174,7 +217,8 @@ async def _begin_repeat_collection(
         repeat_reuse_session_id=(int(source_session.id) if reuse_session and source_session else None),
         repeat_source_session_id=(int(source_session.id) if source_session else None),
         repeat_mode=(str(getattr(source_session, "mode", "text") or "text") if source_session else "text"),
-        repeat_aspect_ratio=(getattr(source_session, "aspect_ratio", None) if source_session else getattr(generation, "aspect_ratio", None)),
+        repeat_aspect_ratio="1:1",
+        repeat_ratio_options=_repeat_ratio_options(model_key),
         repeat_quality=(
             str(getattr(source_session, "quality", "") or "")
             if source_session
@@ -190,12 +234,7 @@ async def _begin_repeat_collection(
     total = len(base_urls)
     await call.message.answer(  # type: ignore[union-attr]
         _repeat_refs_text(data),
-        reply_markup=_repeat_refs_keyboard(
-            total=total,
-            added=0,
-            max_refs=max_refs,
-            required=bool(data.get("repeat_reference_required")),
-        ),
+        reply_markup=_repeat_keyboard_from_data(data, total=total, added=0),
     )
     await safe_answer_callback(call, "Можно добавить несколько фото")
     return True
@@ -327,11 +366,10 @@ async def _collect_repeat_reference(message: Message, state: FSMContext) -> None
         if len(base_urls) + len(new_file_ids) >= max_refs:
             await message.answer(
                 f"У этой модели максимум {max_refs} референсов. Очисти старые или запускай повтор.",
-                reply_markup=_repeat_refs_keyboard(
+                reply_markup=_repeat_keyboard_from_data(
+                    data,
                     total=len(base_urls) + len(new_file_ids),
                     added=len(new_file_ids),
-                    max_refs=max_refs,
-                    required=bool(data.get("repeat_reference_required")),
                 ),
             )
             return
@@ -342,17 +380,35 @@ async def _collect_repeat_reference(message: Message, state: FSMContext) -> None
     total = len(base_urls) + len(new_file_ids)
     await message.answer(
         _repeat_refs_text(data),
-        reply_markup=_repeat_refs_keyboard(
-            total=total,
-            added=len(new_file_ids),
-            max_refs=max_refs,
-            required=bool(data.get("repeat_reference_required")),
-        ),
+        reply_markup=_repeat_keyboard_from_data(data, total=total, added=len(new_file_ids)),
     )
 
 
 async def _repeat_refs_hint(call: CallbackQuery) -> None:
     await call.answer("Отправь следующее фото обычным сообщением", show_alert=True)
+
+
+async def _repeat_refs_ratio(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    ratio = (call.data or "").removeprefix("repeat_refs:ratio:")
+    options = list(data.get("repeat_ratio_options") or ["1:1"])
+    if ratio not in options:
+        await call.answer("Этот формат недоступен для выбранной модели", show_alert=True)
+        return
+    await state.update_data(repeat_aspect_ratio=ratio)
+    data = await state.get_data()
+    total = len(_url_list(data.get("repeat_base_reference_urls"))) + len(
+        list(data.get("repeat_new_reference_file_ids") or [])
+    )
+    await call.message.answer(  # type: ignore[union-attr]
+        _repeat_refs_text(data),
+        reply_markup=_repeat_keyboard_from_data(
+            data,
+            total=total,
+            added=len(list(data.get("repeat_new_reference_file_ids") or [])),
+        ),
+    )
+    await safe_answer_callback(call, f"Формат: {ratio}")
 
 
 async def _repeat_refs_clear(call: CallbackQuery, state: FSMContext) -> None:
@@ -366,12 +422,7 @@ async def _repeat_refs_clear(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     await call.message.answer(  # type: ignore[union-attr]
         _repeat_refs_text(data),
-        reply_markup=_repeat_refs_keyboard(
-            total=0,
-            added=0,
-            max_refs=int(data.get("repeat_max_refs") or 1),
-            required=bool(data.get("repeat_reference_required")),
-        ),
+        reply_markup=_repeat_keyboard_from_data(data, total=0, added=0),
     )
     await safe_answer_callback(call, "Референсы очищены")
 
@@ -427,14 +478,20 @@ async def _repeat_refs_run(
     combined_file_ids = combined_file_ids[:max_refs]
 
     target_mode = "image" if references else str(data.get("repeat_mode") or "text")
+    aspect_ratio = str(data.get("repeat_aspect_ratio") or "1:1")
+    quality = image_gen._normalize_session_quality(
+        str(data.get("repeat_model_key") or generation.model),
+        aspect_ratio,
+        str(data.get("repeat_quality") or "basic"),
+    )
     if image_session is None:
         image_session = await repo.create_image_session(
             session=session,
             user_id=db_user.id,
             model=str(data.get("repeat_model_key") or generation.model),
             mode=target_mode,
-            aspect_ratio=data.get("repeat_aspect_ratio"),
-            quality=str(data.get("repeat_quality") or "basic"),
+            aspect_ratio=aspect_ratio,
+            quality=quality,
             count=int(data.get("repeat_count") or 1),
             base_prompt=str(data.get("repeat_prompt") or generation.prompt or ""),
             reference_file_id=combined_file_ids[0] if combined_file_ids else None,
@@ -443,6 +500,8 @@ async def _repeat_refs_run(
         )
     else:
         image_session.mode = target_mode
+        image_session.aspect_ratio = aspect_ratio
+        image_session.quality = quality
         # Persist newly added Telegram references when the original set is also
         # Telegram-backed. Mixed external URL + Telegram input is still passed
         # exactly for this run without flattening the external reference.
@@ -487,6 +546,7 @@ _register_front(feed.router.callback_query, _feed_again_interceptor, F.data.star
 # Unique FSM handlers do not conflict with the legacy image-session upload flow.
 image_gen.router.message.register(_collect_repeat_reference, RepeatReferenceFSM.collect, F.photo)
 image_gen.router.callback_query.register(_repeat_refs_hint, RepeatReferenceFSM.collect, F.data == "repeat_refs:hint")
+image_gen.router.callback_query.register(_repeat_refs_ratio, RepeatReferenceFSM.collect, F.data.startswith("repeat_refs:ratio:"))
 image_gen.router.callback_query.register(_repeat_refs_clear, RepeatReferenceFSM.collect, F.data == "repeat_refs:clear")
 image_gen.router.callback_query.register(_repeat_refs_cancel, RepeatReferenceFSM.collect, F.data == "repeat_refs:cancel")
 image_gen.router.callback_query.register(_repeat_refs_run, RepeatReferenceFSM.collect, F.data == "repeat_refs:run")
