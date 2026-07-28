@@ -54,8 +54,20 @@ services:
       - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       - app
+    networks:
+      - default
+      - foxgen_backend
+      - stupidbot_backend
     restart: unless-stopped
 
 volumes:
   pgdata:
   redisdata:
+
+networks:
+  foxgen_backend:
+    external: true
+    name: foxgen_backend
+  stupidbot_backend:
+    external: true
+    name: stupidbot_backend

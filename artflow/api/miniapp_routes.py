@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, midjourney_service, video_service
 from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
+from api.image_errors import image_generation_user_error
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.midjourney_service import MJDimensions, MJVideoMotion
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_telegram_login_data
@@ -1986,7 +1987,7 @@ async def create_image_generation(
         logger.error("miniapp image gen error user=%s: %s", user.id, exc)
         if await repo.fail_generation(session, gen.id, str(exc)):
             await repo.add_credits(session, user.id, model_cost.credits)
-        raise HTTPException(status_code=502, detail="Generation service error")
+        raise HTTPException(status_code=502, detail=image_generation_user_error(exc))
 
     if not getattr(result, "is_async", True):
         gen = await _finish_direct_image_result(session, gen, result, surface=surface)

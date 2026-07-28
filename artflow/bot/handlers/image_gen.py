@@ -19,6 +19,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service
+from api.image_errors import telegram_image_error_text
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
 from api.photo_prompt_service import generate_prompt_from_photo
@@ -221,6 +222,34 @@ def _quality_label(model_key: str, quality: str | None) -> str:
         for value, label in _quality_options(model_key)
     }
     return clean_labels.get(quality or "", quality or "по умолчанию")
+
+
+def _image_review_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✅ Запустить", callback_data="img_review:launch"))
+    builder.row(InlineKeyboardButton(text="← Изменить промпт", callback_data="img_review:back"))
+    return builder.as_markup()
+
+
+def _image_review_text(
+    *,
+    image_session: ImageSession,
+    prompt: str,
+    credits: float,
+    has_reference: bool,
+) -> str:
+    mode_label = "img2img · по референсам" if has_reference else "text-to-image · с нуля"
+    ratio = image_session.aspect_ratio or "auto"
+    quality = _quality_label(image_session.model, image_session.quality)
+    return (
+        "✅ <b>Проверь задачу</b>\n\n"
+        f"🎨 <b>{html.escape(get_image_model_label(image_session.model))}</b>\n"
+        f"🔀 Режим: <b>{mode_label}</b>\n"
+        f"📐 Формат: <b>{html.escape(str(ratio))}</b>\n"
+        f"💎 Качество: <b>{html.escape(str(quality))}</b>\n"
+        f"💋 Стоимость: <b>{credits:g}</b>\n\n"
+        f"📝 <b>Промпт</b>\n{html.escape(prompt)}"
+    )
 
 
 def _normalize_session_quality(model_key: str, aspect_ratio: str | None, quality: str | None) -> str:
@@ -668,6 +697,71 @@ def _session_count_choices_kb(image_session: ImageSession) -> InlineKeyboardMark
     return builder.as_markup()
 
 
+def _repeat_reference_count(image_session: ImageSession, data: dict) -> int:
+    return len(_active_reference_file_ids(image_session, data))
+
+
+def _repeat_setup_text(image_session: ImageSession, prompt: str, data: dict) -> str:
+    caps = IMAGE_CAPS.get(image_session.model, {})
+    max_refs = int(caps.get("max_refs", 1) or 1)
+    quality_label = _quality_label(image_session.model, image_session.quality) if caps.get("has_quality") else "фиксированное"
+    ratio_label = image_session.aspect_ratio or "по умолчанию"
+    return (
+        "🔁 <b>Повтор генерации</b>\n\n"
+        "Перед запуском можно добавить референсы и выбрать формат кадра.\n\n"
+        f"🎨 <b>{html.escape(get_image_model_label(image_session.model))}</b>\n"
+        f"Референсы: <b>{_repeat_reference_count(image_session, data)}/{max_refs}</b>\n"
+        f"Формат: <b>{html.escape(str(ratio_label))}</b>\n"
+        f"Качество: <b>{html.escape(str(quality_label))}</b>\n\n"
+        f"📝 <b>Промпт</b>\n{html.escape(prompt)}"
+    )
+
+
+def _repeat_setup_kb(image_session: ImageSession) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    caps = IMAGE_CAPS.get(image_session.model, {})
+    ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
+    if ratios:
+        builder.button(text="📐 Формат", callback_data=f"img_repeat:ratio:{image_session.id}")
+    if caps.get("has_quality"):
+        builder.button(text="💎 Качество", callback_data=f"img_repeat:quality:{image_session.id}")
+    builder.adjust(2)
+    if _supports_img2img(image_session.model):
+        builder.row(InlineKeyboardButton(text="📎 Добавить референс", callback_data="img_repeat:refs"))
+    builder.row(InlineKeyboardButton(text="✅ Запустить повтор", callback_data="img_repeat:launch"))
+    builder.row(InlineKeyboardButton(text="← К серии", callback_data=f"img_sset:back:{image_session.id}"))
+    return builder.as_markup()
+
+
+def _repeat_ratio_choices_kb(image_session: ImageSession) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
+    buttons = [
+        InlineKeyboardButton(
+            text=f"{'✅ ' if ratio == image_session.aspect_ratio else ''}{ratio}",
+            callback_data=f"img_repeat:ratio:set:{image_session.id}:{ratio}",
+        )
+        for ratio in ratios
+    ]
+    for i in range(0, len(buttons), 3):
+        builder.row(*buttons[i:i + 3])
+    builder.row(InlineKeyboardButton(text="← К повтору", callback_data=f"img_repeat:back:{image_session.id}"))
+    return builder.as_markup()
+
+
+def _repeat_quality_choices_kb(image_session: ImageSession) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for quality, label in _quality_options(image_session.model):
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{'✅ ' if image_session.quality == quality else ''}{label}",
+                callback_data=f"img_repeat:quality:set:{image_session.id}:{quality}",
+            )
+        )
+    builder.row(InlineKeyboardButton(text="← К повтору", callback_data=f"img_repeat:back:{image_session.id}"))
+    return builder.as_markup()
+
+
 async def _launch_session_generation(
     *,
     source_message: Message,
@@ -772,7 +866,7 @@ async def _launch_session_generation(
         if await repo.fail_generation(session, gen.id, str(e)):
             await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
-            "❌ Ошибка генерации. 💋 возвращены.",
+            telegram_image_error_text(e),
             reply_markup=image_session_kb(parent_generation_id, allow_publish=not bool(source_feed_gen_id)),
         )
         return False
@@ -1037,46 +1131,15 @@ async def _start_image_model_flow(
         )
         return
 
-    caps = IMAGE_CAPS.get(model_key, {})
-    modes = caps.get("modes", ["text"])
+    from bot.handlers.image_wizard_v2 import open_model_composer_for_selection
 
-    if forced_mode and forced_mode in modes:
-        default_mode = forced_mode
-    else:
-        default_mode = "text" if "text" in modes else modes[0]
-
-    await state.update_data(
-        image_session_id=None,
-        model_key=model_key,
-        image_model=model_key,
-        mode=default_mode,
-        image_mode=default_mode,
-        credits=model_cost.credits,
-        aspect_ratio=None,
-        image_aspect_ratio=None,
-        count=1,
-        image_count=1,
-        image_file_id=None,
-        quality=default_quality,
-        image_quality=default_quality,
-        remix_mode=False,
-        remix_parent_generation_id=None,
-        source_feed_gen_id=None,
+    await open_model_composer_for_selection(
+        call,
+        state,
+        session,
+        model_key,
+        forced_mode=forced_mode,
     )
-
-    text = (
-        f"🎛 <b>{model_cost.display_name}</b>\n\n"
-        "Я покажу только настройки, которые реально поддерживает эта модель.\n"
-        "Выбери параметры или нажми «Продолжить»."
-    )
-
-    await safe_edit_message(
-        call.message,
-        text,
-        reply_markup=image_dynamic_settings_kb(model_key, default_mode),
-    )
-    await state.set_state(ImageGenFSM.model_select)
-    await safe_answer_callback(call)
 
 
 @router.callback_query(F.data == "menu:image")
@@ -1344,52 +1407,10 @@ async def cb_image_model(call: CallbackQuery, state: FSMContext, session: AsyncS
         await call.answer(f"Модель: {display_name}")
         return
 
-    caps = IMAGE_CAPS.get(model_key, {})
-    modes = caps.get("modes", ["text"])
-    data = await state.get_data()
-    carryover_mode = data.get("carryover_mode")
-    if carryover_mode in modes:
-        default_mode = carryover_mode
-    else:
-        default_mode = "text" if "text" in modes else modes[0]
+    from bot.handlers.image_wizard_v2 import open_model_composer_for_selection
 
-    updates = {
-        "image_session_id": None,
-        "model_key": model_key,
-        "image_model": model_key,
-        "mode": default_mode,
-        "image_mode": default_mode,
-        "aspect_ratio": None,
-        "image_aspect_ratio": None,
-        "count": 1,
-        "image_count": 1,
-        "quality": _default_image_quality(model_key),
-        "image_quality": _default_image_quality(model_key),
-        "source_feed_gen_id": None,
-    }
-    if data.get("carryover_image_file_id"):
-        updates["image_file_id"] = data.get("carryover_image_file_id")
-    if data.get("carryover_ref_file_ids"):
-        updates["ref_file_ids"] = list(data.get("carryover_ref_file_ids") or [])
-    if data.get("carryover_reference_url"):
-        updates["remix_reference_url"] = data.get("carryover_reference_url")
-
-    await state.update_data(**updates)
-
-    model_title = get_image_model_label(model_key)
-    text = (
-        f"🎛 <b>{model_title}</b>\n\n"
-        "Покажу только те настройки, которые реально работают у этой модели.\n"
-        "Выбери параметры или нажми «Продолжить»."
-    )
-
-    await safe_edit_message(
-        call.message,  # type: ignore[arg-type]
-        text,
-        reply_markup=image_dynamic_settings_kb(model_key, default_mode),
-    )
-    await state.set_state(ImageGenFSM.model_select)
-    await call.answer()
+    await open_model_composer_for_selection(call, state, session, model_key)
+    return
 
 
 @router.callback_query(ImageGenFSM.mode_select, F.data.startswith("img_mode:"))
@@ -1574,6 +1595,7 @@ async def handle_reference_upload(
     state: FSMContext,
     session: AsyncSession,
     db_user: User,
+    bot: Bot,
 ) -> None:
     best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
     file_id = best[0].file_id
@@ -1588,6 +1610,10 @@ async def handle_reference_upload(
     if file_id not in existing:
         existing.append(file_id)
     await state.update_data(image_file_id=existing[0], ref_file_ids=existing)
+    if (message.caption or "").strip():
+        await state.update_data(mode="image", image_mode="image")
+        await handle_prompt(message, state, session, db_user, bot)
+        return
 
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
@@ -1679,44 +1705,15 @@ async def cb_image_reference_skip(
         return
 
     await state.update_data(mode="text", image_mode="text", image_file_id=None, ref_file_ids=[])
-    model_cost = await repo.get_model_cost(session, model_key)
-    display_name = model_cost.display_name if model_cost else model_key
-    caps = IMAGE_CAPS.get(model_key, {})
-    modes = caps.get("modes", ["text"])
-    data = await state.get_data()
-    carryover_mode = data.get("carryover_mode")
-    if carryover_mode in modes:
-        default_mode = carryover_mode
-    else:
-        default_mode = "text" if "text" in modes else modes[0]
+    from bot.handlers.image_wizard_v2 import open_model_composer_for_selection
 
-    updates = {
-        "model_key": model_key,
-        "image_model": model_key,
-        "mode": default_mode,
-        "image_mode": default_mode,
-    }
-    if data.get("carryover_image_file_id"):
-        updates["image_file_id"] = data.get("carryover_image_file_id")
-    if data.get("carryover_ref_file_ids"):
-        updates["ref_file_ids"] = list(data.get("carryover_ref_file_ids") or [])
-    if data.get("carryover_reference_url"):
-        updates["remix_reference_url"] = data.get("carryover_reference_url")
-
-    await state.update_data(**updates)
-
-    text = (
-        f"🎛 <b>{display_name}</b>\n\n"
-        "Я покажу только настройки, которые реально поддерживает эта модель.\n"
-        "Выбери параметры или нажми «Продолжить»."
+    await open_model_composer_for_selection(
+        call,
+        state,
+        session,
+        model_key,
+        forced_mode="text",
     )
-
-    await call.message.edit_text(
-        text,
-        reply_markup=image_dynamic_settings_kb(model_key, default_mode),
-    )
-    await state.set_state(ImageGenFSM.model_select)
-    await call.answer()
     await call.answer()
 
 
@@ -1726,6 +1723,9 @@ async def cb_image_reference_skip(
 async def handle_prompt_reference_upload(
     message: Message,
     state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    bot: Bot,
 ) -> None:
     best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
     file_id = best[0].file_id
@@ -1762,6 +1762,9 @@ async def handle_prompt_reference_upload(
         mode="image",
         image_mode="image",
     )
+    if (message.caption or "").strip():
+        await handle_prompt(message, state, session, db_user, bot)
+        return
 
     reply_markup = (
         image_nana_banano_kb(model_key, len(existing))
@@ -1784,7 +1787,7 @@ async def handle_prompt(
     db_user: User,
     bot: Bot,
 ) -> None:
-    prompt = message.text.strip()  # type: ignore[union-attr]
+    prompt = ((message.text or message.caption or "")).strip()
     image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
 
     reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
@@ -1811,16 +1814,74 @@ async def handle_prompt(
         await state.set_state(ImageGenFSM.image_upload)
         return
 
+    model_cost = await repo.resolve_image_model_cost(
+        session,
+        image_session.model,
+        quality=image_session.quality,
+    )
+    credits = model_cost.credits if model_cost else 1
+    await state.update_data(
+        pending_image_prompt=prompt,
+        pending_reference_url=reference_url,
+        pending_parent_generation_id=None,
+        pending_source_feed_gen_id=None,
+        pending_action_type=ImageGenerationAction.initial.value,
+        credits=credits,
+    )
+    await state.set_state(ImageGenFSM.review)
+    await message.answer(
+        _image_review_text(
+            image_session=image_session,
+            prompt=prompt,
+            credits=credits,
+            has_reference=bool(reference_url),
+        ),
+        reply_markup=_image_review_kb(),
+    )
+
+
+@router.callback_query(ImageGenFSM.review, F.data == "img_review:back")
+async def cb_image_review_back(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(ImageGenFSM.prompt_input)
+    await safe_edit_message(
+        call.message,
+        "📝 <b>Ок, поправь задачу</b>\n\nОтправь новый текст или фото с подписью.",
+        reply_markup=back_to_menu_kb(),
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(ImageGenFSM.review, F.data == "img_review:launch")
+async def cb_image_review_launch(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    data = await state.get_data()
+    prompt = str(data.get("pending_image_prompt") or "").strip()
+    if not prompt:
+        await call.answer("Промпт пустой. Отправь задачу ещё раз.", show_alert=True)
+        await state.set_state(ImageGenFSM.prompt_input)
+        return
+
+    image_session = await _ensure_active_image_session_from_state(
+        session=session,
+        state=state,
+        db_user=db_user,
+    )
+    await safe_answer_callback(call)
     await _launch_session_generation(
-        source_message=message,
+        source_message=call.message,  # type: ignore[arg-type]
         state=state,
         session=session,
         db_user=db_user,
         image_session=image_session,
         prompt=prompt,
         action_type=ImageGenerationAction.initial,
-        reference_url=reference_url,
+        reference_url=data.get("pending_reference_url"),
         parent_generation_id=None,
+        source_feed_gen_id=data.get("pending_source_feed_gen_id"),
         launching_text=f"⏳ <b>Запускаю генерацию...</b>\n<b>{get_image_model_label(image_session.model)}</b>",
         queued_text="⏳ <b>Задача запущена.</b> Пришлю результат, когда генерация будет готова.",
     )
@@ -1978,10 +2039,22 @@ async def handle_session_photo(
         await state.update_data(source_feed_gen_id=source_feed_gen_id)
 
     await message.answer(
-        f"{label} Теперь напиши, что изменить.",
-        reply_markup=image_session_kb(
-            image_session.last_generation_id,
-            allow_publish=not bool(source_feed_gen_id),
+        (
+            _repeat_setup_text(
+                image_session,
+                str((await state.get_data()).get("pending_image_prompt") or getattr(image_session, "last_prompt", "") or ""),
+                await state.get_data(),
+            )
+            if data.get("pending_action_type") == ImageGenerationAction.repeat.value
+            else f"{label} Теперь напиши, что изменить."
+        ),
+        reply_markup=(
+            _repeat_setup_kb(image_session)
+            if data.get("pending_action_type") == ImageGenerationAction.repeat.value
+            else image_session_kb(
+                image_session.last_generation_id,
+                allow_publish=not bool(source_feed_gen_id),
+            )
         ),
     )
 
@@ -2180,23 +2253,196 @@ async def cb_image_session_repeat(
         return
 
     source_feed_gen_id = getattr(last_gen, "source_feed_gen_id", None)
-    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=None)
+    await _sync_state_with_image_session(state, image_session)
+    data = await state.get_data()
+    await state.update_data(
+        pending_image_prompt=last_gen.prompt,
+        pending_parent_generation_id=parent_id or last_gen.id,
+        pending_source_feed_gen_id=source_feed_gen_id,
+        pending_action_type=ImageGenerationAction.repeat.value,
+        source_feed_gen_id=source_feed_gen_id,
+    )
+    data = {**data, "pending_image_prompt": last_gen.prompt, "source_feed_gen_id": source_feed_gen_id}
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        _repeat_setup_text(image_session, last_gen.prompt, data),
+        reply_markup=_repeat_setup_kb(image_session),
+    )
+    await call.answer("Проверь параметры повтора")
 
-    await _launch_session_generation(
+
+@router.callback_query(F.data == "img_repeat:refs")
+async def cb_image_repeat_refs(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    await call.answer(
+        "Отправь фото сюда сообщением. Можно добавить несколько референсов до лимита модели.",
+        show_alert=True,
+    )
+
+
+@router.callback_query(F.data.startswith("img_repeat:back:"))
+async def cb_image_repeat_back(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    image_session, _ = await _resolve_image_session(session, db_user, state)
+    if not image_session:
+        await call.answer("Активная серия не найдена", show_alert=True)
+        return
+    data = await state.get_data()
+    prompt = str(data.get("pending_image_prompt") or getattr(image_session, "last_prompt", "") or "")
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        _repeat_setup_text(image_session, prompt, data),
+        reply_markup=_repeat_setup_kb(image_session),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("img_repeat:ratio:"))
+async def cb_image_repeat_ratio(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    if call.data and call.data.startswith("img_repeat:ratio:set:"):
+        _, _, _, session_id_raw, ratio = call.data.split(":", 4)
+        image_session = await repo.get_image_session(session, int(session_id_raw), db_user.id)
+        if not image_session:
+            await call.answer("Активная серия не найдена", show_alert=True)
+            return
+        if ratio not in _ratio_options_for_mode(image_session.model, image_session.mode):
+            await call.answer("Этот формат недоступен для модели", show_alert=True)
+            return
+        image_session.aspect_ratio = ratio
+        image_session.quality = _normalize_session_quality(image_session.model, ratio, image_session.quality)
+        await session.commit()
+        await state.update_data(
+            image_session_id=image_session.id,
+            aspect_ratio=ratio,
+            image_aspect_ratio=ratio,
+            quality=image_session.quality,
+            image_quality=image_session.quality,
+        )
+        data = await state.get_data()
+        prompt = str(data.get("pending_image_prompt") or getattr(image_session, "last_prompt", "") or "")
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            _repeat_setup_text(image_session, prompt, data),
+            reply_markup=_repeat_setup_kb(image_session),
+        )
+        await call.answer(f"Формат: {ratio}")
+        return
+
+    image_session, _ = await _resolve_image_session(session, db_user, state)
+    if not image_session:
+        await call.answer("Активная серия не найдена", show_alert=True)
+        return
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "📐 <b>Выбери формат для повтора</b>",
+        reply_markup=_repeat_ratio_choices_kb(image_session),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("img_repeat:quality:"))
+async def cb_image_repeat_quality(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+) -> None:
+    if call.data and call.data.startswith("img_repeat:quality:set:"):
+        _, _, _, session_id_raw, quality = call.data.split(":", 4)
+        image_session = await repo.get_image_session(session, int(session_id_raw), db_user.id)
+        if not image_session:
+            await call.answer("Активная серия не найдена", show_alert=True)
+            return
+        allowed_quality = {value for value, _ in _quality_options(image_session.model)}
+        if quality not in allowed_quality:
+            await call.answer("Это качество недоступно для модели", show_alert=True)
+            return
+        image_session.quality = _normalize_session_quality(image_session.model, image_session.aspect_ratio, quality)
+        await session.commit()
+        await state.update_data(image_session_id=image_session.id, quality=image_session.quality, image_quality=image_session.quality)
+        data = await state.get_data()
+        prompt = str(data.get("pending_image_prompt") or getattr(image_session, "last_prompt", "") or "")
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            _repeat_setup_text(image_session, prompt, data),
+            reply_markup=_repeat_setup_kb(image_session),
+        )
+        await call.answer(f"Качество: {_quality_label(image_session.model, image_session.quality)}")
+        return
+
+    image_session, _ = await _resolve_image_session(session, db_user, state)
+    if not image_session:
+        await call.answer("Активная серия не найдена", show_alert=True)
+        return
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        "💎 <b>Выбери качество для повтора</b>",
+        reply_markup=_repeat_quality_choices_kb(image_session),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "img_repeat:launch")
+async def cb_image_repeat_launch(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    db_user: User,
+    bot: Bot,
+) -> None:
+    data = await state.get_data()
+    image_session, _ = await _resolve_image_session(session, db_user, state)
+    if not image_session:
+        await call.answer("Активная серия не найдена", show_alert=True)
+        return
+    prompt = str(data.get("pending_image_prompt") or getattr(image_session, "last_prompt", "") or "").strip()
+    if not prompt:
+        await call.answer("Не нашла промпт для повтора", show_alert=True)
+        return
+    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
+    current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
+    current_mode = await _promote_reference_mode_if_needed(
+        session=session,
+        state=state,
+        image_session=image_session,
+        data=data,
+        current_mode=current_mode,
+        reference_url=reference_url,
+    )
+    if current_mode != "image" or not _supports_img2img(image_session.model):
+        reference_url = None
+
+    await safe_answer_callback(call)
+    launched = await _launch_session_generation(
         source_message=call.message,  # type: ignore[arg-type]
         state=state,
         session=session,
         db_user=db_user,
         image_session=image_session,
-        prompt=last_gen.prompt,
+        prompt=prompt,
         action_type=ImageGenerationAction.repeat,
         reference_url=reference_url,
-        parent_generation_id=parent_id or last_gen.id,
-        source_feed_gen_id=source_feed_gen_id,
+        parent_generation_id=data.get("pending_parent_generation_id") or image_session.last_generation_id,
+        source_feed_gen_id=data.get("pending_source_feed_gen_id"),
         launching_text="🔁 <b>Повторяю последнюю генерацию...</b>",
         queued_text="⏳ <b>Повтор запущен.</b> Результат придёт сюда автоматически.",
     )
-    await call.answer()
+    if launched:
+        await state.update_data(
+            pending_image_prompt=None,
+            pending_parent_generation_id=None,
+            pending_source_feed_gen_id=None,
+            pending_action_type=None,
+        )
 
 
 @router.callback_query(F.data == "img_settings")

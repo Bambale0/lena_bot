@@ -1892,6 +1892,7 @@ async def test_webapp_image_models_expose_single_ref_caps_and_no_false_count(cli
     assert payload["qwen/image-edit"]["counts"] == [1]
     assert payload["qwen/image-edit"]["aspect_ratios"] == []
     assert payload["grok-imagine/image-to-image"]["counts"] == [1]
+    assert payload["grok-imagine/image-to-image"]["max_refs"] == 7
     assert payload["grok-imagine/image-to-image"]["aspect_ratios"] == []
     assert payload["gpt-image-2-image-to-image"]["aspect_ratios"] == ["1:1", "9:16", "16:9", "4:3", "3:4"]
     assert payload["nano-banana-pro"]["counts"] == [1]

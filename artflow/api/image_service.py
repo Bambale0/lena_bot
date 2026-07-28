@@ -112,7 +112,7 @@ _STRICT_UPLOAD_MODELS = set(_KIE_UPLOAD_REFERENCE_MODELS)
 _REFERENCE_LIMITS: dict[str, int] = {
     ImageModel.SEEDREAM_5_PRO_I2I.value: 10,
     ImageModel.SEEDREAM_45_EDIT.value: 3,
-    ImageModel.GROK_I2I.value: 1,
+    ImageModel.GROK_I2I.value: 7,
     ImageModel.WAN_27.value: 9,
     ImageModel.WAN_27_PRO.value: 9,
     ImageModel.NANO_BANANA_2.value: 14,

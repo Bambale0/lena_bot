@@ -3,35 +3,14 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.i18n import t
 from bot.services.session_service import MainMenuContext
 from bot.ui.common import ScreenRender
+from bot.ui.model_labels import model_display_name
 from core.config import settings
-
-_IMAGE_MODEL_LABELS = {
-    "grok-imagine/text-to-image": "Grok Imagine",
-    "grok-imagine/image-to-image": "Grok Imagine Edit",
-    "qwen/text-to-image": "Qwen",
-    "qwen/image-to-image": "Qwen Edit",
-    "qwen/image-edit": "Qwen Edit Pro",
-    "qwen2/text-to-image": "Qwen2",
-    "qwen2/image-edit": "Qwen2 Edit",
-    "seedream/5-pro-text-to-image": "Seedream 5.0 Pro",
-    "seedream/5-pro-image-to-image": "Seedream 5.0 Pro Edit",
-    "seedream/4.5-text-to-image": "Seedream 4.5",
-    "seedream/4.5-edit": "Seedream 4.5 Edit",
-    "wan/2-7-image": "WAN 2.7",
-    "wan/2-7-image-pro": "WAN 2.7 Pro",
-    "gpt-image-2-text-to-image": "GPT Image 2",
-    "gpt-image-2-image-to-image": "GPT Image 2 Edit",
-    "google/nano-banana": "Nano Banana",
-    "nano-banana-pro": "Nano Banana Pro",
-    "nano-banana-2": "Nano Banana 2",
-}
 
 
 def _pretty_image_model(model_key: str) -> str:
-    return _IMAGE_MODEL_LABELS.get(model_key, model_key.replace('-', ' ').replace('/', ' · ').title())
+    return model_display_name(model_key)
 
 
 def _pretty_ratio(value: str | None, lang: str) -> str:
@@ -51,100 +30,82 @@ def _pretty_quality(value: str | None, lang: str) -> str:
 def _pretty_count(value: int, lang: str) -> str:
     if lang != "ru":
         return "1 image" if value == 1 else f"{value} images"
-    if value == 1:
-        return "1 фото"
-    return f"{value} фото"
+    return "1 фото" if value == 1 else f"{value} фото"
+
+
+def _home_text(context: MainMenuContext, lang: str, *, show_session: bool) -> str:
+    if lang == "en":
+        base = (
+            "✨ <b>APIX — your AI creative studio</b>\n\n"
+            "Create images, animate photos, generate video with sound, make music and turn rough ideas into strong prompts.\n\n"
+            "😊 <b>App</b> — the full visual workspace with models, references, feed and payments.\n"
+            "✨ <b>Create</b> — a quick guided flow inside the bot.\n"
+            "🤖 <b>AI Assistant</b> — describe the goal and let APIX help choose the path.\n\n"
+            f"💋 Balance: <b>{context.balance} credits</b>. The exact price is shown before every launch."
+        )
+    else:
+        base = (
+            "✨ <b>APIX — твоя AI-студия</b>\n\n"
+            "Создавай изображения, оживляй фото, генерируй видео со звуком, делай музыку и превращай сырые идеи в сильные промпты.\n\n"
+            "😊 <b>Приложение</b> — полноценная визуальная студия с моделями, референсами, лентой и оплатой.\n"
+            "✨ <b>Создать</b> — быстрый пошаговый запуск прямо в боте.\n"
+            "🤖 <b>AI-ассистент</b> — опиши задачу обычными словами, и APIX поможет выбрать путь.\n\n"
+            f"💋 На балансе: <b>{context.balance} кредитов</b>. Точную стоимость покажем до запуска."
+        )
+
+    if not show_session or not context.active_image_session:
+        return base + ("\n\nВыбирай, с чего начнём 👇" if lang == "ru" else "\n\nChoose where to start 👇")
+
+    session = context.active_image_session
+    model = _pretty_image_model(session.model)
+    ratio = _pretty_ratio(session.aspect_ratio, lang)
+    quality = _pretty_quality(session.quality, lang)
+    count = _pretty_count(session.count or 1, lang)
+    active = (
+        f"\n\n🔥 <b>У тебя есть активная серия</b>\n{model} · {ratio} · {quality} · {count}\n"
+        "Продолжи её в том же стиле или начни новую работу."
+        if lang == "ru"
+        else f"\n\n🔥 <b>You have an active series</b>\n{model} · {ratio} · {quality} · {count}\nContinue it or start a new work."
+    )
+    return base + active
 
 
 def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_text: bool = False) -> ScreenRender:
     builder = InlineKeyboardBuilder()
-
     builder.row(
         InlineKeyboardButton(
-            text="📱 " + ("Открыть приложение" if lang == "ru" else "Open App"),
-            web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?v=1778285569"),
-        ),
-    )
-
-    builder.row(
-        InlineKeyboardButton(text=f"{t('balance_credits', lang, credits=context.balance)}", callback_data="menu:balance"),
+            text="😊 " + ("Приложение" if lang == "ru" else "App"),
+            web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app"),
+        )
     )
 
     if context.active_image_session:
-        session = context.active_image_session
-        quality = _pretty_quality(session.quality, lang)
-        ratio = _pretty_ratio(session.aspect_ratio, lang)
-        count = session.count or 1
-
         builder.row(
-            InlineKeyboardButton(
-                text="🔥 " + ("Продолжить серию" if lang == "ru" else "Continue series"),
-                callback_data="menu:image",
-            ),
-            InlineKeyboardButton(
-                text="🆕 " + ("Новая серия" if lang == "ru" else "New series"),
-                callback_data="img_session:new",
-            ),
+            InlineKeyboardButton(text="🔥 " + ("Продолжить" if lang == "ru" else "Continue"), callback_data="menu:image"),
+            InlineKeyboardButton(text="🆕 " + ("Новая работа" if lang == "ru" else "New work"), callback_data="img_session:new"),
         )
 
-        if force_main_text:
-            text = t("main_menu", lang)
-        else:
-            text = t(
-                "main_menu_with_session",
-                lang,
-                model=_pretty_image_model(session.model),
-                ratio=ratio,
-                quality=quality,
-                count=_pretty_count(count, lang),
-            )
-    else:
-        text = t("main_menu", lang)
-
-    # Creation
     builder.row(
-        InlineKeyboardButton(text="🎨 " + ("Фото" if lang == "ru" else "Photo"), callback_data="menu:image"),
-        InlineKeyboardButton(text="🎬 " + ("Видео" if lang == "ru" else "Video"), callback_data="menu:video"),
-    )
-    if context.is_admin:
-        builder.row(
-            InlineKeyboardButton(text="🎵 " + ("Песня" if lang == "ru" else "Song"), callback_data="menu:music"),
-            InlineKeyboardButton(text="🖌️ Midjourney", callback_data="menu:mj"),
-        )
-    else:
-        builder.row(
-            InlineKeyboardButton(text="🎵 " + ("Песня" if lang == "ru" else "Song"), callback_data="menu:music"),
-        )
-    builder.row(
+        InlineKeyboardButton(text="✨ " + ("Создать" if lang == "ru" else "Create"), callback_data="menu:create"),
         InlineKeyboardButton(text="🤖 " + ("AI-ассистент" if lang == "ru" else "AI Assistant"), callback_data="menu:assistant"),
     )
-
-    # Content
     builder.row(
-        InlineKeyboardButton(text="🔥 " + ("Лента" if lang == "ru" else "Feed"), callback_data="menu:feed"),
-        InlineKeyboardButton(text="📚 " + ("Библиотека" if lang == "ru" else "Library"), callback_data="menu:prompts"),
+        InlineKeyboardButton(text="📂 " + ("Мои работы" if lang == "ru" else "My work"), callback_data="menu:history"),
+        InlineKeyboardButton(text="🔥 " + ("Лента идей" if lang == "ru" else "Ideas feed"), callback_data="menu:feed"),
     )
     builder.row(
-        InlineKeyboardButton(text="📋 " + ("История" if lang == "ru" else "History"), callback_data="menu:history"),
+        InlineKeyboardButton(text="💋 " + (f"Баланс · {context.balance}" if lang == "ru" else f"Balance · {context.balance}"), callback_data="menu:balance"),
+        InlineKeyboardButton(text="☰ " + ("Ещё" if lang == "ru" else "More"), callback_data="menu:more"),
     )
-
-    # Account
-    builder.row(
-        InlineKeyboardButton(text="👥 " + ("Рефералы" if lang == "ru" else "Referrals"), callback_data="menu:referral"),
-        InlineKeyboardButton(text="❓ " + ("Помощь" if lang == "ru" else "Help"), callback_data="menu:help"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="💳 " + ("Пополнить" if lang == "ru" else "Top up"), callback_data="menu:topup"),
-    )
-
     if context.is_admin:
         builder.row(
-            InlineKeyboardButton(text="👑 " + ("Админ" if lang == "ru" else "Admin"), callback_data="menu:admin"),
+            InlineKeyboardButton(
+                text="👑 " + ("Админ-панель" if lang == "ru" else "Admin panel"),
+                callback_data="menu:admin",
+            )
         )
 
-    # Settings / Language
-    builder.row(
-        InlineKeyboardButton(text="⚙️ " + ("Настройки" if lang == "ru" else "Settings"), callback_data="menu:settings"),
+    return ScreenRender(
+        text=_home_text(context, lang, show_session=not force_main_text),
+        reply_markup=builder.as_markup(),
     )
-
-    return ScreenRender(text=text, reply_markup=builder.as_markup())
