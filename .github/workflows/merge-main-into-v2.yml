@@ -1,3 +1,4 @@
+# Triggered after workflow creation so GitHub can execute it from the branch.
 name: Merge main into v2 integration
 
 on:
@@ -32,10 +33,7 @@ jobs:
 
           git merge --no-ff --no-commit origin/main || true
 
-          # Keep current main security/runtime changes, then re-apply the one UX-v2 startup flag.
           git checkout --theirs -- artflow/main.py artflow/.env.example
-
-          # Keep UX-v2 versions and layer the newer main changes on top.
           git checkout --ours -- \
             .github/workflows/ci.yml \
             artflow/bot/handlers/__init__.py \
@@ -44,7 +42,6 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          # main.py: preserve current main and add optional Telegram startup registration.
           path = Path("artflow/main.py")
           text = path.read_text(encoding="utf-8")
           old = "    await _set_bot_commands(bot)\n    dp = Dispatcher(storage=storage)"
@@ -61,7 +58,6 @@ jobs:
               raise SystemExit("main.py startup command anchor not found")
           path.write_text(text, encoding="utf-8")
 
-          # .env.example: expose the matching configuration flag.
           path = Path("artflow/.env.example")
           text = path.read_text(encoding="utf-8")
           marker = "WEB_PUBLIC_URL=https://apixbotai.com\n"
@@ -72,7 +68,6 @@ jobs:
               text = text.replace(marker, marker + line, 1)
           path.write_text(text, encoding="utf-8")
 
-          # Handler bootstrap: install repeat interceptors on legacy routers before wrapping them in UX v2.
           path = Path("artflow/bot/handlers/__init__.py")
           text = path.read_text(encoding="utf-8")
           old = (
@@ -91,7 +86,6 @@ jobs:
               raise SystemExit("handler bootstrap anchor not found")
           path.write_text(text, encoding="utf-8")
 
-          # Docker Compose: keep UX-v2 external nginx networks and current main persistence/migrations.
           path = Path("artflow/docker-compose.yml")
           text = path.read_text(encoding="utf-8")
           text = text.replace(
@@ -106,7 +100,6 @@ jobs:
           )
           path.write_text(text, encoding="utf-8")
 
-          # CI: retain hardened deployment from v2, but target the actual production main branch and self-hosted runner.
           path = Path(".github/workflows/ci.yml")
           text = path.read_text(encoding="utf-8")
           text = text.replace("branches: [main, v2]", "branches: [main]")
@@ -116,7 +109,6 @@ jobs:
           path.write_text(text, encoding="utf-8")
           PY
 
-          # Do not merge the temporary resolver workflow into main.
           rm -f .github/workflows/merge-main-into-v2.yml
 
           git add -A
