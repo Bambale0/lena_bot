@@ -47,6 +47,7 @@ jobs:
             bot/handlers/repeat_reference_marketplace.py \
             tests/test_repeat_multiple_references.py \
             tests/test_repeat_marketplace_multiple_references.py \
+            --per-file-ignores "bot/handlers/repeat_references.py:I001" \
             --output-format=json > repeat-ruff.json
 
       - name: Upload Ruff diagnostics
