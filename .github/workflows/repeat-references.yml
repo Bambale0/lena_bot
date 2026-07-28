@@ -38,14 +38,41 @@ jobs:
             tests/test_repeat_multiple_references.py \
             tests/test_repeat_marketplace_multiple_references.py
 
-      - name: Ruff repeat flow
+      - name: Collect Ruff diagnostics
+        continue-on-error: true
         run: |
           ruff check \
             bot/handlers/__init__.py \
             bot/handlers/repeat_references.py \
             bot/handlers/repeat_reference_marketplace.py \
             tests/test_repeat_multiple_references.py \
-            tests/test_repeat_marketplace_multiple_references.py
+            tests/test_repeat_marketplace_multiple_references.py \
+            --output-format=json > repeat-ruff.json
+
+      - name: Upload Ruff diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repeat-ruff-diagnostics
+          path: artflow/repeat-ruff.json
+          if-no-files-found: error
+
+      - name: Enforce Ruff
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          issues = json.loads(Path("repeat-ruff.json").read_text(encoding="utf-8"))
+          if issues:
+              for issue in issues:
+                  location = issue.get("location") or {}
+                  print(
+                      f"{issue.get('filename')}:{location.get('row')}:{location.get('column')} "
+                      f"{issue.get('code')} {issue.get('message')}"
+                  )
+              raise SystemExit(1)
+          PY
 
       - name: Repeat flow regression tests
         run: |
