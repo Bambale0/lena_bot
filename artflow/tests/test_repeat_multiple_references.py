@@ -38,9 +38,16 @@ def _call() -> SimpleNamespace:
     )
 
 
+def _callback_handlers(router) -> list:
+    handlers = [handler.callback for handler in router.callback_query.handlers]
+    for child in router.sub_routers:
+        handlers.extend(_callback_handlers(child))
+    return handlers
+
+
 def test_repeat_handlers_are_prioritized_before_legacy_handlers() -> None:
-    image_callbacks = [handler.callback for handler in image_gen.router.callback_query.handlers]
-    feed_callbacks = [handler.callback for handler in feed.router.callback_query.handlers]
+    image_callbacks = _callback_handlers(image_gen.router)
+    feed_callbacks = _callback_handlers(feed.router)
 
     assert image_callbacks.index(repeat_references._session_repeat_interceptor) < image_callbacks.index(
         image_gen.cb_image_session_repeat
