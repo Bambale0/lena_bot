@@ -104,6 +104,15 @@ async def test_lava_webhook_confirms_nested_invoice_id(monkeypatch) -> None:
 
     monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
     monkeypatch.setattr(main, "bot", None)
+    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=SimpleNamespace(**{
+        **tx.__dict__,
+        "status": TransactionStatus.pending,
+    })))
+    monkeypatch.setattr(
+        main,
+        "lava_get_invoice",
+        AsyncMock(return_value={"id": "invoice-1", "status": "completed", "amount": 500.0, "currency": "RUB"}),
+    )
     monkeypatch.setattr(main.repo, "confirm_transaction_and_add_credits", confirm_and_add)
     monkeypatch.setattr(main.repo, "get_user_by_id", AsyncMock(return_value=SimpleNamespace(id=7, tg_id=123)))
     monkeypatch.setattr(main, "_accrue_referral_commissions", AsyncMock())
@@ -120,3 +129,33 @@ async def test_lava_webhook_confirms_nested_invoice_id(monkeypatch) -> None:
     assert response.text == "OK"
     confirm_and_add.assert_awaited_once()
     assert confirm_and_add.await_args.args[1] == "invoice-1"
+
+
+@pytest.mark.asyncio
+async def test_lava_webhook_does_not_confirm_without_server_side_paid_invoice(monkeypatch) -> None:
+    tx = SimpleNamespace(
+        id=12,
+        user_id=7,
+        amount_rub=500.0,
+        credits=50.0,
+        provider=PaymentProvider.lava,
+        status=TransactionStatus.pending,
+    )
+    confirm_and_add = AsyncMock()
+
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=tx))
+    monkeypatch.setattr(main, "lava_get_invoice", AsyncMock(return_value={"id": "invoice-1", "status": "pending"}))
+    monkeypatch.setattr(main.repo, "confirm_transaction_and_add_credits", confirm_and_add)
+
+    payload = {
+        "eventType": "payment.success",
+        "data": {"invoiceId": "invoice-1", "status": "completed"},
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/webhook/lava", json=payload)
+
+    assert response.status_code == 200
+    assert response.text == "OK"
+    confirm_and_add.assert_not_awaited()

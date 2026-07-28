@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import mimetypes
 import shutil
+import socket
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
@@ -13,6 +15,10 @@ from PIL import Image, ImageFilter, ImageOps
 from core.config import settings
 
 UPLOAD_ROOT = Path(settings.STATIC_UPLOAD_DIR)
+_MAX_IMAGE_MIRROR_BYTES = 30 * 1024 * 1024
+_MAX_AUDIO_MIRROR_BYTES = 100 * 1024 * 1024
+_MAX_VIDEO_MIRROR_BYTES = 500 * 1024 * 1024
+_MIRROR_CHUNK_BYTES = 1024 * 1024
 
 
 def get_static_upload_mount_path() -> str:
@@ -76,6 +82,37 @@ def public_url_is_available(url: str | None) -> bool:
     if path is None:
         return bool(url)
     return path.exists() and path.is_file()
+
+
+def _reject_private_url_targets(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("unsupported mirror URL")
+    if parsed.username or parsed.password:
+        raise ValueError("credentials are not allowed in mirror URL")
+
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError("mirror URL host does not resolve") from exc
+
+    checked: set[str] = set()
+    for info in infos:
+        ip_text = str(info[4][0])
+        if ip_text in checked:
+            continue
+        checked.add(ip_text)
+        ip = ipaddress.ip_address(ip_text)
+        if not ip.is_global:
+            raise ValueError("mirror URL host resolves to a non-public address")
+
+
+def _mirror_size_limit(content_type: str | None) -> int:
+    if is_video_content_type(content_type):
+        return _MAX_VIDEO_MIRROR_BYTES
+    if is_audio_content_type(content_type):
+        return _MAX_AUDIO_MIRROR_BYTES
+    return _MAX_IMAGE_MIRROR_BYTES
 
 
 def detect_image_extension(data: bytes, content_type: str | None = None) -> str:
@@ -335,10 +372,27 @@ def save_public_file(data: bytes, content_type: str | None = None, *, subdir: st
 
 
 def _download_public_url(url: str) -> tuple[bytes, str | None]:
+    _reject_private_url_targets(url)
     req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; APIXMirror/1.0)"})
     with urlopen(req, timeout=25) as resp:
-        data = resp.read()
+        final_url = getattr(resp, "url", "") or resp.geturl()
         content_type = resp.headers.get("Content-Type")
+        _reject_private_url_targets(final_url)
+        max_bytes = _mirror_size_limit(content_type)
+        content_length = resp.headers.get("Content-Length")
+        if content_length and int(content_length) > max_bytes:
+            raise ValueError("mirror URL response is too large")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = resp.read(_MIRROR_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError("mirror URL response exceeded size limit")
+            chunks.append(chunk)
+        data = b"".join(chunks)
     return data, content_type
 
 
