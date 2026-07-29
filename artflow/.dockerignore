@@ -36,7 +36,6 @@ redisdata
 *.sqlite3
 
 webapp/node_modules
-webapp/dist
 webapp/.vite
 webapp/tsconfig.tsbuildinfo
 npm-debug.log*
