@@ -205,7 +205,53 @@ async def test_prompt_input_shows_review_before_launching_generation() -> None:
     launch.assert_not_awaited()
     state.set_state.assert_awaited_with(image_gen.ImageGenFSM.review)
     assert "Проверь задачу" in message.answer.await_args.args[0]
-    assert message.answer.await_args.kwargs["reply_markup"] is not None
+    markup = message.answer.await_args.kwargs["reply_markup"]
+    callbacks = {
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    }
+    assert "img_review:ratio" in callbacks
+    assert "img_review:quality" in callbacks
+    assert "img_review:launch" in callbacks
+
+
+@pytest.mark.asyncio
+async def test_first_generation_ratio_can_change_from_review() -> None:
+    call = SimpleNamespace(
+        data="img_review:ratio:set:9:16",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    image_session = SimpleNamespace(
+        id=7,
+        model="seedream/5-pro-text-to-image",
+        mode="text",
+        aspect_ratio="1:1",
+        quality="basic",
+        count=1,
+    )
+    session = AsyncMock()
+
+    with (
+        patch(
+            "bot.handlers.image_gen._ensure_active_image_session_from_state",
+            AsyncMock(return_value=image_session),
+        ),
+        patch("bot.handlers.image_gen._show_image_review", AsyncMock()) as show_review,
+    ):
+        await image_gen.cb_image_review_ratio_set(
+            call,
+            state,
+            session,
+            SimpleNamespace(id=42),
+        )
+
+    assert image_session.aspect_ratio == "9:16"
+    session.commit.assert_awaited_once()
+    show_review.assert_awaited_once()
 
 
 @pytest.mark.asyncio

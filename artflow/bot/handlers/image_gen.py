@@ -224,10 +224,35 @@ def _quality_label(model_key: str, quality: str | None) -> str:
     return clean_labels.get(quality or "", quality or "по умолчанию")
 
 
-def _image_review_kb() -> InlineKeyboardMarkup:
+def _image_review_kb(image_session: ImageSession) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    caps = IMAGE_CAPS.get(image_session.model, {})
+    if _ratio_options_for_mode(image_session.model, image_session.mode):
+        builder.button(text="📐 Формат", callback_data="img_review:ratio")
+    if caps.get("has_quality"):
+        builder.button(text="💎 Качество", callback_data="img_review:quality")
+    if len(caps.get("counts") or [1]) > 1:
+        builder.button(text="🔢 Количество", callback_data="img_review:count")
+    builder.adjust(2)
     builder.row(InlineKeyboardButton(text="✅ Запустить", callback_data="img_review:launch"))
     builder.row(InlineKeyboardButton(text="← Изменить промпт", callback_data="img_review:back"))
+    return builder.as_markup()
+
+
+def _image_review_choice_kb(
+    *,
+    values: list[tuple[str, str]],
+    selected: str,
+    callback_prefix: str,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for value, label in values:
+        builder.button(
+            text=f"{'✅ ' if value == selected else ''}{label}",
+            callback_data=f"{callback_prefix}:{value}",
+        )
+    builder.adjust(3)
+    builder.row(InlineKeyboardButton(text="← К запуску", callback_data="img_review:settings"))
     return builder.as_markup()
 
 
@@ -247,6 +272,7 @@ def _image_review_text(
         f"🔀 Режим: <b>{mode_label}</b>\n"
         f"📐 Формат: <b>{html.escape(str(ratio))}</b>\n"
         f"💎 Качество: <b>{html.escape(str(quality))}</b>\n"
+        f"🔢 Количество: <b>{image_session.count or 1}</b>\n"
         f"💋 Стоимость: <b>{credits:g}</b>\n\n"
         f"📝 <b>Промпт</b>\n{html.escape(prompt)}"
     )
@@ -1836,8 +1862,203 @@ async def handle_prompt(
             credits=credits,
             has_reference=bool(reference_url),
         ),
-        reply_markup=_image_review_kb(),
+        reply_markup=_image_review_kb(image_session),
     )
+
+
+async def _show_image_review(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    data = await state.get_data()
+    image_session = await _ensure_active_image_session_from_state(
+        session=session,
+        state=state,
+        db_user=db_user,
+    )
+    model_cost = await repo.resolve_image_model_cost(
+        session,
+        image_session.model,
+        quality=image_session.quality,
+    )
+    credits = model_cost.credits if model_cost else float(data.get("credits") or 1)
+    await state.update_data(
+        aspect_ratio=image_session.aspect_ratio,
+        image_aspect_ratio=image_session.aspect_ratio,
+        quality=image_session.quality,
+        image_quality=image_session.quality,
+        count=image_session.count,
+        image_count=image_session.count,
+        credits=credits,
+    )
+    await safe_edit_message(
+        call.message,
+        _image_review_text(
+            image_session=image_session,
+            prompt=str(data.get("pending_image_prompt") or ""),
+            credits=credits,
+            has_reference=bool(data.get("pending_reference_url")),
+        ),
+        reply_markup=_image_review_kb(image_session),
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(ImageGenFSM.review, F.data == "img_review:settings")
+async def cb_image_review_settings(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    await _show_image_review(call, state, session, db_user)
+
+
+@router.callback_query(ImageGenFSM.review, F.data == "img_review:ratio")
+async def cb_image_review_ratio(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    image_session = await _ensure_active_image_session_from_state(
+        session=session,
+        state=state,
+        db_user=db_user,
+    )
+    ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
+    await safe_edit_message(
+        call.message,
+        "📐 <b>Выбери формат первой генерации</b>",
+        reply_markup=_image_review_choice_kb(
+            values=[(ratio, ratio) for ratio in ratios],
+            selected=str(image_session.aspect_ratio or ""),
+            callback_prefix="img_review:ratio:set",
+        ),
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(ImageGenFSM.review, F.data.startswith("img_review:ratio:set:"))
+async def cb_image_review_ratio_set(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    image_session = await _ensure_active_image_session_from_state(
+        session=session,
+        state=state,
+        db_user=db_user,
+    )
+    ratio = (call.data or "").removeprefix("img_review:ratio:set:")
+    if ratio not in _ratio_options_for_mode(image_session.model, image_session.mode):
+        await call.answer("Этот формат недоступен для модели", show_alert=True)
+        return
+    image_session.aspect_ratio = ratio
+    image_session.quality = _normalize_session_quality(image_session.model, ratio, image_session.quality)
+    await session.commit()
+    await _show_image_review(call, state, session, db_user)
+
+
+@router.callback_query(ImageGenFSM.review, F.data == "img_review:quality")
+async def cb_image_review_quality(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    image_session = await _ensure_active_image_session_from_state(
+        session=session,
+        state=state,
+        db_user=db_user,
+    )
+    await safe_edit_message(
+        call.message,
+        "💎 <b>Выбери качество первой генерации</b>",
+        reply_markup=_image_review_choice_kb(
+            values=[(value, label) for value, label in _quality_options(image_session.model)],
+            selected=str(image_session.quality or ""),
+            callback_prefix="img_review:quality:set",
+        ),
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(ImageGenFSM.review, F.data.startswith("img_review:quality:set:"))
+async def cb_image_review_quality_set(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    image_session = await _ensure_active_image_session_from_state(
+        session=session,
+        state=state,
+        db_user=db_user,
+    )
+    quality = (call.data or "").removeprefix("img_review:quality:set:")
+    allowed = {value for value, _label in _quality_options(image_session.model)}
+    if quality not in allowed:
+        await call.answer("Это качество недоступно для модели", show_alert=True)
+        return
+    image_session.quality = _normalize_session_quality(
+        image_session.model,
+        image_session.aspect_ratio,
+        quality,
+    )
+    await session.commit()
+    await _show_image_review(call, state, session, db_user)
+
+
+@router.callback_query(ImageGenFSM.review, F.data == "img_review:count")
+async def cb_image_review_count(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    image_session = await _ensure_active_image_session_from_state(
+        session=session,
+        state=state,
+        db_user=db_user,
+    )
+    counts = [int(value) for value in IMAGE_CAPS.get(image_session.model, {}).get("counts", [1])]
+    await safe_edit_message(
+        call.message,
+        "🔢 <b>Выбери количество изображений</b>",
+        reply_markup=_image_review_choice_kb(
+            values=[(str(count), f"{count} шт") for count in counts],
+            selected=str(image_session.count or 1),
+            callback_prefix="img_review:count:set",
+        ),
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(ImageGenFSM.review, F.data.startswith("img_review:count:set:"))
+async def cb_image_review_count_set(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    image_session = await _ensure_active_image_session_from_state(
+        session=session,
+        state=state,
+        db_user=db_user,
+    )
+    raw_count = (call.data or "").removeprefix("img_review:count:set:")
+    counts = [int(value) for value in IMAGE_CAPS.get(image_session.model, {}).get("counts", [1])]
+    count = int(raw_count) if raw_count.isdigit() else 0
+    if count not in counts:
+        await call.answer("Это количество недоступно для модели", show_alert=True)
+        return
+    image_session.count = count
+    await session.commit()
+    await _show_image_review(call, state, session, db_user)
 
 
 @router.callback_query(ImageGenFSM.review, F.data == "img_review:back")
