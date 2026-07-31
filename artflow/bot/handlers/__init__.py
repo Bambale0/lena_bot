@@ -51,10 +51,10 @@ for _key, _description in list(_model_keyboards.IMAGE_MODEL_DESC.items()):
 # Image UX v2: direct task-first flow first, dedicated photo-to-prompt flow
 # second, legacy expert flow last.
 from . import image_gen as _legacy_image_gen
-from . import repeat_reference_marketplace as _repeat_reference_marketplace  # noqa: F401
-from . import repeat_references as _repeat_references  # noqa: F401
 from . import image_wizard_v2 as _image_wizard_v2
 from . import photo_prompt as _photo_prompt
+from . import repeat_reference_marketplace as _repeat_reference_marketplace  # noqa: F401
+from . import repeat_references as _repeat_references  # noqa: F401
 
 _photo_prompt.install_photo_prompt_keyboard_hooks(_legacy_image_gen)
 
