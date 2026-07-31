@@ -4,7 +4,7 @@ import "./style.css";
 
 const API_BASE = "/api/v1";
 const REALTIME_MAX_FAILURES = 5;
-window.__APIX_MINIAPP_BUILD_ID__ = "20260731-admin-curated-trends-v2";
+window.__APIX_MINIAPP_BUILD_ID__ = "20260731-compact-feed-v3";
 
 // ── fallbacks ────────────────────────────────────────────────────────────────
 
@@ -762,7 +762,8 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   async function handleCopyLink() {
     try {
       const res = await api(`/feed/${item.id}/link`);
-      await navigator.clipboard?.writeText(res.link);
+      const copied = await copyText(res.link || "");
+      if (!copied) throw new Error("Не удалось скопировать ссылку");
       tg()?.HapticFeedback?.notificationOccurred("success");
       setLinkCopied(true);
       onNotice?.({ type: "success", message: "Ссылка для репоста скопирована" });
@@ -791,100 +792,114 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   }
 
   return (
-    <div className="feedFullCard feedTileCard">
-      <div className={`feedTileMedia ${visibleUrls.length > 1 ? "multi" : ""}`}>
+    <article className="feedCompactCard">
+      <div className={`feedCompactMedia ${visibleUrls.length > 1 ? "multi" : ""}`}>
         {visibleUrls.length ? visibleUrls.map((url, mediaIdx) => (
           <MediaThumb
             key={`${url}-${mediaIdx}`}
             url={url}
             openUrl={resultUrls[mediaIdx] || url}
-            type="image"
+            type={/\.(mp4|webm|mov)(?:$|\?)/i.test(url) ? "video" : "image"}
             idx={idx + mediaIdx}
-            className="feedTileImg"
+            className="feedCompactImg"
             onOpen={openExternalUrl}
           />
         )) : <Art type="a" />}
+        <div className="feedCompactTop">
+          <span className="feedCompactAuthor">@{item.author || "anon"}</span>
+          {item.is_mine && <span className="feedMineBadge">твой</span>}
+        </div>
+        <div className="feedCompactStats" aria-label="Статистика публикации">
+          <span>♥ {likes}</span>
+          <span>↻ {remixes}</span>
+          {shares > 0 && <span>↗ {shares}</span>}
+        </div>
         {resultUrls.length > 4 && <span className="feedMoreBadge">+{resultUrls.length - 4}</span>}
       </div>
-      <div className="feedTileInfo">
-        <div className="feedTileHead">
-          <span className="feedAuthor">@{item.author || "anon"}</span>
-        </div>
 
-        <div className="feedTileStats">
-          <span>♥ {likes}</span>
-          <span>🔁 {remixes}</span>
-          <span>📤 {shares}</span>
-          {item.is_mine && <span className="mineMark">твой</span>}
-        </div>
-
-        <div className="feedActions feedTileActions">
-          <button className={`likeBtn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={busy}>
-            ♥
-          </button>
-          <button
-            className="remixBtn"
-            onClick={() => onRemix && onRemix(item)}
-          >
-            🔁 Повтор
-          </button>
-          {item.is_mine && (
-            <>
-              <button
-                className={linkCopied ? "successAction" : ""}
-                onClick={handleCopyLink}
-              >
-                {linkCopied ? "✓" : "🔗"}
-              </button>
-              <button
-                className="dangerAction"
-                onClick={handleRemove}
-                disabled={removing}
-              >
-                {removing ? "…" : "🗑"}
-              </button>
-            </>
-          )}
-        </div>
+      <div className="feedCompactActions">
+        <button
+          className={`feedIconAction ${liked ? "liked" : ""}`}
+          onClick={handleLike}
+          disabled={busy}
+          aria-label="Поставить лайк"
+          title="Лайк"
+        >
+          ♥
+        </button>
+        <button className="feedRepeatAction" onClick={() => onRemix?.(item)}>
+          ↻ <span>Повторить</span>
+        </button>
+        {item.is_mine && (
+          <>
+            <button
+              className={`feedIconAction ${linkCopied ? "successAction" : ""}`}
+              onClick={handleCopyLink}
+              aria-label="Скопировать ссылку"
+              title="Поделиться"
+            >
+              {linkCopied ? "✓" : "↗"}
+            </button>
+            <button
+              className="feedIconAction dangerAction"
+              onClick={handleRemove}
+              disabled={removing}
+              aria-label="Удалить из ленты"
+              title="Удалить"
+            >
+              {removing ? "…" : "×"}
+            </button>
+          </>
+        )}
       </div>
-    </div>
+    </article>
   );
 }
 
 function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemoved, scope = "all", onPromptUse, onOpenPrompts }) {
   const [mode, setMode] = useState("all");
   const scopedFeed = scope === "midjourney" ? (feed || []).filter((item) => isMidjourneyModel(item.model)) : (feed || []);
-  const myCount = scopedFeed.filter(item => item.is_mine).length;
-  const filtered = mode === "mine" ? scopedFeed.filter(item => item.is_mine) : scopedFeed;
-  const totalLikes = filtered.reduce((sum, item) => sum + (item.likes_count || 0), 0);
+  const myCount = scopedFeed.filter((item) => item.is_mine).length;
+  const filtered = mode === "mine" ? scopedFeed.filter((item) => item.is_mine) : scopedFeed;
   const isMjScope = scope === "midjourney";
 
   return (
     <>
-      <h1>{isMjScope ? "Midjourney лента" : "Лента"}</h1>
-      <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 14, background: "var(--surface-2)", border: "1px solid var(--border-soft)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <div>
-            <div style={{ fontWeight: 700 }}>{isMjScope ? "Публичные MJ-работы" : "Публичные работы"}</div>
-            <div style={{ fontSize: 12, color: "var(--text-ghost)", marginTop: 4 }}>Смотри чужие работы, повторяй и забирай ссылку на репост для своих.</div>
-          </div>
-          <button onClick={() => setScreen(isMjScope ? "midjourney" : "studio")} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent-border)", background: "var(--accent-soft)", color: "var(--accent-text)", fontSize: 13, fontWeight: 600 }}>{isMjScope ? "В MJ" : "В студию"}</button>
+      <div className="feedPageHeader">
+        <div>
+          <h1>{isMjScope ? "Midjourney лента" : "Лента"}</h1>
+          <p>{filtered.length} {filtered.length === 1 ? "работа" : "работ"}</p>
         </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <button onClick={() => setMode("all")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${mode === "all" ? "var(--accent-border)" : "var(--border-strong)"}`, background: mode === "all" ? "var(--accent-soft)" : "var(--surface-1)", color: mode === "all" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 600 }}>Все ({scopedFeed.length})</button>
-          <button onClick={() => setMode("mine")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${mode === "mine" ? "var(--success-border)" : "var(--border-strong)"}`, background: mode === "mine" ? "var(--success-soft)" : "var(--surface-1)", color: mode === "mine" ? "var(--success)" : "var(--text-muted)", fontWeight: 600 }}>Мои ({myCount})</button>
-        </div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: "var(--text-ghost)" }}>
-          <span>Карточек: {filtered.length}</span>
-          <span>Лайков: {totalLikes}</span>
-        </div>
+        <button className="feedCreateButton" onClick={() => setScreen(isMjScope ? "midjourney" : "studio")}>
+          ＋ Создать
+        </button>
       </div>
+
+      <div className="feedFilterBar" role="tablist" aria-label="Фильтр ленты">
+        <button className={mode === "all" ? "active" : ""} onClick={() => setMode("all")} role="tab" aria-selected={mode === "all"}>
+          Все <span>{scopedFeed.length}</span>
+        </button>
+        <button className={mode === "mine" ? "active mine" : ""} onClick={() => setMode("mine")} role="tab" aria-selected={mode === "mine"}>
+          Мои <span>{myCount}</span>
+        </button>
+      </div>
+
       {feedLoading ? <Spinner /> : (
         <div className="feedList">
-          {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} onNotice={onNotice} onRemoved={onRemoved} />)}
+          {filtered.map((item, index) => (
+            <FeedCard
+              key={item.id || index}
+              item={item}
+              idx={index}
+              onRemix={onRemix}
+              onNotice={onNotice}
+              onRemoved={onRemoved}
+            />
+          ))}
           {filtered.length === 0 && (
-            <div style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 32, padding: "24px 16px", border: "1px dashed var(--border-strong)", borderRadius: 16 }}>
-              {mode === "mine" ? "У тебя пока нет работ в ленте. Опубликуй готовую картинку и забери ссылку для репоста." : "Лента пока пустая."}
+            <div className="feedEmptyState">
+              <b>{mode === "mine" ? "Здесь появятся твои публикации" : "Лента пока пустая"}</b>
+              <span>{mode === "mine" ? "Опубликуй готовую работу — она появится в этой вкладке." : "Создай первую работу и опубликуй её."}</span>
             </div>
           )}
         </div>
@@ -892,7 +907,6 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemo
     </>
   );
 }
-
 
 // ── Admin-curated trends ─────────────────────────────────────────────────────
 
