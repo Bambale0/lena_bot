@@ -4,6 +4,13 @@ const FEED_START = "// ── Feed screen ────────────�
 const FEED_END = "// ── Admin-curated trends ─────────────────────────────────────────────────────";
 const FEED_BLOCK = `${readFileSync(new URL("./feed-pinterest.block.jsx", import.meta.url), "utf8").trim()}\n\n`;
 
+function replaceRequired(code, from, to, label) {
+  if (!code.includes(from)) {
+    throw new Error(`Feed stability transform could not find: ${label}`);
+  }
+  return code.replace(from, to);
+}
+
 export function feedPinterestMiniApp() {
   return {
     name: "apix-feed-pinterest-miniapp",
@@ -25,9 +32,27 @@ export function feedPinterestMiniApp() {
           'import "./style.css";\nimport "./feed-pinterest.css";',
         );
       }
-      code = code.replace(
+
+      // A failed image request must never make a publication disappear. The
+      // backend now returns a valid retryable WebP placeholder, and this guard
+      // keeps the card mounted even if a proxy/browser still emits onError.
+      code = replaceRequired(
+        code,
+        "  const visibleUrls = previewUrls.filter((url) => !failedUrls.has(url)).slice(0, 4);",
+        "  const visibleUrls = previewUrls.slice(0, 4);",
+        "stable preview list",
+      );
+      code = replaceRequired(
+        code,
+        "  if (!previewUrls.length || (!visibleUrls.length && failedUrls.size)) return null;",
+        "  if (!previewUrls.length) return null;",
+        "card collapse guard",
+      );
+      code = replaceRequired(
+        code,
         'window.__APIX_MINIAPP_BUILD_ID__ = "20260731-feed-first-relevance-v1";',
-        'window.__APIX_MINIAPP_BUILD_ID__ = "20260801-feed-webp-viewer-v4";',
+        'window.__APIX_MINIAPP_BUILD_ID__ = "20260801-feed-stability-v5";',
+        "Mini App build id",
       );
 
       return { code, map: null };
