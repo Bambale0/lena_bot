@@ -39,6 +39,9 @@ def _image_start_kb(*, show_continue: bool = False):
         InlineKeyboardButton(text="📎 Референсы", callback_data="img_v2:refs"),
         InlineKeyboardButton(text="🧠 Сменить модель", callback_data="img_menu:advanced"),
     )
+    builder.row(
+        InlineKeyboardButton(text="📸 Промпт по фото", callback_data="img:photo2prompt"),
+    )
     if show_continue:
         builder.row(InlineKeyboardButton(text="✅ Продолжить", callback_data="img_v2:continue"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:create"))
@@ -61,7 +64,8 @@ def render_image_scenarios(
         "🖼 фото — использовать как референс;\n"
         "🖼 фото + подпись — сразу подготовить задачу;\n"
         "📚 несколько фото — собрать композицию или сохранить персонажа.\n\n"
-        "APIX сам выберет подходящий внутренний режим.\n\n"
+        "APIX сам выберет подходящий внутренний режим.\n"
+        "Нужно разобрать готовое изображение в текст — нажми «Промпт по фото».\n\n"
         f"Референсы: {reference_count}/{max_refs}\n"
         f"Формат: {aspect_ratio}\n"
         f"Качество: {quality}"
