@@ -34,27 +34,28 @@ async def test_video_failure_never_calls_cross_model_fallback(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_grok_i2v_requires_source_task_id_before_provider_call(monkeypatch) -> None:
-    provider_called = False
+async def test_grok_i2v_accepts_uploaded_photo_without_source_task_id(monkeypatch) -> None:
+    created: list[dict] = []
 
-    async def forbidden_create_task(payload: dict, callback_url: str | None = None) -> dict:
-        nonlocal provider_called
-        provider_called = True
-        raise AssertionError("provider must not be called without source_task_id")
+    async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
+        created.append(payload)
+        return {"code": 200, "data": {"taskId": "grok_photo_video_task"}}
 
-    monkeypatch.setattr(video_service.kieai_client, "create_task", forbidden_create_task)
+    monkeypatch.setattr(video_service.kieai_client, "create_task", fake_create_task)
 
-    with pytest.raises(RuntimeError, match="requires source_task_id"):
-        await video_service.generate_video(
-            VideoModel.GROK_I2V,
-            "Animate the subject",
-            image_url="https://cdn.example.test/source.png",
-            duration=6,
-            aspect_ratio="16:9",
-            resolution="480p",
-        )
+    result = await video_service.generate_video(
+        VideoModel.GROK_I2V,
+        "Animate the subject",
+        image_url="https://cdn.example.test/source.png",
+        duration=6,
+        aspect_ratio="16:9",
+        resolution="480p",
+    )
 
-    assert provider_called is False
+    assert result.task_id == "grok_photo_video_task"
+    assert created[0]["model"] == "grok-imagine/image-to-video"
+    assert created[0]["input"]["image_urls"] == ["https://cdn.example.test/source.png"]
+    assert "task_id" not in created[0]["input"]
 
 
 @pytest.mark.asyncio

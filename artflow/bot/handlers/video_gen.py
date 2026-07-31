@@ -183,8 +183,8 @@ def _is_per_second_video_model(model_key: str) -> bool:
 
 def _video_total_credits(model_key: str, duration: int, rate_or_flat: float) -> float:
     if _is_per_second_video_model(model_key):
-        return rate_or_flat * duration
-    return rate_or_flat
+        return round(rate_or_flat * duration, 6)
+    return round(rate_or_flat, 6)
 
 
 def _video_price_text(model_key: str, duration: int, rate_or_flat: float) -> str:
@@ -1379,10 +1379,10 @@ async def _launch_video_generation_from_state(
     )
     motion_credits = data.get("motion_credits")
     if motion_credits is not None:
-        credits = int(motion_credits)
+        credits = float(motion_credits)
     else:
-        rate_or_flat = model_cost.credits if model_cost else int(data.get("credits", 0))
-        credits = int(_video_total_credits(model_key, duration, rate_or_flat))
+        rate_or_flat = model_cost.credits if model_cost else float(data.get("credits", 0))
+        credits = float(_video_total_credits(model_key, duration, rate_or_flat))
 
     input_params = _video_input_params_from_generation_state(
         model_key=model_key,
@@ -1845,7 +1845,7 @@ async def cb_regen_video(
         await call.answer("Модель недоступна", show_alert=True)
         return
 
-    credits = int(_video_total_credits(model_key, duration, model_cost.credits))
+    credits = float(_video_total_credits(model_key, duration, model_cost.credits))
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await call.answer("Недостаточно 💋", show_alert=True)

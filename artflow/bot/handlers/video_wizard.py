@@ -37,7 +37,7 @@ SCENARIOS = {
         "mode": "image",
         "recommended": [
             "kling/v3-turbo-image-to-video",
-            "grok-imagine/image-to-video",
+            "grok-imagine-video-1-5-preview",
             "bytedance/seedance-2-fast",
         ],
         "group": "i2v",
@@ -86,6 +86,14 @@ def _review_kb(credits: float):
         InlineKeyboardButton(text="🏠 Главная", callback_data="menu:main"),
     )
     return builder.as_markup()
+
+
+def _compact_balance(value: float) -> str:
+    amount = max(0.0, float(value))
+    for threshold, suffix in ((1_000_000, "M"), (1_000, "K")):
+        if amount >= threshold:
+            return f"≈{amount / threshold:.1f}{suffix}"
+    return f"{amount:g}"
 
 
 @router.callback_query(F.data == "menu:video")
@@ -231,7 +239,7 @@ async def review_video_prompt(
         f"⚙️ Параметры: <code>{escape(legacy._params_summary(data))}</code>\n"
         f"✍️ Запрос: <i>{escape(prompt[:700])}</i>\n\n"
         f"💎 Итоговая стоимость: <b>{total:g} 💋</b>\n"
-        f"Баланс после запуска: <b>{max(0, float(db_user.credits) - total):g} 💋</b>\n\n"
+        f"Баланс после запуска: <b>{_compact_balance(float(db_user.credits) - total)} 💋</b>\n\n"
         "Списание произойдёт только после нажатия кнопки запуска.",
         reply_markup=_review_kb(total),
     )

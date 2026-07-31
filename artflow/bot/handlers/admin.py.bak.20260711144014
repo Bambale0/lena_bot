@@ -1426,17 +1426,6 @@ async def handle_price_label(message: Message, session: AsyncSession, state: FSM
 # ─── Стоимость моделей ────────────────────────────────────────────────────────
 
 _MODELS_PAGE_SIZE = 12
-_MODEL_EDIT_CALLBACK = "adm:mc:"
-_MODEL_COST_CALLBACK = "adm:mcc:"
-_MODEL_NAME_CALLBACK = "adm:mcn:"
-
-
-def _model_callback_key(data: str | None, *prefixes: str) -> str:
-    value = data or ""
-    for prefix in prefixes:
-        if value.startswith(prefix):
-            return value[len(prefix):]
-    return ""
 
 
 def _model_family_key(model_key: str) -> str:
@@ -1519,7 +1508,7 @@ def _models_kb(costs: list, page: int) -> "InlineKeyboardMarkup":
         item_label = f"{label} · {variant_label}"
         builder.button(
             text=f"{prefix} {item_label} — {cred_label}",
-            callback_data=f"{_MODEL_EDIT_CALLBACK}{mc.model_key}",
+            callback_data=f"adm:model_edit:{mc.model_key}",
         )
     builder.adjust(1)
 
@@ -1563,11 +1552,9 @@ async def cb_noop(call: CallbackQuery) -> None:
     await call.answer()
 
 
-@router.callback_query(
-    F.data.startswith(_MODEL_EDIT_CALLBACK) | F.data.startswith("adm:model_edit:")
-)
+@router.callback_query(F.data.startswith("adm:model_edit:"))
 async def cb_model_edit(call: CallbackQuery, session: AsyncSession) -> None:
-    model_key = _model_callback_key(call.data, _MODEL_EDIT_CALLBACK, "adm:model_edit:")
+    model_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
     model_cost = await repo.get_model_cost(session, model_key)
     if not model_cost:
         await call.answer("Модель не найдена", show_alert=True)
@@ -1579,8 +1566,8 @@ async def cb_model_edit(call: CallbackQuery, session: AsyncSession) -> None:
     price_text = model_cost_display_text(model_cost).replace("💋", "кр")
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="✏️ Изменить стоимость", callback_data=f"{_MODEL_COST_CALLBACK}{model_key}")
-    builder.button(text="✏️ Изменить название", callback_data=f"{_MODEL_NAME_CALLBACK}{model_key}")
+    builder.button(text="✏️ Изменить стоимость", callback_data=f"adm:model_set_cr:{model_key}")
+    builder.button(text="✏️ Изменить название", callback_data=f"adm:model_set_name:{model_key}")
     builder.button(text="← Назад", callback_data="adm:models")
     builder.adjust(1)
 
@@ -1596,22 +1583,18 @@ async def cb_model_edit(call: CallbackQuery, session: AsyncSession) -> None:
     )
     await call.answer()
 
-@router.callback_query(
-    F.data.startswith(_MODEL_COST_CALLBACK) | F.data.startswith("adm:model_set_cr:")
-)
+@router.callback_query(F.data.startswith("adm:model_set_cr:"))
 async def cb_model_set_credits_start(call: CallbackQuery, state: FSMContext) -> None:
-    model_key = _model_callback_key(call.data, _MODEL_COST_CALLBACK, "adm:model_set_cr:")
+    model_key = call.data.split(":")[2]  # type: ignore[union-attr]
     await state.set_state(AdminFSM.edit_model_credits)
     await state.update_data(edit_model_key=model_key)
     await call.message.answer(f"Введи новую стоимость в кредитах для <code>{model_key}</code>:")
     await call.answer()
 
 
-@router.callback_query(
-    F.data.startswith(_MODEL_NAME_CALLBACK) | F.data.startswith("adm:model_set_name:")
-)
+@router.callback_query(F.data.startswith("adm:model_set_name:"))
 async def cb_model_set_name_start(call: CallbackQuery, state: FSMContext) -> None:
-    model_key = _model_callback_key(call.data, _MODEL_NAME_CALLBACK, "adm:model_set_name:")
+    model_key = call.data.split(":")[2]  # type: ignore[union-attr]
     await state.set_state(AdminFSM.edit_model_display_name)
     await state.update_data(edit_model_key=model_key)
     await call.message.answer(

@@ -442,12 +442,21 @@ async def cb_prompt_pick_model(
     _, id_raw, model_key = call.data.split(":", 2)  # type: ignore[union-attr]
     data = await state.get_data()
     is_feed_use = data.get("feed_use_prompt") is not None
-    await state.update_data(use_model_key=model_key)
+    from bot.handlers import repeat_references
+
+    max_refs = repeat_references._repeat_max_refs(model_key)
+    ratios = repeat_references._repeat_ratio_options(model_key)
+    await state.update_data(
+        use_model_key=model_key,
+        prompt_multi_ref_max=max_refs,
+        prompt_multi_ref_ratio=ratios[0] if ratios else None,
+    )
     await state.set_state(PromptUseFSM.reference_upload)
     if is_feed_use:
         text = (
             "🖼 <b>Твой референс</b>\n\n"
             "Отправь фото, по которому нужно повторить пост из ленты.\n"
+            f"Можно отправить до <b>{max_refs}</b> фото — по одному или альбомом.\n"
             "Промпт автора применю скрыто, а лицо/объект возьму из твоего фото."
         )
     else:

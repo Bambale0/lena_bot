@@ -364,9 +364,8 @@ async def _kieai_generate(
 
     if resolved_model == VideoModel.GROK_I2V.value:
         task_id = str(source_task_id or "").strip()
-        if not task_id:
-            raise ValueError("Grok image-to-video requires source_task_id from a prior Grok task")
-        inp["task_id"] = task_id
+        if task_id:
+            inp["task_id"] = task_id
         if aspect_ratio:
             inp["aspect_ratio"] = aspect_ratio
 

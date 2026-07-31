@@ -558,6 +558,40 @@ async def test_cb_model_edit() -> None:
     call.message.edit_text.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_grok_15_720p_admin_callbacks_fit_telegram_limit() -> None:
+    model_key = "grok-imagine-video-1-5-preview__resolution=720p"
+    mock_cost = SimpleNamespace(
+        model_key=model_key,
+        display_name="Grok Imagine Video 1.5 · 720p",
+        credits=0.6,
+        gen_type=GenerationType.video,
+    )
+    markup = admin._models_kb([mock_cost], 0)
+    edit_callback = markup.inline_keyboard[0][0].callback_data
+    assert edit_callback == f"adm:mc:{model_key}"
+    assert len(edit_callback.encode("utf-8")) <= 64
+
+    call = make_callback(data=edit_callback)
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    repo_mock = AsyncMock(
+        get_model_cost=AsyncMock(return_value=mock_cost),
+        get_all_model_costs=AsyncMock(return_value=[mock_cost]),
+    )
+    with patch("bot.handlers.admin.repo", repo_mock):
+        await admin.cb_model_edit(call, AsyncMock())
+
+    buttons = [
+        button
+        for row in call.message.edit_text.await_args.kwargs["reply_markup"].inline_keyboard
+        for button in row
+    ]
+    callbacks = [button.callback_data for button in buttons]
+    assert f"adm:mcc:{model_key}" in callbacks
+    assert all(len(value.encode("utf-8")) <= 64 for value in callbacks)
+
+
 # ── add_credits flow ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

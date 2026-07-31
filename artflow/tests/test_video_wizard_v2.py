@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from bot.handlers.video_wizard import SCENARIOS, _home_kb, _review_kb
+from bot.handlers.video_wizard import SCENARIOS, _compact_balance, _home_kb, _review_kb
 
 
 def callbacks(markup):
@@ -39,6 +39,13 @@ def test_video_scenarios_have_human_goal_and_recommendations():
         assert scenario["recommended"]
 
 
+def test_image_scenario_recommends_grok_version_that_accepts_uploaded_photos():
+    recommended = SCENARIOS["image"]["recommended"]
+
+    assert "grok-imagine-video-1-5-preview" in recommended
+    assert "grok-imagine/image-to-video" not in recommended
+
+
 def test_review_has_explicit_price_and_safe_escape_routes():
     markup = _review_kb(42)
     assert labels(markup)[0] == "🚀 Запустить за 42 💋"
@@ -49,3 +56,9 @@ def test_review_has_explicit_price_and_safe_escape_routes():
         "menu:video",
         "menu:main",
     ]
+
+
+def test_review_balance_is_compact_without_changing_small_amounts():
+    assert _compact_balance(9280.4) == "≈9.3K"
+    assert _compact_balance(999.4) == "999.4"
+    assert _compact_balance(1_250_000) == "≈1.2M"

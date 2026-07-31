@@ -1,6 +1,16 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
-from bot.handlers.image_wizard_v2 import _composer_screen, _quality_choice_kb, _quick_flow_kb, _ratio_choice_kb
+import pytest
+
+from bot.handlers.image_wizard_v2 import (
+    _composer_screen,
+    _quality_choice_kb,
+    _quick_flow_kb,
+    _ratio_choice_kb,
+    choose_default_ratio,
+)
+from bot.states import ImageGenFSM
 from bot.ui.image_menu import render_image_scenarios
 
 
@@ -94,3 +104,25 @@ def test_edit_flow_does_not_force_user_to_choose_edit_endpoint():
 
     assert "🧠 Другая модель" in texts
     assert all("Edit" not in text for text in texts)
+
+
+@pytest.mark.asyncio
+async def test_format_button_recovers_from_stale_fsm_state() -> None:
+    call = SimpleNamespace(message=SimpleNamespace(), answer=AsyncMock())
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "model_key": "seedream/5-pro-text-to-image",
+        "image_session_id": 77,
+        "aspect_ratio": "1:1",
+    })
+
+    with (
+        patch("bot.handlers.image_wizard_v2.safe_answer_callback", AsyncMock()) as answer_callback,
+        patch("bot.handlers.image_wizard_v2.safe_edit_message", AsyncMock()) as edit_message,
+    ):
+        await choose_default_ratio(call, state)
+
+    answer_callback.assert_awaited_once_with(call)
+    state.set_state.assert_awaited_once_with(ImageGenFSM.prompt_input)
+    state.update_data.assert_awaited_once_with(image_session_id=None)
+    assert "Выбери формат" in edit_message.await_args.args[1]

@@ -727,6 +727,27 @@ def _repeat_reference_count(image_session: ImageSession, data: dict) -> int:
     return len(_active_reference_file_ids(image_session, data))
 
 
+def _apply_default_repeat_ratio(image_session: ImageSession, data: dict) -> bool:
+    """Default repeats to portrait unless the repeat flow selected a ratio explicitly."""
+    explicitly_selected = (
+        data.get("pending_action_type") == ImageGenerationAction.repeat.value
+        and data.get("repeat_aspect_ratio_explicit")
+    )
+    if data.get("repeat_aspect_ratio") or explicitly_selected:
+        return False
+    if "9:16" not in _ratio_options_for_mode(image_session.model, image_session.mode):
+        return False
+    if image_session.aspect_ratio == "9:16":
+        return False
+    image_session.aspect_ratio = "9:16"
+    image_session.quality = _normalize_session_quality(
+        image_session.model,
+        image_session.aspect_ratio,
+        image_session.quality,
+    )
+    return True
+
+
 def _repeat_setup_text(image_session: ImageSession, prompt: str, data: dict) -> str:
     caps = IMAGE_CAPS.get(image_session.model, {})
     max_refs = int(caps.get("max_refs", 1) or 1)
@@ -2474,6 +2495,8 @@ async def cb_image_session_repeat(
         return
 
     source_feed_gen_id = getattr(last_gen, "source_feed_gen_id", None)
+    if _apply_default_repeat_ratio(image_session, {}):
+        await session.commit()
     await _sync_state_with_image_session(state, image_session)
     data = await state.get_data()
     await state.update_data(
@@ -2481,6 +2504,8 @@ async def cb_image_session_repeat(
         pending_parent_generation_id=parent_id or last_gen.id,
         pending_source_feed_gen_id=source_feed_gen_id,
         pending_action_type=ImageGenerationAction.repeat.value,
+        repeat_aspect_ratio=None,
+        repeat_aspect_ratio_explicit=False,
         source_feed_gen_id=source_feed_gen_id,
     )
     data = {**data, "pending_image_prompt": last_gen.prompt, "source_feed_gen_id": source_feed_gen_id}
@@ -2545,6 +2570,7 @@ async def cb_image_repeat_ratio(
             image_session_id=image_session.id,
             aspect_ratio=ratio,
             image_aspect_ratio=ratio,
+            repeat_aspect_ratio_explicit=True,
             quality=image_session.quality,
             image_quality=image_session.quality,
         )
@@ -2629,6 +2655,14 @@ async def cb_image_repeat_launch(
     if not prompt:
         await call.answer("Не нашла промпт для повтора", show_alert=True)
         return
+    if _apply_default_repeat_ratio(image_session, data):
+        await session.commit()
+        await state.update_data(
+            aspect_ratio=image_session.aspect_ratio,
+            image_aspect_ratio=image_session.aspect_ratio,
+            quality=image_session.quality,
+            image_quality=image_session.quality,
+        )
     reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
     current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
     current_mode = await _promote_reference_mode_if_needed(
@@ -3152,7 +3186,14 @@ async def _image_session_for_result_action(
         user_id=db_user.id,
         model=gen.model,
         mode=prev_session.mode if prev_session else "text",
-        aspect_ratio=prev_session.aspect_ratio if prev_session else None,
+        aspect_ratio=(
+            "9:16"
+            if "9:16" in _ratio_options_for_mode(
+                prev.model,
+                prev_session.mode if prev_session else "text",
+            )
+            else (prev_session.aspect_ratio if prev_session else None)
+        ),
         quality=prev_session.quality if prev_session else "basic",
         count=prev_session.count if prev_session else 1,
         base_prompt=None,

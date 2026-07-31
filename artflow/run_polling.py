@@ -20,6 +20,7 @@ from bot.handlers import admin, balance, image_gen, marketplace, payment, start,
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
+from bot.utils.dispatcher import create_dispatcher
 from core.config import settings
 from core.logger import setup_logging
 from db.seed import run_seed
@@ -82,7 +83,7 @@ async def main() -> None:
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    dp = Dispatcher(storage=storage)
+    dp = create_dispatcher(storage)
 
     # Middlewares
     dp.update.middleware(DbSessionMiddleware())

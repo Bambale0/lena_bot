@@ -28,10 +28,9 @@ from aiogram.types import (
     BotCommand,
     BotCommandScopeAllPrivateChats,
     FSInputFile,
-    MenuButtonWebApp,
+    MenuButtonCommands,
     Update,
     URLInputFile,
-    WebAppInfo,
 )
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -89,6 +88,7 @@ from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.states import MidjourneyFSM
+from bot.utils.dispatcher import create_dispatcher
 from bot.utils.telegram_images import (
     send_image_group_to_chat,
     send_image_to_chat,
@@ -514,13 +514,6 @@ async def _download_url_to_tempfile(url: str, suffix: str = ".bin") -> str | Non
         return None
 
 
-MINIAPP_ENTRY_VERSION = "1784063035"
-
-
-def _miniapp_entry_url() -> str:
-    return f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?v={MINIAPP_ENTRY_VERSION}"
-
-
 async def _retry_set_bot_commands(bot: Bot, delay_seconds: int) -> None:
     await asyncio.sleep(delay_seconds)
     await _set_bot_commands(bot, schedule_retry=False)
@@ -548,10 +541,7 @@ async def _set_bot_commands(bot: Bot, *, schedule_retry: bool = True) -> None:
 
     try:
         await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(
-                text="Открыть APIX",
-                web_app=WebAppInfo(url=_miniapp_entry_url()),
-            ),
+            menu_button=MenuButtonCommands(),
         )
     except TelegramRetryAfter as exc:
         retry_after = max(retry_after, int(exc.retry_after))
@@ -631,7 +621,7 @@ async def lifespan(app: FastAPI):
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     await _set_bot_commands(bot)
-    dp = Dispatcher(storage=storage)
+    dp = create_dispatcher(storage)
 
     # Middlewares (порядок важен)
     dp.update.middleware(DbSessionMiddleware())

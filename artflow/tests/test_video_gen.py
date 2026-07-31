@@ -831,6 +831,42 @@ async def test_handle_video_prompt_grok_spends_per_second_price() -> None:
     assert spend_credits.await_args.args[1:] == (42, 270)
 
 
+@pytest.mark.asyncio
+async def test_handle_video_prompt_preserves_fractional_credit_price() -> None:
+    msg = make_message(text="animate portrait")
+    msg.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=100, language="ru", username="test", full_name="Test", is_banned=False)
+    mock_state = _fake_state(
+        model_key="grok-imagine-video-1-5-preview", duration=6,
+        aspect_ratio="auto", resolution="480p",
+        mode="image", credits=0.6, grok_mode=None,
+        image_url="https://example.test/ref.jpg",
+    )
+    mock_cost = _make_video_model_cost("grok-imagine-video-1-5-preview", 0.6, "Grok 1.5")
+    mock_gen = SimpleNamespace(id=102, task_id=None, model="grok-imagine-video-1-5-preview")
+    spend_credits = AsyncMock(return_value=True)
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(
+        spend_credits=spend_credits,
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )), patch("bot.handlers.video_gen._video_reference_image_url", AsyncMock(return_value="https://example.test/ref.jpg")), patch(
+        "bot.handlers.video_gen.video_service",
+        new=SimpleNamespace(
+            generate_video=AsyncMock(return_value=SimpleNamespace(task_id="task_grok_15", provider="direct")),
+            get_poll_fn=MagicMock(return_value=MagicMock()),
+        ),
+    ), patch("bot.handlers.video_gen.polling", new=SimpleNamespace(poll_until_done=AsyncMock())):
+        await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
+
+    assert spend_credits.await_args.args[1:] == (42, 3.6)
+
+
 def test_video_state_resolution_normalizes_kling_motion_aliases() -> None:
     assert video_gen._normalize_resolution_for_state("kling-3.0/video", "2K") == "pro"
     assert video_gen._normalize_resolution_for_state("kling-3.0/video", "720p") == "std"

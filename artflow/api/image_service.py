@@ -15,6 +15,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 try:
     from enum import StrEnum
 except ImportError:
@@ -93,6 +95,8 @@ _COMET_PRIMARY_IMAGE_MODELS = {
     ImageModel.NANO_BANANA_2,
     ImageModel.NANO_BANANA_PRO,
 }
+
+_COMET_FALLBACK_HTTP_STATUSES = {401, 402, 403, 408, 425, 429}
 
 # Models whose official KIE workflow requires or benefits from provider-hosted
 # media. Local APIX files are always uploaded before createTask.
@@ -299,6 +303,44 @@ def _validate_prompt(prompt: str) -> str:
     return value
 
 
+def _should_fallback_from_comet(exc: Exception) -> bool:
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status in _COMET_FALLBACK_HTTP_STATUSES or status >= 500
+    return False
+
+
+async def _create_kie_image_task(
+    resolved_model: str,
+    inp: dict[str, Any],
+    *,
+    callback_url: str | None,
+) -> ImageResult:
+    resp = await kieai_client.create_task(
+        {"model": resolved_model, "input": inp},
+        callback_url=callback_url,
+    )
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"KIE.AI image: invalid createTask response for {resolved_model}: {resp!r}")
+    code = resp.get("code")
+    if code not in (None, 200, "200"):
+        raise RuntimeError(
+            f"KIE.AI image createTask failed for {resolved_model}: {code} {resp.get('msg')}"
+        )
+    data = resp.get("data")
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        raise RuntimeError(f"KIE.AI image: invalid createTask data for {resolved_model}: {data!r}")
+    task_id = str(data.get("taskId") or resp.get("taskId") or "").strip()
+    if not task_id:
+        raise RuntimeError(f"KIE.AI image: empty taskId for {resolved_model}: {resp!r}")
+    logger.info("KIE.AI image task %s: %s", resolved_model, task_id)
+    return ImageResult(is_async=True, task_id=task_id)
+
+
 async def generate_image(
     model: ImageModel,
     prompt: str,
@@ -353,14 +395,33 @@ async def generate_image(
     )
 
     if model in _COMET_PRIMARY_IMAGE_MODELS:
-        result = await comet_fallback.generate_image(
-            model_key=resolved_model,
-            prompt=str(inp.get("prompt") or prompt),
-            reference_urls=prepared_image_url,
-            aspect_ratio=str(inp.get("aspect_ratio") or "") or None,
-            count=max(1, int(n or 1)),
-            resolution=str(inp.get("resolution") or "") or None,
-        )
+        try:
+            result = await comet_fallback.generate_image(
+                model_key=resolved_model,
+                prompt=str(inp.get("prompt") or prompt),
+                reference_urls=prepared_image_url,
+                aspect_ratio=str(inp.get("aspect_ratio") or "") or None,
+                count=max(1, int(n or 1)),
+                resolution=str(inp.get("resolution") or "") or None,
+            )
+        except Exception as exc:
+            if not _should_fallback_from_comet(exc):
+                raise
+            logger.warning(
+                "CometAPI unavailable for %s (%s); falling back to KIE.AI",
+                resolved_model,
+                type(exc).__name__,
+            )
+            try:
+                return await _create_kie_image_task(
+                    resolved_model,
+                    inp,
+                    callback_url=callback_url,
+                )
+            except Exception as kie_exc:
+                raise RuntimeError(
+                    f"{resolved_model} failed via CometAPI and KIE.AI fallback"
+                ) from kie_exc
         if not result.urls:
             raise RuntimeError(f"CometAPI image returned no result URLs for {resolved_model}")
         return ImageResult(
@@ -371,27 +432,7 @@ async def generate_image(
         )
 
     try:
-        resp = await kieai_client.create_task(
-            {"model": resolved_model, "input": inp},
-            callback_url=callback_url,
-        )
-        if not isinstance(resp, dict):
-            raise RuntimeError(f"KIE.AI image: invalid createTask response for {resolved_model}: {resp!r}")
-        code = resp.get("code")
-        if code not in (None, 200, "200"):
-            raise RuntimeError(
-                f"KIE.AI image createTask failed for {resolved_model}: {code} {resp.get('msg')}"
-            )
-        data = resp.get("data")
-        if data is None:
-            data = {}
-        elif not isinstance(data, dict):
-            raise RuntimeError(f"KIE.AI image: invalid createTask data for {resolved_model}: {data!r}")
-        task_id = str(data.get("taskId") or resp.get("taskId") or "").strip()
-        if not task_id:
-            raise RuntimeError(f"KIE.AI image: empty taskId for {resolved_model}: {resp!r}")
-        logger.info("KIE.AI image task %s: %s", resolved_model, task_id)
-        return ImageResult(is_async=True, task_id=task_id)
+        return await _create_kie_image_task(resolved_model, inp, callback_url=callback_url)
     except Exception as exc:
         raise RuntimeError(
             f"{resolved_model} generation failed via its configured provider; "

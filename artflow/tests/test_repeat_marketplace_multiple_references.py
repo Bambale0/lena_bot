@@ -35,6 +35,36 @@ def test_marketplace_multi_ref_handler_precedes_legacy_single_photo_handler() ->
     )
 
 
+def test_uploaded_reference_screen_exposes_repeat_settings() -> None:
+    markup = repeat_reference_marketplace._keyboard(uploaded=2, max_refs=10, feed_repeat=True)
+    callbacks = {
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+    }
+
+    assert "prompt_multi_ref:mode" in callbacks
+    assert "prompt_multi_ref:ratio_menu" in callbacks
+    assert "prompt_multi_ref:model_menu" in callbacks
+
+
+def test_repeat_screen_text_shows_selected_settings() -> None:
+    text = repeat_reference_marketplace._text(
+        {
+            "feed_use_prompt": "hidden",
+            "prompt_multi_ref_file_ids": ["one", "two"],
+            "prompt_multi_ref_max": 10,
+            "prompt_multi_ref_ratio": "9:16",
+            "use_model_key": "nano-banana-2",
+        }
+    )
+
+    assert "Референсы: <b>2/10</b>" in text
+    assert "Режим: <b>Фото → фото</b>" in text
+    assert "Формат: <b>9:16</b>" in text
+    assert "Нейросеть:" in text
+
+
 @pytest.mark.asyncio
 async def test_feed_repeat_collects_first_photo_without_starting_generation() -> None:
     state = FakeState(

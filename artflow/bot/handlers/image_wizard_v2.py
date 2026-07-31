@@ -322,60 +322,77 @@ async def explain_references(call: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(ImageGenFSM.prompt_input, F.data == "img_v2:ratio")
+@router.callback_query(F.data == "img_v2:ratio")
 async def choose_default_ratio(call: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer_callback(call)
     data = await state.get_data()
     model_key = str(data.get("model_key") or _DEFAULT_MODEL)
     current = str(data.get("aspect_ratio") or _DEFAULT_ASPECT_RATIO)
+    await state.set_state(ImageGenFSM.prompt_input)
+    await state.update_data(image_session_id=None)
     await safe_edit_message(
         call.message,
         f"📐 <b>Выбери формат</b>\n\nТекущий: <b>{current}</b>",
         reply_markup=_ratio_choice_kb(model_key, current),
     )
-    await safe_answer_callback(call)
 
 
-@router.callback_query(ImageGenFSM.prompt_input, F.data.startswith("img_v2:ratio:set:"))
+@router.callback_query(F.data.startswith("img_v2:ratio:set:"))
 async def set_default_ratio(call: CallbackQuery, state: FSMContext) -> None:
     next_ratio = call.data.split(":", 3)[3]  # type: ignore[union-attr]
     data = await state.get_data()
+    model_key = str(data.get("model_key") or _DEFAULT_MODEL)
+    allowed = {str(item) for item in IMAGE_CAPS.get(model_key, {}).get("aspect_ratios", []) if item}
+    if next_ratio not in allowed:
+        await safe_answer_callback(call, "Этот формат недоступен", show_alert=True)
+        return
+    await safe_answer_callback(call)
+    await state.set_state(ImageGenFSM.prompt_input)
     await state.update_data(
+        image_session_id=None,
         aspect_ratio=next_ratio,
         image_aspect_ratio=next_ratio,
         image_params_changed=True,
     )
     screen = _composer_screen({**data, "aspect_ratio": next_ratio, "image_aspect_ratio": next_ratio, "image_params_changed": True})
     await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)
-    await call.answer(f"Формат: {next_ratio}")
 
 
-@router.callback_query(ImageGenFSM.prompt_input, F.data == "img_v2:quality")
+@router.callback_query(F.data == "img_v2:quality")
 async def choose_default_quality(call: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer_callback(call)
     data = await state.get_data()
     model_key = str(data.get("model_key") or _DEFAULT_MODEL)
     options = IMAGE_CAPS.get(model_key, {}).get("quality_options") or [(_DEFAULT_QUALITY, "1K")]
     current = str(data.get("quality") or options[0][0])
+    await state.set_state(ImageGenFSM.prompt_input)
+    await state.update_data(image_session_id=None)
     await safe_edit_message(
         call.message,
         f"💎 <b>Выбери качество</b>\n\nТекущее: <b>{_quality_label(model_key, current)}</b>",
         reply_markup=_quality_choice_kb(model_key, current),
     )
-    await safe_answer_callback(call)
 
 
-@router.callback_query(ImageGenFSM.prompt_input, F.data.startswith("img_v2:quality:set:"))
+@router.callback_query(F.data.startswith("img_v2:quality:set:"))
 async def set_default_quality(call: CallbackQuery, state: FSMContext) -> None:
     next_quality = call.data.split(":", 3)[3]  # type: ignore[union-attr]
     data = await state.get_data()
     model_key = str(data.get("model_key") or _DEFAULT_MODEL)
+    allowed = {str(value) for value, _label in IMAGE_CAPS.get(model_key, {}).get("quality_options", [])}
+    if allowed and next_quality not in allowed:
+        await safe_answer_callback(call, "Это качество недоступно", show_alert=True)
+        return
+    await safe_answer_callback(call)
+    await state.set_state(ImageGenFSM.prompt_input)
     await state.update_data(
+        image_session_id=None,
         quality=next_quality,
         image_quality=next_quality,
         image_params_changed=True,
     )
     screen = _composer_screen({**data, "quality": next_quality, "image_quality": next_quality, "image_params_changed": True})
     await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)
-    await call.answer(f"Качество: {_quality_label(model_key, next_quality)}")
 
 
 @router.callback_query(ImageGenFSM.prompt_input, F.data == "img_v2:back")

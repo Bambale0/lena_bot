@@ -723,6 +723,40 @@ async def test_repeat_launch_uses_saved_user_references_not_last_result() -> Non
     assert launch.await_args.kwargs["reference_url"] != "https://example.test/generated-wrong-face.jpg"
 
 
+def test_repeat_defaults_to_portrait_when_model_supports_it() -> None:
+    image_session = SimpleNamespace(
+        model="seedream/5-pro-text-to-image",
+        mode="image",
+        aspect_ratio="1:1",
+        quality="basic",
+    )
+
+    changed = image_gen._apply_default_repeat_ratio(image_session, {})
+
+    assert changed is True
+    assert image_session.aspect_ratio == "9:16"
+
+
+def test_repeat_keeps_explicitly_selected_ratio() -> None:
+    image_session = SimpleNamespace(
+        model="seedream/5-pro-text-to-image",
+        mode="image",
+        aspect_ratio="1:1",
+        quality="basic",
+    )
+
+    changed = image_gen._apply_default_repeat_ratio(
+        image_session,
+        {
+            "pending_action_type": image_gen.ImageGenerationAction.repeat.value,
+            "repeat_aspect_ratio_explicit": True,
+        },
+    )
+
+    assert changed is False
+    assert image_session.aspect_ratio == "1:1"
+
+
 @pytest.mark.asyncio
 async def test_handle_session_photo_switches_active_session_to_image_mode() -> None:
     message = SimpleNamespace(
@@ -1161,7 +1195,16 @@ async def test_session_repeat_uses_last_generation_source_not_stale_state() -> N
     call = SimpleNamespace(data="img_variation", message=SimpleNamespace(), answer=AsyncMock())
     state = AsyncMock()
     state.get_data = AsyncMock(return_value={"source_feed_gen_id": 77})
-    image_session = SimpleNamespace(id=7, model="wan/2-7-image-pro", mode="text")
+    image_session = SimpleNamespace(
+        id=7,
+        model="wan/2-7-image-pro",
+        mode="text",
+        aspect_ratio="1:1",
+        count=1,
+        quality="2K",
+        reference_file_id=None,
+        reference_file_ids=None,
+    )
     last_gen = SimpleNamespace(id=99, prompt="own prompt", source_feed_gen_id=None)
     repo_stub = SimpleNamespace(get_last_session_generation=AsyncMock(return_value=last_gen))
 
