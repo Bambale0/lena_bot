@@ -25,6 +25,7 @@ from bot.keyboards.main_menu import back_to_menu_kb
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from core.trends import (
+    TREND_CATEGORIES,
     TREND_TAG,
     build_trend_tags,
     is_trend_prompt,
@@ -48,6 +49,7 @@ MAX_BOT_PREVIEW_BYTES = 20 * 1024 * 1024
 class TrendAdminFSM(StatesGroup):
     title = State()
     description = State()
+    category = State()
     model = State()
     scenario = State()
     duration = State()
@@ -246,10 +248,30 @@ async def trend_title(message: Message, state: FSMContext) -> None:
 
 
 @router.message(TrendAdminFSM.description, IsAdmin())
-async def trend_description(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def trend_description(message: Message, state: FSMContext) -> None:
     value = (message.text or "").strip()
     if len(value) > 200:
         await message.answer("Описание длиннее 200 символов.")
+        return
+    await state.update_data(description=value)
+    await state.set_state(TrendAdminFSM.category)
+    builder = InlineKeyboardBuilder()
+    for key, meta in TREND_CATEGORIES.items():
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{meta['emoji']} {meta['title']}",
+                callback_data=f"trends:category:{key}",
+            )
+        )
+    builder.row(InlineKeyboardButton(text="Отмена", callback_data="trends:cancel"))
+    await message.answer("Выбери категорию витрины:", reply_markup=builder.as_markup())
+
+
+@router.callback_query(TrendAdminFSM.category, F.data.startswith("trends:category:"), IsAdmin())
+async def trend_category_pick(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    category = call.data.split(":", 2)[2]  # type: ignore[union-attr]
+    if category not in TREND_CATEGORIES:
+        await call.answer("Категория не найдена", show_alert=True)
         return
     data = await state.get_data()
     kind = data.get("kind", "image")
@@ -258,16 +280,17 @@ async def trend_description(message: Message, state: FSMContext, session: AsyncS
         if getattr(getattr(item, "gen_type", None), "value", None) == kind and getattr(item, "is_active", True)
     ]
     if not models:
-        await message.answer("Нет активных моделей этого типа.", reply_markup=back_to_menu_kb())
+        await call.message.answer("Нет активных моделей этого типа.", reply_markup=back_to_menu_kb())
         await state.clear()
         return
-    await state.update_data(description=value)
+    await state.update_data(category=category)
     await state.set_state(TrendAdminFSM.model)
     builder = InlineKeyboardBuilder()
     for item in models:
         builder.row(InlineKeyboardButton(text=item.display_name[:50], callback_data=f"trends:model:{item.model_key}"))
     builder.row(InlineKeyboardButton(text="Отмена", callback_data="trends:cancel"))
-    await message.answer("Выбери модель:", reply_markup=builder.as_markup())
+    await call.message.answer("Выбери модель:", reply_markup=builder.as_markup())
+    await safe_answer_callback(call)
 
 
 @router.callback_query(TrendAdminFSM.model, F.data.startswith("trends:model:"), IsAdmin())
@@ -387,6 +410,7 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
     data = await state.get_data()
     kind = data.get("kind", "image")
     settings_payload = {
+        "category": data.get("category", "featured"),
         "scenario": data.get("scenario"),
         "duration": data.get("duration"),
         "requires_reference": bool(data.get("requires_reference")),
