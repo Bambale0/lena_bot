@@ -25,7 +25,7 @@ install_grok15_adapter(_kieai_client)
 
 
 class _MiniappLabelLoader(importlib.abc.Loader):
-    """Delegate normal import, then install the shared UI presentation layer."""
+    """Delegate normal import, then install shared Mini App presentation hooks."""
 
     def __init__(self, wrapped: importlib.abc.Loader, finder: "_MiniappLabelFinder") -> None:
         self.wrapped = wrapped
@@ -39,9 +39,11 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         self.wrapped.exec_module(module)
         from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
         from db import repository
+        from db.feed_relevance import install_feed_relevance
 
         install_miniapp_model_labels(module)
         install_repository_model_labels(repository)
+        install_feed_relevance(repository)
         if self.finder in sys.meta_path:
             sys.meta_path.remove(self.finder)
 
@@ -69,6 +71,8 @@ if "api.miniapp_routes" not in sys.modules:
 else:
     from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
     from db import repository
+    from db.feed_relevance import install_feed_relevance
 
     install_miniapp_model_labels(sys.modules["api.miniapp_routes"])
     install_repository_model_labels(repository)
+    install_feed_relevance(repository)
