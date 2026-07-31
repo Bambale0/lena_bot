@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { feedPinterestMiniApp } from "./feed-pinterest-transform.js";
 
 function replaceRequired(code, from, to, label) {
   if (!code.includes(from)) {
@@ -71,6 +72,6 @@ function feedFirstMiniApp() {
 }
 
 export default defineConfig({
-  plugins: [feedFirstMiniApp(), react()],
+  plugins: [feedFirstMiniApp(), feedPinterestMiniApp(), react()],
   base: "/app/",
 });
