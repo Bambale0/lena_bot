@@ -37,6 +37,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
 
     def exec_module(self, module: ModuleType) -> None:
         self.wrapped.exec_module(module)
+        from api.feed_media_viewer import install_feed_media_viewer
         from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
         from db import repository
         from db.feed_relevance import install_feed_relevance
@@ -44,6 +45,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_miniapp_model_labels(module)
         install_repository_model_labels(repository)
         install_feed_relevance(repository)
+        install_feed_media_viewer(module)
         if self.finder in sys.meta_path:
             sys.meta_path.remove(self.finder)
 
@@ -69,10 +71,13 @@ if "api.miniapp_routes" not in sys.modules:
     _miniapp_label_finder = _MiniappLabelFinder()
     sys.meta_path.insert(0, _miniapp_label_finder)
 else:
+    from api.feed_media_viewer import install_feed_media_viewer
     from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
     from db import repository
     from db.feed_relevance import install_feed_relevance
 
-    install_miniapp_model_labels(sys.modules["api.miniapp_routes"])
+    miniapp_routes = sys.modules["api.miniapp_routes"]
+    install_miniapp_model_labels(miniapp_routes)
     install_repository_model_labels(repository)
     install_feed_relevance(repository)
+    install_feed_media_viewer(miniapp_routes)
