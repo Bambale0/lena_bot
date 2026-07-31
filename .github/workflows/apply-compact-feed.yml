@@ -1,0 +1,52 @@
+name: Apply Compact Feed Tiles
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/compact-feed-tiles'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/compact-feed-tiles
+          fetch-depth: 0
+
+      - name: Apply compact feed redesign
+        run: |
+          python3 .github/scripts/apply_compact_feed.py
+          grep -q 'className="feedCompactCard"' artflow/webapp/src/main.jsx
+          grep -q 'className="feedFilterBar"' artflow/webapp/src/main.jsx
+          grep -q 'aspect-ratio:1/1' artflow/webapp/src/style.css
+          ! grep -q 'className="feedFullCard feedTileCard"' artflow/webapp/src/main.jsx
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: artflow/webapp/package-lock.json
+
+      - name: Build Mini App
+        working-directory: artflow/webapp
+        run: |
+          npm ci
+          npm run build
+
+      - name: Keep generated dist out of source diff
+        run: git checkout -- artflow/webapp/dist || true
+
+      - name: Commit compact feed
+        run: |
+          rm -f .github/scripts/apply_compact_feed.py .github/workflows/apply-compact-feed.yml
+          git config user.name 'APIX Agent'
+          git config user.email 'actions@users.noreply.github.com'
+          git add artflow/webapp/src/main.jsx artflow/webapp/src/style.css .github
+          git commit -m 'feat: compact feed tiles'
+          git push origin HEAD:agent/compact-feed-tiles
