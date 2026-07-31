@@ -26,6 +26,19 @@ jobs:
       - name: Apply category-first trend home
         run: python .github/apply-trend-category-home.py
 
+      - name: Normalize generated contract test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('artflow/tests/test_trend_category_home.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              "assert 'settings_payload = {\n        \"category\"' in bot",
+              "assert 'settings_payload = {\\n        \"category\"' in bot",
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+
       - name: Install backend test dependencies
         run: |
           pip install -r artflow/requirements.txt
