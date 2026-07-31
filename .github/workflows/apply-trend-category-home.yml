@@ -1,0 +1,62 @@
+name: Apply Trend Category Home
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/trend-category-home'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/trend-category-home
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply category-first trend home
+        run: python .github/apply-trend-category-home.py
+
+      - name: Install backend test dependencies
+        run: |
+          pip install -r artflow/requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Validate backend and contracts
+        working-directory: artflow
+        run: |
+          python -m py_compile core/trends.py bot/handlers/trends.py api/trends_routes.py
+          pytest -q tests/test_admin_curated_trends.py tests/test_trend_category_home.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: artflow/webapp/package-lock.json
+
+      - name: Build Mini App
+        working-directory: artflow/webapp
+        run: |
+          npm ci
+          npm run build
+
+      - name: Keep generated dist out of source diff
+        run: git checkout -- artflow/webapp/dist || true
+
+      - name: Commit integration
+        run: |
+          rm -f .github/apply-trend-category-home.py .github/workflows/apply-trend-category-home.yml
+          git config user.name 'APIX Agent'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: make trends the category-first home'
+          git push origin HEAD:agent/trend-category-home
