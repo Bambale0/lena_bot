@@ -4,7 +4,7 @@ import "./style.css";
 
 const API_BASE = "/api/v1";
 const REALTIME_MAX_FAILURES = 5;
-window.__APIX_MINIAPP_BUILD_ID__ = "20260731-compact-feed-v3";
+window.__APIX_MINIAPP_BUILD_ID__ = "20260731-trend-category-home-v4";
 
 // ── fallbacks ────────────────────────────────────────────────────────────────
 
@@ -479,17 +479,20 @@ function Header({ screen, setScreen, user, setTopup }) {
 
 function Nav({ screen, setScreen }) {
   const tabs = [
-    ["home", "⌂", "Главная"],
-    ["studio", "⌘", "Студия"],
-    ["midjourney", "MJ", "MJ"],
-    ["assistant", "?", "AI"],
-    ["feed", "◷", "Лента"],
-    ["profile", "♙", "Профиль"],
+    ["home", "⌂", "Главная", ""],
+    ["feed", "▤", "Лента", ""],
+    ["studio", "+", "Создать", "navCreate"],
+    ["assistant", "◯", "AI", ""],
+    ["profile", "♙", "Профиль", ""],
   ];
   return (
     <div className="nav">
-      {tabs.map(([id, ic, label]) => (
-        <button key={id} onClick={() => setScreen(id)} className={screen === id ? "on" : ""}>
+      {tabs.map(([id, ic, label, extraClass]) => (
+        <button
+          key={id}
+          onClick={() => setScreen(id)}
+          className={`${screen === id ? "on" : ""} ${extraClass}`.trim()}
+        >
           <b>{ic}</b><small>{label}</small>
         </button>
       ))}
@@ -669,65 +672,121 @@ function PromptFeed({ prompts, setScreen, onPromptUse, onOpenAll }) {
   );
 }
 
-function Home({ user, referrals, feed, prompts, historyCount, setScreen, setTopup, midjourneyItems = [], openStudioPreset, onPromptUse }) {
+const TREND_CATEGORY_META = [
+  { key: "featured", title: "Тренды", emoji: "🔥" },
+  { key: "photo-video", title: "Фото → видео", emoji: "🎬" },
+  { key: "portrait", title: "Портреты", emoji: "✨" },
+  { key: "cartoon", title: "Мультфильм", emoji: "🎨" },
+  { key: "animals", title: "С животными", emoji: "🦁" },
+  { key: "holidays", title: "Праздники", emoji: "🎉" },
+  { key: "style", title: "Образы", emoji: "💫" },
+];
+
+function trendCategoryMeta(itemOrKey) {
+  const key = typeof itemOrKey === "string" ? itemOrKey : itemOrKey?.category || itemOrKey?.settings?.category || "featured";
+  const known = TREND_CATEGORY_META.find((item) => item.key === key) || TREND_CATEGORY_META[0];
+  if (typeof itemOrKey === "object" && itemOrKey) {
+    return {
+      ...known,
+      title: itemOrKey.category_title || known.title,
+      emoji: itemOrKey.category_emoji || known.emoji,
+    };
+  }
+  return known;
+}
+
+function TrendDiscoveryCard({ item, onApply, onShare, onArchive, manage = false }) {
+  const category = trendCategoryMeta(item);
+  const settings = item.settings || {};
+  const isVideo = item.kind === "video";
   return (
-    <>
-      <ProfileStrip user={user} referrals={referrals} historyCount={historyCount} setScreen={setScreen} setTopup={setTopup} />
-      <section className="block">
-        <div className="title">
-          <div><h2>Возможности APIX</h2><p>Фото, видео, музыка, промпты и партнёрка в одном Mini App</p></div>
-          <button onClick={() => setScreen("capabilities")}>Все</button>
+    <article className={`trendDiscoveryCard ${manage ? "manage" : ""}`}>
+      <button className="trendDiscoveryMedia" onClick={() => onApply?.(item)} aria-label={`Открыть тренд ${item.title}`}>
+        {item.preview_url ? (
+          isVideo
+            ? <video src={item.preview_url} muted loop autoPlay playsInline preload="metadata" />
+            : <img src={item.preview_url} alt={item.title || "Тренд"} loading="lazy" />
+        ) : <Art type="a" />}
+        <span className="trendKindBadge">{isVideo ? "▻ Видео" : "▧ Фото"}</span>
+        {(settings.requires_reference || settings.scenario === "image") && <span className="trendReferenceBadge">＋ фото</span>}
+        <div className="trendDiscoveryCaption">
+          <small>{category.emoji} {category.title}</small>
+          <b>{item.title}</b>
+          {item.description && <span>{item.description}</span>}
         </div>
-        <div className="toolGrid compact">
-          <button className="toolCard" onClick={() => setScreen("studio")}><b>⌘</b><span>Генерация изображений и видео</span></button>
-          <button className="toolCard" onClick={() => setScreen("midjourney")}><b>MJ</b><span>Midjourney модуль</span></button>
-          <button className="toolCard" onClick={() => setScreen("music")}><b>♪</b><span>Музыка AI</span></button>
-          <button className="toolCard" onClick={() => setScreen("assistant")}><b>AI</b><span>Ассистент по промптам</span></button>
-          <button className="toolCard" onClick={() => setScreen("trends")}><b>👑</b><span>Тренды работ</span></button>
-          <button className="toolCard" onClick={() => setScreen("referrals")}><b>₽</b><span>Партнёрский кабинет</span></button>
+      </button>
+      {manage && (
+        <div className="trendManageActions">
+          <button className="primary" onClick={() => onApply?.(item)}>Повторить</button>
+          <button onClick={() => onShare?.(item)}>↗</button>
+          <button className="dangerAction" onClick={() => onArchive?.(item)}>×</button>
         </div>
+      )}
+    </article>
+  );
+}
+
+function Home({ user, trends, loading, setScreen, onApply, openStudioKind }) {
+  const [activeCategory, setActiveCategory] = useState("all");
+  const availableCategories = TREND_CATEGORY_META.filter((meta) => (trends || []).some((item) => trendCategoryMeta(item).key === meta.key));
+  const sections = (activeCategory === "all" ? availableCategories : availableCategories.filter((meta) => meta.key === activeCategory))
+    .map((meta) => ({ ...meta, items: (trends || []).filter((item) => trendCategoryMeta(item).key === meta.key) }))
+    .filter((section) => section.items.length);
+
+  const shortcuts = [
+    ["▧", "Картинка", () => openStudioKind?.("image")],
+    ["▻", "Видео", () => openStudioKind?.("video")],
+    ["✦", "Промпт по фото", () => setScreen("prompts")],
+    ["♫", "Звук", () => setScreen("music")],
+    ["MJ", "Midjourney", () => setScreen("midjourney")],
+  ];
+
+  return (
+    <div className="trendHome">
+      <div className="trendQuickRail" aria-label="Быстрые инструменты">
+        {shortcuts.map(([icon, label, action]) => (
+          <button key={label} className="trendQuickTool" onClick={action}>
+            <b>{icon}</b><span>{label}</span>
+          </button>
+        ))}
+      </div>
+
+      <section className="trendHomeHero">
+        <div>
+          <span className="trendEyebrow">Готовые сценарии</span>
+          <h1>Тренды</h1>
+          <p>Выбери эффект, добавь своё фото и получи результат без ручной настройки модели.</p>
+        </div>
+        {user.is_admin && <button onClick={() => setScreen("trends")}>Управление</button>}
       </section>
-      {!!midjourneyItems.length && (
-        <section className="block">
-          <div className="title">
-            <div><h2>Midjourney</h2><p>Цены из текущих моделей</p></div>
-            <button onClick={() => setScreen("midjourney")}>Открыть</button>
+
+      <div className="trendCategoryTabs" role="tablist" aria-label="Категории трендов">
+        <button className={activeCategory === "all" ? "active" : ""} onClick={() => setActiveCategory("all")}>Все</button>
+        {availableCategories.map((meta) => (
+          <button key={meta.key} className={activeCategory === meta.key ? "active" : ""} onClick={() => setActiveCategory(meta.key)}>
+            {meta.emoji} {meta.title}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <Spinner /> : sections.length ? sections.map((section) => (
+        <section className="trendDiscoverySection" key={section.key}>
+          <div className="trendSectionHead">
+            <div><h2>{section.emoji} {section.title}</h2><p>{section.items.length} шаблонов</p></div>
+            {activeCategory === "all" && <button onClick={() => setActiveCategory(section.key)}>Все</button>}
           </div>
-          <div className="grid">
-            {midjourneyItems.map((item, i) => (
-              <button
-                key={item.key || i}
-                className="feedCard"
-                onClick={() => item.available_in_studio && openStudioPreset ? openStudioPreset(item) : undefined}
-                style={{ textAlign: "left", cursor: item.available_in_studio ? "pointer" : "default" }}
-              >
-                <div>
-                  <span>{item.display_name}</span>
-                  <p>{item.credits} 💋 · {item.gen_type === "video" ? "video" : "image"}{item.available_in_studio ? " · открыть" : ""}</p>
-                </div>
-              </button>
-            ))}
+          <div className="trendDiscoveryRail">
+            {section.items.map((item) => <TrendDiscoveryCard key={item.id} item={item} onApply={onApply} />)}
           </div>
         </section>
+      )) : (
+        <div className="trendHomeEmpty">
+          <b>Тренды пока не опубликованы</b>
+          <span>После добавления администратором они появятся здесь по категориям.</span>
+          {user.is_admin && <button className="primary" onClick={() => setScreen("trends")}>Добавить первый тренд</button>}
+        </div>
       )}
-
-      <section className="block">
-        <div className="title">
-          <h2>Публичные работы</h2>
-          <button onClick={() => setScreen("feed")}>Все</button>
-        </div>
-        <div className="grid">
-          {feed.slice(0, 4).map((f, i) => (
-            <button key={f.id || i} className="feedCard" onClick={() => setScreen("feed")}>
-              <MediaThumb url={generationPreviewUrl(f)} openUrl={f.result_url || generationPreviewUrl(f)} type="image" idx={i} />
-              <div>
-                <p>@{f.author || "anon"} · ♥ {f.likes_count || 0} · 🔁 {f.remixes || 0}</p>
-              </div>
-            </button>
-          ))}
-        </div>
-      </section>
-    </>
+    </div>
   );
 }
 
@@ -922,6 +981,7 @@ function TrendAdminForm({ imageModels, videoModels, onCreated, onNotice }) {
   const [kind, setKind] = useState("image");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("featured");
   const [model, setModel] = useState("");
   const [promptTemplate, setPromptTemplate] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
@@ -973,6 +1033,7 @@ function TrendAdminForm({ imageModels, videoModels, onCreated, onNotice }) {
           preview_url: previewUrl,
           model,
           settings: {
+            category,
             scenario: kind === "video" ? scenario : undefined,
             duration: kind === "video" ? Number(duration) : undefined,
             ratio: ratio || undefined,
@@ -1002,6 +1063,9 @@ function TrendAdminForm({ imageModels, videoModels, onCreated, onNotice }) {
       </div>
       <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Название — до 60 символов" maxLength={60} />
       <textarea className="field" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Публичное описание — до 200 символов" maxLength={200} />
+      <select value={category} onChange={(e) => setCategory(e.target.value)}>
+        {TREND_CATEGORY_META.map((item) => <option key={item.key} value={item.key}>{item.emoji} {item.title}</option>)}
+      </select>
       <select value={model} onChange={(e) => setModel(e.target.value)}>
         {models.map((item) => <option key={item.key} value={item.key}>{item.display_name} · {formatCredits(item.credits)} 💋</option>)}
       </select>
@@ -1028,8 +1092,7 @@ function TrendAdminForm({ imageModels, videoModels, onCreated, onNotice }) {
 }
 
 function Trends({ trends, loading, user, imageModels, videoModels, reload, onApply, onNotice }) {
-  const images = (trends || []).filter((item) => item.kind !== "video");
-  const videos = (trends || []).filter((item) => item.kind === "video");
+  const [adminOpen, setAdminOpen] = useState(false);
 
   async function share(item) {
     try {
@@ -1052,38 +1115,29 @@ function Trends({ trends, loading, user, imageModels, videoModels, reload, onApp
     }
   }
 
-  function Section({ title, data }) {
-    return (
-      <section className="block">
-        <div className="title"><div><h2>{title}</h2><p>Шаблоны задаёт администратор</p></div><span>{data.length}</span></div>
-        <div style={{ display: "grid", gap: 14 }}>
-          {data.map((item) => (
-            <article key={item.id} className="assistantPanel">
-              <TrendPreview item={item} />
-              <div><h3 style={{ margin: "0 0 5px" }}>{item.title}</h3><p style={{ margin: 0, color: "var(--text-soft)" }}>{item.description}</p></div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--text-ghost)" }}>
-                <span>{item.model}</span><span>🔥 {item.uses_count || 0} повторов</span>
-              </div>
-              <div className="feedActions">
-                <button className="primary" onClick={() => onApply?.(item)}>🔥 Повторить</button>
-                <button className="ghost" onClick={() => share(item)}>🔗</button>
-                {user.is_admin && <button className="dangerAction" onClick={() => archive(item)}>🗑</button>}
-              </div>
-            </article>
-          ))}
-          {!data.length && <div className="warn">Администратор пока не опубликовал тренды этого типа.</div>}
-        </div>
-      </section>
-    );
-  }
+  const sections = TREND_CATEGORY_META
+    .map((meta) => ({ ...meta, items: (trends || []).filter((item) => trendCategoryMeta(item).key === meta.key) }))
+    .filter((section) => section.items.length);
 
   if (loading) return <><h1>Тренды</h1><Spinner /></>;
   return (
     <>
-      <div className="studioHead"><div><h1>🔥 Тренды</h1><p style={{ color: "var(--text-soft)", margin: 0 }}>Курируемые шаблоны, а не копия пользовательской ленты.</p></div></div>
-      {user.is_admin && <TrendAdminForm imageModels={imageModels} videoModels={videoModels} onCreated={reload} onNotice={onNotice} />}
-      <Section title="🖼 Фото-тренды" data={images} />
-      <Section title="🎬 Видео-тренды" data={videos} />
+      <div className="trendManagerHead">
+        <div><h1>Тренды</h1><p>Категории и шаблоны задаёт администратор.</p></div>
+        {user.is_admin && <button className="primary" onClick={() => setAdminOpen((value) => !value)}>{adminOpen ? "Закрыть" : "+ Добавить"}</button>}
+      </div>
+      {user.is_admin && adminOpen && <TrendAdminForm imageModels={imageModels} videoModels={videoModels} onCreated={() => { reload?.(); setAdminOpen(false); }} onNotice={onNotice} />}
+      {sections.map((section) => (
+        <section className="trendDiscoverySection" key={section.key}>
+          <div className="trendSectionHead"><div><h2>{section.emoji} {section.title}</h2><p>{section.items.length} шаблонов</p></div></div>
+          <div className="trendManageGrid">
+            {section.items.map((item) => (
+              <TrendDiscoveryCard key={item.id} item={item} onApply={onApply} onShare={share} onArchive={archive} manage={user.is_admin} />
+            ))}
+          </div>
+        </section>
+      ))}
+      {!sections.length && <div className="trendHomeEmpty"><b>Нет опубликованных трендов</b><span>Добавь первый шаблон и выбери для него категорию.</span></div>}
     </>
   );
 }
@@ -3938,6 +3992,13 @@ function App() {
     }
   }
 
+  function openStudioKind(kind = "image") {
+    setRemixSource(null);
+    setGeneration(null);
+    setStudioPreset({ kind });
+    setScreen("studio");
+  }
+
   function openStudioPreset(item) {
     setRemixSource(null);
     setStudioPreset({ modelKey: item.key, kind: item.gen_type });
@@ -4037,7 +4098,7 @@ function App() {
   window.__APIX_IS_ADMIN__ = Boolean(user?.is_admin);
 
   const screens = {
-    home: <Home user={user} referrals={referrals.data} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={navigate} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
+    home: <Home user={user} trends={curatedTrends.data} loading={curatedTrends.loading} setScreen={navigate} onApply={openTrendPreset} openStudioKind={openStudioKind} />,
     capabilities: <Capabilities setScreen={navigate} setTopup={setTopupOpen} />,
     assistant: <Assistant onNotice={setNotice} />,
     feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} onRemoved={() => { feed.reload(); myFeed.reload(); }} scope={feedScope} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,

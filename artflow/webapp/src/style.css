@@ -1218,3 +1218,69 @@ textarea{width:100%;height:112px;margin-top:16px;padding:14px;resize:none;outlin
     display: none;
   }
 }
+
+
+/* category-first trend home */
+.trendHome{display:grid;gap:18px}
+.trendQuickRail{display:flex;gap:12px;overflow-x:auto;margin:2px -16px 0;padding:4px 16px 8px;scroll-snap-type:x proximity;scrollbar-width:none}
+.trendQuickRail::-webkit-scrollbar{display:none}
+.trendQuickTool{flex:0 0 84px;display:grid;gap:7px;justify-items:center;background:transparent;color:var(--text-soft);scroll-snap-align:start}
+.trendQuickTool b{display:grid;place-items:center;width:64px;height:64px;border:1px solid var(--border-strong);border-radius:20px;background:linear-gradient(145deg,var(--surface-3),var(--surface));color:var(--text);font-size:24px;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.trendQuickTool span{font-size:11px;line-height:1.2;text-align:center}
+.trendHomeHero{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;padding:18px;border:1px solid var(--border-soft);border-radius:24px;background:radial-gradient(circle at 88% 15%,var(--accent-soft),transparent 44%),linear-gradient(145deg,var(--surface-2),var(--surface));overflow:hidden}
+.trendHomeHero h1{margin:3px 0 5px;font-size:30px;line-height:1;font-weight:800}
+.trendHomeHero p{max-width:310px;margin:0;color:var(--text-soft);font-size:13px;line-height:1.45}
+.trendHomeHero>button{flex:0 0 auto;padding:8px 11px;border:1px solid var(--accent-border);border-radius:12px;background:var(--accent-soft);color:var(--accent-text);font-size:11px;font-weight:750}
+.trendEyebrow{color:var(--accent-text);font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.trendCategoryTabs{display:flex;gap:7px;overflow-x:auto;margin:0 -16px;padding:0 16px 3px;scrollbar-width:none}
+.trendCategoryTabs::-webkit-scrollbar{display:none}
+.trendCategoryTabs button{flex:0 0 auto;padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text-soft);font-size:11px;font-weight:700;white-space:nowrap}
+.trendCategoryTabs button.active{border-color:var(--accent-border);background:var(--accent-soft);color:var(--accent-text)}
+.trendDiscoverySection{display:grid;gap:10px;margin-top:3px}
+.trendSectionHead{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.trendSectionHead h2{margin:0;font-size:19px;font-weight:780}
+.trendSectionHead p{margin:2px 0 0;color:var(--text-ghost);font-size:10px}
+.trendSectionHead>button{padding:7px 11px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);color:var(--text-soft);font-size:11px;font-weight:700}
+.trendDiscoveryRail{display:flex;gap:10px;overflow-x:auto;margin:0 -16px;padding:0 16px 5px;scroll-snap-type:x mandatory;scrollbar-width:none}
+.trendDiscoveryRail::-webkit-scrollbar{display:none}
+.trendDiscoveryRail .trendDiscoveryCard{flex:0 0 min(72vw,230px);scroll-snap-align:start}
+.trendDiscoveryCard{min-width:0;border:1px solid var(--border-soft);border-radius:18px;background:var(--surface);overflow:hidden;box-shadow:0 10px 28px rgba(0,0,0,.14)}
+.trendDiscoveryMedia{position:relative;display:block;width:100%;padding:0;aspect-ratio:4/5;background:var(--bg-strong);overflow:hidden;text-align:left}
+.trendDiscoveryMedia img,.trendDiscoveryMedia video,.trendDiscoveryMedia .art{width:100%;height:100%;object-fit:cover}
+.trendKindBadge,.trendReferenceBadge{position:absolute;top:9px;z-index:2;padding:4px 7px;border:1px solid rgba(255,255,255,.18);border-radius:9px;background:rgba(5,7,16,.64);backdrop-filter:blur(10px);color:#fff;font-size:9px;font-weight:800}
+.trendKindBadge{right:9px}
+.trendReferenceBadge{left:9px}
+.trendDiscoveryCaption{position:absolute;left:0;right:0;bottom:0;display:grid;gap:3px;padding:42px 12px 12px;background:linear-gradient(180deg,transparent,rgba(2,4,12,.92));color:#fff}
+.trendDiscoveryCaption small{font-size:9px;font-weight:750;color:rgba(255,255,255,.74)}
+.trendDiscoveryCaption b{font-size:16px;line-height:1.15;text-shadow:0 2px 8px rgba(0,0,0,.55)}
+.trendDiscoveryCaption span{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;color:rgba(255,255,255,.72);font-size:10px;line-height:1.35}
+.trendManageGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.trendManageGrid .trendDiscoveryMedia{aspect-ratio:3/4}
+.trendManageActions{display:grid;grid-template-columns:1fr 34px 34px;gap:5px;padding:6px}
+.trendManageActions button{min-width:0;height:32px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface-2);font-size:10px;font-weight:800}
+.trendManageActions .primary{border-color:var(--accent-border)}
+.trendManagerHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
+.trendManagerHead h1{font-size:26px}
+.trendManagerHead p{margin:4px 0 0;color:var(--text-soft);font-size:12px}
+.trendManagerHead>button{padding:9px 12px;border-radius:12px;font-size:12px}
+.trendHomeEmpty{display:grid;justify-items:center;gap:7px;padding:30px 18px;border:1px dashed var(--border-strong);border-radius:20px;text-align:center}
+.trendHomeEmpty b{font-size:15px}
+.trendHomeEmpty span{max-width:290px;color:var(--text-ghost);font-size:12px}
+.trendHomeEmpty button{margin-top:5px;padding:10px 14px;border-radius:12px}
+
+/* reference-style five-tab navigation with central create action */
+.nav{grid-template-columns:repeat(5,1fr);align-items:end;padding:7px 10px}
+.nav button{min-width:0}
+.nav .navCreate{position:relative;transform:translateY(-12px);color:#fff}
+.nav .navCreate b{display:grid;place-items:center;width:54px;height:54px;margin:0 auto -2px;border-radius:999px;background:linear-gradient(145deg,var(--accent),#4f7cff);box-shadow:0 10px 28px rgba(59,150,255,.34);font-size:32px;font-weight:300;line-height:1}
+.nav .navCreate small{color:var(--text-soft)}
+.nav .navCreate.on{background:transparent}
+
+@media (max-width:360px){
+  .trendQuickTool{flex-basis:74px}
+  .trendQuickTool b{width:58px;height:58px;border-radius:18px}
+  .trendHomeHero{padding:15px}
+  .trendHomeHero h1{font-size:27px}
+  .trendDiscoveryRail .trendDiscoveryCard{flex-basis:72vw}
+  .trendManageGrid{gap:7px}
+}

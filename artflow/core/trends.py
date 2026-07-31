@@ -8,6 +8,17 @@ from db.models import PromptStatus, UserPrompt
 TREND_TAG = "trend"
 TREND_VIDEO_TAG = "trend-video"
 TREND_PREFIX = "trend-"
+TREND_CATEGORY_PREFIX = "trend-category:"
+DEFAULT_TREND_CATEGORY = "featured"
+TREND_CATEGORIES: dict[str, dict[str, str]] = {
+    "featured": {"title": "Тренды", "emoji": "🔥"},
+    "photo-video": {"title": "Фото → видео", "emoji": "🎬"},
+    "portrait": {"title": "Портреты", "emoji": "✨"},
+    "cartoon": {"title": "Мультфильм", "emoji": "🎨"},
+    "animals": {"title": "С животными", "emoji": "🦁"},
+    "holidays": {"title": "Праздники", "emoji": "🎉"},
+    "style": {"title": "Образы", "emoji": "💫"},
+}
 
 
 def normalized_tags(prompt_or_tags: UserPrompt | list[str] | tuple[str, ...] | None) -> set[str]:
@@ -33,6 +44,21 @@ def _tag_value(tags: set[str], prefix: str) -> str | None:
     return None
 
 
+def normalize_trend_category(value: Any) -> str:
+    category = str(value or "").strip().lower()
+    return category if category in TREND_CATEGORIES else DEFAULT_TREND_CATEGORY
+
+
+def trend_category(prompt: UserPrompt) -> str:
+    return normalize_trend_category(_tag_value(normalized_tags(prompt), TREND_CATEGORY_PREFIX))
+
+
+def trend_category_payload(category: str) -> dict[str, str]:
+    key = normalize_trend_category(category)
+    meta = TREND_CATEGORIES[key]
+    return {"key": key, "title": meta["title"], "emoji": meta["emoji"]}
+
+
 def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
     tags = normalized_tags(prompt)
     kind = trend_kind(prompt)
@@ -55,13 +81,14 @@ def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
         "resolution": _tag_value(tags, "trend-resolution:"),
         "requires_reference": requires_reference,
         "kind": kind,
+        "category": trend_category(prompt),
     }
 
 
 def build_trend_tags(kind: str, settings: dict[str, Any] | None = None) -> list[str]:
     kind = "video" if str(kind).lower() == "video" else "image"
     settings = dict(settings or {})
-    tags = [TREND_TAG]
+    tags = [TREND_TAG, f"{TREND_CATEGORY_PREFIX}{normalize_trend_category(settings.get('category'))}"]
     if kind == "video":
         tags.append(TREND_VIDEO_TAG)
 
@@ -95,9 +122,13 @@ def trend_is_public(prompt: UserPrompt | None) -> bool:
 
 def trend_public_payload(prompt: UserPrompt) -> dict[str, Any]:
     created_at: datetime | None = getattr(prompt, "created_at", None)
+    category = trend_category_payload(trend_category(prompt))
     return {
         "id": int(prompt.id),
         "kind": trend_kind(prompt),
+        "category": category["key"],
+        "category_title": category["title"],
+        "category_emoji": category["emoji"],
         "title": prompt.title,
         "description": prompt.description,
         "preview_url": prompt.preview_url,
