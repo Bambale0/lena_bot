@@ -744,7 +744,6 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   const resultUrls = generationResultUrls(item);
   const previewUrls = generationPreviewUrls(item);
   const visibleUrls = previewUrls.slice(0, 4);
-  const mediaType = String(item.gen_type || item.type || item.generation_type || "").toLowerCase().includes("video") ? "video" : "image";
 
   async function handleLike() {
     if (liked || busy) return;
@@ -800,7 +799,7 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
             key={`${url}-${mediaIdx}`}
             url={url}
             openUrl={resultUrls[mediaIdx] || url}
-            type={mediaType}
+            type={/\.(mp4|webm|mov)(?:$|\?)/i.test(url) ? "video" : "image"}
             idx={idx + mediaIdx}
             className="feedCompactImg"
             onOpen={openExternalUrl}
