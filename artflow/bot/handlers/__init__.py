@@ -48,14 +48,19 @@ for _key, _description in list(_model_keyboards.IMAGE_MODEL_DESC.items()):
     _label = model_display_name(str(_key), _description)
     _model_keyboards.IMAGE_MODEL_DESC[_key] = f"{_label} · {_suffix}" if _suffix else _label
 
-# Image UX v2: direct task-first flow first, legacy expert flow second.
+# Image UX v2: direct task-first flow first, dedicated photo-to-prompt flow
+# second, legacy expert flow last.
 from . import image_gen as _legacy_image_gen
+from . import image_wizard_v2 as _image_wizard_v2
+from . import photo_prompt as _photo_prompt
 from . import repeat_reference_marketplace as _repeat_reference_marketplace  # noqa: F401
 from . import repeat_references as _repeat_references  # noqa: F401
-from . import image_wizard_v2 as _image_wizard_v2
+
+_photo_prompt.install_photo_prompt_keyboard_hooks(_legacy_image_gen)
 
 _image_router = Router(name="image_v2")
 _image_router.include_router(_image_wizard_v2.router)
+_image_router.include_router(_photo_prompt.router)
 _image_router.include_router(_legacy_image_gen.router)
 _legacy_image_gen.router = _image_router
 
