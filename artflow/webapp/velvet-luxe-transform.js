@@ -126,6 +126,16 @@ export default function velvetLuxeMiniApp() {
       if (!next.includes(oldCall)) throw new Error("Velvet Luxe AppHeader call target not found");
       next = next.replace(oldCall, newCall);
 
+      const oldSearch = 'onClick={onSearch} aria-label="Поиск"';
+      const newSearch = 'onClick={() => { onSearch?.(); window.dispatchEvent(new Event("apix:feed-search")); }} aria-label="Поиск"';
+      if (!next.includes(oldSearch)) throw new Error("Velvet Luxe search action target not found");
+      next = next.replace(oldSearch, newSearch);
+
+      const stateAnchor = '  const [items, setItems] = useState(feed);\n\n  useEffect(() => setItems(feed), [feed]);';
+      const stateReplacement = '  const [items, setItems] = useState(feed);\n\n  useEffect(() => setItems(feed), [feed]);\n  useEffect(() => {\n    const openSearch = () => setSearchOpen(true);\n    window.addEventListener("apix:feed-search", openSearch);\n    return () => window.removeEventListener("apix:feed-search", openSearch);\n  }, []);';
+      if (!next.includes(stateAnchor)) throw new Error("Velvet Luxe feed search state target not found");
+      next = next.replace(stateAnchor, stateReplacement);
+
       return { code: next, map: null };
     },
   };
