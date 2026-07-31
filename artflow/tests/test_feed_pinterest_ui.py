@@ -3,58 +3,57 @@ from pathlib import Path
 
 WEBAPP = Path("webapp")
 API = Path("api")
+APP = WEBAPP / "src" / "v2" / "VelvetApp.jsx"
+STYLES = WEBAPP / "src" / "v2" / "velvet-neon.css"
 
 
-def test_feed_uses_compact_masonry_and_filters():
-    block = (WEBAPP / "feed-pinterest.block.jsx").read_text(encoding="utf-8")
-    styles = (WEBAPP / "src" / "feed-pinterest.css").read_text(encoding="utf-8")
+def test_feed_uses_velvet_neon_masonry_and_filters():
+    app = APP.read_text(encoding="utf-8")
+    styles = STYLES.read_text(encoding="utf-8")
 
-    for label in ("Для тебя", "Новые", "Популярные", "Повторы"):
-        assert label in block
-    for label in ("Все", "Фото", "Видео"):
-        assert label in block
+    for label in ("Для тебя", "Популярное", "Фото", "Видео", "Арт"):
+        assert label in app
 
-    assert "feedSortRail" in block
-    assert "feedTypeTabs" in block
-    assert "feedMineToggle" in block
+    assert "FEED_FILTERS" in app
+    assert "vnFilterRail" in app
+    assert "vnMasonry" in app
     assert "column-count: 2" in styles
     assert "break-inside: avoid" in styles
     assert "position: sticky" in styles
 
 
 def test_feed_cards_use_lazy_preview_only():
-    block = (WEBAPP / "feed-pinterest.block.jsx").read_text(encoding="utf-8")
+    app = APP.read_text(encoding="utf-8")
 
-    assert "function feedTileUrls" in block
-    assert 'loading="lazy"' in block
-    assert 'decoding="async"' in block
-    assert 'fetchPriority="low"' in block
-    assert "generationResultUrls(item)" not in block
-    assert "openExternalUrl" not in block
+    assert "generationPreviewUrls(item)" in app
+    assert 'loading="lazy"' in app
+    assert 'decoding="async"' in app
+    assert "function FeedMedia" in app
+    assert "openTelegramLink(url)" not in app
 
 
 def test_images_open_in_internal_miniapp_viewer():
-    block = (WEBAPP / "feed-pinterest.block.jsx").read_text(encoding="utf-8")
-    styles = (WEBAPP / "src" / "feed-pinterest.css").read_text(encoding="utf-8")
+    app = APP.read_text(encoding="utf-8")
+    styles = STYLES.read_text(encoding="utf-8")
 
-    assert "function FeedViewer" in block
-    assert 'role="dialog"' in block
-    assert "feedViewerStage" in block
-    assert "display.webp?index=" in block
-    assert "setViewer({ item: openedItem, index: mediaIndex })" in block
-    assert "position: fixed" in styles
+    assert "function FeedViewer" in app
+    assert 'role="dialog"' in app
+    assert "vnViewerStage" in app
+    assert "display.webp?index=" in app
+    assert "setViewer({ item: selected, index: mediaIndex })" in app
+    assert ".vnViewer { position: fixed" in styles
     assert "100dvh" in styles
 
 
 def test_card_actions_stay_compact_and_explicit():
-    block = (WEBAPP / "feed-pinterest.block.jsx").read_text(encoding="utf-8")
-    styles = (WEBAPP / "src" / "feed-pinterest.css").read_text(encoding="utf-8")
+    app = APP.read_text(encoding="utf-8")
+    styles = STYLES.read_text(encoding="utf-8")
 
-    assert "Повторить" in block
-    assert 'aria-label="Нравится"' in block
-    assert 'aria-label="Поделиться"' in block
-    assert "feedCardActionRow" in block
-    assert "grid-template-columns: minmax(0, 1fr) 36px 36px auto" in styles
+    assert "Повторить" in app
+    assert 'aria-label="Нравится"' in app
+    assert 'aria-label="Поделиться"' in app
+    assert "vnCardActions" in app
+    assert "grid-template-columns: 1fr auto auto auto" in styles
 
 
 def test_all_image_feed_media_is_served_as_webp():
@@ -70,11 +69,13 @@ def test_all_image_feed_media_is_served_as_webp():
     assert "install_feed_media_viewer(module)" in bootstrap
 
 
-def test_initial_feed_is_limited_and_build_id_is_bumped():
+def test_front_v2_limits_feed_and_removes_string_transforms():
+    main = (WEBAPP / "src" / "main.jsx").read_text(encoding="utf-8")
     config = (WEBAPP / "vite.config.js").read_text(encoding="utf-8")
-    transform = (WEBAPP / "feed-pinterest-transform.js").read_text(encoding="utf-8")
+    app = APP.read_text(encoding="utf-8")
 
-    assert "/feed?source=recent&limit=60" in config
-    assert "feedPinterestMiniApp" in config
-    assert 'import "./feed-pinterest.css"' in transform
-    assert "feed-webp-viewer-v4" in transform
+    assert "/feed?source=recent&limit=60" in app
+    assert "20260801-velvet-neon-front-v2" in main
+    assert "feedPinterestMiniApp" not in config
+    assert "feedFirstMiniApp" not in config
+    assert "plugins: [react()]" in config
