@@ -36,7 +36,9 @@ jobs:
         run: python /tmp/apply_curated_trends.py
 
       - name: Install backend dependencies
-        run: pip install -r artflow/requirements.txt
+        run: |
+          pip install -r artflow/requirements.txt
+          pip install pytest pytest-asyncio
 
       - name: Validate backend
         working-directory: artflow
