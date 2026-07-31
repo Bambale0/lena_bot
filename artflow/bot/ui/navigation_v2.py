@@ -14,6 +14,12 @@ def render_create_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRend
         InlineKeyboardButton(text="🎬 " + ("Видео" if lang == "ru" else "Video"), callback_data="menu:video"),
     )
     builder.row(
+        InlineKeyboardButton(
+            text="📸 " + ("Промпт по фото" if lang == "ru" else "Prompt from photo"),
+            callback_data="img:photo2prompt",
+        )
+    )
+    builder.row(
         InlineKeyboardButton(text="🎵 " + ("Музыка" if lang == "ru" else "Music"), callback_data="menu:music"),
         InlineKeyboardButton(text="🤖 " + ("Подобрать через AI" if lang == "ru" else "Choose with AI"), callback_data="menu:assistant"),
     )
@@ -27,6 +33,8 @@ def render_create_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRend
             "Выбери не нейросеть, а нужный результат — подходящие модели и параметры появятся дальше.\n\n"
             "🖼 <b>Изображение</b>\n"
             "С нуля по описанию, редактирование фото, замена деталей, стили, карточки товаров и работа с несколькими референсами.\n\n"
+            "📸 <b>Промпт по фото</b>\n"
+            "Загрузи готовое изображение — APIX разберёт сцену, стиль, свет и подготовит промпт для новой генерации.\n\n"
             "🎬 <b>Видео</b>\n"
             "Текст в видео, оживление фото, видео по референсам, движение камеры, персонажи и генерация со звуком.\n\n"
             "🎵 <b>Музыка</b>\n"
@@ -40,6 +48,7 @@ def render_create_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRend
             "✨ <b>What do you want to create?</b>\n\n"
             "Choose the result, not the model. APIX will show compatible tools and settings next.\n\n"
             "🖼 <b>Image</b> — generate, edit, restyle and work with references.\n"
+            "📸 <b>Prompt from photo</b> — upload an image and turn its scene, style and lighting into a reusable prompt.\n"
             "🎬 <b>Video</b> — text-to-video, animate photos, control motion and create with sound.\n"
             "🎵 <b>Music</b> — make a complete track from an idea, mood or genre.\n"
             "🤖 <b>Choose with AI</b> — turn a rough idea into the right workflow.\n\n"
