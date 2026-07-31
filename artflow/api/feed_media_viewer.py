@@ -23,7 +23,7 @@ def _generation_urls(routes: Any, generation: Any) -> list[str]:
         primary = routes._generation_primary_result_url(generation)
         if primary:
             urls.append(primary)
-    return urls
+    return urls[:4]
 
 
 async def _render_webp(
