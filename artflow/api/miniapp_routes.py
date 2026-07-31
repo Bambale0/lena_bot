@@ -62,6 +62,7 @@ from bot.utils.telegram_images import (
     send_original_document_to_chat,
 )
 from core.config import settings
+from core.trends import is_trend_prompt, trend_kind
 from core.gemini_omni import (
     GEMINI_OMNI_MAX_AUDIO_IDS,
     GEMINI_OMNI_MAX_CHARACTER_IDS,
@@ -235,7 +236,19 @@ def _can_view_prompt(prompt: Any | None, user: User | None) -> bool:
 
 
 def _generation_prompt_hidden(gen: Any) -> bool:
-    return bool(getattr(gen, "source_feed_gen_id", None))
+    if getattr(gen, "source_feed_gen_id", None):
+        return True
+    raw = getattr(gen, "input_params", None)
+    if not raw:
+        return False
+    if isinstance(raw, dict):
+        payload = raw
+    else:
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+    return bool(isinstance(payload, dict) and payload.get("hidden_prompt"))
 
 
 def _is_midjourney_model(model_key: str) -> bool:
@@ -507,7 +520,7 @@ def _direct_result_should_notify_bot(gen, *, surface: str) -> bool:
 
 
 def _direct_result_prompt_actions_allowed(gen) -> bool:
-    if getattr(gen, "source_feed_gen_id", None):
+    if _generation_prompt_hidden(gen):
         return False
     action_type = getattr(gen, "action_type", None)
     action_value = str(getattr(action_type, "value", action_type) or "")
@@ -1188,6 +1201,7 @@ class ImageGenRequest(BaseModel):
 class VideoGenRequest(BaseModel):
     model: str
     prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt_id: int | None = None
     mode: str = "text"                    # "text" | "image" | "video"
     duration: int = Field(default=5, ge=2, le=30)
     aspect_ratio: str | None = None
@@ -1859,6 +1873,17 @@ async def create_image_generation(
         prompt_source = await get_prompt_by_id(session, body.prompt_id)
         if not _is_prompt_public_approved(prompt_source):
             raise HTTPException(status_code=404, detail="Prompt not found or not public")
+        user_prompt = prompt_source.prompt_text
+        if is_trend_prompt(prompt_source):
+            if trend_kind(prompt_source) != "image":
+                raise HTTPException(status_code=422, detail="Selected trend is not an image trend")
+            if prompt_source.model and body.model != prompt_source.model:
+                raise HTTPException(status_code=422, detail="Trend must use its configured model")
+
+    prompt_meta = {
+        "prompt_id": getattr(prompt_source, "id", None),
+        "hidden_prompt": bool(is_trend_prompt(prompt_source)),
+    }
 
     if body.model in _MJ_STUDIO_IMAGE_MODELS:
         caps: dict[str, Any] = _MJ_IMAGE_CAPS.get(body.model, {})
@@ -1884,7 +1909,7 @@ async def create_image_generation(
             raise HTTPException(status_code=402, detail="Failed to spend credits")
         gen_prompt = user_prompt or f"blend:{len(all_refs)}"
         image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None, reference_urls=all_refs)
-        gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, model_cost.credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial)
+        gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, model_cost.credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial, input_params=prompt_meta)
         try:
             if body.model == "midjourney-imagine":
                 task_id = await midjourney_service.imagine(user_prompt, reference_url=all_refs[0] if all_refs else None)
@@ -1965,6 +1990,7 @@ async def create_image_generation(
         user_prompt, model_cost.credits,
         image_session_id=image_session.id,
         action_type=ImageGenerationAction.initial,
+        input_params=prompt_meta,
     )
 
     ref_urls: str | list[str] | None = None
@@ -2026,6 +2052,26 @@ async def create_video_generation(
     Returns immediately with `status: pending`.
     Poll `GET /api/v1/generations/{id}` until done.
     """
+    user_prompt = body.prompt
+    prompt_source = None
+    if body.prompt_id is not None:
+        from db.prompt_repository import get_prompt_by_id
+
+        prompt_source = await get_prompt_by_id(session, body.prompt_id)
+        if not _is_prompt_public_approved(prompt_source):
+            raise HTTPException(status_code=404, detail="Prompt not found or not public")
+        user_prompt = prompt_source.prompt_text
+        if is_trend_prompt(prompt_source):
+            if trend_kind(prompt_source) != "video":
+                raise HTTPException(status_code=422, detail="Selected trend is not a video trend")
+            if prompt_source.model and body.model != prompt_source.model:
+                raise HTTPException(status_code=422, detail="Trend must use its configured model")
+
+    prompt_meta = {
+        "prompt_id": getattr(prompt_source, "id", None),
+        "hidden_prompt": bool(is_trend_prompt(prompt_source)),
+    }
+
     if body.model in _MJ_VIDEO_MODELS:
         image_urls = _normalize_public_urls(body.image_url, *body.reference_urls)
         if not image_urls:
@@ -2043,8 +2089,8 @@ async def create_video_generation(
         ok = await repo.spend_credits(session, user.id, model_cost.credits)
         if not ok:
             raise HTTPException(status_code=402, detail="Failed to spend credits")
-        prompt = body.prompt
-        gen = await repo.create_generation(session, user.id, body.model, GenerationType.video, prompt or "mj-video", model_cost.credits)
+        prompt = user_prompt
+        gen = await repo.create_generation(session, user.id, body.model, GenerationType.video, prompt or "mj-video", model_cost.credits, input_params=prompt_meta)
         try:
             task_id = await midjourney_service.submit_video(image=image_urls[0], motion=MJVideoMotion(motion_value), prompt=prompt)
         except Exception as exc:
@@ -2053,6 +2099,12 @@ async def create_video_generation(
                 await repo.add_credits(session, user.id, model_cost.credits)
             raise HTTPException(status_code=502, detail="Generation service error")
         await repo.update_generation_task(session, gen.id, task_id_for_surface(task_id, surface))
+        await _mark_prompt_used_after_generation(
+            session,
+            prompt_id=getattr(prompt_source, "id", None),
+            user_id=user.id,
+            credits_spent=model_cost.credits,
+        )
         await session.refresh(gen)
         return _gen_out(gen)
 
@@ -2110,16 +2162,17 @@ async def create_video_generation(
     if not ok:
         raise HTTPException(status_code=402, detail="Failed to spend credits")
 
+    normalized.update(prompt_meta)
     gen = await repo.create_generation(
         session, user.id, body.model, GenerationType.video,
-        body.prompt, total_credits,
+        user_prompt, total_credits,
         input_params=normalized,
     )
 
     try:
         result = await video_service.generate_video(
             model,
-            body.prompt,
+            user_prompt,
             image_url=image_url,
             duration=normalized["duration"],
             aspect_ratio=normalized["aspect_ratio"],
@@ -2141,6 +2194,12 @@ async def create_video_generation(
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
+    await _mark_prompt_used_after_generation(
+        session,
+        prompt_id=getattr(prompt_source, "id", None),
+        user_id=user.id,
+        credits_spent=total_credits,
+    )
 
     await session.refresh(gen)
     return _gen_out(gen)

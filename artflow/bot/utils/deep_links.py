@@ -11,7 +11,7 @@ class StartPayload:
     target_id: int | None = None
 
 
-_TARGET_PREFIXES = ("feed_", "prompt_")
+_TARGET_PREFIXES = ("feed_", "prompt_", "trend_")
 
 
 def parse_start_payload(raw: str | None) -> StartPayload:
@@ -44,6 +44,13 @@ def parse_start_payload(raw: str | None) -> StartPayload:
             if prompt_id_raw.isdigit():
                 target_kind = "prompt"
                 target_id = int(prompt_id_raw)
+                continue
+
+        if part.startswith("trend_"):
+            trend_id_raw = part.split("_", 1)[1]
+            if trend_id_raw.isdigit():
+                target_kind = "trend"
+                target_id = int(trend_id_raw)
                 continue
 
         if ref_code is None:

@@ -136,7 +136,7 @@ async def _cards_for_source(session: AsyncSession, source: str) -> list[FeedGene
 
 
 async def _show_feed_empty(holder: Message, *, top_day: bool = False) -> None:
-    title = "👑 <b>Тренды</b>" if top_day else "🔥 <b>Лента</b>"
+    title = "👑 <b>Топ дня</b>" if top_day else "🔥 <b>Лента</b>"
     await safe_edit_message(
         holder,
         f"{title}\n\nПока нет готовых публичных изображений. Самое время создать первый пост.",
@@ -327,23 +327,6 @@ async def open_feed(
     )  # type: ignore[arg-type]
     if isinstance(event, CallbackQuery):
         await safe_answer_callback(event)
-
-
-@router.message(Command("trends"))
-async def open_trends_command(
-    message: Message,
-    session: AsyncSession,
-    state: FSMContext,
-    db_user: User | None = None,
-) -> None:
-    await state.clear()
-    await show_feed_from_source(
-        holder=message,
-        session=session,
-        source="top",
-        index=0,
-        viewer_user_id=db_user.id if db_user else None,
-    )
 
 
 @router.callback_query(F.data == "menu:top_day")
