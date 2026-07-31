@@ -1,0 +1,146 @@
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;600&display=swap");
+
+:root {
+  --vn-font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --vn-font-ui: "Manrope", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --vn-font-accent: "Unbounded", "Manrope", system-ui, sans-serif;
+}
+
+html,
+body,
+#root,
+.vnApp {
+  font-family: var(--vn-font-ui);
+  font-optical-sizing: auto;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "tnum" 1;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: var(--vn-font-ui);
+  letter-spacing: -0.012em;
+}
+
+/* Editorial display titles: expressive, but only where hierarchy needs it. */
+.vnHeader h1,
+.vnApp main > section > h1,
+.vnApp main > section > header h1,
+.vnApp main > section > header h2,
+.vnModal h1,
+.vnModal h2,
+.vnViewer h1,
+.vnViewer h2 {
+  font-family: var(--vn-font-display);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 0.96;
+  text-wrap: balance;
+}
+
+.vnHeader h1 {
+  font-size: clamp(31px, 8.4vw, 43px);
+  line-height: 0.9;
+  background: linear-gradient(110deg, #fff 0%, #efe4ff 48%, #c9faff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 12px 38px rgba(129, 44, 255, 0.14);
+}
+
+/* Product name, token balance and compact premium accents. */
+.vnBrand,
+.vnLogo,
+.vnWordmark,
+.vnCreditButton,
+.vnBalanceAmount,
+.vnPlanPrice,
+.vnPlanCredits,
+.vnProfileStats b,
+.vnCardMetrics,
+.vnResultStatus,
+.vnModelPrice {
+  font-family: var(--vn-font-accent);
+  font-variant-numeric: tabular-nums slashed-zero;
+  letter-spacing: -0.045em;
+}
+
+.vnCreditButton {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.vnCreditButton span,
+.vnCreditButton b {
+  font-family: inherit;
+}
+
+/* Interface headings stay modern and compact instead of turning every card serif. */
+.vnApp h3,
+.vnApp h4,
+.vnApp strong,
+.vnApp b {
+  letter-spacing: -0.022em;
+}
+
+.vnFeedCaption,
+.vnPromptCard p,
+.vnResultPrompt,
+.vnViewer p,
+.vnModal p,
+.vnEmpty p {
+  letter-spacing: -0.008em;
+  line-height: 1.52;
+}
+
+.vnFilterRail button,
+.vnPromptTabs button,
+.vnBottomNav small,
+.vnCardTop,
+.vnCardActions button,
+.vnBadge,
+.vnChip,
+.vnStatusBadge {
+  font-weight: 700;
+  letter-spacing: -0.018em;
+}
+
+.vnBottomNav small {
+  font-size: 10.5px;
+}
+
+.vnCardTop span {
+  font-weight: 800;
+}
+
+.vnCardMetrics span {
+  font-variant-numeric: tabular-nums;
+}
+
+textarea,
+input[type="text"],
+input[type="search"],
+input[type="url"] {
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+::placeholder {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+@media (max-width: 370px) {
+  .vnHeader h1 {
+    font-size: 30px;
+  }
+
+  .vnBottomNav small {
+    font-size: 9.5px;
+  }
+}
