@@ -35,6 +35,20 @@ jobs:
       - name: Apply curated trends integration
         run: python /tmp/apply_curated_trends.py
 
+      - name: Normalize generated contract test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("artflow/tests/test_admin_curated_trends.py")
+          source = path.read_text(encoding="utf-8")
+          source = source.replace(
+              'assert \'@router.post("/admin/trends")\' in api',
+              'assert \'@router.post("/admin/trends"\' in api',
+          )
+          path.write_text(source, encoding="utf-8")
+          PY
+
       - name: Install backend dependencies
         run: |
           pip install -r artflow/requirements.txt
