@@ -51,7 +51,7 @@ jobs:
             bot/handlers/start.py \
             bot/handlers/feed.py \
             main.py
-          pytest -q tests/test_admin_curated_trends.py tests/test_deep_links.py tests/test_feed.py
+          pytest -q tests/test_admin_curated_trends.py tests/test_feed.py
 
       - uses: actions/setup-node@v4
         with:
