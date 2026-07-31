@@ -4,7 +4,7 @@ import "./style.css";
 
 const API_BASE = "/api/v1";
 const REALTIME_MAX_FAILURES = 5;
-window.__APIX_MINIAPP_BUILD_ID__ = "20260713-miniapp-asset-cache-bust";
+window.__APIX_MINIAPP_BUILD_ID__ = "20260731-trends-v1";
 
 // ── fallbacks ────────────────────────────────────────────────────────────────
 
@@ -683,6 +683,7 @@ function Home({ user, referrals, feed, prompts, historyCount, setScreen, setTopu
           <button className="toolCard" onClick={() => setScreen("midjourney")}><b>MJ</b><span>Midjourney модуль</span></button>
           <button className="toolCard" onClick={() => setScreen("music")}><b>♪</b><span>Музыка AI</span></button>
           <button className="toolCard" onClick={() => setScreen("assistant")}><b>AI</b><span>Ассистент по промптам</span></button>
+          <button className="toolCard" onClick={() => setScreen("trends")}><b>👑</b><span>Тренды работ</span></button>
           <button className="toolCard" onClick={() => setScreen("referrals")}><b>₽</b><span>Партнёрский кабинет</span></button>
         </div>
       </section>
@@ -850,8 +851,9 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   );
 }
 
-function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemoved, scope = "all", onPromptUse, onOpenPrompts }) {
+function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemoved, scope = "all", onPromptUse, onOpenPrompts, source = "recent", onSourceChange }) {
   const [mode, setMode] = useState("all");
+  useEffect(() => setMode("all"), [source]);
   const scopedFeed = scope === "midjourney" ? (feed || []).filter((item) => isMidjourneyModel(item.model)) : (feed || []);
   const myCount = scopedFeed.filter(item => item.is_mine).length;
   const filtered = mode === "mine" ? scopedFeed.filter(item => item.is_mine) : scopedFeed;
@@ -860,14 +862,18 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemo
 
   return (
     <>
-      <h1>{isMjScope ? "Midjourney лента" : "Лента"}</h1>
+      <h1>{isMjScope ? (source === "top_day" ? "Midjourney тренды" : "Midjourney лента") : (source === "top_day" ? "Тренды" : "Лента")}</h1>
       <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 14, background: "var(--surface-2)", border: "1px solid var(--border-soft)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
           <div>
-            <div style={{ fontWeight: 700 }}>{isMjScope ? "Публичные MJ-работы" : "Публичные работы"}</div>
+            <div style={{ fontWeight: 700 }}>{source === "top_day" ? (isMjScope ? "Популярные MJ-работы сегодня" : "Популярные работы сегодня") : (isMjScope ? "Публичные MJ-работы" : "Публичные работы")}</div>
             <div style={{ fontSize: 12, color: "var(--text-ghost)", marginTop: 4 }}>Смотри чужие работы, повторяй и забирай ссылку на репост для своих.</div>
           </div>
           <button onClick={() => setScreen(isMjScope ? "midjourney" : "studio")} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent-border)", background: "var(--accent-soft)", color: "var(--accent-text)", fontSize: 13, fontWeight: 600 }}>{isMjScope ? "В MJ" : "В студию"}</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <button onClick={() => onSourceChange?.("recent")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${source !== "top_day" ? "var(--accent-border)" : "var(--border-strong)"}`, background: source !== "top_day" ? "var(--accent-soft)" : "var(--surface-1)", color: source !== "top_day" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 700 }}>🔥 Все работы</button>
+          <button onClick={() => onSourceChange?.("top_day")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${source === "top_day" ? "var(--accent-border)" : "var(--border-strong)"}`, background: source === "top_day" ? "var(--accent-soft)" : "var(--surface-1)", color: source === "top_day" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 700 }}>👑 Тренды</button>
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button onClick={() => setMode("all")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${mode === "all" ? "var(--accent-border)" : "var(--border-strong)"}`, background: mode === "all" ? "var(--accent-soft)" : "var(--surface-1)", color: mode === "all" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 600 }}>Все ({scopedFeed.length})</button>
@@ -883,7 +889,7 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemo
           {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} onNotice={onNotice} onRemoved={onRemoved} />)}
           {filtered.length === 0 && (
             <div style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 32, padding: "24px 16px", border: "1px dashed var(--border-strong)", borderRadius: 16 }}>
-              {mode === "mine" ? "У тебя пока нет работ в ленте. Опубликуй готовую картинку и забери ссылку для репоста." : "Лента пока пустая."}
+              {mode === "mine" ? "У тебя пока нет работ в ленте. Опубликуй готовую картинку и забери ссылку для репоста." : source === "top_day" ? "Сегодня в трендах пока нет опубликованных работ." : "Лента пока пустая."}
             </div>
           )}
         </div>
@@ -3402,6 +3408,7 @@ function App() {
   const [studioPreset, setStudioPreset] = useState(null);
   const [promptTarget, setPromptTarget] = useState("studio");
   const [feedScope, setFeedScope] = useState("all");
+  const [feedSource, setFeedSource] = useState("recent");
   const [historyScope, setHistoryScope] = useState("all");
   const poll = useRef(null);
   const musicPoll = useRef(null);
@@ -3439,7 +3446,8 @@ function App() {
   const imageModels = useApi(() => api("/models/image").then(x => items(x).length ? items(x) : x), fallbackImageModels);
   const videoModels = useApi(() => api("/models/video").then(x => items(x).length ? items(x) : x), fallbackVideoModels);
   const musicModels = useApi(() => api("/models/music").then(x => items(x).length ? items(x) : x), []);
-  const feed = useApi(() => api("/feed?limit=10000").then(items), fallbackFeed);
+  const feed = useApi(() => api("/feed?source=recent&limit=10000").then(items), fallbackFeed);
+  const trends = useApi(() => api("/feed?source=top_day&limit=10000").then(items), fallbackFeed);
   const myFeed = useApi(() => api("/me/feed?limit=10000").then(items), []);
   const history = useApi(() => api("/history?limit=50").then(items), []);
   const prompts = useApi(() => api("/prompts?limit=30").then(items), []);
@@ -3749,7 +3757,16 @@ function App() {
   }
 
   function navigate(nextScreen) {
-    if (nextScreen === "feed") setFeedScope("all");
+    if (nextScreen === "trends") {
+      setFeedScope("all");
+      setFeedSource("top_day");
+      setScreen("feed");
+      return;
+    }
+    if (nextScreen === "feed") {
+      setFeedScope("all");
+      setFeedSource("recent");
+    }
     if (nextScreen === "history") setHistoryScope("all");
     if (nextScreen === "prompts") setPromptTarget("studio");
     setScreen(nextScreen);
@@ -3763,6 +3780,7 @@ function App() {
   function openFeed(scope = "all") {
     const normalizedScope = scope === "midjourney" ? "midjourney" : "all";
     setFeedScope(normalizedScope);
+    setFeedSource("recent");
     setPromptTarget(normalizedScope === "midjourney" ? "midjourney" : "studio");
     setScreen("feed");
   }
@@ -3794,7 +3812,7 @@ function App() {
     home: <Home user={user} referrals={referrals.data} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={navigate} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
     capabilities: <Capabilities setScreen={navigate} setTopup={setTopupOpen} />,
     assistant: <Assistant onNotice={setNotice} />,
-    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} onRemoved={() => { feed.reload(); myFeed.reload(); }} scope={feedScope} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
+    feed: <Feed feed={feedSource === "top_day" ? trends.data : feed.data} feedLoading={feedSource === "top_day" ? trends.loading : feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} onRemoved={() => { feed.reload(); trends.reload(); myFeed.reload(); }} scope={feedScope} source={feedSource} onSourceChange={setFeedSource} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
     studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} />,
     midjourney: <MidjourneyModule imageModels={imageModels.data} videoModels={videoModels.data} user={user} generation={generation} prompts={prompts.data} feed={feed.data} history={history.data} setScreen={navigate} setTopup={setTopupOpen} onGenerate={generate} onRemixGenerate={remixGenerate} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} onPromptUse={openMidjourneyPromptPreset} onOpenPrompts={() => openPromptLibrary("midjourney")} onOpenFeed={() => openFeed("midjourney")} onOpenHistory={() => openHistory("midjourney")} />,
     music: <Music user={user} musicGen={musicGen} musicModels={musicModels.data} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,
