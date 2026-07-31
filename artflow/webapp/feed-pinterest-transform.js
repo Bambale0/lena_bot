@@ -27,7 +27,7 @@ export function feedPinterestMiniApp() {
       }
       code = code.replace(
         'window.__APIX_MINIAPP_BUILD_ID__ = "20260731-feed-first-relevance-v1";',
-        'window.__APIX_MINIAPP_BUILD_ID__ = "20260801-feed-ux-architecture-v3";',
+        'window.__APIX_MINIAPP_BUILD_ID__ = "20260801-feed-webp-viewer-v4";',
       );
 
       return { code, map: null };

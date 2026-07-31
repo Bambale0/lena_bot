@@ -56,7 +56,7 @@ function feedFirstMiniApp() {
       code = replaceRequired(
         code,
         '  const feed = useApi(() => api("/feed?source=recent&limit=10000").then(items), fallbackFeed);',
-        '  const feed = useApi(() => api("/feed?source=recent&limit=200").then(items), fallbackFeed);',
+        '  const feed = useApi(() => api("/feed?source=recent&limit=60").then(items), fallbackFeed);',
         "feed request limit",
       );
       code = replaceRequired(
