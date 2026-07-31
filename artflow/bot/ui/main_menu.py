@@ -94,7 +94,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
         InlineKeyboardButton(text="🔥 " + ("Лента идей" if lang == "ru" else "Ideas feed"), callback_data="menu:feed"),
     )
     builder.row(
-        InlineKeyboardButton(text="👑 " + ("Тренды" if lang == "ru" else "Trends"), callback_data="menu:top_day"),
+        InlineKeyboardButton(text="👑 " + ("Тренды" if lang == "ru" else "Trends"), callback_data="menu:trends"),
     )
     builder.row(
         InlineKeyboardButton(text="💋 " + (f"Баланс · {context.balance}" if lang == "ru" else f"Balance · {context.balance}"), callback_data="menu:balance"),

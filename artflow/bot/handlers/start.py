@@ -142,6 +142,10 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, session:
         from bot.handlers.marketplace import show_prompt_card_by_id
         await show_prompt_card_by_id(message=message, session=session, prompt_id=start_payload.target_id)
         return
+    if start_payload.target_kind == "trend" and start_payload.target_id is not None:
+        from bot.handlers.trends import _show
+        await _show(message, session, db_user, trend_id=start_payload.target_id)
+        return
 
     history = await repo.get_user_history(session, db_user.id, limit=1)
     if not history:

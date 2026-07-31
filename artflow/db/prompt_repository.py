@@ -46,7 +46,7 @@ COLLECTION_KEYWORDS: dict[str, tuple[str, ...]] = {
 def _normalize_tags(tags: list[str] | None) -> list[str]:
     cleaned: list[str] = []
     for tag in tags or []:
-        normalized = re.sub(r"[^a-z0-9_+-]", "", tag.lower().strip().lstrip("#"))
+        normalized = re.sub(r"[^a-z0-9_+:-]", "", tag.lower().strip().lstrip("#"))
         if normalized and normalized not in cleaned:
             cleaned.append(normalized[:32])
     return cleaned
