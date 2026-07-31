@@ -203,31 +203,49 @@ img,video{display:block;width:100%;height:100%;object-fit:cover}
 .feedCard div:not(.art){padding:12px}
 .feedCard span{display:inline-block;border-radius:8px;background:var(--accent-soft);padding:4px 8px;font-size:10px;color:var(--text-muted)}
 
-/* feed gallery */
-.feedList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
-.feedFullCard{border-radius:16px;border:1px solid var(--border);background:var(--surface);overflow:hidden;box-shadow:0 10px 24px rgba(0,0,0,.14)}
-.feedTileMedia{position:relative;display:grid;aspect-ratio:3/4;background:var(--bg-strong);overflow:hidden}
-.feedTileMedia.multi{grid-template-columns:repeat(2,1fr);gap:2px;aspect-ratio:1/1}
-.feedTileImg{width:100%;height:100%;object-fit:cover}
-.feedMoreBadge{position:absolute;right:6px;bottom:6px;border-radius:999px;background:rgba(0,0,0,.62);color:#fff;font-size:11px;font-weight:700;padding:3px 7px}
-.feedTileInfo{padding:9px}
-.feedTileHead{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:7px}
-.feedTileStats{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:var(--text-ghost)}
-.feedTileStats .mineMark{color:var(--success);font-weight:700}
-.feedTileActions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:0}
-.feedTileActions button{min-height:34px;border-radius:10px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text-soft);font-size:12px;font-weight:700}
-.feedTileActions .remixBtn{background:var(--accent-soft);border-color:var(--accent-border);color:var(--accent-text)}
-.feedTileActions .successAction{background:var(--success-soft);border-color:var(--success-border);color:var(--success)}
-.feedTileActions .dangerAction{background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.35);color:#ff6b6b}
-.feedTileHead .modelBadge{margin-bottom:0}
-.feedTileCard .modelBadge{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.feedTileCard .feedAuthor{max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.modelBadge{display:inline-block;border-radius:8px;background:var(--accent-soft);padding:4px 8px;font-size:10px;color:var(--text-muted);margin-bottom:6px}
-.feedPrompt{margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--text-soft);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
-.feedActions{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
-.likeBtn{background:var(--surface-2);border-radius:999px;padding:6px 12px;font-size:13px;transition:background .15s}
-.likeBtn.liked{background:rgba(236,72,153,.18);color:#db2777}
-.feedAuthor{font-size:11px;color:var(--text-ghost)}
+/* compact feed gallery */
+.feedPageHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:0 0 10px}
+.feedPageHeader h1{font-size:24px;line-height:1.1}
+.feedPageHeader p{margin:4px 0 0;color:var(--text-ghost);font-size:12px}
+.feedCreateButton{flex:0 0 auto;border:1px solid var(--accent-border);background:var(--accent-soft);color:var(--accent-text);border-radius:12px;padding:8px 11px;font-size:12px;font-weight:750}
+.feedFilterBar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:10px;padding:4px;border:1px solid var(--border-soft);border-radius:13px;background:var(--surface)}
+.feedFilterBar button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border-radius:9px;background:transparent;color:var(--text-soft);font-size:12px;font-weight:700}
+.feedFilterBar button span{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:var(--surface-2);font-size:10px;color:var(--text-ghost)}
+.feedFilterBar button.active{background:var(--surface-3);color:var(--text);box-shadow:inset 0 0 0 1px var(--border)}
+.feedFilterBar button.active span{background:var(--accent-soft);color:var(--accent-text)}
+.feedFilterBar button.active.mine span{background:var(--success-soft);color:var(--success)}
+.feedList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:start}
+.feedCompactCard{min-width:0;border:1px solid var(--border-soft);border-radius:14px;background:var(--surface);overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.12);content-visibility:auto;contain-intrinsic-size:190px 240px}
+.feedCompactMedia{position:relative;display:grid;width:100%;aspect-ratio:1/1;background:var(--bg-strong);overflow:hidden}
+.feedCompactMedia.multi{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:2px}
+.feedCompactMedia .art,.feedCompactMedia .mediaOpenable,.feedCompactImg{width:100%;height:100%;min-width:0;min-height:0;object-fit:cover}
+.feedCompactMedia video{pointer-events:none}
+.feedCompactTop{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px;background:linear-gradient(180deg,rgba(0,0,0,.62),transparent);pointer-events:none}
+.feedCompactAuthor{max-width:78%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-size:10px;font-weight:750;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.feedMineBadge{border:1px solid rgba(255,255,255,.28);background:rgba(28,140,83,.78);color:#fff;border-radius:999px;padding:2px 6px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+.feedCompactStats{position:absolute;left:6px;bottom:6px;display:flex;align-items:center;gap:4px;pointer-events:none}
+.feedCompactStats span{border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.58);backdrop-filter:blur(8px);color:#fff;border-radius:999px;padding:3px 6px;font-size:9px;font-weight:750;line-height:1}
+.feedMoreBadge{position:absolute;right:6px;bottom:6px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(0,0,0,.62);color:#fff;font-size:10px;font-weight:800;padding:3px 7px}
+.feedCompactActions{display:flex;align-items:center;gap:5px;padding:6px}
+.feedCompactActions button{height:32px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface-2);color:var(--text-soft);font-size:11px;font-weight:800;transition:transform .12s ease,background .12s ease,border-color .12s ease}
+.feedCompactActions button:active{transform:scale(.96)}
+.feedIconAction{flex:0 0 32px;padding:0;display:grid;place-items:center}
+.feedIconAction.liked{border-color:rgba(236,72,153,.35);background:rgba(236,72,153,.15);color:#f472b6}
+.feedRepeatAction{flex:1;min-width:0;padding:0 8px;border-color:var(--accent-border)!important;background:var(--accent-soft)!important;color:var(--accent-text)!important;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.feedCompactActions .successAction{border-color:var(--success-border);background:var(--success-soft);color:var(--success)}
+.feedCompactActions .dangerAction{border-color:var(--danger-border);background:var(--danger-soft);color:var(--danger)}
+.feedEmptyState{grid-column:1/-1;display:grid;gap:4px;margin-top:12px;padding:22px 16px;border:1px dashed var(--border-strong);border-radius:14px;text-align:center}
+.feedEmptyState b{font-size:14px}
+.feedEmptyState span{font-size:12px;color:var(--text-ghost)}
+@media (max-width:360px){
+  .feedList{gap:6px}
+  .feedCompactCard{border-radius:12px}
+  .feedCompactActions{gap:4px;padding:5px}
+  .feedCompactActions button{height:30px;border-radius:8px}
+  .feedIconAction{flex-basis:30px}
+  .feedRepeatAction span{display:none}
+}
+
 .resultCard{margin-top:14px;border:1px solid var(--border);border-radius:18px;background:var(--surface);overflow:hidden}
 .resultMedia{display:flex;align-items:center;justify-content:center;background:var(--bg-strong);padding:10px;min-height:280px;max-height:78vh}
 .resultImg{width:100%;height:auto;max-height:76vh;object-fit:contain}
