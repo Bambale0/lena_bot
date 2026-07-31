@@ -29,15 +29,27 @@ def feed_card_kb(
             InlineKeyboardButton(text="🗑 Удалить из ленты", callback_data=f"feed:remove:{gen_id}:{source}:{index}"),
         )
     builder.row(
+        InlineKeyboardButton(
+            text="🔥 Все работы" if source == "top" else "👑 Тренды",
+            callback_data="menu:feed" if source == "top" else "feed:top",
+        ),
+    )
+    builder.row(
         InlineKeyboardButton(text="📚 Библиотека промптов", callback_data="menu:prompts"),
         InlineKeyboardButton(text="🏠 Главная", callback_data="menu:main"),
     )
     return builder.as_markup()
 
 
-def empty_feed_kb() -> InlineKeyboardMarkup:
+def empty_feed_kb(*, top_day: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🎨 Создать изображение", callback_data="menu:image"))
+    builder.row(
+        InlineKeyboardButton(
+            text="🔥 Все работы" if top_day else "👑 Тренды",
+            callback_data="menu:feed" if top_day else "menu:top_day",
+        )
+    )
     builder.row(InlineKeyboardButton(text="📚 Библиотека промптов", callback_data="menu:prompts"))
     builder.row(InlineKeyboardButton(text="🏠 Главная", callback_data="menu:main"))
     return builder.as_markup()
