@@ -4,7 +4,7 @@ import "./style.css";
 
 const API_BASE = "/api/v1";
 const REALTIME_MAX_FAILURES = 5;
-window.__APIX_MINIAPP_BUILD_ID__ = "20260731-trends-v1";
+window.__APIX_MINIAPP_BUILD_ID__ = "20260731-admin-curated-trends-v2";
 
 // ── fallbacks ────────────────────────────────────────────────────────────────
 
@@ -851,9 +851,8 @@ function FeedCard({ item, idx, onRemix, onNotice, onRemoved }) {
   );
 }
 
-function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemoved, scope = "all", onPromptUse, onOpenPrompts, source = "recent", onSourceChange }) {
+function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemoved, scope = "all", onPromptUse, onOpenPrompts }) {
   const [mode, setMode] = useState("all");
-  useEffect(() => setMode("all"), [source]);
   const scopedFeed = scope === "midjourney" ? (feed || []).filter((item) => isMidjourneyModel(item.model)) : (feed || []);
   const myCount = scopedFeed.filter(item => item.is_mine).length;
   const filtered = mode === "mine" ? scopedFeed.filter(item => item.is_mine) : scopedFeed;
@@ -862,18 +861,14 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemo
 
   return (
     <>
-      <h1>{isMjScope ? (source === "top_day" ? "Midjourney тренды" : "Midjourney лента") : (source === "top_day" ? "Тренды" : "Лента")}</h1>
+      <h1>{isMjScope ? "Midjourney лента" : "Лента"}</h1>
       <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 14, background: "var(--surface-2)", border: "1px solid var(--border-soft)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
           <div>
-            <div style={{ fontWeight: 700 }}>{source === "top_day" ? (isMjScope ? "Популярные MJ-работы сегодня" : "Популярные работы сегодня") : (isMjScope ? "Публичные MJ-работы" : "Публичные работы")}</div>
+            <div style={{ fontWeight: 700 }}>{isMjScope ? "Публичные MJ-работы" : "Публичные работы"}</div>
             <div style={{ fontSize: 12, color: "var(--text-ghost)", marginTop: 4 }}>Смотри чужие работы, повторяй и забирай ссылку на репост для своих.</div>
           </div>
           <button onClick={() => setScreen(isMjScope ? "midjourney" : "studio")} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent-border)", background: "var(--accent-soft)", color: "var(--accent-text)", fontSize: 13, fontWeight: 600 }}>{isMjScope ? "В MJ" : "В студию"}</button>
-        </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <button onClick={() => onSourceChange?.("recent")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${source !== "top_day" ? "var(--accent-border)" : "var(--border-strong)"}`, background: source !== "top_day" ? "var(--accent-soft)" : "var(--surface-1)", color: source !== "top_day" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 700 }}>🔥 Все работы</button>
-          <button onClick={() => onSourceChange?.("top_day")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${source === "top_day" ? "var(--accent-border)" : "var(--border-strong)"}`, background: source === "top_day" ? "var(--accent-soft)" : "var(--surface-1)", color: source === "top_day" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 700 }}>👑 Тренды</button>
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button onClick={() => setMode("all")} style={{ flex: 1, padding: "9px 12px", borderRadius: 12, border: `1px solid ${mode === "all" ? "var(--accent-border)" : "var(--border-strong)"}`, background: mode === "all" ? "var(--accent-soft)" : "var(--surface-1)", color: mode === "all" ? "var(--accent-text)" : "var(--text-muted)", fontWeight: 600 }}>Все ({scopedFeed.length})</button>
@@ -889,11 +884,192 @@ function Feed({ feed, feedLoading, prompts, setScreen, onRemix, onNotice, onRemo
           {filtered.map((f, i) => <FeedCard key={f.id || i} item={f} idx={i} onRemix={onRemix} onNotice={onNotice} onRemoved={onRemoved} />)}
           {filtered.length === 0 && (
             <div style={{ color: "var(--text-ghost)", textAlign: "center", marginTop: 32, padding: "24px 16px", border: "1px dashed var(--border-strong)", borderRadius: 16 }}>
-              {mode === "mine" ? "У тебя пока нет работ в ленте. Опубликуй готовую картинку и забери ссылку для репоста." : source === "top_day" ? "Сегодня в трендах пока нет опубликованных работ." : "Лента пока пустая."}
+              {mode === "mine" ? "У тебя пока нет работ в ленте. Опубликуй готовую картинку и забери ссылку для репоста." : "Лента пока пустая."}
             </div>
           )}
         </div>
       )}
+    </>
+  );
+}
+
+
+// ── Admin-curated trends ─────────────────────────────────────────────────────
+
+function TrendPreview({ item }) {
+  if (!item?.preview_url) return <Art type="a" />;
+  if (item.kind === "video") {
+    return <video src={item.preview_url} controls muted playsInline preload="metadata" style={{ width: "100%", maxHeight: 420, objectFit: "contain", borderRadius: 16, background: "#000" }} />;
+  }
+  return <img src={item.preview_url} alt={item.title || "Trend"} loading="lazy" style={{ width: "100%", maxHeight: 420, objectFit: "contain", borderRadius: 16, background: "#000" }} />;
+}
+
+function TrendAdminForm({ imageModels, videoModels, onCreated, onNotice }) {
+  const [kind, setKind] = useState("image");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [model, setModel] = useState("");
+  const [promptTemplate, setPromptTemplate] = useState("");
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [scenario, setScenario] = useState("text");
+  const [duration, setDuration] = useState(5);
+  const [ratio, setRatio] = useState("");
+  const [quality, setQuality] = useState("");
+  const [resolution, setResolution] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+  const models = kind === "video" ? (videoModels || []) : (imageModels || []);
+
+  useEffect(() => {
+    if (!models.length) { setModel(""); return; }
+    if (!models.some((item) => item.key === model)) setModel(models[0].key);
+  }, [kind, models, model]);
+
+  async function uploadPreview(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("kind", kind);
+      form.append("file", file);
+      const result = await apiForm("/admin/trends/upload", form);
+      setPreviewUrl(result.url || "");
+      onNotice?.({ type: "success", message: "Preview загружен" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось загрузить preview" });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api("/admin/trends", {
+        method: "POST",
+        body: JSON.stringify({
+          kind,
+          title: title.trim(),
+          description: description.trim(),
+          prompt_template: promptTemplate.trim(),
+          preview_url: previewUrl,
+          model,
+          settings: {
+            scenario: kind === "video" ? scenario : undefined,
+            duration: kind === "video" ? Number(duration) : undefined,
+            ratio: ratio || undefined,
+            quality: kind === "image" ? quality || undefined : undefined,
+            resolution: kind === "video" ? resolution || undefined : undefined,
+            requires_reference: scenario === "image",
+          },
+        }),
+      });
+      setTitle(""); setDescription(""); setPromptTemplate(""); setPreviewUrl("");
+      onNotice?.({ type: "success", message: "Тренд опубликован" });
+      onCreated?.();
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось опубликовать тренд" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = title.trim().length >= 3 && promptTemplate.trim() && previewUrl && model;
+  return (
+    <section className="assistantPanel" style={{ marginBottom: 18 }}>
+      <div className="studioHead"><h1 style={{ fontSize: 18 }}>Добавить тренд</h1><span className="statusBadge success">только админ</span></div>
+      <div className="tabs soft">
+        <button className={kind === "image" ? "active" : ""} onClick={() => setKind("image")}>🖼 Фото</button>
+        <button className={kind === "video" ? "active" : ""} onClick={() => setKind("video")}>🎬 Видео</button>
+      </div>
+      <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Название — до 60 символов" maxLength={60} />
+      <textarea className="field" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Публичное описание — до 200 символов" maxLength={200} />
+      <select value={model} onChange={(e) => setModel(e.target.value)}>
+        {models.map((item) => <option key={item.key} value={item.key}>{item.display_name} · {formatCredits(item.credits)} 💋</option>)}
+      </select>
+      {kind === "video" && (
+        <div className="settingsGrid">
+          <SettingsRow label="Сценарий"><select value={scenario} onChange={(e) => setScenario(e.target.value)}><option value="text">Текст → видео</option><option value="image">Фото → видео</option></select></SettingsRow>
+          <SettingsRow label="Длительность"><input className="field" type="number" min="2" max="30" value={duration} onChange={(e) => setDuration(e.target.value)} /></SettingsRow>
+          <SettingsRow label="Разрешение"><input className="field" value={resolution} onChange={(e) => setResolution(e.target.value)} placeholder="720p" /></SettingsRow>
+        </div>
+      )}
+      {kind === "image" && (
+        <div className="settingsGrid">
+          <SettingsRow label="Формат"><input className="field" value={ratio} onChange={(e) => setRatio(e.target.value)} placeholder="4:5 или 9:16" /></SettingsRow>
+          <SettingsRow label="Качество"><input className="field" value={quality} onChange={(e) => setQuality(e.target.value)} placeholder="basic / 2K / 4K" /></SettingsRow>
+        </div>
+      )}
+      <button className="refUpload" onClick={() => fileRef.current?.click()} disabled={uploading}>{uploading ? "Загружаю..." : previewUrl ? "✅ Preview загружен — заменить" : "Загрузить preview"}</button>
+      <input ref={fileRef} type="file" accept={kind === "video" ? "video/mp4,video/webm,video/quicktime" : "image/jpeg,image/png,image/webp"} hidden onChange={uploadPreview} />
+      {previewUrl && <TrendPreview item={{ kind, preview_url: previewUrl, title }} />}
+      <textarea className="field" value={promptTemplate} onChange={(e) => setPromptTemplate(e.target.value)} placeholder="Скрытый канонический prompt — до 8000 символов" maxLength={8000} style={{ minHeight: 130 }} />
+      <button className="primary" disabled={!ready || busy} onClick={submit}>{busy ? "Публикую..." : "Опубликовать тренд"}</button>
+    </section>
+  );
+}
+
+function Trends({ trends, loading, user, imageModels, videoModels, reload, onApply, onNotice }) {
+  const images = (trends || []).filter((item) => item.kind !== "video");
+  const videos = (trends || []).filter((item) => item.kind === "video");
+
+  async function share(item) {
+    try {
+      const result = await api(`/trends/${item.id}/link`);
+      const ok = result.link ? await copyText(result.link) : false;
+      onNotice?.({ type: ok ? "success" : "error", message: ok ? "Ссылка на тренд скопирована" : "Не удалось получить ссылку" });
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось получить ссылку" });
+    }
+  }
+
+  async function archive(item) {
+    if (!window.confirm(`Убрать тренд «${item.title}»?`)) return;
+    try {
+      await api(`/admin/trends/${item.id}/archive`, { method: "POST" });
+      onNotice?.({ type: "success", message: "Тренд скрыт" });
+      reload?.();
+    } catch (e) {
+      onNotice?.({ type: "error", message: e.message || "Не удалось скрыть тренд" });
+    }
+  }
+
+  function Section({ title, data }) {
+    return (
+      <section className="block">
+        <div className="title"><div><h2>{title}</h2><p>Шаблоны задаёт администратор</p></div><span>{data.length}</span></div>
+        <div style={{ display: "grid", gap: 14 }}>
+          {data.map((item) => (
+            <article key={item.id} className="assistantPanel">
+              <TrendPreview item={item} />
+              <div><h3 style={{ margin: "0 0 5px" }}>{item.title}</h3><p style={{ margin: 0, color: "var(--text-soft)" }}>{item.description}</p></div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--text-ghost)" }}>
+                <span>{item.model}</span><span>🔥 {item.uses_count || 0} повторов</span>
+              </div>
+              <div className="feedActions">
+                <button className="primary" onClick={() => onApply?.(item)}>🔥 Повторить</button>
+                <button className="ghost" onClick={() => share(item)}>🔗</button>
+                {user.is_admin && <button className="dangerAction" onClick={() => archive(item)}>🗑</button>}
+              </div>
+            </article>
+          ))}
+          {!data.length && <div className="warn">Администратор пока не опубликовал тренды этого типа.</div>}
+        </div>
+      </section>
+    );
+  }
+
+  if (loading) return <><h1>Тренды</h1><Spinner /></>;
+  return (
+    <>
+      <div className="studioHead"><div><h1>🔥 Тренды</h1><p style={{ color: "var(--text-soft)", margin: 0 }}>Курируемые шаблоны, а не копия пользовательской ленты.</p></div></div>
+      {user.is_admin && <TrendAdminForm imageModels={imageModels} videoModels={videoModels} onCreated={reload} onNotice={onNotice} />}
+      <Section title="🖼 Фото-тренды" data={images} />
+      <Section title="🎬 Видео-тренды" data={videos} />
     </>
   );
 }
@@ -1298,11 +1474,23 @@ function Studio({
 
   useEffect(() => {
     if (!preset?.prompt) return;
-    setKind("image");
-    setPrompt(preset.prompt);
-    setSelectedPrompt(preset.promptId ? { id: preset.promptId, title: preset.title || "Промпт" } : null);
+    setKind(preset.kind === "video" ? "video" : "image");
+    setPrompt(preset.hiddenPrompt ? "Скрытый шаблон тренда" : preset.prompt);
+    setSelectedPrompt(preset.promptId ? { id: preset.promptId, title: preset.title || "Промпт", hidden: Boolean(preset.hiddenPrompt) } : null);
     if (preset.modelKey) setScenario("all");
-  }, [preset?.prompt, preset?.promptId, preset?.title, preset?.modelKey]);
+  }, [preset?.prompt, preset?.promptId, preset?.title, preset?.modelKey, preset?.kind, preset?.hiddenPrompt]);
+
+  useEffect(() => {
+    const next = preset?.settings || {};
+    if (next.ratio) setRatio(next.ratio);
+    if (next.quality) setQuality(next.quality);
+    if (next.duration) setDuration(Number(next.duration));
+    if (next.resolution) setResolution(next.resolution);
+    if (next.scenario === "image" || next.requires_reference) {
+      setScenario(preset?.kind === "video" ? "i2v" : "edit");
+      setMode("image");
+    }
+  }, [preset?.promptId, preset?.settings, preset?.kind]);
 
   useEffect(() => {
     if (preset?.modelKey && visibleModels.some((item) => item.key === preset.modelKey)) {
@@ -1534,7 +1722,7 @@ function Studio({
     const payload = {
       model,
       prompt: promptForGeneration,
-      prompt_id: kind === "image" && !styleEditKind && promptForGeneration === prompt ? selectedPrompt?.id : null,
+      prompt_id: !styleEditKind && promptForGeneration === prompt ? selectedPrompt?.id : null,
       mode,
       aspect_ratio: ratio,
       quality,
@@ -1821,13 +2009,14 @@ function Studio({
         <SettingsRow label="Промпт">
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            readOnly={Boolean(selectedPrompt?.hidden)}
+            onChange={(e) => { setPrompt(e.target.value); setSelectedPrompt(null); }}
             placeholder={stylePromptPlaceholder}
           />
           {selectedPrompt && (
             <div className="selectedPrompt">
-              <span>Из библиотеки: <b>{selectedPrompt.title}</b></span>
-              <button type="button" onClick={() => setSelectedPrompt(null)}>×</button>
+              <span>{selectedPrompt.hidden ? "Тренд" : "Из библиотеки"}: <b>{selectedPrompt.title}</b></span>
+              <button type="button" onClick={() => { setSelectedPrompt(null); if (selectedPrompt.hidden) setPrompt(""); }}>×</button>
             </div>
           )}
         </SettingsRow>
@@ -3408,7 +3597,6 @@ function App() {
   const [studioPreset, setStudioPreset] = useState(null);
   const [promptTarget, setPromptTarget] = useState("studio");
   const [feedScope, setFeedScope] = useState("all");
-  const [feedSource, setFeedSource] = useState("recent");
   const [historyScope, setHistoryScope] = useState("all");
   const poll = useRef(null);
   const musicPoll = useRef(null);
@@ -3417,6 +3605,7 @@ function App() {
   const realtimeRef = useRef(null);
   const realtimeReconnectRef = useRef(null);
   const generationScreen = useRef("studio");
+  const handledTrendLink = useRef(false);
 
   useEffect(() => {
     const webApp = tg();
@@ -3447,7 +3636,7 @@ function App() {
   const videoModels = useApi(() => api("/models/video").then(x => items(x).length ? items(x) : x), fallbackVideoModels);
   const musicModels = useApi(() => api("/models/music").then(x => items(x).length ? items(x) : x), []);
   const feed = useApi(() => api("/feed?source=recent&limit=10000").then(items), fallbackFeed);
-  const trends = useApi(() => api("/feed?source=top_day&limit=10000").then(items), fallbackFeed);
+  const curatedTrends = useApi(() => api("/trends?limit=80").then(items), []);
   const myFeed = useApi(() => api("/me/feed?limit=10000").then(items), []);
   const history = useApi(() => api("/history?limit=50").then(items), []);
   const prompts = useApi(() => api("/prompts?limit=30").then(items), []);
@@ -3467,6 +3656,19 @@ function App() {
   }, [me.data, telegramUser?.username, telegramUser?.first_name, telegramUser?.last_name, telegramUser?.photo_url]);
   const isDemo = me.error || imageModels.error || videoModels.error;
   const resolvedTheme = resolveTheme(theme);
+
+  useEffect(() => {
+    if (handledTrendLink.current || !curatedTrends.data?.length) return;
+    const queryId = Number(new URLSearchParams(window.location.search).get("trend") || 0);
+    const startParam = String(tg()?.initDataUnsafe?.start_param || "");
+    const startMatch = startParam.match(/^trend_(\d+)$/);
+    const trendId = queryId || Number(startMatch?.[1] || 0);
+    if (!trendId) return;
+    const item = curatedTrends.data.find((candidate) => Number(candidate.id) === trendId);
+    if (!item) return;
+    handledTrendLink.current = true;
+    openTrendPreset(item);
+  }, [curatedTrends.data]);
 
   useEffect(() => {
     pollIdRef.current = pollId;
@@ -3681,7 +3883,7 @@ function App() {
     try {
       const endpoint = kind === "video" ? "/generate/video" : "/generate/image";
       const body = kind === "video"
-        ? { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-video" ? "mj-video" : ""), mode: payload.mode, duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, reference_urls: payload.reference_urls || [], grok_mode: payload.grok_mode }
+        ? { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-video" ? "mj-video" : ""), prompt_id: payload.prompt_id || null, mode: payload.mode, duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, reference_urls: payload.reference_urls || [], grok_mode: payload.grok_mode }
         : { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-blend" ? "mj-blend" : ""), prompt_id: payload.prompt_id || null, aspect_ratio: payload.aspect_ratio, quality: payload.quality, count: payload.count, reference_url: payload.reference_url, reference_urls: payload.reference_urls || [] };
       const g = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
       setGeneration(g);
@@ -3757,15 +3959,8 @@ function App() {
   }
 
   function navigate(nextScreen) {
-    if (nextScreen === "trends") {
-      setFeedScope("all");
-      setFeedSource("top_day");
-      setScreen("feed");
-      return;
-    }
     if (nextScreen === "feed") {
       setFeedScope("all");
-      setFeedSource("recent");
     }
     if (nextScreen === "history") setHistoryScope("all");
     if (nextScreen === "prompts") setPromptTarget("studio");
@@ -3780,7 +3975,6 @@ function App() {
   function openFeed(scope = "all") {
     const normalizedScope = scope === "midjourney" ? "midjourney" : "all";
     setFeedScope(normalizedScope);
-    setFeedSource("recent");
     setPromptTarget(normalizedScope === "midjourney" ? "midjourney" : "studio");
     setScreen("feed");
   }
@@ -3804,6 +3998,26 @@ function App() {
     setScreen(targetScreen);
   }
 
+  async function openTrendPreset(item) {
+    try {
+      const prepared = await api(`/trends/${item.id}/prepare`, { method: "POST" });
+      setRemixSource(null);
+      setStudioPreset({
+        kind: prepared.kind,
+        modelKey: prepared.model,
+        prompt: "Скрытый шаблон тренда",
+        promptId: prepared.prompt_id,
+        title: prepared.title,
+        settings: prepared.settings || {},
+        hiddenPrompt: true,
+        trendId: prepared.id,
+      });
+      setScreen("studio");
+    } catch (e) {
+      setNotice({ type: "error", message: e.message || "Не удалось открыть тренд" });
+    }
+  }
+
   const activePromptUse = promptTarget === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset;
 
   window.__APIX_IS_ADMIN__ = Boolean(user?.is_admin);
@@ -3812,7 +4026,8 @@ function App() {
     home: <Home user={user} referrals={referrals.data} feed={feed.data} prompts={prompts.data} historyCount={history.data.length} setScreen={navigate} setTopup={setTopupOpen} midjourneyItems={midjourneyItems.data} openStudioPreset={openStudioPreset} onPromptUse={openPromptPreset} />,
     capabilities: <Capabilities setScreen={navigate} setTopup={setTopupOpen} />,
     assistant: <Assistant onNotice={setNotice} />,
-    feed: <Feed feed={feedSource === "top_day" ? trends.data : feed.data} feedLoading={feedSource === "top_day" ? trends.loading : feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} onRemoved={() => { feed.reload(); trends.reload(); myFeed.reload(); }} scope={feedScope} source={feedSource} onSourceChange={setFeedSource} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
+    feed: <Feed feed={feed.data} feedLoading={feed.loading} prompts={prompts.data} setScreen={navigate} onRemix={handleRemix} onNotice={setNotice} onRemoved={() => { feed.reload(); myFeed.reload(); }} scope={feedScope} onPromptUse={feedScope === "midjourney" ? openMidjourneyPromptPreset : openPromptPreset} onOpenPrompts={() => openPromptLibrary(feedScope === "midjourney" ? "midjourney" : "studio")} />,
+    trends: <Trends trends={curatedTrends.data} loading={curatedTrends.loading} user={user} imageModels={imageModels.data} videoModels={videoModels.data} reload={curatedTrends.reload} onApply={openTrendPreset} onNotice={setNotice} />,
     studio: <Studio imageModels={imageModels.data} videoModels={videoModels.data} user={user} onGenerate={generate} onRemixGenerate={remixGenerate} generation={generation} setTopup={setTopupOpen} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} />,
     midjourney: <MidjourneyModule imageModels={imageModels.data} videoModels={videoModels.data} user={user} generation={generation} prompts={prompts.data} feed={feed.data} history={history.data} setScreen={navigate} setTopup={setTopupOpen} onGenerate={generate} onRemixGenerate={remixGenerate} remixSource={remixSource} clearRemix={() => setRemixSource(null)} onNotice={setNotice} preset={studioPreset} onPromptUse={openMidjourneyPromptPreset} onOpenPrompts={() => openPromptLibrary("midjourney")} onOpenFeed={() => openFeed("midjourney")} onOpenHistory={() => openHistory("midjourney")} />,
     music: <Music user={user} musicGen={musicGen} musicModels={musicModels.data} onGenerateMusic={generateMusic} setTopup={setTopupOpen} onNotice={setNotice} />,

@@ -52,6 +52,7 @@ from api.midjourney_service import MJButton, MJTaskResult
 from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import WEB_TASK_PREFIX, is_web_task_id
 from api.miniapp_routes import router as miniapp_router
+from api.trends_routes import router as trends_api_router
 from api.music_service import (
     SUNO_VOICE_FAILED_STATUSES,
     SUNO_VOICE_STATUS_AWAITING_VERIFICATION,
@@ -80,6 +81,7 @@ from bot.handlers import (
     payment,
     stars_payment,
     start,
+    trends,
     video_gen,
 )
 from bot.handlers import settings as settings_handler
@@ -533,6 +535,7 @@ async def _set_bot_commands(bot: Bot, *, schedule_retry: bool = True) -> None:
         BotCommand(command="help", description="Помощь"),
         BotCommand(command="assistant", description="AI-ассистент"),
         BotCommand(command="feed", description="Лента работ"),
+        BotCommand(command="trends", description="Тренды от администратора"),
         BotCommand(command="prompts", description="Библиотека промптов"),
     ]
     if settings.TELEGRAM_STARS_ENABLED:
@@ -641,6 +644,7 @@ async def lifespan(app: FastAPI):
     # Routers
     dp.include_router(start.router)
     dp.include_router(assistant.router)
+    dp.include_router(trends.router)
     dp.include_router(feed.router)
     dp.include_router(image_gen.router)
     dp.include_router(video_gen.router)
@@ -760,6 +764,7 @@ async def miniapp_no_cache(request, call_next):
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 app.mount(settings.STATIC_UPLOAD_URL_PATH, UploadStaticFiles(directory=str(UPLOAD_ROOT)), name="static_upload")
 app.include_router(miniapp_router)
+app.include_router(trends_api_router)
 app.include_router(realtime_router)
 app.include_router(web_router, prefix="/api/web")
 
