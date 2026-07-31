@@ -1,0 +1,25 @@
+.luxeCardMetrics,
+.luxeCardMetrics *,
+.luxeCardQuick,
+.luxeCardQuick * {
+  pointer-events: auto;
+}
+
+.luxeFeedCard .vnFeedMedia,
+.luxeFeedCard .vnFeedMediaButton {
+  min-height: 0;
+}
+
+.luxeFeedCard .vnCardTop {
+  pointer-events: none;
+}
+
+.luxeFeedCard .luxeCardQuick,
+.luxeFeedCard .luxeCardMetrics {
+  pointer-events: auto;
+}
+
+.luxeViewerHeader,
+.luxeViewerFooter {
+  pointer-events: auto;
+}
