@@ -43,12 +43,14 @@ def test_old_engagement_decays_instead_of_staying_first_forever():
     assert feed_relevance_score(fresh, 2, now=now) > feed_relevance_score(old_viral, 5, now=now)
 
 
-def test_vite_build_opens_feed_first_and_keeps_trends_available():
-    config = Path("webapp/vite.config.js").read_text(encoding="utf-8")
+def test_front_v2_opens_feed_first_and_keeps_core_navigation():
+    main = Path("webapp/src/main.jsx").read_text(encoding="utf-8")
+    app = Path("webapp/src/v2/VelvetApp.jsx").read_text(encoding="utf-8")
 
-    assert 'useState("feed")' in config
-    assert '["feed", "▤", "Лента", ""]' in config
-    assert '["home", "🔥", "Тренды", ""]' in config
-    assert 'source=recent&limit=200' in config
-    assert "свежесть, популярность, повторы" in config
-    assert "screens.feed" in config
+    assert 'useState("feed")' in app
+    assert '["feed", "home", "Лента"]' in app
+    assert '["create", "sparkle", "Создать"]' in app
+    assert '["prompts", "prompt", "Промпты"]' in app
+    assert '["profile", "user", "Профиль"]' in app
+    assert 'source=recent&limit=60' in app
+    assert "20260801-velvet-neon-front-v2" in main
