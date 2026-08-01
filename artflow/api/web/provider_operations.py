@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import dataclasses
-from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
