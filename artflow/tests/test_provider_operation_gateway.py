@@ -66,7 +66,7 @@ async def test_direct_operation_finishes_without_fake_task() -> None:
 
     spec = OperationSpec(
         contract_id="test.direct",
-        generation_type=GenerationType.ASSISTANT,
+        generation_type=GenerationType.image,
         model="test",
         executor=direct_executor,
         poll_kind=PollKind.NONE,
