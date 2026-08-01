@@ -1,3 +1,5 @@
+const demoAsset = (name) => `${import.meta.env.BASE_URL}apix-demo/${name}.svg`;
+
 export const demoUser = {
   username: "apix_user",
   full_name: "APIX Creator",
@@ -18,7 +20,10 @@ export const demoFeed = [
     shares_count: 312,
     remixes: 82,
     created_at: new Date(Date.now() - 1000 * 60 * 40).toISOString(),
-    preview_urls: [],
+    preview_url: demoAsset("neon-portrait"),
+    result_url: demoAsset("neon-portrait"),
+    preview_urls: [demoAsset("neon-portrait")],
+    result_urls: [demoAsset("neon-portrait")],
   },
   {
     id: "demo-2",
@@ -30,7 +35,10 @@ export const demoFeed = [
     shares_count: 201,
     remixes: 44,
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
-    preview_urls: [],
+    preview_url: demoAsset("sky-city"),
+    result_url: demoAsset("sky-city"),
+    preview_urls: [demoAsset("sky-city")],
+    result_urls: [demoAsset("sky-city")],
   },
   {
     id: "demo-3",
@@ -42,7 +50,10 @@ export const demoFeed = [
     shares_count: 432,
     remixes: 128,
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 9).toISOString(),
-    preview_urls: [],
+    preview_url: demoAsset("fashion-noir"),
+    result_url: demoAsset("fashion-noir"),
+    preview_urls: [demoAsset("fashion-noir")],
+    result_urls: [demoAsset("fashion-noir")],
   },
   {
     id: "demo-4",
@@ -54,7 +65,10 @@ export const demoFeed = [
     shares_count: 178,
     remixes: 39,
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 18).toISOString(),
-    preview_urls: [],
+    preview_url: demoAsset("supercar-rain"),
+    result_url: demoAsset("supercar-rain"),
+    preview_urls: [demoAsset("supercar-rain")],
+    result_urls: [demoAsset("supercar-rain")],
   },
   {
     id: "demo-5",
@@ -66,7 +80,10 @@ export const demoFeed = [
     shares_count: 96,
     remixes: 24,
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 27).toISOString(),
-    preview_urls: [],
+    preview_url: demoAsset("orbit-helmet"),
+    result_url: demoAsset("orbit-helmet"),
+    preview_urls: [demoAsset("orbit-helmet")],
+    result_urls: [demoAsset("orbit-helmet")],
   },
   {
     id: "demo-6",
@@ -78,7 +95,10 @@ export const demoFeed = [
     shares_count: 144,
     remixes: 51,
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 36).toISOString(),
-    preview_urls: [],
+    preview_url: demoAsset("halo-muse"),
+    result_url: demoAsset("halo-muse"),
+    preview_urls: [demoAsset("halo-muse")],
+    result_urls: [demoAsset("halo-muse")],
   },
 ];
 
@@ -88,6 +108,7 @@ export const demoPrompts = [
     title: "Неоновый портрет",
     prompt: "Кинематографичный портрет в розово-синем неоне, мокрый асфальт, объёмный свет, премиальная детализация",
     category: "portrait",
+    cover_url: demoAsset("neon-portrait"),
     likes_count: 892,
     uses_count: 1260,
   },
@@ -96,6 +117,7 @@ export const demoPrompts = [
     title: "Город нового поколения",
     prompt: "Футуристический город на закате, глянцевые отражения, глубокий контраст, luxury sci-fi editorial",
     category: "city",
+    cover_url: demoAsset("sky-city"),
     likes_count: 756,
     uses_count: 980,
   },
@@ -104,6 +126,7 @@ export const demoPrompts = [
     title: "Рекламный суперкар",
     prompt: "Премиальная автомобильная фотосъёмка ночью, дождь, неон, отражения, объектив 85mm",
     category: "commercial",
+    cover_url: demoAsset("supercar-rain"),
     likes_count: 642,
     uses_count: 744,
   },
