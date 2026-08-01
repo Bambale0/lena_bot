@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-label="Neon portal landscape">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2c0c33"/>
+      <stop offset="0.45" stop-color="#10091a"/>
+      <stop offset="1" stop-color="#061722"/>
+    </linearGradient>
+    <radialGradient id="portal" cx="0.72" cy="0.42" r="0.34">
+      <stop offset="0" stop-color="#ff4bd8" stop-opacity="0.96"/>
+      <stop offset="0.28" stop-color="#8a36ff" stop-opacity="0.64"/>
+      <stop offset="0.55" stop-color="#27e9ff" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#050408" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="road" x1="0.5" y1="0.36" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#31143d"/>
+      <stop offset="0.45" stop-color="#120a1a"/>
+      <stop offset="1" stop-color="#030306"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1200" height="720" fill="url(#sky)"/>
+  <rect width="1200" height="720" fill="url(#portal)"/>
+  <path d="M0 488 C180 420 318 435 474 466 C633 498 768 506 1200 432 L1200 720 L0 720 Z" fill="#07050c" opacity="0.86"/>
+  <path d="M497 448 L702 448 L970 720 L230 720 Z" fill="url(#road)"/>
+  <path d="M596 448 L604 448 L646 720 L555 720 Z" fill="#ff48c6" opacity="0.24" filter="url(#glow)"/>
+  <path d="M360 660 C515 610 665 610 850 690" fill="none" stroke="#27e9ff" stroke-opacity="0.28" stroke-width="3"/>
+  <circle cx="830" cy="298" r="158" fill="none" stroke="#ff48c6" stroke-width="9" filter="url(#glow)"/>
+  <circle cx="830" cy="298" r="124" fill="none" stroke="#8a36ff" stroke-opacity="0.45" stroke-width="2"/>
+  <path d="M708 410 L730 246 L768 430 Z M985 410 L952 224 L918 430 Z" fill="#0a0710" stroke="#7b4dff" stroke-opacity="0.24"/>
+  <path d="M350 474 C420 410 520 396 628 434" fill="none" stroke="#ff48c6" stroke-opacity="0.18" stroke-width="42" stroke-linecap="round"/>
+  <g opacity="0.55">
+    <circle cx="246" cy="212" r="2" fill="#fff"/><circle cx="315" cy="178" r="2" fill="#fff"/><circle cx="616" cy="126" r="3" fill="#fff"/><circle cx="1035" cy="170" r="2" fill="#fff"/><circle cx="102" cy="322" r="2" fill="#fff"/>
+  </g>
+  <g filter="url(#glow)">
+    <path d="M610 456 C615 432 643 432 648 456 L655 522 L602 522 Z" fill="#090711"/>
+    <circle cx="629" cy="420" r="17" fill="#0b0812"/>
+    <path d="M629 432 L629 520" stroke="#f7e7ff" stroke-opacity="0.72" stroke-width="3"/>
+  </g>
+  <rect y="0" width="1200" height="720" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
+</svg>
