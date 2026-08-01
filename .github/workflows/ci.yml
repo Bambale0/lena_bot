@@ -86,11 +86,11 @@ jobs:
         run: npm run build
 
   deploy:
-    runs-on: [self-hosted, linux, x64, apix-ci]
+    runs-on: ubuntu-latest
     needs:
       - backend-quality
       - webapp
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AUTODEPLOY_ENABLED == 'true'
     timeout-minutes: 35
     environment:
       name: production
