@@ -242,19 +242,47 @@ def _build_specs() -> dict[str, OperationSpec]:
     specs.update(
         {
             "llm.kie.responses": OperationSpec(
-                "llm.kie.responses", GenerationType.image, "gpt-responses", _execute_assistant, PollKind.NONE, False
+                contract_id="llm.kie.responses",
+                generation_type=GenerationType.image,
+                model="gpt-responses",
+                executor=_execute_assistant,
+                poll_kind=PollKind.NONE,
+                billable=False,
+                fixed_params=(("provider", "kie_responses"),),
             ),
             "llm.kie.claude": OperationSpec(
-                "llm.kie.claude", GenerationType.image, "claude-sonnet-4-5", _execute_assistant, PollKind.NONE, False
+                contract_id="llm.kie.claude",
+                generation_type=GenerationType.image,
+                model="claude-sonnet-4-5",
+                executor=_execute_assistant,
+                poll_kind=PollKind.NONE,
+                billable=False,
+                fixed_params=(("provider", "kie_claude"),),
             ),
             "llm.comet.chat": OperationSpec(
-                "llm.comet.chat", GenerationType.image, "openai-compatible-chat", _execute_assistant, PollKind.NONE, False
+                contract_id="llm.comet.chat",
+                generation_type=GenerationType.image,
+                model="openai-compatible-chat",
+                executor=_execute_assistant,
+                poll_kind=PollKind.NONE,
+                billable=False,
+                fixed_params=(("provider", "comet_chat"),),
             ),
             "llm.photo-prompt": OperationSpec(
-                "llm.photo-prompt", GenerationType.image, "photo-prompt-router", _execute_photo_prompt, PollKind.NONE, False
+                contract_id="llm.photo-prompt",
+                generation_type=GenerationType.image,
+                model="photo-prompt-router",
+                executor=_execute_photo_prompt,
+                poll_kind=PollKind.NONE,
+                billable=False,
             ),
             "llm.moderation": OperationSpec(
-                "llm.moderation", GenerationType.image, "strict-json-moderation", _execute_moderation, PollKind.NONE, False
+                contract_id="llm.moderation",
+                generation_type=GenerationType.image,
+                model="strict-json-moderation",
+                executor=_execute_moderation,
+                poll_kind=PollKind.NONE,
+                billable=False,
             ),
         }
     )
