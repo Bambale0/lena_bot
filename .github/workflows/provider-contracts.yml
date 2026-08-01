@@ -11,6 +11,7 @@ jobs:
     env:
       BOT_TOKEN: "123456:ci-provider-contracts"
       COMET_API_KEY: "ci-provider-contracts"
+      DATABASE_URL: "postgresql+asyncpg://ci:ci@localhost:5432/ci"
     defaults:
       run:
         working-directory: artflow
