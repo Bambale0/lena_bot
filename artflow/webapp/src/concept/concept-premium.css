@@ -1,0 +1,218 @@
+/* Premium refinement layer: closer to the approved Velvet Neon concept. */
+:root {
+  --cx-bg: #09090f;
+  --cx-surface: #111018;
+  --cx-surface-2: #17151f;
+  --cx-line: rgba(255,255,255,.085);
+  --cx-line-strong: rgba(255,255,255,.14);
+}
+
+.cxApp {
+  width: min(100%, 430px);
+  padding-inline: 14px;
+  background:
+    radial-gradient(circle at 88% 15%, rgba(0,231,223,.075), transparent 28%),
+    radial-gradient(circle at 6% 52%, rgba(132,42,255,.14), transparent 34%),
+    linear-gradient(180deg, #09090f 0%, #0b0a12 46%, #09090f 100%);
+}
+
+.cxBrandBar {
+  height: 54px;
+  margin-bottom: 2px;
+}
+
+.cxBrandBar--embedded {
+  justify-content: flex-end;
+}
+
+.cxBrandBar--embedded .cxBrandBar__actions {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.cxWordmark span {
+  font-size: 24px;
+  letter-spacing: .08em;
+}
+
+.cxPageHero {
+  min-height: 96px;
+  padding: 8px 2px 20px;
+  align-items: center;
+}
+
+.cxPageHero__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cxPageHero h1 {
+  font-size: clamp(48px, 14vw, 62px);
+  line-height: .86;
+  letter-spacing: -.06em;
+  text-shadow: 0 8px 35px rgba(96,72,255,.08);
+}
+
+.cxHeroSpark {
+  width: 22px;
+  height: 22px;
+}
+
+.cxCreateQuick {
+  height: 46px;
+  min-width: 126px;
+  border-radius: 18px;
+  background: linear-gradient(115deg, rgba(139,44,255,.2), rgba(0,231,223,.11));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 28px rgba(0,0,0,.22);
+}
+
+.cxFilterGroup {
+  margin-bottom: 12px;
+}
+
+.cxFilterRail--primary button {
+  height: 40px;
+  padding-inline: 16px;
+}
+
+.cxFilterRail--secondary {
+  margin-bottom: 18px;
+}
+
+.cxFilterRail--secondary button {
+  height: 32px;
+  padding-inline: 11px;
+}
+
+.cxFilterRail button,
+.cxFilterIcon {
+  background: rgba(255,255,255,.018);
+  border-color: rgba(255,255,255,.085);
+  backdrop-filter: blur(14px);
+}
+
+.cxFilterRail button.active {
+  background: linear-gradient(125deg, rgba(131,43,255,.28), rgba(77,54,255,.18));
+  border-color: rgba(183,100,255,.7);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 0 24px rgba(126,44,255,.11);
+}
+
+.cxMasonry {
+  column-gap: 12px;
+}
+
+.cxFeedCard {
+  margin-bottom: 12px;
+  border-radius: 22px;
+  border-color: rgba(255,255,255,.105);
+  box-shadow: 0 20px 42px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.04);
+  background: #0d0d14;
+}
+
+.cxFeedCard--portrait { aspect-ratio: .72; }
+.cxFeedCard--tall { aspect-ratio: .62; }
+.cxFeedCard--square { aspect-ratio: .92; }
+.cxFeedCard--wide { aspect-ratio: .82; }
+
+.cxFeedCard__shade {
+  background:
+    linear-gradient(180deg, rgba(4,4,8,.54) 0%, rgba(4,4,8,.04) 28%, transparent 54%, rgba(4,4,8,.9) 100%);
+}
+
+.cxFeedCard__top {
+  left: 11px;
+  right: 10px;
+  top: 11px;
+}
+
+.cxFeedCard__top > span {
+  font-size: 10.5px;
+  letter-spacing: -.01em;
+}
+
+.cxFeedCard__footer {
+  left: 10px;
+  right: 9px;
+  bottom: 10px;
+}
+
+.cxFeedCard__statbar > button,
+.cxFeedCard__statbar > span,
+.cxFeedCard__share {
+  min-height: 29px;
+  border-radius: 999px;
+  background: rgba(7,7,12,.62);
+  border: 1px solid rgba(255,255,255,.13);
+  backdrop-filter: blur(14px);
+}
+
+.cxProgressiveMedia.is-fallback img {
+  filter: saturate(1.1) contrast(1.04);
+  transform: scale(1.015);
+}
+
+.cxMediaPlaceholder__shade {
+  background: linear-gradient(180deg, transparent 35%, rgba(6,6,10,.7));
+}
+
+.cxBottomNav {
+  width: min(calc(100% - 18px), 416px);
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(8px, env(safe-area-inset-bottom));
+  height: 82px;
+  border-radius: 28px;
+  border-color: rgba(255,255,255,.14);
+  background: rgba(10,9,15,.92);
+  backdrop-filter: blur(28px) saturate(1.2);
+  box-shadow: 0 24px 58px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+.cxBottomNav > button:not(.cxOrbButton) {
+  padding-top: 17px;
+}
+
+.cxBottomNav small {
+  font-size: 10px;
+}
+
+.cxOrbButton {
+  top: -23px;
+}
+
+.cxOrbButton__core {
+  width: 72px;
+  height: 72px;
+  border: 5px solid #09090f;
+  box-shadow: 0 0 0 1px rgba(190,95,255,.62), 0 0 30px rgba(139,44,255,.55), 0 0 52px rgba(0,231,223,.18);
+}
+
+.cxViewer {
+  background: #060609;
+}
+
+.cxViewer__content {
+  background: linear-gradient(180deg, transparent, rgba(7,7,12,.94) 35%);
+  padding-bottom: max(26px, env(safe-area-inset-bottom));
+}
+
+.cxCreatePanel,
+.cxPromptCard,
+.cxProfileHero,
+.cxReferralCard,
+.cxBalanceCard,
+.cxTopupPanel {
+  border-color: rgba(255,255,255,.1);
+  background: linear-gradient(145deg, rgba(22,20,31,.95), rgba(12,11,18,.96));
+  box-shadow: 0 22px 48px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+@media (max-width: 360px) {
+  .cxApp { padding-inline: 10px; }
+  .cxPageHero h1 { font-size: 44px; }
+  .cxCreateQuick { min-width: 108px; padding-inline: 12px; }
+  .cxMasonry { column-gap: 8px; }
+  .cxFeedCard { margin-bottom: 8px; border-radius: 18px; }
+  .cxBottomNav { width: calc(100% - 12px); }
+}
