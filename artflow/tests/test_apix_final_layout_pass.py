@@ -15,8 +15,10 @@ def test_structural_pass_is_loaded_last_without_dom_patch() -> None:
     assert 'import "./apix/apix.archive.css";' in entry
     assert 'import "./apix/apix.final-pass.css";' in entry
     assert 'import "./apix/apix.structural.css";' in entry
+    assert 'import "./apix/apix.v3.css";' in entry
     assert "apix.final-pass.js" not in entry
     assert entry.index("apix.structural.css") > entry.index("apix.final-pass.css")
+    assert entry.index("apix.v3.css") > entry.index("apix.structural.css")
     assert not (APX / "apix.final-pass.js").exists()
 
 
@@ -95,3 +97,18 @@ def test_structural_layer_controls_media_and_svg_icons() -> None:
     assert ".modeSwitch svg" in structural
     assert ".createIntro" in structural
     assert ".studioFlow" in structural
+
+
+def test_v3_reset_is_decisive_and_visible() -> None:
+    css = read(APX / "apix.v3.css")
+
+    assert "APIX v3 decisive visual reset" in css
+    assert "loaded last" in css
+    assert "width: min(100vw, 430px)" in css
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in css
+    assert "feedMedia" in css
+    assert "height: 178px" in css
+    assert "bottomNav" in css
+    assert "border-radius: 30px" in css
+    assert "demoNotice" in css
+    assert "display: none !important" in css
