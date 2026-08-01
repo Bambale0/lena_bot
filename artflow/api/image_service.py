@@ -147,8 +147,32 @@ MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.QWEN_EDIT: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
     ImageModel.QWEN2_T2I: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
     ImageModel.QWEN2_EDIT: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
-    ImageModel.GPT_IMAGE_2_T2I: ["1:1", "9:16", "16:9", "4:3", "3:4"],
-    ImageModel.GPT_IMAGE_2_I2I: ["1:1", "9:16", "16:9", "4:3", "3:4"],
+    ImageModel.GPT_IMAGE_2_T2I: [
+        "auto",
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "2:1",
+        "1:2",
+        "21:9",
+    ],
+    ImageModel.GPT_IMAGE_2_I2I: [
+        "auto",
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "2:1",
+        "1:2",
+        "21:9",
+    ],
 }
 
 
@@ -217,7 +241,7 @@ def _validate_reference_count(
 
     limit = _REFERENCE_LIMITS.get(resolved_model)
     if limit is not None and len(refs) > limit:
-        raise ValueError(f"{resolved_model} supports at most {limit} reference image(s)")
+        raise ValueError(f"{resolved_model} supports at most {limit} reference images")
 
     spec = IMAGE_SPECS.get(resolved_model)
     if refs and spec and "image" not in spec.supported_modes:
@@ -435,9 +459,106 @@ async def generate_image(
         return await _create_kie_image_task(resolved_model, inp, callback_url=callback_url)
     except Exception as exc:
         raise RuntimeError(
-            f"{resolved_model} generation failed via its configured provider; "
-            f"cross-model fallback is disabled: {exc}"
+            f"{resolved_model} fallback disabled to prevent model substitution; "
+            f"configured provider failed: {exc}"
         ) from exc
+
+
+def _qwen_legacy_image_size(value: str | None, *, default: str) -> str:
+    mapping = {
+        "1:1": "square_hd",
+        "3:4": "portrait_4_3",
+        "2:3": "portrait_4_3",
+        "9:16": "portrait_16_9",
+        "4:3": "landscape_4_3",
+        "3:2": "landscape_4_3",
+        "16:9": "landscape_16_9",
+        "21:9": "landscape_16_9",
+        "square": "square",
+        "square_hd": "square_hd",
+        "portrait_4_3": "portrait_4_3",
+        "portrait_16_9": "portrait_16_9",
+        "landscape_4_3": "landscape_4_3",
+        "landscape_16_9": "landscape_16_9",
+    }
+    if not value:
+        return default
+    return mapping.get(str(value), default)
+
+
+def _set_if_present(payload: dict[str, Any], key: str, value: Any) -> None:
+    if value is not None:
+        payload[key] = value
+
+
+def _normalize_official_image_payload(
+    *,
+    effective_model: ImageModel,
+    payload: dict[str, Any],
+    image_url: str | list[str] | None,
+    ratio_value: str | None,
+    negative_prompt: str | None,
+    num_inference_steps: int | None,
+    guidance_scale: float | None,
+    acceleration: str | None,
+    strength: float | None,
+    sync_mode: bool | None,
+    enable_safety_checker: bool | None,
+    output_format: str | None,
+    seed: int | None,
+    watermark: bool | None,
+    bbox_list: list[list[Any]] | None,
+) -> dict[str, Any]:
+    if effective_model in _GPT_IMAGE_2_MODELS:
+        payload.pop("nsfw_checker", None)
+        return payload
+
+    if effective_model in {ImageModel.QWEN_T2I, ImageModel.QWEN_I2I}:
+        payload.pop("nsfw_checker", None)
+        if ratio_value:
+            payload["image_size"] = _qwen_legacy_image_size(ratio_value, default="square_hd")
+        elif image_url:
+            payload.pop("image_size", None)
+        _set_if_present(payload, "negative_prompt", negative_prompt)
+        _set_if_present(payload, "num_inference_steps", num_inference_steps)
+        _set_if_present(payload, "guidance_scale", guidance_scale)
+        _set_if_present(payload, "acceleration", acceleration)
+        _set_if_present(payload, "strength", strength)
+        _set_if_present(payload, "enable_safety_checker", enable_safety_checker)
+        _set_if_present(payload, "output_format", output_format)
+        return payload
+
+    if effective_model == ImageModel.QWEN_EDIT:
+        payload.pop("nsfw_checker", None)
+        payload["image_size"] = _qwen_legacy_image_size(ratio_value, default="landscape_4_3")
+        _set_if_present(payload, "num_inference_steps", num_inference_steps)
+        _set_if_present(payload, "guidance_scale", guidance_scale)
+        _set_if_present(payload, "acceleration", acceleration)
+        _set_if_present(payload, "sync_mode", sync_mode)
+        _set_if_present(payload, "enable_safety_checker", enable_safety_checker)
+        _set_if_present(payload, "output_format", output_format)
+        return payload
+
+    if effective_model in {ImageModel.QWEN2_T2I, ImageModel.QWEN2_EDIT}:
+        payload.pop("nsfw_checker", None)
+        if ratio_value:
+            payload["image_size"] = ratio_value
+        _set_if_present(payload, "seed", seed)
+        _set_if_present(payload, "output_format", output_format)
+        return payload
+
+    if effective_model in {ImageModel.GROK_T2I, ImageModel.GROK_I2I}:
+        payload.pop("nsfw_checker", None)
+        payload.pop("enable_pro", None)
+        return payload
+
+    if effective_model in {ImageModel.WAN_27, ImageModel.WAN_27_PRO}:
+        payload.pop("nsfw_checker", None)
+        _set_if_present(payload, "watermark", watermark)
+        _set_if_present(payload, "bbox_list", bbox_list)
+        return payload
+
+    return payload
 
 
 def _build_input(
@@ -515,6 +636,9 @@ def _build_input(
         quality_value = str(normalized_quality)
         resolution_value = quality_value if quality_value in {"1K", "2K", "4K"} else resolution_value
 
+    if effective_model in {ImageModel.WAN_27, ImageModel.WAN_27_PRO} and image_url and resolution_value == "4K":
+        raise ValueError("4K is unavailable for WAN image reference/edit mode")
+
     prepared_reference_urls = image_url
     if effective_model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}:
         if isinstance(image_url, str):
@@ -549,10 +673,23 @@ def _build_input(
         reference_urls=prepared_reference_urls,
         params=params,
     )
-
-    if effective_model in _GPT_IMAGE_2_MODELS:
-        payload.pop("nsfw_checker", None)
-    return resolved_model, payload
+    return resolved_model, _normalize_official_image_payload(
+        effective_model=effective_model,
+        payload=payload,
+        image_url=image_url,
+        ratio_value=ratio_value,
+        negative_prompt=negative_prompt,
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
+        acceleration=acceleration,
+        strength=strength,
+        sync_mode=sync_mode,
+        enable_safety_checker=enable_safety_checker,
+        output_format=output_format,
+        seed=seed,
+        watermark=watermark,
+        bbox_list=bbox_list,
+    )
 
 
 def _urls_from_value(value: Any) -> list[str]:
