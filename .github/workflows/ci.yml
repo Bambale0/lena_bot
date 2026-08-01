@@ -8,6 +8,10 @@ on:
 jobs:
   backend-quality:
     runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: "123456:ci-backend-quality"
+      COMET_API_KEY: "ci-backend-quality"
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/ci"
     defaults:
       run:
         working-directory: artflow
