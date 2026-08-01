@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # Bot
     BOT_TOKEN: str
-    BOT_USERNAME: str = "APIXBot"
+    BOT_USERNAME: str = "apix_ai_bot"
     WEBHOOK_URL: str = "https://testapi.chillcreative.ru"
     WEBHOOK_PATH: str = "/webhook/telegram"
     WEBHOOK_SECRET: str = ""
