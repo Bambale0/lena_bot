@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 """Central pricing helpers shared by Telegram, Mini App and provider gateway.
 
 The repository stores image prices as flat credits, most video resolution
