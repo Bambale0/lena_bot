@@ -130,13 +130,26 @@ def test_ui_pass_enforces_touch_targets_and_motion_safety() -> None:
     assert "prefers-reduced-motion" in css
 
 
+def test_shadcn_inspired_focus_and_disabled_states_are_present() -> None:
+    css = read(APX / "apix.archive.css")
+
+    assert "button:focus-visible" in css
+    assert "input:focus-visible" in css
+    assert "textarea:focus-visible" in css
+    assert "select:focus-visible" in css
+    assert "button:disabled" in css
+    assert "pointer-events: none" in css
+    assert "opacity: .5" in css
+
+
 def test_feed_starts_fast_without_duplicate_rectangular_blocks() -> None:
     css = read(APX / "apix.archive.css")
 
     assert "/* Content-first rule: the feed is the hero." in css
-    assert ".apixHeroCta { display: none; }" in css
+    assert ".apixHero:has(+ .apixTabs) { display: none !important; }" in css
+    assert ".apixEyebrow, .apixHero p, .apixHeroCta { display: none !important; }" in css
     assert ".apixHero { min-height: 0" in css
     assert ".feedFeature { display: none !important; }" in css
     assert "border-radius: 0" in css
     assert "box-shadow: none" in css
-    assert "padding: 6px 2px 4px" in css
+    assert "padding: 0 2px 2px" in css
