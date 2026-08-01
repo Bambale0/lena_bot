@@ -1,0 +1,202 @@
+/*
+ * APIX compact chrome prototype layer.
+ * Purpose: keep the branded Telegram Mini App top area premium, but stop it from
+ * eating vertical space. This file is intentionally isolated so the prototype
+ * can be approved or removed without touching the product CSS architecture.
+ */
+
+:root {
+  --apix-chrome-bg: rgba(6, 4, 13, 0.82);
+  --apix-chrome-line: linear-gradient(90deg, #bb2cff 0%, #7b4dff 48%, #00f0ff 100%);
+  --apix-chrome-glow: 0 0 18px rgba(187, 44, 255, 0.28), 0 0 24px rgba(0, 240, 255, 0.12);
+}
+
+/* Real Mini App: compact sticky header, not a poster hero. */
+.header {
+  position: sticky;
+  top: 0;
+  min-height: 48px;
+  margin: 0 -16px 10px;
+  padding: 6px 12px 7px;
+  border-radius: 0 0 16px 16px;
+  background:
+    radial-gradient(circle at 22% 0%, rgba(187, 44, 255, 0.16), transparent 42%),
+    radial-gradient(circle at 82% 0%, rgba(0, 240, 255, 0.10), transparent 40%),
+    var(--apix-chrome-bg);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(18px) saturate(1.16);
+}
+
+.header::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 5px;
+  width: 96px;
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--apix-chrome-line);
+  opacity: 0.78;
+  box-shadow: var(--apix-chrome-glow);
+  pointer-events: none;
+}
+
+.headerTitle {
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  background: linear-gradient(100deg, #ff4dff 0%, #b46cff 42%, #55e7ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 10px rgba(187, 44, 255, 0.22));
+}
+
+.headerRight {
+  gap: 6px;
+}
+
+.header .balanceBtn,
+.balanceBtn {
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border-color: rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.045)),
+    rgba(20, 15, 28, 0.76);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+.header .avatar {
+  width: 32px;
+  height: 32px;
+  border-width: 1px;
+  font-size: 13px;
+  box-shadow: 0 0 14px rgba(187, 44, 255, 0.24);
+}
+
+.ghost {
+  font-size: 14px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+/* Screen heroes: keep title energy, but reserve space for content. */
+.feedPageHeader,
+.studioHead,
+.mjModuleHero {
+  margin-top: 2px;
+  margin-bottom: 10px;
+}
+
+.feedPageHeader h1,
+.studioHead h1,
+.mjModuleHero h1,
+.title h2,
+h1 {
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: clamp(24px, 7vw, 34px);
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+}
+
+.feedPageHeader p,
+.mjModuleHero p,
+.title p {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.28;
+}
+
+.block {
+  margin-top: 16px;
+}
+
+.feedFilterBar,
+.sourceTabs,
+.chips.top {
+  margin-bottom: 8px;
+}
+
+.feedFilterBar button,
+.sourceTabs button,
+.chips button {
+  min-height: 32px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+/* Future concept/prototype classes: thematic status bar must be micro, not a roof. */
+.apix-status,
+.apix-statusbar,
+.theme-statusbar,
+.phone-status,
+.device-status,
+.mock-status,
+.statusbar {
+  min-height: 22px !important;
+  height: 22px !important;
+  max-height: 22px !important;
+  padding: 0 10px !important;
+  margin: 0 0 8px !important;
+  border-radius: 999px !important;
+  background:
+    linear-gradient(90deg, rgba(187, 44, 255, 0.26), rgba(0, 240, 255, 0.14)),
+    rgba(10, 6, 18, 0.82) !important;
+  box-shadow: var(--apix-chrome-glow) !important;
+}
+
+.apix-hero,
+.apix-hero-shell,
+.heroBrandArea,
+.conceptHero,
+.premiumHero {
+  padding-top: 8px !important;
+  padding-bottom: 12px !important;
+  margin-bottom: 10px !important;
+}
+
+.apix-hero .brand,
+.apix-hero-logo,
+.heroBrandLogo,
+.premiumWordmark {
+  font-size: clamp(36px, 13vw, 58px) !important;
+  line-height: 0.92 !important;
+  margin-bottom: 8px !important;
+}
+
+@media (max-width: 360px) {
+  .header {
+    min-height: 44px;
+    margin-bottom: 8px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .headerTitle {
+    font-size: 18px;
+  }
+
+  .header .balanceBtn,
+  .balanceBtn {
+    padding-left: 8px;
+    padding-right: 8px;
+    font-size: 11px;
+  }
+
+  .feedPageHeader h1,
+  .studioHead h1,
+  .mjModuleHero h1,
+  .title h2,
+  h1 {
+    font-size: 26px;
+  }
+}
