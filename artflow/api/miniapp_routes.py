@@ -265,6 +265,21 @@ def _telegram_start_link(start_param: str) -> str:
     return f"https://t.me/{username}?start={start_param}"
 
 
+def _public_miniapp_link(*, feed_id: int | None = None, prompt_id: int | None = None, trend_id: int | None = None) -> str:
+    base = str(getattr(settings, "WEB_PUBLIC_URL", "") or "").strip().rstrip("/")
+    if not base:
+        return ""
+    params: list[str] = []
+    if feed_id is not None:
+        params.append(f"feed={int(feed_id)}")
+    if prompt_id is not None:
+        params.append(f"prompt={int(prompt_id)}")
+    if trend_id is not None:
+        params.append(f"trend={int(trend_id)}")
+    query = f"?{'&'.join(params)}" if params else ""
+    return f"{base}/app{query}"
+
+
 def _withdrawal_out(item: Any) -> "ReferralWithdrawalOut":
     status = getattr(getattr(item, "status", None), "value", None) or str(getattr(item, "status", "pending"))
     created_at = getattr(item, "created_at", None)
@@ -2577,7 +2592,7 @@ async def share_generation(
     gen = await repo.share_to_feed(session, gen_id, user.id)
     if not gen:
         raise HTTPException(status_code=404, detail="Generation not found or not ready")
-    link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="feed", target_id=gen.id))
+    link = _public_miniapp_link(feed_id=gen.id)
     return {"id": gen.id, "is_public_feed": gen.is_public_feed, "link": link}
 
 
@@ -2901,11 +2916,11 @@ async def get_feed_share_link(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> dict:
-    """Returns a shareable Telegram deeplink for a public post using the viewer's referral code."""
+    """Returns a shareable public Mini App link for a public post."""
     gen = await repo.increment_feed_share(session, gen_id)
     if not gen:
         raise HTTPException(status_code=404, detail="Public post not found")
-    link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="feed", target_id=gen_id))
+    link = _public_miniapp_link(feed_id=gen_id)
     return {"link": link, "gen_id": gen_id}
 
 
@@ -3838,7 +3853,7 @@ async def publish_generation_to_library(
     if not shared:
         raise HTTPException(status_code=404, detail="Generation not found or not ready")
     gen = await repo.share_to_library(session, gen_id, user.id) or shared
-    link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="feed", target_id=gen.id))
+    link = _public_miniapp_link(feed_id=gen.id)
 
     return {
         "ok": True,

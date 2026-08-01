@@ -106,6 +106,20 @@ async def feed_top(
     return ok(await _feed_payloads(session, "top_day", limit, compact=compact))
 
 
+@router.get("/feed/{generation_id}")
+async def feed_item(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    card = await repo.get_feed_generation_card(session, generation_id, require_media=False)
+    if card is None:
+        return error_response(404, "Generation not found")
+    payload = _feed_payload(card, require_local=False)
+    if payload is None:
+        return error_response(404, "Generation not found")
+    return ok(payload)
+
+
 @router.post("/feed/{generation_id}/like")
 async def feed_like(
     generation_id: int,

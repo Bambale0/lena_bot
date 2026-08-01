@@ -998,16 +998,51 @@ async def test_webapp_publish_actions_reject_feed_derivatives(client, monkeypatc
 async def test_webapp_feed_link_uses_viewer_referral_for_public_posts(client, monkeypatch) -> None:
     increment_feed_share = AsyncMock(return_value=SimpleNamespace(id=88, is_public_feed=True))
     monkeypatch.setattr("api.miniapp_routes.repo.increment_feed_share", increment_feed_share)
-    monkeypatch.setattr("api.miniapp_routes.settings.BOT_USERNAME", "@TestBot")
+    monkeypatch.setattr("api.miniapp_routes.settings.WEB_PUBLIC_URL", "https://apixbotai.com")
 
     response = await client.get("/api/v1/feed/88/link")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["gen_id"] == 88
-    assert payload["link"].startswith("https://t.me/TestBot?start=")
-    assert "__feed_88" in payload["link"]
+    assert payload["link"] == "https://apixbotai.com/app?feed=88"
     increment_feed_share.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_webapp_feed_item_returns_public_post_without_auth(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.web.feed.repo.get_feed_generation_card",
+        AsyncMock(return_value=SimpleNamespace(
+            generation=SimpleNamespace(
+                id=88,
+                result_url="https://example.test/static/upload/feed-88.jpg",
+                result_urls=None,
+                gen_type=GenerationType.image,
+                model="seedream",
+                likes_count=7,
+                shares_count=2,
+                user_id=1,
+            ),
+            aspect_ratio="1:1",
+            username="tester",
+            full_name="Test User",
+            author_photo_url=None,
+            remix_count=3,
+            score=0,
+        )),
+    )
+    monkeypatch.setattr("api.web.feed.public_url_is_available", lambda _url: True)
+    monkeypatch.setattr("api.web.feed.preview_public_image_url", lambda url, **_kwargs: url)
+    app.dependency_overrides.clear()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get("/api/v1/feed/88")
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["id"] == 88
+    assert payload["result_url"] == "https://example.test/static/upload/feed-88.jpg"
 
 
 @pytest.mark.asyncio

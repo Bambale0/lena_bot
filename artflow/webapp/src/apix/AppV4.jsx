@@ -95,6 +95,12 @@ function imageUploadError(file, allowedTypes) {
   return "Поддерживаются только JPG, PNG, WebP" + (allowedTypes.has("image/gif") ? " и GIF." : ".");
 }
 
+function queryFeedId() {
+  const value = new URLSearchParams(window.location.search).get("feed");
+  if (!value || !/^[1-9]\\d*$/.test(value)) return null;
+  return Number(value);
+}
+
 function useV4Data() {
   const [state, setState] = useState({ user: demoUser, feed: demoFeed, prompts: demoPrompts, imageModels: demoImageModels, videoModels: demoVideoModels, history: [], plans: demoPlans, loading: true, demo: true });
   const reload = useCallback(async () => {
@@ -335,6 +341,23 @@ export default function AppV4() {
   const [result, setResult] = useState(null);
 
   useEffect(() => setupTelegramChrome(), []);
+  useEffect(() => {
+    const feedId = queryFeedId();
+    if (!feedId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await api(`/feed/${feedId}`);
+        const item = response?.data || response;
+        if (cancelled || !item?.id) return;
+        setScreen("feed");
+        setViewer(item);
+      } catch {
+        if (!cancelled) show("Пост не найден или ссылка устарела");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => {
     if (!result?.id || !ACTIVE_STATUSES.has(String(result.status || "").toLowerCase())) return undefined;
     const timer = window.setInterval(async () => {

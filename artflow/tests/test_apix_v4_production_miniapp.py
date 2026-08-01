@@ -38,6 +38,7 @@ def test_v4_app_keeps_real_api_contracts_and_telegram_auth() -> None:
     for path in [
         'api("/me")',
         'api("/feed?source=recent&limit=60")',
+        'api(`/feed/${feedId}`)',
         'api("/prompts?source=popular&limit=30")',
         'api("/models/image")',
         'api("/models/video")',
@@ -81,6 +82,18 @@ def test_v4_upload_flow_handles_mobile_photo_edge_cases() -> None:
         'uploadingReference ? "Загружаю…" : "+ Референс"',
         'buildingPhotoPrompt ? "Анализирую…" : "Промпт по фото"',
         'accept="image/jpeg,image/png,image/webp,image/gif"',
+    ]:
+        assert snippet in app
+
+
+def test_v4_feed_share_links_open_specific_post_from_query_param() -> None:
+    app = read(APX / "AppV4.jsx")
+
+    for snippet in [
+        'new URLSearchParams(window.location.search).get("feed")',
+        'api(`/feed/${feedId}`)',
+        'setViewer(item)',
+        'Пост не найден или ссылка устарела',
     ]:
         assert snippet in app
 
