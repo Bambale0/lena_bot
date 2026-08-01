@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Icon from "./icons.jsx";
+import { FALLBACK_ART } from "./fallbackArt.js";
 import {
   feedDisplayCandidates,
   formatCompact,
@@ -27,7 +28,7 @@ export function Avatar({ user, size = "md" }) {
   );
 }
 
-export function AppHeader({ screen, user, onSearch, onCreate, onTopup }) {
+export function AppHeader({ screen, user, onCreate, onTopup }) {
   const title = {
     feed: "Лента",
     create: "Создать",
@@ -38,36 +39,28 @@ export function AppHeader({ screen, user, onSearch, onCreate, onTopup }) {
   return (
     <>
       <header className="cxBrandBar">
-        <button className="cxWordmark" type="button" aria-label="APIX">
+        <span className="cxWordmark" aria-label="APIX">
           <span>APIX</span><i>✦</i>
-        </button>
+        </span>
         <div className="cxBrandBar__actions">
           <Avatar user={user} size="sm"/>
-          <button className="cxBalancePill" type="button" onClick={onTopup}>
+          <button className="cxBalancePill" type="button" onClick={onTopup} aria-label="Пополнить баланс">
             <Icon name="sparkle" size={16}/>
             <span>{formatCredits(user?.credits)}</span>
-            <b>+</b>
+            <b><Icon name="plus" size={15}/></b>
           </button>
         </div>
       </header>
 
-      <section className="cxPageHero">
-        <div>
-          <span className="cxHeroSpark"><Icon name="sparkle" size={18}/></span>
+      <section className={`cxPageHero cxPageHero--${screen}`}>
+        <div className="cxPageHero__title">
           <h1>{title}<i/></h1>
         </div>
-        <div className="cxHeroActions">
-          {screen === "feed" && (
-            <button className="cxIconButton" type="button" onClick={onSearch} aria-label="Поиск">
-              <Icon name="search" size={24}/>
-            </button>
-          )}
-          {screen === "feed" && (
-            <button className="cxCreateQuick" type="button" onClick={onCreate}>
-              <Icon name="plus" size={18}/><span>Создать</span>
-            </button>
-          )}
-        </div>
+        {screen === "feed" && (
+          <button className="cxCreateQuick" type="button" onClick={onCreate}>
+            <Icon name="plus" size={20}/><span>Создать</span>
+          </button>
+        )}
       </section>
     </>
   );
@@ -146,34 +139,47 @@ export function MediaPlaceholder({ item, compact = false }) {
   const prompt = publicPrompt(item);
   return (
     <div className={`cxMediaPlaceholder ${compact ? "compact" : ""}`}>
-      <span className="cxMediaPlaceholder__noise"/>
-      <span className="cxMediaPlaceholder__orb"><Icon name="sparkle" size={compact ? 20 : 34}/></span>
+      <img src={FALLBACK_ART} alt=""/>
+      <span className="cxMediaPlaceholder__shade"/>
       {!compact && <><b>Работа сохранена</b><p>{prompt ? prompt.slice(0, 90) : "Превью пока недоступно"}</p></>}
     </div>
   );
 }
 
 export function ProgressiveMedia({ item, index = 0, sources = [], className = "", onClick, controls = false, autoPlay = false, compact = false }) {
-  const unique = useMemo(() => [...new Set(sources.filter(Boolean))], [sources]);
+  const unique = useMemo(() => [...new Set([...sources.filter(Boolean), FALLBACK_ART])], [sources]);
   const [sourceIndex, setSourceIndex] = useState(0);
   const source = unique[sourceIndex];
-  const video = isVideoMedia(item, source);
+  const fallback = source === FALLBACK_ART;
+  const video = !fallback && isVideoMedia(item, source);
+  const tone = Math.abs(Number(item?.id || index || 0)) % 6;
 
   useEffect(() => setSourceIndex(0), [item?.id, index, unique.join("|")]);
 
   function fail() {
-    setSourceIndex((value) => value + 1);
+    setSourceIndex((value) => Math.min(value + 1, unique.length - 1));
   }
 
   if (!source) return <MediaPlaceholder item={item} compact={compact}/>;
   const Wrapper = onClick ? "button" : "div";
 
   return (
-    <Wrapper className={`cxProgressiveMedia ${className}`} type={onClick ? "button" : undefined} onClick={onClick}>
+    <Wrapper
+      className={`cxProgressiveMedia ${fallback ? "is-fallback" : ""} ${className}`}
+      data-fallback-tone={tone}
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+    >
       {video ? (
         <video src={source} muted={!controls} controls={controls} autoPlay={autoPlay} playsInline preload="metadata" onError={fail}/>
       ) : (
-        <img src={source} alt="" loading={autoPlay ? "eager" : "lazy"} decoding="async" onError={fail}/>
+        <img
+          src={source}
+          alt={fallback ? "Демонстрационная обложка работы" : ""}
+          loading={autoPlay ? "eager" : "lazy"}
+          decoding="async"
+          onError={fail}
+        />
       )}
       {video && !controls && <span className="cxMediaPlay"><Icon name="play" size={20}/></span>}
     </Wrapper>
