@@ -6,8 +6,8 @@ This module is the only place that applies those rules.
 """
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable
+import math
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
