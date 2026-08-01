@@ -1012,7 +1012,7 @@ async def test_webapp_feed_link_uses_viewer_referral_for_public_posts(client, mo
 @pytest.mark.asyncio
 async def test_webapp_feed_item_returns_public_post_without_auth(monkeypatch) -> None:
     monkeypatch.setattr(
-        "api.web.feed.repo.get_feed_generation_card",
+        "api.miniapp_routes.repo.get_feed_generation_card",
         AsyncMock(return_value=SimpleNamespace(
             generation=SimpleNamespace(
                 id=88,
@@ -1032,15 +1032,13 @@ async def test_webapp_feed_item_returns_public_post_without_auth(monkeypatch) ->
             score=0,
         )),
     )
-    monkeypatch.setattr("api.web.feed.public_url_is_available", lambda _url: True)
-    monkeypatch.setattr("api.web.feed.preview_public_image_url", lambda url, **_kwargs: url)
     app.dependency_overrides.clear()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        response = await ac.get("/api/v1/feed/88")
+        response = await ac.get("/api/v1/public/feed/88")
 
     assert response.status_code == 200
-    payload = response.json()["data"]
+    payload = response.json()
     assert payload["id"] == 88
     assert payload["result_url"] == "https://example.test/static/upload/feed-88.jpg"
 

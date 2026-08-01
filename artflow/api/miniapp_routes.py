@@ -1868,6 +1868,17 @@ async def public_models_summary(
     return _landing_models_payload(public_model_costs)
 
 
+@router.get("/public/feed/{gen_id}")
+async def public_feed_post(
+    gen_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    card = await repo.get_feed_generation_card(session, gen_id, require_media=False)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Public post not found")
+    return _feed_card_out(card, _anonymous_user())
+
+
 # ── image generation ──────────────────────────────────────────────────────────
 
 @router.post("/generate/image", response_model=GenerationOut, status_code=202)

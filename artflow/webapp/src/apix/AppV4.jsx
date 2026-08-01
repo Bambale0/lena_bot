@@ -347,7 +347,7 @@ export default function AppV4() {
     let cancelled = false;
     (async () => {
       try {
-        const response = await api(`/feed/${feedId}`);
+        const response = await api(`/public/feed/${feedId}`);
         const item = response?.data || response;
         if (cancelled || !item?.id) return;
         setScreen("feed");
