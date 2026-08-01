@@ -59,6 +59,18 @@ def test_video_cards_do_not_render_webp_previews_as_video() -> None:
     assert "isVideo(item, first);" in app
 
 
+def test_demo_mode_uses_verified_media_keys_only() -> None:
+    demo = read(APX / "demoData.js")
+
+    assert "verifiedDemoAssetKey" in demo
+    assert "GitHub Contents API is text-safe" in demo
+    assert 'portraitNeon: "portraitNeon"' in demo
+    assert 'architecture: "architecture"' in demo
+    for key in ["fashion", "car", "abstractGlass", "product", "watch", "lounge", "editorialSculpture"]:
+        assert f"{key}:" in demo
+    assert "archiveAssets[verifiedDemoAssetKey(key)]" in demo
+
+
 def test_final_pass_has_real_glassmorphism_without_new_bulky_blocks() -> None:
     css = read(APX / "apix.final-pass.css")
 
