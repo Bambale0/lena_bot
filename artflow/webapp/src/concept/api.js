@@ -195,7 +195,24 @@ export function isVideoMedia(item, url = "") {
 export async function uploadReference(file) {
   const form = new FormData();
   form.append("file", file);
-  const result = await apiForm("/upload", form);
+  const response = await fetch("/upload", {
+    method: "POST",
+    headers: { "X-Telegram-Init-Data": telegramInitData() },
+    body: form,
+  });
+
+  if (!response.ok) {
+    let detail = response.status === 413
+      ? "Файл слишком большой. Максимум 20 МБ."
+      : "Не удалось загрузить файл";
+    try {
+      const body = await response.json();
+      detail = body.detail || body.message || detail;
+    } catch {}
+    throw new Error(detail);
+  }
+
+  const result = await response.json();
   if (!result?.url) throw new Error("Сервер не вернул ссылку на файл");
   return result.url;
 }
