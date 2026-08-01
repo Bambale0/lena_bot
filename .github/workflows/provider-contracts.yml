@@ -8,6 +8,9 @@ on:
 jobs:
   provider-contracts:
     runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: "123456:ci-provider-contracts"
+      COMET_API_KEY: "ci-provider-contracts"
     defaults:
       run:
         working-directory: artflow
