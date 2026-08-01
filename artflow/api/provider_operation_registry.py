@@ -184,7 +184,7 @@ def _build_specs() -> dict[str, OperationSpec]:
     for contract_id, model in _IMAGE_MODELS.items():
         specs[contract_id] = OperationSpec(
             contract_id=contract_id,
-            generation_type=GenerationType.IMAGE,
+            generation_type=GenerationType.image,
             model=model,
             executor=_execute_image,
             poll_kind=PollKind.KIE,
@@ -195,7 +195,7 @@ def _build_specs() -> dict[str, OperationSpec]:
         poll_kind = PollKind.VEO if model in {"veo3", "veo3_fast", "veo3_lite"} else PollKind.KIE
         specs[contract_id] = OperationSpec(
             contract_id=contract_id,
-            generation_type=GenerationType.VIDEO,
+            generation_type=GenerationType.video,
             model=model,
             executor=_execute_video,
             poll_kind=poll_kind,
@@ -209,7 +209,7 @@ def _build_specs() -> dict[str, OperationSpec]:
             fixed = (("version_11", True),)
         specs[contract_id] = OperationSpec(
             contract_id=contract_id,
-            generation_type=GenerationType.VIDEO,
+            generation_type=GenerationType.video,
             model=model,
             executor=executor,
             poll_kind=poll_kind,
@@ -221,7 +221,7 @@ def _build_specs() -> dict[str, OperationSpec]:
         contract_id = f"suno.{operation}"
         specs[contract_id] = OperationSpec(
             contract_id=contract_id,
-            generation_type=GenerationType.MUSIC,
+            generation_type=GenerationType.music,
             model=f"suno/{operation}",
             executor=getattr(suno_full_service, function_name),
             poll_kind=_SUNO_POLL_KIND[operation],
@@ -232,7 +232,7 @@ def _build_specs() -> dict[str, OperationSpec]:
         contract_id = f"midjourney.{operation}"
         specs[contract_id] = OperationSpec(
             contract_id=contract_id,
-            generation_type=(GenerationType.VIDEO if operation == "video" else GenerationType.MIDJOURNEY),
+            generation_type=(GenerationType.video if operation == "video" else GenerationType.image),
             model=f"midjourney/{operation}",
             executor=getattr(midjourney_full_service, function_name),
             poll_kind=(PollKind.MIDJOURNEY if operation not in {"fetch", "list"} else PollKind.NONE),
@@ -242,19 +242,19 @@ def _build_specs() -> dict[str, OperationSpec]:
     specs.update(
         {
             "llm.kie.responses": OperationSpec(
-                "llm.kie.responses", GenerationType.ASSISTANT, "gpt-responses", _execute_assistant, PollKind.NONE, False
+                "llm.kie.responses", GenerationType.image, "gpt-responses", _execute_assistant, PollKind.NONE, False
             ),
             "llm.kie.claude": OperationSpec(
-                "llm.kie.claude", GenerationType.ASSISTANT, "claude-sonnet-4-5", _execute_assistant, PollKind.NONE, False
+                "llm.kie.claude", GenerationType.image, "claude-sonnet-4-5", _execute_assistant, PollKind.NONE, False
             ),
             "llm.comet.chat": OperationSpec(
-                "llm.comet.chat", GenerationType.ASSISTANT, "openai-compatible-chat", _execute_assistant, PollKind.NONE, False
+                "llm.comet.chat", GenerationType.image, "openai-compatible-chat", _execute_assistant, PollKind.NONE, False
             ),
             "llm.photo-prompt": OperationSpec(
-                "llm.photo-prompt", GenerationType.ASSISTANT, "photo-prompt-router", _execute_photo_prompt, PollKind.NONE, False
+                "llm.photo-prompt", GenerationType.image, "photo-prompt-router", _execute_photo_prompt, PollKind.NONE, False
             ),
             "llm.moderation": OperationSpec(
-                "llm.moderation", GenerationType.ASSISTANT, "strict-json-moderation", _execute_moderation, PollKind.NONE, False
+                "llm.moderation", GenerationType.image, "strict-json-moderation", _execute_moderation, PollKind.NONE, False
             ),
         }
     )
@@ -325,7 +325,10 @@ async def resolve_operation_price(
     if not spec.billable:
         return 0
 
-    if spec.generation_type == GenerationType.IMAGE:
+    if spec.contract_id.startswith("midjourney."):
+        return await get_midjourney_price(spec.contract_id.split(".", 1)[1], session=session)
+
+    if spec.generation_type == GenerationType.image:
         return await get_image_price_for_model(
             spec.price_alias or spec.model,
             quality=str(params.get("quality") or params.get("resolution") or "") or None,
@@ -333,7 +336,7 @@ async def resolve_operation_price(
             session=session,
         )
 
-    if spec.generation_type == GenerationType.VIDEO:
+    if spec.generation_type == GenerationType.video:
         return await get_video_price_for_model(
             spec.price_alias or spec.model,
             duration=int(params.get("duration") or params.get("extend_times") or 1),
@@ -347,7 +350,7 @@ async def resolve_operation_price(
             session=session,
         )
 
-    if spec.generation_type == GenerationType.MUSIC:
+    if spec.generation_type == GenerationType.music:
         model = str(params.get("model") or "suno/v5.0")
         model_aliases = {
             "V4_5": "suno/v4.5",
@@ -355,9 +358,6 @@ async def resolve_operation_price(
             "V5_5": "suno/v5.5",
         }
         return await get_music_price_for_model(model_aliases.get(model, model), session=session)
-
-    if spec.generation_type == GenerationType.MIDJOURNEY:
-        return await get_midjourney_price(spec.contract_id.split(".", 1)[1], session=session)
 
     return 0
 
