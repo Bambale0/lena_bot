@@ -6,7 +6,6 @@ import "./apix/apix.css";
 import "./apix/apix-art.css";
 import "./apix/apix.archive.css";
 import "./apix/apix.final-pass.css";
-import "./apix/apix.final-pass.js";
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
