@@ -4,6 +4,7 @@ The repository stores image prices as flat credits, most video resolution
 variants as credits per second, and Gemini Omni variants as final flat prices.
 This module is the only place that applies those rules.
 """
+
 from __future__ import annotations
 
 import math
