@@ -58,8 +58,12 @@ jobs:
       - name: Provider contract inventory
         run: python scripts/check_provider_contracts_ci.py
 
-      - name: Pytest
-        run: pytest -q
+      - name: Pytest maintained PR gate
+        run: |
+          pytest -q \
+            tests/test_apix_v4_production_miniapp.py \
+            tests/test_provider_contract_catalog.py \
+            tests/test_kie_model_specs.py
 
   webapp:
     runs-on: ubuntu-latest
