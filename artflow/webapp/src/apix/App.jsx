@@ -15,7 +15,7 @@ import {
 } from "./api.js";
 import { demoFeed, demoImageModels, demoPlans, demoPrompts, demoUser, demoVideoModels } from "./demoData.js";
 
-const BUILD_ID = "20260801-apix-premium-integrated-v1";
+const BUILD_ID = "20260801-apix-premium-structural-v2";
 const ACTIVE_STATUSES = new Set(["pending", "processing", "queued", "running"]);
 const FINISHED_STATUSES = new Set(["done", "completed", "success"]);
 const FAILED_STATUSES = new Set(["failed", "error", "cancelled"]);
@@ -24,6 +24,35 @@ window.__APIX_MINIAPP_BUILD_ID__ = BUILD_ID;
 
 function cls(...parts) {
   return parts.filter(Boolean).join(" ");
+}
+
+function Icon({ name }) {
+  const common = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": "true",
+  };
+
+  const paths = {
+    home: <><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10.5V20h13v-9.5" /><path d="M9.5 20v-5h5v5" /></>,
+    plus: <><path d="M12 5v14" /><path d="M5 12h14" /></>,
+    plusBox: <><rect x="4" y="4" width="16" height="16" rx="4" /><path d="M12 8v8" /><path d="M8 12h8" /></>,
+    prompt: <><path d="M5 5h14v11H8l-3 3V5Z" /><path d="M8 9h8" /><path d="M8 13h5" /></>,
+    user: <><path d="M20 21a8 8 0 0 0-16 0" /><circle cx="12" cy="8" r="4" /></>,
+    spark: <><path d="M12 2l2.2 6.3L21 12l-6.8 3.7L12 22l-2.2-6.3L3 12l6.8-3.7L12 2Z" /><path d="M19 3v4" /><path d="M17 5h4" /></>,
+    image: <><rect x="4" y="5" width="16" height="14" rx="3" /><path d="m8 15 3-3 3 3 2-2 3 3" /><circle cx="9" cy="10" r="1.3" /></>,
+    video: <><rect x="4" y="6" width="12" height="12" rx="3" /><path d="m16 10 4-2v8l-4-2" /></>,
+    save: <><path d="M6 4h12v16l-6-3-6 3V4Z" /></>,
+    share: <><path d="M4 12v7h16v-7" /><path d="M12 15V4" /><path d="m7 9 5-5 5 5" /></>,
+    repeat: <><path d="M17 2v5h-5" /><path d="M7 22v-5h5" /><path d="M19 11a7 7 0 0 0-12-5L5 8" /><path d="M5 13a7 7 0 0 0 12 5l2-2" /></>,
+    heart: <><path d="M20.8 8.6a5.2 5.2 0 0 0-8.8-3.7 5.2 5.2 0 0 0-8.8 3.7c0 5.2 8.8 10.4 8.8 10.4s8.8-5.2 8.8-10.4Z" /></>,
+  };
+
+  return <svg {...common}>{paths[name] || paths.spark}</svg>;
 }
 
 function modelKey(model) {
@@ -49,8 +78,12 @@ function itemMediaUrls(item) {
   return [...new Set(urls)];
 }
 
+function isPlayableVideoUrl(url = "") {
+  return /\.(mp4|mov|webm)(?:$|\?)/i.test(url);
+}
+
 function isVideo(item, url = "") {
-  return item?.gen_type === "video" || /\.(mp4|mov|webm)(?:$|\?)/i.test(url);
+  return item?.gen_type === "video" || isPlayableVideoUrl(url);
 }
 
 function compactNumber(value) {
@@ -111,7 +144,7 @@ function useResources() {
   return { ...state, reload };
 }
 
-function AppHeader({ user, demo, onTopup, onProfile }) {
+function AppHeader({ user, demo, onTopup, onProfile, onSearch }) {
   const telegramUser = tgUser();
   const initials = (user?.full_name || user?.username || telegramUser?.first_name || "A").trim().slice(0, 1).toUpperCase();
   const photo = user?.photo_url || telegramUser?.photo_url || "";
@@ -124,7 +157,7 @@ function AppHeader({ user, demo, onTopup, onProfile }) {
         <span>{demo ? "API fallback" : "Telegram Mini App"}</span>
       </div>
       <div className="apixTopRow">
-        <button className="apixSearch" type="button" aria-label="Поиск">⌕</button>
+        <button className="apixSearch" type="button" aria-label="Поиск промптов" onClick={onSearch}>⌕</button>
         <div className="apixLogo">APIX</div>
         <div className="apixTopActions">
           <button className="apixBalance" type="button" onClick={onTopup}>◆ {compactNumber(user?.credits)}</button>
@@ -162,6 +195,7 @@ function Hero({ screen, onCreate }) {
 function FeedCard({ item, index, onOpen, onLike, onRemix, onShare }) {
   const urls = itemMediaUrls(item);
   const first = urls[0] || "";
+  const playableVideo = isPlayableVideoUrl(first);
   const video = isVideo(item, first);
   const title = item.prompt || item.title || "Премиальная генерация APIX";
   const author = item.author || item.username || item.user?.username || "apix";
@@ -170,27 +204,26 @@ function FeedCard({ item, index, onOpen, onLike, onRemix, onShare }) {
     <article className={cls("feedTile", index % 3 === 0 && "tall", index % 5 === 0 && "wideTone")} style={{ "--tone": index % 6 }}>
       <button className="feedMedia" type="button" onClick={() => onOpen(item)} aria-label="Открыть публикацию">
         {first ? (
-          video ? <video src={first} muted playsInline preload="metadata" /> : <img src={first} alt="" loading="lazy" decoding="async" />
+          playableVideo ? <video src={first} muted playsInline preload="metadata" /> : <img src={first} alt="" loading={index < 2 ? "eager" : "lazy"} decoding="async" />
         ) : <div className="generatedArt" />}
         {video && <span className="mediaBadge">▶ 0:{12 + index}</span>}
         {!first && <span className="mediaBadge">AI</span>}
       </button>
       <div className="tileBadge">{index === 0 ? "🔥 Тренд" : video ? "Видео" : "Фото"}</div>
-      <div className="tileAuthor"><span className="authorAvatar">{author.slice(0, 1).toUpperCase()}</span><b>{author}</b><small>{index < 2 ? "2 ч назад" : "Вчера"}</small></div>
       <div className="tileBody">
         <p>{title}</p>
         <div className="tileActions">
-          <button type="button" onClick={() => onLike(item)}>♡ {compactNumber(item.likes_count)}</button>
-          <button type="button" onClick={() => onShare(item)}>↗ {compactNumber(item.shares_count)}</button>
-          <button type="button" onClick={() => onRemix(item)}>↻</button>
-          <button type="button" aria-label="Сохранить">▱</button>
+          <button type="button" onClick={() => onLike(item)} aria-label="Нравится"><Icon name="heart" /> {compactNumber(item.likes_count)}</button>
+          <button type="button" onClick={() => onShare(item)} aria-label="Поделиться"><Icon name="share" /> {compactNumber(item.shares_count)}</button>
+          <button type="button" onClick={() => onRemix(item)} aria-label="Повторить"><Icon name="repeat" /></button>
+          <button type="button" aria-label="Сохранить"><Icon name="save" /></button>
         </div>
       </div>
     </article>
   );
 }
 
-function FeedScreen({ feed, loading, onOpen, onLike, onRemix, onShare, onCreate }) {
+function FeedScreen({ feed, loading, onOpen, onLike, onRemix, onShare }) {
   const [sort, setSort] = useState("feed");
   const [type, setType] = useState("all");
 
@@ -204,16 +237,11 @@ function FeedScreen({ feed, loading, onOpen, onLike, onRemix, onShare, onCreate 
 
   return (
     <>
-      <Hero screen="feed" onCreate={onCreate} />
       <nav className="apixTabs" aria-label="Сортировка ленты">
         {[["feed", "Лента"], ["popular", "Популярное"], ["new", "Новое"], ["following", "Подписки"], ["for-you", "Для тебя"]].map(([key, label]) => (
           <button key={key} className={sort === key ? "active" : ""} onClick={() => setSort(key)} type="button">{label}</button>
         ))}
       </nav>
-      <section className="feedFeature">
-        <div><span>✧ Главная подборка</span><h2>AI-искусство нового поколения</h2><p>Глянцевые работы, видео и промпты из APIX.</p></div>
-        <button type="button" onClick={onCreate}>Создать работу <span>›</span></button>
-      </section>
       <nav className="apixChips" aria-label="Тип контента">
         {[["all", "Все"], ["image", "Фото"], ["video", "Видео"], ["mine", "Мои"]].map(([key, label]) => (
           <button key={key} className={type === key ? "active" : ""} onClick={() => setType(key === "mine" ? "all" : key)} type="button">{label}</button>
@@ -313,10 +341,15 @@ function StudioScreen({ imageModels, videoModels, selectedPrompt, onResult, onNo
 
   return (
     <>
-      <Hero screen="create" />
-      <section className="studioCard">
-        <div className="modeSwitch">
-          {[["image", "Изображение"], ["video", "Видео"]].map(([key, label]) => <button type="button" key={key} className={mode === key ? "active" : ""} onClick={() => setMode(key)}>{label}</button>)}
+      <section className="createIntro">
+        <h1>Создать</h1>
+        <p>Опиши идею. Остальное APIX соберёт в один поток.</p>
+      </section>
+      <section className="studioFlow">
+        <div className="modeSwitch" role="tablist" aria-label="Тип генерации">
+          {[["image", "Изображение", "image"], ["video", "Видео", "video"]].map(([key, label, icon]) => (
+            <button type="button" key={key} className={mode === key ? "active" : ""} onClick={() => setMode(key)}><Icon name={icon} />{label}</button>
+          ))}
         </div>
         <label className="promptBox"><span>Опишите вашу идею</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Например: футуристический город на закате, неоновые огни, дождь, отражения в лужах..." maxLength={1200} /></label>
         <div className="studioGridControls">
@@ -388,7 +421,7 @@ function ResultScreen({ result, onPublish, onReuse, onOpen }) {
     <>
       <Hero screen="result" />
       <section className="resultPanel">
-        <div className="resultStage">{ready && urls[0] ? (isVideo(result, urls[0]) ? <video src={urls[0]} controls playsInline /> : <img src={urls[0]} alt="" />) : <div className={cls("resultPending", failed && "failed")}><b>{failed ? "Не удалось" : "Генерация в очереди"}</b><span>{failed ? result?.error || "Проверь параметры и попробуй снова" : "Статус обновится автоматически"}</span></div>}</div>
+        <div className="resultStage">{ready && urls[0] ? (isPlayableVideoUrl(urls[0]) ? <video src={urls[0]} controls playsInline /> : <img src={urls[0]} alt="" />) : <div className={cls("resultPending", failed && "failed")}><b>{failed ? "Не удалось" : "Генерация в очереди"}</b><span>{failed ? result?.error || "Проверь параметры и попробуй снова" : "Статус обновится автоматически"}</span></div>}</div>
         <div className="resultMeta"><span>{result?.model || "APIX"}</span><span>{status}</span></div>
         <p>{result?.prompt || "Готовый результат появится здесь."}</p>
         <div className="resultActions"><button type="button" onClick={() => onOpen(result)}>Открыть</button><button type="button" onClick={() => onPublish(result)}>В ленту</button><button type="button" className="primaryAction" onClick={() => onReuse(result)}>Ещё вариант</button></div>
@@ -405,7 +438,7 @@ function Viewer({ item, onClose, onRemix, onShare }) {
     <div className="viewer" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="viewerCard" onClick={(event) => event.stopPropagation()}>
         <button className="viewerClose" type="button" onClick={onClose}>×</button>
-        <div className="viewerMedia">{first ? (isVideo(item, first) ? <video src={first} controls playsInline autoPlay /> : <img src={first} alt="" />) : <div className="generatedArt" />}</div>
+        <div className="viewerMedia">{first ? (isPlayableVideoUrl(first) ? <video src={first} controls playsInline autoPlay /> : <img src={first} alt="" />) : <div className="generatedArt" />}</div>
         <div className="viewerInfo"><b>@{item.author || item.username || "apix"}</b><p>{item.prompt || item.title || "Премиальная генерация APIX"}</p><div><button type="button" onClick={() => onRemix(item)}>↻ Повторить</button><button type="button" onClick={() => onShare(item)}>↗ Поделиться</button></div></div>
       </div>
     </div>
@@ -426,8 +459,24 @@ function TopupSheet({ open, plans, onClose }) {
 }
 
 function BottomNav({ screen, setScreen }) {
-  const items = [["feed", "⌂", "Лента"], ["trends", "♨", "Тренды"], ["create", "+", ""], ["prompts", "☻", "AI"], ["profile", "◉", "Профиль"]];
-  return <nav className="bottomNav" aria-label="Основная навигация">{items.map(([key, icon, label]) => <button key={key} type="button" className={cls(screen === key && "active", key === "create" && "center")} onClick={() => setScreen(key === "trends" ? "feed" : key)}><b>{icon}</b>{label && <span>{label}</span>}</button>)}</nav>;
+  const items = [
+    { key: "feed", target: "feed", icon: "home", label: "Лента" },
+    { key: "create-tab", target: "create", icon: "plusBox", label: "Создать" },
+    { key: "create", target: "create", icon: "spark", label: "", center: true },
+    { key: "prompts", target: "prompts", icon: "prompt", label: "Промпты" },
+    { key: "profile", target: "profile", icon: "user", label: "Профиль" },
+  ];
+
+  return (
+    <nav className="bottomNav" aria-label="Основная навигация">
+      {items.map((item) => (
+        <button key={item.key} type="button" className={cls(screen === item.target && !item.center && "active", item.center && "center")} onClick={() => setScreen(item.target)} aria-label={item.label || "Создать"}>
+          <b><Icon name={item.icon} /></b>
+          {item.label && <span>{item.label}</span>}
+        </button>
+      ))}
+    </nav>
+  );
 }
 
 function SkeletonGrid() {
@@ -517,11 +566,11 @@ export default function App() {
         ? <ProfileScreen user={resources.user} history={resources.history} feed={resources.feed} onTopup={() => setTopupOpen(true)} />
         : screen === "result"
           ? <ResultScreen result={result} onOpen={setViewer} onPublish={publishResult} onReuse={(item) => { setSelectedPrompt(item?.prompt || selectedPrompt); setScreen("create"); }} />
-          : <FeedScreen feed={resources.feed} loading={resources.loading} onOpen={setViewer} onLike={likeFeed} onRemix={remixFeed} onShare={shareFeed} onCreate={() => setScreen("create")} />;
+          : <FeedScreen feed={resources.feed} loading={resources.loading} onOpen={setViewer} onLike={likeFeed} onRemix={remixFeed} onShare={shareFeed} />;
 
   return (
     <main className="apixApp">
-      <AppHeader user={resources.user} demo={resources.demo} onTopup={() => setTopupOpen(true)} onProfile={() => setScreen("profile")} />
+      <AppHeader user={resources.user} demo={resources.demo} onTopup={() => setTopupOpen(true)} onProfile={() => setScreen("profile")} onSearch={() => setScreen("prompts")} />
       {resources.demo && <div className="demoNotice">Демо-режим: реальные данные появятся внутри Telegram Mini App.</div>}
       <div className="screenWrap">{content}</div>
       <BottomNav screen={screen} setScreen={setScreen} />
