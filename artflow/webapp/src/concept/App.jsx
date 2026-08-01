@@ -182,7 +182,17 @@ export default function ConceptApp() {
       modelKey: item.model || item.model_key || "",
       kind: item.kind === "video" || item.gen_type === "video" ? "video" : "image",
     });
-    setScreen("create");
+    navigate("create");
+  }
+
+  function remixItem(item) {
+    setPreset({
+      id: `remix-${item.id}-${Date.now()}`,
+      remix: item,
+      kind: item.gen_type === "video" ? "video" : "image",
+      hiddenPrompt: true,
+    });
+    navigate("create");
   }
 
   function navigate(next) {
@@ -249,6 +259,7 @@ export default function ConceptApp() {
             onNavigate={navigate}
             onTopup={() => setTopupOpen(true)}
             onNotice={setNotice}
+            onRemix={remixItem}
           />
         )}
       </main>
