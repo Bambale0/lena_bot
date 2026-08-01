@@ -2,6 +2,8 @@
 html, body, #root { background: #08070c; color: var(--apx-text); font-family: var(--apx-sans); }
 body { background: radial-gradient(circle at 50% -10%, rgba(187,44,255,.16), transparent 30%), radial-gradient(circle at 92% 12%, rgba(0,240,255,.08), transparent 28%), linear-gradient(180deg, #08070c, #050408 72%); }
 button { touch-action: manipulation; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(187,44,255,.28), 0 0 0 1px rgba(0,240,255,.42) inset; }
+button:disabled, input:disabled, textarea:disabled, select:disabled { pointer-events: none; opacity: .5; }
 .apixApp { max-width: 430px; padding: 0 12px calc(88px + env(safe-area-inset-bottom)); }
 .apixTop { min-height: 58px; margin: 0 -12px 6px; padding: calc(7px + env(safe-area-inset-top)) 12px 8px; background: linear-gradient(180deg, rgba(8,7,12,.96), rgba(8,7,12,.74)); border-bottom: 1px solid rgba(255,255,255,.07); box-shadow: 0 10px 26px rgba(0,0,0,.24); }
 .apixMicroBar { position: fixed; right: calc(50% - min(215px, 50vw) + 10px); bottom: calc(86px + env(safe-area-inset-bottom)); z-index: 39; width: auto; height: 18px; margin: 0; padding: 0 7px; border-radius: 999px; opacity: .34; pointer-events: none; font-size: 8px; letter-spacing: .06em; background: rgba(20,17,26,.48); border-color: rgba(255,255,255,.05); box-shadow: none; }
@@ -21,6 +23,7 @@ button { touch-action: manipulation; }
 .apixHeroCopy { max-width: none; }
 .apixEyebrow, .apixHero p, .apixHeroCta { display: none !important; }
 .apixHero h1 { margin: 0; font-size: clamp(31px, 8.5vw, 39px); line-height: .95; letter-spacing: -.058em; }
+.apixHero:has(+ .apixTabs) { display: none !important; }
 
 .apixTabs { margin: 0 -12px 8px; padding: 0 12px 3px; gap: 13px; }
 .apixTabs button { min-height: 38px; padding: 7px 0; font-size: 14px; }
