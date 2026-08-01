@@ -1,0 +1,128 @@
+export const demoUser = {
+  username: "apix_user",
+  full_name: "APIX Creator",
+  photo_url: "",
+  credits: 12450,
+  referral_balance: 0,
+  referral_link: "",
+};
+
+export const demoFeed = [
+  {
+    id: "demo-1",
+    author: "Elysian",
+    gen_type: "image",
+    model: "gpt-image-2-text-to-image",
+    prompt: "Кинематографичный портрет в розово-синем неоне, мокрый асфальт, премиальная детализация",
+    likes_count: 2400,
+    shares_count: 312,
+    remixes: 82,
+    created_at: new Date(Date.now() - 1000 * 60 * 40).toISOString(),
+    preview_urls: [],
+  },
+  {
+    id: "demo-2",
+    author: "SkyForge",
+    gen_type: "video",
+    model: "kling-3.0/video",
+    prompt: "Парящий город над облаками на закате, sci-fi editorial frame",
+    likes_count: 1800,
+    shares_count: 201,
+    remixes: 44,
+    created_at: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
+    preview_urls: [],
+  },
+  {
+    id: "demo-3",
+    author: "NeonSoul",
+    gen_type: "image",
+    model: "nano-banana-pro",
+    prompt: "Девушка в тёмных очках, городские огни, дорогой fashion cyberpunk",
+    likes_count: 3100,
+    shares_count: 432,
+    remixes: 128,
+    created_at: new Date(Date.now() - 1000 * 60 * 60 * 9).toISOString(),
+    preview_urls: [],
+  },
+  {
+    id: "demo-4",
+    author: "DriveDreams",
+    gen_type: "image",
+    model: "seedream/5-pro-text-to-image",
+    prompt: "Глянцевый суперкар под дождём, неоновые отражения, luxury ad photography",
+    likes_count: 1200,
+    shares_count: 178,
+    remixes: 39,
+    created_at: new Date(Date.now() - 1000 * 60 * 60 * 18).toISOString(),
+    preview_urls: [],
+  },
+  {
+    id: "demo-5",
+    author: "OrbitLab",
+    gen_type: "image",
+    model: "grok-imagine/text-to-image",
+    prompt: "Астронавт с отражением галактики на шлеме, глубокий космос, premium poster art",
+    likes_count: 840,
+    shares_count: 96,
+    remixes: 24,
+    created_at: new Date(Date.now() - 1000 * 60 * 60 * 27).toISOString(),
+    preview_urls: [],
+  },
+  {
+    id: "demo-6",
+    author: "HaloMuse",
+    gen_type: "video",
+    model: "veo3_fast",
+    prompt: "Силуэт девушки в сияющем кольце света, мягкая камера, slow motion",
+    likes_count: 1530,
+    shares_count: 144,
+    remixes: 51,
+    created_at: new Date(Date.now() - 1000 * 60 * 60 * 36).toISOString(),
+    preview_urls: [],
+  },
+];
+
+export const demoPrompts = [
+  {
+    id: "prompt-1",
+    title: "Неоновый портрет",
+    prompt: "Кинематографичный портрет в розово-синем неоне, мокрый асфальт, объёмный свет, премиальная детализация",
+    category: "portrait",
+    likes_count: 892,
+    uses_count: 1260,
+  },
+  {
+    id: "prompt-2",
+    title: "Город нового поколения",
+    prompt: "Футуристический город на закате, глянцевые отражения, глубокий контраст, luxury sci-fi editorial",
+    category: "city",
+    likes_count: 756,
+    uses_count: 980,
+  },
+  {
+    id: "prompt-3",
+    title: "Рекламный суперкар",
+    prompt: "Премиальная автомобильная фотосъёмка ночью, дождь, неон, отражения, объектив 85mm",
+    category: "commercial",
+    likes_count: 642,
+    uses_count: 744,
+  },
+];
+
+export const demoImageModels = [
+  { key: "gpt-image-2-text-to-image", model_key: "gpt-image-2-text-to-image", name: "GPT Image 2", display_name: "GPT Image 2", cost_credits: 10, capabilities: { aspect_ratios: ["1:1", "4:5", "9:16", "16:9"], counts: [1, 2, 4] } },
+  { key: "nano-banana-pro", model_key: "nano-banana-pro", name: "Nano Banana Pro", display_name: "Nano Banana Pro", cost_credits: 8, capabilities: { aspect_ratios: ["1:1", "3:4", "9:16", "16:9"], counts: [1] } },
+  { key: "seedream/5-pro-text-to-image", model_key: "seedream/5-pro-text-to-image", name: "Seedream 5 Pro", display_name: "Seedream 5 Pro", cost_credits: 6, capabilities: { aspect_ratios: ["1:1", "4:5", "16:9"], counts: [1, 2] } },
+];
+
+export const demoVideoModels = [
+  { key: "kling-3.0/video", model_key: "kling-3.0/video", name: "Kling 3.0", display_name: "Kling 3.0", cost_credits: 30, capabilities: { duration_options: [5, 10] } },
+  { key: "veo3_fast", model_key: "veo3_fast", name: "Veo Fast", display_name: "Veo Fast", cost_credits: 35, capabilities: { duration_options: [5, 8] } },
+];
+
+export const demoPlans = [
+  { id: "p1", credits: 100, price_rub: 99, bonus_credits: 10 },
+  { id: "p2", credits: 300, price_rub: 249, bonus_credits: 40 },
+  { id: "p3", credits: 1000, price_rub: 799, bonus_credits: 200 },
+  { id: "p4", credits: 3000, price_rub: 2199, bonus_credits: 750 },
+];
