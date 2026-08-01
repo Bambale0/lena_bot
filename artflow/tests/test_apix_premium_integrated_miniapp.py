@@ -25,7 +25,7 @@ def test_miniapp_entrypoint_loads_archive_visual_pass_after_base_styles() -> Non
     assert 'import "./apix/apix.css";' in entry
     assert 'import "./apix/apix-art.css";' in entry
     assert 'import "./apix/apix.archive.css";' in entry
-    assert entry.index('apix.archive.css') > entry.index('apix-art.css')
+    assert entry.index("apix.archive.css") > entry.index("apix-art.css")
     assert "createRoot" in entry
 
 
@@ -41,11 +41,11 @@ def test_premium_app_is_integrated_with_real_api_contract() -> None:
         '"/models/video"',
         '"/history?limit=40"',
         '"/plans"',
-        '`/generate/${mode}`',
-        '`/generations/${result.id}`',
-        '`/feed/${item.id}/like`',
-        '`/feed/${item.id}/link`',
-        '`/generations/${item.id}/share`',
+        "`/generate/${mode}`",
+        "`/generations/${result.id}`",
+        "`/feed/${item.id}/like`",
+        "`/feed/${item.id}/link`",
+        "`/generations/${item.id}/share`",
     ]
 
     for path in required_paths:
@@ -54,7 +54,7 @@ def test_premium_app_is_integrated_with_real_api_contract() -> None:
     assert "X-Telegram-Init-Data" in api
     assert "X-Web-Auth-Token" in api
     assert 'fetch("/upload"' in api
-    assert '`${API_BASE}/photo-prompt`' in api
+    assert "`${API_BASE}/photo-prompt`" in api
 
 
 def test_archive_visual_system_is_tokenized_and_content_first() -> None:
@@ -94,14 +94,16 @@ def test_demo_mode_is_compact_and_not_empty_light_placeholder() -> None:
     assert ".apixMicroBar { position: fixed" in css
 
 
-def test_demo_feed_uses_archive_adapted_assets_not_empty_radial_bubbles() -> None:
+def test_demo_feed_uses_webp_assets_not_svg_or_radial_bubbles() -> None:
     demo = read(APX / "demoData.js")
     assets = read(APX / "archiveAssets.js")
     css = read(APX / "apix.archive.css")
 
     assert "from \"./archiveAssets.js\"" in demo
     assert "preview_urls: []" not in demo
-    assert "data:image/svg+xml" in assets
+    assert "data:image/webp;base64" in assets
+    assert "data:image/svg+xml" not in assets
+    assert "const svg =" not in assets
     for key in [
         "portraitNeon",
         "architecture",
