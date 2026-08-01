@@ -1,0 +1,224 @@
+/* Structural APIX pass.
+   This file is intentionally loaded last: it fixes real component structure,
+   not cosmetic overlays. */
+
+.apixApp {
+  padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important;
+}
+
+.apixSearch,
+.apixBalance,
+.apixAvatar,
+.apixChips button,
+.modeSwitch,
+.promptBox textarea,
+.studioGridControls select,
+.inlineInput input,
+.referenceRow > button,
+.ghostUpload,
+.studioActions > button,
+.bottomNav,
+.bottomNav button,
+.tileActions button {
+  background: rgba(18, 14, 24, .54) !important;
+  border-color: rgba(255, 255, 255, .13) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.32);
+  backdrop-filter: blur(22px) saturate(1.32);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 14px 34px rgba(0,0,0,.24) !important;
+}
+
+.apixTabs {
+  padding-top: 10px !important;
+  padding-bottom: 2px !important;
+}
+
+.apixChips {
+  padding-bottom: 8px !important;
+}
+
+.feedGrid {
+  align-items: start;
+}
+
+.feedTile {
+  display: grid !important;
+  grid-template-rows: minmax(166px, 1fr) auto;
+  min-height: 286px !important;
+  background: rgba(12, 10, 16, .76) !important;
+}
+
+.feedTile.tall {
+  min-height: 332px !important;
+  grid-template-rows: minmax(212px, 1fr) auto;
+}
+
+.feedMedia {
+  min-height: 166px !important;
+  height: 100% !important;
+  background: rgba(5, 4, 8, .72) !important;
+}
+
+.feedTile.tall .feedMedia {
+  min-height: 212px !important;
+}
+
+.feedMedia img,
+.feedMedia video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  display: block !important;
+}
+
+.feedMedia img[src^="data:image/webp"] {
+  image-rendering: auto;
+}
+
+.tileAuthor {
+  display: none !important;
+}
+
+.tileBody {
+  min-height: 82px;
+}
+
+.tileActions button svg,
+.bottomNav svg,
+.modeSwitch svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.tileActions button {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.createIntro {
+  margin: 8px 0 12px;
+  padding: 0 2px;
+}
+
+.createIntro h1 {
+  margin: 0;
+  font-family: var(--apx-serif);
+  font-size: clamp(34px, 10vw, 42px);
+  line-height: .9;
+  letter-spacing: -.055em;
+  color: var(--apx-text);
+}
+
+.createIntro h1::after {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--apx-primary);
+  box-shadow: 0 0 18px rgba(187,44,255,.8);
+  vertical-align: .15em;
+}
+
+.createIntro p {
+  max-width: 300px;
+  margin: 8px 0 0;
+  color: var(--apx-muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.studioFlow {
+  display: block;
+  margin: 0;
+  padding: 0 0 12px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.studioFlow .modeSwitch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  min-height: 52px !important;
+}
+
+.studioFlow .modeSwitch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px !important;
+}
+
+.studioFlow .modeSwitch button.active {
+  background: linear-gradient(135deg, rgba(255,72,198,.88), rgba(39,233,255,.88)) !important;
+  color: #fff;
+  box-shadow: 0 0 28px rgba(187,44,255,.30), inset 0 1px 0 rgba(255,255,255,.18) !important;
+}
+
+.studioFlow .promptBox textarea {
+  min-height: 128px !important;
+  resize: vertical;
+}
+
+.studioFlow .studioActions .primaryAction {
+  min-height: 52px !important;
+  font-size: 14px !important;
+  background: linear-gradient(135deg, #bb2cff, #27e9ff) !important;
+}
+
+.bottomNav {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  height: 68px !important;
+}
+
+.bottomNav button {
+  display: grid !important;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  color: var(--apx-muted);
+}
+
+.bottomNav button b {
+  display: grid !important;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 0 !important;
+}
+
+.bottomNav button.active {
+  color: #fff !important;
+  background: rgba(255,255,255,.085) !important;
+}
+
+.bottomNav button.center {
+  width: 58px !important;
+  height: 58px !important;
+  min-height: 58px !important;
+  margin-top: -28px !important;
+  justify-self: center;
+  border-radius: 50% !important;
+  background: linear-gradient(135deg, #bb2cff, #27e9ff) !important;
+  color: #fff !important;
+  box-shadow: 0 0 34px rgba(187,44,255,.45), 0 12px 28px rgba(0,0,0,.34) !important;
+}
+
+.bottomNav button.center b {
+  width: 26px;
+  height: 26px;
+}
+
+@media (max-width: 370px) {
+  .feedTile { min-height: 266px !important; grid-template-rows: minmax(154px, 1fr) auto; }
+  .feedTile.tall { min-height: 308px !important; grid-template-rows: minmax(194px, 1fr) auto; }
+  .feedMedia { min-height: 154px !important; }
+  .feedTile.tall .feedMedia { min-height: 194px !important; }
+  .createIntro h1 { font-size: 34px; }
+}
