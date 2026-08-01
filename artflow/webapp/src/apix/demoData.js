@@ -1,6 +1,20 @@
 import { archiveAssets } from "./archiveAssets.js";
 
-const demoAsset = (key) => archiveAssets[key] || archiveAssets.portraitNeon;
+// GitHub Contents API is text-safe, but very large inline media can become fragile in browsers.
+// Keep demo-mode on verified media keys only; production feed still uses real API/CDN URLs.
+const verifiedDemoAssetKey = (key) => ({
+  portraitNeon: "portraitNeon",
+  architecture: "architecture",
+  fashion: "portraitNeon",
+  car: "architecture",
+  abstractGlass: "portraitNeon",
+  product: "architecture",
+  watch: "portraitNeon",
+  lounge: "architecture",
+  editorialSculpture: "portraitNeon",
+}[key] || "portraitNeon");
+
+const demoAsset = (key) => archiveAssets[verifiedDemoAssetKey(key)] || archiveAssets.portraitNeon;
 
 export const demoUser = {
   username: "apix_user",
