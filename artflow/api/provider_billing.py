@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import repository as repo
-from db.models import Generation
+from db.models import Generation, User
 
 
 async def refund_generation_once(
@@ -27,7 +27,8 @@ async def refund_generation_once(
 
     result = await session.execute(
         select(Generation)
-        .where(Generation.id == generation_id, Generation.tg_id == user_id)
+        .join(User, User.id == Generation.user_id)
+        .where(Generation.id == generation_id, User.tg_id == user_id)
         .with_for_update()
     )
     generation = result.scalar_one_or_none()
