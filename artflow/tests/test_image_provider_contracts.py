@@ -261,7 +261,7 @@ async def test_kie_image_failure_never_substitutes_seedream(monkeypatch) -> None
     monkeypatch.setattr(image_service.kieai_client, "create_task", fail_kie)
     monkeypatch.setattr(image_service.comet_fallback, "generate_image", forbidden_comet)
 
-    with pytest.raises(RuntimeError, match="cross-model fallback is disabled"):
+    with pytest.raises(RuntimeError, match="fallback disabled to prevent model substitution"):
         await image_service.generate_image(
             ImageModel.QWEN_T2I,
             "A product photo",
