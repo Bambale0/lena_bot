@@ -43,8 +43,7 @@ function FeedCard({ item, index, onOpen, onRemix, onNotice, onRemoved }) {
   const previewCount = Math.max(1, generationPreviewUrls(item).length);
   const primarySources = feedPreviewCandidates(item, 0);
   const video = isVideoMedia(item, primarySources[0]);
-  const prompt = publicPrompt(item);
-  const shape = ["portrait", "tall", "square", "portrait", "wide"][index % 5];
+  const shape = ["portrait", "portrait", "square", "tall", "tall", "wide"][index % 6];
 
   async function like(event) {
     event.stopPropagation();
@@ -107,20 +106,19 @@ function FeedCard({ item, index, onOpen, onRemix, onNotice, onRemoved }) {
         </div>
       </header>
 
-      {video && <span className="cxFeedCard__play"><Icon name="play" size={18}/></span>}
+      {video && <span className="cxFeedCard__play"><Icon name="play" size={19}/></span>}
 
       <footer className="cxFeedCard__footer">
-        {prompt && <p>{prompt.length > 64 ? `${prompt.slice(0, 61)}…` : prompt}</p>}
-        <div className="cxFeedCard__controls">
+        <div className="cxFeedCard__statbar">
           <button type="button" className={liked ? "liked" : ""} onClick={like} disabled={busy} aria-label="Нравится">
-            <Icon name="heart" size={15}/><span>{formatCompact(likes)}</span>
+            <Icon name="heart" size={16}/><span>{formatCompact(likes)}</span>
           </button>
-          <span><Icon name="eye" size={15}/>{formatCompact(item.views_count || item.remixes)}</span>
+          <span><Icon name="eye" size={16}/>{formatCompact(item.views_count || item.remixes)}</span>
           <button type="button" onClick={(event) => { event.stopPropagation(); onRemix(item); }} aria-label="Повторить">
-            <Icon name="reload" size={15}/><span>{formatCompact(item.remixes)}</span>
+            <Icon name="reload" size={16}/><span>{formatCompact(item.remixes)}</span>
           </button>
-          <button type="button" onClick={share} aria-label="Поделиться"><Icon name="share" size={15}/></button>
         </div>
+        <button className="cxFeedCard__share" type="button" onClick={share} aria-label="Поделиться"><Icon name="share" size={17}/></button>
       </footer>
     </article>
   );
@@ -203,7 +201,7 @@ export default function FeedScreen({ feed, loading, onReload, onNavigate, onPres
             <button key={key} type="button" className={sort === key ? "active" : ""} onClick={() => setSort(key)}>{label}</button>
           ))}
         </div>
-        <button className="cxFilterIcon" type="button" onClick={() => setSearchOpen((value) => !value)} aria-label="Фильтры">
+        <button className="cxFilterIcon" type="button" onClick={() => setSearchOpen((value) => !value)} aria-label="Поиск и фильтры">
           <Icon name="sliders" size={19}/>
         </button>
       </div>
