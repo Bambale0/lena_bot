@@ -1,22 +1,26 @@
 from pathlib import Path
 
 
-TRANSFORM = Path("webapp/feed-pinterest-transform.js")
+COMPONENTS = Path("webapp/src/concept/components.jsx")
+FEED = Path("webapp/src/concept/FeedScreen.jsx")
 
 
-def test_preview_error_never_removes_publication_card() -> None:
-    source = TRANSFORM.read_text(encoding="utf-8")
+def test_preview_error_advances_fallback_instead_of_removing_card() -> None:
+    components = COMPONENTS.read_text(encoding="utf-8")
+    feed = FEED.read_text(encoding="utf-8")
 
-    assert '"  const visibleUrls = previewUrls.slice(0, 4);"' in source
-    assert '"  if (!previewUrls.length) return null;"' in source
-    assert "failedUrls.has(url) ? undefined : onOpen" in source
-    assert "Публикация сохранена" in source
-    assert "feed-card-persistence-v6" in source
+    assert "function ProgressiveMedia" in components
+    assert "setSourceIndex((value) => value + 1)" in components
+    assert "if (!source) return <MediaPlaceholder" in components
+    assert "MediaPlaceholder" in components
+    assert "return null" not in feed
 
 
-def test_hotfix_is_frontend_only() -> None:
-    source = TRANSFORM.read_text(encoding="utf-8")
+def test_publication_identity_and_actions_remain_visible() -> None:
+    source = FEED.read_text(encoding="utf-8")
 
-    assert "FEED_RENDER_CONCURRENCY" not in source
-    assert "asyncio" not in source
-    assert "placeholder_webp" not in source
+    assert "@{item.author" in source
+    assert 'aria-label="Нравится"' in source
+    assert 'aria-label="Повторить"' in source
+    assert 'aria-label="Поделиться"' in source
+    assert "onRemoved" in source
