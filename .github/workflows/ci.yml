@@ -61,7 +61,7 @@ jobs:
       - name: Pytest maintained PR gate
         run: |
           pytest -q \
-            tests/test_apix_v4_production_miniapp.py \
+            tests/test_apix_legacy_concept_runtime.py \
             tests/test_provider_contract_catalog.py \
             tests/test_kie_model_specs.py
 
