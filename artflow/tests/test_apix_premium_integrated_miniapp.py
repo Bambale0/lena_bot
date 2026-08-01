@@ -17,20 +17,28 @@ def test_vite_no_longer_uses_string_transform_plugins() -> None:
     assert "plugins: [react()]" in config
 
 
-def test_miniapp_entrypoint_loads_archive_visual_pass_after_base_styles() -> None:
+def test_miniapp_entrypoint_uses_clean_v4_shell_only() -> None:
     entry = read(WEBAPP / "src" / "main.jsx")
 
-    assert 'import App from "./apix/App.jsx";' in entry
-    assert 'import "./apix/apix.tokens.css";' in entry
-    assert 'import "./apix/apix.css";' in entry
-    assert 'import "./apix/apix-art.css";' in entry
-    assert 'import "./apix/apix.archive.css";' in entry
-    assert entry.index("apix.archive.css") > entry.index("apix-art.css")
+    assert 'import App from "./apix/AppV4.jsx";' in entry
+    assert 'import "./apix/apix.v4.css";' in entry
+    for legacy in [
+        "./apix/App.jsx",
+        "apix.tokens.css",
+        "apix.css",
+        "apix-art.css",
+        "apix.archive.css",
+        "apix.final-pass.css",
+        "apix.structural.css",
+        "apix.v3.css",
+        "apix.final-pass.js",
+    ]:
+        assert legacy not in entry
     assert "createRoot" in entry
 
 
-def test_premium_app_is_integrated_with_real_api_contract() -> None:
-    app = read(APX / "App.jsx")
+def test_v4_app_is_integrated_with_real_api_contract() -> None:
+    app = read(APX / "AppV4.jsx")
     api = read(APX / "api.js")
 
     required_paths = [
@@ -57,101 +65,42 @@ def test_premium_app_is_integrated_with_real_api_contract() -> None:
     assert "`${API_BASE}/photo-prompt`" in api
 
 
-def test_archive_visual_system_is_tokenized_and_content_first() -> None:
-    tokens = read(APX / "apix.tokens.css")
-    css = read(APX / "apix.archive.css")
-    app = read(APX / "App.jsx")
+def test_v4_visual_system_is_not_the_legacy_override_stack() -> None:
+    app = read(APX / "AppV4.jsx")
+    css = read(APX / "apix.v4.css")
 
-    for token in [
-        "--apx-bg: #08070c",
-        "--apx-primary: #bb2cff",
-        "--apx-violet: #7b4dff",
-        "--apx-cyan: #00f0ff",
-        "--apx-r-1",
-        "--apx-s-1",
-    ]:
-        assert token in tokens
-
-    assert ".apixHero { min-height: 0" in css
-    assert "background: transparent !important" in css
-    assert ".feedFeature { display: none !important" in css
-    assert ".feedGrid { gap: 10px" in css
-    assert ".bottomNav { width: min(396px" in css
+    assert "20260801-apix-v4-clean-shell" in app
+    assert "APIX v4 clean shell" in css
+    assert ".v4App" in css
+    assert ".v4Grid" in css
+    assert "column-count: 2" in css
+    assert ".v4Nav" in css
+    assert "blur(26px) saturate(1.35)" in css
     assert "env(safe-area-inset-bottom)" in css
     assert "@media (prefers-reduced-motion: reduce)" in css
-    assert "APIX" in app
-    assert "AI-искусство нового поколения" in app
+    assert ".apixHero" not in css
+    assert ".bottomNav" not in css
+    assert ".studioCard" not in css
 
 
-def test_demo_mode_is_compact_and_not_empty_light_placeholder() -> None:
-    css = read(APX / "apix.archive.css")
-    app = read(APX / "App.jsx")
-
-    assert "demoNotice" in app
-    assert "По этому фильтру пока ничего нет" not in app
-    assert "#08070c" in css
-    assert "светлая" not in css.lower()
-    assert ".apixMicroBar { position: fixed" in css
-
-
-def test_demo_feed_uses_webp_assets_not_svg_or_radial_bubbles() -> None:
+def test_v4_demo_media_is_guarded_against_broken_inline_assets() -> None:
     demo = read(APX / "demoData.js")
-    assets = read(APX / "archiveAssets.js")
-    css = read(APX / "apix.archive.css")
+    app = read(APX / "AppV4.jsx")
 
-    assert "from \"./archiveAssets.js\"" in demo
-    assert "preview_urls: []" not in demo
-    assert "data:image/webp;base64" in assets
-    assert "data:image/svg+xml" not in assets
-    assert "const svg =" not in assets
-    for key in [
-        "portraitNeon",
-        "architecture",
-        "fashion",
-        "car",
-        "abstractGlass",
-        "product",
-        "watch",
-        "lounge",
-        "editorialSculpture",
-    ]:
-        assert key in assets
-        assert f'demoAsset("{key}")' in demo
-
-    assert "radial-gradient(circle" not in css
-    assert ".generatedArt::before, .generatedArt::after { display: none" in css
+    assert "verifiedDemoAssetKey" in demo
+    assert "archiveAssets[verifiedDemoAssetKey(key)]" in demo
+    assert "function playableVideo" in app
+    assert "playableVideo(src) ? <video" in app
+    assert "loading={index < 2 ? \"eager\" : \"lazy\"}" in app
 
 
-def test_ui_pass_enforces_touch_targets_and_motion_safety() -> None:
-    css = read(APX / "apix.archive.css")
-
-    assert "min-width: 44px" in css
-    assert "min-height: 44px" in css
-    assert "transition:" in css
-    assert "touch-action: manipulation" in css
-    assert "prefers-reduced-motion" in css
-
-
-def test_shadcn_inspired_focus_and_disabled_states_are_present() -> None:
-    css = read(APX / "apix.archive.css")
+def test_v4_accessibility_and_touch_basics() -> None:
+    css = read(APX / "apix.v4.css")
+    app = read(APX / "AppV4.jsx")
 
     assert "button:focus-visible" in css
-    assert "input:focus-visible" in css
-    assert "textarea:focus-visible" in css
-    assert "select:focus-visible" in css
     assert "button:disabled" in css
-    assert "pointer-events: none" in css
-    assert "opacity: .5" in css
-
-
-def test_feed_starts_fast_without_duplicate_rectangular_blocks() -> None:
-    css = read(APX / "apix.archive.css")
-
-    assert "/* Content-first rule: the feed is the hero." in css
-    assert ".apixHero:has(+ .apixTabs) { display: none !important; }" in css
-    assert ".apixEyebrow, .apixHero p, .apixHeroCta { display: none !important; }" in css
-    assert ".apixHero { min-height: 0" in css
-    assert ".feedFeature { display: none !important; }" in css
-    assert "border-radius: 0" in css
-    assert "box-shadow: none" in css
-    assert "padding: 0 2px 2px" in css
+    assert "touch-action: manipulation" in css
+    assert "role=\"dialog\"" in app
+    assert "aria-modal=\"true\"" in app
+    assert "aria-label=\"Основная навигация\"" in app
