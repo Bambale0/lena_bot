@@ -1,5 +1,28 @@
-// Generated from premium-ui-design-prompt archive public/feed PNG assets.
-// Optimized to inline WebP data URLs for demo/empty states; production feed still uses API media URLs.
+// Archive-adapted demo assets based on premium-ui-design-prompt/public/feed/* names.
+// Inline SVG scenes keep GitHub text updates safe while the UI no longer falls back to CSS bubbles.
+const svg = (body) => `data:image/svg+xml;utf8,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#ff4d90"/><stop offset=".48" stop-color="#7b4dff"/><stop offset="1" stop-color="#00f0ff"/></linearGradient>
+    <radialGradient id="r" cx="50%" cy="35%" r="70%"><stop stop-color="#fff" stop-opacity=".34"/><stop offset=".38" stop-color="#bb2cff" stop-opacity=".18"/><stop offset="1" stop-color="#08070c" stop-opacity="0"/></radialGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="28"/></filter>
+    <filter id="glow"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="720" height="900" fill="#08070c"/>
+  <rect width="720" height="900" fill="url(#r)"/>
+  ${body}
+  <rect y="620" width="720" height="280" fill="url(#g)" opacity=".10"/>
+  <rect width="720" height="900" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="2"/>
+</svg>` )}`;
+
 export const archiveAssets = {
-  placeholder: "data:image/webp;base64,UklGRkoAAABXRUJQVlA4ID4AAACQAQCdASoBAAEAAQAcJaQAA3AA/vuUAAA=",
+  portraitNeon: svg(`<circle cx="360" cy="290" r="138" fill="url(#g)" opacity=".38" filter="url(#blur)"/><path d="M255 710c18-178 56-280 104-280s88 102 106 280" fill="#11101a"/><circle cx="360" cy="335" r="106" fill="#17101b"/><path d="M260 338c65-64 134-70 204-4" fill="none" stroke="#ff4d90" stroke-width="18" filter="url(#glow)"/><rect x="264" y="330" width="192" height="46" rx="23" fill="#050408" stroke="#00f0ff" stroke-opacity=".55"/><path d="M220 760c80-54 198-68 280-16" stroke="#7b4dff" stroke-width="20" opacity=".7"/>`),
+  architecture: svg(`<path d="M80 700 360 145 640 700Z" fill="#111827" stroke="#00f0ff" stroke-opacity=".45" stroke-width="5"/><path d="M160 700h400V430H160z" fill="#16111d"/><path d="M205 640h40V500h-40zm90 0h40V450h-40zm90 0h40V390h-40zm90 0h40V510h-40z" fill="url(#g)" opacity=".78"/><circle cx="510" cy="200" r="72" fill="#ff4d90" opacity=".45" filter="url(#blur)"/><path d="M110 720h500" stroke="#fff" stroke-opacity=".28" stroke-width="2"/>`),
+  fashion: svg(`<rect x="145" y="120" width="430" height="640" rx="220" fill="#130f1a" stroke="#ff4d90" stroke-opacity=".42" stroke-width="4"/><circle cx="360" cy="315" r="112" fill="#1b1222"/><path d="M278 315c60-36 112-36 164 0" stroke="#00f0ff" stroke-width="20" stroke-linecap="round" opacity=".82"/><path d="M238 760c34-184 78-280 122-280s88 96 122 280" fill="#0d0b12"/><path d="M185 205c80-72 236-94 350-28" stroke="#7b4dff" stroke-width="18" opacity=".4" filter="url(#glow)"/>`),
+  car: svg(`<ellipse cx="360" cy="615" rx="270" ry="70" fill="#000" opacity=".55"/><path d="M125 575c46-102 132-150 260-144 76 3 142 40 200 112 36 5 58 22 66 52H91c4-12 15-19 34-20Z" fill="#15111a" stroke="#ff4d90" stroke-width="5"/><circle cx="225" cy="600" r="48" fill="#050408" stroke="#00f0ff" stroke-width="8"/><circle cx="525" cy="600" r="48" fill="#050408" stroke="#00f0ff" stroke-width="8"/><path d="M160 560h360" stroke="url(#g)" stroke-width="14" filter="url(#glow)"/><path d="M80 720c130-46 430-44 560 0" stroke="#7b4dff" stroke-width="10" opacity=".45"/>`),
+  abstractGlass: svg(`<path d="M370 105 590 430 368 790 142 430Z" fill="rgba(255,255,255,.08)" stroke="url(#g)" stroke-width="8" filter="url(#glow)"/><path d="M370 105 368 790" stroke="#fff" stroke-opacity=".18" stroke-width="4"/><path d="M142 430h448" stroke="#00f0ff" stroke-opacity=".45" stroke-width="5"/><circle cx="250" cy="280" r="110" fill="#ff4d90" opacity=".28" filter="url(#blur)"/><circle cx="470" cy="585" r="135" fill="#00f0ff" opacity=".18" filter="url(#blur)"/>`),
+  product: svg(`<rect x="210" y="210" width="300" height="410" rx="68" fill="#111019" stroke="#fff" stroke-opacity=".14" stroke-width="4"/><rect x="246" y="250" width="228" height="284" rx="44" fill="url(#g)" opacity=".28"/><circle cx="360" cy="392" r="74" fill="#050408" stroke="#00f0ff" stroke-opacity=".75" stroke-width="8" filter="url(#glow)"/><path d="M190 660h340" stroke="#ff4d90" stroke-width="18" stroke-linecap="round" opacity=".38"/><path d="M252 188c80-44 178-44 256 0" stroke="#fff" stroke-opacity=".23"/>`),
+  watch: svg(`<circle cx="360" cy="450" r="158" fill="#0b0a10" stroke="url(#g)" stroke-width="12" filter="url(#glow)"/><circle cx="360" cy="450" r="104" fill="#14111a" stroke="#fff" stroke-opacity=".16" stroke-width="3"/><path d="M360 450V355M360 450l74 52" stroke="#fff" stroke-width="10" stroke-linecap="round"/><path d="M300 280h120M300 620h120" stroke="#ff4d90" stroke-width="28" stroke-linecap="round" opacity=".58"/><circle cx="520" cy="260" r="85" fill="#00f0ff" opacity=".18" filter="url(#blur)"/>`),
+  lounge: svg(`<path d="M110 610c60-92 160-136 300-132 96 3 166 34 210 94v92H110Z" fill="#12101a" stroke="#7b4dff" stroke-opacity=".45" stroke-width="5"/><path d="M160 575h400" stroke="url(#g)" stroke-width="18" opacity=".65" filter="url(#glow)"/><circle cx="520" cy="230" r="120" fill="#ff4d90" opacity=".24" filter="url(#blur)"/><rect x="110" y="665" width="500" height="54" rx="27" fill="#050408" stroke="#fff" stroke-opacity=".12"/><path d="M180 720h360" stroke="#00f0ff" stroke-opacity=".36"/>`),
+  editorialSculpture: svg(`<path d="M360 130c116 92 170 186 162 282-8 98-62 192-162 282-100-90-154-184-162-282-8-96 46-190 162-282Z" fill="rgba(255,255,255,.08)" stroke="url(#g)" stroke-width="8" filter="url(#glow)"/><path d="M280 350c78-34 150-32 216 6" stroke="#fff" stroke-opacity=".42" stroke-width="18" stroke-linecap="round"/><path d="M245 505c98 44 192 42 282-5" stroke="#00f0ff" stroke-opacity=".42" stroke-width="14" stroke-linecap="round"/><ellipse cx="360" cy="735" rx="190" ry="42" fill="#000" opacity=".38"/>`),
 };
