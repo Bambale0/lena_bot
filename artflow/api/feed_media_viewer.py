@@ -1,7 +1,10 @@
-"""WebP-only media delivery for the Mini App public feed."""
+"""WebP-first media delivery for the Mini App public feed."""
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from fastapi.responses import RedirectResponse
 
 from api.public_files import local_upload_path_from_url, mirror_url, preview_public_image_url
 
@@ -10,6 +13,9 @@ FEED_TILE_QUALITY = 72
 FEED_VIEW_MAX_SIZE = 1280
 FEED_VIEW_QUALITY = 84
 FEED_CACHE_CONTROL = "public, max-age=31536000, immutable"
+FEED_FALLBACK_CACHE_CONTROL = "no-store"
+
+logger = logging.getLogger(__name__)
 
 
 def _is_non_image_media(gen_type: Any) -> bool:
@@ -24,6 +30,28 @@ def _generation_urls(routes: Any, generation: Any) -> list[str]:
         if primary:
             urls.append(primary)
     return urls[:4]
+
+
+def _source_redirect(generation: Any, source_url: str, *, index: int):
+    """Keep feed media visible when preview preparation temporarily fails.
+
+    The redirect is intentionally non-cacheable so the next request retries the
+    normal WebP path instead of pinning the heavyweight source permanently.
+    """
+    target = str(source_url or "").strip()
+    if not target or not target.startswith(("http://", "https://", "/")):
+        return None
+
+    logger.warning(
+        "Feed WebP fallback to source generation=%s index=%s",
+        getattr(generation, "id", None),
+        index,
+    )
+    return RedirectResponse(
+        url=target,
+        status_code=307,
+        headers={"Cache-Control": FEED_FALLBACK_CACHE_CONTROL},
+    )
 
 
 async def _render_webp(
@@ -48,21 +76,25 @@ async def _render_webp(
     )
     webp_path = local_upload_path_from_url(webp_url)
 
-    if webp_path is None or not webp_path.exists() or not webp_path.is_file():
-        raise routes.HTTPException(status_code=502, detail="Не удалось подготовить изображение")
+    if webp_path is not None and webp_path.exists() and webp_path.is_file():
+        return routes.Response(
+            content=webp_path.read_bytes(),
+            media_type="image/webp",
+            headers={
+                "Cache-Control": FEED_CACHE_CONTROL,
+                "Content-Disposition": "inline",
+            },
+        )
 
-    return routes.Response(
-        content=webp_path.read_bytes(),
-        media_type="image/webp",
-        headers={
-            "Cache-Control": FEED_CACHE_CONTROL,
-            "Content-Disposition": "inline",
-        },
-    )
+    fallback = _source_redirect(generation, source_url, index=index)
+    if fallback is not None:
+        return fallback
+
+    raise routes.HTTPException(status_code=502, detail="Не удалось подготовить изображение")
 
 
 def install_feed_media_viewer(routes: Any) -> None:
-    """Expose only compressed WebP URLs for image posts in the public feed."""
+    """Expose compressed WebP URLs for image posts with a safe source fallback."""
     if getattr(routes, "_feed_media_viewer_installed", False):
         return
 
@@ -83,7 +115,9 @@ def install_feed_media_viewer(routes: Any) -> None:
         payload["preview_url"] = preview_urls[0] if preview_urls else ""
         payload["preview_urls"] = preview_urls
 
-        # Never expose heavyweight PNG/JPEG originals to the Mini App feed.
+        # Keep heavyweight PNG/JPEG originals out of the normal feed payload.
+        # The preview endpoint may redirect to the source only as a temporary,
+        # non-cacheable recovery path when WebP preparation fails.
         payload["result_url"] = ""
         payload["result_urls"] = []
         return payload
