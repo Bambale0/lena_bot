@@ -7,6 +7,7 @@ APP_SUBDIR="${DEPLOY_APP_SUBDIR:-artflow}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-v2}"
 PUBLIC_HEALTH_URL="${DEPLOY_PUBLIC_HEALTH_URL:-https://apixbotai.com/api/v1/health}"
 LOCK_FILE="${DEPLOY_LOCK_FILE:-/tmp/artflow-production-deploy.lock}"
+MEDIA_CERT_DIR="${MEDIA_CERT_DIR:-/etc/letsencrypt/live/media.apixbotai.com}"
 
 log() {
   printf '[artflow-deploy] %s\n' "$*"
@@ -78,6 +79,13 @@ if [ -n "$EXPECTED_SHA" ] && [ "$DEPLOYED_SHA" != "$EXPECTED_SHA" ]; then
 fi
 
 cd "$APP_SUBDIR"
+
+if [ -f nginx-media.conf ]; then
+  [ -s "${MEDIA_CERT_DIR}/fullchain.pem" ] || fail \
+    "media CDN certificate is missing: ${MEDIA_CERT_DIR}/fullchain.pem; issue it before deployment"
+  [ -s "${MEDIA_CERT_DIR}/privkey.pem" ] || fail \
+    "media CDN private key is missing: ${MEDIA_CERT_DIR}/privkey.pem; issue it before deployment"
+fi
 
 if [ -f webapp/package-lock.json ]; then
   log "building webapp assets"
