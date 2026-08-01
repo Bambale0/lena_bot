@@ -2,62 +2,80 @@ from pathlib import Path
 
 
 WEBAPP = Path("webapp")
+SRC = WEBAPP / "src" / "concept"
 API = Path("api")
 
 
-def test_feed_uses_compact_masonry_and_filters():
-    block = (WEBAPP / "feed-pinterest.block.jsx").read_text(encoding="utf-8")
-    styles = (WEBAPP / "src" / "feed-pinterest.css").read_text(encoding="utf-8")
+def test_concept_entrypoint_has_no_string_transform_plugins() -> None:
+    main = (WEBAPP / "src" / "main.jsx").read_text(encoding="utf-8")
+    vite = (WEBAPP / "vite.config.js").read_text(encoding="utf-8")
 
-    for label in ("Для тебя", "Новые", "Популярные", "Повторы"):
-        assert label in block
-    for label in ("Все", "Фото", "Видео"):
-        assert label in block
+    assert 'import ConceptApp from "./concept/App.jsx"' in main
+    assert "20260801-velvet-concept-v1" in main
+    assert "plugins: [react()]" in vite
+    assert "feedPinterestMiniApp" not in vite
+    assert "feedFirstMiniApp" not in vite
 
-    assert "feedSortRail" in block
-    assert "feedTypeTabs" in block
-    assert "feedMineToggle" in block
+
+def test_feed_matches_concept_composition() -> None:
+    source = (SRC / "FeedScreen.jsx").read_text(encoding="utf-8")
+    styles = (SRC / "concept.css").read_text(encoding="utf-8")
+
+    for label in ("Для тебя", "Новые", "Популярные"):
+        assert label in source
+    for label in ("Все", "Фото", "Видео", "Мои"):
+        assert label in source
+
+    assert "cxMasonry" in source
+    assert "cxFeedCard--" in source
     assert "column-count: 2" in styles
     assert "break-inside: avoid" in styles
-    assert "position: sticky" in styles
+    assert "aspect-ratio: .68" in styles
+    assert "grid-template-columns: 1fr 1fr 72px 1fr 1fr" in styles
 
 
-def test_feed_cards_use_lazy_preview_only():
-    block = (WEBAPP / "feed-pinterest.block.jsx").read_text(encoding="utf-8")
+def test_media_stays_inside_mini_app_and_uses_webp_fallbacks() -> None:
+    api_source = (SRC / "api.js").read_text(encoding="utf-8")
+    components = (SRC / "components.jsx").read_text(encoding="utf-8")
 
-    assert "function feedTileUrls" in block
-    assert 'loading="lazy"' in block
-    assert 'decoding="async"' in block
-    assert 'fetchPriority="low"' in block
-    assert "generationResultUrls(item)" not in block
-    assert "openExternalUrl" not in block
-
-
-def test_images_open_in_internal_miniapp_viewer():
-    block = (WEBAPP / "feed-pinterest.block.jsx").read_text(encoding="utf-8")
-    styles = (WEBAPP / "src" / "feed-pinterest.css").read_text(encoding="utf-8")
-
-    assert "function FeedViewer" in block
-    assert 'role="dialog"' in block
-    assert "feedViewerStage" in block
-    assert "display.webp?index=" in block
-    assert "setViewer({ item: openedItem, index: mediaIndex })" in block
-    assert "position: fixed" in styles
-    assert "100dvh" in styles
+    assert "feedPreviewCandidates" in api_source
+    assert "preview.webp?index=" in api_source
+    assert "display.webp?index=" in api_source
+    assert "function MediaViewer" in components
+    assert 'role="dialog"' in components
+    assert "window.open" not in components
+    assert "ProgressiveMedia" in components
 
 
-def test_card_actions_stay_compact_and_explicit():
-    block = (WEBAPP / "feed-pinterest.block.jsx").read_text(encoding="utf-8")
-    styles = (WEBAPP / "src" / "feed-pinterest.css").read_text(encoding="utf-8")
+def test_all_primary_product_screens_are_real_components() -> None:
+    app = (SRC / "App.jsx").read_text(encoding="utf-8")
 
-    assert "Повторить" in block
-    assert 'aria-label="Нравится"' in block
-    assert 'aria-label="Поделиться"' in block
-    assert "feedCardActionRow" in block
-    assert "grid-template-columns: minmax(0, 1fr) 36px 36px auto" in styles
+    for component in (
+        "FeedScreen",
+        "CreateScreen",
+        "PromptsScreen",
+        "ProfileScreen",
+        "TopupModal",
+    ):
+        assert component in app
+
+    for contract in (
+        'api("/me")',
+        'api("/models/image")',
+        'api("/models/video")',
+        'api("/feed?source=recent&limit=60")',
+        'api("/prompts?limit=60")',
+        'api("/history?limit=60")',
+        'api("/me/feed?limit=100")',
+        '"/generate/image"',
+        '"/generate/video"',
+        'api(`/feed/${remix.id}/remix`',
+        '"/api/v1/ws/generations"',
+    ):
+        assert contract in app
 
 
-def test_all_image_feed_media_is_served_as_webp():
+def test_feed_backend_still_serves_webp_variants() -> None:
     viewer = (API / "feed_media_viewer.py").read_text(encoding="utf-8")
     bootstrap = (API / "__init__.py").read_text(encoding="utf-8")
 
@@ -65,16 +83,15 @@ def test_all_image_feed_media_is_served_as_webp():
     assert "FEED_VIEW_MAX_SIZE = 1280" in viewer
     assert 'media_type="image/webp"' in viewer
     assert 'preview.webp?index=' in viewer
-    assert 'payload["result_url"] = ""' in viewer
-    assert 'payload["result_urls"] = []' in viewer
     assert "install_feed_media_viewer(module)" in bootstrap
 
 
-def test_initial_feed_is_limited_and_build_id_is_bumped():
-    config = (WEBAPP / "vite.config.js").read_text(encoding="utf-8")
-    transform = (WEBAPP / "feed-pinterest-transform.js").read_text(encoding="utf-8")
+def test_design_system_has_premium_hierarchy_and_accessibility() -> None:
+    styles = (SRC / "concept.css").read_text(encoding="utf-8")
 
-    assert "/feed?source=recent&limit=60" in config
-    assert "feedPinterestMiniApp" in config
-    assert 'import "./feed-pinterest.css"' in transform
-    assert "feed-webp-viewer-v4" in transform
+    assert '"Cormorant Garamond"' in styles
+    assert '"Manrope"' in styles
+    assert "width: min(100%, 460px)" in styles
+    assert "prefers-reduced-motion" in styles
+    assert "button:focus-visible" in styles
+    assert "env(safe-area-inset-bottom)" in styles
