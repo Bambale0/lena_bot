@@ -769,6 +769,7 @@ if PROMPT_RIOT_DIR.exists():
 
 if WEBAPP_DIST.exists():
     @app.api_route("/app", methods=["GET", "HEAD"], include_in_schema=False)
+    @app.api_route("/app/", methods=["GET", "HEAD"], include_in_schema=False)
     async def miniapp_index() -> FileResponse:
         return FileResponse(WEBAPP_DIST / "index.html")
 
