@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from "react";
 import Icon from "./icons.jsx";
 import {
+  api,
   copyText,
   feedPreviewCandidates,
   formatCompact,
   formatCredits,
-  generationPreviewUrls,
   isVideoMedia,
   openExternal,
 } from "./api.js";
@@ -33,7 +33,7 @@ function ProfileTile({ item, index, onOpen }) {
   );
 }
 
-export default function ProfileScreen({ user, history, myFeed, referrals, onNavigate, onTopup, onNotice }) {
+export default function ProfileScreen({ user, history, myFeed, referrals, onNavigate, onTopup, onNotice, onRemix }) {
   const [tab, setTab] = useState("posts");
   const [viewer, setViewer] = useState(null);
 
@@ -48,6 +48,31 @@ export default function ProfileScreen({ user, history, myFeed, referrals, onNavi
       return;
     }
     if (await copyText(link)) onNotice({ type: "success", message: "Реферальная ссылка скопирована" });
+  }
+
+  async function like(item) {
+    if (!item?.id || !item.is_public_feed) return;
+    try {
+      await api(`/feed/${item.id}/like`, { method: "POST" });
+      onNotice({ type: "success", message: "Добавлено в понравившиеся" });
+    } catch (error) {
+      onNotice({ type: "error", message: error.message || "Не удалось поставить лайк" });
+    }
+  }
+
+  async function share(item) {
+    try {
+      let link = item.share_link || "";
+      if (item?.id && item.is_public_feed) {
+        const result = await api(`/feed/${item.id}/link`);
+        link = result.link || link;
+      }
+      link = link || item.result_url || item.preview_url;
+      if (!link || !await copyText(link)) throw new Error("Ссылка недоступна");
+      onNotice({ type: "success", message: "Ссылка скопирована" });
+    } catch (error) {
+      onNotice({ type: "error", message: error.message || "Не удалось поделиться" });
+    }
   }
 
   return (
@@ -110,12 +135,9 @@ export default function ProfileScreen({ user, history, myFeed, referrals, onNavi
         <MediaViewer
           entry={viewer}
           onClose={() => setViewer(null)}
-          onLike={() => {}}
-          onRemix={(item) => { setViewer(null); onNavigate("create", item); }}
-          onShare={async (item) => {
-            const link = item.share_link || item.result_url || item.preview_url;
-            if (link && await copyText(link)) onNotice({ type: "success", message: "Ссылка скопирована" });
-          }}
+          onLike={like}
+          onRemix={(item) => { setViewer(null); onRemix(item); }}
+          onShare={share}
         />
       )}
     </section>
