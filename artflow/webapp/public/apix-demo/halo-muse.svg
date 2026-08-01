@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200" role="img" aria-label="Silhouette woman with luminous halo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2e1038"/><stop offset="0.48" stop-color="#0b0b16"/><stop offset="1" stop-color="#041824"/></linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="12" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="900" height="1200" fill="url(#bg)"/>
+  <circle cx="514" cy="396" r="245" fill="none" stroke="#ff48c6" stroke-width="18" opacity=".86" filter="url(#glow)"/>
+  <circle cx="514" cy="396" r="178" fill="none" stroke="#27e9ff" stroke-width="3" opacity=".28"/>
+  <path d="M0 686 C168 580 292 592 424 650 C562 710 690 696 900 596 V1200 H0 Z" fill="#050408" opacity=".64"/>
+  <path d="M328 970 C352 768 402 632 518 582 C642 530 724 628 754 792 C774 900 800 1018 852 1200 H240 Z" fill="#06050a"/>
+  <path d="M426 565 C432 430 522 344 628 382 C730 420 736 566 656 642 C578 718 430 686 426 565 Z" fill="#16101d"/>
+  <path d="M412 527 C480 390 620 330 748 424 C684 270 448 250 376 454 C338 562 382 654 472 704 C422 648 394 592 412 527 Z" fill="#07050c"/>
+  <path d="M486 518 C552 500 626 518 684 562" stroke="#f9edff" stroke-opacity=".42" stroke-width="5" stroke-linecap="round"/>
+  <path d="M544 632 C578 660 634 654 670 620" stroke="#ff48c6" stroke-opacity=".6" stroke-width="6" fill="none" filter="url(#glow)"/>
+  <path d="M300 920 C430 840 642 842 804 930" stroke="#27e9ff" stroke-opacity=".2" stroke-width="10" fill="none"/>
+  <g fill="#fff" opacity=".56"><circle cx="738" cy="206" r="4"/><circle cx="182" cy="278" r="2"/><circle cx="220" cy="146" r="2"/><circle cx="760" cy="764" r="2"/></g>
+</svg>
