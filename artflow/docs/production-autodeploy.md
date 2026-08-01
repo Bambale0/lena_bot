@@ -1,6 +1,6 @@
 # Production autodeploy
 
-APIX deploys from branch `v2` after the `APIX CI/CD` backend and webapp checks complete successfully.
+APIX deploys from branch `main` after the `APIX CI/CD` backend and webapp checks complete successfully.
 
 The quality jobs run first on GitHub-hosted `ubuntu-latest` runners. Only the
 production deploy runs on the self-hosted runner labeled `apix`; the runner must
@@ -18,7 +18,7 @@ environment (not repository-wide):
 | `DEPLOY_PORT` | `22` |
 | `DEPLOY_PATH` | `/root/mkdir/lena_bot` |
 | `DEPLOY_APP_SUBDIR` | `artflow` |
-| `DEPLOY_BRANCH` | `v2` |
+| `DEPLOY_BRANCH` | `main` |
 | `DEPLOY_PUBLIC_HEALTH_URL` | `https://apixbotai.com/api/v1/health` |
 
 The workflow deploys directly from the `apix` self-hosted runner, so it does
@@ -44,7 +44,7 @@ on the `apix` runner after both GitHub-hosted quality jobs pass. Deployments are
 serialized, and the script receives the tested commit SHA. The script:
 
 1. Acquires a deployment lock.
-2. Fetches and fast-forwards `origin/v2`.
+2. Fetches and fast-forwards `origin/main`.
 3. Builds the webapp assets in a Node 22 container.
 4. Validates `docker compose`.
 5. Builds the app image.
@@ -58,5 +58,5 @@ If a future commit conflicts with local tracked changes, Git stops the deploymen
 
 ## Rollback
 
-Revert the bad commit on `v2`, wait for CI to pass, and let autodeploy deploy the reverted commit.
+Revert the bad commit on `main`, wait for CI to pass, and let autodeploy deploy the reverted commit.
 Database migrations are not automatically downgraded; use a forward repair migration after schema changes reach production.

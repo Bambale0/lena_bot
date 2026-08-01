@@ -67,7 +67,7 @@ jobs:
     needs: [backend-quality, webapp]
     if: >-
       github.event_name == 'push' &&
-      github.ref == 'refs/heads/v2' &&
+      github.ref == 'refs/heads/main' &&
       vars.AUTODEPLOY_ENABLED == 'true'
     runs-on: [self-hosted, apix]
     environment: production
