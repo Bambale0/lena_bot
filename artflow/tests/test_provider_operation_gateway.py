@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from api import provider_operation_bindings as _bindings  # noqa: F401
 from api import provider_billing
+from api import provider_operation_bindings as _bindings  # noqa: F401
 from api.provider_contract_catalog import ALL_CONTRACTS
 from api.provider_operation_registry import (
     OPERATION_SPECS,
