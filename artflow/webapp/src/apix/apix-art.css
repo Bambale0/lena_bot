@@ -1,0 +1,131 @@
+:root {
+  --apix-demo-hero: url('/app/apix-demo/hero.svg');
+  --apix-demo-portrait: url('/app/apix-demo/neon-portrait.svg');
+  --apix-demo-city: url('/app/apix-demo/sky-city.svg');
+  --apix-demo-fashion: url('/app/apix-demo/fashion-noir.svg');
+  --apix-demo-car: url('/app/apix-demo/supercar-rain.svg');
+  --apix-demo-orbit: url('/app/apix-demo/orbit-helmet.svg');
+  --apix-demo-halo: url('/app/apix-demo/halo-muse.svg');
+}
+
+/* The feed must sell generation outcomes. Abstract gradient bubbles are only a
+   last-resort skeleton, never the approved visual language. */
+.apixHero {
+  min-height: 250px;
+  background-image:
+    linear-gradient(90deg, rgba(5, 4, 8, 0.86) 0%, rgba(8, 5, 12, 0.55) 45%, rgba(8, 5, 12, 0.18) 100%),
+    var(--apix-demo-hero);
+  background-size: cover;
+  background-position: center;
+}
+
+.apixHero::before {
+  background:
+    linear-gradient(90deg, rgba(5, 4, 8, 0.72) 0%, rgba(8, 5, 12, 0.28) 55%, transparent 100%),
+    linear-gradient(180deg, transparent 46%, rgba(0, 0, 0, 0.44) 100%);
+  opacity: 1;
+}
+
+.apixHero::after,
+.apixHeroOrb {
+  display: none;
+}
+
+.feedFeature {
+  min-height: 112px;
+  background-image:
+    linear-gradient(90deg, rgba(10, 6, 16, 0.92), rgba(10, 6, 16, 0.46)),
+    var(--apix-demo-hero);
+  background-size: cover;
+  background-position: center 46%;
+}
+
+.feedFeature::after {
+  display: none;
+}
+
+.generatedArt {
+  background-size: cover;
+  background-position: center;
+  background-image: var(--apix-demo-portrait);
+}
+
+.generatedArt::before,
+.generatedArt::after {
+  display: none;
+}
+
+.feedTile:nth-child(6n + 1) .generatedArt,
+.miniTile:nth-child(6n + 1) .generatedArt,
+.promptCard:nth-child(6n + 1) .generatedArt {
+  background-image: var(--apix-demo-portrait);
+}
+
+.feedTile:nth-child(6n + 2) .generatedArt,
+.miniTile:nth-child(6n + 2) .generatedArt,
+.promptCard:nth-child(6n + 2) .generatedArt {
+  background-image: var(--apix-demo-city);
+}
+
+.feedTile:nth-child(6n + 3) .generatedArt,
+.miniTile:nth-child(6n + 3) .generatedArt,
+.promptCard:nth-child(6n + 3) .generatedArt {
+  background-image: var(--apix-demo-fashion);
+}
+
+.feedTile:nth-child(6n + 4) .generatedArt,
+.miniTile:nth-child(6n + 4) .generatedArt,
+.promptCard:nth-child(6n + 4) .generatedArt {
+  background-image: var(--apix-demo-car);
+}
+
+.feedTile:nth-child(6n + 5) .generatedArt,
+.miniTile:nth-child(6n + 5) .generatedArt,
+.promptCard:nth-child(6n + 5) .generatedArt {
+  background-image: var(--apix-demo-orbit);
+}
+
+.feedTile:nth-child(6n) .generatedArt,
+.miniTile:nth-child(6n) .generatedArt,
+.promptCard:nth-child(6n) .generatedArt {
+  background-image: var(--apix-demo-halo);
+}
+
+.feedMedia img,
+.feedMedia video,
+.viewerStage img,
+.viewerStage video,
+.resultMedia img,
+.resultMedia video {
+  filter: contrast(1.03) saturate(1.08);
+}
+
+.feedMedia:hover img,
+.feedMedia:hover video {
+  transform: scale(1.025);
+}
+
+.feedMedia img,
+.feedMedia video {
+  transition: transform 180ms ease, filter 180ms ease;
+}
+
+.apixMicroBar {
+  width: 170px;
+  height: 18px;
+  margin-bottom: 7px;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  opacity: 0.86;
+}
+
+.apixMicroBar i {
+  width: 48px;
+  height: 2px;
+}
+
+@media (max-width: 370px) {
+  .apixHero {
+    min-height: 218px;
+  }
+}
