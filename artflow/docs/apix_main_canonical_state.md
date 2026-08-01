@@ -18,7 +18,15 @@ regression guard
 
 Do not use the old experimental V4/V5/frontend prototype PRs as merge targets.
 
-## Current canonical commit
+## Current main commit
+
+```text
+adadffbb7b67b2e701fb2202eceddfd661505a38
+```
+
+This is the documentation commit on top of the Mini App restore commit. If newer docs-only or CI-only commits appear later, the Mini App verification markers below remain the source of truth.
+
+## Mini App restore commit
 
 ```text
 175390c6d5f3b1e9f040d722571191dfdc048a55
@@ -134,11 +142,7 @@ git reset --hard origin/main
 git rev-parse HEAD
 ```
 
-Expected commit:
-
-```text
-175390c6d5f3b1e9f040d722571191dfdc048a55
-```
+The exact HEAD may be newer than the Mini App restore commit due to docs/CI commits. Verify the actual Mini App state by markers, not by old branch names.
 
 Build check:
 
@@ -170,7 +174,7 @@ concept skin: present
 After deploying, open the Mini App with a cache-bust query:
 
 ```text
-https://apixbotai.com/app/?v=175390c
+https://apixbotai.com/app/?v=compact-feed-concept
 ```
 
 If Telegram still shows an old screen, purge `/app/*` cache and verify the built container contains the expected markers.
