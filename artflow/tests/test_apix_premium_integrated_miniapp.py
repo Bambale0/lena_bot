@@ -17,6 +17,7 @@ def test_miniapp_entrypoint_uses_premium_component() -> None:
 
     assert 'import App from "./apix/App.jsx";' in entry
     assert 'import "./apix/apix.css";' in entry
+    assert 'import "./apix/apix-art.css";' in entry
     assert "createRoot" in entry
 
 
@@ -50,6 +51,7 @@ def test_premium_app_is_integrated_with_real_api_contract() -> None:
 
 def test_premium_ui_contains_target_visual_system() -> None:
     css = (WEBAPP / "src" / "apix" / "apix.css").read_text(encoding="utf-8")
+    art_css = (WEBAPP / "src" / "apix" / "apix-art.css").read_text(encoding="utf-8")
     app = (WEBAPP / "src" / "apix" / "App.jsx").read_text(encoding="utf-8")
 
     assert "--bg:#07050c" in css
@@ -59,6 +61,7 @@ def test_premium_ui_contains_target_visual_system() -> None:
     assert ".feedGrid{display:grid;grid-template-columns:repeat(2" in css
     assert ".bottomNav" in css
     assert ".apixHero" in css
+    assert "--apix-demo-hero" in art_css
     assert "APIX" in app
     assert "AI-искусство нового поколения" in app
 
@@ -71,3 +74,26 @@ def test_demo_mode_is_compact_and_not_empty_light_placeholder() -> None:
     assert "По этому фильтру пока ничего нет" not in app
     assert "background:#050408" in css
     assert "светлая" not in css.lower()
+
+
+def test_demo_feed_uses_art_assets_not_empty_radial_bubbles() -> None:
+    demo = (WEBAPP / "src" / "apix" / "demoData.js").read_text(encoding="utf-8")
+    art_css = (WEBAPP / "src" / "apix" / "apix-art.css").read_text(encoding="utf-8")
+    public_assets = WEBAPP / "public" / "apix-demo"
+
+    for asset in [
+        "hero.svg",
+        "neon-portrait.svg",
+        "sky-city.svg",
+        "fashion-noir.svg",
+        "supercar-rain.svg",
+        "orbit-helmet.svg",
+        "halo-muse.svg",
+    ]:
+        assert (public_assets / asset).exists()
+
+    assert "preview_urls: []" not in demo
+    assert "demoAsset(" in demo
+    assert "radial-gradient(circle" not in art_css
+    assert "generatedArt::before" in art_css
+    assert "display: none" in art_css
