@@ -37,20 +37,63 @@ def _safe_upload_relative_path(filename: str) -> Path:
     return rel
 
 
+def _normalized_upload_url_path(value: str | None) -> str:
+    cleaned = str(value or "").strip("/")
+    return f"/{cleaned}" if cleaned else ""
+
+
+def _public_upload_base_url() -> str:
+    configured = str(getattr(settings, "STATIC_UPLOAD_PUBLIC_BASE_URL", "") or "").strip()
+    return (configured or settings.WEBHOOK_URL).rstrip("/")
+
+
+def _public_upload_url_path() -> str:
+    configured = _normalized_upload_url_path(
+        getattr(settings, "STATIC_UPLOAD_PUBLIC_URL_PATH", "")
+    )
+    return configured or _normalized_upload_url_path(settings.STATIC_UPLOAD_URL_PATH)
+
+
 def public_upload_url(filename: str) -> str:
-    base = settings.WEBHOOK_URL.rstrip("/")
-    path = settings.STATIC_UPLOAD_URL_PATH.strip("/")
+    base = _public_upload_base_url()
+    path = _public_upload_url_path().strip("/")
     rel = str(_safe_upload_relative_path(filename)).replace("\\", "/")
     return f"{base}/{path}/{rel}"
 
 
 def _configured_public_hosts() -> set[str]:
     hosts: set[str] = set()
-    for value in (settings.WEBHOOK_URL, getattr(settings, "WEB_PUBLIC_URL", "")):
+    for value in (
+        settings.WEBHOOK_URL,
+        getattr(settings, "WEB_PUBLIC_URL", ""),
+        getattr(settings, "STATIC_UPLOAD_PUBLIC_BASE_URL", ""),
+    ):
         host = urlparse(str(value or "")).netloc.lower()
         if host:
             hosts.add(host)
     return hosts
+
+
+def _configured_upload_prefixes() -> tuple[str, ...]:
+    prefixes: list[str] = []
+    for value in (
+        settings.STATIC_UPLOAD_URL_PATH,
+        getattr(settings, "STATIC_UPLOAD_PUBLIC_URL_PATH", ""),
+    ):
+        normalized = _normalized_upload_url_path(value)
+        if normalized:
+            prefix = normalized.rstrip("/") + "/"
+            if prefix not in prefixes:
+                prefixes.append(prefix)
+    return tuple(prefixes)
+
+
+def _public_url_for_local_path(path: Path) -> str | None:
+    try:
+        rel = path.relative_to(UPLOAD_ROOT)
+    except ValueError:
+        return None
+    return public_upload_url(str(rel).replace("\\", "/"))
 
 
 def local_upload_path_from_url(url: str | None) -> Path | None:
@@ -60,8 +103,11 @@ def local_upload_path_from_url(url: str | None) -> Path | None:
     if parsed.scheme and parsed.netloc and parsed.netloc.lower() not in _configured_public_hosts():
         return None
     path = unquote(parsed.path if parsed.scheme else url)
-    upload_prefix = "/" + settings.STATIC_UPLOAD_URL_PATH.strip("/") + "/"
-    if not path.startswith(upload_prefix):
+    upload_prefix = next(
+        (prefix for prefix in _configured_upload_prefixes() if path.startswith(prefix)),
+        None,
+    )
+    if upload_prefix is None:
         return None
     rel_raw = path.removeprefix(upload_prefix)
     try:
@@ -73,10 +119,10 @@ def local_upload_path_from_url(url: str | None) -> Path | None:
 
 def public_url_is_available(url: str | None) -> bool:
     """
-    Return False only for local /static/upload URLs whose file is missing.
+    Return False only for configured local upload URLs whose file is missing.
 
-    External provider/CDN URLs are considered available because this process
-    cannot cheaply or reliably prove their existence while serializing API data.
+    External provider URLs are considered available because this process cannot
+    cheaply or reliably prove their existence while serializing API data.
     """
     path = local_upload_path_from_url(url)
     if path is None:
@@ -212,12 +258,12 @@ def ensure_public_image_url(url: str | None) -> str | None:
     data = path.read_bytes()
     ext = detect_image_extension(data)
     if path.suffix.lower() == ext:
-        return url
+        return _public_url_for_local_path(path) or url
 
     image_path = path.with_suffix(ext)
     if not image_path.exists():
         image_path.write_bytes(data)
-    return public_upload_url(image_path.name)
+    return _public_url_for_local_path(image_path) or url
 
 
 def ensure_provider_safe_png_url(url: str | None) -> str | None:
@@ -236,7 +282,7 @@ def ensure_provider_safe_png_url(url: str | None) -> str | None:
             if not png_path.exists():
                 normalized = image.convert('RGBA' if 'A' in image.getbands() else 'RGB')
                 normalized.save(png_path, format='PNG')
-        return public_upload_url(png_path.name)
+        return _public_url_for_local_path(png_path) or image_url
     except Exception:
         return image_url
 
@@ -247,7 +293,7 @@ def preview_public_image_url(url: str | None, *, max_size: int = 768, quality: i
         return url
 
     if "_preview_" in path.stem and path.suffix.lower() == ".webp":
-        return public_upload_url(path.name)
+        return _public_url_for_local_path(path) or url
 
     try:
         stat = path.stat()
@@ -257,7 +303,7 @@ def preview_public_image_url(url: str | None, *, max_size: int = 768, quality: i
     digest = hashlib.sha256(f"{path.name}:{stat.st_mtime_ns}:{max_size}:{quality}".encode()).hexdigest()[:16]
     preview_path = path.with_name(f"{path.stem}_preview_{max_size}_{digest}.webp")
     if preview_path.exists() and preview_path.is_file():
-        return public_upload_url(preview_path.name)
+        return _public_url_for_local_path(preview_path) or url
 
     try:
         with Image.open(path) as image:
@@ -268,7 +314,7 @@ def preview_public_image_url(url: str | None, *, max_size: int = 768, quality: i
             if "A" not in image.getbands():
                 image = image.convert("RGB")
             image.save(preview_path, format="WEBP", quality=quality, method=6)
-        return public_upload_url(preview_path.name)
+        return _public_url_for_local_path(preview_path) or url
     except Exception:
         return ensure_public_image_url(url) or url
 
@@ -302,7 +348,7 @@ def ensure_video_reference_aspect_url(
     ).hexdigest()[:16]
     fitted_path = path.with_name(f"{path.stem}_video_ref_{max_side}_{digest}.jpg")
     if fitted_path.exists() and fitted_path.is_file():
-        return public_upload_url(fitted_path.name)
+        return _public_url_for_local_path(fitted_path) or image_url
 
     try:
         with Image.open(path) as source:
@@ -348,7 +394,7 @@ def ensure_video_reference_aspect_url(
             )
             background.paste(foreground, offset)
             background.save(fitted_path, format="JPEG", quality=92, optimize=True)
-            return public_upload_url(fitted_path.name)
+            return _public_url_for_local_path(fitted_path) or image_url
     except Exception:
         return image_url
 
@@ -414,7 +460,7 @@ async def mirror_url(url: str, *, subdir: str | None = None) -> str:
             except ValueError:
                 rel = Path(local_path.name)
             if rel.parts and rel.parts[0] == subdir and local_path.exists():
-                return url
+                return _public_url_for_local_path(local_path) or url
             if not local_path.exists() or not local_path.is_file():
                 return url
             target_dir = get_static_upload_directory() / subdir
@@ -422,9 +468,9 @@ async def mirror_url(url: str, *, subdir: str | None = None) -> str:
             target = target_dir / local_path.name
             if target.resolve() != local_path.resolve():
                 await asyncio.to_thread(shutil.copy2, local_path, target)
-            return public_upload_url(f"{subdir}/{target.name}")
+            return _public_url_for_local_path(target) or url
         if suffix in {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".mp4", ".webm", ".mov"}:
-            return url
+            return _public_url_for_local_path(local_path) or url
         return ensure_public_image_url(url) or url
 
     try:

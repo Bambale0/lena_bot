@@ -50,6 +50,8 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx-media.conf:/etc/nginx/conf.d/media.conf:ro
+      - ./static/upload:/var/www/apix-media/uploads:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - /var/www/certbot:/var/www/certbot:ro
     depends_on:

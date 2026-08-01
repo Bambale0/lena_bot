@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     # Public static uploads used as stable references for KIE and Telegram.
     STATIC_UPLOAD_DIR: str = "static/upload"
     STATIC_UPLOAD_URL_PATH: str = "/static/upload"
+    STATIC_UPLOAD_PUBLIC_BASE_URL: str = ""
+    STATIC_UPLOAD_PUBLIC_URL_PATH: str = ""
 
     # CryptoBot
     CRYPTOBOT_TOKEN: str = ""
