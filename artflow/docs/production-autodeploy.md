@@ -2,17 +2,14 @@
 
 APIX deploys from branch `v2` after the `APIX CI/CD` backend and webapp checks complete successfully.
 
+The quality jobs run first on GitHub-hosted `ubuntu-latest` runners. Only the
+production deploy runs on the self-hosted runner labeled `apix`; the runner must
+also have GitHub's default `self-hosted` label.
+
 ## GitHub configuration
 
-Create or update the `production` environment and set these secrets:
-
-| Name | Value |
-| --- | --- |
-| `DEPLOY_HOST` | Production server IP or hostname |
-| `DEPLOY_KNOWN_HOSTS` | Verified SSH host key line |
-| `DEPLOY_SSH_PRIVATE_KEY` | Private Ed25519 deploy key |
-
-Set these variables both on the repository or environment:
+Create or update the `production` environment. Set these variables on that
+environment (not repository-wide):
 
 | Name | Value |
 | --- | --- |
@@ -23,6 +20,10 @@ Set these variables both on the repository or environment:
 | `DEPLOY_APP_SUBDIR` | `artflow` |
 | `DEPLOY_BRANCH` | `v2` |
 | `DEPLOY_PUBLIC_HEALTH_URL` | `https://apixbotai.com/api/v1/health` |
+
+The workflow deploys directly from the `apix` self-hosted runner, so it does
+not use SSH deployment secrets. Keep production application credentials only in
+the server-side `artflow/.env`, outside GitHub and outside the repository.
 
 ## Server requirements
 
@@ -38,8 +39,9 @@ Required runtime tools:
 
 ## Deploy flow
 
-The `deploy` job in `.github/workflows/ci.yml` streams `artflow/scripts/deploy-production.sh`
-over SSH. The script:
+The `deploy` job in `.github/workflows/ci.yml` runs `scripts/deploy-production.sh`
+on the `apix` runner after both GitHub-hosted quality jobs pass. Deployments are
+serialized, and the script receives the tested commit SHA. The script:
 
 1. Acquires a deployment lock.
 2. Fetches and fast-forwards `origin/v2`.
