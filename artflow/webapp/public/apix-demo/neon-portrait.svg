@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200" role="img" aria-label="Neon cyberpunk portrait">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#341142"/><stop offset="0.48" stop-color="#07111d"/><stop offset="1" stop-color="#040408"/></linearGradient>
+    <radialGradient id="pink" cx="0.18" cy="0.18" r="0.42"><stop offset="0" stop-color="#ff48c6"/><stop offset="0.45" stop-color="#8a36ff" stop-opacity="0.4"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <radialGradient id="cyan" cx="0.78" cy="0.42" r="0.38"><stop offset="0" stop-color="#27e9ff" stop-opacity="0.7"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="900" height="1200" fill="url(#bg)"/>
+  <rect width="900" height="1200" fill="url(#pink)"/><rect width="900" height="1200" fill="url(#cyan)"/>
+  <path d="M0 0 H900 V1200 H0 Z" fill="url(#bg)" opacity="0.18"/>
+  <path d="M180 1020 C220 780 188 598 282 420 C373 250 555 218 681 360 C812 509 782 788 690 1020 Z" fill="#0b0811" opacity="0.86"/>
+  <path d="M278 494 C312 300 536 236 650 390 C730 498 712 674 642 784 C558 914 390 882 323 758 C289 696 266 600 278 494 Z" fill="#2a162d"/>
+  <path d="M365 452 C438 389 570 400 633 486 C581 458 442 474 365 452 Z" fill="#ff48c6" opacity="0.44" filter="url(#glow)"/>
+  <path d="M360 560 C420 544 495 546 560 570" stroke="#27e9ff" stroke-width="10" stroke-linecap="round" opacity="0.72" filter="url(#glow)"/>
+  <path d="M394 596 C428 573 478 576 508 606" fill="none" stroke="#ffffff" stroke-opacity="0.82" stroke-width="4"/>
+  <path d="M592 585 C624 570 660 577 680 604" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="4"/>
+  <path d="M543 606 C535 672 514 720 481 764" stroke="#ffb8ed" stroke-opacity="0.42" stroke-width="5" fill="none"/>
+  <path d="M412 800 C482 842 558 838 620 796" stroke="#ff48c6" stroke-width="7" stroke-linecap="round" opacity="0.62" filter="url(#glow)"/>
+  <path d="M205 292 C292 184 513 112 684 278 C588 249 461 284 380 374 C317 444 276 574 274 724 C206 628 156 418 205 292 Z" fill="#09070e"/>
+  <path d="M178 742 C250 884 361 980 548 1042 C378 1064 211 1012 126 872 Z" fill="#120919"/>
+  <path d="M132 1090 C306 982 618 972 810 1110 L900 1200 H0 Z" fill="#060409"/>
+  <path d="M102 818 C256 734 550 788 781 670" stroke="#ff48c6" stroke-width="3" stroke-opacity="0.42" filter="url(#glow)"/>
+  <path d="M90 200 L820 1060" stroke="#27e9ff" stroke-opacity="0.12" stroke-width="3"/>
+</svg>
