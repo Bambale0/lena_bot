@@ -15,15 +15,12 @@ button { touch-action: manipulation; }
 .apixAvatar { width: 42px; height: 42px; }
 .demoNotice { position: fixed; right: calc(50% - min(215px, 50vw) + 10px); bottom: calc(108px + env(safe-area-inset-bottom)); z-index: 39; max-width: 232px; margin: 0; padding: 7px 9px; border-radius: 999px; background: rgba(20,17,26,.72); border-color: rgba(255,214,128,.14); color: #e9d0a6; backdrop-filter: blur(16px); font-size: 10px; line-height: 1.2; opacity: .72; }
 
-/* Content-first rule: the feed is the hero. Avoid large rectangular promo blocks above it. */
-.apixHero { min-height: 0; margin: 0 0 8px; padding: 6px 2px 4px; border: 0; border-radius: 0; background: transparent !important; box-shadow: none; overflow: visible; }
+/* Content-first rule: the feed is the hero. Avoid explanatory captions above it. */
+.apixHero { min-height: 0; margin: 0 0 4px; padding: 0 2px 2px; border: 0; border-radius: 0; background: transparent !important; box-shadow: none; overflow: visible; }
 .apixHero::before, .apixHero::after, .apixHeroOrb { display: none !important; }
 .apixHeroCopy { max-width: none; }
-.apixEyebrow { padding: 0; border: 0; background: transparent; color: rgba(255,255,255,.52); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
-.apixHero h1 { margin: 5px 0 3px; font-size: clamp(35px, 10vw, 46px); line-height: .95; letter-spacing: -.06em; }
-.apixHero p { max-width: 330px; font-size: 12px; line-height: 1.28; color: rgba(247,245,248,.64); }
-.apixHero p b { color: #fff; font-weight: 760; }
-.apixHeroCta { display: none; }
+.apixEyebrow, .apixHero p, .apixHeroCta { display: none !important; }
+.apixHero h1 { margin: 0; font-size: clamp(31px, 8.5vw, 39px); line-height: .95; letter-spacing: -.058em; }
 
 .apixTabs { margin: 0 -12px 8px; padding: 0 12px 3px; gap: 13px; }
 .apixTabs button { min-height: 38px; padding: 7px 0; font-size: 14px; }
@@ -50,5 +47,5 @@ button { touch-action: manipulation; }
 .promptCard img, .miniTile img, .feedMedia img, .feedMedia video, .viewerStage img, .viewerStage video, .resultMedia img, .resultMedia video { filter: contrast(1.03) saturate(1.08); transition: transform 180ms var(--apx-ease), filter 180ms var(--apx-ease); }
 .feedMedia:hover img, .feedMedia:hover video { transform: scale(1.025); }
 input, textarea, select { min-height: 44px; }
-@media (max-width: 370px) { .apixApp { padding-inline: 10px; } .apixTop { margin-inline: -10px; padding-inline: 10px; } .apixLogo { font-size: 29px; } .apixHero h1 { font-size: 36px; } .apixHero p { font-size: 11px; } .feedGrid { gap: 8px; } .feedTile { min-height: 222px; } .feedTile.tall { min-height: 278px; } .bottomNav { width: calc(100vw - 16px); } }
+@media (max-width: 370px) { .apixApp { padding-inline: 10px; } .apixTop { margin-inline: -10px; padding-inline: 10px; } .apixLogo { font-size: 29px; } .apixHero h1 { font-size: 33px; } .feedGrid { gap: 8px; } .feedTile { min-height: 222px; } .feedTile.tall { min-height: 278px; } .bottomNav { width: calc(100vw - 16px); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; scroll-behavior: auto !important; } }
