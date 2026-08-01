@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200" role="img" aria-label="Neon supercar in rain">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#13233d"/><stop offset="0.5" stop-color="#130914"/><stop offset="1" stop-color="#030306"/></linearGradient>
+    <linearGradient id="car" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1d1330"/><stop offset="0.35" stop-color="#721c8a"/><stop offset="0.72" stop-color="#0c1f34"/><stop offset="1" stop-color="#111"/></linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="900" height="1200" fill="url(#bg)"/>
+  <g opacity=".55">
+    <rect x="72" y="70" width="44" height="460" fill="#27e9ff" opacity=".16"/><rect x="158" y="140" width="64" height="390" fill="#ff48c6" opacity=".12"/><rect x="705" y="44" width="68" height="520" fill="#8a36ff" opacity=".16"/><rect x="790" y="152" width="36" height="380" fill="#27e9ff" opacity=".12"/>
+  </g>
+  <path d="M0 664 C238 604 556 602 900 662 V1200 H0 Z" fill="#050407"/>
+  <path d="M0 792 C280 718 620 720 900 792" stroke="#ff48c6" stroke-opacity=".18" stroke-width="12" fill="none"/>
+  <path d="M104 730 C200 574 336 502 556 516 C688 524 790 598 836 718 C778 702 706 696 636 700 C560 706 286 720 104 730 Z" fill="url(#car)"/>
+  <path d="M282 560 C374 474 528 468 642 552 L564 564 C474 536 392 538 306 584 Z" fill="#090810"/>
+  <path d="M122 736 C280 680 620 674 818 728" stroke="#27e9ff" stroke-opacity=".66" stroke-width="10" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M128 702 L356 654" stroke="#ff48c6" stroke-opacity=".7" stroke-width="8" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M610 664 L826 704" stroke="#fff" stroke-opacity=".72" stroke-width="7" stroke-linecap="round" filter="url(#glow)"/>
+  <circle cx="260" cy="748" r="74" fill="#050408" stroke="#2b2640" stroke-width="18"/><circle cx="260" cy="748" r="34" fill="#111827" stroke="#27e9ff" stroke-opacity=".45" stroke-width="5"/>
+  <circle cx="672" cy="742" r="78" fill="#050408" stroke="#2b2640" stroke-width="18"/><circle cx="672" cy="742" r="36" fill="#111827" stroke="#ff48c6" stroke-opacity=".5" stroke-width="5"/>
+  <path d="M120 890 C280 840 620 838 820 908" stroke="#fff" stroke-opacity=".09" stroke-width="10"/>
+  <g stroke="#d7faff" stroke-opacity=".18" stroke-width="3">
+    <path d="M150 50 L102 324"/><path d="M312 36 L250 416"/><path d="M512 20 L455 438"/><path d="M742 72 L690 420"/><path d="M820 18 L760 506"/>
+  </g>
+</svg>
