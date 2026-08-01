@@ -93,6 +93,18 @@ def test_v4_visual_system_is_tokenized_touch_safe_and_telegram_safe() -> None:
     assert "overflow-x: hidden" in css
 
 
+def test_v4_profile_uses_professional_visual_pass() -> None:
+    css = read(APX / "apix.v4.css")
+
+    assert "Profile v4 professional pass" in css
+    assert ".v4Profile { display: grid; gap: 14px; }" in css
+    assert ".v4ProfileCard::before" in css
+    assert "grid-template-areas:" in css
+    assert ".v4MiniGrid::before" in css
+    assert "content: \"Работы\"" in css
+    assert "v4MiniGrid div:first-of-type" in css
+
+
 def test_v4_has_no_legacy_visual_classes_or_labels() -> None:
     app = read(APX / "AppV4.jsx")
     css = read(APX / "apix.v4.css")
