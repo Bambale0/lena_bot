@@ -36,6 +36,31 @@ APIX Mini App — премиальная AI-галерея и студия ге�
 --apx-gold: #ffd700;
 ```
 
+## Glassmorphism
+
+Glassmorphism in APIX is a surface system, not decoration. The goal is to make controls feel suspended above the media while preserving compact layout.
+
+Required glass rules:
+
+```css
+background: rgba(18, 14, 24, .54);
+backdrop-filter: blur(18px-24px) saturate(1.2-1.35);
+border: 1px solid rgba(255,255,255,.10-.14);
+box-shadow: 0 18px 46px rgba(0,0,0,.30-.38), inset 0 1px 0 rgba(255,255,255,.06-.10);
+```
+
+Use glass on:
+
+- feed cards;
+- bottom glass action rail;
+- top bar;
+- bottom navigation;
+- chips and controls;
+- form fields;
+- sheets/viewers.
+
+Do not use glass to create new large promo rectangles. Blur must support the central content, not compete with it. If a glass block does not help scanning or action, remove it.
+
 ## Типографика
 
 - Brand / large titles: `Playfair Display`, `Cormorant Garamond`, fallback `Georgia`.
@@ -134,7 +159,7 @@ Content-first. No explanatory masthead. Main CTA is accessible via top create bu
 
 ### Create
 
-May keep title and short helper because the user is entering a task. Use progressive disclosure for advanced settings.
+May keep title and short helper because the user is entering a task. Use progressive disclosure for advanced settings. Use glass on individual fields and controls, not on one giant form wrapper.
 
 ### Prompts
 
@@ -157,6 +182,10 @@ Before merge:
 - no duplicate feed feature block;
 - safe area respected;
 - bottom nav does not hide cards;
+- glassmorphism uses translucent rgba backgrounds;
+- glassmorphism uses backdrop-filter and -webkit-backdrop-filter;
+- glass surfaces use soft border and inset highlight;
+- glass does not create new bulky rectangles;
 - focus-visible exists;
 - disabled states exist;
 - all main tap targets >= 44px;
