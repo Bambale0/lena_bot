@@ -1,0 +1,33 @@
+:root {
+  color-scheme: dark;
+  --apx-bg: #08070c;
+  --apx-surface: rgba(20, 17, 26, .78);
+  --apx-surface-strong: #14111a;
+  --apx-surface-2: #1c1a24;
+  --apx-text: #f7f5f8;
+  --apx-muted: #a9a1b7;
+  --apx-soft: #756e83;
+  --apx-border: rgba(255,255,255,.10);
+  --apx-border-strong: rgba(255,255,255,.18);
+  --apx-primary: #bb2cff;
+  --apx-violet: #7b4dff;
+  --apx-cyan: #00f0ff;
+  --apx-pink: #ff4d90;
+  --apx-gold: #ffd700;
+  --apx-grad: linear-gradient(135deg, var(--apx-pink) 0%, var(--apx-primary) 42%, var(--apx-cyan) 100%);
+  --apx-grad-soft: linear-gradient(135deg, rgba(255,77,144,.22), rgba(123,77,255,.13) 45%, rgba(0,240,255,.10));
+  --apx-serif: "Playfair Display", Georgia, "Times New Roman", serif;
+  --apx-sans: Inter, Manrope, "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --apx-r-1: 8px;
+  --apx-r-2: 12px;
+  --apx-r-3: 16px;
+  --apx-r-4: 20px;
+  --apx-r-5: 28px;
+  --apx-s-1: 4px;
+  --apx-s-2: 8px;
+  --apx-s-3: 12px;
+  --apx-s-4: 16px;
+  --apx-s-5: 24px;
+  --apx-shadow: 0 22px 70px rgba(0,0,0,.48), 0 0 46px rgba(187,44,255,.10);
+  --apx-ease: cubic-bezier(.2,.8,.2,1);
+}
