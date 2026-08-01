@@ -2,28 +2,36 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WEBAPP = ROOT / "webapp"
+APX = WEBAPP / "src" / "apix"
+
+
+def read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def test_vite_no_longer_uses_string_transform_plugins() -> None:
-    config = (WEBAPP / "vite.config.js").read_text(encoding="utf-8")
+    config = read(WEBAPP / "vite.config.js")
 
     assert "feed-pinterest-transform" not in config
     assert "replaceRequired" not in config
     assert "plugins: [react()]" in config
 
 
-def test_miniapp_entrypoint_uses_premium_component() -> None:
-    entry = (WEBAPP / "src" / "main.jsx").read_text(encoding="utf-8")
+def test_miniapp_entrypoint_loads_archive_visual_pass_after_base_styles() -> None:
+    entry = read(WEBAPP / "src" / "main.jsx")
 
     assert 'import App from "./apix/App.jsx";' in entry
+    assert 'import "./apix/apix.tokens.css";' in entry
     assert 'import "./apix/apix.css";' in entry
     assert 'import "./apix/apix-art.css";' in entry
+    assert 'import "./apix/apix.archive.css";' in entry
+    assert entry.index('apix.archive.css') > entry.index('apix-art.css')
     assert "createRoot" in entry
 
 
 def test_premium_app_is_integrated_with_real_api_contract() -> None:
-    app = (WEBAPP / "src" / "apix" / "App.jsx").read_text(encoding="utf-8")
-    api = (WEBAPP / "src" / "apix" / "api.js").read_text(encoding="utf-8")
+    app = read(APX / "App.jsx")
+    api = read(APX / "api.js")
 
     required_paths = [
         '"/me"',
@@ -49,51 +57,72 @@ def test_premium_app_is_integrated_with_real_api_contract() -> None:
     assert '`${API_BASE}/photo-prompt`' in api
 
 
-def test_premium_ui_contains_target_visual_system() -> None:
-    css = (WEBAPP / "src" / "apix" / "apix.css").read_text(encoding="utf-8")
-    art_css = (WEBAPP / "src" / "apix" / "apix-art.css").read_text(encoding="utf-8")
-    app = (WEBAPP / "src" / "apix" / "App.jsx").read_text(encoding="utf-8")
+def test_archive_visual_system_is_tokenized_and_content_first() -> None:
+    tokens = read(APX / "apix.tokens.css")
+    css = read(APX / "apix.archive.css")
+    app = read(APX / "App.jsx")
 
-    assert "--bg:#07050c" in css
-    assert "--pink:#ff48c6" in css
-    assert "--violet:#8a36ff" in css
-    assert "--cyan:#27e9ff" in css
-    assert ".feedGrid{display:grid;grid-template-columns:repeat(2" in css
-    assert ".bottomNav" in css
-    assert ".apixHero" in css
-    assert "--apix-demo-hero" in art_css
+    for token in [
+        "--apx-bg: #08070c",
+        "--apx-primary: #bb2cff",
+        "--apx-violet: #7b4dff",
+        "--apx-cyan: #00f0ff",
+        "--apx-r-1",
+        "--apx-s-1",
+    ]:
+        assert token in tokens
+
+    assert ".apixHero { min-height: 132px" in css
+    assert ".feedGrid { gap: 12px" in css
+    assert ".bottomNav { width: min(402px" in css
+    assert "env(safe-area-inset-bottom)" in css
+    assert "@media (prefers-reduced-motion: reduce)" in css
     assert "APIX" in app
     assert "AI-искусство нового поколения" in app
 
 
 def test_demo_mode_is_compact_and_not_empty_light_placeholder() -> None:
-    css = (WEBAPP / "src" / "apix" / "apix.css").read_text(encoding="utf-8")
-    app = (WEBAPP / "src" / "apix" / "App.jsx").read_text(encoding="utf-8")
+    css = read(APX / "apix.archive.css")
+    app = read(APX / "App.jsx")
 
     assert "demoNotice" in app
     assert "По этому фильтру пока ничего нет" not in app
-    assert "background:#050408" in css
+    assert "#08070c" in css
     assert "светлая" not in css.lower()
+    assert ".apixMicroBar { position: fixed" in css
 
 
-def test_demo_feed_uses_art_assets_not_empty_radial_bubbles() -> None:
-    demo = (WEBAPP / "src" / "apix" / "demoData.js").read_text(encoding="utf-8")
-    art_css = (WEBAPP / "src" / "apix" / "apix-art.css").read_text(encoding="utf-8")
-    public_assets = WEBAPP / "public" / "apix-demo"
+def test_demo_feed_uses_archive_adapted_assets_not_empty_radial_bubbles() -> None:
+    demo = read(APX / "demoData.js")
+    assets = read(APX / "archiveAssets.js")
+    css = read(APX / "apix.archive.css")
 
-    for asset in [
-        "hero.svg",
-        "neon-portrait.svg",
-        "sky-city.svg",
-        "fashion-noir.svg",
-        "supercar-rain.svg",
-        "orbit-helmet.svg",
-        "halo-muse.svg",
-    ]:
-        assert (public_assets / asset).exists()
-
+    assert "from \"./archiveAssets.js\"" in demo
     assert "preview_urls: []" not in demo
-    assert "demoAsset(" in demo
-    assert "radial-gradient(circle" not in art_css
-    assert "generatedArt::before" in art_css
-    assert "display: none" in art_css
+    assert "data:image/svg+xml" in assets
+    for key in [
+        "portraitNeon",
+        "architecture",
+        "fashion",
+        "car",
+        "abstractGlass",
+        "product",
+        "watch",
+        "lounge",
+        "editorialSculpture",
+    ]:
+        assert key in assets
+        assert f'demoAsset("{key}")' in demo
+
+    assert "radial-gradient(circle" not in css
+    assert ".generatedArt::before, .generatedArt::after { display: none" in css
+
+
+def test_ui_pass_enforces_touch_targets_and_motion_safety() -> None:
+    css = read(APX / "apix.archive.css")
+
+    assert "min-width: 44px" in css
+    assert "min-height: 44px" in css
+    assert "transition:" in css
+    assert "touch-action: manipulation" in css
+    assert "prefers-reduced-motion" in css
