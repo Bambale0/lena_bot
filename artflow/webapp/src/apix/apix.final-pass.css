@@ -7,11 +7,90 @@
   display: none !important;
 }
 
+/* Global glassmorphism tokens for the final pass.
+   Glass is used as a surface treatment, not as another bulky rectangle. */
+:root {
+  --apx-glass-bg: rgba(18, 14, 24, .54);
+  --apx-glass-bg-soft: rgba(255, 255, 255, .045);
+  --apx-glass-bg-strong: rgba(8, 7, 12, .72);
+  --apx-glass-border: rgba(255, 255, 255, .13);
+  --apx-glass-highlight: rgba(255, 255, 255, .10);
+  --apx-glass-shadow: 0 18px 46px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 255, 255, .08);
+  --apx-glass-blur: blur(22px) saturate(1.32);
+}
+
+.apixTop,
+.bottomNav,
+.feedTile,
+.tileBody,
+.tileActions button,
+.tileBadge,
+.mediaBadge,
+.modeSwitch,
+.promptBox textarea,
+.studioGridControls select,
+.inlineInput input,
+.referenceRow > button,
+.ghostUpload,
+.studioActions > button,
+.profilePanel,
+.promptCard,
+.resultPanel,
+.topupSheet,
+.planCard,
+.viewerCard,
+.apixBalance,
+.apixSearch,
+.apixAvatar,
+.apixChips button,
+.apixTabs button {
+  -webkit-backdrop-filter: var(--apx-glass-blur);
+  backdrop-filter: var(--apx-glass-blur);
+}
+
+.feedTile,
+.profilePanel,
+.promptCard,
+.resultPanel,
+.topupSheet,
+.planCard,
+.viewerCard {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.075), rgba(255,255,255,.018) 44%, rgba(0,240,255,.035)),
+    var(--apx-glass-bg) !important;
+  border: 1px solid var(--apx-glass-border) !important;
+  box-shadow: var(--apx-glass-shadow) !important;
+}
+
+.feedTile::before,
+.profilePanel::before,
+.promptCard::before,
+.resultPanel::before,
+.topupSheet::before,
+.planCard::before,
+.viewerCard::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(115deg, rgba(255,255,255,.13), transparent 27%, transparent 72%, rgba(0,240,255,.075));
+  opacity: .34;
+  mix-blend-mode: screen;
+}
+
 /* Header: keep premium brand, but make it compact and stable. */
 .apixTop {
   min-height: 54px !important;
   margin-bottom: 0 !important;
   padding-bottom: 6px !important;
+  background:
+    linear-gradient(180deg, rgba(14, 10, 20, .72), rgba(9, 7, 12, .58)),
+    rgba(8, 7, 12, .72) !important;
+  border-bottom: 1px solid rgba(255,255,255,.085) !important;
+  box-shadow: 0 14px 38px rgba(0,0,0,.28), inset 0 -1px 0 rgba(255,255,255,.035) !important;
 }
 
 .apixTopRow {
@@ -20,6 +99,14 @@
 
 .apixLogo {
   font-size: clamp(27px, 7vw, 31px) !important;
+}
+
+.apixSearch,
+.apixBalance,
+.apixAvatar {
+  background: rgba(255,255,255,.055) !important;
+  border-color: rgba(255,255,255,.13) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 10px 28px rgba(0,0,0,.22) !important;
 }
 
 .apixBalance {
@@ -56,6 +143,13 @@
   min-height: 34px !important;
   font-size: 13px !important;
   line-height: 1 !important;
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+.apixTabs button.active {
+  color: #fff !important;
+  text-shadow: 0 0 14px rgba(187,44,255,.24);
 }
 
 .apixChips {
@@ -70,6 +164,14 @@
   min-height: 36px !important;
   padding: 0 13px !important;
   font-size: 12px !important;
+  background: rgba(255,255,255,.045) !important;
+  border-color: rgba(255,255,255,.105) !important;
+}
+
+.apixChips button.active {
+  background: linear-gradient(135deg, rgba(187,44,255,.34), rgba(0,240,255,.14)) !important;
+  border-color: rgba(255,255,255,.20) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.10), 0 0 20px rgba(187,44,255,.18) !important;
 }
 
 /* Feed cards: more image, less control chrome. */
@@ -86,8 +188,15 @@
   min-height: 286px !important;
 }
 
+.feedMedia img,
+.feedMedia video {
+  transform: translateZ(0);
+}
+
 .tileBody {
   padding: 9px 9px 8px !important;
+  background: linear-gradient(180deg, rgba(8,7,12,.36), rgba(8,7,12,.82)) !important;
+  border-top: 1px solid rgba(255,255,255,.075) !important;
 }
 
 .tileBody p {
@@ -106,6 +215,16 @@
   min-width: 34px !important;
   min-height: 32px !important;
   padding: 0 8px !important;
+  background: rgba(255,255,255,.06) !important;
+  border-color: rgba(255,255,255,.10) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07) !important;
+}
+
+.tileBadge,
+.mediaBadge {
+  background: rgba(8,7,12,.52) !important;
+  border-color: rgba(255,255,255,.15) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 8px 22px rgba(0,0,0,.26) !important;
 }
 
 /* Create / Prompts / Profile titles: compact, not poster-like. */
@@ -133,7 +252,9 @@
   min-height: 54px !important;
   padding: 5px !important;
   border-radius: 22px !important;
-  background: rgba(255,255,255,.035) !important;
+  background: rgba(255,255,255,.045) !important;
+  border: 1px solid rgba(255,255,255,.11) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 12px 30px rgba(0,0,0,.22) !important;
 }
 
 .modeSwitch button {
@@ -155,7 +276,9 @@
   min-height: 116px !important;
   padding: 14px !important;
   border-radius: 22px !important;
-  background: rgba(5,4,8,.62) !important;
+  background: rgba(10,8,14,.58) !important;
+  border-color: rgba(255,255,255,.13) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.075), 0 14px 32px rgba(0,0,0,.25) !important;
 }
 
 .studioGridControls {
@@ -168,6 +291,8 @@
   min-height: 46px !important;
   border-radius: 17px !important;
   background: rgba(255,255,255,.055) !important;
+  border-color: rgba(255,255,255,.115) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07) !important;
 }
 
 .referenceRow {
@@ -180,6 +305,9 @@
 .studioActions > button {
   min-height: 44px !important;
   border-radius: 16px !important;
+  background: rgba(255,255,255,.055) !important;
+  border-color: rgba(255,255,255,.115) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 10px 24px rgba(0,0,0,.20) !important;
 }
 
 .studioActions {
@@ -200,6 +328,9 @@
   bottom: calc(7px + env(safe-area-inset-bottom)) !important;
   padding: 5px !important;
   border-radius: 23px !important;
+  background: rgba(11, 9, 15, .64) !important;
+  border-color: rgba(255,255,255,.13) !important;
+  box-shadow: 0 18px 48px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.09) !important;
 }
 
 .bottomNav button {
@@ -224,6 +355,14 @@
 .bottomNav button:nth-child(2) b,
 .bottomNav button:nth-child(4) b {
   opacity: .86;
+}
+
+/* Sheet/viewer glass: focus central content, blur everything below. */
+.sheetOverlay,
+.viewer {
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  backdrop-filter: blur(18px) saturate(1.1);
+  background: rgba(5,4,8,.58) !important;
 }
 
 @media (max-width: 370px) {
