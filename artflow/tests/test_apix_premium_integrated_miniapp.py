@@ -72,9 +72,11 @@ def test_archive_visual_system_is_tokenized_and_content_first() -> None:
     ]:
         assert token in tokens
 
-    assert ".apixHero { min-height: 132px" in css
-    assert ".feedGrid { gap: 12px" in css
-    assert ".bottomNav { width: min(402px" in css
+    assert ".apixHero { min-height: 0" in css
+    assert "background: transparent !important" in css
+    assert ".feedFeature { display: none !important" in css
+    assert ".feedGrid { gap: 10px" in css
+    assert ".bottomNav { width: min(396px" in css
     assert "env(safe-area-inset-bottom)" in css
     assert "@media (prefers-reduced-motion: reduce)" in css
     assert "APIX" in app
@@ -126,3 +128,15 @@ def test_ui_pass_enforces_touch_targets_and_motion_safety() -> None:
     assert "transition:" in css
     assert "touch-action: manipulation" in css
     assert "prefers-reduced-motion" in css
+
+
+def test_feed_starts_fast_without_duplicate_rectangular_blocks() -> None:
+    css = read(APX / "apix.archive.css")
+
+    assert "/* Content-first rule: the feed is the hero." in css
+    assert ".apixHeroCta { display: none; }" in css
+    assert ".apixHero { min-height: 0" in css
+    assert ".feedFeature { display: none !important; }" in css
+    assert "border-radius: 0" in css
+    assert "box-shadow: none" in css
+    assert "padding: 6px 2px 4px" in css
