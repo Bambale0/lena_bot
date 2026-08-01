@@ -7,7 +7,6 @@ This module is the only place that applies those rules.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 import math
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +31,7 @@ _VIDEO_POST_PROCESS_MODELS = {
 }
 
 
-async def _first_cost(session: AsyncSession, keys: Iterable[str]) -> float | None:
+async def _first_cost(session: AsyncSession, keys) -> float | None:
     for key in keys:
         cost = await repo.get_model_cost(session, key)
         if cost is not None:
