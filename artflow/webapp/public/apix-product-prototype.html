@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>APIX product prototype</title>
+  <style>
+    :root{
+      color-scheme:dark;
+      --bg:#08060d;--panel:#121018;--panel2:#191522;--line:rgba(255,255,255,.11);
+      --text:#f7f1ff;--muted:#a9a1b8;--soft:#716a80;
+      --pink:#ff48b7;--violet:#8a36ff;--blue:#536dff;--cyan:#27e9ff;
+      --grad:linear-gradient(135deg,var(--pink),var(--violet) 48%,var(--cyan));
+      --serif:Georgia,'Times New Roman',serif;--sans:Inter,Manrope,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      --r:22px;--shadow:0 18px 70px rgba(0,0,0,.48),0 0 44px rgba(138,54,255,.12);
+    }
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#050408;color:var(--text);font-family:var(--sans)}
+    body:before{content:"";position:fixed;inset:0;background:
+      radial-gradient(circle at 50% -10%,rgba(255,72,183,.22),transparent 34%),
+      radial-gradient(circle at 90% 4%,rgba(39,233,255,.12),transparent 25%),
+      linear-gradient(180deg,#07050b,#0b0711 55%,#06050a);pointer-events:none}
+    button,input,textarea{font:inherit}button{border:0;color:inherit;background:none;cursor:pointer}img{display:block;width:100%;height:100%;object-fit:cover}
+    .phone{position:relative;max-width:430px;min-height:100dvh;margin:0 auto;padding:calc(8px + env(safe-area-inset-top)) 14px calc(96px + env(safe-area-inset-bottom));overflow:hidden}
+    .chrome{position:sticky;top:0;z-index:20;margin:0 -14px 10px;padding:7px 14px 8px;background:linear-gradient(180deg,rgba(8,6,13,.94),rgba(8,6,13,.72));backdrop-filter:blur(20px)}
+    .status{height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border:1px solid rgba(255,255,255,.08);border-radius:999px;background:linear-gradient(90deg,rgba(255,72,183,.08),rgba(39,233,255,.05));box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 0 22px rgba(138,54,255,.12);font-size:11px;color:#d7d0e6}
+    .status b{font-weight:800}.status span{display:flex;align-items:center;gap:7px}.dot{width:5px;height:5px;border-radius:50%;background:var(--cyan);box-shadow:0 0 12px var(--cyan)}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px}
+    .logo{font-family:var(--serif);font-size:34px;line-height:.92;letter-spacing:-.06em;background:var(--grad);-webkit-background-clip:text;color:transparent;text-shadow:0 0 34px rgba(255,72,183,.32)}
+    .topRight{display:flex;align-items:center;gap:8px}.balance{display:flex;align-items:center;gap:7px;padding:8px 11px;border:1px solid rgba(255,255,255,.13);border-radius:999px;background:rgba(255,255,255,.055);box-shadow:inset 0 0 0 1px rgba(255,255,255,.035);font-weight:800;font-size:13px}.avatar{width:35px;height:35px;border-radius:50%;display:grid;place-items:center;background:var(--grad);box-shadow:0 0 20px rgba(255,72,183,.3);font-weight:900}
+    .hero{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin:10px 0 12px}.hero h1{margin:0;font-family:var(--serif);font-size:44px;line-height:.98;letter-spacing:-.055em}.hero p{margin:7px 0 0;color:var(--muted);font-size:13px}.heroAction{width:52px;height:52px;border-radius:50%;background:radial-gradient(circle at 34% 28%,#fff,transparent 17%),var(--grad);box-shadow:0 0 28px rgba(255,72,183,.44);font-size:32px;line-height:1}
+    .chips{display:flex;gap:8px;overflow:auto;margin:0 -14px 13px;padding:0 14px;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}.chip{flex:0 0 auto;padding:10px 13px;border:1px solid var(--line);border-radius:15px;background:rgba(255,255,255,.045);color:var(--muted);font-weight:750;font-size:12px}.chip.active{color:white;background:linear-gradient(135deg,rgba(255,72,183,.28),rgba(83,109,255,.21));border-color:rgba(255,72,183,.5);box-shadow:0 0 18px rgba(255,72,183,.15)}
+    .screen{display:none}.screen.active{display:block;animation:in .18s ease-out}@keyframes in{from{opacity:.6;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.card{position:relative;min-height:194px;border:1px solid var(--line);border-radius:20px;overflow:hidden;background:var(--panel);box-shadow:var(--shadow);isolation:isolate}.card.tall{min-height:246px}.card.short{min-height:166px}.art{position:absolute;inset:0;background:linear-gradient(145deg,#201225,#111522)}
+    .art:before{content:"";position:absolute;inset:-20%;background:radial-gradient(circle at 30% 20%,rgba(255,72,183,.75),transparent 24%),radial-gradient(circle at 72% 35%,rgba(39,233,255,.6),transparent 20%),linear-gradient(135deg,rgba(255,255,255,.12),transparent 35%);filter:saturate(1.2)}.art:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 38%,rgba(0,0,0,.84))}
+    .a2:before{background:radial-gradient(circle at 70% 18%,rgba(255,178,80,.8),transparent 23%),radial-gradient(circle at 38% 50%,rgba(70,120,255,.52),transparent 29%),linear-gradient(145deg,#351212,#08152b)}.a3:before{background:radial-gradient(circle at 45% 20%,rgba(39,233,255,.8),transparent 21%),radial-gradient(circle at 65% 70%,rgba(255,72,183,.65),transparent 28%),linear-gradient(145deg,#071318,#23102b)}.a4:before{background:radial-gradient(circle at 35% 28%,rgba(255,255,255,.75),transparent 14%),radial-gradient(circle at 55% 60%,rgba(138,54,255,.66),transparent 29%),linear-gradient(145deg,#20152c,#09090f)}
+    .meta{position:absolute;left:10px;right:10px;bottom:10px;z-index:2}.tag{display:inline-flex;padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.42);border:1px solid rgba(255,255,255,.12);font-size:10px;color:#eee}.meta h3{margin:8px 0 6px;font-size:13px;line-height:1.15}.stats{display:flex;justify-content:space-between;gap:8px;color:#ddd;font-size:11px}.iconBtns{position:absolute;right:9px;top:9px;display:flex;gap:5px;z-index:3}.mini{width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.42);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(10px)}
+    .panel{border:1px solid var(--line);border-radius:var(--r);background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.035));box-shadow:var(--shadow);padding:14px}.field{display:grid;gap:8px;margin-top:10px}.field label{color:var(--muted);font-size:12px;font-weight:750}.field textarea,.field input{width:100%;border:1px solid var(--line);background:rgba(0,0,0,.25);border-radius:16px;color:var(--text);padding:13px;outline:none}.field textarea{height:116px;resize:none}.selectRow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.select{padding:12px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045);font-size:12px}.cta{width:100%;margin-top:12px;padding:14px 16px;border-radius:17px;background:var(--grad);font-weight:900;box-shadow:0 0 28px rgba(255,72,183,.28)}
+    .promptList{display:grid;gap:10px}.prompt{display:grid;grid-template-columns:74px 1fr auto;gap:11px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.045)}.thumb{height:74px;border-radius:14px;background:var(--grad);position:relative;overflow:hidden}.prompt h3{margin:0 0 4px;font-size:13px}.prompt p{margin:0;color:var(--muted);font-size:11px;line-height:1.35}.run{padding:9px 10px;border-radius:13px;background:rgba(255,72,183,.18);border:1px solid rgba(255,72,183,.35);font-size:12px;font-weight:850}
+    .profileCard{text-align:center;padding:18px;border:1px solid var(--line);border-radius:26px;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.035));box-shadow:var(--shadow)}.bigAvatar{width:78px;height:78px;margin:0 auto 10px;border-radius:50%;background:var(--grad);display:grid;place-items:center;font-size:26px;font-weight:900}.profileCard h2{margin:0;font-size:20px}.profileCard p{margin:5px 0 15px;color:var(--muted);font-size:12px}.statsGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.stat{padding:10px;border-radius:16px;background:rgba(255,255,255,.055)}.stat b{display:block;font-size:16px}.stat span{font-size:10px;color:var(--muted)}
+    .nav{position:fixed;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:30;width:min(402px,94vw);padding:7px;border:1px solid rgba(255,255,255,.13);border-radius:24px;background:rgba(11,8,16,.84);backdrop-filter:blur(24px);box-shadow:0 18px 60px rgba(0,0,0,.45);display:grid;grid-template-columns:repeat(5,1fr);gap:4px}.nav button{border-radius:17px;padding:8px 4px;color:var(--muted);font-size:10px}.nav b{display:block;font-size:18px;margin-bottom:1px}.nav .on{background:rgba(255,255,255,.075);color:white}.nav .center{margin-top:-28px;width:58px;height:58px;justify-self:center;border-radius:50%;background:var(--grad);box-shadow:0 0 30px rgba(255,72,183,.5);font-size:0}.nav .center b{font-size:32px;line-height:40px}
+    .overlay{position:fixed;inset:0;z-index:60;display:none;background:rgba(0,0,0,.72);backdrop-filter:blur(12px);padding:18px 14px calc(18px + env(safe-area-inset-bottom));align-items:flex-end;justify-content:center}.overlay.show{display:flex}.sheet{width:min(430px,100%);max-height:88dvh;overflow:auto;border:1px solid var(--line);border-radius:28px;background:#100d17;box-shadow:0 30px 90px rgba(0,0,0,.7);padding:14px}.sheetHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.close{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.07)}.preview{height:420px;border-radius:22px;overflow:hidden;background:var(--panel);position:relative}.preview .art{border-radius:22px}.sheet h2{margin:8px 0 4px;font-family:var(--serif);font-size:30px}.sheet p{margin:0;color:var(--muted);font-size:13px;line-height:1.45}.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.ghostBtn{padding:12px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045);font-weight:800}.plans{display:grid;gap:8px}.plan{display:flex;align-items:center;justify-content:space-between;padding:14px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.045)}.plan b{font-size:15px}.plan span{color:var(--muted);font-size:12px}.price{font-weight:900;color:#fff}
+    @media(max-width:360px){.phone{padding-left:10px;padding-right:10px}.chrome{margin-left:-10px;margin-right:-10px;padding-left:10px;padding-right:10px}.logo{font-size:30px}.hero h1{font-size:38px}.grid{gap:8px}.card{min-height:174px}.card.tall{min-height:220px}.balance{padding:7px 9px}.heroAction{width:46px;height:46px}}
+  </style>
+</head>
+<body>
+  <main class="phone">
+    <div class="chrome">
+      <div class="status"><b>APIX live</b><span><i class="dot"></i> neural studio</span></div>
+      <div class="top"><div class="logo">APIX</div><div class="topRight"><button class="balance" data-sheet="balance">💎 12 450</button><div class="avatar">A</div></div></div>
+    </div>
+
+    <section class="screen active" id="feed">
+      <div class="hero"><div><h1>Лента</h1><p>Лучшие генерации без лишнего шума</p></div><button class="heroAction" data-go="create">+</button></div>
+      <div class="chips"><button class="chip active">✨ Для тебя</button><button class="chip">🔥 Популярное</button><button class="chip">🎭 Арт</button><button class="chip">🎬 Видео</button></div>
+      <div class="grid">
+        <button class="card tall" data-detail="Киберпанк-портрет"><div class="art"></div><div class="iconBtns"><span class="mini">♡</span></div><div class="meta"><span class="tag">@neon / фото</span><h3>Кинематографичный портрет в неоне</h3><div class="stats"><span>♡ 2.1K</span><span>↻ remix</span></div></div></button>
+        <button class="card" data-detail="Город на закате"><div class="art a2"></div><div class="meta"><span class="tag">@sunset / арт</span><h3>Золотой город после дождя</h3><div class="stats"><span>♡ 864</span><span>↻ remix</span></div></div></button>
+        <button class="card short" data-detail="Портал"><div class="art a3"></div><div class="meta"><span class="tag">@space / prompt</span><h3>Портал между мирами</h3><div class="stats"><span>♡ 1.4K</span><span>↻ remix</span></div></div></button>
+        <button class="card tall" data-detail="Фэнтези"><div class="art a4"></div><div class="meta"><span class="tag">@dream / видео</span><h3>Темная фэнтези-сцена</h3><div class="stats"><span>♡ 932</span><span>↻ remix</span></div></div></button>
+      </div>
+    </section>
+
+    <section class="screen" id="create">
+      <div class="hero"><div><h1>Создать</h1><p>Одна идея — готовый визуал</p></div></div>
+      <div class="chips"><button class="chip active">Изображение</button><button class="chip">Видео</button><button class="chip">Avatar</button><button class="chip">Prompt+</button></div>
+      <div class="panel">
+        <div class="field"><label>Промпт</label><textarea id="promptText" placeholder="Например: девушка в киберпанковском городе, мокрый асфальт, неон, cinematic light..."></textarea></div>
+        <div class="selectRow"><button class="select">APIX Realism v2</button><button class="select">9:16 • High</button></div>
+        <button class="cta" id="makeBtn">Создать за 💎 10</button>
+      </div>
+      <div class="panel" id="resultBox" style="display:none;margin-top:12px"><div class="preview" style="height:260px"><div class="art a3"></div></div><button class="cta" data-sheet="result">Открыть результат</button></div>
+    </section>
+
+    <section class="screen" id="prompts">
+      <div class="hero"><div><h1>Промпты</h1><p>Идеи, которые запускаются в один клик</p></div></div>
+      <div class="field" style="margin-bottom:12px"><input placeholder="Поиск промптов..." /></div>
+      <div class="promptList">
+        <button class="prompt" data-go="create"><div class="thumb"></div><div><h3>Неоновый портрет</h3><p>Киберпанк, отражения, крупный план, cinematic detail</p></div><span class="run">Запуск</span></button>
+        <button class="prompt" data-go="create"><div class="thumb"></div><div><h3>Премиальный продукт</h3><p>Студийный свет, глянец, чёрный фон, macro lens</p></div><span class="run">Запуск</span></button>
+        <button class="prompt" data-go="create"><div class="thumb"></div><div><h3>Фэнтези-сцена</h3><p>Магия, туман, контровой свет, драматичная композиция</p></div><span class="run">Запуск</span></button>
+      </div>
+    </section>
+
+    <section class="screen" id="profile">
+      <div class="hero"><div><h1>Профиль</h1><p>Работы, история и баланс</p></div></div>
+      <div class="profileCard"><div class="bigAvatar">A</div><h2>@apix_user</h2><p>Premium creator • 128 работ</p><div class="statsGrid"><div class="stat"><b>128</b><span>работ</span></div><div class="stat"><b>5.2K</b><span>лайков</span></div><div class="stat"><b>256</b><span>сейвов</span></div></div><button class="cta" data-sheet="balance">Пополнить баланс</button></div>
+    </section>
+  </main>
+
+  <nav class="nav">
+    <button class="on" data-go="feed"><b>⌂</b>Лента</button><button data-go="prompts"><b>⌕</b>Поиск</button><button class="center" data-go="create"><b>+</b></button><button data-go="prompts"><b>☰</b>Промпты</button><button data-go="profile"><b>◌</b>Профиль</button>
+  </nav>
+
+  <div class="overlay" id="detail"><div class="sheet"><div class="sheetHead"><strong>Просмотр</strong><button class="close" data-close>×</button></div><div class="preview"><div class="art a3"></div></div><h2 id="detailTitle">Работа</h2><p>Интерактивный просмотр: лайк, remix, сохранить промпт, открыть автора. Это не картинка интерфейса — это рабочий прототип поведения.</p><div class="actions"><button class="ghostBtn">♡ Лайк</button><button class="ghostBtn" data-go="create" data-close>↻ Remix</button><button class="cta" style="grid-column:1/-1;margin:0">Использовать промпт</button></div></div></div>
+  <div class="overlay" id="balance"><div class="sheet"><div class="sheetHead"><strong>Пополнить баланс</strong><button class="close" data-close>×</button></div><div class="plans"><button class="plan"><span><b>💎 100</b><small>+10 бонус</small></span><span class="price">99 ₽</span></button><button class="plan"><span><b>💎 300</b><small>+40 бонус</small></span><span class="price">249 ₽</span></button><button class="plan"><span><b>💎 1000</b><small>+200 бонус</small></span><span class="price">799 ₽</span></button></div><button class="cta">Оплатить</button></div></div>
+  <div class="overlay" id="result"><div class="sheet"><div class="sheetHead"><strong>Результат</strong><button class="close" data-close>×</button></div><div class="preview"><div class="art a3"></div></div><h2>Готово</h2><p>Результат генерации: скачать, улучшить, опубликовать или запустить ещё вариант.</p><div class="actions"><button class="ghostBtn">Скачать</button><button class="ghostBtn">Улучшить</button><button class="cta" style="grid-column:1/-1;margin:0">Опубликовать</button></div></div></div>
+
+  <script>
+    const screens=[...document.querySelectorAll('.screen')];
+    const nav=[...document.querySelectorAll('.nav button')];
+    function go(id){screens.forEach(s=>s.classList.toggle('active',s.id===id));nav.forEach(b=>b.classList.toggle('on',b.dataset.go===id));document.querySelector('.phone').scrollTo?.(0,0);window.scrollTo(0,0)}
+    document.addEventListener('click',e=>{const goBtn=e.target.closest('[data-go]');if(goBtn){go(goBtn.dataset.go)}const card=e.target.closest('[data-detail]');if(card){document.getElementById('detailTitle').textContent=card.dataset.detail;document.getElementById('detail').classList.add('show')}const sheet=e.target.closest('[data-sheet]');if(sheet){document.getElementById(sheet.dataset.sheet).classList.add('show')}if(e.target.closest('[data-close]')){e.target.closest('.overlay')?.classList.remove('show')}});
+    document.getElementById('makeBtn').addEventListener('click',()=>{const box=document.getElementById('resultBox');box.style.display='block';setTimeout(()=>document.getElementById('result').classList.add('show'),260)});
+    document.querySelectorAll('.chip').forEach(ch=>ch.addEventListener('click',()=>{const row=ch.parentElement;row.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));ch.classList.add('active')}));
+  </script>
+</body>
+</html>
