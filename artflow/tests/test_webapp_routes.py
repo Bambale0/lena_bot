@@ -180,6 +180,21 @@ async def test_photo_prompt_rejects_disguised_non_image(client, monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_photo_prompt_accepts_gif(client, monkeypatch) -> None:
+    generate_prompt = AsyncMock(return_value="animated prompt")
+    monkeypatch.setattr("api.miniapp_routes.generate_prompt_from_photo", generate_prompt)
+
+    response = await client.post(
+        "/api/v1/photo-prompt",
+        files={"file": ("anim.gif", b"GIF89a" + b"payload", "image/gif")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["prompt"] == "animated prompt"
+    generate_prompt.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_photo_prompt_rejects_large_file_before_provider_call(client, monkeypatch) -> None:
     generate_prompt = AsyncMock()
     monkeypatch.setattr("api.miniapp_routes.generate_prompt_from_photo", generate_prompt)

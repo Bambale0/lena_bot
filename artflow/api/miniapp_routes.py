@@ -669,6 +669,10 @@ def _is_supported_reference_image(data: bytes, content_type: str | None) -> bool
     )
 
 
+def _is_supported_photo_prompt_image(data: bytes, content_type: str | None) -> bool:
+    return _is_supported_reference_image(data, content_type) or data.startswith((b"GIF87a", b"GIF89a"))
+
+
 def _url_has_safe_public_shape(url: str) -> bool:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
@@ -1643,8 +1647,8 @@ async def miniapp_photo_prompt(
         raise HTTPException(status_code=413, detail="File too large (max 20 MB)")
 
     mime = file.content_type or "image/jpeg"
-    if not _is_supported_reference_image(data, mime):
-        raise HTTPException(status_code=422, detail="Only JPEG, PNG and WebP images are supported")
+    if not _is_supported_photo_prompt_image(data, mime):
+        raise HTTPException(status_code=422, detail="Only JPEG, PNG, WebP and GIF images are supported")
 
     try:
         prompt = await generate_prompt_from_photo(data, mime)

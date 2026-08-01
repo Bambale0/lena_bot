@@ -53,8 +53,10 @@ def test_v4_app_keeps_real_api_contracts_and_telegram_auth() -> None:
 
     assert "X-Telegram-Init-Data" in api
     assert "X-Web-Auth-Token" in api
-    assert 'fetch("/upload"' in api
+    assert 'fetchWithTimeout("/upload"' in api
     assert "`${API_BASE}/photo-prompt`" in api
+    assert "fetchWithTimeout" in api
+    assert "PHOTO_PROMPT_TIMEOUT_MS = 120000" in api
     assert "webapp.ready?.()" in api
     assert "webapp.expand?.()" in api
 
@@ -67,6 +69,20 @@ def test_v4_media_handling_does_not_render_webp_as_video() -> None:
     assert "item?.gen_type === \"video\" || playableVideo(url)" in app
     assert "playableVideo(src) ? <video" in app
     assert "<img src={src}" in app
+
+
+def test_v4_upload_flow_handles_mobile_photo_edge_cases() -> None:
+    app = read(APX / "AppV4.jsx")
+
+    for snippet in [
+        'const REFERENCE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"])',
+        'const PHOTO_PROMPT_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"])',
+        'Фото в HEIC пока не поддерживается.',
+        'uploadingReference ? "Загружаю…" : "+ Референс"',
+        'buildingPhotoPrompt ? "Анализирую…" : "Промпт по фото"',
+        'accept="image/jpeg,image/png,image/webp,image/gif"',
+    ]:
+        assert snippet in app
 
 
 def test_v4_visual_system_is_tokenized_touch_safe_and_telegram_safe() -> None:

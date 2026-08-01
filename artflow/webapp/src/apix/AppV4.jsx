@@ -17,6 +17,9 @@ const BUILD_ID = "20260801-apix-v4-clean-shell";
 const ACTIVE_STATUSES = new Set(["pending", "processing", "queued", "running"]);
 const FINISHED_STATUSES = new Set(["done", "completed", "success"]);
 const FAILED_STATUSES = new Set(["failed", "error", "cancelled"]);
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const REFERENCE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const PHOTO_PROMPT_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 window.__APIX_MINIAPP_BUILD_ID__ = BUILD_ID;
 
@@ -75,6 +78,21 @@ function compact(value) {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`;
   return String(n);
+}
+
+function normalizeFileType(file) {
+  return String(file?.type || "").split(";", 1)[0].toLowerCase();
+}
+
+function imageUploadError(file, allowedTypes) {
+  if (!file) return "Файл не выбран";
+  if (file.size > MAX_UPLOAD_BYTES) return "Файл слишком большой. Максимум 20 МБ.";
+  const type = normalizeFileType(file);
+  if (allowedTypes.has(type)) return "";
+  if (type === "image/heic" || type === "image/heif") {
+    return "Фото в HEIC пока не поддерживается. Сохрани его как JPG или PNG и попробуй снова.";
+  }
+  return "Поддерживаются только JPG, PNG, WebP" + (allowedTypes.has("image/gif") ? " и GIF." : ".");
 }
 
 function useV4Data() {
@@ -179,49 +197,65 @@ function Create({ imageModels, videoModels, selectedPrompt, onResult, onToast })
   const [ratio, setRatio] = useState("9:16");
   const [duration, setDuration] = useState(5);
   const [reference, setReference] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [uploadingReference, setUploadingReference] = useState(false);
+  const [buildingPhotoPrompt, setBuildingPhotoPrompt] = useState(false);
+  const [improvingPrompt, setImprovingPrompt] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const fileInput = useRef(null);
   const photoPromptInput = useRef(null);
   const models = mode === "image" ? imageModels : videoModels;
   const currentModel = models.find((item) => modelKey(item) === model) || models[0] || null;
+  const busy = uploadingReference || buildingPhotoPrompt || improvingPrompt || submitting;
   useEffect(() => { if (!model && models[0]) setModel(modelKey(models[0])); }, [models, model]);
   useEffect(() => { if (selectedPrompt) setPrompt(selectedPrompt); }, [selectedPrompt]);
 
   async function handleUpload(event) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setBusy(true);
+    const validationError = imageUploadError(file, REFERENCE_IMAGE_TYPES);
+    if (validationError) {
+      onToast(validationError);
+      event.target.value = "";
+      return;
+    }
+    setUploadingReference(true);
     try {
       const uploaded = await uploadReference(file);
       setReference(uploaded.url || uploaded.public_url || "");
       notify("success");
     } catch (error) { onToast(error.message || "Не удалось загрузить референс"); }
-    finally { setBusy(false); event.target.value = ""; }
+    finally { setUploadingReference(false); event.target.value = ""; }
   }
   async function handlePhotoPrompt(event) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setBusy(true);
+    const validationError = imageUploadError(file, PHOTO_PROMPT_IMAGE_TYPES);
+    if (validationError) {
+      onToast(validationError);
+      event.target.value = "";
+      return;
+    }
+    setBuildingPhotoPrompt(true);
     try {
       const response = await photoPrompt(file);
       setPrompt(response.prompt || "");
       notify("success");
     } catch (error) { onToast(error.message || "Не удалось получить промпт по фото"); }
-    finally { setBusy(false); event.target.value = ""; }
+    finally { setBuildingPhotoPrompt(false); event.target.value = ""; }
   }
   async function improve() {
     if (!prompt.trim()) return;
-    setBusy(true);
+    setImprovingPrompt(true);
     try {
       const response = await api("/prompt/improve", { method: "POST", body: JSON.stringify({ prompt }) });
       setPrompt(response.prompt || response.improved_prompt || response.text || prompt);
       notify("success");
     } catch (error) { onToast(error.message || "Не удалось улучшить промпт"); }
-    finally { setBusy(false); }
+    finally { setImprovingPrompt(false); }
   }
   async function submit() {
     if (!prompt.trim()) return onToast("Опиши идею перед запуском");
-    setBusy(true);
+    setSubmitting(true);
     try {
       const payload = mode === "image"
         ? { prompt, model, model_key: model, aspect_ratio: ratio, count: 1, reference_url: reference || null }
@@ -230,7 +264,7 @@ function Create({ imageModels, videoModels, selectedPrompt, onResult, onToast })
       onResult(response);
       notify("success");
     } catch (error) { onToast(error.message || "Генерация не запустилась"); }
-    finally { setBusy(false); }
+    finally { setSubmitting(false); }
   }
 
   return (
@@ -242,8 +276,8 @@ function Create({ imageModels, videoModels, selectedPrompt, onResult, onToast })
         <label><span>Модель</span><select value={model} onChange={(e) => setModel(e.target.value)}>{models.map((item) => <option key={modelKey(item)} value={modelKey(item)}>{modelName(item)} · {modelCost(item)}◆</option>)}</select></label>
         <label><span>{mode === "image" ? "Формат" : "Длина"}</span>{mode === "image" ? <select value={ratio} onChange={(e) => setRatio(e.target.value)}>{["9:16", "1:1", "4:5", "16:9", "3:4"].map((item) => <option key={item}>{item}</option>)}</select> : <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>{[5, 8, 10].map((item) => <option key={item} value={item}>{item} сек</option>)}</select>}</label>
       </div>
-      <div className="v4Reference"><button type="button" onClick={() => fileInput.current?.click()}>+ Референс</button><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="URL референса" /><input hidden ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleUpload} /></div>
-      <div className="v4CreateActions"><button type="button" onClick={() => photoPromptInput.current?.click()} disabled={busy}>Промпт по фото</button><button type="button" onClick={improve} disabled={busy}>Улучшить</button><button className="v4Primary" type="button" onClick={submit} disabled={busy}>{busy ? "Запускаю…" : `Создать · ${modelCost(currentModel) || "?"}◆`}</button><input hidden ref={photoPromptInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoPrompt} /></div>
+      <div className="v4Reference"><button type="button" onClick={() => fileInput.current?.click()} disabled={busy}>{uploadingReference ? "Загружаю…" : "+ Референс"}</button><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="URL референса" /><input hidden ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleUpload} /></div>
+      <div className="v4CreateActions"><button type="button" onClick={() => photoPromptInput.current?.click()} disabled={busy}>{buildingPhotoPrompt ? "Анализирую…" : "Промпт по фото"}</button><button type="button" onClick={improve} disabled={busy}>{improvingPrompt ? "Улучшаю…" : "Улучшить"}</button><button className="v4Primary" type="button" onClick={submit} disabled={busy}>{submitting ? "Запускаю…" : `Создать · ${modelCost(currentModel) || "?"}◆`}</button><input hidden ref={photoPromptInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handlePhotoPrompt} /></div>
     </section>
   );
 }
