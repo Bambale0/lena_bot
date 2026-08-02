@@ -41,31 +41,31 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
 
   return (
     <div className="apix-shell">
-      <header className="sticky top-0 z-40 -mx-1 mb-5 flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/76 px-3 py-2.5 shadow-sm backdrop-blur-2xl">
+      <header className="sticky top-0 z-40 mb-2 flex min-h-11 items-center justify-between gap-2 rounded-xl border border-border/70 bg-background/88 px-2 py-1.5 shadow-sm backdrop-blur-2xl">
         <button
           type="button"
-          className="apix-focus-ring flex min-w-0 items-center gap-3 rounded-xl text-left"
+          className="apix-focus-ring flex min-w-0 items-center gap-2 rounded-lg text-left"
           onClick={() => onTabChange("profile")}
         >
-          <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full border border-primary/30 bg-gradient-to-br from-primary via-fuchsia-500 to-cyan-400 font-bold text-white shadow-lg shadow-primary/15">
+          <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full border border-primary/30 bg-gradient-to-br from-primary via-fuchsia-500 to-cyan-400 text-xs font-bold text-white shadow-md shadow-primary/15">
             {user.photo_url ? <img src={user.photo_url} alt="" className="size-full object-cover" /> : initial}
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold">{name}</span>
-            <span className="block truncate text-xs text-muted-foreground">APIX Studio</span>
+            <span className="block max-w-36 truncate text-xs font-semibold sm:max-w-none sm:text-sm">{name}</span>
+            <span className="hidden truncate text-[10px] text-muted-foreground sm:block">APIX Studio</span>
           </span>
         </button>
 
-        <Button variant="soft" size="sm" onClick={onBalanceOpen} aria-label="Открыть баланс">
-          <CircleDollarSign />
-          {formatCredits(user.credits)}
+        <Button variant="soft" size="sm" className="min-w-0 px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
+          <CircleDollarSign className="size-3.5" />
+          <span>{formatCredits(user.credits)}</span>
         </Button>
       </header>
 
       <main>{children}</main>
 
-      <nav className="apix-bottom-nav apix-glass rounded-2xl p-1.5" aria-label="Основная навигация">
-        <div className="apix-nav-scroll flex gap-1 overflow-x-auto overscroll-x-contain">
+      <nav className="apix-bottom-nav apix-glass rounded-xl p-1" aria-label="Основная навигация">
+        <div className="apix-nav-scroll flex gap-0.5 overflow-x-auto overscroll-x-contain">
           {tabs.map(({ id, label, icon: Icon }) => {
             const active = id === activeTab;
             return (
@@ -73,8 +73,9 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
                 key={id}
                 type="button"
                 aria-current={active ? "page" : undefined}
+                aria-label={label}
                 className={cn(
-                  "apix-focus-ring flex min-h-14 min-w-[68px] flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 text-[10px] font-medium transition",
+                  "apix-focus-ring flex min-h-12 min-w-[54px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-[9px] font-medium transition",
                   active
                     ? "bg-primary/15 text-primary shadow-inner"
                     : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
@@ -84,8 +85,8 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
                   onTabChange(id);
                 }}
               >
-                <Icon className={cn("size-5", active && "drop-shadow-[0_0_10px_currentColor]")} />
-                <span>{label}</span>
+                <Icon className={cn("size-[18px]", active && "drop-shadow-[0_0_8px_currentColor]")} />
+                <span className="leading-none">{label}</span>
               </button>
             );
           })}
