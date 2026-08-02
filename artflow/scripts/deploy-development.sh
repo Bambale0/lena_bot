@@ -10,8 +10,9 @@ IFS=$'\n\t'
 # - rebuild/recreate Docker Compose services;
 # - avoid the stale host/container dist mismatch that is easy to hit during UI work.
 #
-# Usage from anywhere inside the repository:
-#   bash artflow/scripts/deploy-development.sh [branch]
+# Usage:
+#   From repository root: bash artflow/scripts/deploy-development.sh [branch]
+#   From artflow/:       bash scripts/deploy-development.sh [branch]
 #
 # Common examples:
 #   bash scripts/deploy-development.sh agent/miniapp-shadcn-rework
@@ -63,7 +64,6 @@ docker compose version >/dev/null 2>&1 || fail "docker compose plugin is unavail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${DEV_DEPLOY_APP_DIR:-$SCRIPT_DIR/..}" && pwd)"
 REPO_DIR="${DEV_DEPLOY_REPO_DIR:-$(git -C "$APP_DIR" rev-parse --show-toplevel)}"
-APP_SUBDIR="${DEV_DEPLOY_APP_SUBDIR:-$(realpath --relative-to="$REPO_DIR" "$APP_DIR")}" 
 WEBAPP_DIR="$APP_DIR/webapp"
 LOCK_FILE="${DEV_DEPLOY_LOCK_FILE:-/tmp/artflow-development-deploy.lock}"
 RESET_LOCAL="${DEV_DEPLOY_RESET:-1}"
@@ -170,7 +170,7 @@ case "$NODE_MODE" in
     ;;
   auto)
     if ! build_webapp_local; then
-      log "local npm is unavailable; falling back to Docker Node"
+      log "local npm is unavailable or failed; falling back to Docker Node"
       build_webapp_docker
     fi
     ;;
