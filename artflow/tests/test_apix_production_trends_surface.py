@@ -124,7 +124,7 @@ def test_feed_is_first_tab_and_repeat_is_inside_feed() -> None:
     assert 'repeatFirst' not in app
     assert '<h1 className="text-lg font-bold tracking-tight sm:text-xl">Лента</h1>' in feed
     assert 'Повторить' in feed
-    assert 'Повтор уже внутри каждой карточки' in feed
+    assert 'повтор остаётся внутри карточек' in feed
 
 
 def test_infinite_feed_uses_intersection_observer_and_growing_limit() -> None:
@@ -146,6 +146,51 @@ def test_infinite_feed_uses_intersection_observer_and_growing_limit() -> None:
     assert 'apix-feed-card' in feed
     assert '.apix-feed-card' in css
     assert '@keyframes apix-feed-card-in' in css
+
+
+def test_feed_media_opens_inside_app_viewer_not_browser() -> None:
+    feed = read(SRC / "features/feed-screen.tsx")
+    css = read(SRC / "styles/globals.css")
+
+    assert 'interface MediaViewerState' in feed
+    assert 'function MediaViewer' in feed
+    assert 'apix-media-viewer fixed inset-0' in feed
+    assert 'onClick={() => openViewer(item)}' in feed
+    assert 'Открыть внутри приложения' in feed
+    assert 'openExternalUrl' not in feed
+    assert '.apix-media-viewer' in css
+    assert '@keyframes apix-media-viewer-in' in css
+
+
+def test_feed_uses_mosaic_cards_instead_of_monotone_grid() -> None:
+    feed = read(SRC / "features/feed-screen.tsx")
+    css = read(SRC / "styles/globals.css")
+
+    assert 'function cardMediaShape' in feed
+    assert 'index % 11 === 0' in feed
+    assert 'index % 7 === 0' in feed
+    assert 'apix-feed-mosaic' in feed
+    assert 'apix-feed-card-featured' in feed
+    assert 'выбор' in feed
+    assert '.apix-feed-mosaic' in css
+    assert '.apix-feed-card-featured' in css
+
+
+def test_feed_has_categorized_trends_tab() -> None:
+    feed = read(SRC / "features/feed-screen.tsx")
+
+    assert 'type ContentMode = "works" | "trends"' in feed
+    assert 'type TrendKindFilter = "all" | "image" | "video"' in feed
+    assert 'const [contentMode, setContentMode]' in feed
+    assert 'const [trendCategory, setTrendCategory]' in feed
+    assert 'trendCategories' in feed
+    assert 'trendCategoryKey' in feed
+    assert 'Работы' in feed and 'Тренды' in feed
+    assert 'category_emoji' in feed
+    assert 'Повторить тренд' in feed
+    assert '`/api/v1/trends/${trend.id}/prepare`' in feed
+    assert '"/api/v1/generate/video"' in feed
+    assert '"/api/v1/generate/image"' in feed
 
 
 def test_repeat_feed_uses_filters_and_safe_video_remix_payload() -> None:
