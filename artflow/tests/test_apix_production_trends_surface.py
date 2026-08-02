@@ -70,7 +70,7 @@ def test_secondary_help_is_collapsed_and_primary_surfaces_are_dense() -> None:
     services = read(SRC / "features/services-screen.tsx")
 
     assert '.apix-help' in css
-    assert '<FeedScreen\n          title="Повторы"' in app
+    assert 'activeTab === "feed" || activeTab === "studio"' in app
     assert 'import { StudioScreen }' not in app
     assert '<details className="apix-help' in generation
     assert '<details className="apix-help' in feed
@@ -112,14 +112,47 @@ def test_trends_use_state_and_prepare_endpoint_not_dom_clicks() -> None:
     assert 'button.click()' not in app
 
 
+def test_feed_is_first_tab_and_repeat_is_inside_feed() -> None:
+    app = read(SRC / "app/App.tsx")
+    feed = read(SRC / "features/feed-screen.tsx")
+    shell = read(SRC / "components/app-shell.tsx")
+
+    assert 'useState<AppTab>("feed")' in app
+    assert 'label: "Лента"' in shell
+    assert 'label: "Повторы"' not in shell
+    assert 'title="Повторы"' not in app
+    assert 'repeatFirst' not in app
+    assert '<h1 className="text-lg font-bold tracking-tight sm:text-xl">Лента</h1>' in feed
+    assert 'Повторить' in feed
+    assert 'Повтор уже внутри каждой карточки' in feed
+
+
+def test_infinite_feed_uses_intersection_observer_and_growing_limit() -> None:
+    app = read(SRC / "app/App.tsx")
+    feed = read(SRC / "features/feed-screen.tsx")
+    api = read(SRC / "lib/api.ts")
+    css = read(SRC / "styles/globals.css")
+
+    assert 'export const FEED_PAGE_SIZE = 24' in api
+    assert '`/feed?source=${source}&limit=${limit}`' in api
+    assert 'feedLimit + FEED_PAGE_SIZE' in app
+    assert 'setFeedHasMore(feed.length >= nextLimit)' in app
+    assert 'loadingMore={feedLoadingMore}' in app
+    assert 'hasMore={feedHasMore}' in app
+    assert 'onLoadMore={() => void loadMoreFeed()}' in app
+    assert 'new IntersectionObserver' in feed
+    assert 'rootMargin: "720px 0px"' in feed
+    assert 'sentinelRef' in feed
+    assert 'apix-feed-card' in feed
+    assert '.apix-feed-card' in css
+    assert '@keyframes apix-feed-card-in' in css
+
+
 def test_repeat_feed_uses_filters_and_safe_video_remix_payload() -> None:
     app = read(SRC / "app/App.tsx")
     feed = read(SRC / "features/feed-screen.tsx")
     api = read(SRC / "lib/api.ts")
-    shell = read(SRC / "components/app-shell.tsx")
 
-    assert 'label: "Повторы"' in shell
-    assert 'repeatFirst' in app
     assert 'remixingId' in app
     assert 'mode: videoMedia ? "text" : "image"' in app
     assert 'source_image_url: media && !videoMedia ? media : null' in app
@@ -127,7 +160,6 @@ def test_repeat_feed_uses_filters_and_safe_video_remix_payload() -> None:
     assert 'type WorkFilter = "all" | "image" | "video" | "mine"' in feed
     assert 'visibleItems' in feed
     assert 'Все' in feed and 'Фото' in feed and 'Видео' in feed and 'Мои' in feed
-    assert 'const FEED_LIMIT = 96' in api
     assert 'const HISTORY_LIMIT = 100' in api
 
 
