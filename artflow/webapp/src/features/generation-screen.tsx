@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import { AlertCircle, Film, ImageIcon, Info, Orbit, Sparkles, WandSparkles } from "lucide-react";
+import { AlertCircle, Film, ImageIcon, Orbit, Sparkles, WandSparkles } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,37 +29,25 @@ interface GenerationScreenProps {
 }
 
 const titles = {
-  image: {
-    title: "Генерация фото",
-    description: "Текст, edit-модели, несколько референсов и пакетный результат.",
-    icon: ImageIcon,
-  },
-  video: {
-    title: "Генерация видео",
-    description: "Text-to-video, image-to-video и video-to-video в одной форме.",
-    icon: Film,
-  },
-  motion: {
-    title: "Motion Control",
-    description: "Фото персонажа + видео движения. Стоимость подтверждается сервером.",
-    icon: Orbit,
-  },
+  image: { title: "Фото", description: "Текст, edit-модели, референсы и пакетный результат.", icon: ImageIcon },
+  video: { title: "Видео", description: "Text-to-video, image-to-video и video-to-video.", icon: Film },
+  motion: { title: "Motion", description: "Фото персонажа и видео движения.", icon: Orbit },
 };
 
 function chipClass(active: boolean): string {
   return cn(
-    "apix-focus-ring min-h-9 rounded-xl border px-3 text-xs font-semibold transition",
+    "apix-focus-ring min-h-8 rounded-lg border px-2.5 text-xs font-semibold transition",
     active
       ? "border-primary/45 bg-primary/15 text-primary"
-      : "border-border bg-card/45 text-muted-foreground hover:bg-accent hover:text-foreground",
+      : "border-border bg-card/45 text-muted-foreground active:bg-accent",
   );
 }
 
 function modeLabel(mode: string): string {
   return {
-    text: "По тексту",
-    image: "По фото",
-    video: "По видео",
+    text: "Текст",
+    image: "Фото",
+    video: "Видео",
     avatar: "Аватар",
     audio: "Голос",
     character: "Персонаж",
@@ -91,10 +79,7 @@ function GenerationScreen({
   const counts = selectedModel?.counts?.length ? selectedModel.counts : [1, 2, 4, 6];
   const durations = selectedModel?.duration_options?.length ? selectedModel.duration_options : [5, 10];
   const resolutions = selectedModel?.resolution_options?.length ? selectedModel.resolution_options : ["720p", "1080p"];
-  const estimate =
-    kind === "image"
-      ? estimateImageCost(selectedModel, draft.quality, draft.count)
-      : estimateVideoCost(selectedModel);
+  const estimate = kind === "image" ? estimateImageCost(selectedModel, draft.quality, draft.count) : estimateVideoCost(selectedModel);
   const refsRequired = Boolean(selectedModel && !modelSupports(selectedModel, "text") && modelSupports(selectedModel, "image"));
   const maxRefs = Math.max(1, Number(selectedModel?.max_refs || 1));
   const tooManyRefs = draft.referenceUrls.length > maxRefs;
@@ -102,21 +87,13 @@ function GenerationScreen({
   const missingMotionVideo = kind === "motion" && !draft.videoUrl;
   const missingPrompt = !draft.prompt.trim() && !draft.promptId;
   const insufficientCredits = estimate > Number(user.credits || 0);
-  const disabled =
-    submitting ||
-    !selectedModel ||
-    missingPrompt ||
-    missingReference ||
-    missingMotionVideo ||
-    tooManyRefs ||
-    insufficientCredits;
+  const disabled = submitting || !selectedModel || missingPrompt || missingReference || missingMotionVideo || tooManyRefs || insufficientCredits;
 
   const syncSelectedModel = (modelKey: string) => {
     const model = availableModels.find((item) => item.key === modelKey);
-    const firstMode = kind === "motion" ? "video" : model?.modes?.[0] || "text";
     onChange({
       model: modelKey,
-      mode: firstMode,
+      mode: kind === "motion" ? "video" : model?.modes?.[0] || "text",
       aspectRatio: model?.aspect_ratios?.[0] || draft.aspectRatio || "1:1",
       quality: model?.quality_options?.[0]?.value || "basic",
       duration: model?.duration_options?.[0] || draft.duration || 5,
@@ -126,165 +103,138 @@ function GenerationScreen({
   };
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section className="grid gap-4">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-primary">
-            <Icon className="size-5" />
-            <span className="text-xs font-semibold uppercase tracking-[0.16em]">APIX Studio</span>
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_270px]">
+      <section className="grid gap-2.5">
+        <div className="flex items-center justify-between gap-2 px-0.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><Icon className="size-4" /></span>
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold tracking-tight sm:text-xl">{copy.title}</h1>
+              <p className="truncate text-[11px] text-muted-foreground">{selectedModel?.display_name || copy.description}</p>
+            </div>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">{copy.title}</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">{copy.description}</p>
+          <Badge variant="outline" className="shrink-0">{formatCredits(user.credits)} кр.</Badge>
         </div>
 
         {draft.promptId ? (
-          <Card className="border-primary/25 bg-primary/8 shadow-none">
-            <CardContent className="flex items-start justify-between gap-3 p-4">
-              <div>
-                <Badge>Тренд #{draft.promptId}</Badge>
-                <p className="mt-2 font-semibold">{draft.sourceTitle || "Готовый сценарий"}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Канонический промпт скрыт и будет подставлен backend. Его нельзя случайно раскрыть в интерфейсе.
-                </p>
-              </div>
-              <Button variant="ghost" size="sm" onClick={onResetPreset}>Сбросить</Button>
-            </CardContent>
-          </Card>
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold">Тренд #{draft.promptId}: {draft.sourceTitle || "сценарий"}</p>
+              <p className="text-[10px] text-muted-foreground">Скрытый промпт применит backend</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={onResetPreset}>Сбросить</Button>
+          </div>
         ) : null}
 
         <Card>
-          <CardHeader>
-            <CardTitle>1. Модель и сценарий</CardTitle>
-            <CardDescription>Показываются только модели, доступные через текущий backend registry.</CardDescription>
+          <CardHeader className="pb-2">
+            <CardTitle>Модель и идея</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-4">
-            <label className="grid gap-2 text-sm font-medium">
+          <CardContent className="grid gap-2.5">
+            <label className="grid gap-1 text-xs font-medium">
               Модель
               <Select value={selectedModel?.key || ""} onChange={(event) => syncSelectedModel(event.target.value)}>
                 {availableModels.map((model) => (
-                  <option key={model.key} value={model.key}>
-                    {model.display_name} · {formatCredits(model.credits)} кр.
-                  </option>
+                  <option key={model.key} value={model.key}>{model.display_name} · {formatCredits(model.credits)} кр.</option>
                 ))}
               </Select>
             </label>
 
             {kind !== "image" || modes.length > 1 ? (
-              <div>
-                <p className="mb-2 text-sm font-medium">Сценарий</p>
-                <div className="flex flex-wrap gap-2">
-                  {modes.map((mode) => (
-                    <button key={mode} type="button" className={chipClass(draft.mode === mode)} onClick={() => onChange({ mode })}>
-                      {modeLabel(mode)}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+                <span className="shrink-0 text-xs font-medium">Режим</span>
+                {modes.map((mode) => (
+                  <button key={mode} type="button" className={cn(chipClass(draft.mode === mode), "shrink-0")} onClick={() => onChange({ mode })}>
+                    {modeLabel(mode)}
+                  </button>
+                ))}
               </div>
             ) : null}
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>2. Идея и референсы</CardTitle>
-            <CardDescription>Основной целевой шаг. Дополнительные параметры находятся ниже.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <label className="grid gap-2 text-sm font-medium">
+            <label className="grid gap-1 text-xs font-medium">
               Промпт
               <Textarea
+                className="min-h-24"
                 value={draft.prompt}
                 disabled={Boolean(draft.promptId)}
-                placeholder={draft.promptId ? "Скрытый промпт тренда применяется сервером" : "Опишите сцену, стиль, свет, движение и важные детали"}
+                placeholder={draft.promptId ? "Скрытый промпт тренда" : "Сцена, стиль, свет, движение, детали"}
                 onChange={(event) => onChange({ prompt: event.target.value })}
               />
             </label>
 
-            {(kind === "image" || draft.mode === "image" || kind === "motion") && (
-              <label className="grid gap-2 text-sm font-medium">
-                Референсы изображений
+            {(kind === "image" || draft.mode === "image" || kind === "motion") ? (
+              <label className="grid gap-1 text-xs font-medium">
+                Референсы · до {maxRefs}
                 <Textarea
-                  className="min-h-24 font-mono text-xs"
+                  className="min-h-16 font-mono text-base sm:text-xs"
                   value={draft.referenceUrls.join("\n")}
-                  placeholder={`По одной публичной HTTPS-ссылке в строке. Максимум: ${maxRefs}`}
+                  placeholder="HTTPS-ссылки, по одной в строке"
                   onChange={(event) => onChange({ referenceUrls: splitUrls(event.target.value) })}
                 />
-                <span className="text-xs font-normal text-muted-foreground">
-                  Файлы не маскируются как blob URL: backend принимает только безопасные публичные HTTPS-ссылки.
-                </span>
               </label>
-            )}
+            ) : null}
 
-            {(draft.mode === "video" || kind === "motion") && (
-              <label className="grid gap-2 text-sm font-medium">
-                Видео движения / video reference
+            {(draft.mode === "video" || kind === "motion") ? (
+              <label className="grid gap-1 text-xs font-medium">
+                Видео движения
                 <Input
                   value={draft.videoUrl}
-                  placeholder="https://cdn.example.com/motion.mp4"
+                  placeholder="https://…/motion.mp4"
                   inputMode="url"
                   onChange={(event) => onChange({ videoUrl: event.target.value.trim() })}
                 />
               </label>
-            )}
+            ) : null}
+
+            <details className="apix-help">
+              <summary>Требования к референсам</summary>
+              <p className="pb-2">Backend принимает безопасные публичные HTTPS-ссылки. Blob URL не отправляются.</p>
+            </details>
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle>3. Параметры</CardTitle>
-            <CardDescription>Неподдерживаемые значения не отправляются.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-5">
+          <CardHeader className="pb-2"><CardTitle>Параметры</CardTitle></CardHeader>
+          <CardContent className="grid gap-2.5">
             {ratios.length ? (
-              <div>
-                <p className="mb-2 text-sm font-medium">Формат</p>
-                <div className="flex flex-wrap gap-2">
-                  {ratios.map((ratio) => (
-                    <button key={ratio} type="button" className={chipClass(draft.aspectRatio === ratio)} onClick={() => onChange({ aspectRatio: ratio })}>
-                      {ratio}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+                <span className="shrink-0 text-xs font-medium">Формат</span>
+                {ratios.map((ratio) => (
+                  <button key={ratio} type="button" className={cn(chipClass(draft.aspectRatio === ratio), "shrink-0")} onClick={() => onChange({ aspectRatio: ratio })}>{ratio}</button>
+                ))}
               </div>
             ) : null}
 
             {kind === "image" ? (
-              <>
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <p className="mb-2 text-sm font-medium">Качество</p>
-                  <div className="flex flex-wrap gap-2">
+                  <p className="mb-1 text-xs font-medium">Качество</p>
+                  <div className="flex gap-1 overflow-x-auto">
                     {qualities.map((quality) => (
-                      <button
-                        key={quality.value}
-                        type="button"
-                        className={chipClass(draft.quality === quality.value)}
-                        onClick={() => onChange({ quality: quality.value })}
-                      >
+                      <button key={quality.value} type="button" className={cn(chipClass(draft.quality === quality.value), "shrink-0")} onClick={() => onChange({ quality: quality.value })}>
                         {quality.label || quality.value}
                       </button>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <p className="mb-2 text-sm font-medium">Количество</p>
-                  <div className="flex flex-wrap gap-2">
+                  <p className="mb-1 text-xs font-medium">Количество</p>
+                  <div className="flex gap-1 overflow-x-auto">
                     {counts.map((count) => (
-                      <button key={count} type="button" className={chipClass(draft.count === count)} onClick={() => onChange({ count })}>
-                        {count}
-                      </button>
+                      <button key={count} type="button" className={cn(chipClass(draft.count === count), "min-w-8 shrink-0 px-2")} onClick={() => onChange({ count })}>{count}</button>
                     ))}
                   </div>
                 </div>
-              </>
+              </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-2 text-sm font-medium">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="grid gap-1 text-xs font-medium">
                   Длительность
                   <Select value={String(draft.duration)} onChange={(event) => onChange({ duration: Number(event.target.value) })}>
                     {durations.map((duration) => <option key={duration} value={duration}>{duration} сек</option>)}
                   </Select>
                 </label>
-                <label className="grid gap-2 text-sm font-medium">
+                <label className="grid gap-1 text-xs font-medium">
                   Разрешение
                   <Select value={draft.resolution} onChange={(event) => onChange({ resolution: event.target.value })}>
                     {resolutions.map((resolution) => <option key={resolution} value={resolution}>{resolution}</option>)}
@@ -293,46 +243,41 @@ function GenerationScreen({
               </div>
             )}
 
-            <details className="rounded-xl border border-border bg-muted/35 p-3">
-              <summary className="cursor-pointer text-sm font-semibold">Расширенные параметры</summary>
-              <div className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
-                <Info className="mt-0.5 size-4 shrink-0" />
-                Seed, negative prompt, CFG, watermark и provider-specific параметры появятся только для моделей, которые объявляют соответствующие capabilities. Сейчас форма не придумывает поля, отсутствующие в текущем контракте.
-              </div>
+            <details className="apix-help">
+              <summary>Расширенные параметры</summary>
+              <p className="pb-2">Seed, negative prompt, CFG и watermark появятся только у моделей, которые объявляют эти capabilities.</p>
             </details>
           </CardContent>
         </Card>
       </section>
 
-      <aside className="lg:sticky lg:top-24 lg:self-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>Запуск</CardTitle>
-            <CardDescription>Финальная стоимость будет повторно рассчитана backend.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <div className="rounded-2xl border border-primary/20 bg-primary/8 p-4">
-              <p className="text-xs text-muted-foreground">Предварительная стоимость</p>
-              <p className="mt-1 text-3xl font-bold">{formatCredits(estimate)} кр.</p>
-              <p className="mt-1 text-xs text-muted-foreground">Баланс: {formatCredits(user.credits)} кр.</p>
+      <aside className="apix-launch-bar lg:sticky lg:top-16 lg:self-start">
+        <Card className="border-primary/25 bg-popover/95 shadow-xl">
+          <CardContent className="grid gap-2 p-2.5 sm:p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-[10px] text-muted-foreground">Стоимость</p>
+                <p className="text-lg font-bold leading-none">{formatCredits(estimate)} кр.</p>
+              </div>
+              <Button className="min-w-[56%]" disabled={disabled} onClick={onSubmit}>
+                {submitting ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <WandSparkles />}
+                {submitting ? "Запуск…" : "Создать"}
+              </Button>
             </div>
 
-            {missingPrompt ? <ValidationError>Добавьте промпт или выберите тренд.</ValidationError> : null}
-            {missingReference ? <ValidationError>Эта модель требует хотя бы один референс.</ValidationError> : null}
-            {tooManyRefs ? <ValidationError>Модель поддерживает не более {maxRefs} референсов.</ValidationError> : null}
-            {missingMotionVideo ? <ValidationError>Для Motion Control нужно видео движения.</ValidationError> : null}
-            {insufficientCredits ? <ValidationError>Недостаточно кредитов для запуска.</ValidationError> : null}
-            {!availableModels.length ? <ValidationError>Подходящие модели сейчас недоступны.</ValidationError> : null}
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+              {missingPrompt ? <ValidationError>Нужен промпт</ValidationError> : null}
+              {missingReference ? <ValidationError>Нужен референс</ValidationError> : null}
+              {tooManyRefs ? <ValidationError>Лишние референсы</ValidationError> : null}
+              {missingMotionVideo ? <ValidationError>Нужно видео</ValidationError> : null}
+              {insufficientCredits ? <ValidationError>Мало кредитов</ValidationError> : null}
+              {!availableModels.length ? <ValidationError>Нет моделей</ValidationError> : null}
+            </div>
 
-            <Button size="lg" disabled={disabled} onClick={onSubmit}>
-              {submitting ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <WandSparkles />}
-              {submitting ? "Создаём задачу…" : "Запустить генерацию"}
-            </Button>
-
-            <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
-              <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
-              После ответа 202 задача сразу появится в истории, откроется detail sheet и начнётся polling.
-            </p>
+            <details className="apix-help hidden lg:block">
+              <summary>Что будет после запуска</summary>
+              <p className="flex items-start gap-1.5 pb-2"><Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />Задача сразу появится в истории, откроется результат и начнётся polling.</p>
+            </details>
           </CardContent>
         </Card>
       </aside>
@@ -341,12 +286,7 @@ function GenerationScreen({
 }
 
 function ValidationError({ children }: { children: ReactNode }) {
-  return (
-    <p className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
-      <AlertCircle className="mt-0.5 size-4 shrink-0" />
-      {children}
-    </p>
-  );
+  return <span className="flex items-center gap-1 text-[10px] text-destructive"><AlertCircle className="size-3" />{children}</span>;
 }
 
 export { GenerationScreen };
