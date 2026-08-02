@@ -127,6 +127,23 @@ def test_feed_is_first_tab_and_repeat_is_inside_feed() -> None:
     assert 'Карточки выводятся порциями' in feed
 
 
+def test_feed_controls_are_compact_and_actions_stay_inside_media() -> None:
+    feed = read(SRC / "features/feed-screen.tsx")
+    css = read(SRC / "styles/globals.css")
+
+    assert 'apix-feed-toolbar' in feed
+    assert 'apix-chip-rail' in feed
+    assert 'sticky top-[48px]' not in feed
+    assert 'grid grid-cols-2 gap-1 rounded-lg bg-muted/45 p-1' not in feed
+    assert 'apix-feed-media group relative' in feed
+    assert 'cursor-zoom-in' in feed
+    assert 'inline-flex min-h-8 flex-1 items-center justify-center' in feed
+    assert 'event.stopPropagation()' in feed
+    assert '.apix-feed-toolbar' in css
+    assert '.apix-chip-rail' in css
+    assert '.apix-feed-media' in css
+
+
 def test_infinite_feed_uses_intersection_observer_and_growing_limit() -> None:
     app = read(SRC / "app/App.tsx")
     feed = read(SRC / "features/feed-screen.tsx")
