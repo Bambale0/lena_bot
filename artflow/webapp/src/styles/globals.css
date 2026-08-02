@@ -158,6 +158,10 @@ video {
   -webkit-overflow-scrolling: touch;
 }
 
+.apix-shell > main > * {
+  min-width: 0;
+}
+
 .apix-app-header {
   min-width: 0;
 }
@@ -341,9 +345,8 @@ video {
 }
 
 .apix-launch-bar {
-  position: sticky;
+  position: static;
   z-index: 35;
-  bottom: 0.5rem;
 }
 
 @media (min-width: 390px) {
@@ -392,7 +395,9 @@ video {
   }
 
   .apix-launch-bar {
-    position: static;
+    position: sticky;
+    top: 1rem;
+    align-self: start;
   }
 }
 
