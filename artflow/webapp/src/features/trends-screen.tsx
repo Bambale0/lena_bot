@@ -34,34 +34,37 @@ function TrendsScreen({
   const filtered = filter === "all" ? items : items.filter((item) => item.kind === filter);
 
   return (
-    <div className="grid gap-4">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <Badge className="mb-2">Каталог сценариев</Badge>
-          <h1 className="text-3xl font-bold tracking-tight">Тренды</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Нажмите «Повторить»: модель и параметры перенесутся в рабочую форму, а скрытый prompt останется на backend.
-          </p>
+    <div className="grid gap-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-bold tracking-tight sm:text-xl">Тренды</h1>
+            <Badge variant="outline">{filtered.length}</Badge>
+          </div>
+          <details className="apix-help max-w-xl">
+            <summary>Как повторить тренд</summary>
+            <p className="pb-2">Модель и параметры попадут в форму, скрытый промпт останется на backend.</p>
+          </details>
         </div>
-        <Button variant="outline" size="icon" disabled={loading} onClick={onRefresh} aria-label="Обновить тренды">
+        <Button variant="outline" size="icon" className="size-9 min-h-9" disabled={loading} onClick={onRefresh} aria-label="Обновить тренды">
           <RefreshCw className={loading ? "animate-spin" : ""} />
         </Button>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="flex gap-1 overflow-x-auto pb-0.5">
         {filters.map(({ value, label, icon: Icon }) => (
           <button
             key={value}
             type="button"
             className={cn(
-              "apix-focus-ring flex min-h-10 shrink-0 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition",
+              "apix-focus-ring flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition",
               filter === value
                 ? "border-primary/40 bg-primary/15 text-primary"
                 : "border-border bg-card/55 text-muted-foreground",
             )}
             onClick={() => onFilterChange(value)}
           >
-            <Icon className="size-4" />
+            <Icon className="size-3.5" />
             {label}
           </button>
         ))}
@@ -74,7 +77,7 @@ function TrendsScreen({
             const isVideo = trend.kind === "video";
             return (
               <Card key={trend.id} className="overflow-hidden shadow-none">
-                <div className={cn("overflow-hidden bg-muted", index % 5 === 0 ? "aspect-[3/4]" : "aspect-[4/5]") }>
+                <div className={cn("relative overflow-hidden bg-muted", index % 5 === 0 ? "aspect-[3/4]" : "aspect-[4/5]") }>
                   {media ? (
                     isVideo ? (
                       <video src={media} muted playsInline loop preload="metadata" className="size-full object-cover" />
@@ -82,25 +85,29 @@ function TrendsScreen({
                       <img src={media} alt="" loading="lazy" className="size-full object-cover" />
                     )
                   ) : (
-                    <div className="grid size-full place-items-center text-muted-foreground">
-                      {isVideo ? <Film /> : <ImageIcon />}
-                    </div>
+                    <div className="grid size-full place-items-center text-muted-foreground">{isVideo ? <Film /> : <ImageIcon />}</div>
                   )}
-                </div>
-                <div className="grid gap-3 p-3">
-                  <div>
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      <Badge variant="outline">{trend.category_emoji || (isVideo ? "🎬" : "🖼️")} {trend.category_title || trend.kind}</Badge>
-                      {trend.uses_count ? <Badge variant="secondary">{trend.uses_count} повторов</Badge> : null}
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-10 text-white">
+                    <div className="mb-1 flex items-center gap-1 text-[8px] opacity-85">
+                      <span>{trend.category_emoji || (isVideo ? "🎬" : "🖼️")}</span>
+                      <span className="truncate">{trend.category_title || trend.kind}</span>
+                      {trend.uses_count ? <span className="ml-auto">↻ {trend.uses_count}</span> : null}
                     </div>
-                    <h2 className="text-sm font-semibold leading-snug">{trend.title}</h2>
-                    {trend.description ? <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-muted-foreground">{trend.description}</p> : null}
+                    <h2 className="line-clamp-2 text-[11px] font-semibold leading-tight">{trend.title}</h2>
                   </div>
-                  <Button disabled={preparingId === trend.id} onClick={() => onPrepare(trend)}>
+                </div>
+                <div className="grid gap-1.5 p-1.5">
+                  {trend.description ? (
+                    <details className="apix-help border-0">
+                      <summary className="py-1 text-[10px]">Описание</summary>
+                      <p className="line-clamp-6 pb-1 text-[10px]">{trend.description}</p>
+                    </details>
+                  ) : null}
+                  <Button className="min-h-8 px-2 text-[10px]" disabled={preparingId === trend.id} onClick={() => onPrepare(trend)}>
                     {preparingId === trend.id ? (
-                      <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
                     ) : (
-                      <Repeat2 />
+                      <Repeat2 className="size-3.5" />
                     )}
                     Повторить
                   </Button>
@@ -110,7 +117,7 @@ function TrendsScreen({
           })}
         </div>
       ) : (
-        <div className="grid min-h-56 place-items-center rounded-2xl border border-dashed border-border text-center text-sm text-muted-foreground">
+        <div className="grid min-h-28 place-items-center rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">
           {loading ? "Загружаем тренды…" : "В этой категории пока нет трендов"}
         </div>
       )}
