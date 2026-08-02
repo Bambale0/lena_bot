@@ -186,6 +186,23 @@ video {
   margin-bottom: 0.4rem;
 }
 
+.apix-feed-card {
+  animation: apix-feed-card-in 260ms ease-out both;
+  content-visibility: auto;
+  contain-intrinsic-size: 320px 420px;
+}
+
+@keyframes apix-feed-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .apix-safe-sheet {
   padding-bottom: max(6px, env(safe-area-inset-bottom));
 }
