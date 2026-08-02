@@ -7,7 +7,7 @@ import {
   GalleryVerticalEnd,
   ImageIcon,
   Orbit,
-  Sparkles,
+  Repeat2,
   UserRound,
 } from "lucide-react";
 
@@ -16,8 +16,8 @@ import type { AppTab, UserProfile } from "@/lib/types";
 import { cn, formatCredits } from "@/lib/utils";
 import { haptic } from "@/lib/telegram";
 
-const tabs: Array<{ id: AppTab; label: string; icon: typeof Sparkles }> = [
-  { id: "studio", label: "Студия", icon: Sparkles },
+const tabs: Array<{ id: AppTab; label: string; icon: typeof Repeat2 }> = [
+  { id: "studio", label: "Повторы", icon: Repeat2 },
   { id: "photo", label: "Фото", icon: ImageIcon },
   { id: "video", label: "Видео", icon: Film },
   { id: "motion", label: "Motion", icon: Orbit },
@@ -52,7 +52,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
           </span>
           <span className="min-w-0">
             <span className="block max-w-36 truncate text-xs font-semibold sm:max-w-none sm:text-sm">{name}</span>
-            <span className="hidden truncate text-[10px] text-muted-foreground sm:block">APIX Studio</span>
+            <span className="hidden truncate text-[10px] text-muted-foreground sm:block">APIX Mini App</span>
           </span>
         </button>
 
@@ -65,17 +65,19 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
       <main>{children}</main>
 
       <nav className="apix-bottom-nav apix-glass rounded-xl p-1" aria-label="Основная навигация">
-        <div className="apix-nav-scroll flex gap-0.5 overflow-x-auto overscroll-x-contain">
+        <div className="apix-nav-scroll flex gap-1 overflow-x-auto overscroll-x-contain" role="tablist" aria-label="Разделы Mini App">
           {tabs.map(({ id, label, icon: Icon }) => {
             const active = id === activeTab;
             return (
               <button
                 key={id}
                 type="button"
+                role="tab"
+                aria-selected={active}
                 aria-current={active ? "page" : undefined}
                 aria-label={label}
                 className={cn(
-                  "apix-focus-ring flex min-h-12 min-w-[54px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-[9px] font-medium transition",
+                  "apix-nav-item apix-focus-ring flex min-h-12 min-w-[74px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg px-2 text-[10px] font-semibold transition active:scale-[0.97]",
                   active
                     ? "bg-primary/15 text-primary shadow-inner"
                     : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
