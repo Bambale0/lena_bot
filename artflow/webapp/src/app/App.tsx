@@ -30,6 +30,7 @@ import type {
   FeedItem,
   GenerationDraft,
   GenerationTask,
+  ModelInfo,
   PaymentPlan,
   PhotoPromptResult,
   PreparedTrend,
@@ -42,6 +43,23 @@ window.__APIX_MINIAPP_BUILD_ID__ = "20260802-feed-first-infinite-v1";
 
 type FeedSource = "recent" | "top_day" | "top";
 
+function modelDurations(model?: ModelInfo): number[] {
+  if (model?.duration_options?.length) return model.duration_options;
+  if (model?.durations?.length) return model.durations;
+  return [5, 10];
+}
+
+function modelResolutions(model?: ModelInfo): string[] {
+  if (model?.resolution_options?.length) return model.resolution_options;
+  if (model?.resolutions?.length) return model.resolutions;
+  return ["720p", "1080p"];
+}
+
+function clampTaskCount(value: number | undefined): number {
+  const normalized = Number(value || 1);
+  return [1, 2, 3, 4, 6].includes(normalized) ? normalized : 1;
+}
+
 function emptyDraft(kind: GenerationDraft["kind"]): GenerationDraft {
   return {
     kind,
@@ -52,11 +70,18 @@ function emptyDraft(kind: GenerationDraft["kind"]): GenerationDraft {
     aspectRatio: kind === "video" || kind === "motion" ? "16:9" : "1:1",
     quality: "basic",
     count: 1,
-    mode: kind === "motion" ? "video" : "text",
+    taskCount: 1,
+    mode: kind === "motion" ? "motion" : "text",
     duration: 5,
     resolution: "720p",
     referenceUrls: [],
     videoUrl: "",
+    videoStart: 0,
+    videoEnd: null,
+    audioIds: [],
+    characterIds: [],
+    seed: null,
+    grokMode: "normal",
   };
 }
 
@@ -118,7 +143,11 @@ function App() {
   const hydrateDraftDefaults = useCallback((bootstrap: BootstrapData) => {
     const firstImage = bootstrap.imageModels[0];
     const firstVideo = bootstrap.videoModels.find((model) => !/motion-control/i.test(model.key)) || bootstrap.videoModels[0];
-    const firstMotion = bootstrap.videoModels.find((model) => /motion/i.test(`${model.key} ${model.display_name}`));
+    const firstMotion = bootstrap.videoModels.find((model) => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"));
+    const firstVideoDurations = modelDurations(firstVideo);
+    const firstVideoResolutions = modelResolutions(firstVideo);
+    const firstMotionDurations = modelDurations(firstMotion);
+    const firstMotionResolutions = modelResolutions(firstMotion);
     setImageDraft((current) => ({
       ...current,
       model: current.model || firstImage?.key || "",
@@ -126,22 +155,25 @@ function App() {
       aspectRatio: firstImage?.aspect_ratios?.[0] || current.aspectRatio,
       quality: firstImage?.quality_options?.[0]?.value || current.quality,
       count: firstImage?.counts?.[0] || current.count,
+      taskCount: current.taskCount || 1,
     }));
     setVideoDraft((current) => ({
       ...current,
       model: current.model || firstVideo?.key || "",
       mode: firstVideo?.modes?.[0] || current.mode,
       aspectRatio: firstVideo?.aspect_ratios?.[0] || current.aspectRatio,
-      duration: firstVideo?.duration_options?.[0] || current.duration,
-      resolution: firstVideo?.resolution_options?.[0] || current.resolution,
+      duration: firstVideoDurations[0] || current.duration,
+      resolution: firstVideoResolutions[0] || current.resolution,
+      grokMode: firstVideo?.mode_options?.[0] || current.grokMode || "normal",
     }));
     setMotionDraft((current) => ({
       ...current,
       model: current.model || firstMotion?.key || "",
-      mode: "video",
+      mode: firstMotion?.modes?.[0] || current.mode || "motion",
       aspectRatio: firstMotion?.aspect_ratios?.[0] || current.aspectRatio,
-      duration: firstMotion?.duration_options?.[0] || current.duration,
-      resolution: firstMotion?.resolution_options?.[0] || current.resolution,
+      duration: firstMotionDurations[0] || current.duration,
+      resolution: firstMotionResolutions[0] || current.resolution,
+      grokMode: firstMotion?.mode_options?.[0] || current.grokMode || "normal",
     }));
   }, []);
 
@@ -202,6 +234,7 @@ function App() {
         aspectRatio: stringSetting(settings, "ratio", current.aspectRatio),
         duration: numberSetting(settings, "duration", current.duration),
         resolution: stringSetting(settings, "resolution", current.resolution),
+        grokMode: stringSetting(settings, "grok_mode", current.grokMode),
       }));
       setActiveTab("video");
     } else {
@@ -379,44 +412,65 @@ function App() {
   const submitGeneration = useCallback(async (kind: "image" | "video" | "motion") => {
     if (!api || !data || submitting) return;
     const draft = currentDraft[kind];
+    const taskCount = clampTaskCount(draft.taskCount);
     setSubmitting(true);
+    const createdTasks: GenerationTask[] = [];
     try {
       const prompt = draft.prompt.trim() || "Использовать выбранный сценарий";
-      const task = kind === "image"
-        ? await api.createImage({
-            model: draft.model,
-            prompt,
-            prompt_id: draft.promptId,
-            aspect_ratio: draft.aspectRatio,
-            quality: draft.quality,
-            count: draft.count,
-            reference_url: draft.referenceUrls[0] || null,
-            reference_urls: draft.referenceUrls,
-          })
-        : await api.createVideo({
-            model: draft.model,
-            prompt,
-            prompt_id: draft.promptId,
-            mode: kind === "motion" ? "video" : draft.mode,
-            duration: draft.duration,
-            aspect_ratio: draft.aspectRatio,
-            resolution: draft.resolution,
-            image_url: draft.referenceUrls[0] || null,
-            reference_urls: draft.referenceUrls,
-            video_url: draft.videoUrl || null,
-          });
+      for (let index = 0; index < taskCount; index += 1) {
+        const task = kind === "image"
+          ? await api.createImage({
+              model: draft.model,
+              prompt,
+              prompt_id: draft.promptId,
+              aspect_ratio: draft.aspectRatio,
+              quality: draft.quality,
+              count: draft.count,
+              reference_url: draft.referenceUrls[0] || null,
+              reference_urls: draft.referenceUrls,
+            })
+          : await api.createVideo({
+              model: draft.model,
+              prompt,
+              prompt_id: draft.promptId,
+              mode: draft.mode,
+              duration: draft.duration,
+              aspect_ratio: draft.aspectRatio,
+              resolution: draft.resolution,
+              image_url: draft.referenceUrls[0] || null,
+              reference_urls: draft.referenceUrls,
+              video_url: draft.videoUrl || null,
+              video_start: draft.videoStart,
+              video_end: draft.videoEnd,
+              audio_ids: draft.audioIds,
+              character_ids: draft.characterIds,
+              seed: draft.seed,
+              grok_mode: draft.grokMode || "normal",
+            });
+        createdTasks.push(task);
+      }
+      const orderedTasks = [...createdTasks].reverse();
       setData((current) => current ? {
         ...current,
-        recentTasks: [task, ...current.recentTasks.filter((item) => item.id !== task.id)],
+        recentTasks: [...orderedTasks, ...current.recentTasks.filter((item) => !createdTasks.some((task) => task.id === item.id))],
       } : current);
-      setSelectedTask(task);
+      const primaryTask = createdTasks[createdTasks.length - 1];
+      setSelectedTask(primaryTask);
       setTaskOpen(true);
       notifyHaptic("success");
-      toast.success("Задача создана");
+      toast.success(taskCount > 1 ? `Создано задач: ${taskCount}` : "Задача создана");
       void refreshCore();
     } catch (error) {
+      if (createdTasks.length) {
+        const orderedTasks = [...createdTasks].reverse();
+        setData((current) => current ? {
+          ...current,
+          recentTasks: [...orderedTasks, ...current.recentTasks.filter((item) => !createdTasks.some((task) => task.id === item.id))],
+        } : current);
+      }
       notifyHaptic("error");
-      toast.error(error instanceof Error ? error.message : "Не удалось создать задачу");
+      const prefix = createdTasks.length ? `Создано ${createdTasks.length}, дальше ошибка: ` : "";
+      toast.error(`${prefix}${error instanceof Error ? error.message : "Не удалось создать задачу"}`);
     } finally {
       setSubmitting(false);
     }
