@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AlertCircle, Film, ImageIcon, Orbit, Sparkles, WandSparkles } from "lucide-react";
+import { AlertCircle, Film, ImageIcon, LoaderCircle, Orbit, Sparkles, Upload, WandSparkles, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,11 @@ interface GenerationScreenProps {
   models: ModelInfo[];
   draft: GenerationDraft;
   submitting: boolean;
+  referenceUploading: boolean;
+  videoUploading: boolean;
   onChange: (patch: Partial<GenerationDraft>) => void;
+  onUploadReferenceFiles: (files: File[]) => void;
+  onUploadVideoFile: (file: File) => void;
   onSubmit: () => void;
   onResetPreset: () => void;
 }
@@ -54,13 +58,27 @@ function modeLabel(mode: string): string {
   }[mode] || mode;
 }
 
+function shortUrlLabel(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const name = parsed.pathname.split("/").filter(Boolean).at(-1) || parsed.hostname;
+    return decodeURIComponent(name).slice(0, 42);
+  } catch {
+    return url.slice(0, 42);
+  }
+}
+
 function GenerationScreen({
   kind,
   user,
   models,
   draft,
   submitting,
+  referenceUploading,
+  videoUploading,
   onChange,
+  onUploadReferenceFiles,
+  onUploadVideoFile,
   onSubmit,
   onResetPreset,
 }: GenerationScreenProps) {
@@ -87,7 +105,11 @@ function GenerationScreen({
   const missingMotionVideo = kind === "motion" && !draft.videoUrl;
   const missingPrompt = !draft.prompt.trim() && !draft.promptId;
   const insufficientCredits = estimate > Number(user.credits || 0);
-  const disabled = submitting || !selectedModel || missingPrompt || missingReference || missingMotionVideo || tooManyRefs || insufficientCredits;
+  const mediaUploading = referenceUploading || videoUploading;
+  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingMotionVideo || tooManyRefs || insufficientCredits;
+  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion";
+  const showVideoUploader = draft.mode === "video" || kind === "motion";
+  const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);
 
   const syncSelectedModel = (modelKey: string) => {
     const model = availableModels.find((item) => item.key === modelKey);
@@ -102,10 +124,14 @@ function GenerationScreen({
     });
   };
 
+  const removeReference = (url: string) => {
+    onChange({ referenceUrls: draft.referenceUrls.filter((item) => item !== url) });
+  };
+
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_270px]">
-      <section className="grid gap-2.5">
-        <div className="flex items-center justify-between gap-2 px-0.5">
+    <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_270px]">
+      <section className="grid min-w-0 gap-2.5">
+        <div className="flex min-w-0 items-center justify-between gap-2 px-0.5">
           <div className="flex min-w-0 items-center gap-2">
             <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><Icon className="size-4" /></span>
             <div className="min-w-0">
@@ -117,7 +143,7 @@ function GenerationScreen({
         </div>
 
         {draft.promptId ? (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2">
+          <div className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2">
             <div className="min-w-0">
               <p className="truncate text-xs font-semibold">Тренд #{draft.promptId}: {draft.sourceTitle || "сценарий"}</p>
               <p className="text-[10px] text-muted-foreground">Скрытый промпт применит backend</p>
@@ -126,12 +152,12 @@ function GenerationScreen({
           </div>
         ) : null}
 
-        <Card>
+        <Card className="min-w-0 overflow-hidden">
           <CardHeader className="pb-2">
             <CardTitle>Модель и идея</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-2.5">
-            <label className="grid gap-1 text-xs font-medium">
+          <CardContent className="grid min-w-0 gap-2.5">
+            <label className="grid min-w-0 gap-1 text-xs font-medium">
               Модель
               <Select value={selectedModel?.key || ""} onChange={(event) => syncSelectedModel(event.target.value)}>
                 {availableModels.map((model) => (
@@ -141,7 +167,7 @@ function GenerationScreen({
             </label>
 
             {kind !== "image" || modes.length > 1 ? (
-              <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+              <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-0.5">
                 <span className="shrink-0 text-xs font-medium">Режим</span>
                 {modes.map((mode) => (
                   <button key={mode} type="button" className={cn(chipClass(draft.mode === mode), "shrink-0")} onClick={() => onChange({ mode })}>
@@ -151,7 +177,7 @@ function GenerationScreen({
               </div>
             ) : null}
 
-            <label className="grid gap-1 text-xs font-medium">
+            <label className="grid min-w-0 gap-1 text-xs font-medium">
               Промпт
               <Textarea
                 className="min-h-24"
@@ -162,42 +188,115 @@ function GenerationScreen({
               />
             </label>
 
-            {(kind === "image" || draft.mode === "image" || kind === "motion") ? (
-              <label className="grid gap-1 text-xs font-medium">
-                Референсы · до {maxRefs}
-                <Textarea
-                  className="min-h-16 font-mono text-base sm:text-xs"
-                  value={draft.referenceUrls.join("\n")}
-                  placeholder="HTTPS-ссылки, по одной в строке"
-                  onChange={(event) => onChange({ referenceUrls: splitUrls(event.target.value) })}
-                />
-              </label>
+            {showReferenceUploader ? (
+              <div className="grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold">Референсы · до {maxRefs}</p>
+                    <p className="text-[10px] text-muted-foreground">Загрузи фото с устройства. Ссылки вставлять не нужно.</p>
+                  </div>
+                  <label className={cn(chipClass(Boolean(remainingRefs) && !referenceUploading), "inline-flex shrink-0 cursor-pointer items-center gap-1.5") }>
+                    {referenceUploading ? <LoaderCircle className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+                    {referenceUploading ? "Загрузка" : "Добавить"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="sr-only"
+                      disabled={!remainingRefs || referenceUploading}
+                      onChange={(event) => {
+                        const files = Array.from(event.currentTarget.files || []).slice(0, remainingRefs);
+                        event.currentTarget.value = "";
+                        if (files.length) onUploadReferenceFiles(files);
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {draft.referenceUrls.length ? (
+                  <div className="grid min-w-0 gap-1">
+                    {draft.referenceUrls.map((url, index) => (
+                      <div key={`${url}-${index}`} className="flex min-w-0 items-center gap-1 rounded-lg bg-background/70 px-2 py-1 text-[10px]">
+                        <ImageIcon className="size-3.5 shrink-0 text-primary" />
+                        <span className="min-w-0 flex-1 truncate">{shortUrlLabel(url)}</span>
+                        <button type="button" className="apix-focus-ring grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => removeReference(url)} aria-label="Убрать референс">
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                <details className="apix-help border-0">
+                  <summary>Вставить ссылку вручную</summary>
+                  <Textarea
+                    className="min-h-14 font-mono text-base sm:text-xs"
+                    value={draft.referenceUrls.join("\n")}
+                    placeholder="Опционально: HTTPS-ссылки, по одной в строке"
+                    onChange={(event) => onChange({ referenceUrls: splitUrls(event.target.value) })}
+                  />
+                </details>
+              </div>
             ) : null}
 
-            {(draft.mode === "video" || kind === "motion") ? (
-              <label className="grid gap-1 text-xs font-medium">
-                Видео движения
-                <Input
-                  value={draft.videoUrl}
-                  placeholder="https://…/motion.mp4"
-                  inputMode="url"
-                  onChange={(event) => onChange({ videoUrl: event.target.value.trim() })}
-                />
-              </label>
+            {showVideoUploader ? (
+              <div className="grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold">{kind === "motion" ? "Видео движения" : "Видео-референс"}</p>
+                    <p className="text-[10px] text-muted-foreground">Загрузи ролик с устройства, если модель требует видео.</p>
+                  </div>
+                  <label className={cn(chipClass(!videoUploading), "inline-flex shrink-0 cursor-pointer items-center gap-1.5") }>
+                    {videoUploading ? <LoaderCircle className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+                    {videoUploading ? "Загрузка" : "Видео"}
+                    <input
+                      type="file"
+                      accept="video/mp4,video/webm,video/quicktime,video/*"
+                      className="sr-only"
+                      disabled={videoUploading}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        if (file) onUploadVideoFile(file);
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {draft.videoUrl ? (
+                  <div className="flex min-w-0 items-center gap-1 rounded-lg bg-background/70 px-2 py-1 text-[10px]">
+                    <Film className="size-3.5 shrink-0 text-primary" />
+                    <span className="min-w-0 flex-1 truncate">{shortUrlLabel(draft.videoUrl)}</span>
+                    <button type="button" className="apix-focus-ring grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => onChange({ videoUrl: "" })} aria-label="Убрать видео">
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ) : null}
+
+                <details className="apix-help border-0">
+                  <summary>Вставить ссылку вручную</summary>
+                  <Input
+                    value={draft.videoUrl}
+                    placeholder="Опционально: https://…/motion.mp4"
+                    inputMode="url"
+                    onChange={(event) => onChange({ videoUrl: event.target.value.trim() })}
+                  />
+                </details>
+              </div>
             ) : null}
 
             <details className="apix-help">
-              <summary>Требования к референсам</summary>
-              <p className="pb-2">Backend принимает безопасные публичные HTTPS-ссылки. Blob URL не отправляются.</p>
+              <summary>Требования к файлам</summary>
+              <p className="pb-2">Обычный путь — загрузка с устройства. Mini App отправляет файл на backend, получает публичную HTTPS-ссылку и только её передаёт в генерацию. Blob URL не отправляются.</p>
             </details>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0 overflow-hidden">
           <CardHeader className="pb-2"><CardTitle>Параметры</CardTitle></CardHeader>
-          <CardContent className="grid gap-2.5">
+          <CardContent className="grid min-w-0 gap-2.5">
             {ratios.length ? (
-              <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+              <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-0.5">
                 <span className="shrink-0 text-xs font-medium">Формат</span>
                 {ratios.map((ratio) => (
                   <button key={ratio} type="button" className={cn(chipClass(draft.aspectRatio === ratio), "shrink-0")} onClick={() => onChange({ aspectRatio: ratio })}>{ratio}</button>
@@ -206,10 +305,10 @@ function GenerationScreen({
             ) : null}
 
             {kind === "image" ? (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
+              <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+                <div className="min-w-0">
                   <p className="mb-1 text-xs font-medium">Качество</p>
-                  <div className="flex gap-1 overflow-x-auto">
+                  <div className="flex min-w-0 gap-1 overflow-x-auto">
                     {qualities.map((quality) => (
                       <button key={quality.value} type="button" className={cn(chipClass(draft.quality === quality.value), "shrink-0")} onClick={() => onChange({ quality: quality.value })}>
                         {quality.label || quality.value}
@@ -217,9 +316,9 @@ function GenerationScreen({
                     ))}
                   </div>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="mb-1 text-xs font-medium">Количество</p>
-                  <div className="flex gap-1 overflow-x-auto">
+                  <div className="flex min-w-0 gap-1 overflow-x-auto">
                     {counts.map((count) => (
                       <button key={count} type="button" className={cn(chipClass(draft.count === count), "min-w-8 shrink-0 px-2")} onClick={() => onChange({ count })}>{count}</button>
                     ))}
@@ -227,14 +326,14 @@ function GenerationScreen({
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <label className="grid gap-1 text-xs font-medium">
+              <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+                <label className="grid min-w-0 gap-1 text-xs font-medium">
                   Длительность
                   <Select value={String(draft.duration)} onChange={(event) => onChange({ duration: Number(event.target.value) })}>
                     {durations.map((duration) => <option key={duration} value={duration}>{duration} сек</option>)}
                   </Select>
                 </label>
-                <label className="grid gap-1 text-xs font-medium">
+                <label className="grid min-w-0 gap-1 text-xs font-medium">
                   Разрешение
                   <Select value={draft.resolution} onChange={(event) => onChange({ resolution: event.target.value })}>
                     {resolutions.map((resolution) => <option key={resolution} value={resolution}>{resolution}</option>)}
@@ -270,6 +369,7 @@ function GenerationScreen({
               {missingReference ? <ValidationError>Нужен референс</ValidationError> : null}
               {tooManyRefs ? <ValidationError>Лишние референсы</ValidationError> : null}
               {missingMotionVideo ? <ValidationError>Нужно видео</ValidationError> : null}
+              {mediaUploading ? <ValidationError>Дождись загрузки файла</ValidationError> : null}
               {insufficientCredits ? <ValidationError>Мало кредитов</ValidationError> : null}
               {!availableModels.length ? <ValidationError>Нет моделей</ValidationError> : null}
             </div>
