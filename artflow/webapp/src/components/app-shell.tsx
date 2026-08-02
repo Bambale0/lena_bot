@@ -7,7 +7,6 @@ import {
   GalleryVerticalEnd,
   ImageIcon,
   Orbit,
-  Repeat2,
   UserRound,
 } from "lucide-react";
 
@@ -16,12 +15,11 @@ import type { AppTab, UserProfile } from "@/lib/types";
 import { cn, formatCredits } from "@/lib/utils";
 import { haptic } from "@/lib/telegram";
 
-const tabs: Array<{ id: AppTab; label: string; icon: typeof Repeat2 }> = [
-  { id: "studio", label: "Повторы", icon: Repeat2 },
+const tabs: Array<{ id: AppTab; label: string; icon: typeof GalleryVerticalEnd }> = [
+  { id: "feed", label: "Лента", icon: GalleryVerticalEnd },
   { id: "photo", label: "Фото", icon: ImageIcon },
   { id: "video", label: "Видео", icon: Film },
   { id: "motion", label: "Motion", icon: Orbit },
-  { id: "feed", label: "Лента", icon: GalleryVerticalEnd },
   { id: "trends", label: "Тренды", icon: Flame },
   { id: "services", label: "Сервисы", icon: Bot },
   { id: "profile", label: "Профиль", icon: UserRound },
