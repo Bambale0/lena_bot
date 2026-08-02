@@ -128,6 +128,23 @@ export class MiniAppApi {
     });
   }
 
+  async uploadMedia(file: File): Promise<{ url: string; content_type?: string; size?: number }> {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch("/upload", {
+      method: "POST",
+      body: form,
+      headers: { "X-Telegram-Init-Data": this.initData },
+    });
+    if (!response.ok) throw await readApiError(response);
+    const payload = asRecord(await response.json());
+    return {
+      url: String(payload.url || ""),
+      content_type: typeof payload.content_type === "string" ? payload.content_type : undefined,
+      size: typeof payload.size === "number" ? payload.size : undefined,
+    };
+  }
+
   getFeed(source: "recent" | "top_day" | "top", limit = FEED_PAGE_SIZE, signal?: AbortSignal): Promise<FeedItem[]> {
     return this.request<unknown>(`/feed?source=${source}&limit=${limit}`, {}, signal).then((value) => asArray<FeedItem>(value));
   }
