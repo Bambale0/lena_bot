@@ -1,7 +1,6 @@
 import { Banknote, Bitcoin, Send, Star } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sheet } from "@/components/ui/sheet";
 import type { PaymentPlan, UserProfile } from "@/lib/types";
 import { formatCredits } from "@/lib/utils";
@@ -23,35 +22,27 @@ function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceS
       title="Баланс"
       description={`Доступно ${formatCredits(user.credits)} кредитов`}
     >
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-2">
         {plans.length ? (
           plans.map((plan) => (
-            <Card key={plan.key} className="shadow-none">
-              <CardHeader>
-                <CardTitle>{plan.title || `${formatCredits(plan.credits)} кредитов`}</CardTitle>
-                <p className="text-2xl font-bold">{formatCredits(plan.credits)} кр.</p>
-              </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-2">
-                <Button disabled={busy} onClick={() => onPay("stars", plan)}>
-                  <Star /> Stars
-                </Button>
-                <Button variant="outline" disabled={busy} onClick={() => onPay("tbank", plan)}>
-                  <Banknote /> Карта
-                </Button>
-                <Button variant="outline" disabled={busy} onClick={() => onPay("crypto", plan)}>
-                  <Bitcoin /> Crypto
-                </Button>
-                <Button variant="outline" disabled={busy} onClick={() => onPay("lava", plan)}>
-                  <Send /> СБП
-                </Button>
-                <p className="col-span-2 text-center text-xs text-muted-foreground">
-                  {plan.price_rub ? `${plan.price_rub} ₽` : "Цена будет показана перед оплатой"}
-                </p>
-              </CardContent>
-            </Card>
+            <section key={plan.key} className="rounded-xl border border-border bg-card/65 p-2.5">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold">{plan.title || `${formatCredits(plan.credits)} кредитов`}</h3>
+                  <p className="text-[10px] text-muted-foreground">{plan.price_rub ? `${plan.price_rub} ₽` : "Цена перед оплатой"}</p>
+                </div>
+                <p className="shrink-0 text-lg font-bold">{formatCredits(plan.credits)} кр.</p>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                <Button size="sm" className="px-1 text-[10px]" disabled={busy} onClick={() => onPay("stars", plan)}><Star className="size-3.5" /> Stars</Button>
+                <Button size="sm" className="px-1 text-[10px]" variant="outline" disabled={busy} onClick={() => onPay("tbank", plan)}><Banknote className="size-3.5" /> Карта</Button>
+                <Button size="sm" className="px-1 text-[10px]" variant="outline" disabled={busy} onClick={() => onPay("crypto", plan)}><Bitcoin className="size-3.5" /> Crypto</Button>
+                <Button size="sm" className="px-1 text-[10px]" variant="outline" disabled={busy} onClick={() => onPay("lava", plan)}><Send className="size-3.5" /> СБП</Button>
+              </div>
+            </section>
           ))
         ) : (
-          <div className="col-span-full rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+          <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
             Пакеты оплаты временно недоступны. Баланс не изменён.
           </div>
         )}
