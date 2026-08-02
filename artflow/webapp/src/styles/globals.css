@@ -85,6 +85,7 @@
 }
 
 html {
+  height: 100%;
   min-height: 100%;
   background: var(--background);
   color-scheme: light;
@@ -98,9 +99,10 @@ html.dark {
 
 body {
   min-width: 320px;
+  height: 100%;
   min-height: 100dvh;
   margin: 0;
-  overflow-x: hidden;
+  overflow: hidden;
   background:
     radial-gradient(circle at 10% -10%, color-mix(in oklab, var(--primary) 20%, transparent), transparent 30rem),
     radial-gradient(circle at 105% 15%, color-mix(in oklab, var(--apix-cyan) 14%, transparent), transparent 26rem),
@@ -130,19 +132,33 @@ video {
 }
 
 #root {
+  height: 100%;
   min-height: 100dvh;
 }
 
 .apix-shell {
   width: min(100%, 1180px);
+  height: 100dvh;
   min-height: 100dvh;
   margin: 0 auto;
-  padding: max(4px, env(safe-area-inset-top)) 8px var(--apix-bottom-nav-space);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  padding: max(4px, env(safe-area-inset-top)) 8px max(6px, env(safe-area-inset-bottom));
+  overflow: hidden;
 }
 
 .apix-shell > main {
-  padding-bottom: calc(var(--apix-bottom-nav-space) + 10px);
-  scroll-padding-bottom: var(--apix-bottom-nav-space);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: 0.6rem;
+  scroll-padding-bottom: 1rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+.apix-app-header {
+  min-width: 0;
 }
 
 .apix-glass {
@@ -154,22 +170,26 @@ video {
 }
 
 .apix-bottom-nav {
-  position: fixed;
+  position: relative;
   z-index: 50;
-  left: 50%;
+  left: auto;
   bottom: max(3px, env(safe-area-inset-bottom));
-  width: min(calc(100% - 12px), 820px);
-  transform: translateX(-50%);
+  width: min(100%, 820px);
+  transform: none;
+  margin: 0 auto;
   box-shadow:
-    0 -18px 38px color-mix(in oklab, var(--background) 80%, transparent),
-    0 12px 36px color-mix(in oklab, black 18%, transparent);
+    0 -10px 28px color-mix(in oklab, var(--background) 72%, transparent),
+    0 10px 28px color-mix(in oklab, black 14%, transparent);
 }
 
 .apix-nav-scroll {
+  min-width: 0;
   scrollbar-width: none;
   scroll-snap-type: x proximity;
   scroll-padding-inline: 0.5rem;
   padding-inline: 0.125rem;
+  justify-content: flex-start;
+  touch-action: pan-x;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -202,13 +222,13 @@ video {
 
 .apix-feed-mosaic button.group,
 .apix-trend-category-grid button.group {
-  max-height: min(58dvh, 420px);
+  max-height: min(48dvh, 360px);
 }
 
 .apix-feed-card {
   animation: apix-feed-card-in 220ms ease-out both;
   content-visibility: auto;
-  contain-intrinsic-size: 280px 360px;
+  contain-intrinsic-size: 240px 320px;
   overflow: clip;
   border-color: color-mix(in oklab, var(--border) 84%, transparent);
   box-shadow: 0 8px 20px color-mix(in oklab, black 10%, transparent);
@@ -292,7 +312,7 @@ video {
 .apix-launch-bar {
   position: sticky;
   z-index: 35;
-  bottom: calc(61px + env(safe-area-inset-bottom));
+  bottom: 0.5rem;
 }
 
 @media (min-width: 390px) {
@@ -307,21 +327,19 @@ video {
 
 @media (min-width: 760px) {
   :root {
-    --apix-bottom-nav-space: calc(104px + env(safe-area-inset-bottom));
+    --apix-bottom-nav-space: calc(86px + env(safe-area-inset-bottom));
   }
 
   .apix-shell {
     padding-inline: 16px;
-    padding-bottom: var(--apix-bottom-nav-space);
-  }
-
-  .apix-shell > main {
-    padding-bottom: calc(var(--apix-bottom-nav-space) + 18px);
   }
 
   .apix-bottom-nav {
-    bottom: max(10px, env(safe-area-inset-bottom));
-    width: min(calc(100% - 40px), 760px);
+    width: min(100%, 760px);
+  }
+
+  .apix-nav-scroll {
+    justify-content: center;
   }
 
   .apix-media-grid {
@@ -335,11 +353,11 @@ video {
 
   .apix-feed-mosaic button.group,
   .apix-trend-category-grid button.group {
-    max-height: min(42dvh, 330px);
+    max-height: min(36dvh, 300px);
   }
 
   .apix-feed-card {
-    contain-intrinsic-size: 260px 320px;
+    contain-intrinsic-size: 240px 300px;
   }
 
   .apix-launch-bar {
@@ -354,7 +372,7 @@ video {
 
   .apix-feed-mosaic button.group,
   .apix-trend-category-grid button.group {
-    max-height: min(39dvh, 300px);
+    max-height: min(34dvh, 280px);
   }
 }
 
@@ -369,7 +387,7 @@ video {
 
   .apix-feed-mosaic button.group,
   .apix-trend-category-grid button.group {
-    max-height: 280px;
+    max-height: 260px;
   }
 }
 
