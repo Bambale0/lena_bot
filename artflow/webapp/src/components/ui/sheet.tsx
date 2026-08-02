@@ -36,7 +36,7 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
       <button
         type="button"
         aria-label="Закрыть"
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/65 backdrop-blur-sm"
         onClick={() => onOpenChange(false)}
       />
       <section
@@ -44,23 +44,24 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
         aria-modal="true"
         aria-labelledby="apix-sheet-title"
         className={cn(
-          "apix-safe-sheet relative z-10 flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-border bg-popover shadow-2xl sm:rounded-3xl",
+          "apix-safe-sheet relative z-10 flex max-h-[calc(100dvh-env(safe-area-inset-top)-4px)] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-border bg-popover shadow-2xl sm:max-h-[92dvh] sm:rounded-2xl",
           className,
         )}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5">
+        <div className="mx-auto mt-1.5 h-1 w-9 shrink-0 rounded-full bg-muted-foreground/25 sm:hidden" />
+        <header className="flex items-start justify-between gap-3 border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <div className="min-w-0">
-            <h2 id="apix-sheet-title" className="truncate text-lg font-semibold">
+            <h2 id="apix-sheet-title" className="truncate text-base font-semibold sm:text-lg">
               {title}
             </h2>
-            {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+            {description ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{description}</p> : null}
           </div>
-          <Button variant="ghost" size="icon" aria-label="Закрыть" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" size="icon" className="size-9 min-h-9" aria-label="Закрыть" onClick={() => onOpenChange(false)}>
             <X />
           </Button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">{children}</div>
-        {footer ? <footer className="border-t border-border p-4 sm:p-5">{footer}</footer> : null}
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">{children}</div>
+        {footer ? <footer className="border-t border-border bg-popover/95 p-3 backdrop-blur-xl sm:p-4">{footer}</footer> : null}
       </section>
     </div>
   );
