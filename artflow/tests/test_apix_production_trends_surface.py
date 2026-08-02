@@ -124,7 +124,7 @@ def test_feed_is_first_tab_and_repeat_is_inside_feed() -> None:
     assert 'repeatFirst' not in app
     assert '<h1 className="text-lg font-bold tracking-tight sm:text-xl">Лента</h1>' in feed
     assert 'Повторить' in feed
-    assert 'повтор остаётся внутри карточек' in feed
+    assert 'Карточки выводятся порциями' in feed
 
 
 def test_infinite_feed_uses_intersection_observer_and_growing_limit() -> None:
@@ -141,11 +141,27 @@ def test_infinite_feed_uses_intersection_observer_and_growing_limit() -> None:
     assert 'hasMore={feedHasMore}' in app
     assert 'onLoadMore={() => void loadMoreFeed()}' in app
     assert 'new IntersectionObserver' in feed
-    assert 'rootMargin: "720px 0px"' in feed
+    assert 'rootMargin: "640px 0px"' in feed
     assert 'sentinelRef' in feed
     assert 'apix-feed-card' in feed
     assert '.apix-feed-card' in css
     assert '@keyframes apix-feed-card-in' in css
+
+
+def test_feed_render_window_keeps_loaded_items_from_overloading_dom() -> None:
+    feed = read(SRC / "features/feed-screen.tsx")
+
+    assert 'const WORK_RENDER_BATCH = 30' in feed
+    assert 'const TREND_RENDER_BATCH = 24' in feed
+    assert 'visibleWorkCount' in feed
+    assert 'renderedItems' in feed
+    assert 'canRevealMoreWorks' in feed
+    assert 'setVisibleWorkCount((current) => Math.min(current + WORK_RENDER_BATCH, visibleItems.length))' in feed
+    assert 'visibleTrendCount' in feed
+    assert 'renderedTrends' in feed
+    assert 'loading={index < 4 ? "eager" : "lazy"}' in feed
+    assert 'decoding="async"' in feed
+    assert 'fetchPriority={index < 2 ? "high" : "auto"}' in feed
 
 
 def test_feed_media_opens_inside_app_viewer_not_browser() -> None:
@@ -167,7 +183,7 @@ def test_feed_uses_mosaic_cards_instead_of_monotone_grid() -> None:
     css = read(SRC / "styles/globals.css")
 
     assert 'function cardMediaShape' in feed
-    assert 'index % 11 === 0' in feed
+    assert 'index % 10 === 0' in feed
     assert 'index % 7 === 0' in feed
     assert 'apix-feed-mosaic' in feed
     assert 'apix-feed-card-featured' in feed
