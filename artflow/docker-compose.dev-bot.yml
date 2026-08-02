@@ -1,5 +1,6 @@
 services:
   app:
+    container_name: apix-dev-bot-app
     build: .
     command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1"
     env_file: .env.dev
@@ -19,6 +20,9 @@ services:
     volumes:
       - ./data/dev-bot:/app/data
       - ./static/upload-dev-bot:/app/static/upload
+    networks:
+      - default
+      - apix_devbot_backend
 
   postgres:
     image: postgres:16-alpine
@@ -53,3 +57,8 @@ services:
 volumes:
   pgdata-dev-bot:
   redisdata-dev-bot:
+
+networks:
+  apix_devbot_backend:
+    external: true
+    name: apix_devbot_backend
