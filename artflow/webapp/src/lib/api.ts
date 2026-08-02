@@ -15,7 +15,7 @@ import { asArray, asRecord } from "@/lib/utils";
 
 const API_BASE = "/api/v1";
 const HISTORY_LIMIT = 100;
-const FEED_LIMIT = 96;
+export const FEED_PAGE_SIZE = 24;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -84,7 +84,7 @@ export class MiniAppApi {
         this.request<unknown>("/models/image", {}, signal),
         this.request<unknown>("/models/video", {}, signal),
         this.request<unknown>(`/history?limit=${HISTORY_LIMIT}`, {}, signal),
-        this.request<unknown>(`/feed?source=recent&limit=${FEED_LIMIT}`, {}, signal),
+        this.request<unknown>(`/feed?source=recent&limit=${FEED_PAGE_SIZE}`, {}, signal),
         this.request<unknown>("/trends?limit=32", {}, signal),
         this.request<unknown>("/plans", {}, signal),
       ]);
@@ -128,8 +128,8 @@ export class MiniAppApi {
     });
   }
 
-  getFeed(source: "recent" | "top_day" | "top", signal?: AbortSignal): Promise<FeedItem[]> {
-    return this.request<unknown>(`/feed?source=${source}&limit=${FEED_LIMIT}`, {}, signal).then((value) => asArray<FeedItem>(value));
+  getFeed(source: "recent" | "top_day" | "top", limit = FEED_PAGE_SIZE, signal?: AbortSignal): Promise<FeedItem[]> {
+    return this.request<unknown>(`/feed?source=${source}&limit=${limit}`, {}, signal).then((value) => asArray<FeedItem>(value));
   }
 
   likeFeed(id: number): Promise<{ likes_count?: number }> {
