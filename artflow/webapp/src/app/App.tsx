@@ -11,7 +11,7 @@ import { GenerationScreen } from "@/features/generation-screen";
 import { ProfileScreen } from "@/features/profile-screen";
 import { ServicesScreen } from "@/features/services-screen";
 import { TrendsScreen } from "@/features/trends-screen";
-import { ApiError, MiniAppApi } from "@/lib/api";
+import { ApiError, FEED_PAGE_SIZE, MiniAppApi } from "@/lib/api";
 import {
   configureTelegramWebApp,
   haptic,
@@ -38,7 +38,7 @@ import type {
 } from "@/lib/types";
 import { firstMedia, isPendingTask } from "@/lib/utils";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20260802-repeat-feed-v2";
+window.__APIX_MINIAPP_BUILD_ID__ = "20260802-feed-first-infinite-v1";
 
 type FeedSource = "recent" | "top_day" | "top";
 
@@ -82,7 +82,7 @@ function App() {
   const [botUsername, setBotUsername] = useState("");
   const [api, setApi] = useState<MiniAppApi | null>(null);
   const [data, setData] = useState<BootstrapData | null>(null);
-  const [activeTab, setActiveTab] = useState<AppTab>("studio");
+  const [activeTab, setActiveTab] = useState<AppTab>("feed");
   const [selectedTask, setSelectedTask] = useState<GenerationTask | null>(null);
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
@@ -91,7 +91,10 @@ function App() {
   const [submitting, setSubmitting] = useState(false);
   const [remixingId, setRemixingId] = useState<number | null>(null);
   const [feedSource, setFeedSource] = useState<FeedSource>("recent");
+  const [feedLimit, setFeedLimit] = useState(FEED_PAGE_SIZE);
+  const [feedHasMore, setFeedHasMore] = useState(true);
   const [feedLoading, setFeedLoading] = useState(false);
+  const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const [trendsFilter, setTrendsFilter] = useState<"all" | "image" | "video">("all");
   const [trendsLoading, setTrendsLoading] = useState(false);
   const [preparingTrendId, setPreparingTrendId] = useState<number | null>(null);
@@ -179,7 +182,7 @@ function App() {
         return;
       }
       if (target.kind === "feed" || target.kind === "remix") {
-        setActiveTab("studio");
+        setActiveTab("feed");
         return;
       }
       if (target.kind === "trend") {
@@ -233,6 +236,8 @@ function App() {
       const bootstrap = await client.bootstrap();
       setApi(client);
       setData(bootstrap);
+      setFeedLimit(FEED_PAGE_SIZE);
+      setFeedHasMore(bootstrap.feed.length >= FEED_PAGE_SIZE);
       hydrateDraftDefaults(bootstrap);
       setMode("live");
       await processStartParam(client, bootstrap);
@@ -421,18 +426,36 @@ function App() {
     }
   }, [api, refreshCore, taskBusy]);
 
-  const loadFeed = useCallback(async (source = feedSource) => {
+  const loadFeed = useCallback(async (source = feedSource, limit = FEED_PAGE_SIZE) => {
     if (!api || feedLoading) return;
     setFeedLoading(true);
     try {
-      const feed = await api.getFeed(source);
+      const feed = await api.getFeed(source, limit);
       setData((current) => current ? { ...current, feed } : current);
+      setFeedLimit(limit);
+      setFeedHasMore(feed.length >= limit);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Не удалось обновить ленту");
     } finally {
       setFeedLoading(false);
     }
   }, [api, feedLoading, feedSource]);
+
+  const loadMoreFeed = useCallback(async () => {
+    if (!api || feedLoading || feedLoadingMore || !feedHasMore) return;
+    const nextLimit = feedLimit + FEED_PAGE_SIZE;
+    setFeedLoadingMore(true);
+    try {
+      const feed = await api.getFeed(feedSource, nextLimit);
+      setData((current) => current ? { ...current, feed } : current);
+      setFeedLimit(nextLimit);
+      setFeedHasMore(feed.length >= nextLimit);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось подгрузить ленту");
+    } finally {
+      setFeedLoadingMore(false);
+    }
+  }, [api, feedHasMore, feedLimit, feedLoading, feedLoadingMore, feedSource]);
 
   const likeFeed = useCallback(async (item: FeedItem) => {
     if (!api) return;
@@ -557,6 +580,8 @@ function App() {
     }
   }, [api, paymentBusy, refreshCore]);
 
+  const showFeed = activeTab === "feed" || activeTab === "studio";
+
   if (mode === "booting") {
     return (
       <main className="grid min-h-[100dvh] place-items-center px-4 text-center">
@@ -574,18 +599,22 @@ function App() {
   }
 
   const screen = (() => {
-    if (activeTab === "studio") {
+    if (showFeed) {
       return (
         <FeedScreen
-          title="Повторы"
-          subtitle="Стартовый экран теперь показывает все опубликованные работы. Повтор берёт скрытый промпт поста; для фото добавляется референс, для видео запускается безопасный повтор по промпту."
-          repeatFirst
           items={data.feed}
           source={feedSource}
           loading={feedLoading}
+          loadingMore={feedLoadingMore}
+          hasMore={feedHasMore}
           remixingId={remixingId}
-          onSourceChange={(source) => { setFeedSource(source); void loadFeed(source); }}
-          onRefresh={() => void loadFeed()}
+          onSourceChange={(source) => {
+            setFeedSource(source);
+            setFeedHasMore(true);
+            void loadFeed(source, FEED_PAGE_SIZE);
+          }}
+          onRefresh={() => void loadFeed(feedSource, Math.max(feedLimit, FEED_PAGE_SIZE))}
+          onLoadMore={() => void loadMoreFeed()}
           onLike={(item) => void likeFeed(item)}
           onRemix={(item) => void remixFeed(item)}
         />
@@ -600,9 +629,6 @@ function App() {
     if (activeTab === "motion") {
       return <GenerationScreen kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} onChange={(patch) => setMotionDraft((current) => ({ ...current, ...patch }))} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => setMotionDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
     }
-    if (activeTab === "feed") {
-      return <FeedScreen items={data.feed} source={feedSource} loading={feedLoading} remixingId={remixingId} onSourceChange={(source) => { setFeedSource(source); void loadFeed(source); }} onRefresh={() => void loadFeed()} onLike={(item) => void likeFeed(item)} onRemix={(item) => void remixFeed(item)} />;
-    }
     if (activeTab === "trends") {
       return <TrendsScreen items={data.trends} filter={trendsFilter} loading={trendsLoading} preparingId={preparingTrendId} onFilterChange={setTrendsFilter} onRefresh={() => void loadTrends()} onPrepare={(trend) => void prepareTrend(trend)} />;
     }
@@ -614,7 +640,7 @@ function App() {
 
   return (
     <>
-      <AppShell activeTab={activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={() => setBalanceOpen(true)}>
+      <AppShell activeTab={showFeed ? "feed" : activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={() => setBalanceOpen(true)}>
         {screen}
       </AppShell>
       <TaskDetailSheet task={selectedTask} open={taskOpen} busy={taskBusy} onOpenChange={setTaskOpen} onRefresh={(task) => void refreshTask(task)} onShare={(task) => void toggleTaskShare(task)} onToggleLibrary={(task) => void toggleTaskLibrary(task)} />
