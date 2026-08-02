@@ -14,6 +14,8 @@ import type {
 import { asArray, asRecord } from "@/lib/utils";
 
 const API_BASE = "/api/v1";
+const HISTORY_LIMIT = 100;
+const FEED_LIMIT = 96;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -81,8 +83,8 @@ export class MiniAppApi {
         this.request<UserProfile>("/me", {}, signal),
         this.request<unknown>("/models/image", {}, signal),
         this.request<unknown>("/models/video", {}, signal),
-        this.request<unknown>("/history?limit=16", {}, signal),
-        this.request<unknown>("/feed?source=recent&limit=16", {}, signal),
+        this.request<unknown>(`/history?limit=${HISTORY_LIMIT}`, {}, signal),
+        this.request<unknown>(`/feed?source=recent&limit=${FEED_LIMIT}`, {}, signal),
         this.request<unknown>("/trends?limit=32", {}, signal),
         this.request<unknown>("/plans", {}, signal),
       ]);
@@ -103,7 +105,7 @@ export class MiniAppApi {
   async refreshCore(signal?: AbortSignal): Promise<{ user: UserProfile; recentTasks: GenerationTask[] }> {
     const [user, history] = await Promise.all([
       this.request<UserProfile>("/me", {}, signal),
-      this.request<unknown>("/history?limit=16", {}, signal),
+      this.request<unknown>(`/history?limit=${HISTORY_LIMIT}`, {}, signal),
     ]);
     return { user, recentTasks: asArray<GenerationTask>(history) };
   }
@@ -127,7 +129,7 @@ export class MiniAppApi {
   }
 
   getFeed(source: "recent" | "top_day" | "top", signal?: AbortSignal): Promise<FeedItem[]> {
-    return this.request<unknown>(`/feed?source=${source}&limit=24`, {}, signal).then((value) => asArray<FeedItem>(value));
+    return this.request<unknown>(`/feed?source=${source}&limit=${FEED_LIMIT}`, {}, signal).then((value) => asArray<FeedItem>(value));
   }
 
   likeFeed(id: number): Promise<{ likes_count?: number }> {
