@@ -10,7 +10,6 @@ import { FeedScreen } from "@/features/feed-screen";
 import { GenerationScreen } from "@/features/generation-screen";
 import { ProfileScreen } from "@/features/profile-screen";
 import { ServicesScreen } from "@/features/services-screen";
-import { StudioScreen } from "@/features/studio-screen";
 import { TrendsScreen } from "@/features/trends-screen";
 import { ApiError, MiniAppApi } from "@/lib/api";
 import {
@@ -37,9 +36,11 @@ import type {
   ReferralStats,
   TrendItem,
 } from "@/lib/types";
-import { asRecord, firstMedia, isPendingTask } from "@/lib/utils";
+import { firstMedia, isPendingTask } from "@/lib/utils";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20260802-shadcn-shell-v1";
+window.__APIX_MINIAPP_BUILD_ID__ = "20260802-repeat-feed-v2";
+
+type FeedSource = "recent" | "top_day" | "top";
 
 function emptyDraft(kind: GenerationDraft["kind"]): GenerationDraft {
   return {
@@ -69,6 +70,11 @@ function stringSetting(settings: Record<string, unknown>, key: string, fallback:
   return typeof value === "string" && value ? value : fallback;
 }
 
+function mediaLooksVideo(item: FeedItem): boolean {
+  const media = firstMedia(item);
+  return item.gen_type === "video" || /\.(mp4|webm|mov)(\?|$)/i.test(media);
+}
+
 function App() {
   const [mode, setMode] = useState<AppMode>("booting");
   const [errorMessage, setErrorMessage] = useState("");
@@ -83,7 +89,8 @@ function App() {
   const [balanceOpen, setBalanceOpen] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [feedSource, setFeedSource] = useState<"recent" | "top_day" | "top">("recent");
+  const [remixingId, setRemixingId] = useState<number | null>(null);
+  const [feedSource, setFeedSource] = useState<FeedSource>("recent");
   const [feedLoading, setFeedLoading] = useState(false);
   const [trendsFilter, setTrendsFilter] = useState<"all" | "image" | "video">("all");
   const [trendsLoading, setTrendsLoading] = useState(false);
@@ -172,7 +179,7 @@ function App() {
         return;
       }
       if (target.kind === "feed" || target.kind === "remix") {
-        setActiveTab("feed");
+        setActiveTab("studio");
         return;
       }
       if (target.kind === "trend") {
@@ -442,30 +449,32 @@ function App() {
   }, [api]);
 
   const remixFeed = useCallback(async (item: FeedItem) => {
-    if (!api || submitting) return;
-    setSubmitting(true);
+    if (!api || remixingId) return;
+    setRemixingId(item.id);
     try {
       const media = firstMedia(item);
-      const video = item.gen_type === "video";
+      const videoMedia = mediaLooksVideo(item);
       const task = await api.remixFeed(item.id, {
         model: item.model,
-        mode: video ? "video" : "image",
+        mode: videoMedia ? "text" : "image",
         duration: 5,
-        aspect_ratio: item.aspect_ratio || (video ? "16:9" : "1:1"),
+        aspect_ratio: item.aspect_ratio || (videoMedia ? "16:9" : "1:1"),
         resolution: "720p",
-        source_image_url: video ? null : media,
-        video_url: video ? media : null,
+        source_image_url: media && !videoMedia ? media : null,
+        video_url: null,
         reference_urls: [],
       });
       setData((current) => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter((entry) => entry.id !== task.id)] } : current);
       openTask(task);
+      notifyHaptic("success");
       toast.success("Повтор запущен");
     } catch (error) {
+      notifyHaptic("error");
       toast.error(error instanceof Error ? error.message : "Не удалось повторить работу");
     } finally {
-      setSubmitting(false);
+      setRemixingId(null);
     }
-  }, [api, openTask, submitting]);
+  }, [api, openTask, remixingId]);
 
   const loadTrends = useCallback(async () => {
     if (!api || trendsLoading) return;
@@ -566,7 +575,21 @@ function App() {
 
   const screen = (() => {
     if (activeTab === "studio") {
-      return <StudioScreen user={data.user} imageModels={data.imageModels} videoModels={data.videoModels} tasks={data.recentTasks} onNavigate={setActiveTab} onOpenTask={openTask} onBalanceOpen={() => setBalanceOpen(true)} />;
+      return (
+        <FeedScreen
+          title="Повторы"
+          subtitle="Стартовый экран теперь показывает все опубликованные работы. Повтор берёт скрытый промпт поста; для фото добавляется референс, для видео запускается безопасный повтор по промпту."
+          repeatFirst
+          items={data.feed}
+          source={feedSource}
+          loading={feedLoading}
+          remixingId={remixingId}
+          onSourceChange={(source) => { setFeedSource(source); void loadFeed(source); }}
+          onRefresh={() => void loadFeed()}
+          onLike={(item) => void likeFeed(item)}
+          onRemix={(item) => void remixFeed(item)}
+        />
+      );
     }
     if (activeTab === "photo") {
       return <GenerationScreen kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} onChange={(patch) => setImageDraft((current) => ({ ...current, ...patch }))} onSubmit={() => void submitGeneration("image")} onResetPreset={() => setImageDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
@@ -578,7 +601,7 @@ function App() {
       return <GenerationScreen kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} onChange={(patch) => setMotionDraft((current) => ({ ...current, ...patch }))} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => setMotionDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
     }
     if (activeTab === "feed") {
-      return <FeedScreen items={data.feed} source={feedSource} loading={feedLoading} onSourceChange={(source) => { setFeedSource(source); void loadFeed(source); }} onRefresh={() => void loadFeed()} onLike={(item) => void likeFeed(item)} onRemix={(item) => void remixFeed(item)} />;
+      return <FeedScreen items={data.feed} source={feedSource} loading={feedLoading} remixingId={remixingId} onSourceChange={(source) => { setFeedSource(source); void loadFeed(source); }} onRefresh={() => void loadFeed()} onLike={(item) => void likeFeed(item)} onRemix={(item) => void remixFeed(item)} />;
     }
     if (activeTab === "trends") {
       return <TrendsScreen items={data.trends} filter={trendsFilter} loading={trendsLoading} preparingId={preparingTrendId} onFilterChange={setTrendsFilter} onRefresh={() => void loadTrends()} onPrepare={(trend) => void prepareTrend(trend)} />;
