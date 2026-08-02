@@ -23,7 +23,7 @@
   --border: oklch(0.88 0.018 286 / 0.75);
   --input: oklch(0.88 0.018 286 / 0.9);
   --ring: oklch(0.62 0.23 294);
-  --radius: 1rem;
+  --radius: 0.75rem;
   --apix-cyan: oklch(0.79 0.16 205);
   --apix-pink: oklch(0.7 0.23 350);
 }
@@ -71,11 +71,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 6px);
-  --radius-md: calc(var(--radius) - 3px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 6px);
-  --radius-2xl: calc(var(--radius) + 12px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 }
 
 * {
@@ -88,6 +88,7 @@ html {
   background: var(--background);
   color-scheme: light;
   -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 html.dark {
@@ -100,14 +101,14 @@ body {
   margin: 0;
   overflow-x: hidden;
   background:
-    radial-gradient(circle at 10% -10%, color-mix(in oklab, var(--primary) 24%, transparent), transparent 34rem),
-    radial-gradient(circle at 105% 15%, color-mix(in oklab, var(--apix-cyan) 18%, transparent), transparent 30rem),
-    radial-gradient(circle at 45% 115%, color-mix(in oklab, var(--apix-pink) 14%, transparent), transparent 34rem),
+    radial-gradient(circle at 10% -10%, color-mix(in oklab, var(--primary) 20%, transparent), transparent 30rem),
+    radial-gradient(circle at 105% 15%, color-mix(in oklab, var(--apix-cyan) 14%, transparent), transparent 26rem),
     var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   overscroll-behavior-y: none;
   -webkit-font-smoothing: antialiased;
+  -webkit-touch-callout: none;
 }
 
 button,
@@ -122,6 +123,11 @@ button,
   -webkit-tap-highlight-color: transparent;
 }
 
+img,
+video {
+  -webkit-user-drag: none;
+}
+
 #root {
   min-height: 100dvh;
 }
@@ -130,61 +136,113 @@ button,
   width: min(100%, 1180px);
   min-height: 100dvh;
   margin: 0 auto;
-  padding: max(12px, env(safe-area-inset-top)) 14px calc(112px + env(safe-area-inset-bottom));
+  padding: max(4px, env(safe-area-inset-top)) 8px calc(68px + env(safe-area-inset-bottom));
 }
 
 .apix-glass {
-  background: color-mix(in oklab, var(--card) 92%, transparent);
+  background: color-mix(in oklab, var(--card) 94%, transparent);
   border: 1px solid var(--border);
-  box-shadow: 0 24px 80px color-mix(in oklab, black 28%, transparent);
-  backdrop-filter: blur(22px) saturate(1.12);
-  -webkit-backdrop-filter: blur(22px) saturate(1.12);
+  box-shadow: 0 12px 36px color-mix(in oklab, black 18%, transparent);
+  backdrop-filter: blur(18px) saturate(1.08);
+  -webkit-backdrop-filter: blur(18px) saturate(1.08);
 }
 
 .apix-bottom-nav {
   position: fixed;
   z-index: 50;
   left: 50%;
-  bottom: max(8px, env(safe-area-inset-bottom));
-  width: min(calc(100% - 16px), 900px);
+  bottom: max(3px, env(safe-area-inset-bottom));
+  width: min(calc(100% - 8px), 900px);
   transform: translateX(-50%);
 }
 
 .apix-nav-scroll {
   scrollbar-width: none;
+  scroll-snap-type: x proximity;
 }
 
 .apix-nav-scroll::-webkit-scrollbar {
   display: none;
 }
 
+.apix-nav-scroll > * {
+  scroll-snap-align: center;
+}
+
 .apix-media-grid {
   columns: 2;
-  column-gap: 0.75rem;
+  column-gap: 0.4rem;
 }
 
 .apix-media-grid > * {
   break-inside: avoid;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.4rem;
 }
 
 .apix-safe-sheet {
-  padding-bottom: max(18px, env(safe-area-inset-bottom));
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
 }
 
 .apix-focus-ring:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 
-@media (min-width: 760px) {
+.apix-help {
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.apix-help > summary {
+  cursor: pointer;
+  list-style: none;
+  padding-block: 0.45rem;
+  font-weight: 600;
+}
+
+.apix-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.apix-help[open] > summary {
+  color: var(--foreground);
+}
+
+.apix-launch-bar {
+  position: sticky;
+  z-index: 35;
+  bottom: calc(61px + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 430px) {
   .apix-shell {
-    padding-inline: 24px;
-    padding-bottom: 124px;
+    padding-inline: 10px;
   }
 
   .apix-media-grid {
     columns: 3;
+  }
+}
+
+@media (min-width: 760px) {
+  .apix-shell {
+    padding-inline: 20px;
+    padding-bottom: 88px;
+  }
+
+  .apix-media-grid {
+    columns: 3;
+    column-gap: 0.75rem;
+  }
+
+  .apix-media-grid > * {
+    margin-bottom: 0.75rem;
+  }
+
+  .apix-launch-bar {
+    position: static;
   }
 }
 
