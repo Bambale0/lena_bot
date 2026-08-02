@@ -39,6 +39,43 @@ def test_shadcn_configuration_and_theme_are_present() -> None:
     assert 'columns: 4' in css
 
 
+def test_iphone_layout_uses_safe_areas_and_dense_navigation() -> None:
+    css = read(SRC / "styles/globals.css")
+    shell = read(SRC / "components/app-shell.tsx")
+    input_source = read(SRC / "components/ui/input.tsx")
+    select_source = read(SRC / "components/ui/select.tsx")
+    textarea_source = read(SRC / "components/ui/textarea.tsx")
+
+    assert 'calc(68px + env(safe-area-inset-bottom))' in css
+    assert 'bottom: max(3px, env(safe-area-inset-bottom))' in css
+    assert 'max-h-[calc(100dvh-env(safe-area-inset-top)-4px)]' in read(SRC / "components/ui/sheet.tsx")
+    assert 'min-h-12 min-w-[54px]' in shell
+    assert 'min-h-14 min-w-[68px]' not in shell
+    assert 'text-base' in input_source
+    assert 'text-base' in select_source
+    assert 'text-base' in textarea_source
+
+
+def test_secondary_help_is_collapsed_and_primary_surfaces_are_dense() -> None:
+    css = read(SRC / "styles/globals.css")
+    studio = read(SRC / "features/studio-screen.tsx")
+    generation = read(SRC / "features/generation-screen.tsx")
+    feed = read(SRC / "features/feed-screen.tsx")
+    trends = read(SRC / "features/trends-screen.tsx")
+    services = read(SRC / "features/services-screen.tsx")
+
+    assert '.apix-help' in css
+    assert '<details className="apix-help' in studio
+    assert '<details className="apix-help' in generation
+    assert '<details className="apix-help' in feed
+    assert '<details className="apix-help' in trends
+    assert '<details className="apix-help' in services
+    assert 'text-3xl font-bold' not in studio
+    assert 'sm:text-5xl' not in studio
+    assert 'apix-launch-bar' in generation
+    assert 'grid-cols-5' in studio
+
+
 def test_telegram_auth_is_resilient_and_never_uses_demo_balance() -> None:
     telegram = read(SRC / "lib/telegram.ts")
     app = read(SRC / "app/App.tsx")
