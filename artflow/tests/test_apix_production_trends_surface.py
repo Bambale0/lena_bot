@@ -48,6 +48,7 @@ def test_iphone_layout_uses_safe_areas_and_dense_navigation() -> None:
 
     assert 'calc(68px + env(safe-area-inset-bottom))' in css
     assert 'bottom: max(3px, env(safe-area-inset-bottom))' in css
+    assert '@media (min-width: 390px)' in css
     assert 'max-h-[calc(100dvh-env(safe-area-inset-top)-4px)]' in read(SRC / "components/ui/sheet.tsx")
     assert 'min-h-12 min-w-[54px]' in shell
     assert 'min-h-14 min-w-[68px]' not in shell
