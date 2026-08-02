@@ -46,11 +46,14 @@ def test_iphone_layout_uses_safe_areas_and_dense_navigation() -> None:
     select_source = read(SRC / "components/ui/select.tsx")
     textarea_source = read(SRC / "components/ui/textarea.tsx")
 
-    assert 'calc(68px + env(safe-area-inset-bottom))' in css
+    assert 'calc(70px + env(safe-area-inset-bottom))' in css
     assert 'bottom: max(3px, env(safe-area-inset-bottom))' in css
     assert '@media (min-width: 390px)' in css
+    assert '-webkit-overflow-scrolling: touch' in css
+    assert 'scroll-snap-type: x proximity' in css
     assert 'max-h-[calc(100dvh-env(safe-area-inset-top)-4px)]' in read(SRC / "components/ui/sheet.tsx")
-    assert 'min-h-12 min-w-[54px]' in shell
+    assert 'min-h-12 min-w-[74px]' in shell
+    assert 'role="tablist"' in shell
     assert 'min-h-14 min-w-[68px]' not in shell
     assert 'text-base' in input_source
     assert 'text-base' in select_source
@@ -59,22 +62,25 @@ def test_iphone_layout_uses_safe_areas_and_dense_navigation() -> None:
 
 def test_secondary_help_is_collapsed_and_primary_surfaces_are_dense() -> None:
     css = read(SRC / "styles/globals.css")
-    studio = read(SRC / "features/studio-screen.tsx")
+    app = read(SRC / "app/App.tsx")
     generation = read(SRC / "features/generation-screen.tsx")
     feed = read(SRC / "features/feed-screen.tsx")
+    profile = read(SRC / "features/profile-screen.tsx")
     trends = read(SRC / "features/trends-screen.tsx")
     services = read(SRC / "features/services-screen.tsx")
 
     assert '.apix-help' in css
-    assert '<details className="apix-help' in studio
+    assert '<FeedScreen\n          title="Повторы"' in app
+    assert 'import { StudioScreen }' not in app
     assert '<details className="apix-help' in generation
     assert '<details className="apix-help' in feed
     assert '<details className="apix-help' in trends
     assert '<details className="apix-help' in services
-    assert 'text-3xl font-bold' not in studio
-    assert 'sm:text-5xl' not in studio
+    assert 'Выложенные работы' in profile
+    assert 'Все работы' in profile
+    assert 'text-3xl font-bold' not in app
+    assert 'sm:text-5xl' not in app
     assert 'apix-launch-bar' in generation
-    assert 'grid-cols-5' in studio
 
 
 def test_telegram_auth_is_resilient_and_never_uses_demo_balance() -> None:
@@ -104,6 +110,25 @@ def test_trends_use_state_and_prepare_endpoint_not_dom_clicks() -> None:
     assert 'Повторить' in trends
     assert 'findTrendsButton' not in app
     assert 'button.click()' not in app
+
+
+def test_repeat_feed_uses_filters_and_safe_video_remix_payload() -> None:
+    app = read(SRC / "app/App.tsx")
+    feed = read(SRC / "features/feed-screen.tsx")
+    api = read(SRC / "lib/api.ts")
+    shell = read(SRC / "components/app-shell.tsx")
+
+    assert 'label: "Повторы"' in shell
+    assert 'repeatFirst' in app
+    assert 'remixingId' in app
+    assert 'mode: videoMedia ? "text" : "image"' in app
+    assert 'source_image_url: media && !videoMedia ? media : null' in app
+    assert 'video_url: null' in app
+    assert 'type WorkFilter = "all" | "image" | "video" | "mine"' in feed
+    assert 'visibleItems' in feed
+    assert 'Все' in feed and 'Фото' in feed and 'Видео' in feed and 'Мои' in feed
+    assert 'const FEED_LIMIT = 96' in api
+    assert 'const HISTORY_LIMIT = 100' in api
 
 
 def test_workflows_have_polling_and_secure_task_actions() -> None:
