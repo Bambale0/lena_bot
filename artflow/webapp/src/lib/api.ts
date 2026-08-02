@@ -34,15 +34,7 @@ async function readApiError(response: Response): Promise<ApiError> {
   try {
     payload = await response.json();
   } catch {
-    try {
-      payload = await response.text();
-    } catch {
-      payload = null;
-    }
-  }
-
-  if (typeof payload === "string" && payload.trim()) {
-    return new ApiError(payload.trim(), response.status);
+    payload = null;
   }
 
   const record = asRecord(payload);
@@ -135,11 +127,11 @@ export class MiniAppApi {
   }
 
   getFeed(source: "recent" | "top_day" | "top", signal?: AbortSignal): Promise<FeedItem[]> {
-    return this.request<unknown>(`/feed?source=${source}&limit=24`, {}, signal).then(asArray<FeedItem>);
+    return this.request<unknown>(`/feed?source=${source}&limit=24`, {}, signal).then((value) => asArray<FeedItem>(value));
   }
 
   likeFeed(id: number): Promise<{ likes_count?: number }> {
-    return this.request(`/feed/${id}/like`, { method: "POST", body: "{}" });
+    return this.request<{ likes_count?: number }>(`/feed/${id}/like`, { method: "POST", body: "{}" });
   }
 
   remixFeed(id: number, body: Record<string, unknown>): Promise<GenerationTask> {
@@ -150,24 +142,24 @@ export class MiniAppApi {
   }
 
   shareGeneration(id: number): Promise<{ link?: string; is_public_feed?: boolean }> {
-    return this.request(`/generations/${id}/share`, { method: "POST", body: "{}" });
+    return this.request<{ link?: string; is_public_feed?: boolean }>(`/generations/${id}/share`, { method: "POST", body: "{}" });
   }
 
   removeFeedPost(id: number): Promise<{ is_public_feed?: boolean }> {
-    return this.request(`/feed/${id}/remove`, { method: "POST", body: "{}" });
+    return this.request<{ is_public_feed?: boolean }>(`/feed/${id}/remove`, { method: "POST", body: "{}" });
   }
 
   savePrompt(id: number): Promise<{ is_prompt_library?: boolean }> {
-    return this.request(`/generations/${id}/share-library`, { method: "POST", body: "{}" });
+    return this.request<{ is_prompt_library?: boolean }>(`/generations/${id}/share-library`, { method: "POST", body: "{}" });
   }
 
   removePrompt(id: number): Promise<{ is_prompt_library?: boolean }> {
-    return this.request(`/generations/${id}/remove-library`, { method: "POST", body: "{}" });
+    return this.request<{ is_prompt_library?: boolean }>(`/generations/${id}/remove-library`, { method: "POST", body: "{}" });
   }
 
   getTrends(kind?: "image" | "video", signal?: AbortSignal): Promise<TrendItem[]> {
     const query = kind ? `?kind=${kind}&limit=64` : "?limit=64";
-    return this.request<unknown>(`/trends${query}`, {}, signal).then(asArray<TrendItem>);
+    return this.request<unknown>(`/trends${query}`, {}, signal).then((value) => asArray<TrendItem>(value));
   }
 
   prepareTrend(id: number): Promise<PreparedTrend> {
@@ -203,7 +195,7 @@ export class MiniAppApi {
   }
 
   createPayment(provider: "stars" | "tbank" | "crypto" | "lava", planKey: string): Promise<Record<string, unknown>> {
-    return this.request(`/topup/${provider}`, {
+    return this.request<Record<string, unknown>>(`/topup/${provider}`, {
       method: "POST",
       body: JSON.stringify({ plan_key: planKey }),
     });
