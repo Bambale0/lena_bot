@@ -26,7 +26,7 @@
   --radius: 0.75rem;
   --apix-cyan: oklch(0.79 0.16 205);
   --apix-pink: oklch(0.7 0.23 350);
-  --apix-bottom-nav-space: calc(86px + env(safe-area-inset-bottom));
+  --apix-bottom-nav-space: calc(70px + env(safe-area-inset-bottom));
 }
 
 .dark {
