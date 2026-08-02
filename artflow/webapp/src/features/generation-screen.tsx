@@ -61,7 +61,8 @@ function modeLabel(mode: string): string {
 function shortUrlLabel(url: string): string {
   try {
     const parsed = new URL(url);
-    const name = parsed.pathname.split("/").filter(Boolean).at(-1) || parsed.hostname;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const name = parts[parts.length - 1] || parsed.hostname;
     return decodeURIComponent(name).slice(0, 42);
   } catch {
     return url.slice(0, 42);
