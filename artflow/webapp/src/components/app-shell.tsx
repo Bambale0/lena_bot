@@ -35,24 +35,51 @@ interface AppShellProps {
 
 type ViewportMode = "nano" | "phone" | "phablet" | "tablet" | "wide";
 
-function readViewport() {
-  if (typeof window === "undefined") return { mode: "wide" as ViewportMode, short: false };
+interface ViewportState {
+  mode: ViewportMode;
+  short: boolean;
+  width: number;
+  height: number;
+}
+
+function classifyViewport(width: number): ViewportMode {
+  if (width <= 360) return "nano";
+  if (width <= 430) return "phone";
+  if (width <= 560) return "phablet";
+  if (width <= 900) return "tablet";
+  return "wide";
+}
+
+function readViewport(): ViewportState {
+  if (typeof window === "undefined") return { mode: "wide", short: false, width: 1024, height: 768 };
   const viewport = window.visualViewport;
-  const width = Math.round(viewport?.width || window.innerWidth || document.documentElement.clientWidth || 1024);
-  const height = Math.round(viewport?.height || window.innerHeight || document.documentElement.clientHeight || 768);
-  const mode: ViewportMode =
-    width <= 360 ? "nano" : width <= 430 ? "phone" : width <= 560 ? "phablet" : width <= 900 ? "tablet" : "wide";
-  return { mode, short: height <= 660 };
+  const width = Math.max(320, Math.round(viewport?.width || window.innerWidth || document.documentElement.clientWidth || 1024));
+  const height = Math.max(360, Math.round(viewport?.height || window.innerHeight || document.documentElement.clientHeight || 768));
+  return { mode: classifyViewport(width), short: height <= 660, width, height };
+}
+
+function applyViewportCssVars(viewport: ViewportState) {
+  if (typeof document === "undefined") return;
+  document.documentElement.style.setProperty("--apix-visual-viewport-width", `${viewport.width}px`);
+  document.documentElement.style.setProperty("--apix-visual-viewport-height", `${viewport.height}px`);
 }
 
 function useViewportMode() {
-  const [viewport, setViewport] = useState(readViewport);
+  const [viewport, setViewport] = useState(() => {
+    const initial = readViewport();
+    applyViewportCssVars(initial);
+    return initial;
+  });
 
   useEffect(() => {
     let frame = 0;
     const update = () => {
       window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => setViewport(readViewport()));
+      frame = window.requestAnimationFrame(() => {
+        const next = readViewport();
+        applyViewportCssVars(next);
+        setViewport(next);
+      });
     };
     update();
     window.addEventListener("resize", update, { passive: true });
@@ -77,7 +104,13 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
   const viewport = useViewportMode();
 
   return (
-    <div className="apix-shell" data-viewport={viewport.mode} data-short={viewport.short ? "true" : "false"}>
+    <div
+      className="apix-shell"
+      data-viewport={viewport.mode}
+      data-short={viewport.short ? "true" : "false"}
+      data-width={viewport.width}
+      data-height={viewport.height}
+    >
       <header className="apix-app-header grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-border/70 bg-background/88 px-2 py-1.5 shadow-sm backdrop-blur-2xl">
         <button
           type="button"
