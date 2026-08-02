@@ -1,0 +1,193 @@
+/* APIX production trends surface.
+   Purpose: first screen must be trends, without the old in-app header and without large rectangular trend blocks. */
+
+/* The Telegram chrome already has app title/close controls. Keep in-app content clean. */
+.header {
+  display: none;
+}
+
+.wrap {
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+/* Trends screen: compact, content-first, Pinterest-like. */
+.studioHead:has(h1) {
+  margin: 0 0 12px;
+}
+
+.studioHead h1 {
+  font-size: clamp(28px, 8vw, 40px);
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+}
+
+.studioHead h1::first-letter {
+  letter-spacing: 0;
+}
+
+.studioHead p {
+  display: none;
+}
+
+/* Only tighten the Trends sections. Keep admin form and other runtime screens functional. */
+.block:has(.title + div article .feedActions) {
+  margin: 0 0 14px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.block:has(.title + div article .feedActions) > .title {
+  margin: 0 0 10px;
+  padding: 0 2px;
+}
+
+.block:has(.title + div article .feedActions) > .title p {
+  display: none;
+}
+
+.block:has(.title + div article .feedActions) > .title h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.block:has(.title + div article .feedActions) > .title span {
+  min-width: 32px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-size: 12px;
+  border: 1px solid var(--border-soft);
+}
+
+.block:has(.title + div article .feedActions) > div:last-child {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: dense;
+  gap: 10px;
+  align-items: start;
+}
+
+.block:has(.title + div article .feedActions) article.assistantPanel {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 22px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow);
+}
+
+.block:has(.title + div article .feedActions) article.assistantPanel:nth-child(3n + 1) {
+  grid-row: span 2;
+}
+
+.block:has(.title + div article .feedActions) article.assistantPanel > img,
+.block:has(.title + div article .feedActions) article.assistantPanel > video,
+.block:has(.title + div article .feedActions) article.assistantPanel > .art {
+  width: 100%;
+  height: auto;
+  min-height: 150px;
+  max-height: 310px;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  border-radius: 0;
+  background: var(--bg-strong);
+}
+
+.block:has(.title + div article .feedActions) article.assistantPanel:nth-child(3n + 1) > img,
+.block:has(.title + div article .feedActions) article.assistantPanel:nth-child(3n + 1) > video,
+.block:has(.title + div article .feedActions) article.assistantPanel:nth-child(3n + 1) > .art {
+  aspect-ratio: 3 / 4;
+  max-height: 380px;
+}
+
+.block:has(.title + div article .feedActions) article.assistantPanel > div:nth-of-type(1) {
+  padding: 10px 10px 0;
+}
+
+.block:has(.title + div article .feedActions) article.assistantPanel h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.block:has(.title + div article .feedActions) article.assistantPanel p {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.block:has(.title + div article .feedActions) article.assistantPanel > div:nth-of-type(2) {
+  padding: 8px 10px 0;
+  gap: 6px;
+}
+
+.block:has(.title + div article .feedActions) article.assistantPanel > div:nth-of-type(2) span:first-child {
+  display: none;
+}
+
+.block:has(.title + div article .feedActions) .feedActions {
+  display: grid;
+  grid-template-columns: 1fr 42px 42px;
+  gap: 6px;
+  padding: 10px;
+}
+
+.block:has(.title + div article .feedActions) .feedActions .primary {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 14px;
+  font-size: 0;
+}
+
+.block:has(.title + div article .feedActions) .feedActions .primary::after {
+  content: "Повторить";
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.block:has(.title + div article .feedActions) .feedActions .ghost,
+.block:has(.title + div article .feedActions) .feedActions .dangerAction {
+  min-height: 40px;
+  width: 42px;
+  border-radius: 14px;
+  padding: 0;
+}
+
+/* The admin trend form must stay full-width and usable. */
+.assistantPanel:has(textarea.field):has(.refUpload) {
+  padding: 14px;
+  border-radius: 20px;
+}
+
+@media (max-width: 380px) {
+  .block:has(.title + div article .feedActions) > div:last-child {
+    gap: 8px;
+  }
+  .block:has(.title + div article .feedActions) article.assistantPanel {
+    border-radius: 18px;
+  }
+  .block:has(.title + div article .feedActions) .feedActions {
+    grid-template-columns: 1fr 38px 38px;
+    padding: 8px;
+  }
+}
