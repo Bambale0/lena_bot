@@ -3,7 +3,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GenerationTask, ReferralStats, UserProfile } from "@/lib/types";
 import { firstMedia, formatCredits, formatRelativeDate, generationStatusLabel } from "@/lib/utils";
 
@@ -32,40 +32,40 @@ function ProfileScreen({ user, tasks, referrals, referralsLoading, onOpenTask, o
   };
 
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-3">
       <Card className="overflow-hidden">
-        <div className="h-28 bg-gradient-to-r from-primary/45 via-fuchsia-500/25 to-cyan-400/25" />
-        <CardContent className="relative grid gap-4 pb-5">
-          <div className="-mt-11 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div className="flex min-w-0 items-end gap-3">
-              <span className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-3xl border-4 border-background bg-gradient-to-br from-primary to-cyan-400 text-3xl font-bold text-white shadow-xl">
+        <div className="h-12 bg-gradient-to-r from-primary/45 via-fuchsia-500/25 to-cyan-400/25" />
+        <CardContent className="relative grid gap-2.5 pb-3">
+          <div className="-mt-7 flex items-end justify-between gap-2">
+            <div className="flex min-w-0 items-end gap-2">
+              <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-2xl border-3 border-background bg-gradient-to-br from-primary to-cyan-400 text-xl font-bold text-white shadow-lg">
                 {user.photo_url ? <img src={user.photo_url} alt="" className="size-full object-cover" /> : name.slice(0, 1).toUpperCase()}
               </span>
-              <div className="min-w-0 pb-1">
-                <h1 className="truncate text-2xl font-bold tracking-tight">{name}</h1>
-                <p className="truncate text-sm text-muted-foreground">{user.username ? `@${user.username}` : "Telegram-профиль"}</p>
+              <div className="min-w-0 pb-0.5">
+                <h1 className="truncate text-lg font-bold tracking-tight">{name}</h1>
+                <p className="truncate text-[10px] text-muted-foreground">{user.username ? `@${user.username}` : "Telegram-профиль"}</p>
               </div>
             </div>
-            <Button variant="soft" onClick={onBalanceOpen}><Wallet /> {formatCredits(user.credits)} кр.</Button>
+            <Button variant="soft" size="sm" onClick={onBalanceOpen}><Wallet /> {formatCredits(user.credits)}</Button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-4 gap-1.5">
             <Stat label="Задач" value={tasks.length} icon={History} />
             <Stat label="Приглашено" value={invited} icon={Users} />
-            <Stat label="Партнёрский баланс" value={formatCredits(referrals?.balance?.available_to_withdraw || user.referral_balance)} icon={Gift} />
-            <Stat label="Всего заработано" value={formatCredits(referrals?.balance?.total_earned)} icon={Sparkles} />
+            <Stat label="Баланс" value={formatCredits(referrals?.balance?.available_to_withdraw || user.referral_balance)} icon={Gift} />
+            <Stat label="Заработано" value={formatCredits(referrals?.balance?.total_earned)} icon={Sparkles} />
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
         <section>
-          <div className="mb-3">
-            <h2 className="text-xl font-semibold tracking-tight">История</h2>
-            <p className="text-sm text-muted-foreground">Приватные задачи видны только владельцу.</p>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold tracking-tight">История</h2>
+            <Badge variant="outline">{tasks.length}</Badge>
           </div>
           {tasks.length ? (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-2 gap-1.5 min-[430px]:grid-cols-3 sm:grid-cols-4 xl:grid-cols-5">
               {tasks.map((task) => {
                 const media = firstMedia(task);
                 const video = task.gen_type === "video";
@@ -73,54 +73,48 @@ function ProfileScreen({ user, tasks, referrals, referralsLoading, onOpenTask, o
                   <button
                     key={task.id}
                     type="button"
-                    className="apix-focus-ring apix-glass overflow-hidden rounded-2xl text-left transition hover:-translate-y-0.5 hover:border-primary/30"
+                    className="apix-focus-ring apix-glass overflow-hidden rounded-xl text-left transition active:scale-[0.98]"
                     onClick={() => onOpenTask(task)}
                   >
-                    <div className="aspect-video bg-muted">
+                    <div className="relative aspect-square bg-muted">
                       {media ? (
                         video ? <video src={media} muted playsInline preload="metadata" className="size-full object-cover" /> : <img src={media} alt="" loading="lazy" className="size-full object-cover" />
-                      ) : <div className="grid size-full place-items-center text-muted-foreground"><Sparkles /></div>}
+                      ) : <div className="grid size-full place-items-center text-muted-foreground"><Sparkles className="size-4" /></div>}
+                      <Badge variant={task.status === "failed" ? "destructive" : task.status === "done" ? "success" : "warning"} className="absolute left-1 top-1 px-1.5 py-0 text-[8px]">{generationStatusLabel(task.status)}</Badge>
                     </div>
-                    <div className="grid gap-1 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-semibold">{task.model}</span>
-                        <Badge variant={task.status === "failed" ? "destructive" : task.status === "done" ? "success" : "warning"}>{generationStatusLabel(task.status)}</Badge>
-                      </div>
-                      <span className="text-xs text-muted-foreground">{formatRelativeDate(task.created_at)} · {formatCredits(task.credits_spent)} кр.</span>
+                    <div className="px-2 py-1.5">
+                      <p className="truncate text-[10px] font-semibold">{task.model}</p>
+                      <p className="mt-0.5 flex justify-between gap-1 text-[9px] text-muted-foreground"><span>{formatRelativeDate(task.created_at)}</span><span>{formatCredits(task.credits_spent)}</span></p>
                     </div>
                   </button>
                 );
               })}
             </div>
           ) : (
-            <div className="grid min-h-48 place-items-center rounded-2xl border border-dashed border-border text-sm text-muted-foreground">История пока пустая</div>
+            <div className="grid min-h-24 place-items-center rounded-xl border border-dashed border-border text-xs text-muted-foreground">История пока пустая</div>
           )}
         </section>
 
         <aside>
           <Card>
-            <CardHeader>
-              <CardTitle>Партнёрская программа</CardTitle>
-              <CardDescription>Существующая привязка реферала не перезаписывается новой ссылкой.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3">
+            <CardHeader className="pb-2"><CardTitle>Партнёрская программа</CardTitle></CardHeader>
+            <CardContent className="grid gap-2">
               {referralsLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground"><span className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Загружаем статистику…</div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground"><span className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Загружаем…</div>
               ) : (
                 <>
-                  <div className="rounded-2xl border border-border bg-muted/35 p-4">
-                    <p className="text-xs text-muted-foreground">Реферальный код</p>
-                    <p className="mt-1 font-mono text-lg font-semibold">{referrals?.referral_code || user.referral_code || "—"}</p>
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/35 px-3 py-2">
+                    <div className="min-w-0"><p className="text-[9px] text-muted-foreground">Реферальный код</p><p className="truncate font-mono text-sm font-semibold">{referrals?.referral_code || user.referral_code || "—"}</p></div>
+                    <Button variant="ghost" size="icon" className="size-8 min-h-8" disabled={!referralLink} onClick={() => copy(referralLink, "Ссылка")} aria-label="Копировать"><Copy /></Button>
                   </div>
-                  <Button variant="outline" disabled={!referralLink} onClick={() => copy(referralLink, "Ссылка")}>
-                    <Copy /> Копировать ссылку
-                  </Button>
-                  <Button disabled={!referralLink} onClick={() => copy(referralLink, "Ссылка для публикации")}>
-                    <Share2 /> Поделиться
-                  </Button>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Вознаграждения за повтор работ проходят через серверный ledger и не зависят от данных frontend.
-                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <Button variant="outline" size="sm" disabled={!referralLink} onClick={() => copy(referralLink, "Ссылка")}><Copy /> Копировать</Button>
+                    <Button size="sm" disabled={!referralLink} onClick={() => copy(referralLink, "Ссылка для публикации")}><Share2 /> Поделиться</Button>
+                  </div>
+                  <details className="apix-help">
+                    <summary>Правила начислений</summary>
+                    <p className="pb-2">Привязка реферала не перезаписывается, начисления проходят через серверный ledger.</p>
+                  </details>
                 </>
               )}
             </CardContent>
@@ -133,10 +127,10 @@ function ProfileScreen({ user, tasks, referrals, referralsLoading, onOpenTask, o
 
 function Stat({ label, value, icon: Icon }: { label: string; value: string | number; icon: typeof History }) {
   return (
-    <div className="rounded-2xl border border-border bg-card/55 p-3">
-      <Icon className="mb-2 size-4 text-primary" />
-      <p className="text-lg font-bold">{value}</p>
-      <p className="text-[11px] text-muted-foreground">{label}</p>
+    <div className="min-w-0 rounded-lg border border-border bg-card/55 px-1.5 py-2 text-center">
+      <Icon className="mx-auto mb-0.5 size-3.5 text-primary" />
+      <p className="truncate text-xs font-bold">{value}</p>
+      <p className="truncate text-[8px] text-muted-foreground">{label}</p>
     </div>
   );
 }
