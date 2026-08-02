@@ -39,10 +39,10 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
 
   return (
     <div className="apix-shell">
-      <header className="sticky top-0 z-40 mb-2 flex min-h-11 items-center justify-between gap-2 rounded-xl border border-border/70 bg-background/88 px-2 py-1.5 shadow-sm backdrop-blur-2xl">
+      <header className="apix-app-header grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-border/70 bg-background/88 px-2 py-1.5 shadow-sm backdrop-blur-2xl">
         <button
           type="button"
-          className="apix-focus-ring flex min-w-0 items-center gap-2 rounded-lg text-left"
+          className="apix-focus-ring flex min-w-0 max-w-full items-center gap-2 rounded-lg text-left"
           onClick={() => onTabChange("profile")}
         >
           <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full border border-primary/30 bg-gradient-to-br from-primary via-fuchsia-500 to-cyan-400 text-xs font-bold text-white shadow-md shadow-primary/15">
@@ -54,7 +54,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
           </span>
         </button>
 
-        <Button variant="soft" size="sm" className="min-w-0 px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
+        <Button variant="soft" size="sm" className="min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
           <CircleDollarSign className="size-3.5" />
           <span>{formatCredits(user.credits)}</span>
         </Button>
@@ -62,8 +62,8 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
 
       <main>{children}</main>
 
-      <nav className="apix-bottom-nav apix-glass rounded-xl p-1" aria-label="Основная навигация">
-        <div className="apix-nav-scroll flex gap-1 overflow-x-auto overscroll-x-contain" role="tablist" aria-label="Разделы Mini App">
+      <nav className="apix-bottom-nav apix-glass rounded-2xl p-1" aria-label="Основная навигация">
+        <div className="apix-nav-scroll flex min-w-0 gap-1 overflow-x-auto overscroll-x-contain" role="tablist" aria-label="Разделы Mini App">
           {tabs.map(({ id, label, icon: Icon }) => {
             const active = id === activeTab;
             return (
@@ -75,7 +75,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
                 aria-current={active ? "page" : undefined}
                 aria-label={label}
                 className={cn(
-                  "apix-nav-item apix-focus-ring flex min-h-12 min-w-[74px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg px-2 text-[10px] font-semibold transition active:scale-[0.97]",
+                  "apix-nav-item apix-focus-ring flex min-h-12 min-w-[74px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl px-2 text-[10px] font-semibold transition active:scale-[0.97]",
                   active
                     ? "bg-primary/15 text-primary shadow-inner"
                     : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
