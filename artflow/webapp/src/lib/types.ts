@@ -42,13 +42,27 @@ export interface ModelInfo {
   credits: number;
   modes: string[];
   aspect_ratios?: string[];
+  aspect_ratio_modes?: string[];
+  aspect_ratio_min_refs?: number;
   quality_options?: ModelOption[];
+  quality_prices?: Record<string, number>;
   duration_options?: number[];
+  durations?: number[];
   resolution_options?: string[];
+  resolutions?: string[];
+  motion_controls?: string[];
   mode_options?: string[];
   counts?: number[];
   max_refs?: number;
   has_quality?: boolean;
+  is_per_second?: boolean;
+  credits_per_sec?: number | null;
+  supports_video_input?: boolean;
+  max_audio_ids?: number;
+  max_character_ids?: number;
+  has_seed?: boolean;
+  video_input_prices?: Record<string, number>;
+  price_table?: Record<string, Record<string, number>>;
   available_in_studio?: boolean;
 }
 
@@ -156,11 +170,18 @@ export interface GenerationDraft {
   aspectRatio: string;
   quality: string;
   count: number;
+  taskCount: number;
   mode: string;
   duration: number;
   resolution: string;
   referenceUrls: string[];
   videoUrl: string;
+  videoStart: number;
+  videoEnd: number | null;
+  audioIds: string[];
+  characterIds: string[];
+  seed: number | null;
+  grokMode: string;
 }
 
 export interface StartTarget {
