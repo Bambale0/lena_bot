@@ -1,0 +1,206 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(0.985 0.004 286);
+  --foreground: oklch(0.16 0.012 286);
+  --card: oklch(1 0 0 / 0.84);
+  --card-foreground: oklch(0.16 0.012 286);
+  --popover: oklch(1 0 0 / 0.96);
+  --popover-foreground: oklch(0.16 0.012 286);
+  --primary: oklch(0.62 0.23 294);
+  --primary-foreground: oklch(0.98 0.01 286);
+  --secondary: oklch(0.94 0.014 286);
+  --secondary-foreground: oklch(0.24 0.02 286);
+  --muted: oklch(0.95 0.01 286);
+  --muted-foreground: oklch(0.51 0.026 286);
+  --accent: oklch(0.91 0.045 300);
+  --accent-foreground: oklch(0.31 0.08 294);
+  --destructive: oklch(0.59 0.22 27);
+  --destructive-foreground: oklch(0.98 0.01 27);
+  --border: oklch(0.88 0.018 286 / 0.75);
+  --input: oklch(0.88 0.018 286 / 0.9);
+  --ring: oklch(0.62 0.23 294);
+  --radius: 1rem;
+  --apix-cyan: oklch(0.79 0.16 205);
+  --apix-pink: oklch(0.7 0.23 350);
+}
+
+.dark {
+  --background: oklch(0.105 0.012 286);
+  --foreground: oklch(0.96 0.007 286);
+  --card: oklch(0.16 0.018 286 / 0.78);
+  --card-foreground: oklch(0.96 0.007 286);
+  --popover: oklch(0.15 0.016 286 / 0.97);
+  --popover-foreground: oklch(0.96 0.007 286);
+  --primary: oklch(0.71 0.22 298);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.21 0.021 286);
+  --secondary-foreground: oklch(0.94 0.008 286);
+  --muted: oklch(0.2 0.018 286);
+  --muted-foreground: oklch(0.68 0.022 286);
+  --accent: oklch(0.25 0.055 298);
+  --accent-foreground: oklch(0.93 0.035 298);
+  --destructive: oklch(0.63 0.22 25);
+  --destructive-foreground: oklch(0.98 0.01 25);
+  --border: oklch(1 0 0 / 0.1);
+  --input: oklch(1 0 0 / 0.14);
+  --ring: oklch(0.72 0.2 298);
+}
+
+@theme inline {
+  --font-sans: Inter, Manrope, "SF Pro Text", ui-sans-serif, system-ui, sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 6px);
+  --radius-2xl: calc(var(--radius) + 12px);
+}
+
+* {
+  border-color: var(--border);
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--background);
+  color-scheme: light;
+  -webkit-text-size-adjust: 100%;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100dvh;
+  margin: 0;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 10% -10%, color-mix(in oklab, var(--primary) 24%, transparent), transparent 34rem),
+    radial-gradient(circle at 105% 15%, color-mix(in oklab, var(--apix-cyan) 18%, transparent), transparent 30rem),
+    radial-gradient(circle at 45% 115%, color-mix(in oklab, var(--apix-pink) 14%, transparent), transparent 34rem),
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  overscroll-behavior-y: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+.apix-shell {
+  width: min(100%, 1180px);
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: max(12px, env(safe-area-inset-top)) 14px calc(112px + env(safe-area-inset-bottom));
+}
+
+.apix-glass {
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 80px color-mix(in oklab, black 28%, transparent);
+  backdrop-filter: blur(22px) saturate(1.12);
+  -webkit-backdrop-filter: blur(22px) saturate(1.12);
+}
+
+.apix-bottom-nav {
+  position: fixed;
+  z-index: 50;
+  left: 50%;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  width: min(calc(100% - 16px), 900px);
+  transform: translateX(-50%);
+}
+
+.apix-nav-scroll {
+  scrollbar-width: none;
+}
+
+.apix-nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.apix-media-grid {
+  columns: 2;
+  column-gap: 0.75rem;
+}
+
+.apix-media-grid > * {
+  break-inside: avoid;
+  margin-bottom: 0.75rem;
+}
+
+.apix-safe-sheet {
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+}
+
+.apix-focus-ring:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+@media (min-width: 760px) {
+  .apix-shell {
+    padding-inline: 24px;
+    padding-bottom: 124px;
+  }
+
+  .apix-media-grid {
+    columns: 3;
+  }
+}
+
+@media (min-width: 1080px) {
+  .apix-media-grid {
+    columns: 4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
