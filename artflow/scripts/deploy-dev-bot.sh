@@ -15,6 +15,7 @@ IFS=$'\n\t'
 #   DEV_BOT_ENV_FILE=.env.dev
 #   DEV_BOT_COMPOSE_FILE=docker-compose.dev-bot.yml
 #   DEV_BOT_PROJECT=artflow_devbot
+#   DEV_BOT_NETWORK=apix_devbot_backend
 #   DEV_BOT_APP_PORT=8010
 #   DEV_BOT_BRANCH=agent/miniapp-shadcn-rework
 #   DEV_BOT_NODE_MODE=auto        # auto|local|docker
@@ -39,6 +40,7 @@ WEBAPP_DIR="$APP_DIR/webapp"
 ENV_FILE="${DEV_BOT_ENV_FILE:-$APP_DIR/.env.dev}"
 COMPOSE_FILE="${DEV_BOT_COMPOSE_FILE:-$APP_DIR/docker-compose.dev-bot.yml}"
 PROJECT="${DEV_BOT_PROJECT:-artflow_devbot}"
+NETWORK="${DEV_BOT_NETWORK:-apix_devbot_backend}"
 NODE_MODE="${DEV_BOT_NODE_MODE:-auto}"
 TARGET_BRANCH="${1:-${DEV_BOT_BRANCH:-$(git -C "$REPO_DIR" branch --show-current)}}"
 
@@ -89,6 +91,10 @@ esac
 export DEV_BOT_APP_PORT="${DEV_BOT_APP_PORT:-8010}"
 export DEV_BOT_POSTGRES_PORT="${DEV_BOT_POSTGRES_PORT:-5434}"
 export DEV_BOT_REDIS_PORT="${DEV_BOT_REDIS_PORT:-6380}"
+export DEV_BOT_NETWORK="$NETWORK"
+
+log "Ensure shared Docker network: $NETWORK"
+docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
 
 log "Validate dev compose"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -p "$PROJECT" config --quiet
