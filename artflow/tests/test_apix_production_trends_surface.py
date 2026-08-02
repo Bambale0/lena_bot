@@ -18,7 +18,6 @@ def test_production_uses_modular_typescript_entry() -> None:
     assert 'production-trends-entry.js' not in index
     assert 'window.__APIX_EARLY_URL__' in index
     assert 'import { App } from "@/app/App"' in main
-    assert 'legacy') is False if False else True
     assert 'get("legacy") === "1"' in main
     assert 'import("./main.jsx")' in main
     assert '"typescript"' in package
