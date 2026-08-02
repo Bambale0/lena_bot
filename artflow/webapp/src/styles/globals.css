@@ -216,7 +216,7 @@ video {
   bottom: calc(61px + env(safe-area-inset-bottom));
 }
 
-@media (min-width: 430px) {
+@media (min-width: 390px) {
   .apix-shell {
     padding-inline: 10px;
   }
