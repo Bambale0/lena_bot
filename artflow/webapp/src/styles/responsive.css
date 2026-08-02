@@ -186,6 +186,22 @@
     padding: 0.55rem 0.8rem 0.75rem;
   }
 
+  .apix-generation-card .apix-adaptive-rail {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    overflow-x: visible;
+    gap: 0.45rem 0.5rem;
+    padding-bottom: 0;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > span:first-child {
+    flex: 0 0 100%;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > button {
+    flex: 0 0 auto;
+  }
+
   .apix-prompt-input {
     min-height: 5.75rem;
   }
@@ -263,6 +279,15 @@
     max-height: min(42dvh, 280px);
   }
 
+  .apix-generation-card .apix-adaptive-rail {
+    gap: 0.4rem 0.42rem;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > button {
+    min-height: 2.1rem;
+    padding-inline: 0.6rem;
+  }
+
   .apix-nav-scroll {
     justify-content: flex-start !important;
   }
@@ -302,6 +327,11 @@
 
   .apix-generation-card-content {
     padding-inline: 0.65rem;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > button {
+    min-height: 2rem;
+    padding-inline: 0.52rem;
   }
 
   .apix-nav-item {
@@ -363,6 +393,15 @@
 
   .apix-uploader-head {
     align-items: flex-start;
+  }
+
+  .apix-generation-card .apix-adaptive-rail {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > span:first-child {
+    flex: 0 0 100%;
   }
 
   .apix-launch-row {
