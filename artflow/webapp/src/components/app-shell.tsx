@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Bot,
   CircleDollarSign,
@@ -33,28 +33,67 @@ interface AppShellProps {
   onBalanceOpen: () => void;
 }
 
+type ViewportMode = "nano" | "phone" | "phablet" | "tablet" | "wide";
+
+function readViewport() {
+  if (typeof window === "undefined") return { mode: "wide" as ViewportMode, short: false };
+  const viewport = window.visualViewport;
+  const width = Math.round(viewport?.width || window.innerWidth || document.documentElement.clientWidth || 1024);
+  const height = Math.round(viewport?.height || window.innerHeight || document.documentElement.clientHeight || 768);
+  const mode: ViewportMode =
+    width <= 360 ? "nano" : width <= 430 ? "phone" : width <= 560 ? "phablet" : width <= 900 ? "tablet" : "wide";
+  return { mode, short: height <= 660 };
+}
+
+function useViewportMode() {
+  const [viewport, setViewport] = useState(readViewport);
+
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => setViewport(readViewport()));
+    };
+    update();
+    window.addEventListener("resize", update, { passive: true });
+    window.addEventListener("orientationchange", update, { passive: true });
+    window.visualViewport?.addEventListener("resize", update, { passive: true });
+    window.visualViewport?.addEventListener("scroll", update, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+    };
+  }, []);
+
+  return viewport;
+}
+
 function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: AppShellProps) {
   const name = user.full_name || user.first_name || user.username || "Пользователь";
   const initial = name.trim().slice(0, 1).toUpperCase() || "A";
+  const viewport = useViewportMode();
 
   return (
-    <div className="apix-shell">
+    <div className="apix-shell" data-viewport={viewport.mode} data-short={viewport.short ? "true" : "false"}>
       <header className="apix-app-header grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-border/70 bg-background/88 px-2 py-1.5 shadow-sm backdrop-blur-2xl">
         <button
           type="button"
-          className="apix-focus-ring flex min-w-0 max-w-full items-center gap-2 rounded-lg text-left"
+          className="apix-profile-button apix-focus-ring flex min-w-0 max-w-full items-center gap-2 rounded-lg text-left"
           onClick={() => onTabChange("profile")}
         >
-          <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full border border-primary/30 bg-gradient-to-br from-primary via-fuchsia-500 to-cyan-400 text-xs font-bold text-white shadow-md shadow-primary/15">
+          <span className="apix-profile-avatar grid size-8 shrink-0 place-items-center overflow-hidden rounded-full border border-primary/30 bg-gradient-to-br from-primary via-fuchsia-500 to-cyan-400 text-xs font-bold text-white shadow-md shadow-primary/15">
             {user.photo_url ? <img src={user.photo_url} alt="" className="size-full object-cover" /> : initial}
           </span>
           <span className="min-w-0">
-            <span className="block max-w-36 truncate text-xs font-semibold sm:max-w-none sm:text-sm">{name}</span>
-            <span className="hidden truncate text-[10px] text-muted-foreground sm:block">APIX Mini App</span>
+            <span className="apix-profile-name block max-w-36 truncate text-xs font-semibold sm:max-w-none sm:text-sm">{name}</span>
+            <span className="apix-profile-subtitle hidden truncate text-[10px] text-muted-foreground sm:block">APIX Mini App</span>
           </span>
         </button>
 
-        <Button variant="soft" size="sm" className="min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
+        <Button variant="soft" size="sm" className="apix-balance-button min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
           <CircleDollarSign className="size-3.5" />
           <span>{formatCredits(user.credits)}</span>
         </Button>
@@ -86,7 +125,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
                 }}
               >
                 <Icon className={cn("size-[18px]", active && "drop-shadow-[0_0_8px_currentColor]")} />
-                <span className="leading-none">{label}</span>
+                <span className="apix-nav-label leading-none">{label}</span>
               </button>
             );
           })}
