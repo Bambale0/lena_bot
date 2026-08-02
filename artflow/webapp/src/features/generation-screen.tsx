@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AlertCircle, Film, ImageIcon, Info, Orbit, Sparkles, WandSparkles } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -339,7 +340,7 @@ function GenerationScreen({
   );
 }
 
-function ValidationError({ children }: { children: string }) {
+function ValidationError({ children }: { children: ReactNode }) {
   return (
     <p className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
       <AlertCircle className="mt-0.5 size-4 shrink-0" />
