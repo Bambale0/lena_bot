@@ -130,17 +130,17 @@ function GenerationScreen({
   };
 
   return (
-    <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_270px]">
-      <section className="grid min-w-0 gap-2.5">
-        <div className="flex min-w-0 items-center justify-between gap-2 px-0.5">
+    <div className="apix-generation-layout grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
+      <section className="apix-generation-main grid min-w-0 gap-2.5">
+        <div className="apix-generation-titlebar flex min-w-0 items-center justify-between gap-2 px-0.5">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><Icon className="size-4" /></span>
+            <span className="apix-generation-icon grid size-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><Icon className="size-4" /></span>
             <div className="min-w-0">
-              <h1 className="text-lg font-bold tracking-tight sm:text-xl">{copy.title}</h1>
-              <p className="truncate text-[11px] text-muted-foreground">{selectedModel?.display_name || copy.description}</p>
+              <h1 className="apix-generation-title text-lg font-bold tracking-tight sm:text-xl">{copy.title}</h1>
+              <p className="apix-generation-subtitle truncate text-[11px] text-muted-foreground">{selectedModel?.display_name || copy.description}</p>
             </div>
           </div>
-          <Badge variant="outline" className="shrink-0">{formatCredits(user.credits)} кр.</Badge>
+          <Badge variant="outline" className="apix-generation-balance shrink-0">{formatCredits(user.credits)} кр.</Badge>
         </div>
 
         {draft.promptId ? (
@@ -153,11 +153,11 @@ function GenerationScreen({
           </div>
         ) : null}
 
-        <Card className="min-w-0 overflow-hidden">
-          <CardHeader className="pb-2">
+        <Card className="apix-generation-card min-w-0 overflow-hidden">
+          <CardHeader className="apix-generation-card-header pb-2">
             <CardTitle>Модель и идея</CardTitle>
           </CardHeader>
-          <CardContent className="grid min-w-0 gap-2.5">
+          <CardContent className="apix-generation-card-content grid min-w-0 gap-2.5">
             <label className="grid min-w-0 gap-1 text-xs font-medium">
               Модель
               <Select value={selectedModel?.key || ""} onChange={(event) => syncSelectedModel(event.target.value)}>
@@ -168,7 +168,7 @@ function GenerationScreen({
             </label>
 
             {kind !== "image" || modes.length > 1 ? (
-              <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-0.5">
+              <div className="apix-adaptive-rail flex min-w-0 items-center gap-2 overflow-x-auto pb-0.5">
                 <span className="shrink-0 text-xs font-medium">Режим</span>
                 {modes.map((mode) => (
                   <button key={mode} type="button" className={cn(chipClass(draft.mode === mode), "shrink-0")} onClick={() => onChange({ mode })}>
@@ -181,7 +181,7 @@ function GenerationScreen({
             <label className="grid min-w-0 gap-1 text-xs font-medium">
               Промпт
               <Textarea
-                className="min-h-24"
+                className="apix-prompt-input min-h-24"
                 value={draft.prompt}
                 disabled={Boolean(draft.promptId)}
                 placeholder={draft.promptId ? "Скрытый промпт тренда" : "Сцена, стиль, свет, движение, детали"}
@@ -190,8 +190,8 @@ function GenerationScreen({
             </label>
 
             {showReferenceUploader ? (
-              <div className="grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
-                <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
+                <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold">Референсы · до {maxRefs}</p>
                     <p className="text-[10px] text-muted-foreground">Загрузи фото с устройства. Ссылки вставлять не нужно.</p>
@@ -241,8 +241,8 @@ function GenerationScreen({
             ) : null}
 
             {showVideoUploader ? (
-              <div className="grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
-                <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
+                <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold">{kind === "motion" ? "Видео движения" : "Видео-референс"}</p>
                     <p className="text-[10px] text-muted-foreground">Загрузи ролик с устройства, если модель требует видео.</p>
@@ -293,11 +293,11 @@ function GenerationScreen({
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 overflow-hidden">
-          <CardHeader className="pb-2"><CardTitle>Параметры</CardTitle></CardHeader>
-          <CardContent className="grid min-w-0 gap-2.5">
+        <Card className="apix-generation-card min-w-0 overflow-hidden">
+          <CardHeader className="apix-generation-card-header pb-2"><CardTitle>Параметры</CardTitle></CardHeader>
+          <CardContent className="apix-generation-card-content grid min-w-0 gap-2.5">
             {ratios.length ? (
-              <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-0.5">
+              <div className="apix-adaptive-rail flex min-w-0 items-center gap-2 overflow-x-auto pb-0.5">
                 <span className="shrink-0 text-xs font-medium">Формат</span>
                 {ratios.map((ratio) => (
                   <button key={ratio} type="button" className={cn(chipClass(draft.aspectRatio === ratio), "shrink-0")} onClick={() => onChange({ aspectRatio: ratio })}>{ratio}</button>
@@ -306,10 +306,10 @@ function GenerationScreen({
             ) : null}
 
             {kind === "image" ? (
-              <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-2 min-[430px]:grid-cols-2">
                 <div className="min-w-0">
                   <p className="mb-1 text-xs font-medium">Качество</p>
-                  <div className="flex min-w-0 gap-1 overflow-x-auto">
+                  <div className="apix-adaptive-rail flex min-w-0 gap-1 overflow-x-auto">
                     {qualities.map((quality) => (
                       <button key={quality.value} type="button" className={cn(chipClass(draft.quality === quality.value), "shrink-0")} onClick={() => onChange({ quality: quality.value })}>
                         {quality.label || quality.value}
@@ -319,7 +319,7 @@ function GenerationScreen({
                 </div>
                 <div className="min-w-0">
                   <p className="mb-1 text-xs font-medium">Количество</p>
-                  <div className="flex min-w-0 gap-1 overflow-x-auto">
+                  <div className="apix-adaptive-rail flex min-w-0 gap-1 overflow-x-auto">
                     {counts.map((count) => (
                       <button key={count} type="button" className={cn(chipClass(draft.count === count), "min-w-8 shrink-0 px-2")} onClick={() => onChange({ count })}>{count}</button>
                     ))}
@@ -327,7 +327,7 @@ function GenerationScreen({
                 </div>
               </div>
             ) : (
-              <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-2 min-[430px]:grid-cols-2">
                 <label className="grid min-w-0 gap-1 text-xs font-medium">
                   Длительность
                   <Select value={String(draft.duration)} onChange={(event) => onChange({ duration: Number(event.target.value) })}>
@@ -351,15 +351,15 @@ function GenerationScreen({
         </Card>
       </section>
 
-      <aside className="apix-launch-bar lg:sticky lg:top-16 lg:self-start">
-        <Card className="border-primary/25 bg-popover/95 shadow-xl">
+      <aside className="apix-launch-bar xl:sticky xl:top-16 xl:self-start">
+        <Card className="apix-launch-card border-primary/25 bg-popover/95 shadow-xl">
           <CardContent className="grid gap-2 p-2.5 sm:p-3">
-            <div className="flex items-center justify-between gap-2">
+            <div className="apix-launch-row flex items-center justify-between gap-2">
               <div>
                 <p className="text-[10px] text-muted-foreground">Стоимость</p>
                 <p className="text-lg font-bold leading-none">{formatCredits(estimate)} кр.</p>
               </div>
-              <Button className="min-w-[56%]" disabled={disabled} onClick={onSubmit}>
+              <Button className="apix-submit-button w-full min-[430px]:w-auto min-[430px]:min-w-[56%]" disabled={disabled} onClick={onSubmit}>
                 {submitting ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <WandSparkles />}
                 {submitting ? "Запуск…" : "Создать"}
               </Button>
@@ -375,7 +375,7 @@ function GenerationScreen({
               {!availableModels.length ? <ValidationError>Нет моделей</ValidationError> : null}
             </div>
 
-            <details className="apix-help hidden lg:block">
+            <details className="apix-help hidden xl:block">
               <summary>Что будет после запуска</summary>
               <p className="flex items-start gap-1.5 pb-2"><Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />Задача сразу появится в истории, откроется результат и начнётся polling.</p>
             </details>
