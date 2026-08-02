@@ -50,6 +50,9 @@ interface MediaViewerState {
   item: FeedItem;
 }
 
+const WORK_RENDER_BATCH = 30;
+const TREND_RENDER_BATCH = 24;
+
 const sourceFilters = [
   { value: "recent" as const, label: "Новые" },
   { value: "top_day" as const, label: "Топ дня" },
@@ -98,11 +101,10 @@ function uniqueMediaUrls(item: FeedItem): string[] {
 }
 
 function cardMediaShape(index: number, isVideo: boolean): string {
-  if (isVideo) return index % 5 === 0 ? "aspect-[16/10]" : "aspect-[4/5]";
-  if (index % 11 === 0) return "aspect-[3/4]";
+  if (isVideo) return index % 6 === 0 ? "aspect-[16/10]" : "aspect-[4/5]";
+  if (index % 10 === 0) return "aspect-[3/4]";
   if (index % 7 === 0) return "aspect-square";
   if (index % 5 === 0) return "aspect-[2/3]";
-  if (index % 3 === 0) return "aspect-[5/6]";
   return "aspect-[4/5]";
 }
 
@@ -162,11 +164,13 @@ function FeedScreen({
 }: FeedScreenProps) {
   const [contentMode, setContentMode] = useState<ContentMode>("works");
   const [workFilter, setWorkFilter] = useState<WorkFilter>("all");
+  const [visibleWorkCount, setVisibleWorkCount] = useState(WORK_RENDER_BATCH);
   const [viewer, setViewer] = useState<MediaViewerState | null>(null);
   const [trends, setTrends] = useState<TrendItem[]>([]);
   const [trendsLoading, setTrendsLoading] = useState(false);
   const [trendKind, setTrendKind] = useState<TrendKindFilter>("all");
   const [trendCategory, setTrendCategory] = useState("all");
+  const [visibleTrendCount, setVisibleTrendCount] = useState(TREND_RENDER_BATCH);
   const [preparingTrendId, setPreparingTrendId] = useState<number | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -178,6 +182,12 @@ function FeedScreen({
       return true;
     });
   }, [items, workFilter]);
+
+  const renderedItems = useMemo(() => {
+    return visibleItems.slice(0, visibleWorkCount);
+  }, [visibleItems, visibleWorkCount]);
+
+  const canRevealMoreWorks = renderedItems.length < visibleItems.length;
 
   const filteredTrendBase = useMemo(() => {
     return trends.filter((trend) => trendKind === "all" || trend.kind === trendKind);
@@ -210,19 +220,38 @@ function FeedScreen({
     return filteredTrendBase.filter((trend) => trendCategoryKey(trend) === trendCategory);
   }, [filteredTrendBase, trendCategory]);
 
+  const renderedTrends = useMemo(() => {
+    return visibleTrends.slice(0, visibleTrendCount);
+  }, [visibleTrendCount, visibleTrends]);
+
+  const canRevealMoreTrends = renderedTrends.length < visibleTrends.length;
+
+  useEffect(() => {
+    setVisibleWorkCount(WORK_RENDER_BATCH);
+  }, [source, workFilter]);
+
+  useEffect(() => {
+    setVisibleTrendCount(TREND_RENDER_BATCH);
+  }, [trendCategory, trendKind]);
+
   useEffect(() => {
     const target = sentinelRef.current;
-    if (!target || !onLoadMore || !hasMore || contentMode !== "works") return undefined;
+    if (!target || contentMode !== "works") return undefined;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry?.isIntersecting && !loading && !loadingMore) onLoadMore();
+        if (!entry?.isIntersecting || loading || loadingMore) return;
+        if (canRevealMoreWorks) {
+          setVisibleWorkCount((current) => Math.min(current + WORK_RENDER_BATCH, visibleItems.length));
+          return;
+        }
+        if (hasMore && onLoadMore) onLoadMore();
       },
-      { root: null, rootMargin: "720px 0px", threshold: 0 },
+      { root: null, rootMargin: "640px 0px", threshold: 0 },
     );
     observer.observe(target);
     return () => observer.disconnect();
-  }, [contentMode, hasMore, loading, loadingMore, onLoadMore, visibleItems.length]);
+  }, [canRevealMoreWorks, contentMode, hasMore, loading, loadingMore, onLoadMore, visibleItems.length]);
 
   useEffect(() => {
     if (!viewer) return undefined;
@@ -283,7 +312,7 @@ function FeedScreen({
       const prepared = (await prepareResponse.json()) as PreparedTrend;
       const settings = prepared.settings || {};
       const endpoint = prepared.kind === "video" ? "/api/v1/generate/video" : "/api/v1/generate/image";
-      const body = prepared.kind === "video"
+      const body: Record<string, unknown> = prepared.kind === "video"
         ? {
             model: prepared.model,
             prompt: "Использовать скрытый трендовый промпт",
@@ -322,11 +351,11 @@ function FeedScreen({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold tracking-tight sm:text-xl">Лента</h1>
-            <Badge variant="outline">{contentMode === "works" ? `${visibleItems.length}/${items.length}` : visibleTrends.length}</Badge>
+            <Badge variant="outline">{contentMode === "works" ? `${renderedItems.length}/${visibleItems.length}` : `${renderedTrends.length}/${visibleTrends.length}`}</Badge>
           </div>
           <details className="apix-help max-w-xl">
             <summary>Как работает лента</summary>
-            <p className="pb-2">Работы открываются внутри Mini App. Вкладка трендов группирует сценарии по категориям, а повтор остаётся внутри карточек.</p>
+            <p className="pb-2">Карточки выводятся порциями, чтобы Mini App не держала всю ленту в DOM. Фото и видео открываются внутри приложения.</p>
           </details>
         </div>
         <Button
@@ -447,7 +476,7 @@ function FeedScreen({
         visibleItems.length ? (
           <>
             <div className="apix-media-grid apix-feed-mosaic">
-              {visibleItems.map((item, index) => {
+              {renderedItems.map((item, index) => {
                 const mediaUrls = uniqueMediaUrls(item);
                 const media = mediaUrls[0] || "";
                 const isVideo = itemLooksVideo(item);
@@ -462,14 +491,21 @@ function FeedScreen({
                     >
                       {media ? (
                         isVideo ? (
-                          <video src={media} muted playsInline preload="metadata" className="size-full object-cover transition duration-500 group-active:scale-[1.02]" />
+                          <video src={media} muted playsInline preload="metadata" className="size-full object-cover transition duration-300 group-active:scale-[1.02]" />
                         ) : (
-                          <img src={media} alt="" loading="lazy" className="size-full object-cover transition duration-500 group-active:scale-[1.02]" />
+                          <img
+                            src={media}
+                            alt=""
+                            loading={index < 4 ? "eager" : "lazy"}
+                            decoding="async"
+                            fetchPriority={index < 2 ? "high" : "auto"}
+                            className="size-full object-cover transition duration-300 group-active:scale-[1.02]"
+                          />
                         )
                       ) : (
                         <div className="grid size-full place-items-center text-xs text-muted-foreground">Нет preview</div>
                       )}
-                      <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(255,255,255,.22),transparent_26%),linear-gradient(to_top,rgba(0,0,0,.78),transparent_52%)]" />
+                      <span className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(0,0,0,.78),transparent_54%)]" />
                       {isVideo ? <span className="absolute inset-0 grid place-items-center"><span className="grid size-10 place-items-center rounded-full bg-black/55 text-white backdrop-blur"><Play className="ml-0.5 size-4" /></span></span> : null}
                       <span className="absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-black/45 text-white opacity-85 backdrop-blur">
                         <Maximize2 className="size-3.5" />
@@ -478,7 +514,7 @@ function FeedScreen({
                         <span className="flex items-center justify-between gap-1">
                           <span className="flex min-w-0 items-center gap-1.5">
                             <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-white/20">
-                              {item.author_photo_url ? <img src={item.author_photo_url} alt="" className="size-full object-cover" /> : <UserRound className="size-3" />}
+                              {item.author_photo_url ? <img src={item.author_photo_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <UserRound className="size-3" />}
                             </span>
                             <span className="truncate text-[9px] font-semibold">{item.author || "Автор"}</span>
                           </span>
@@ -526,6 +562,8 @@ function FeedScreen({
             <div ref={sentinelRef} className="grid min-h-16 place-items-center pb-2 text-xs text-muted-foreground">
               {loadingMore ? (
                 <span className="inline-flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Подгружаем ещё…</span>
+              ) : canRevealMoreWorks ? (
+                <Button variant="ghost" size="sm" onClick={() => setVisibleWorkCount((current) => Math.min(current + WORK_RENDER_BATCH, visibleItems.length))}>Показать ещё</Button>
               ) : hasMore && onLoadMore ? (
                 <Button variant="ghost" size="sm" onClick={onLoadMore}>Загрузить ещё</Button>
               ) : (
@@ -540,9 +578,11 @@ function FeedScreen({
         )
       ) : (
         <TrendCategorySurface
-          trends={visibleTrends}
+          trends={renderedTrends}
           loading={trendsLoading}
+          canRevealMore={canRevealMoreTrends}
           preparingTrendId={preparingTrendId}
+          onRevealMore={() => setVisibleTrendCount((current) => Math.min(current + TREND_RENDER_BATCH, visibleTrends.length))}
           onRepeat={(trend) => void repeatTrend(trend)}
         />
       )}
@@ -555,12 +595,16 @@ function FeedScreen({
 function TrendCategorySurface({
   trends,
   loading,
+  canRevealMore,
   preparingTrendId,
+  onRevealMore,
   onRepeat,
 }: {
   trends: TrendItem[];
   loading: boolean;
+  canRevealMore: boolean;
   preparingTrendId: number | null;
+  onRevealMore: () => void;
   onRepeat: (trend: TrendItem) => void;
 }) {
   if (!trends.length) {
@@ -572,52 +616,53 @@ function TrendCategorySurface({
   }
 
   return (
-    <div className="apix-media-grid apix-trend-category-grid">
-      {trends.map((trend, index) => {
-        const media = safeExternalUrl(trend.preview_url);
-        const isVideo = trend.kind === "video";
-        return (
-          <Card key={trend.id} className={cn("apix-feed-card overflow-hidden shadow-none", index % 6 === 0 && "apix-feed-card-featured")}>
-            <div className={cn("relative overflow-hidden bg-muted", cardMediaShape(index, isVideo))}>
-              {media ? (
-                isVideo ? (
-                  <video src={media} muted playsInline loop preload="metadata" className="size-full object-cover" />
+    <div className="grid gap-3">
+      <div className="apix-media-grid apix-trend-category-grid">
+        {trends.map((trend, index) => {
+          const media = safeExternalUrl(trend.preview_url);
+          const isVideo = trend.kind === "video";
+          return (
+            <Card key={trend.id} className={cn("apix-feed-card overflow-hidden shadow-none", index % 6 === 0 && "apix-feed-card-featured")}>
+              <div className={cn("relative overflow-hidden bg-muted", index % 6 === 0 ? "aspect-[3/4]" : "aspect-[4/5]") }>
+                {media ? (
+                  isVideo ? (
+                    <video src={media} muted playsInline preload="metadata" className="size-full object-cover" />
+                  ) : (
+                    <img src={media} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
+                  )
                 ) : (
-                  <img src={media} alt="" loading="lazy" className="size-full object-cover" />
-                )
-              ) : (
-                <div className="grid size-full place-items-center text-muted-foreground">{isVideo ? <Film /> : <ImageIcon />}</div>
-              )}
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(255,255,255,.22),transparent_30%),linear-gradient(to_top,rgba(0,0,0,.82),transparent_60%)]" />
-              {isVideo ? <span className="absolute inset-0 grid place-items-center"><span className="grid size-10 place-items-center rounded-full bg-black/55 text-white"><Play className="ml-0.5 size-4" /></span></span> : null}
-              <div className="absolute inset-x-0 bottom-0 px-2 pb-2 pt-10 text-white">
-                <div className="mb-1 flex items-center gap-1 text-[8px] opacity-85">
-                  <span>{trend.category_emoji || (isVideo ? "🎬" : "🖼️")}</span>
-                  <span className="truncate">{trend.category_title || trend.category || trend.kind}</span>
-                  {trend.uses_count ? <span className="ml-auto">↻ {trend.uses_count}</span> : null}
-                </div>
-                <h2 className="line-clamp-2 text-[11px] font-semibold leading-tight">{trend.title}</h2>
-              </div>
-            </div>
-            <div className="grid gap-1.5 p-1.5">
-              {trend.description ? (
-                <details className="apix-help border-0">
-                  <summary className="py-1 text-[10px]">Описание</summary>
-                  <p className="line-clamp-6 pb-1 text-[10px]">{trend.description}</p>
-                </details>
-              ) : null}
-              <Button className="min-h-8 px-2 text-[10px]" disabled={preparingTrendId === trend.id} onClick={() => onRepeat(trend)}>
-                {preparingTrendId === trend.id ? (
-                  <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                ) : (
-                  <Repeat2 className="size-3.5" />
+                  <div className="grid size-full place-items-center text-muted-foreground">{isVideo ? <Film /> : <ImageIcon />}</div>
                 )}
-                Повторить тренд
-              </Button>
-            </div>
-          </Card>
-        );
-      })}
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-10 text-white">
+                  <div className="mb-1 flex items-center gap-1 text-[8px] opacity-85">
+                    <span>{trend.category_emoji || (isVideo ? "🎬" : "🖼️")}</span>
+                    <span className="truncate">{trend.category_title || trend.kind}</span>
+                    {trend.uses_count ? <span className="ml-auto">↻ {trend.uses_count}</span> : null}
+                  </div>
+                  <h2 className="line-clamp-2 text-[11px] font-semibold leading-tight">{trend.title}</h2>
+                </div>
+              </div>
+              <div className="grid gap-1.5 p-1.5">
+                {trend.description ? (
+                  <details className="apix-help border-0">
+                    <summary className="py-1 text-[10px]">Описание</summary>
+                    <p className="line-clamp-6 pb-1 text-[10px]">{trend.description}</p>
+                  </details>
+                ) : null}
+                <Button className="min-h-8 px-2 text-[10px]" disabled={preparingTrendId === trend.id} onClick={() => onRepeat(trend)}>
+                  {preparingTrendId === trend.id ? (
+                    <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  ) : (
+                    <Repeat2 className="size-3.5" />
+                  )}
+                  Повторить тренд
+                </Button>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+      {canRevealMore ? <Button variant="ghost" size="sm" onClick={onRevealMore}>Показать ещё тренды</Button> : null}
     </div>
   );
 }
@@ -665,7 +710,7 @@ function MediaViewer({
           {isVideo ? (
             <video src={url} controls autoPlay playsInline className="max-h-[calc(100dvh-132px-env(safe-area-inset-top)-env(safe-area-inset-bottom))] max-w-full rounded-2xl object-contain shadow-2xl" />
           ) : (
-            <img src={url} alt="" className="max-h-[calc(100dvh-132px-env(safe-area-inset-top)-env(safe-area-inset-bottom))] max-w-full rounded-2xl object-contain shadow-2xl" />
+            <img src={url} alt="" decoding="async" className="max-h-[calc(100dvh-132px-env(safe-area-inset-top)-env(safe-area-inset-bottom))] max-w-full rounded-2xl object-contain shadow-2xl" />
           )}
           {canNext ? (
             <Button variant="ghost" size="icon" className="absolute right-1 z-20 size-10 rounded-full bg-black/35 text-white hover:bg-black/55" onClick={() => onChangeIndex(viewer.index + 1)} aria-label="Следующее фото">
