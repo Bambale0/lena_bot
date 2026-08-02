@@ -346,129 +346,121 @@ function FeedScreen({
   }, [preparingTrendId]);
 
   return (
-    <div className="grid gap-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold tracking-tight sm:text-xl">Лента</h1>
-            <Badge variant="outline">{contentMode === "works" ? `${renderedItems.length}/${visibleItems.length}` : `${renderedTrends.length}/${visibleTrends.length}`}</Badge>
-          </div>
-          <details className="apix-help max-w-xl">
-            <summary>Как работает лента</summary>
-            <p className="pb-2">Карточки выводятся порциями, чтобы Mini App не держала всю ленту в DOM. Фото и видео открываются внутри приложения.</p>
-          </details>
-        </div>
-        <Button
-          variant="outline"
-          size="icon"
-          className="size-9 min-h-9"
-          disabled={contentMode === "works" ? loading : trendsLoading}
-          onClick={contentMode === "works" ? onRefresh : () => void loadTrends()}
-          aria-label="Обновить ленту"
-        >
-          <RefreshCw className={(contentMode === "works" ? loading : trendsLoading) ? "animate-spin" : ""} />
-        </Button>
-      </div>
-
-      <div className="sticky top-[48px] z-30 grid gap-1.5 rounded-xl border border-border/70 bg-background/88 p-1.5 backdrop-blur-xl">
-        <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/45 p-1">
-          {[
-            { value: "works" as const, label: "Работы" },
-            { value: "trends" as const, label: "Тренды" },
-          ].map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              className={cn(
-                "apix-focus-ring min-h-8 rounded-md px-3 text-xs font-bold transition",
-                contentMode === tab.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
-              )}
-              onClick={() => setContentMode(tab.value)}
+    <div className="grid gap-2">
+      <div className="apix-feed-toolbar">
+        <div className="flex min-w-0 items-center gap-2">
+          <h1 className="text-lg font-bold tracking-tight sm:text-xl">Лента</h1>
+          <Badge variant="outline" className="shrink-0 text-[10px]">
+            {contentMode === "works" ? `${renderedItems.length}/${visibleItems.length}` : `${renderedTrends.length}/${visibleTrends.length}`}
+          </Badge>
+          <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
+            <div className="inline-flex shrink-0 rounded-xl border border-border/70 bg-muted/35 p-0.5">
+              {[
+                { value: "works" as const, label: "Работы" },
+                { value: "trends" as const, label: "Тренды" },
+              ].map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  className={cn(
+                    "apix-focus-ring min-h-7 rounded-lg px-2.5 text-[11px] font-bold transition",
+                    contentMode === tab.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+                  )}
+                  onClick={() => setContentMode(tab.value)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 min-h-8 shrink-0 rounded-xl"
+              disabled={contentMode === "works" ? loading : trendsLoading}
+              onClick={contentMode === "works" ? onRefresh : () => void loadTrends()}
+              aria-label="Обновить ленту"
             >
-              {tab.label}
-            </button>
-          ))}
+              <RefreshCw className={cn("size-4", (contentMode === "works" ? loading : trendsLoading) && "animate-spin")} />
+            </Button>
+          </div>
         </div>
+
+        <details className="apix-help hidden max-w-xl">
+          <summary>Как работает лента</summary>
+          <p className="pb-2">Карточки выводятся порциями, чтобы Mini App не держала всю ленту в DOM. Фото и видео открываются внутри приложения.</p>
+        </details>
 
         {contentMode === "works" ? (
-          <>
-            <div className="flex gap-1 overflow-x-auto pb-0.5">
-              {sourceFilters.map((filter) => (
-                <button
-                  key={filter.value}
-                  type="button"
-                  className={cn(
-                    "apix-focus-ring min-h-8 shrink-0 rounded-lg border px-3 text-xs font-semibold transition",
-                    source === filter.value
-                      ? "border-primary/40 bg-primary/15 text-primary"
-                      : "border-border bg-card/55 text-muted-foreground",
-                  )}
-                  onClick={() => onSourceChange(filter.value)}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex gap-1 overflow-x-auto pb-0.5">
-              {workFilters.map((filter) => (
-                <button
-                  key={filter.value}
-                  type="button"
-                  className={cn(
-                    "apix-focus-ring min-h-8 shrink-0 rounded-lg border px-3 text-xs font-semibold transition",
-                    workFilter === filter.value
-                      ? "border-cyan-400/45 bg-cyan-400/15 text-cyan-700 dark:text-cyan-200"
-                      : "border-border bg-card/55 text-muted-foreground",
-                  )}
-                  onClick={() => setWorkFilter(filter.value)}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
-          </>
+          <div className="apix-chip-rail flex gap-1.5 overflow-x-auto pb-0.5">
+            {sourceFilters.map((filter) => (
+              <button
+                key={filter.value}
+                type="button"
+                className={cn(
+                  "apix-focus-ring min-h-8 shrink-0 rounded-full border px-3 text-xs font-semibold transition",
+                  source === filter.value
+                    ? "border-primary/40 bg-primary/15 text-primary"
+                    : "border-border bg-card/55 text-muted-foreground",
+                )}
+                onClick={() => onSourceChange(filter.value)}
+              >
+                {filter.label}
+              </button>
+            ))}
+            <span className="my-1 w-px shrink-0 bg-border/70" aria-hidden="true" />
+            {workFilters.map((filter) => (
+              <button
+                key={filter.value}
+                type="button"
+                className={cn(
+                  "apix-focus-ring min-h-8 shrink-0 rounded-full border px-3 text-xs font-semibold transition",
+                  workFilter === filter.value
+                    ? "border-cyan-400/45 bg-cyan-400/15 text-cyan-700 dark:text-cyan-200"
+                    : "border-border bg-card/55 text-muted-foreground",
+                )}
+                onClick={() => setWorkFilter(filter.value)}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
         ) : (
-          <>
-            <div className="flex gap-1 overflow-x-auto pb-0.5">
-              {trendKindFilters.map(({ value, label, icon: Icon }) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={cn(
-                    "apix-focus-ring flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition",
-                    trendKind === value
-                      ? "border-primary/40 bg-primary/15 text-primary"
-                      : "border-border bg-card/55 text-muted-foreground",
-                  )}
-                  onClick={() => setTrendKind(value)}
-                >
-                  <Icon className="size-3.5" />
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex gap-1 overflow-x-auto pb-0.5">
-              {trendCategories.map((category) => (
-                <button
-                  key={category.key}
-                  type="button"
-                  className={cn(
-                    "apix-focus-ring flex min-h-8 shrink-0 items-center gap-1 rounded-lg border px-3 text-xs font-semibold transition",
-                    trendCategory === category.key
-                      ? "border-fuchsia-400/45 bg-fuchsia-400/15 text-fuchsia-700 dark:text-fuchsia-200"
-                      : "border-border bg-card/55 text-muted-foreground",
-                  )}
-                  onClick={() => setTrendCategory(category.key)}
-                >
-                  <span>{category.emoji}</span>
-                  <span>{category.title}</span>
-                  <span className="text-[10px] opacity-70">{category.count}</span>
-                </button>
-              ))}
-            </div>
-          </>
+          <div className="apix-chip-rail flex gap-1.5 overflow-x-auto pb-0.5">
+            {trendKindFilters.map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                type="button"
+                className={cn(
+                  "apix-focus-ring flex min-h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition",
+                  trendKind === value
+                    ? "border-primary/40 bg-primary/15 text-primary"
+                    : "border-border bg-card/55 text-muted-foreground",
+                )}
+                onClick={() => setTrendKind(value)}
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </button>
+            ))}
+            <span className="my-1 w-px shrink-0 bg-border/70" aria-hidden="true" />
+            {trendCategories.map((category) => (
+              <button
+                key={category.key}
+                type="button"
+                className={cn(
+                  "apix-focus-ring flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-semibold transition",
+                  trendCategory === category.key
+                    ? "border-fuchsia-400/45 bg-fuchsia-400/15 text-fuchsia-700 dark:text-fuchsia-200"
+                    : "border-border bg-card/55 text-muted-foreground",
+                )}
+                onClick={() => setTrendCategory(category.key)}
+              >
+                <span>{category.emoji}</span>
+                <span>{category.title}</span>
+                <span className="text-[10px] opacity-70">{category.count}</span>
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
@@ -484,11 +476,7 @@ function FeedScreen({
                 const isFeatured = index % 9 === 0;
                 return (
                   <Card key={item.id} className={cn("apix-feed-card overflow-hidden shadow-none", isFeatured && "apix-feed-card-featured")}>
-                    <button
-                      type="button"
-                      className={cn("apix-focus-ring group relative block w-full overflow-hidden bg-muted", cardMediaShape(index, isVideo))}
-                      onClick={() => openViewer(item)}
-                    >
+                    <div className={cn("apix-feed-media group relative w-full overflow-hidden bg-muted", cardMediaShape(index, isVideo))}>
                       {media ? (
                         isVideo ? (
                           <video src={media} muted playsInline preload="metadata" className="size-full object-cover transition duration-300 group-active:scale-[1.02]" />
@@ -505,13 +493,37 @@ function FeedScreen({
                       ) : (
                         <div className="grid size-full place-items-center text-xs text-muted-foreground">Нет preview</div>
                       )}
-                      <span className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(0,0,0,.78),transparent_54%)]" />
-                      {isVideo ? <span className="absolute inset-0 grid place-items-center"><span className="grid size-10 place-items-center rounded-full bg-black/55 text-white backdrop-blur"><Play className="ml-0.5 size-4" /></span></span> : null}
-                      <span className="absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-black/45 text-white opacity-85 backdrop-blur">
-                        <Maximize2 className="size-3.5" />
-                      </span>
-                      <span className="absolute inset-x-0 bottom-0 grid gap-1 px-2 pb-2 pt-10 text-white">
-                        <span className="flex items-center justify-between gap-1">
+                      <button type="button" className="absolute inset-0 z-10 cursor-zoom-in" aria-label="Открыть внутри приложения" onClick={() => openViewer(item)} />
+                      <span className="pointer-events-none absolute inset-0 z-10 bg-[linear-gradient(to_top,rgba(0,0,0,.82),transparent_62%)]" />
+                      {isVideo ? <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center"><span className="grid size-10 place-items-center rounded-full bg-black/55 text-white backdrop-blur"><Play className="ml-0.5 size-4" /></span></span> : null}
+
+                      <div className="absolute right-2 top-2 z-20 flex gap-1">
+                        <button
+                          type="button"
+                          className="apix-focus-ring grid size-7 place-items-center rounded-full bg-black/45 text-white backdrop-blur active:scale-95"
+                          aria-label="Лайк"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onLike(item);
+                          }}
+                        >
+                          <Heart className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          className="apix-focus-ring grid size-7 place-items-center rounded-full bg-black/45 text-white backdrop-blur active:scale-95"
+                          aria-label="Открыть внутри приложения"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openViewer(item);
+                          }}
+                        >
+                          <Maximize2 className="size-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="absolute inset-x-0 bottom-0 z-20 grid gap-1.5 px-2 pb-2 pt-10 text-white">
+                        <div className="flex items-center justify-between gap-1">
                           <span className="flex min-w-0 items-center gap-1.5">
                             <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-white/20">
                               {item.author_photo_url ? <img src={item.author_photo_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <UserRound className="size-3" />}
@@ -523,36 +535,30 @@ function FeedScreen({
                             {item.is_mine ? <span>моё</span> : null}
                             {item.aspect_ratio ? <span>{item.aspect_ratio}</span> : null}
                           </span>
-                        </span>
+                        </div>
                         {isFeatured && item.prompt && !item.prompt_hidden ? <span className="line-clamp-2 text-left text-[10px] font-semibold leading-tight opacity-95">{item.prompt}</span> : null}
-                      </span>
-                    </button>
-
-                    <div className="grid gap-1.5 p-1.5">
-                      {item.prompt && !item.prompt_hidden && !isFeatured ? (
-                        <details className="apix-help border-0">
-                          <summary className="py-1 text-[10px]">Промпт</summary>
-                          <p className="line-clamp-6 pb-1 text-[10px]">{item.prompt}</p>
-                        </details>
-                      ) : null}
-
-                      <div className="grid grid-cols-[1fr_34px_34px] gap-1">
-                        <Button size="sm" className="min-h-8 px-2 text-[10px]" disabled={remixing} onClick={() => onRemix(item)}>
-                          <Repeat2 className={cn("size-3.5", remixing && "animate-spin")} /> {remixing ? "Запуск" : "Повторить"}
-                        </Button>
-                        <Button variant="ghost" size="icon" className="size-8 min-h-8" aria-label="Лайк" onClick={() => onLike(item)}>
-                          <Heart className="size-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="size-8 min-h-8" aria-label="Открыть внутри приложения" onClick={() => openViewer(item)}>
-                          <Maximize2 className="size-3.5" />
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            className="apix-focus-ring inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-xl bg-primary px-2 text-[10px] font-bold text-primary-foreground shadow-lg shadow-black/20 active:scale-[0.98] disabled:opacity-75"
+                            disabled={remixing}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onRemix(item);
+                            }}
+                          >
+                            <Repeat2 className={cn("size-3.5", remixing && "animate-spin")} />
+                            {remixing ? "Запуск" : "Повторить"}
+                          </button>
+                          <span className="min-w-0 truncate rounded-full bg-black/35 px-2 py-1 text-[8px] text-white/85 backdrop-blur">{item.model}</span>
+                        </div>
                       </div>
-                      <div className="flex gap-2 px-1 text-[9px] text-muted-foreground">
-                        <span>♥ {item.likes_count || 0}</span>
-                        <span>↗ {item.shares_count || 0}</span>
-                        <span>↻ {item.remixes || 0}</span>
-                        <span className="ml-auto truncate">{item.model}</span>
-                      </div>
+                    </div>
+
+                    <div className="flex gap-2 px-2 py-1.5 text-[9px] text-muted-foreground">
+                      <span>♥ {item.likes_count || 0}</span>
+                      <span>↗ {item.shares_count || 0}</span>
+                      <span>↻ {item.remixes || 0}</span>
                     </div>
                   </Card>
                 );
@@ -623,7 +629,7 @@ function TrendCategorySurface({
           const isVideo = trend.kind === "video";
           return (
             <Card key={trend.id} className={cn("apix-feed-card overflow-hidden shadow-none", index % 6 === 0 && "apix-feed-card-featured")}>
-              <div className={cn("relative overflow-hidden bg-muted", index % 6 === 0 ? "aspect-[3/4]" : "aspect-[4/5]") }>
+              <div className={cn("apix-feed-media relative overflow-hidden bg-muted", index % 6 === 0 ? "aspect-[3/4]" : "aspect-[4/5]") }>
                 {media ? (
                   isVideo ? (
                     <video src={media} muted playsInline preload="metadata" className="size-full object-cover" />
