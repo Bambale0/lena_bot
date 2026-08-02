@@ -25,25 +25,30 @@ const filters = [
 
 function FeedScreen({ items, source, loading, onSourceChange, onRefresh, onLike, onRemix }: FeedScreenProps) {
   return (
-    <div className="grid gap-4">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <Badge className="mb-2">Сообщество</Badge>
-          <h1 className="text-3xl font-bold tracking-tight">Лента работ</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Только опубликованные результаты. Тяжёлые медиа загружаются порциями.</p>
+    <div className="grid gap-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-bold tracking-tight sm:text-xl">Лента</h1>
+            <Badge variant="outline">{items.length}</Badge>
+          </div>
+          <details className="apix-help max-w-xl">
+            <summary>Как работает лента</summary>
+            <p className="pb-2">Здесь только опубликованные результаты. Медиа открывается целиком по нажатию.</p>
+          </details>
         </div>
-        <Button variant="outline" size="icon" disabled={loading} onClick={onRefresh} aria-label="Обновить ленту">
+        <Button variant="outline" size="icon" className="size-9 min-h-9" disabled={loading} onClick={onRefresh} aria-label="Обновить ленту">
           <RefreshCw className={loading ? "animate-spin" : ""} />
         </Button>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="flex gap-1 overflow-x-auto pb-0.5">
         {filters.map((filter) => (
           <button
             key={filter.value}
             type="button"
             className={cn(
-              "apix-focus-ring min-h-10 shrink-0 rounded-xl border px-4 text-sm font-semibold transition",
+              "apix-focus-ring min-h-8 shrink-0 rounded-lg border px-3 text-xs font-semibold transition",
               source === filter.value
                 ? "border-primary/40 bg-primary/15 text-primary"
                 : "border-border bg-card/55 text-muted-foreground",
@@ -74,44 +79,44 @@ function FeedScreen({ items, source, loading, onSourceChange, onRefresh, onLike,
                       <img src={media} alt="" loading="lazy" className="max-h-[520px] w-full object-cover" />
                     )
                   ) : (
-                    <div className="grid aspect-[4/5] place-items-center text-muted-foreground">Нет preview</div>
+                    <div className="grid aspect-[4/5] place-items-center text-xs text-muted-foreground">Нет preview</div>
                   )}
-                  {isVideo ? <span className="absolute inset-0 grid place-items-center"><span className="grid size-12 place-items-center rounded-full bg-black/55 text-white"><Play className="ml-0.5 size-5" /></span></span> : null}
+                  {isVideo ? <span className="absolute inset-0 grid place-items-center"><span className="grid size-9 place-items-center rounded-full bg-black/55 text-white"><Play className="ml-0.5 size-4" /></span></span> : null}
+                  <span className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/75 to-transparent px-2 pb-1.5 pt-7 text-white">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-white/20">
+                        {item.author_photo_url ? <img src={item.author_photo_url} alt="" className="size-full object-cover" /> : <UserRound className="size-3" />}
+                      </span>
+                      <span className="truncate text-[9px] font-semibold">{item.author || "Автор"}</span>
+                    </span>
+                    {item.aspect_ratio ? <span className="text-[8px] opacity-80">{item.aspect_ratio}</span> : null}
+                  </span>
                 </button>
 
-                <div className="grid gap-3 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-secondary">
-                        {item.author_photo_url ? <img src={item.author_photo_url} alt="" className="size-full object-cover" /> : <UserRound className="size-4" />}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-xs font-semibold">{item.author || "Автор"}</span>
-                        <span className="block truncate text-[10px] text-muted-foreground">{item.model}</span>
-                      </span>
-                    </div>
-                    {item.aspect_ratio ? <Badge variant="outline">{item.aspect_ratio}</Badge> : null}
-                  </div>
-
+                <div className="grid gap-1.5 p-1.5">
                   {item.prompt && !item.prompt_hidden ? (
-                    <p className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">{item.prompt}</p>
+                    <details className="apix-help border-0">
+                      <summary className="py-1 text-[10px]">Промпт</summary>
+                      <p className="line-clamp-6 pb-1 text-[10px]">{item.prompt}</p>
+                    </details>
                   ) : null}
 
-                  <div className="grid grid-cols-[1fr_auto_auto] gap-2">
-                    <Button size="sm" onClick={() => onRemix(item)}>
-                      <Repeat2 /> Повторить
+                  <div className="grid grid-cols-[1fr_34px_34px] gap-1">
+                    <Button size="sm" className="min-h-8 px-2 text-[10px]" onClick={() => onRemix(item)}>
+                      <Repeat2 className="size-3.5" /> Повторить
                     </Button>
-                    <Button variant="ghost" size="icon" aria-label="Лайк" onClick={() => onLike(item)}>
-                      <Heart />
+                    <Button variant="ghost" size="icon" className="size-8 min-h-8" aria-label="Лайк" onClick={() => onLike(item)}>
+                      <Heart className="size-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" aria-label="Открыть результат" onClick={() => media && openExternalUrl(media)}>
-                      <Share2 />
+                    <Button variant="ghost" size="icon" className="size-8 min-h-8" aria-label="Открыть результат" onClick={() => media && openExternalUrl(media)}>
+                      <Share2 className="size-3.5" />
                     </Button>
                   </div>
-                  <div className="flex gap-3 text-[11px] text-muted-foreground">
+                  <div className="flex gap-2 px-1 text-[9px] text-muted-foreground">
                     <span>♥ {item.likes_count || 0}</span>
                     <span>↗ {item.shares_count || 0}</span>
                     <span>↻ {item.remixes || 0}</span>
+                    <span className="ml-auto truncate">{item.model}</span>
                   </div>
                 </div>
               </Card>
@@ -119,7 +124,7 @@ function FeedScreen({ items, source, loading, onSourceChange, onRefresh, onLike,
           })}
         </div>
       ) : (
-        <div className="grid min-h-56 place-items-center rounded-2xl border border-dashed border-border text-center text-sm text-muted-foreground">
+        <div className="grid min-h-28 place-items-center rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">
           {loading ? "Загружаем ленту…" : "В этой подборке пока нет работ"}
         </div>
       )}
