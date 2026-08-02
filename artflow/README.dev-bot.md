@@ -160,14 +160,57 @@ bash scripts/deploy-dev-bot.sh <branch-name>
 
 ## Production deploy rule
 
-Production must deploy only from `main`:
+Production deploys only from `main`. The script default branch is `main`; `DEPLOY_BRANCH=main` can be set explicitly in CI for readability.
+
+Manual production deploy from the server:
 
 ```bash
 cd ~/mkdir/lena_bot/artflow
-bash scripts/deploy-production.sh main
+DEPLOY_BRANCH=main bash scripts/deploy-production.sh
 ```
 
+Production deploy with a checked SHA from CI:
+
+```bash
+cd ~/mkdir/lena_bot/artflow
+DEPLOY_BRANCH=main bash scripts/deploy-production.sh <tested-main-commit-sha>
+```
+
+Important: the first argument of `deploy-production.sh` is an optional 40-character expected commit SHA, not a branch name. Do not run `bash scripts/deploy-production.sh main`.
+
 For CI/CD, configure production deployment to run only after a successful push/merge to `main`. Do not let feature branches deploy to the production bot.
+
+## GitHub Actions deployment split
+
+Recommended automation shape:
+
+```yaml
+# Dev bot: runs for feature/dev branches, never for main production.
+on:
+  push:
+    branches-ignore:
+      - main
+```
+
+```yaml
+# Production: runs only after merge/push to main.
+on:
+  push:
+    branches:
+      - main
+```
+
+Dev SSH command:
+
+```bash
+cd "$DEV_APP_PATH" && bash scripts/deploy-dev-bot.sh "$GITHUB_REF_NAME"
+```
+
+Production SSH command:
+
+```bash
+cd "$PROD_APP_PATH" && DEPLOY_BRANCH=main bash scripts/deploy-production.sh "$GITHUB_SHA"
+```
 
 ## Rollback
 
@@ -181,10 +224,11 @@ bash scripts/deploy-dev-bot.sh <previous-good-branch-or-sha>
 Production rollback:
 
 ```bash
-cd ~/mkdir/lena_bot/artflow
+cd ~/mkdir/lena_bot
 git fetch origin main
 git reset --hard <previous-good-sha>
-bash scripts/deploy-production.sh main
+cd artflow
+DEPLOY_BRANCH=main bash scripts/deploy-production.sh
 ```
 
 ## Hard safety rule
