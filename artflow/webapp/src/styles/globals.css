@@ -136,7 +136,7 @@ video {
   width: min(100%, 1180px);
   min-height: 100dvh;
   margin: 0 auto;
-  padding: max(4px, env(safe-area-inset-top)) 8px calc(68px + env(safe-area-inset-bottom));
+  padding: max(4px, env(safe-area-inset-top)) 8px calc(70px + env(safe-area-inset-bottom));
 }
 
 .apix-glass {
@@ -159,6 +159,9 @@ video {
 .apix-nav-scroll {
   scrollbar-width: none;
   scroll-snap-type: x proximity;
+  scroll-padding-inline: 0.5rem;
+  padding-inline: 0.125rem;
+  -webkit-overflow-scrolling: touch;
 }
 
 .apix-nav-scroll::-webkit-scrollbar {
@@ -167,6 +170,10 @@ video {
 
 .apix-nav-scroll > * {
   scroll-snap-align: center;
+}
+
+.apix-nav-item {
+  flex: 0 0 auto;
 }
 
 .apix-media-grid {
