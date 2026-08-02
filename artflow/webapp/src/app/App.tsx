@@ -75,6 +75,10 @@ function mediaLooksVideo(item: FeedItem): boolean {
   return item.gen_type === "video" || /\.(mp4|webm|mov)(\?|$)/i.test(media);
 }
 
+function uniqueStrings(items: string[]): string[] {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+}
+
 function App() {
   const [mode, setMode] = useState<AppMode>("booting");
   const [errorMessage, setErrorMessage] = useState("");
@@ -104,6 +108,8 @@ function App() {
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [photoPromptBusy, setPhotoPromptBusy] = useState(false);
   const [photoPromptResult, setPhotoPromptResult] = useState<PhotoPromptResult | null>(null);
+  const [referenceUploadingKind, setReferenceUploadingKind] = useState<GenerationDraft["kind"] | null>(null);
+  const [videoUploadingKind, setVideoUploadingKind] = useState<GenerationDraft["kind"] | null>(null);
   const [imageDraft, setImageDraft] = useState<GenerationDraft>(() => emptyDraft("image"));
   const [videoDraft, setVideoDraft] = useState<GenerationDraft>(() => emptyDraft("video"));
   const [motionDraft, setMotionDraft] = useState<GenerationDraft>(() => emptyDraft("motion"));
@@ -138,6 +144,50 @@ function App() {
       resolution: firstMotion?.resolution_options?.[0] || current.resolution,
     }));
   }, []);
+
+  const patchDraft = useCallback((kind: GenerationDraft["kind"], patcher: (current: GenerationDraft) => GenerationDraft) => {
+    if (kind === "image") setImageDraft(patcher);
+    else if (kind === "video") setVideoDraft(patcher);
+    else setMotionDraft(patcher);
+  }, []);
+
+  const uploadReferenceFiles = useCallback(async (kind: GenerationDraft["kind"], files: File[]) => {
+    if (!api || referenceUploadingKind || !files.length) return;
+    setReferenceUploadingKind(kind);
+    try {
+      const uploaded: string[] = [];
+      for (const file of files) {
+        const result = await api.uploadMedia(file);
+        if (result.url) uploaded.push(result.url);
+      }
+      if (!uploaded.length) throw new Error("Backend не вернул ссылки на файлы");
+      patchDraft(kind, (current) => ({ ...current, referenceUrls: uniqueStrings([...current.referenceUrls, ...uploaded]) }));
+      notifyHaptic("success");
+      toast.success(uploaded.length === 1 ? "Фото загружено" : `Загружено файлов: ${uploaded.length}`);
+    } catch (error) {
+      notifyHaptic("error");
+      toast.error(error instanceof Error ? error.message : "Не удалось загрузить файл");
+    } finally {
+      setReferenceUploadingKind(null);
+    }
+  }, [api, patchDraft, referenceUploadingKind]);
+
+  const uploadVideoFile = useCallback(async (kind: GenerationDraft["kind"], file: File) => {
+    if (!api || videoUploadingKind) return;
+    setVideoUploadingKind(kind);
+    try {
+      const result = await api.uploadMedia(file);
+      if (!result.url) throw new Error("Backend не вернул ссылку на видео");
+      patchDraft(kind, (current) => ({ ...current, videoUrl: result.url }));
+      notifyHaptic("success");
+      toast.success("Видео загружено");
+    } catch (error) {
+      notifyHaptic("error");
+      toast.error(error instanceof Error ? error.message : "Не удалось загрузить видео");
+    } finally {
+      setVideoUploadingKind(null);
+    }
+  }, [api, patchDraft, videoUploadingKind]);
 
   const applyPreparedTrend = useCallback((prepared: PreparedTrend) => {
     const settings = prepared.settings || {};
@@ -621,13 +671,13 @@ function App() {
       );
     }
     if (activeTab === "photo") {
-      return <GenerationScreen kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} onChange={(patch) => setImageDraft((current) => ({ ...current, ...patch }))} onSubmit={() => void submitGeneration("image")} onResetPreset={() => setImageDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
+      return <GenerationScreen kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "image"} videoUploading={videoUploadingKind === "image"} onChange={(patch) => setImageDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("image", files)} onUploadVideoFile={(file) => void uploadVideoFile("image", file)} onSubmit={() => void submitGeneration("image")} onResetPreset={() => setImageDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
     }
     if (activeTab === "video") {
-      return <GenerationScreen kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} onChange={(patch) => setVideoDraft((current) => ({ ...current, ...patch }))} onSubmit={() => void submitGeneration("video")} onResetPreset={() => setVideoDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
+      return <GenerationScreen kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video"} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onSubmit={() => void submitGeneration("video")} onResetPreset={() => setVideoDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
     }
     if (activeTab === "motion") {
-      return <GenerationScreen kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} onChange={(patch) => setMotionDraft((current) => ({ ...current, ...patch }))} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => setMotionDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
+      return <GenerationScreen kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "motion"} videoUploading={videoUploadingKind === "motion"} onChange={(patch) => setMotionDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("motion", files)} onUploadVideoFile={(file) => void uploadVideoFile("motion", file)} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => setMotionDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
     }
     if (activeTab === "trends") {
       return <TrendsScreen items={data.trends} filter={trendsFilter} loading={trendsLoading} preparingId={preparingTrendId} onFilterChange={setTrendsFilter} onRefresh={() => void loadTrends()} onPrepare={(trend) => void prepareTrend(trend)} />;
