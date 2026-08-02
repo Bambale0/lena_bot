@@ -1,4 +1,4 @@
-import { Copy, Gift, History, Share2, Sparkles, Users, Wallet } from "lucide-react";
+import { Copy, Gift, Globe2, History, Play, Share2, Sparkles, Users, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ function ProfileScreen({ user, tasks, referrals, referralsLoading, onOpenTask, o
   const name = user.full_name || user.first_name || user.username || "Пользователь";
   const referralLink = referrals?.referral_link || user.referral_link || "";
   const invited = Number(referrals?.counts?.l1 || 0) + Number(referrals?.counts?.l2 || 0) + Number(referrals?.counts?.l3 || 0);
+  const publishedTasks = tasks.filter((task) => Boolean(task.is_public_feed));
 
   const copy = async (value: string, label: string) => {
     if (!value) return;
@@ -50,49 +51,29 @@ function ProfileScreen({ user, tasks, referrals, referralsLoading, onOpenTask, o
           </div>
 
           <div className="grid grid-cols-4 gap-1.5">
-            <Stat label="Задач" value={tasks.length} icon={History} />
+            <Stat label="История" value={tasks.length} icon={History} />
+            <Stat label="Выложено" value={publishedTasks.length} icon={Globe2} />
             <Stat label="Приглашено" value={invited} icon={Users} />
             <Stat label="Баланс" value={formatCredits(referrals?.balance?.available_to_withdraw || user.referral_balance)} icon={Gift} />
-            <Stat label="Заработано" value={formatCredits(referrals?.balance?.total_earned)} icon={Sparkles} />
           </div>
         </CardContent>
       </Card>
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <section>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold tracking-tight">История</h2>
-            <Badge variant="outline">{tasks.length}</Badge>
-          </div>
-          {tasks.length ? (
-            <div className="grid grid-cols-2 gap-1.5 min-[430px]:grid-cols-3 sm:grid-cols-4 xl:grid-cols-5">
-              {tasks.map((task) => {
-                const media = firstMedia(task);
-                const video = task.gen_type === "video";
-                return (
-                  <button
-                    key={task.id}
-                    type="button"
-                    className="apix-focus-ring apix-glass overflow-hidden rounded-xl text-left transition active:scale-[0.98]"
-                    onClick={() => onOpenTask(task)}
-                  >
-                    <div className="relative aspect-square bg-muted">
-                      {media ? (
-                        video ? <video src={media} muted playsInline preload="metadata" className="size-full object-cover" /> : <img src={media} alt="" loading="lazy" className="size-full object-cover" />
-                      ) : <div className="grid size-full place-items-center text-muted-foreground"><Sparkles className="size-4" /></div>}
-                      <Badge variant={task.status === "failed" ? "destructive" : task.status === "done" ? "success" : "warning"} className="absolute left-1 top-1 px-1.5 py-0 text-[8px]">{generationStatusLabel(task.status)}</Badge>
-                    </div>
-                    <div className="px-2 py-1.5">
-                      <p className="truncate text-[10px] font-semibold">{task.model}</p>
-                      <p className="mt-0.5 flex justify-between gap-1 text-[9px] text-muted-foreground"><span>{formatRelativeDate(task.created_at)}</span><span>{formatCredits(task.credits_spent)}</span></p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="grid min-h-24 place-items-center rounded-xl border border-dashed border-border text-xs text-muted-foreground">История пока пустая</div>
-          )}
+        <section className="grid gap-3">
+          <WorkGrid
+            title="Выложенные работы"
+            empty="Ты ещё ничего не выложил в профиль"
+            tasks={publishedTasks}
+            onOpenTask={onOpenTask}
+          />
+
+          <WorkGrid
+            title="Все работы"
+            empty="История пока пустая"
+            tasks={tasks}
+            onOpenTask={onOpenTask}
+          />
         </section>
 
         <aside>
@@ -122,6 +103,59 @@ function ProfileScreen({ user, tasks, referrals, referralsLoading, onOpenTask, o
         </aside>
       </div>
     </div>
+  );
+}
+
+function WorkGrid({
+  title,
+  empty,
+  tasks,
+  onOpenTask,
+}: {
+  title: string;
+  empty: string;
+  tasks: GenerationTask[];
+  onOpenTask: (task: GenerationTask) => void;
+}) {
+  return (
+    <section>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+        <Badge variant="outline">{tasks.length}</Badge>
+      </div>
+      {tasks.length ? (
+        <div className="grid grid-cols-2 gap-1.5 min-[390px]:grid-cols-3 sm:grid-cols-4 xl:grid-cols-5">
+          {tasks.map((task) => <TaskTile key={task.id} task={task} onOpenTask={onOpenTask} />)}
+        </div>
+      ) : (
+        <div className="grid min-h-24 place-items-center rounded-xl border border-dashed border-border text-xs text-muted-foreground">{empty}</div>
+      )}
+    </section>
+  );
+}
+
+function TaskTile({ task, onOpenTask }: { task: GenerationTask; onOpenTask: (task: GenerationTask) => void }) {
+  const media = firstMedia(task);
+  const video = task.gen_type === "video" || /\.(mp4|webm|mov)(\?|$)/i.test(media);
+  return (
+    <button
+      type="button"
+      className="apix-focus-ring apix-glass overflow-hidden rounded-xl text-left transition active:scale-[0.98]"
+      onClick={() => onOpenTask(task)}
+    >
+      <div className="relative aspect-square bg-muted">
+        {media ? (
+          video ? <video src={media} muted playsInline preload="metadata" className="size-full object-cover" /> : <img src={media} alt="" loading="lazy" className="size-full object-cover" />
+        ) : <div className="grid size-full place-items-center text-muted-foreground"><Sparkles className="size-4" /></div>}
+        {video ? <span className="absolute inset-0 grid place-items-center"><span className="grid size-8 place-items-center rounded-full bg-black/55 text-white"><Play className="ml-0.5 size-3.5" /></span></span> : null}
+        <Badge variant={task.status === "failed" ? "destructive" : task.status === "done" ? "success" : "warning"} className="absolute left-1 top-1 px-1.5 py-0 text-[8px]">{generationStatusLabel(task.status)}</Badge>
+        {task.is_public_feed ? <Badge variant="outline" className="absolute bottom-1 left-1 bg-background/80 px-1.5 py-0 text-[8px]">в профиле</Badge> : null}
+      </div>
+      <div className="px-2 py-1.5">
+        <p className="truncate text-[10px] font-semibold">{task.model}</p>
+        <p className="mt-0.5 flex justify-between gap-1 text-[9px] text-muted-foreground"><span>{formatRelativeDate(task.created_at)}</span><span>{formatCredits(task.credits_spent)}</span></p>
+      </div>
+    </button>
   );
 }
 
