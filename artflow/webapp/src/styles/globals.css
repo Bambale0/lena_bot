@@ -118,6 +118,7 @@ button,
 input,
 textarea,
 select {
+  max-width: 100%;
   font: inherit;
 }
 
@@ -182,17 +183,20 @@ video {
   -webkit-backdrop-filter: blur(16px) saturate(1.05);
 }
 
-.apix-chip-rail {
+.apix-chip-rail,
+.apix-adaptive-rail {
   scrollbar-width: none;
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
 }
 
-.apix-chip-rail::-webkit-scrollbar {
+.apix-chip-rail::-webkit-scrollbar,
+.apix-adaptive-rail::-webkit-scrollbar {
   display: none;
 }
 
-.apix-chip-rail > * {
+.apix-chip-rail > *,
+.apix-adaptive-rail > * {
   scroll-snap-align: start;
 }
 
@@ -344,6 +348,27 @@ video {
   color: var(--foreground);
 }
 
+.apix-generation-layout {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.apix-generation-layout,
+.apix-generation-main,
+.apix-generation-card,
+.apix-generation-card-content,
+.apix-uploader-card {
+  min-width: 0;
+}
+
+.apix-generation-card {
+  overflow: hidden;
+}
+
+.apix-uploader-head > label {
+  margin-left: auto;
+}
+
 .apix-launch-bar {
   position: static;
   z-index: 35;
@@ -424,6 +449,195 @@ video {
   .apix-feed-media,
   .apix-trend-category-grid .apix-feed-media {
     max-height: 260px;
+  }
+}
+
+@media (max-width: 640px), (max-height: 740px) {
+  :root {
+    --apix-bottom-nav-space: calc(58px + env(safe-area-inset-bottom));
+  }
+
+  .apix-shell {
+    width: 100%;
+    gap: 0.2rem;
+    padding-inline: 6px;
+  }
+
+  .apix-shell > main {
+    padding-bottom: 0.1rem;
+  }
+
+  .apix-feed-toolbar {
+    gap: 0.25rem;
+    padding: 0.32rem;
+    border-radius: 0.8rem;
+  }
+
+  .apix-generation-layout {
+    display: block;
+  }
+
+  .apix-generation-main {
+    display: grid;
+    gap: 0.45rem;
+  }
+
+  .apix-generation-titlebar {
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .apix-generation-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 0.55rem;
+  }
+
+  .apix-generation-title {
+    font-size: 1rem;
+    line-height: 1.15;
+  }
+
+  .apix-generation-subtitle {
+    max-width: 58vw;
+  }
+
+  .apix-generation-balance {
+    font-size: 0.7rem;
+    padding-inline: 0.45rem;
+  }
+
+  .apix-generation-card {
+    border-radius: 0.85rem;
+  }
+
+  .apix-generation-card-header {
+    padding: 0.55rem 0.65rem 0.25rem;
+  }
+
+  .apix-generation-card-content {
+    gap: 0.45rem;
+    padding: 0.55rem 0.65rem 0.65rem;
+  }
+
+  .apix-prompt-input {
+    min-height: 4.5rem;
+  }
+
+  .apix-uploader-card {
+    gap: 0.45rem;
+    padding: 0.5rem;
+    border-radius: 0.75rem;
+  }
+
+  .apix-uploader-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .apix-uploader-head p:last-child,
+  .apix-generation-card .apix-help p,
+  .apix-generation-card details:not([open]) + p {
+    display: none;
+  }
+
+  .apix-adaptive-rail {
+    margin-inline: -0.15rem;
+    padding-inline: 0.15rem;
+  }
+
+  .apix-adaptive-rail button,
+  .apix-uploader-head label {
+    min-height: 2rem;
+    padding-inline: 0.55rem;
+    font-size: 0.72rem;
+  }
+
+  .apix-launch-bar {
+    position: static;
+    margin-top: 0.45rem;
+  }
+
+  .apix-launch-bar .shadow-xl {
+    box-shadow: 0 8px 20px color-mix(in oklab, black 10%, transparent);
+  }
+
+  .apix-launch-bar [class*="p-2.5"] {
+    padding: 0.55rem;
+  }
+
+  .apix-bottom-nav {
+    width: 100%;
+    border-radius: 0.9rem;
+  }
+
+  .apix-nav-scroll {
+    gap: 0.15rem;
+    padding: 0.2rem;
+  }
+
+  .apix-nav-item {
+    min-width: 4rem;
+    padding-inline: 0.45rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .apix-shell {
+    padding-inline: 4px;
+  }
+
+  .apix-generation-subtitle {
+    display: none;
+  }
+
+  .apix-generation-balance {
+    max-width: 5.2rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .apix-generation-card-header,
+  .apix-generation-card-content {
+    padding-inline: 0.5rem;
+  }
+
+  .apix-nav-item {
+    min-width: 3.65rem;
+    font-size: 0.68rem;
+  }
+}
+
+@media (max-height: 680px) {
+  .apix-app-header {
+    display: none;
+  }
+
+  .apix-generation-titlebar {
+    display: none;
+  }
+
+  .apix-generation-card-header {
+    padding-top: 0.45rem;
+  }
+
+  .apix-prompt-input {
+    min-height: 3.75rem;
+  }
+}
+
+@container (max-width: 430px) {
+  .apix-generation-layout {
+    gap: 0.45rem;
+  }
+
+  .apix-generation-card-content {
+    gap: 0.45rem;
+  }
+
+  .apix-uploader-head {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 
