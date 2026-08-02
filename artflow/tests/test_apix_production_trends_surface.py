@@ -138,7 +138,7 @@ def test_feed_controls_are_compact_and_actions_stay_inside_media() -> None:
     assert 'apix-feed-media group relative' in feed
     assert 'cursor-zoom-in' in feed
     assert 'inline-flex min-h-8 flex-1 items-center justify-center' in feed
-    assert 'event.stopPropagation()' in feed
+    assert 'event.stopPropagation();' in feed
     assert '.apix-feed-toolbar' in css
     assert '.apix-chip-rail' in css
     assert '.apix-feed-media' in css
