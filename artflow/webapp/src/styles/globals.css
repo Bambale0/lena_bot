@@ -26,6 +26,7 @@
   --radius: 0.75rem;
   --apix-cyan: oklch(0.79 0.16 205);
   --apix-pink: oklch(0.7 0.23 350);
+  --apix-bottom-nav-space: calc(86px + env(safe-area-inset-bottom));
 }
 
 .dark {
@@ -136,11 +137,16 @@ video {
   width: min(100%, 1180px);
   min-height: 100dvh;
   margin: 0 auto;
-  padding: max(4px, env(safe-area-inset-top)) 8px calc(70px + env(safe-area-inset-bottom));
+  padding: max(4px, env(safe-area-inset-top)) 8px var(--apix-bottom-nav-space);
+}
+
+.apix-shell > main {
+  padding-bottom: calc(var(--apix-bottom-nav-space) + 10px);
+  scroll-padding-bottom: var(--apix-bottom-nav-space);
 }
 
 .apix-glass {
-  background: color-mix(in oklab, var(--card) 94%, transparent);
+  background: color-mix(in oklab, var(--card) 96%, transparent);
   border: 1px solid var(--border);
   box-shadow: 0 12px 36px color-mix(in oklab, black 18%, transparent);
   backdrop-filter: blur(18px) saturate(1.08);
@@ -151,9 +157,12 @@ video {
   position: fixed;
   z-index: 50;
   left: 50%;
-  bottom: max(3px, env(safe-area-inset-bottom));
-  width: min(calc(100% - 8px), 900px);
+  bottom: max(5px, env(safe-area-inset-bottom));
+  width: min(calc(100% - 12px), 820px);
   transform: translateX(-50%);
+  box-shadow:
+    0 -18px 38px color-mix(in oklab, var(--background) 80%, transparent),
+    0 12px 36px color-mix(in oklab, black 18%, transparent);
 }
 
 .apix-nav-scroll {
@@ -188,15 +197,21 @@ video {
 
 .apix-feed-mosaic {
   perspective: 1000px;
+  padding-bottom: 0.5rem;
+}
+
+.apix-feed-mosaic button.group,
+.apix-trend-category-grid button.group {
+  max-height: min(58dvh, 420px);
 }
 
 .apix-feed-card {
-  animation: apix-feed-card-in 260ms ease-out both;
+  animation: apix-feed-card-in 220ms ease-out both;
   content-visibility: auto;
-  contain-intrinsic-size: 320px 420px;
+  contain-intrinsic-size: 280px 360px;
   overflow: clip;
   border-color: color-mix(in oklab, var(--border) 84%, transparent);
-  box-shadow: 0 10px 26px color-mix(in oklab, black 12%, transparent);
+  box-shadow: 0 8px 20px color-mix(in oklab, black 10%, transparent);
 }
 
 .apix-feed-card-featured {
@@ -205,7 +220,7 @@ video {
     color-mix(in oklab, var(--card) 96%, transparent);
   border-color: color-mix(in oklab, var(--primary) 38%, var(--border));
   box-shadow:
-    0 14px 34px color-mix(in oklab, black 18%, transparent),
+    0 12px 26px color-mix(in oklab, black 15%, transparent),
     0 0 0 1px color-mix(in oklab, var(--primary) 18%, transparent) inset;
 }
 
@@ -224,7 +239,7 @@ video {
 @keyframes apix-feed-card-in {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.985);
+    transform: translateY(8px) scale(0.988);
   }
   to {
     opacity: 1;
@@ -291,18 +306,40 @@ video {
 }
 
 @media (min-width: 760px) {
+  :root {
+    --apix-bottom-nav-space: calc(104px + env(safe-area-inset-bottom));
+  }
+
   .apix-shell {
-    padding-inline: 20px;
-    padding-bottom: 88px;
+    padding-inline: 16px;
+    padding-bottom: var(--apix-bottom-nav-space);
+  }
+
+  .apix-shell > main {
+    padding-bottom: calc(var(--apix-bottom-nav-space) + 18px);
+  }
+
+  .apix-bottom-nav {
+    bottom: max(10px, env(safe-area-inset-bottom));
+    width: min(calc(100% - 40px), 760px);
   }
 
   .apix-media-grid {
     columns: 3;
-    column-gap: 0.75rem;
+    column-gap: 0.65rem;
   }
 
   .apix-media-grid > * {
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .apix-feed-mosaic button.group,
+  .apix-trend-category-grid button.group {
+    max-height: min(42dvh, 330px);
+  }
+
+  .apix-feed-card {
+    contain-intrinsic-size: 260px 320px;
   }
 
   .apix-launch-bar {
@@ -312,7 +349,27 @@ video {
 
 @media (min-width: 1080px) {
   .apix-media-grid {
+    columns: 3;
+  }
+
+  .apix-feed-mosaic button.group,
+  .apix-trend-category-grid button.group {
+    max-height: min(39dvh, 300px);
+  }
+}
+
+@media (min-width: 1280px) {
+  .apix-shell {
+    width: min(100%, 1120px);
+  }
+
+  .apix-media-grid {
     columns: 4;
+  }
+
+  .apix-feed-mosaic button.group,
+  .apix-trend-category-grid button.group {
+    max-height: 280px;
   }
 }
 
