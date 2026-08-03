@@ -40,16 +40,27 @@ export function readTelegramInitData(): string {
   if (typeof window === "undefined") return "";
   const current = window.location.href;
   const early = window.__APIX_EARLY_URL__ || "";
+  const liveInitData = webApp()?.initData?.trim() || "";
   const candidates = [
+    liveInitData,
     paramFromUrl(current, "tgWebAppData"),
     new URL(current).searchParams.get("tgWebAppData") || "",
-    webApp()?.initData || "",
     paramFromUrl(early, "tgWebAppData"),
     storedValue(INIT_DATA_STORAGE_KEY),
   ];
   const result = candidates.find((value) => value.trim())?.trim() || "";
   storeValue(INIT_DATA_STORAGE_KEY, result);
   return result;
+}
+
+export function clearTelegramSessionCache(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(INIT_DATA_STORAGE_KEY);
+    window.sessionStorage.removeItem(START_PARAM_STORAGE_KEY);
+  } catch {
+    // Ignore storage access failures in restrictive WebViews.
+  }
 }
 
 export async function waitForTelegramInitData(timeoutMs = 8_000): Promise<string> {

@@ -12,6 +12,10 @@ services:
     volumes:
       - ./data:/app/data
       - ./static/upload:/app/static/upload
+    networks:
+      default:
+        aliases:
+          - artflow-app
 
   postgres:
     image: postgres:16-alpine

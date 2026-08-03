@@ -13,6 +13,7 @@ import { ServicesScreen } from "@/features/services-screen";
 import { TrendsScreen } from "@/features/trends-screen";
 import { ApiError, FEED_PAGE_SIZE, MiniAppApi } from "@/lib/api";
 import {
+  clearTelegramSessionCache,
   configureTelegramWebApp,
   haptic,
   notifyHaptic,
@@ -326,6 +327,13 @@ function App() {
       await processStartParam(client, bootstrap);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Не удалось загрузить Mini App";
+      const isInitDataSignatureError =
+        error instanceof ApiError &&
+        error.status === 401 &&
+        /Invalid Telegram initData signature/i.test(message);
+      if (isInitDataSignatureError) {
+        clearTelegramSessionCache();
+      }
       setErrorMessage(message);
       setMode(error instanceof ApiError && error.status === 401 ? "locked" : "error");
     } finally {

@@ -1803,11 +1803,16 @@ LANDING_PAGE_ALIASES = {
     "/guide": "guide.html",
 }
 if LANDING_DIR.exists():
+    landing_static = StaticFiles(directory=str(LANDING_DIR), html=True)
+
     for route_path, file_name in LANDING_PAGE_ALIASES.items():
         async def _landing_alias(file_name=file_name):
             return FileResponse(LANDING_DIR / file_name)
         app.add_api_route(route_path, _landing_alias, methods=["GET", "HEAD"], include_in_schema=False)
-    app.mount("/", StaticFiles(directory=str(LANDING_DIR), html=True), name="landing")
+
+    @app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+    async def landing_files(path: str, request: Request) -> Response:
+        return await landing_static.get_response(path, request.scope)
 else:
     @app.get("/", response_class=PlainTextResponse)
     async def landing_not_built() -> str:
