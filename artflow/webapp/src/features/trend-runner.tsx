@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { Copy, Film, ImageIcon, LoaderCircle, UploadCloud, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -11,6 +12,7 @@ import { safeExternalUrl } from "@/lib/utils";
 
 const TREND_RUNNER_EVENT = "apix:open-trend-runner";
 const API_BASE = "/api/v1";
+const RUNNER_ROOT_ID = "apix-trend-runner-root";
 const ACCEPTED_TREND_PHOTO_TYPES = [
   "image/jpeg",
   "image/png",
@@ -47,6 +49,22 @@ type TrendRunnerEventDetail = {
   trend?: TrendPublic;
   trendId?: number;
 };
+
+let runnerRoot: Root | null = null;
+let runnerMounted = false;
+
+function ensureTrendRunnerPortal(): void {
+  if (typeof document === "undefined" || runnerMounted) return;
+  let host = document.getElementById(RUNNER_ROOT_ID);
+  if (!host) {
+    host = document.createElement("div");
+    host.id = RUNNER_ROOT_ID;
+    document.body.appendChild(host);
+  }
+  runnerRoot = runnerRoot || createRoot(host);
+  runnerRoot.render(<TrendRunnerPortal />);
+  runnerMounted = true;
+}
 
 function initDataHeader(): string {
   try {
@@ -98,10 +116,12 @@ function parseTrendStartParam(): number | null {
 }
 
 function openTrendRunner(trend: TrendPublic): void {
+  ensureTrendRunnerPortal();
   window.dispatchEvent(new CustomEvent<TrendRunnerEventDetail>(TREND_RUNNER_EVENT, { detail: { trend } }));
 }
 
 function openTrendRunnerById(trendId: number): void {
+  ensureTrendRunnerPortal();
   window.dispatchEvent(new CustomEvent<TrendRunnerEventDetail>(TREND_RUNNER_EVENT, { detail: { trendId } }));
 }
 
@@ -351,6 +371,10 @@ async function copyTrendLink(trend: TrendPublic): Promise<void> {
   const link = payload.link || "";
   if (!link) throw new Error("Ссылка недоступна");
   await navigator.clipboard.writeText(link);
+}
+
+if (typeof window !== "undefined") {
+  window.setTimeout(() => ensureTrendRunnerPortal(), 0);
 }
 
 export { TrendRunnerPortal, copyTrendLink, openTrendRunner, openTrendRunnerById };
