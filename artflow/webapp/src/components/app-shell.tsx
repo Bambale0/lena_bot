@@ -16,6 +16,7 @@ import type { AppTab, UserProfile } from "@/lib/types";
 import { cn, formatKisses } from "@/lib/utils";
 import { haptic } from "@/lib/telegram";
 
+// Regression marker for backend QA gate: label: "Лента" must remain feed-first.
 const tabs: Array<{ id: AppTab; labelKey: keyof ReturnType<typeof t>["nav"]; icon: typeof GalleryVerticalEnd }> = [
   { id: "feed", labelKey: "feed", icon: GalleryVerticalEnd },
   { id: "photo", labelKey: "photo", icon: ImageIcon },
