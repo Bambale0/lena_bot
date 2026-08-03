@@ -39,6 +39,14 @@ class _FakeClient:
         return self._responses.pop(0)
 
 
+def test_photo_prompt_instructions_request_russian_output() -> None:
+    assert "русском языке" in photo_prompt_service._SYSTEM_PROMPT
+    assert "финальный русский промпт" in photo_prompt_service._SYSTEM_PROMPT
+    assert "Не используй английский язык" in photo_prompt_service._PHOTO_PROMPT_REQUEST_TEXT
+    assert "English prompt" not in photo_prompt_service._SYSTEM_PROMPT
+    assert "English prompt" not in photo_prompt_service._PHOTO_PROMPT_REQUEST_TEXT
+
+
 @pytest.mark.asyncio
 async def test_generate_prompt_from_photo_uses_kie_first(monkeypatch) -> None:
     fake_client = _FakeClient([_FakeResponse({"choices": [{"message": {"content": "детальный промпт"}}]})])
@@ -75,7 +83,7 @@ async def test_generate_prompt_from_photo_uses_kie_responses_for_gpt_5_5(monkeyp
                     "output": [
                         {
                             "type": "message",
-                            "content": [{"type": "output_text", "text": "kie prompt from responses"}],
+                            "content": [{"type": "output_text", "text": "русский промпт из responses"}],
                         }
                     ]
                 }
@@ -99,7 +107,7 @@ async def test_generate_prompt_from_photo_uses_kie_responses_for_gpt_5_5(monkeyp
 
     result = await photo_prompt_service.generate_prompt_from_photo(b"image", "image/jpeg")
 
-    assert result == "kie prompt from responses"
+    assert result == "русский промпт из responses"
     args, kwargs = fake_client.calls[-1]
     assert args[0] == "https://api.kie.ai/codex/v1/responses"
     assert kwargs["json"]["model"] == "gpt-5-5"
@@ -111,7 +119,7 @@ async def test_generate_prompt_from_photo_uses_comet_after_kie_errors(monkeypatc
         _FakeResponse({"error": "missing"}, status_code=404),
         _FakeResponse({"error": "missing"}, status_code=404),
         _FakeResponse({"error": "missing"}, status_code=404),
-        _FakeResponse({"choices": [{"message": {"content": "comet prompt"}}]}),
+        _FakeResponse({"choices": [{"message": {"content": "русский промпт comet"}}]}),
     ])
     monkeypatch.setattr(photo_prompt_service.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
     monkeypatch.setattr(
@@ -130,7 +138,7 @@ async def test_generate_prompt_from_photo_uses_comet_after_kie_errors(monkeypatc
 
     result = await photo_prompt_service.generate_prompt_from_photo(b"image", "image/jpeg")
 
-    assert result == "comet prompt"
+    assert result == "русский промпт comet"
     args, kwargs = fake_client.calls[-1]
     assert args[0] == "https://api.cometapi.com/v1/chat/completions"
     assert kwargs["json"]["model"] == "gpt-5.2"
