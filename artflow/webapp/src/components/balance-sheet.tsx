@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Banknote, Bitcoin, CheckCircle2, CreditCard, Info, Send, ShieldCheck, Star } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
+import { t } from "@/lib/i18n";
 import type { PaymentPlan, UserProfile } from "@/lib/types";
-import { formatCredits } from "@/lib/utils";
+import { formatCredits, formatKisses } from "@/lib/utils";
 
 type PaymentProvider = "stars" | "tbank" | "crypto" | "lava";
 
@@ -37,49 +38,69 @@ function planPrice(plan: PaymentPlan, method: PaymentProvider): string {
   if (method === "stars" && plan.price_stars) return `${plan.price_stars} ⭐`;
   if (method === "crypto" && plan.price_usdt) return `${plan.price_usdt} USDT`;
   if (plan.price_rub) return `${plan.price_rub} ₽`;
-  return "Цена перед оплатой";
+  return "";
+}
+
+function methodAvailable(method: PaymentProvider, plans: PaymentPlan[]): boolean {
+  if (!plans.length) return true;
+  if (method === "stars") return plans.some((plan) => Number(plan.price_stars || 0) > 0);
+  if (method === "crypto") return plans.some((plan) => Number(plan.price_usdt || 0) > 0);
+  return plans.some((plan) => Number(plan.price_rub || 0) > 0);
 }
 
 function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceSheetProps) {
+  const copy = t(user.language);
   const [selectedPlanKey, setSelectedPlanKey] = useState("");
   const [method, setMethod] = useState<PaymentProvider>("stars");
+
+  const availableMethods = useMemo(() => {
+    const filtered = methods.filter((item) => methodAvailable(item.id, plans));
+    return filtered.length ? filtered : methods;
+  }, [plans]);
+
+  useEffect(() => {
+    if (!availableMethods.some((item) => item.id === method)) setMethod(availableMethods[0]?.id || "stars");
+  }, [availableMethods, method]);
 
   const selectedPlan = useMemo(() => {
     if (!plans.length) return null;
     return plans.find((plan) => plan.key === selectedPlanKey) || plans[0];
   }, [plans, selectedPlanKey]);
 
-  const selectedMethod = methods.find((item) => item.id === method) || methods[0];
+  const selectedMethod = availableMethods.find((item) => item.id === method) || availableMethods[0] || methods[0];
   const MethodIcon = selectedMethod.icon;
+  const selectedPrice = selectedPlan ? planPrice(selectedPlan, method) : "";
+  const payDisabled = busy || !selectedPlan || !selectedPrice;
 
   return (
     <Sheet
       open={open}
       onOpenChange={onOpenChange}
-      title="Кабинет оплаты"
-      description={`Баланс: ${formatCredits(user.credits)} кредитов`}
+      title={copy.balance.title}
+      description={`${copy.settings.balance}: ${formatKisses(user.credits)}`}
     >
       <div className="grid gap-3">
         <section className="rounded-2xl border border-primary/25 bg-primary/8 p-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-[10px] text-muted-foreground">Текущий баланс</p>
-              <p className="text-2xl font-bold leading-none"><span aria-hidden="true">💋</span> {formatCredits(user.credits)}</p>
+              <p className="text-[10px] text-muted-foreground">{copy.balance.current}</p>
+              <p className="text-2xl font-bold leading-none">{formatKisses(user.credits)}</p>
             </div>
-            <Badge variant="outline" className="bg-background/60">кредиты</Badge>
+            <Badge variant="outline" className="bg-background/60">{copy.currency.unit}</Badge>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">Выбери пакет, способ оплаты и создай счёт. После успешной оплаты backend пополнит баланс через свой webhook.</p>
+          <p className="mt-2 text-xs text-muted-foreground">{copy.balance.description}</p>
         </section>
 
         <section className="grid gap-2">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">1. Пакет кредитов</h3>
+            <h3 className="text-sm font-semibold">{copy.balance.packageStep}</h3>
             <Badge variant="outline">{plans.length}</Badge>
           </div>
           {plans.length ? (
             <div className="grid gap-2 min-[430px]:grid-cols-2">
               {plans.map((plan) => {
                 const active = selectedPlan?.key === plan.key;
+                const price = planPrice(plan, method) || copy.balance.priceBeforePayment;
                 return (
                   <button
                     key={plan.key}
@@ -88,26 +109,26 @@ function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceS
                     onClick={() => setSelectedPlanKey(plan.key)}
                   >
                     <div className="mb-1 flex items-center justify-between gap-2">
-                      <p className="min-w-0 truncate text-sm font-semibold">{plan.title || `${formatCredits(plan.credits)} кредитов`}</p>
+                      <p className="min-w-0 truncate text-sm font-semibold">{plan.title || formatKisses(plan.credits, { emoji: false })}</p>
                       {active ? <CheckCircle2 className="size-4 shrink-0 text-primary" /> : null}
                     </div>
-                    <p className="text-lg font-bold">{formatCredits(plan.credits)} кр.</p>
-                    <p className="text-[10px] text-muted-foreground">от {planPrice(plan, method)}</p>
+                    <p className="text-lg font-bold">{formatKisses(plan.credits)}</p>
+                    <p className="text-[10px] text-muted-foreground">от {price}</p>
                   </button>
                 );
               })}
             </div>
           ) : (
             <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
-              Пакеты оплаты временно недоступны. Backend `/plans` не вернул активные тарифы.
+              {copy.balance.noPlans}
             </div>
           )}
         </section>
 
         <section className="grid gap-2">
-          <h3 className="text-sm font-semibold">2. Способ оплаты</h3>
+          <h3 className="text-sm font-semibold">{copy.balance.methodStep}</h3>
           <div className="grid gap-2">
-            {methods.map((item) => {
+            {availableMethods.map((item) => {
               const Icon = item.icon;
               const active = method === item.id;
               return (
@@ -134,17 +155,17 @@ function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceS
           <div className="mb-2 flex items-start gap-2">
             <CreditCard className="mt-0.5 size-4 shrink-0 text-primary" />
             <div>
-              <h3 className="text-sm font-semibold">3. Создать счёт</h3>
-              <p className="text-[10px] text-muted-foreground">{selectedPlan ? `${selectedPlan.title || selectedPlan.key} · ${planPrice(selectedPlan, method)}` : "Выбери пакет, чтобы продолжить"}</p>
+              <h3 className="text-sm font-semibold">{copy.balance.checkoutStep}</h3>
+              <p className="text-[10px] text-muted-foreground">{selectedPlan ? `${selectedPlan.title || selectedPlan.key} · ${selectedPrice || copy.balance.unavailableMethod}` : copy.balance.selectPlan}</p>
             </div>
           </div>
-          <Button className="w-full" disabled={busy || !selectedPlan} onClick={() => selectedPlan && onPay(method, selectedPlan)}>
+          <Button className="w-full" disabled={payDisabled} onClick={() => selectedPlan && selectedPrice && onPay(method, selectedPlan)}>
             <MethodIcon className="size-4" />
-            {busy ? "Создаём счёт…" : `Оплатить через ${selectedMethod.title}`}
+            {busy ? copy.balance.creating : `${copy.balance.payVia} ${selectedMethod.title}`}
           </Button>
           <div className="mt-2 grid gap-1.5 text-[10px] text-muted-foreground">
-            <p className="flex items-start gap-1.5"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />Счёт создаётся на backend, секреты платёжных провайдеров не попадают во фронт.</p>
-            <p className="flex items-start gap-1.5"><Info className="mt-0.5 size-3.5 shrink-0" />После оплаты вернись в Mini App: баланс обновится через webhook и авто-refresh.</p>
+            <p className="flex items-start gap-1.5"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />{copy.balance.safety}</p>
+            <p className="flex items-start gap-1.5"><Info className="mt-0.5 size-3.5 shrink-0" />{copy.balance.webhook}</p>
           </div>
         </section>
       </div>

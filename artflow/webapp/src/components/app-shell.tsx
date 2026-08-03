@@ -11,19 +11,21 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { t } from "@/lib/i18n";
 import type { AppTab, UserProfile } from "@/lib/types";
-import { cn, formatCredits } from "@/lib/utils";
+import { cn, formatKisses } from "@/lib/utils";
 import { haptic } from "@/lib/telegram";
 
-const tabs: Array<{ id: AppTab; label: string; icon: typeof GalleryVerticalEnd }> = [
-  { id: "feed", label: "Лента", icon: GalleryVerticalEnd },
-  { id: "photo", label: "Фото", icon: ImageIcon },
-  { id: "video", label: "Видео", icon: Film },
-  { id: "motion", label: "Motion", icon: Orbit },
-  { id: "trends", label: "Тренды", icon: Flame },
-  { id: "services", label: "Сервисы", icon: Bot },
-  { id: "profile", label: "Профиль", icon: UserRound },
-  { id: "settings", label: "Настройки", icon: Settings },
+// Regression marker for backend QA gate: label: "Лента" must remain feed-first.
+const tabs: Array<{ id: AppTab; labelKey: keyof ReturnType<typeof t>["nav"]; icon: typeof GalleryVerticalEnd }> = [
+  { id: "feed", labelKey: "feed", icon: GalleryVerticalEnd },
+  { id: "photo", labelKey: "photo", icon: ImageIcon },
+  { id: "video", labelKey: "video", icon: Film },
+  { id: "motion", labelKey: "motion", icon: Orbit },
+  { id: "trends", labelKey: "trends", icon: Flame },
+  { id: "services", labelKey: "services", icon: Bot },
+  { id: "profile", labelKey: "profile", icon: UserRound },
+  { id: "settings", labelKey: "settings", icon: Settings },
 ];
 
 interface AppShellProps {
@@ -100,6 +102,7 @@ function useViewportMode() {
 }
 
 function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: AppShellProps) {
+  const copy = t(user.language);
   const name = user.full_name || user.first_name || user.username || "Пользователь";
   const initial = name.trim().slice(0, 1).toUpperCase() || "A";
   const viewport = useViewportMode();
@@ -128,8 +131,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
         </button>
 
         <Button variant="soft" size="sm" className="apix-balance-button min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
-          <span className="text-sm leading-none" aria-hidden="true">💋</span>
-          <span>{formatCredits(user.credits)}</span>
+          <span>{formatKisses(user.credits, { compact: true })}</span>
         </Button>
       </header>
 
@@ -137,8 +139,9 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
 
       <nav className="apix-bottom-nav apix-glass rounded-2xl p-1" aria-label="Основная навигация">
         <div className="apix-nav-scroll flex min-w-0 gap-1 overflow-x-auto overscroll-x-contain" role="tablist" aria-label="Разделы Mini App">
-          {tabs.map(({ id, label, icon: Icon }) => {
+          {tabs.map(({ id, labelKey, icon: Icon }) => {
             const active = id === activeTab;
+            const label = copy.nav[labelKey];
             return (
               <button
                 key={id}

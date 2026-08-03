@@ -1,0 +1,232 @@
+import type { AppLanguage } from "@/lib/types";
+
+export interface I18n {
+  currency: {
+    short: string;
+    unit: string;
+    unitOne: string;
+    unitFew: string;
+    unitMany: string;
+  };
+  nav: {
+    feed: string;
+    photo: string;
+    video: string;
+    motion: string;
+    trends: string;
+    services: string;
+    profile: string;
+    settings: string;
+  };
+  balance: {
+    title: string;
+    current: string;
+    description: string;
+    packageStep: string;
+    methodStep: string;
+    checkoutStep: string;
+    noPlans: string;
+    priceBeforePayment: string;
+    selectPlan: string;
+    creating: string;
+    payVia: string;
+    safety: string;
+    webhook: string;
+    unavailableMethod: string;
+  };
+  settings: {
+    title: string;
+    subtitle: string;
+    schemeTitle: string;
+    schemeHelp: string;
+    languageTitle: string;
+    languageHelp: string;
+    active: string;
+    diagnosticsTitle: string;
+    user: string;
+    language: string;
+    scheme: string;
+    balance: string;
+    reload: string;
+  };
+  services: {
+    title: string;
+    whatHere: string;
+    whatHereText: string;
+    assistant: string;
+    assistantPlaceholder: string;
+    assistantEmpty: string;
+    photoPrompt: string;
+    chooseImage: string;
+    analyze: string;
+    use: string;
+    musicTitle: string;
+    musicPrompt: string;
+    trackTitle: string;
+    style: string;
+    instrumental: string;
+    createMusic: string;
+    voices: string;
+    voiceName: string;
+    chooseAudio: string;
+    createVoice: string;
+    refreshVoices: string;
+  };
+}
+
+export const messages: Record<AppLanguage, I18n> = {
+  ru: {
+    currency: {
+      short: "💋",
+      unit: "поцелуи",
+      unitOne: "поцелуй",
+      unitFew: "поцелуя",
+      unitMany: "поцелуев",
+    },
+    nav: {
+      feed: "Лента",
+      photo: "Фото",
+      video: "Видео",
+      motion: "Motion",
+      trends: "Тренды",
+      services: "Сервисы",
+      profile: "Профиль",
+      settings: "Настройки",
+    },
+    balance: {
+      title: "Кабинет оплаты",
+      current: "Текущий баланс",
+      description: "Выбери пакет, способ оплаты и создай счёт. После успешной оплаты backend пополнит баланс через свой webhook.",
+      packageStep: "1. Пакет поцелуев",
+      methodStep: "2. Способ оплаты",
+      checkoutStep: "3. Создать счёт",
+      noPlans: "Пакеты оплаты временно недоступны. Backend `/plans` не вернул активные тарифы.",
+      priceBeforePayment: "Цена перед оплатой",
+      selectPlan: "Выбери пакет, чтобы продолжить",
+      creating: "Создаём счёт…",
+      payVia: "Оплатить через",
+      safety: "Счёт создаётся на backend, секреты платёжных провайдеров не попадают во фронт.",
+      webhook: "После оплаты вернись в Mini App: баланс обновится через webhook и авто-refresh.",
+      unavailableMethod: "Недоступно для выбранного пакета",
+    },
+    settings: {
+      title: "Настройки",
+      subtitle: "Внешний вид, язык и поведение Mini App",
+      schemeTitle: "Цветовая схема",
+      schemeHelp: "Схема сохраняется на устройстве и применяется через CSS-переменные. Telegram light/dark не ломается.",
+      languageTitle: "Язык",
+      languageHelp: "Переключатель вызывает backend `/settings/language`, поэтому язык сохраняется в профиле пользователя.",
+      active: "активен",
+      diagnosticsTitle: "Диагностика Mini App",
+      user: "Пользователь",
+      language: "Язык",
+      scheme: "Схема",
+      balance: "Баланс",
+      reload: "Перезагрузить данные",
+    },
+    services: {
+      title: "Сервисы",
+      whatHere: "Что здесь есть",
+      whatHereText: "Помощник, анализ фото, музыка, голоса и быстрые переходы в готовые сценарии.",
+      assistant: "AI-помощник",
+      assistantPlaceholder: "Что хотите создать?",
+      assistantEmpty: "Спросите про модель, стоимость или промпт.",
+      photoPrompt: "Промпт по фото",
+      chooseImage: "Выбрать изображение",
+      analyze: "Анализируем…",
+      use: "Использовать",
+      musicTitle: "Музыка / Suno",
+      musicPrompt: "Текст песни или идея трека",
+      trackTitle: "Название трека",
+      style: "Стиль",
+      instrumental: "Инструментал",
+      createMusic: "Создать музыку",
+      voices: "Голоса Suno",
+      voiceName: "Название голоса",
+      chooseAudio: "Выбрать аудио",
+      createVoice: "Создать голос",
+      refreshVoices: "Обновить голоса",
+    },
+  },
+  en: {
+    currency: {
+      short: "💋",
+      unit: "kisses",
+      unitOne: "kiss",
+      unitFew: "kisses",
+      unitMany: "kisses",
+    },
+    nav: {
+      feed: "Feed",
+      photo: "Photo",
+      video: "Video",
+      motion: "Motion",
+      trends: "Trends",
+      services: "Services",
+      profile: "Profile",
+      settings: "Settings",
+    },
+    balance: {
+      title: "Payment cabinet",
+      current: "Current balance",
+      description: "Choose a package, pick a payment method and create an invoice. Backend updates the balance after provider webhook.",
+      packageStep: "1. Kiss package",
+      methodStep: "2. Payment method",
+      checkoutStep: "3. Create invoice",
+      noPlans: "Payment packages are temporarily unavailable. Backend `/plans` returned no active plans.",
+      priceBeforePayment: "Price before payment",
+      selectPlan: "Choose a package to continue",
+      creating: "Creating invoice…",
+      payVia: "Pay with",
+      safety: "Invoice is created on backend; provider secrets never reach the frontend.",
+      webhook: "After payment return to Mini App: balance will update through webhook and auto-refresh.",
+      unavailableMethod: "Unavailable for selected package",
+    },
+    settings: {
+      title: "Settings",
+      subtitle: "Appearance, language and Mini App behavior",
+      schemeTitle: "Color scheme",
+      schemeHelp: "The scheme is saved on this device and applied through CSS variables. Telegram light/dark remains intact.",
+      languageTitle: "Language",
+      languageHelp: "This switch calls backend `/settings/language`, so the language is saved in the user profile.",
+      active: "active",
+      diagnosticsTitle: "Mini App diagnostics",
+      user: "User",
+      language: "Language",
+      scheme: "Scheme",
+      balance: "Balance",
+      reload: "Reload data",
+    },
+    services: {
+      title: "Services",
+      whatHere: "What's here",
+      whatHereText: "Assistant, photo analysis, music, voices and quick links into ready scenarios.",
+      assistant: "AI assistant",
+      assistantPlaceholder: "What do you want to create?",
+      assistantEmpty: "Ask about a model, price or prompt.",
+      photoPrompt: "Prompt from photo",
+      chooseImage: "Choose image",
+      analyze: "Analyzing…",
+      use: "Use",
+      musicTitle: "Music / Suno",
+      musicPrompt: "Lyrics or track idea",
+      trackTitle: "Track title",
+      style: "Style",
+      instrumental: "Instrumental",
+      createMusic: "Create music",
+      voices: "Suno voices",
+      voiceName: "Voice name",
+      chooseAudio: "Choose audio",
+      createVoice: "Create voice",
+      refreshVoices: "Refresh voices",
+    },
+  },
+};
+
+export function normalizeLanguage(language?: string | null): AppLanguage {
+  return language === "en" ? "en" : "ru";
+}
+
+export function t(language?: string | null): I18n {
+  return messages[normalizeLanguage(language)];
+}

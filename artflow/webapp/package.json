@@ -7,7 +7,9 @@
     "dev": "vite --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test:e2e": "npx -y @playwright/test test",
+    "test:e2e:install": "npx -y @playwright/test install chromium"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.3",
