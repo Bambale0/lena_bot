@@ -60,6 +60,12 @@ def trend_category_payload(category: str) -> dict[str, str]:
 
 
 def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
+    """Structured resolver for legacy tag-backed trends.
+
+    This remains server-side only for normal user flows. Public trend payloads must
+    never expose these settings because they include generation parameters that the
+    frontend must not be able to alter.
+    """
     tags = normalized_tags(prompt)
     kind = trend_kind(prompt)
     duration_raw = _tag_value(tags, "trend-duration:")
@@ -79,9 +85,10 @@ def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
         "ratio": _tag_value(tags, "trend-ratio:"),
         "quality": _tag_value(tags, "trend-quality:"),
         "resolution": _tag_value(tags, "trend-resolution:"),
-        "requires_reference": requires_reference,
+        "requires_reference": True,
         "kind": kind,
         "category": trend_category(prompt),
+        "settings_version": 1,
     }
 
 
@@ -123,17 +130,18 @@ def trend_is_public(prompt: UserPrompt | None) -> bool:
 def trend_public_payload(prompt: UserPrompt) -> dict[str, Any]:
     created_at: datetime | None = getattr(prompt, "created_at", None)
     category = trend_category_payload(trend_category(prompt))
+    kind = trend_kind(prompt)
     return {
         "id": int(prompt.id),
-        "kind": trend_kind(prompt),
+        "kind": kind,
         "category": category["key"],
         "category_title": category["title"],
         "category_emoji": category["emoji"],
         "title": prompt.title,
         "description": prompt.description,
+        "user_photo_hint": "Загрузите одно чёткое фото. Остальные настройки тренда уже сохранены.",
         "preview_url": prompt.preview_url,
-        "model": prompt.model,
-        "settings": trend_settings(prompt),
+        "status": "active" if trend_is_public(prompt) else "inactive",
         "uses_count": int(prompt.uses_count or 0),
         "likes": int(prompt.likes or 0),
         "created_at": created_at.isoformat() if created_at else "",
@@ -144,6 +152,8 @@ def trend_admin_payload(prompt: UserPrompt) -> dict[str, Any]:
     payload = trend_public_payload(prompt)
     payload.update({
         "prompt_template": prompt.prompt_text,
+        "model": prompt.model,
+        "settings": trend_settings(prompt),
         "status": getattr(prompt.status, "value", str(prompt.status)),
         "is_public": bool(prompt.is_public),
         "author_id": int(prompt.author_id),
