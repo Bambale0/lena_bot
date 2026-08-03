@@ -28,6 +28,23 @@ export function formatCredits(value: unknown): string {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(number);
 }
 
+export function kissUnit(value: unknown): string {
+  const number = Math.abs(Number(value ?? 0));
+  const rounded = Math.floor(number);
+  const mod10 = rounded % 10;
+  const mod100 = rounded % 100;
+  if (mod10 === 1 && mod100 !== 11) return "поцелуй";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "поцелуя";
+  return "поцелуев";
+}
+
+export function formatKisses(value: unknown, options: { compact?: boolean; emoji?: boolean } = {}): string {
+  const amount = formatCredits(value);
+  const prefix = options.emoji === false ? "" : "💋 ";
+  if (options.compact) return `${prefix}${amount}`.trim();
+  return `${prefix}${amount} ${kissUnit(value)}`.trim();
+}
+
 export function formatRelativeDate(value?: string | null): string {
   if (!value) return "только что";
   const timestamp = Date.parse(value);
