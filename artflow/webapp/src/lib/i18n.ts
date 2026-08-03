@@ -1,8 +1,80 @@
 import type { AppLanguage } from "@/lib/types";
 
-export type I18n = typeof messages.ru;
+export interface I18n {
+  currency: {
+    short: string;
+    unit: string;
+    unitOne: string;
+    unitFew: string;
+    unitMany: string;
+  };
+  nav: {
+    feed: string;
+    photo: string;
+    video: string;
+    motion: string;
+    trends: string;
+    services: string;
+    profile: string;
+    settings: string;
+  };
+  balance: {
+    title: string;
+    current: string;
+    description: string;
+    packageStep: string;
+    methodStep: string;
+    checkoutStep: string;
+    noPlans: string;
+    priceBeforePayment: string;
+    selectPlan: string;
+    creating: string;
+    payVia: string;
+    safety: string;
+    webhook: string;
+    unavailableMethod: string;
+  };
+  settings: {
+    title: string;
+    subtitle: string;
+    schemeTitle: string;
+    schemeHelp: string;
+    languageTitle: string;
+    languageHelp: string;
+    active: string;
+    diagnosticsTitle: string;
+    user: string;
+    language: string;
+    scheme: string;
+    balance: string;
+    reload: string;
+  };
+  services: {
+    title: string;
+    whatHere: string;
+    whatHereText: string;
+    assistant: string;
+    assistantPlaceholder: string;
+    assistantEmpty: string;
+    photoPrompt: string;
+    chooseImage: string;
+    analyze: string;
+    use: string;
+    musicTitle: string;
+    musicPrompt: string;
+    trackTitle: string;
+    style: string;
+    instrumental: string;
+    createMusic: string;
+    voices: string;
+    voiceName: string;
+    chooseAudio: string;
+    createVoice: string;
+    refreshVoices: string;
+  };
+}
 
-export const messages = {
+export const messages: Record<AppLanguage, I18n> = {
   ru: {
     currency: {
       short: "💋",
@@ -149,7 +221,7 @@ export const messages = {
       refreshVoices: "Refresh voices",
     },
   },
-} as const;
+};
 
 export function normalizeLanguage(language?: string | null): AppLanguage {
   return language === "en" ? "en" : "ru";
