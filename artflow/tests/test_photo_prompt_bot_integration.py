@@ -63,13 +63,15 @@ def test_result_keyboard_supports_active_series_and_model_selection() -> None:
     assert selected_callbacks == ["p2p:model", "p2p:generate", "img:cancel_prompt"]
 
 
-def test_vision_instruction_requires_plain_english_prompt() -> None:
+def test_vision_instruction_requires_plain_russian_prompt() -> None:
     chat_messages = photo_prompt_service._photo_prompt_chat_messages("data:image/jpeg;base64,aW1hZ2U=")
     responses_input = photo_prompt_service._photo_prompt_responses_input("data:image/jpeg;base64,aW1hZ2U=")
 
     chat_text = str(chat_messages)
     responses_text = str(responses_input)
-    assert "English" in chat_text
-    assert "Return only the final generation prompt" in chat_text
-    assert "English" in responses_text
-    assert "no commentary" in responses_text
+    assert "русском языке" in chat_text
+    assert "только финальный промпт" in chat_text
+    assert "русском языке" in responses_text
+    assert "без комментариев" in responses_text
+    assert "English" not in chat_text
+    assert "English" not in responses_text
