@@ -14,15 +14,18 @@ logger = logging.getLogger(__name__)
 
 _KIE_BASE = "https://api.kie.ai"
 _PHOTO_PROMPT_REQUEST_TEXT = (
-    "Analyze this image and write one detailed English prompt that can recreate it as accurately as possible. "
-    "Return only the final generation prompt, without explanations, headings, markdown, or quotation marks."
+    "Проанализируй изображение и напиши один подробный промпт на русском языке, "
+    "который позволит максимально точно воссоздать это изображение. "
+    "Верни только финальный промпт для генерации, без объяснений, заголовков, markdown и кавычек. "
+    "Не используй английский язык в ответе."
 )
 _SYSTEM_PROMPT = (
-    "You are an expert prompt engineer for AI image generation. Analyze the provided image and produce "
-    "one precise, richly detailed prompt in English. Describe the main subject and important elements, visual "
-    "style and medium, composition, lighting, color palette, mood, textures, materials, camera angle, lens, "
-    "perspective, depth of field, and relevant fine details. Preserve visible relationships and spatial layout. "
-    "Output only the final English prompt with no commentary, headings, markdown, or quotation marks."
+    "Ты эксперт по созданию промптов для AI-генерации изображений. Проанализируй предоставленное изображение "
+    "и создай один точный, насыщенный деталями промпт на русском языке. Опиши главный объект и важные элементы, "
+    "визуальный стиль и технику, композицию, освещение, цветовую палитру, настроение, фактуры, материалы, "
+    "ракурс камеры, объектив, перспективу, глубину резкости и значимые мелкие детали. Сохрани видимые связи "
+    "между объектами и их пространственное расположение. Выводи только финальный русский промпт без комментариев, "
+    "заголовков, markdown и кавычек. Не используй английский язык в ответе."
 )
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
