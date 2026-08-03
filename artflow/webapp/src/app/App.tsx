@@ -10,6 +10,7 @@ import { FeedScreen } from "@/features/feed-screen";
 import { GenerationScreen } from "@/features/generation-screen";
 import { ProfileScreen } from "@/features/profile-screen";
 import { ServicesScreen } from "@/features/services-screen";
+import { SettingsScreen } from "@/features/settings-screen";
 import { TrendsScreen } from "@/features/trends-screen";
 import { ApiError, FEED_PAGE_SIZE, MiniAppApi } from "@/lib/api";
 import {
@@ -23,6 +24,7 @@ import {
   waitForTelegramInitData,
 } from "@/lib/telegram";
 import type {
+  AppLanguage,
   AppMode,
   AppTab,
   AssistantMessage,
@@ -39,7 +41,7 @@ import type {
 } from "@/lib/types";
 import { firstMedia, isPendingTask } from "@/lib/utils";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20260802-feed-first-infinite-v1";
+window.__APIX_MINIAPP_BUILD_ID__ = "20260803-settings-cabinets-v1";
 
 type FeedSource = "recent" | "top_day" | "top";
 
@@ -129,6 +131,8 @@ function App() {
   const [preparingTrendId, setPreparingTrendId] = useState<number | null>(null);
   const [referrals, setReferrals] = useState<ReferralStats | null>(null);
   const [referralsLoading, setReferralsLoading] = useState(false);
+  const [referralActionBusy, setReferralActionBusy] = useState(false);
+  const [languageBusy, setLanguageBusy] = useState(false);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [photoPromptBusy, setPhotoPromptBusy] = useState(false);
@@ -355,6 +359,18 @@ function App() {
     return () => controller.abort();
   }, [api]);
 
+  const refreshReferrals = useCallback(async () => {
+    if (!api || referralsLoading) return;
+    setReferralsLoading(true);
+    try {
+      setReferrals(await api.getReferrals());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось загрузить партнёрскую статистику");
+    } finally {
+      setReferralsLoading(false);
+    }
+  }, [api, referralsLoading]);
+
   useEffect(() => {
     if (mode !== "live" || !api) return undefined;
     const timer = window.setInterval(() => void refreshCore(), 5_000);
@@ -394,13 +410,9 @@ function App() {
   }, [api, selectedTask, taskOpen]);
 
   useEffect(() => {
-    if (activeTab !== "profile" || !api || referrals || referralsLoading) return;
-    setReferralsLoading(true);
-    api.getReferrals()
-      .then(setReferrals)
-      .catch((error) => toast.error(error instanceof Error ? error.message : "Не удалось загрузить партнёрскую статистику"))
-      .finally(() => setReferralsLoading(false));
-  }, [activeTab, api, referrals, referralsLoading]);
+    if (activeTab !== "profile" || referrals || referralsLoading) return;
+    void refreshReferrals();
+  }, [activeTab, referrals, referralsLoading, refreshReferrals]);
 
   const openTask = useCallback((task: GenerationTask) => {
     setSelectedTask(task);
@@ -684,6 +696,55 @@ function App() {
     }
   }, [api, paymentBusy, refreshCore]);
 
+  const changeLanguage = useCallback(async (language: AppLanguage) => {
+    if (!api || !data || languageBusy) return;
+    setLanguageBusy(true);
+    try {
+      const result = await api.setLanguage(language);
+      setData((current) => current ? { ...current, user: { ...current.user, language: result.language } } : current);
+      notifyHaptic("success");
+      toast.success(result.language === "en" ? "Language switched to English" : "Язык переключён на русский");
+    } catch (error) {
+      notifyHaptic("error");
+      toast.error(error instanceof Error ? error.message : "Не удалось сменить язык");
+    } finally {
+      setLanguageBusy(false);
+    }
+  }, [api, data, languageBusy]);
+
+  const createReferralWithdrawal = useCallback(async (amountRub: number, payoutDetails: string) => {
+    if (!api || referralActionBusy) return;
+    setReferralActionBusy(true);
+    try {
+      await api.createReferralWithdrawal(amountRub, payoutDetails);
+      notifyHaptic("success");
+      toast.success("Заявка на вывод создана");
+      await refreshReferrals();
+    } catch (error) {
+      notifyHaptic("error");
+      toast.error(error instanceof Error ? error.message : "Не удалось создать заявку");
+    } finally {
+      setReferralActionBusy(false);
+    }
+  }, [api, referralActionBusy, refreshReferrals]);
+
+  const exchangeReferralBalance = useCallback(async (amountRub: number) => {
+    if (!api || referralActionBusy) return;
+    setReferralActionBusy(true);
+    try {
+      await api.exchangeReferralBalance(amountRub);
+      notifyHaptic("success");
+      toast.success("Партнёрский баланс обменян на кредиты");
+      await refreshReferrals();
+      void refreshCore();
+    } catch (error) {
+      notifyHaptic("error");
+      toast.error(error instanceof Error ? error.message : "Не удалось обменять баланс");
+    } finally {
+      setReferralActionBusy(false);
+    }
+  }, [api, referralActionBusy, refreshCore, refreshReferrals]);
+
   const showFeed = activeTab === "feed" || activeTab === "studio";
 
   if (mode === "booting") {
@@ -739,7 +800,23 @@ function App() {
     if (activeTab === "services") {
       return <ServicesScreen messages={assistantMessages} assistantBusy={assistantBusy} photoPromptBusy={photoPromptBusy} photoPromptResult={photoPromptResult} onAssistantSend={(message) => void sendAssistant(message)} onPhotoPrompt={(file) => void createPhotoPrompt(file)} onUsePrompt={(prompt) => { setImageDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("photo"); }} onNavigate={setActiveTab} />;
     }
-    return <ProfileScreen user={data.user} tasks={data.recentTasks} referrals={referrals} referralsLoading={referralsLoading} onOpenTask={openTask} onBalanceOpen={() => setBalanceOpen(true)} />;
+    if (activeTab === "settings") {
+      return <SettingsScreen user={data.user} busy={languageBusy} onLanguageChange={(language) => void changeLanguage(language)} onResetApp={() => void initialize()} />;
+    }
+    return (
+      <ProfileScreen
+        user={data.user}
+        tasks={data.recentTasks}
+        referrals={referrals}
+        referralsLoading={referralsLoading}
+        referralBusy={referralActionBusy}
+        onOpenTask={openTask}
+        onBalanceOpen={() => setBalanceOpen(true)}
+        onRefreshReferrals={() => void refreshReferrals()}
+        onReferralWithdraw={(amountRub, payoutDetails) => void createReferralWithdrawal(amountRub, payoutDetails)}
+        onReferralExchange={(amountRub) => void exchangeReferralBalance(amountRub)}
+      />
+    );
   })();
 
   return (

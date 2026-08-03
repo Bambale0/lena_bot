@@ -8,9 +8,11 @@ export type AppTab =
   | "feed"
   | "trends"
   | "services"
-  | "profile";
+  | "profile"
+  | "settings";
 
 export type GenerationStatus = "pending" | "processing" | "done" | "failed" | string;
+export type AppLanguage = "ru" | "en";
 
 export interface UserProfile {
   id: number;
@@ -25,6 +27,8 @@ export interface UserProfile {
   referral_balance?: number;
   referral_code?: string;
   referral_link?: string;
+  referral_withdraw_min_rub?: number;
+  language?: AppLanguage;
   channel_url?: string | null;
   is_admin?: boolean;
 }
@@ -139,9 +143,34 @@ export interface PaymentPlan {
   price_stars?: number;
 }
 
+export interface ReferralChild {
+  id: number;
+  username?: string | null;
+  full_name?: string | null;
+  generations_count?: number;
+  paid_rub?: number;
+}
+
+export interface ReferralWithdrawal {
+  id: number;
+  amount_rub: number;
+  amount_credits?: number | null;
+  payout_details: string;
+  status: string;
+  created_at: string;
+}
+
 export interface ReferralStats {
   referral_code?: string;
   referral_link?: string;
+  bonus_l1_credits?: number;
+  commission_l1?: number;
+  commission_l2?: number;
+  commission_l3?: number;
+  withdraw_min_rub?: number;
+  withdraw_min_credits?: number | null;
+  exchange_min_rub?: number | null;
+  exchange_rate_rub_per_credit?: number | null;
   counts?: { l1?: number; l2?: number; l3?: number };
   balance?: {
     total_earned?: number;
@@ -149,6 +178,8 @@ export interface ReferralStats {
     available_to_withdraw?: number;
   };
   feed_remix_reward_rub?: number;
+  children?: Record<string, ReferralChild[]>;
+  withdrawals?: ReferralWithdrawal[];
 }
 
 export interface BootstrapData {

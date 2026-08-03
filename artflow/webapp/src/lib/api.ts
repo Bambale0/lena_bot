@@ -1,4 +1,5 @@
 import type {
+  AppLanguage,
   AssistantMessage,
   BootstrapData,
   FeedItem,
@@ -8,6 +9,7 @@ import type {
   PhotoPromptResult,
   PreparedTrend,
   ReferralStats,
+  ReferralWithdrawal,
   TrendItem,
   UserProfile,
 } from "@/lib/types";
@@ -188,6 +190,27 @@ export class MiniAppApi {
 
   getReferrals(signal?: AbortSignal): Promise<ReferralStats> {
     return this.request<ReferralStats>("/referrals", {}, signal);
+  }
+
+  createReferralWithdrawal(amountRub: number, payoutDetails: string): Promise<ReferralWithdrawal> {
+    return this.request<ReferralWithdrawal>("/referrals/withdrawals", {
+      method: "POST",
+      body: JSON.stringify({ amount_rub: amountRub, payout_details: payoutDetails }),
+    });
+  }
+
+  exchangeReferralBalance(amountRub: number): Promise<ReferralWithdrawal> {
+    return this.request<ReferralWithdrawal>("/referrals/exchange", {
+      method: "POST",
+      body: JSON.stringify({ amount_rub: amountRub }),
+    });
+  }
+
+  setLanguage(language: AppLanguage): Promise<{ language: AppLanguage }> {
+    return this.request<{ language: AppLanguage }>("/settings/language", {
+      method: "POST",
+      body: JSON.stringify({ language }),
+    });
   }
 
   sendAssistant(message: string, history: AssistantMessage[]): Promise<string> {
