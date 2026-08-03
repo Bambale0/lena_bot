@@ -1,0 +1,422 @@
+/* Adaptive Telegram Mini App layer.
+   This file intentionally sits after globals.css and overrides fixed desktop assumptions. */
+
+:root {
+  --apix-visual-viewport-height: 100dvh;
+  --apix-visual-viewport-width: 100vw;
+  --apix-nav-reserve: calc(64px + env(safe-area-inset-bottom));
+  --apix-nav-bottom: max(6px, env(safe-area-inset-bottom));
+}
+
+.apix-shell {
+  max-width: 100vw;
+  width: min(100%, var(--apix-visual-viewport-width));
+  height: min(var(--apix-visual-viewport-height), 100dvh);
+  max-height: 100dvh;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding-bottom: 0;
+  container-type: inline-size;
+}
+
+.apix-shell > main {
+  max-width: 100%;
+  min-height: 0;
+  padding-bottom: calc(var(--apix-nav-reserve) + 0.65rem) !important;
+  scroll-padding-bottom: calc(var(--apix-nav-reserve) + 1rem) !important;
+  container-type: inline-size;
+}
+
+.apix-shell > main > * {
+  min-width: 0;
+}
+
+.apix-shell * {
+  min-width: 0;
+}
+
+.apix-adaptive-rail,
+.apix-nav-scroll,
+.apix-chip-rail {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.apix-adaptive-rail::-webkit-scrollbar,
+.apix-nav-scroll::-webkit-scrollbar,
+.apix-chip-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.apix-generation-layout {
+  container-type: inline-size;
+}
+
+.apix-generation-card,
+.apix-uploader-card,
+.apix-launch-card {
+  max-width: 100%;
+}
+
+.apix-generation-card select,
+.apix-generation-card textarea,
+.apix-generation-card input,
+.apix-uploader-card select,
+.apix-uploader-card textarea,
+.apix-uploader-card input {
+  max-width: 100%;
+}
+
+.apix-launch-bar {
+  position: static !important;
+  bottom: auto !important;
+}
+
+.apix-bottom-nav {
+  position: fixed !important;
+  z-index: 1000;
+  left: 50% !important;
+  right: auto !important;
+  bottom: var(--apix-nav-bottom) !important;
+  width: min(calc(100vw - 16px), 820px) !important;
+  max-width: calc(var(--apix-visual-viewport-width) - 16px);
+  margin: 0 !important;
+  transform: translateX(-50%) !important;
+  will-change: transform;
+}
+
+@media (max-width: 900px) {
+  .apix-shell {
+    width: 100%;
+    padding-inline: clamp(6px, 2vw, 12px);
+  }
+
+  .apix-bottom-nav {
+    width: min(calc(100vw - 12px), 760px) !important;
+    max-width: calc(var(--apix-visual-viewport-width) - 12px);
+  }
+
+  .apix-generation-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 560px) {
+  :root {
+    --apix-nav-reserve: calc(58px + env(safe-area-inset-bottom));
+    --apix-nav-bottom: max(5px, env(safe-area-inset-bottom));
+  }
+
+  .apix-shell {
+    gap: 0.25rem;
+    padding-top: max(3px, env(safe-area-inset-top));
+    padding-bottom: 0;
+  }
+
+  .apix-app-header {
+    min-height: 2.45rem;
+    border-radius: 0.85rem;
+    padding: 0.3rem 0.45rem;
+  }
+
+  .apix-profile-avatar {
+    width: 1.95rem;
+    height: 1.95rem;
+  }
+
+  .apix-profile-name {
+    max-width: min(44vw, 10rem);
+    font-size: 0.76rem;
+  }
+
+  .apix-profile-subtitle {
+    display: none !important;
+  }
+
+  .apix-balance-button {
+    min-height: 2rem;
+    padding-inline: 0.55rem;
+    font-size: 0.78rem;
+  }
+
+  .apix-feed-toolbar {
+    gap: 0.3rem;
+    margin-bottom: 0.25rem;
+    border-radius: 0.85rem;
+    padding: 0.35rem;
+  }
+
+  .apix-generation-layout {
+    gap: 0.5rem;
+  }
+
+  .apix-generation-main {
+    gap: 0.45rem;
+  }
+
+  .apix-generation-titlebar {
+    align-items: flex-start;
+  }
+
+  .apix-generation-icon {
+    width: 1.85rem;
+    height: 1.85rem;
+    border-radius: 0.65rem;
+  }
+
+  .apix-generation-title {
+    font-size: 1rem;
+    line-height: 1.15;
+  }
+
+  .apix-generation-subtitle {
+    max-width: 60vw;
+  }
+
+  .apix-generation-balance {
+    display: none;
+  }
+
+  .apix-generation-card-header {
+    padding: 0.7rem 0.8rem 0.3rem;
+  }
+
+  .apix-generation-card-content {
+    gap: 0.5rem;
+    padding: 0.55rem 0.8rem 0.75rem;
+  }
+
+  .apix-generation-card .apix-adaptive-rail {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    overflow-x: visible;
+    gap: 0.45rem 0.5rem;
+    padding-bottom: 0;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > span:first-child {
+    flex: 0 0 100%;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > button {
+    flex: 0 0 auto;
+  }
+
+  .apix-prompt-input {
+    min-height: 5.75rem;
+  }
+
+  .apix-uploader-card {
+    border-radius: 0.85rem;
+    padding: 0.55rem;
+  }
+
+  .apix-uploader-head {
+    align-items: flex-start;
+  }
+
+  .apix-launch-card {
+    border-radius: 0.95rem;
+    box-shadow: 0 8px 18px color-mix(in oklab, black 14%, transparent);
+  }
+
+  .apix-launch-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .apix-submit-button {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .apix-bottom-nav {
+    width: min(calc(100vw - 10px), 430px) !important;
+    max-width: calc(var(--apix-visual-viewport-width) - 10px);
+    border-radius: 1.05rem;
+    padding: 0.25rem;
+  }
+
+  .apix-nav-scroll {
+    gap: 0.25rem;
+    scroll-padding-inline: 0.25rem;
+  }
+
+  .apix-nav-item {
+    min-width: 4rem;
+    min-height: 2.65rem;
+    border-radius: 0.85rem;
+    padding-inline: 0.45rem;
+    font-size: 0.58rem;
+  }
+
+  .apix-nav-item svg {
+    width: 1rem;
+    height: 1rem;
+  }
+}
+
+@media (max-width: 430px) {
+  :root {
+    --apix-nav-reserve: calc(54px + env(safe-area-inset-bottom));
+  }
+
+  .apix-shell {
+    padding-inline: 6px;
+  }
+
+  .apix-media-grid {
+    columns: 2 !important;
+    column-gap: 0.35rem;
+  }
+
+  .apix-media-grid > * {
+    margin-bottom: 0.35rem;
+  }
+
+  .apix-feed-media,
+  .apix-trend-category-grid .apix-feed-media {
+    max-height: min(42dvh, 280px);
+  }
+
+  .apix-generation-card .apix-adaptive-rail {
+    gap: 0.4rem 0.42rem;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > button {
+    min-height: 2.1rem;
+    padding-inline: 0.6rem;
+  }
+
+  .apix-nav-scroll {
+    justify-content: flex-start !important;
+  }
+
+  .apix-nav-item {
+    min-width: 3.65rem;
+  }
+
+  .apix-nav-label {
+    max-width: 3.1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 360px) {
+  :root {
+    --apix-nav-reserve: calc(50px + env(safe-area-inset-bottom));
+  }
+
+  .apix-shell {
+    padding-inline: 4px;
+  }
+
+  .apix-profile-name {
+    max-width: 38vw;
+  }
+
+  .apix-balance-button {
+    padding-inline: 0.45rem;
+  }
+
+  .apix-generation-card-header {
+    padding-inline: 0.65rem;
+  }
+
+  .apix-generation-card-content {
+    padding-inline: 0.65rem;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > button {
+    min-height: 2rem;
+    padding-inline: 0.52rem;
+  }
+
+  .apix-nav-item {
+    min-width: 3.35rem;
+    min-height: 2.45rem;
+    padding-inline: 0.35rem;
+  }
+
+  .apix-nav-label {
+    max-width: 2.85rem;
+  }
+}
+
+@media (max-height: 660px) and (max-width: 560px) {
+  .apix-shell {
+    gap: 0.18rem;
+  }
+
+  .apix-app-header {
+    min-height: 2.25rem;
+  }
+
+  .apix-generation-card-header {
+    padding-block: 0.55rem 0.2rem;
+  }
+
+  .apix-prompt-input {
+    min-height: 4.8rem;
+  }
+
+  .apix-bottom-nav {
+    padding: 0.2rem;
+  }
+
+  .apix-nav-item {
+    min-height: 2.35rem;
+  }
+}
+
+.apix-shell[data-viewport="nano"] .apix-generation-subtitle,
+.apix-shell[data-short="true"] .apix-generation-subtitle {
+  display: none;
+}
+
+.apix-shell[data-viewport="nano"] .apix-bottom-nav,
+.apix-shell[data-short="true"] .apix-bottom-nav {
+  border-radius: 0.9rem;
+}
+
+.apix-shell[data-viewport="nano"] .apix-nav-item,
+.apix-shell[data-short="true"] .apix-nav-item {
+  min-height: 2.35rem;
+}
+
+@container (max-width: 520px) {
+  .apix-generation-layout {
+    gap: 0.5rem;
+  }
+
+  .apix-uploader-head {
+    align-items: flex-start;
+  }
+
+  .apix-generation-card .apix-adaptive-rail {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .apix-generation-card .apix-adaptive-rail > span:first-child {
+    flex: 0 0 100%;
+  }
+
+  .apix-launch-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .apix-submit-button {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+}
+
+@supports not (height: 100dvh) {
+  .apix-shell {
+    height: 100vh;
+  }
+}

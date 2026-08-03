@@ -1,0 +1,64 @@
+services:
+  app:
+    container_name: apix-dev-bot-app
+    build: .
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1"
+    env_file: .env.dev
+    environment:
+      ENV: development
+      DATABASE_URL: postgresql+asyncpg://bot:${DEV_DB_PASSWORD:-secret}@postgres:5432/artflow_dev
+      REDIS_URL: redis://redis:6379/1
+      DB_BACKUP_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DEV_BOT_APP_PORT:-8010}:8000"
+    restart: unless-stopped
+    volumes:
+      - ./data/dev-bot:/app/data
+      - ./static/upload-dev-bot:/app/static/upload
+    networks:
+      - default
+      - apix_devbot_backend
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: artflow_dev
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: ${DEV_DB_PASSWORD:-secret}
+    volumes:
+      - pgdata-dev-bot:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${DEV_BOT_POSTGRES_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot -d artflow_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata-dev-bot:/data
+    ports:
+      - "127.0.0.1:${DEV_BOT_REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata-dev-bot:
+  redisdata-dev-bot:
+
+networks:
+  apix_devbot_backend:
+    external: true
+    name: apix_devbot_backend

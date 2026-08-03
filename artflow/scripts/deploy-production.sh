@@ -4,7 +4,7 @@ set -Eeuo pipefail
 EXPECTED_SHA="${1:-}"
 REPO_DIR="${DEPLOY_PATH:-/root/mkdir/lena_bot}"
 APP_SUBDIR="${DEPLOY_APP_SUBDIR:-artflow}"
-DEPLOY_BRANCH="${DEPLOY_BRANCH:-v2}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 PUBLIC_HEALTH_URL="${DEPLOY_PUBLIC_HEALTH_URL:-https://apixbotai.com/api/v1/health}"
 LOCK_FILE="${DEPLOY_LOCK_FILE:-/tmp/artflow-production-deploy.lock}"
 MEDIA_CERT_DIR="${MEDIA_CERT_DIR:-/etc/letsencrypt/live/media.apixbotai.com}"

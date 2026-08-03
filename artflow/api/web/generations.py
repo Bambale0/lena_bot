@@ -102,6 +102,9 @@ from db.session import get_session
 
 router = APIRouter(tags=["web"])
 
+MAX_WEB_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_WEB_REFERENCE_VIDEO_BYTES = 200 * 1024 * 1024
+
 
 def _dump(value: Any) -> Any:
     if isinstance(value, BaseModel):
@@ -139,6 +142,29 @@ def _auth_required(user):
     if user is None:
         return error_response(401, "Authentication required")
     return None
+
+
+def _looks_like_reference_video(data: bytes, content_type: str | None) -> bool:
+    content = (content_type or "").lower()
+    if content and content.startswith("video/"):
+        return True
+    return (
+        (len(data) > 12 and data[4:8] == b"ftyp")
+        or data.startswith(b"\x1a\x45\xdf\xa3")
+        or (data.startswith(b"RIFF") and b"WEBP" not in data[:16])
+    )
+
+
+def _file_upload_error_or_kind(data: bytes, content_type: str | None) -> tuple[str | None, str | None]:
+    if _is_supported_reference_image(data, content_type):
+        if len(data) > MAX_WEB_REFERENCE_IMAGE_BYTES:
+            return "File too large (max 20 MB)", None
+        return None, "image"
+    if _looks_like_reference_video(data, content_type):
+        if len(data) > MAX_WEB_REFERENCE_VIDEO_BYTES:
+            return "File too large (max 200 MB)", None
+        return None, "video"
+    return "Only JPEG, PNG, WebP, MP4, MOV and WebM files are supported", None
 
 
 @router.get("/models/image")
@@ -330,6 +356,7 @@ async def generation_download(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+
 @router.get("/generations/{generation_id}")
 async def generation_detail(
     generation_id: int,
@@ -425,21 +452,33 @@ async def feed_share_link(
     return await _call_miniapp(miniapp_get_feed_share_link, gen_id=generation_id, session=session, user=user)
 
 
-@router.post("/uploads/reference")
-async def upload_reference(
-    file: UploadFile = File(...),
-    user=Depends(get_web_user_or_none),
-):
+async def _save_uploaded_generation_media(file: UploadFile, user) -> dict | Response:
     if auth_error := _auth_required(user):
         return auth_error
     data = await file.read()
     if not data:
         return error_response(422, "Empty file")
-    if len(data) > 20 * 1024 * 1024:
-        return error_response(413, "File too large (max 20 MB)")
-    if not _is_supported_reference_image(data, file.content_type):
-        return error_response(422, "Only JPEG, PNG and WebP images are supported")
-    return ok({"url": save_public_file(data, file.content_type)})
+    error, media_kind = _file_upload_error_or_kind(data, file.content_type)
+    if error:
+        return error_response(413 if "too large" in error.lower() else 422, error)
+    url = save_public_file(data, file.content_type, subdir="miniapp")
+    return ok({"url": url, "kind": media_kind, "content_type": file.content_type, "size": len(data)})
+
+
+@router.post("/upload-media")
+async def upload_media(
+    file: UploadFile = File(...),
+    user=Depends(get_web_user_or_none),
+):
+    return await _save_uploaded_generation_media(file, user)
+
+
+@router.post("/uploads/reference")
+async def upload_reference(
+    file: UploadFile = File(...),
+    user=Depends(get_web_user_or_none),
+):
+    return await _save_uploaded_generation_media(file, user)
 
 
 @router.post("/photo-prompt")
