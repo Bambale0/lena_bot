@@ -45,6 +45,7 @@ function TaskDetailSheet({
   const media = safeExternalUrl(firstMedia(task));
   const isVideo = task.gen_type === "video" || /\.(mp4|webm|mov)(\?|$)/i.test(media);
   const promptVisible = Boolean(task.prompt && !task.prompt_hidden && task.prompt_actions_allowed !== false);
+  const canPublish = Boolean(media) && !isPendingTask(task) && task.status !== "failed";
 
   const copy = async (value: string, label: string) => {
     try {
@@ -62,12 +63,30 @@ function TaskDetailSheet({
       title={`Задача #${task.id}`}
       description={`${task.model} · ${formatRelativeDate(task.created_at)}`}
       footer={
-        <div className="grid grid-cols-3 gap-1.5">
-          {media ? <Button size="sm" onClick={() => openExternalUrl(media)}><ExternalLink /> Открыть</Button> : <span />}
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => onShare(task)}><Share2 /> {task.is_public_feed ? "В ленте" : "Публикация"}</Button>
-          <Button size="sm" variant="outline" disabled={busy || !promptVisible} onClick={() => onToggleLibrary(task)}>
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+          {media ? (
+            <Button className="w-full justify-center" size="sm" onClick={() => openExternalUrl(media)}>
+              <ExternalLink /> Открыть
+            </Button>
+          ) : null}
+          <Button
+            className="w-full justify-center"
+            size="sm"
+            variant="outline"
+            disabled={busy || !canPublish}
+            onClick={() => onShare(task)}
+          >
+            <Share2 /> {task.is_public_feed ? "Убрать из ленты" : "Опубликовать"}
+          </Button>
+          <Button
+            className="w-full justify-center"
+            size="sm"
+            variant="outline"
+            disabled={busy || !promptVisible}
+            onClick={() => onToggleLibrary(task)}
+          >
             {task.is_prompt_library ? <Trash2 /> : <Library />}
-            {task.is_prompt_library ? "Убрать" : "Сохранить"}
+            {task.is_prompt_library ? "Убрать промпт" : "Сохранить промпт"}
           </Button>
         </div>
       }
