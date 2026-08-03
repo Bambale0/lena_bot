@@ -85,7 +85,9 @@ export function parseStartTarget(rawValue: string): StartTarget | null {
   if (separator < 1) return null;
   const kind = value.slice(0, separator) as StartTarget["kind"];
   const targetValue = value.slice(separator + 1).trim();
-  if (!targetValue || !["ref", "profile", "feed", "remix", "prompt", "task", "trend"].includes(kind)) {
+  // trend_* deep links are handled by TrendRunnerPortal so the legacy App flow
+  // cannot route users into the full generation form with leaked settings.
+  if (!targetValue || !["ref", "profile", "feed", "remix", "prompt", "task"].includes(kind)) {
     return null;
   }
   return { kind, value: targetValue };

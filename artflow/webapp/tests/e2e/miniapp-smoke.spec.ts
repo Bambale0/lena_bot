@@ -49,6 +49,31 @@ const plans = [
   { key: "start", title: "старт", credits: 25, price_rub: 250, price_stars: 250 },
 ];
 
+const trends = [
+  {
+    id: 101,
+    kind: "image",
+    title: "Кинопортрет",
+    description: "Загрузите портретное фото",
+    user_photo_hint: "Лучше фото по пояс",
+    preview_url: "https://example.test/trend.jpg",
+    category_title: "Портреты",
+    category_emoji: "✨",
+    uses_count: 3,
+  },
+  {
+    id: 102,
+    kind: "video",
+    title: "Фото в видео",
+    description: "Оживим ваш снимок",
+    user_photo_hint: "Нужно одно селфи",
+    preview_url: "https://example.test/trend.mp4",
+    category_title: "Фото → видео",
+    category_emoji: "🎬",
+    uses_count: 5,
+  },
+];
+
 async function mockApi(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/me", (route) => route.fulfill({ json: user }));
   await page.route("**/api/v1/models/image", (route) => route.fulfill({ json: imageModels }));
@@ -56,7 +81,9 @@ async function mockApi(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/models/music", (route) => route.fulfill({ json: [{ key: "suno-v5", display_name: "Suno 5", credits: 10, modes: ["text"] }] }));
   await page.route("**/api/v1/history?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: trends }));
+  await page.route("**/api/v1/trends/101", (route) => route.fulfill({ json: trends[0] }));
+  await page.route("**/api/v1/trends/101/link", (route) => route.fulfill({ json: { link: "https://t.me/apix_bot?startapp=trend_101" } }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: plans }));
   await page.route("**/api/v1/referrals", (route) => route.fulfill({ json: {
     referral_code: "REF123",
@@ -130,4 +157,56 @@ test("services expose mobile-friendly Suno music panel", async ({ page }) => {
   await page.getByRole("tab", { name: "Сервисы" }).click();
   await expect(page.getByText("Музыка / Suno")).toBeVisible();
   await expect(page.getByPlaceholder("Текст песни или идея трека")).toBeVisible();
+});
+
+test("one-photo trend runner uploads and runs without exposing generation controls", async ({ page }) => {
+  let runPayload: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/trends/upload", async (route) => {
+    await route.fulfill({ json: { asset_id: "apixasset.test.signature", url: "https://example.test/user.jpg", kind: "image", filename: "face.jpg" } });
+  });
+  await page.route("**/api/v1/trends/101/run", async (route) => {
+    runPayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ json: {
+      ok: true,
+      credits: 98.5,
+      task: {
+        id: 9001,
+        task_id: "web:trend-test",
+        model: "Nano Banana 2",
+        gen_type: "image",
+        prompt: "",
+        prompt_hidden: true,
+        status: "pending",
+        result_url: null,
+        result_urls: [],
+        credits_spent: 1.5,
+        created_at: new Date().toISOString(),
+      },
+    } });
+  });
+
+  await page.goto("/app?tgWebAppData=test");
+  await page.getByRole("tab", { name: "Тренды" }).click();
+  await expect(page.getByText("Фото-тренды")).toBeVisible();
+  await page.getByRole("button", { name: /Повторить/ }).first().click();
+
+  const dialog = page.getByRole("dialog", { name: /Кинопортрет/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("select")).toHaveCount(0);
+  await expect(dialog.locator("textarea")).toHaveCount(0);
+  await expect(dialog.getByText(/модель|формат|качество|duration|seed/i)).toHaveCount(0);
+
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "face.jpg",
+    mimeType: "image/jpeg",
+    buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+
+  await expect(page.getByRole("dialog", { name: /Задача #9001/ })).toBeVisible();
+  expect(runPayload).toMatchObject({ asset_id: "apixasset.test.signature" });
+  expect(typeof runPayload?.idempotency_key).toBe("string");
+  expect(runPayload).not.toHaveProperty("model");
+  expect(runPayload).not.toHaveProperty("prompt");
+  expect(runPayload).not.toHaveProperty("ratio");
+  expect(runPayload).not.toHaveProperty("duration");
 });
