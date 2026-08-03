@@ -6,7 +6,7 @@ import {
   GalleryVerticalEnd,
   ImageIcon,
   Orbit,
-  Palette,
+  Settings,
   UserRound,
 } from "lucide-react";
 
@@ -23,19 +23,8 @@ const tabs: Array<{ id: AppTab; label: string; icon: typeof GalleryVerticalEnd }
   { id: "trends", label: "Тренды", icon: Flame },
   { id: "services", label: "Сервисы", icon: Bot },
   { id: "profile", label: "Профиль", icon: UserRound },
+  { id: "settings", label: "Настройки", icon: Settings },
 ];
-
-const colorSchemes = [
-  { id: "violet", label: "Неон", emoji: "🟣" },
-  { id: "kiss", label: "Поцелуй", emoji: "💋" },
-  { id: "ocean", label: "Океан", emoji: "🌊" },
-  { id: "banana", label: "Банан", emoji: "🍌" },
-] as const;
-
-type ColorScheme = (typeof colorSchemes)[number]["id"];
-
-const COLOR_SCHEME_STORAGE_KEY = "apix-color-scheme";
-const DEFAULT_COLOR_SCHEME: ColorScheme = "violet";
 
 interface AppShellProps {
   activeTab: AppTab;
@@ -52,43 +41,6 @@ interface ViewportState {
   short: boolean;
   width: number;
   height: number;
-}
-
-function isColorScheme(value: string | null): value is ColorScheme {
-  return Boolean(value && colorSchemes.some((scheme) => scheme.id === value));
-}
-
-function readColorScheme(): ColorScheme {
-  if (typeof window === "undefined") return DEFAULT_COLOR_SCHEME;
-  const stored = window.localStorage.getItem(COLOR_SCHEME_STORAGE_KEY);
-  return isColorScheme(stored) ? stored : DEFAULT_COLOR_SCHEME;
-}
-
-function applyColorScheme(scheme: ColorScheme) {
-  if (typeof document === "undefined") return;
-  document.documentElement.dataset.apixScheme = scheme;
-}
-
-function useColorScheme() {
-  const [scheme, setScheme] = useState<ColorScheme>(() => {
-    const initial = readColorScheme();
-    applyColorScheme(initial);
-    return initial;
-  });
-
-  useEffect(() => {
-    applyColorScheme(scheme);
-    window.localStorage.setItem(COLOR_SCHEME_STORAGE_KEY, scheme);
-  }, [scheme]);
-
-  const currentIndex = colorSchemes.findIndex((item) => item.id === scheme);
-  const current = colorSchemes[currentIndex >= 0 ? currentIndex : 0];
-  const cycle = () => {
-    const next = colorSchemes[(currentIndex + 1) % colorSchemes.length] || colorSchemes[0];
-    setScheme(next.id);
-    haptic("light");
-  };
-  return { current, cycle };
 }
 
 function classifyViewport(width: number): ViewportMode {
@@ -151,7 +103,6 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
   const name = user.full_name || user.first_name || user.username || "Пользователь";
   const initial = name.trim().slice(0, 1).toUpperCase() || "A";
   const viewport = useViewportMode();
-  const scheme = useColorScheme();
 
   return (
     <div
@@ -176,24 +127,10 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
           </span>
         </button>
 
-        <div className="apix-header-actions flex min-w-fit shrink-0 items-center gap-1 justify-self-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="apix-theme-button shrink-0 px-2"
-            onClick={scheme.cycle}
-            aria-label={`Цветовая схема: ${scheme.current.label}. Переключить`}
-            title={`Цветовая схема: ${scheme.current.label}`}
-          >
-            <Palette className="size-3.5" />
-            <span className="apix-theme-emoji" aria-hidden="true">{scheme.current.emoji}</span>
-            <span className="apix-theme-label hidden sm:inline">{scheme.current.label}</span>
-          </Button>
-          <Button variant="soft" size="sm" className="apix-balance-button min-w-fit shrink-0 px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
-            <span className="text-sm leading-none" aria-hidden="true">💋</span>
-            <span>{formatCredits(user.credits)}</span>
-          </Button>
-        </div>
+        <Button variant="soft" size="sm" className="apix-balance-button min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
+          <span className="text-sm leading-none" aria-hidden="true">💋</span>
+          <span>{formatCredits(user.credits)}</span>
+        </Button>
       </header>
 
       <main>{children}</main>
