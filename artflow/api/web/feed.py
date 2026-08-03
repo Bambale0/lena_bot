@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.public_files import (
     local_upload_path_from_url,
+    mirror_url,
     preview_public_image_url,
     public_url_is_available,
 )
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import FeedCard
+from core.config import settings
 from db import repository as repo
 from db.session import get_session
 
@@ -60,6 +64,34 @@ def _feed_payload(card, *, require_local: bool = True) -> dict | None:
 
 def _compact_feed_payload(payload: dict) -> dict:
     return {key: payload[key] for key in COMPACT_FEED_KEYS if key in payload}
+
+
+def _generation_result_urls(generation) -> list[str]:
+    urls: list[str] = []
+    raw_urls = getattr(generation, "result_urls", None)
+    if isinstance(raw_urls, str) and raw_urls.strip():
+        try:
+            parsed = json.loads(raw_urls)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, list):
+            urls.extend(str(item).strip() for item in parsed if str(item or "").strip())
+    elif isinstance(raw_urls, list):
+        urls.extend(str(item).strip() for item in raw_urls if str(item or "").strip())
+
+    primary = str(getattr(generation, "result_url", "") or "").strip()
+    if primary and primary not in urls:
+        urls.insert(0, primary)
+    return list(dict.fromkeys(urls))
+
+
+def _public_feed_link(generation_id: int) -> str:
+    base = str(getattr(settings, "WEB_PUBLIC_URL", "") or "").strip().rstrip("/")
+    return f"{base}/app?feed={int(generation_id)}" if base else ""
+
+
+def _generation_value(value) -> str:
+    return str(getattr(value, "value", value) or "").lower()
 
 
 async def _feed_payloads(session: AsyncSession, source: str, limit: int, *, compact: bool = False) -> list[dict]:
@@ -150,3 +182,51 @@ async def feed_share(
     if generation is None:
         return error_response(404, "Generation not found")
     return ok({"id": generation.id, "shares": generation.shares_count})
+
+
+@router.post("/feed/generations/{generation_id}/publish")
+async def publish_own_generation_to_feed(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+) -> dict:
+    """Publish any own ready image/video generation without exposing its prompt.
+
+    This endpoint deliberately does not reject hidden-prompt generations or feed
+    remixes. The public feed payload always hides prompts, so users can publish
+    their own finished media while trend/remix source prompts stay protected.
+    """
+    if user is None:
+        return error_response(401, "Authentication required")
+
+    generation = await repo.get_generation_by_id(session, generation_id)
+    if generation is None or getattr(generation, "user_id", None) != getattr(user, "id", None):
+        return error_response(404, "Generation not found")
+
+    gen_type = _generation_value(getattr(generation, "gen_type", ""))
+    if gen_type not in {"image", "video"}:
+        return error_response(422, "Only image and video works can be published")
+
+    if _generation_value(getattr(generation, "status", "")) not in {"done", "completed"}:
+        return error_response(422, "Generation is not ready yet")
+
+    original_urls = _generation_result_urls(generation)
+    if not original_urls:
+        return error_response(422, "Generation has no result media")
+
+    clean_urls: list[str] = []
+    for url in original_urls:
+        mirrored = await mirror_url(url, subdir="feed")
+        clean_urls.append(mirrored or url)
+
+    generation.is_public_feed = True
+    generation.result_url = clean_urls[0]
+    generation.result_urls = json.dumps(clean_urls, ensure_ascii=False)
+    await session.commit()
+    await session.refresh(generation)
+
+    return ok({
+        "id": generation.id,
+        "is_public_feed": True,
+        "link": _public_feed_link(generation.id),
+    })
