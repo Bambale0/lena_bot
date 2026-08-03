@@ -46,6 +46,7 @@ async function readApiError(response: Response): Promise<ApiError> {
   const detail = record.detail;
   const message =
     (typeof nestedError.message === "string" && nestedError.message) ||
+    (typeof record.error === "string" && record.error) ||
     (typeof detail === "string" && detail) ||
     (typeof record.message === "string" && record.message) ||
     `Ошибка API ${response.status}`;
@@ -163,8 +164,22 @@ export class MiniAppApi {
     });
   }
 
-  shareGeneration(id: number): Promise<{ link?: string; is_public_feed?: boolean }> {
-    return this.request<{ link?: string; is_public_feed?: boolean }>(`/generations/${id}/share`, { method: "POST", body: "{}" });
+  async shareGeneration(id: number): Promise<{ link?: string; is_public_feed?: boolean }> {
+    const response = await fetch(`/api/web/feed/generations/${id}/publish`, {
+      method: "POST",
+      body: "{}",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Init-Data": this.initData,
+      },
+    });
+    if (!response.ok) throw await readApiError(response);
+    const payload = asRecord(await response.json());
+    const data = asRecord(payload.data || payload);
+    return {
+      link: typeof data.link === "string" ? data.link : undefined,
+      is_public_feed: Boolean(data.is_public_feed),
+    };
   }
 
   removeFeedPost(id: number): Promise<{ is_public_feed?: boolean }> {
