@@ -32,7 +32,7 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center" role="presentation">
+    <div className="fixed inset-0 z-[1200] flex items-end justify-center sm:items-center" role="presentation">
       <button
         type="button"
         aria-label="Закрыть"
@@ -61,7 +61,11 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
           </Button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">{children}</div>
-        {footer ? <footer className="border-t border-border bg-popover/95 p-3 backdrop-blur-xl sm:p-4">{footer}</footer> : null}
+        {footer ? (
+          <footer className="border-t border-border bg-popover/95 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:p-4">
+            {footer}
+          </footer>
+        ) : null}
       </section>
     </div>
   );
