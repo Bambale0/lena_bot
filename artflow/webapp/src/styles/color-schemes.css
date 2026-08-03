@@ -38,39 +38,40 @@
   --apix-pink: oklch(0.78 0.16 75);
 }
 
-.apix-theme-button {
-  min-width: 2.4rem;
-  gap: 0.3rem;
-  border: 1px solid color-mix(in oklab, var(--primary) 24%, transparent);
-  background: color-mix(in oklab, var(--primary) 7%, transparent);
-}
-
-.apix-theme-button:hover {
-  background: color-mix(in oklab, var(--primary) 14%, transparent);
-}
-
-.apix-theme-emoji {
-  line-height: 1;
-}
-
 .apix-balance-button {
   gap: 0.38rem;
 }
 
+.apix-scheme-preview {
+  background: linear-gradient(90deg, var(--scheme-primary, var(--primary)), var(--scheme-pink, var(--apix-pink)), var(--scheme-cyan, var(--apix-cyan)));
+  box-shadow: 0 0 18px color-mix(in oklab, var(--scheme-primary, var(--primary)) 28%, transparent);
+}
+
+[data-apix-preview-scheme="violet"] {
+  --scheme-primary: oklch(0.71 0.22 298);
+  --scheme-pink: oklch(0.7 0.23 350);
+  --scheme-cyan: oklch(0.79 0.16 205);
+}
+
+[data-apix-preview-scheme="kiss"] {
+  --scheme-primary: oklch(0.7 0.24 350);
+  --scheme-pink: oklch(0.74 0.25 350);
+  --scheme-cyan: oklch(0.72 0.16 18);
+}
+
+[data-apix-preview-scheme="ocean"] {
+  --scheme-primary: oklch(0.73 0.16 205);
+  --scheme-pink: oklch(0.68 0.16 235);
+  --scheme-cyan: oklch(0.8 0.15 195);
+}
+
+[data-apix-preview-scheme="banana"] {
+  --scheme-primary: oklch(0.82 0.17 86);
+  --scheme-pink: oklch(0.78 0.16 75);
+  --scheme-cyan: oklch(0.78 0.14 128);
+}
+
 @media (max-width: 430px) {
-  .apix-header-actions {
-    gap: 0.25rem;
-  }
-
-  .apix-theme-button {
-    min-width: 2.15rem;
-    padding-inline: 0.45rem !important;
-  }
-
-  .apix-theme-button svg {
-    display: none;
-  }
-
   .apix-balance-button {
     padding-inline: 0.55rem !important;
   }
