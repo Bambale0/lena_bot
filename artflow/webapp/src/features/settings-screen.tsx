@@ -4,8 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { colorSchemes, useColorScheme, type ColorScheme } from "@/lib/color-schemes";
+import { t } from "@/lib/i18n";
 import type { AppLanguage, UserProfile } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, formatKisses } from "@/lib/utils";
 
 interface SettingsScreenProps {
   user: UserProfile;
@@ -20,6 +21,7 @@ const languages: Array<{ value: AppLanguage; title: string; subtitle: string; em
 ];
 
 function SettingsScreen({ user, busy, onLanguageChange, onResetApp }: SettingsScreenProps) {
+  const copy = t(user.language);
   const color = useColorScheme();
   const currentLanguage = user.language || "ru";
 
@@ -29,15 +31,15 @@ function SettingsScreen({ user, busy, onLanguageChange, onResetApp }: SettingsSc
         <div className="flex items-center gap-2">
           <span className="grid size-10 place-items-center rounded-xl bg-primary/15 text-primary"><Palette className="size-5" /></span>
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-bold">Настройки</h1>
-            <p className="truncate text-xs text-muted-foreground">Внешний вид, язык и поведение Mini App</p>
+            <h1 className="truncate text-lg font-bold">{copy.settings.title}</h1>
+            <p className="truncate text-xs text-muted-foreground">{copy.settings.subtitle}</p>
           </div>
         </div>
       </div>
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2"><Palette className="size-4" /> Цветовая схема</CardTitle>
+          <CardTitle className="flex items-center gap-2"><Palette className="size-4" /> {copy.settings.schemeTitle}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-2">
           <div className="grid grid-cols-2 gap-2 min-[520px]:grid-cols-4">
@@ -50,13 +52,13 @@ function SettingsScreen({ user, busy, onLanguageChange, onResetApp }: SettingsSc
               />
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">Схема сохраняется на устройстве и применяется через CSS-переменные. Telegram light/dark не ломается.</p>
+          <p className="text-xs text-muted-foreground">{copy.settings.schemeHelp}</p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2"><Languages className="size-4" /> Язык</CardTitle>
+          <CardTitle className="flex items-center gap-2"><Languages className="size-4" /> {copy.settings.languageTitle}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-2">
           {languages.map((language) => {
@@ -77,26 +79,26 @@ function SettingsScreen({ user, busy, onLanguageChange, onResetApp }: SettingsSc
                   <span className="block text-sm font-semibold">{language.title}</span>
                   <span className="block text-[10px] text-muted-foreground">{language.subtitle}</span>
                 </span>
-                {active ? <Badge variant="outline">активен</Badge> : null}
+                {active ? <Badge variant="outline">{copy.settings.active}</Badge> : null}
               </button>
             );
           })}
-          <p className="text-xs text-muted-foreground">Переключатель вызывает backend `/settings/language`, поэтому язык сохраняется в профиле пользователя.</p>
+          <p className="text-xs text-muted-foreground">{copy.settings.languageHelp}</p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2"><Smartphone className="size-4" /> Диагностика Mini App</CardTitle>
+          <CardTitle className="flex items-center gap-2"><Smartphone className="size-4" /> {copy.settings.diagnosticsTitle}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-2 text-xs text-muted-foreground">
           <div className="grid grid-cols-2 gap-1.5">
-            <InfoPill label="Пользователь" value={user.username ? `@${user.username}` : String(user.tg_id || user.id)} />
-            <InfoPill label="Язык" value={currentLanguage.toUpperCase()} />
-            <InfoPill label="Схема" value={color.current.label} />
-            <InfoPill label="Баланс" value={`${user.credits} кр.`} />
+            <InfoPill label={copy.settings.user} value={user.username ? `@${user.username}` : String(user.tg_id || user.id)} />
+            <InfoPill label={copy.settings.language} value={currentLanguage.toUpperCase()} />
+            <InfoPill label={copy.settings.scheme} value={color.current.label} />
+            <InfoPill label={copy.settings.balance} value={formatKisses(user.credits)} />
           </div>
-          <Button variant="outline" size="sm" onClick={onResetApp}><RefreshCw className="size-4" /> Перезагрузить данные</Button>
+          <Button variant="outline" size="sm" onClick={onResetApp}><RefreshCw className="size-4" /> {copy.settings.reload}</Button>
         </CardContent>
       </Card>
     </div>
