@@ -1,3 +1,4 @@
+import { openFeedRemixRunner } from "@/features/feed-remix-runner";
 import type {
   AppLanguage,
   AssistantMessage,
@@ -59,6 +60,23 @@ async function readApiError(response: Response): Promise<ApiError> {
 
 function settledValue<T>(result: PromiseSettledResult<T>, fallback: T): T {
   return result.status === "fulfilled" ? result.value : fallback;
+}
+
+function remixBodyMedia(body: Record<string, unknown>): string {
+  const sourceImage = body.source_image_url;
+  if (typeof sourceImage === "string" && sourceImage) return sourceImage;
+  const imageUrl = body.image_url;
+  if (typeof imageUrl === "string" && imageUrl) return imageUrl;
+  const refs = body.reference_urls;
+  if (Array.isArray(refs)) {
+    const first = refs.find((item) => typeof item === "string" && item);
+    if (typeof first === "string") return first;
+  }
+  return "";
+}
+
+function mediaLooksVideo(url: string): boolean {
+  return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
 }
 
 export class MiniAppApi {
@@ -158,9 +176,18 @@ export class MiniAppApi {
   }
 
   remixFeed(id: number, body: Record<string, unknown>): Promise<GenerationTask> {
-    return this.request<GenerationTask>(`/feed/${id}/remix`, {
-      method: "POST",
-      body: JSON.stringify(body),
+    const media = remixBodyMedia(body);
+    return openFeedRemixRunner({
+      id,
+      model: String(body.model || ""),
+      gen_type: mediaLooksVideo(media) ? "video" : "image",
+      result_url: media,
+      result_urls: media ? [media] : [],
+      preview_url: media,
+      preview_urls: media ? [media] : [],
+      aspect_ratio: typeof body.aspect_ratio === "string" ? body.aspect_ratio : null,
+      author: "Автор",
+      prompt_hidden: true,
     });
   }
 
