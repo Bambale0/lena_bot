@@ -221,20 +221,25 @@ def test_feed_has_categorized_trends_tab() -> None:
     assert 'Работы' in feed and 'Тренды' in feed
     assert 'category_emoji' in feed
     assert 'Повторить тренд' in feed
-    assert '`/api/v1/trends/${trend.id}/prepare`' in feed
-    assert '"/api/v1/generate/video"' in feed
-    assert '"/api/v1/generate/image"' in feed
+    assert 'openTrendRunner(trend)' in feed
+    assert '`/api/v1/trends/${trend.id}/prepare`' not in feed
+    assert '"/api/v1/generate/video"' not in feed
+    assert '"/api/v1/generate/image"' not in feed
 
 
-def test_repeat_feed_uses_filters_and_safe_video_remix_payload() -> None:
+def test_repeat_feed_uses_filters_safe_video_payload_and_normalized_media_urls() -> None:
     app = read(SRC / "app/App.tsx")
     feed = read(SRC / "features/feed-screen.tsx")
     api = read(SRC / "lib/api.ts")
+    utils = read(SRC / "lib/utils.ts")
 
     assert 'remixingId' in app
     assert 'mode: videoMedia ? "text" : "image"' in app
     assert 'source_image_url: media && !videoMedia ? media : null' in app
     assert 'video_url: null' in app
+    assert 'const url = new URL(value, window.location.origin)' in utils
+    assert 'const url = safeExternalUrl(candidate)' in utils
+    assert 'Invalid reference URL' not in app
     assert 'type WorkFilter = "all" | "image" | "video" | "mine"' in feed
     assert 'visibleItems' in feed
     assert 'Все' in feed and 'Фото' in feed and 'Видео' in feed and 'Мои' in feed
