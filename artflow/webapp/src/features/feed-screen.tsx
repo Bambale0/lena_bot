@@ -19,9 +19,10 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import type { FeedItem, PreparedTrend, TrendItem } from "@/lib/types";
-import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
+import { openTrendRunner } from "@/features/trend-runner";
+import type { FeedItem, TrendItem } from "@/lib/types";
 import { notifyHaptic, readTelegramInitData } from "@/lib/telegram";
+import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
 
 type FeedSource = "recent" | "top_day" | "top";
 type WorkFilter = "all" | "image" | "video" | "mine";
@@ -136,19 +137,6 @@ async function apiErrorMessage(response: Response): Promise<string> {
   return `Ошибка API ${response.status}`;
 }
 
-function settingString(settings: Record<string, unknown>, keys: string[], fallback: string): string {
-  for (const key of keys) {
-    const value = settings[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return fallback;
-}
-
-function settingNumber(settings: Record<string, unknown>, key: string, fallback: number): number {
-  const value = Number(settings[key]);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
 function FeedScreen({
   items,
   source,
@@ -171,7 +159,6 @@ function FeedScreen({
   const [trendKind, setTrendKind] = useState<TrendKindFilter>("all");
   const [trendCategory, setTrendCategory] = useState("all");
   const [visibleTrendCount, setVisibleTrendCount] = useState(TREND_RENDER_BATCH);
-  const [preparingTrendId, setPreparingTrendId] = useState<number | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const visibleItems = useMemo(() => {
@@ -299,51 +286,10 @@ function FeedScreen({
     });
   }, []);
 
-  const repeatTrend = useCallback(async (trend: TrendItem) => {
-    if (preparingTrendId) return;
-    setPreparingTrendId(trend.id);
-    try {
-      const prepareResponse = await fetch(`/api/v1/trends/${trend.id}/prepare`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: "{}",
-      });
-      if (!prepareResponse.ok) throw new Error(await apiErrorMessage(prepareResponse));
-      const prepared = (await prepareResponse.json()) as PreparedTrend;
-      const settings = prepared.settings || {};
-      const endpoint = prepared.kind === "video" ? "/api/v1/generate/video" : "/api/v1/generate/image";
-      const body: Record<string, unknown> = prepared.kind === "video"
-        ? {
-            model: prepared.model,
-            prompt: "Использовать скрытый трендовый промпт",
-            prompt_id: prepared.prompt_id,
-            mode: settingString(settings, ["scenario", "mode"], "text"),
-            duration: settingNumber(settings, "duration", 5),
-            aspect_ratio: settingString(settings, ["ratio", "aspect_ratio"], "16:9"),
-            resolution: settingString(settings, ["resolution"], "720p"),
-          }
-        : {
-            model: prepared.model,
-            prompt: "Использовать скрытый трендовый промпт",
-            prompt_id: prepared.prompt_id,
-            aspect_ratio: settingString(settings, ["ratio", "aspect_ratio"], "1:1"),
-            quality: settingString(settings, ["quality"], "basic"),
-          };
-      const generationResponse = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify(body),
-      });
-      if (!generationResponse.ok) throw new Error(await apiErrorMessage(generationResponse));
-      notifyHaptic("success");
-      toast.success("Тренд запущен. Задача появится в истории.");
-    } catch (error) {
-      notifyHaptic("error");
-      toast.error(error instanceof Error ? error.message : "Не удалось запустить тренд");
-    } finally {
-      setPreparingTrendId(null);
-    }
-  }, [preparingTrendId]);
+  const repeatTrend = useCallback((trend: TrendItem) => {
+    notifyHaptic("success");
+    openTrendRunner(trend);
+  }, []);
 
   return (
     <div className="grid gap-2">
@@ -587,9 +533,8 @@ function FeedScreen({
           trends={renderedTrends}
           loading={trendsLoading}
           canRevealMore={canRevealMoreTrends}
-          preparingTrendId={preparingTrendId}
           onRevealMore={() => setVisibleTrendCount((current) => Math.min(current + TREND_RENDER_BATCH, visibleTrends.length))}
-          onRepeat={(trend) => void repeatTrend(trend)}
+          onRepeat={(trend) => repeatTrend(trend)}
         />
       )}
 
@@ -602,14 +547,12 @@ function TrendCategorySurface({
   trends,
   loading,
   canRevealMore,
-  preparingTrendId,
   onRevealMore,
   onRepeat,
 }: {
   trends: TrendItem[];
   loading: boolean;
   canRevealMore: boolean;
-  preparingTrendId: number | null;
   onRevealMore: () => void;
   onRepeat: (trend: TrendItem) => void;
 }) {
@@ -655,12 +598,8 @@ function TrendCategorySurface({
                     <p className="line-clamp-6 pb-1 text-[10px]">{trend.description}</p>
                   </details>
                 ) : null}
-                <Button className="min-h-8 px-2 text-[10px]" disabled={preparingTrendId === trend.id} onClick={() => onRepeat(trend)}>
-                  {preparingTrendId === trend.id ? (
-                    <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  ) : (
-                    <Repeat2 className="size-3.5" />
-                  )}
+                <Button className="min-h-8 px-2 text-[10px]" onClick={() => onRepeat(trend)}>
+                  <Repeat2 className="size-3.5" />
                   Повторить тренд
                 </Button>
               </div>
