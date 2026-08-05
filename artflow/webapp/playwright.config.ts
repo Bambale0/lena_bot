@@ -11,15 +11,15 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "npm run build && npm run preview -- --port 4173",
-    url: "http://127.0.0.1:4173/app?tgWebAppData=test",
+    command: "npm run build && npm run preview -- --host 127.0.0.1 --port 4173",
+    url: "http://127.0.0.1:4173/",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
   projects: [
-    { name: "iPhone SE", use: { ...devices["iPhone SE"] } },
-    { name: "iPhone 13", use: { ...devices["iPhone 13"] } },
-    { name: "Pixel 5", use: { ...devices["Pixel 5"] } },
+    { name: "iPhone SE", use: { ...devices["iPhone SE"], browserName: "chromium" } },
+    { name: "iPhone 13", use: { ...devices["iPhone 13"], browserName: "chromium" } },
+    { name: "Pixel 5", use: { ...devices["Pixel 5"], browserName: "chromium" } },
     { name: "Desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
   ],
 });

@@ -272,6 +272,8 @@ function FeedRemixRunnerPortal() {
     setError("");
     try {
       const isVideoModel = bucket === "video";
+      const sourceMedia = sourcePreview || "";
+      const primaryUserReference = references[0] || "";
       const task = await apiJson<GenerationTask>(`/feed/${item.id}/remix`, {
         method: "POST",
         body: JSON.stringify({
@@ -280,8 +282,10 @@ function FeedRemixRunnerPortal() {
           duration,
           aspect_ratio: aspectRatio,
           resolution,
+          image_url: primaryUserReference || (!sourceIsVideo ? sourceMedia || null : null),
+          source_image_url: !sourceIsVideo ? sourceMedia || null : null,
           reference_urls: references,
-          video_url: null,
+          video_url: sourceIsVideo ? sourceMedia || null : null,
           video_start: 0,
           video_end: null,
           audio_ids: [],
@@ -304,7 +308,7 @@ function FeedRemixRunnerPortal() {
       setPhase("error");
       toast.error(message);
     }
-  }, [aspectRatio, bucket, busy, count, duration, grokMode, item, mode, quality, references, resetForm, resolution, selectedModel]);
+  }, [aspectRatio, bucket, busy, count, duration, grokMode, item, mode, quality, references, resetForm, resolution, selectedModel, sourceIsVideo, sourcePreview]);
 
   const phaseLabel = useMemo(() => {
     if (phase === "uploading") return "Загружаем референсы…";

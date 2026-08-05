@@ -2,7 +2,6 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "@/app/App";
-import { TrendRunnerPortal } from "@/features/trend-runner";
 import "@/styles/globals.css";
 import "@/styles/color-schemes.css";
 import "@/styles/responsive.css";
@@ -18,7 +17,6 @@ if (legacy) {
   createRoot(root).render(
     <StrictMode>
       <App />
-      <TrendRunnerPortal />
     </StrictMode>,
   );
 }
