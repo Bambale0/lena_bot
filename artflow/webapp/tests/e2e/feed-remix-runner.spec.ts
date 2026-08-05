@@ -113,7 +113,7 @@ test("feed work repeat asks for settings and preserves source media payload", as
     });
   });
 
-  await page.goto("/app?tgWebAppData=test");
+  await page.goto("/?tgWebAppData=test");
   await expect(page.getByText("Artist QA")).toBeVisible();
   await page.getByRole("button", { name: "Повторить" }).first().click();
 
