@@ -137,7 +137,8 @@ test("renders feed-first shell without horizontal overflow", async ({ page }) =>
 
 test("payment cabinet uses kisses wording", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
-  await page.getByRole("button", { name: /Открыть баланс/ }).click();
+  await expect(page.getByRole("tab", { name: "Лента" })).toBeVisible();
+  await page.locator(".apix-balance-button").click();
   await expect(page.getByText("1. Пакет поцелуев")).toBeVisible();
   await expect(page.getByText(/15 поцелу/)).toBeVisible();
   await expect(page.getByText("кредиты")).toHaveCount(0);
@@ -148,7 +149,7 @@ test("settings expose color schemes and language switch", async ({ page }) => {
   await page.getByRole("tab", { name: "Настройки" }).click();
   await expect(page.getByText("Цветовая схема")).toBeVisible();
   await expect(page.getByText("Поцелуй")).toBeVisible();
-  await page.getByText("English").click();
+  await page.getByRole("button", { name: /English/ }).click();
   await expect(page.getByText(/English|Язык/)).toBeVisible();
 });
 
@@ -190,7 +191,7 @@ test("one-photo trend runner uploads and runs without exposing generation contro
   await expect(page.getByText("Фото-тренды")).toBeVisible();
   await page.getByRole("button", { name: /Повторить/ }).first().click();
 
-  const dialog = page.getByRole("dialog", { name: /Кинопортрет/ });
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator("select")).toHaveCount(0);
   await expect(dialog.locator("textarea")).toHaveCount(0);
