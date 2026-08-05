@@ -1,0 +1,43 @@
+/* Mobile polish for compact feed cards.
+   Keep the repeat action readable when cards are narrow in Telegram WebView. */
+
+@media (max-width: 420px) {
+  .apix-feed-mosaic .apix-feed-card .apix-feed-media > div[class*="bottom-0"] > div:last-child {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 0.3rem;
+  }
+
+  .apix-feed-mosaic .apix-feed-card .apix-feed-media > div[class*="bottom-0"] > div:last-child > button {
+    width: 100%;
+    min-width: 0;
+    min-height: 2rem;
+    padding-inline: 0.55rem;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    line-height: 1;
+  }
+
+  .apix-feed-mosaic .apix-feed-card .apix-feed-media > div[class*="bottom-0"] > div:last-child > span {
+    justify-self: start;
+    max-width: 100%;
+    padding-block: 0.18rem;
+    padding-inline: 0.45rem;
+    font-size: 0.62rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .apix-feed-mosaic .apix-feed-card .apix-feed-media > div[class*="bottom-0"] {
+    gap: 0.3rem;
+    padding-inline: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
+
+  .apix-feed-mosaic .apix-feed-card .apix-feed-media > div[class*="bottom-0"] > div:last-child > button {
+    min-height: 1.9rem;
+    border-radius: 0.7rem;
+    font-size: 0.68rem;
+  }
+}
