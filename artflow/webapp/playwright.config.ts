@@ -17,9 +17,9 @@ export default defineConfig({
     timeout: 120_000,
   },
   projects: [
-    { name: "iPhone SE", use: { ...devices["iPhone SE"] } },
-    { name: "iPhone 13", use: { ...devices["iPhone 13"] } },
-    { name: "Pixel 5", use: { ...devices["Pixel 5"] } },
+    { name: "iPhone SE", use: { ...devices["iPhone SE"], browserName: "chromium" } },
+    { name: "iPhone 13", use: { ...devices["iPhone 13"], browserName: "chromium" } },
+    { name: "Pixel 5", use: { ...devices["Pixel 5"], browserName: "chromium" } },
     { name: "Desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
   ],
 });
