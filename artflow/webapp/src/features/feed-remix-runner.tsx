@@ -15,18 +15,16 @@ const API_BASE = "/api/v1";
 const ACCEPTED_REFERENCE_IMAGES = "image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif";
 const ACCEPTED_REFERENCE_EXTENSIONS = ".jpg,.jpeg,.png,.webp,.heic,.heif,.avif";
 
-type FeedRemixEventDetail = { item: FeedItem };
 type ModelBucket = "image" | "video";
 type RunnerPhase = "idle" | "uploading" | "generating" | "error";
+type FeedRemixEventDetail = { item: FeedItem };
+type PendingRemix = { resolve: (task: GenerationTask) => void; reject: (error: Error) => void };
 
-type UploadResponse = {
-  url?: string;
-  content_type?: string;
-  size?: number;
-};
+type UploadResponse = { url?: string; content_type?: string; size?: number };
 
 let runnerRoot: Root | null = null;
 let runnerMounted = false;
+let pendingRemix: PendingRemix | null = null;
 
 function ensureFeedRemixRunnerPortal(): void {
   if (typeof document === "undefined" || runnerMounted) return;
@@ -51,10 +49,7 @@ function initDataHeader(): string {
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const initData = initDataHeader();
-  return {
-    ...(initData ? { "X-Telegram-Init-Data": initData } : {}),
-    ...extra,
-  };
+  return { ...(initData ? { "X-Telegram-Init-Data": initData } : {}), ...extra };
 }
 
 async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -104,9 +99,13 @@ async function uploadReferenceImage(file: File): Promise<UploadResponse> {
   return (payload?.data || payload) as UploadResponse;
 }
 
-function openFeedRemixRunner(item: FeedItem): void {
+function openFeedRemixRunner(item: FeedItem): Promise<GenerationTask> {
   ensureFeedRemixRunnerPortal();
-  window.dispatchEvent(new CustomEvent<FeedRemixEventDetail>(FEED_REMIX_EVENT, { detail: { item } }));
+  if (pendingRemix) pendingRemix.reject(new Error("Открыт новый повтор"));
+  return new Promise<GenerationTask>((resolve, reject) => {
+    pendingRemix = { resolve, reject };
+    window.dispatchEvent(new CustomEvent<FeedRemixEventDetail>(FEED_REMIX_EVENT, { detail: { item } }));
+  });
 }
 
 function modelDurations(model?: ModelInfo): number[] {
@@ -153,7 +152,6 @@ function FeedRemixRunnerPortal() {
   const [resolution, setResolution] = useState("720p");
   const [grokMode, setGrokMode] = useState("normal");
   const [references, setReferences] = useState<string[]>([]);
-  const [selectedTask, setSelectedTask] = useState<GenerationTask | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const allModels = useMemo(() => [...imageModels, ...videoModels], [imageModels, videoModels]);
@@ -174,7 +172,6 @@ function FeedRemixRunnerPortal() {
     setPhase("idle");
     setError("");
     setReferences([]);
-    setSelectedTask(null);
     setModelKey(nextItem?.model || "");
     setMode(nextItem && itemLooksVideo(nextItem) ? "text" : "image");
     setAspectRatio(nextItem?.aspect_ratio || "1:1");
@@ -185,14 +182,16 @@ function FeedRemixRunnerPortal() {
     setGrokMode("normal");
   }, []);
 
+  const cancelPending = useCallback((message = "Повтор отменён") => {
+    if (pendingRemix) pendingRemix.reject(new Error(message));
+    pendingRemix = null;
+  }, []);
+
   const loadModels = useCallback(async () => {
     if (modelsLoading || (imageModels.length && videoModels.length)) return;
     setModelsLoading(true);
     try {
-      const [images, videos] = await Promise.all([
-        apiJson<ModelInfo[]>("/models/image"),
-        apiJson<ModelInfo[]>("/models/video"),
-      ]);
+      const [images, videos] = await Promise.all([apiJson<ModelInfo[]>("/models/image"), apiJson<ModelInfo[]>("/models/video")]);
       setImageModels(Array.isArray(images) ? images : []);
       setVideoModels(Array.isArray(videos) ? videos : []);
     } catch (loadError) {
@@ -203,7 +202,6 @@ function FeedRemixRunnerPortal() {
   }, [imageModels.length, modelsLoading, videoModels.length]);
 
   useEffect(() => {
-    ensureFeedRemixRunnerPortal();
     const onOpen = (event: Event) => {
       const detail = (event as CustomEvent<FeedRemixEventDetail>).detail;
       if (!detail?.item) return;
@@ -233,13 +231,14 @@ function FeedRemixRunnerPortal() {
     if (!nextQuality.includes(quality)) setQuality(nextQuality[0] || "basic");
     const nextCounts = selectedModel.counts || [1];
     if (!nextCounts.includes(count)) setCount(nextCounts[0] || 1);
-    if (!modeOptions.includes(mode)) setMode(modeOptions[0] || (bucket === "video" ? "image" : "image"));
-  }, [aspectRatio, bucket, count, duration, mode, modeOptions, quality, resolution, selectedModel]);
+    if (!modeOptions.includes(mode)) setMode(modeOptions[0] || "image");
+  }, [aspectRatio, count, duration, mode, modeOptions, quality, resolution, selectedModel]);
 
   const close = useCallback(() => {
     if (busy) return;
+    cancelPending();
     resetForm(null);
-  }, [busy, resetForm]);
+  }, [busy, cancelPending, resetForm]);
 
   const addReferenceFiles = useCallback(async (files: File[]) => {
     if (!files.length || busy) return;
@@ -293,7 +292,8 @@ function FeedRemixRunnerPortal() {
           count,
         }),
       });
-      setSelectedTask(task);
+      pendingRemix?.resolve(task);
+      pendingRemix = null;
       notifyHaptic("success");
       toast.success("Повтор запущен");
       resetForm(null);
