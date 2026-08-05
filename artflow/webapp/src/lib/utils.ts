@@ -68,19 +68,33 @@ export function isPendingTask(task?: GenerationTask | null): boolean {
   return Boolean(task && ["created", "queued", "pending", "processing", "running"].includes(task.status));
 }
 
+export function safeExternalUrl(value?: string | null): string {
+  if (!value) return "";
+  try {
+    const url = new URL(value, window.location.origin);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 export function firstMedia(item: {
   preview_url?: string | null;
   result_url?: string | null;
   preview_urls?: string[];
   result_urls?: string[];
 }): string {
-  return (
-    item.preview_url ||
-    item.preview_urls?.find(Boolean) ||
-    item.result_url ||
-    item.result_urls?.find(Boolean) ||
-    ""
-  );
+  const candidates = [
+    item.preview_url,
+    item.preview_urls?.find(Boolean),
+    item.result_url,
+    item.result_urls?.find(Boolean),
+  ];
+  for (const candidate of candidates) {
+    const url = safeExternalUrl(candidate);
+    if (url) return url;
+  }
+  return "";
 }
 
 export function modelSupports(model: ModelInfo | undefined, mode: string): boolean {
@@ -106,14 +120,4 @@ export function splitUrls(value: string): string[] {
         .filter(Boolean),
     ),
   );
-}
-
-export function safeExternalUrl(value?: string | null): string {
-  if (!value) return "";
-  try {
-    const url = new URL(value, window.location.origin);
-    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
-  } catch {
-    return "";
-  }
 }
