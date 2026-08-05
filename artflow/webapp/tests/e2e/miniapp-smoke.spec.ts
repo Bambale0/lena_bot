@@ -128,7 +128,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("renders feed-first shell without horizontal overflow", async ({ page }) => {
-  await page.goto("/app?tgWebAppData=test");
+  await page.goto("/?tgWebAppData=test");
   await expect(page.getByRole("tab", { name: "Лента" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Настройки" })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -136,7 +136,7 @@ test("renders feed-first shell without horizontal overflow", async ({ page }) =>
 });
 
 test("payment cabinet uses kisses wording", async ({ page }) => {
-  await page.goto("/app?tgWebAppData=test");
+  await page.goto("/?tgWebAppData=test");
   await page.getByRole("button", { name: /Открыть баланс/ }).click();
   await expect(page.getByText("1. Пакет поцелуев")).toBeVisible();
   await expect(page.getByText(/15 поцелу/)).toBeVisible();
@@ -144,7 +144,7 @@ test("payment cabinet uses kisses wording", async ({ page }) => {
 });
 
 test("settings expose color schemes and language switch", async ({ page }) => {
-  await page.goto("/app?tgWebAppData=test");
+  await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Настройки" }).click();
   await expect(page.getByText("Цветовая схема")).toBeVisible();
   await expect(page.getByText("Поцелуй")).toBeVisible();
@@ -153,7 +153,7 @@ test("settings expose color schemes and language switch", async ({ page }) => {
 });
 
 test("services expose mobile-friendly Suno music panel", async ({ page }) => {
-  await page.goto("/app?tgWebAppData=test");
+  await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Сервисы" }).click();
   await expect(page.getByText("Музыка / Suno")).toBeVisible();
   await expect(page.getByPlaceholder("Текст песни или идея трека")).toBeVisible();
@@ -185,7 +185,7 @@ test("one-photo trend runner uploads and runs without exposing generation contro
     } });
   });
 
-  await page.goto("/app?tgWebAppData=test");
+  await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Тренды" }).click();
   await expect(page.getByText("Фото-тренды")).toBeVisible();
   await page.getByRole("button", { name: /Повторить/ }).first().click();
