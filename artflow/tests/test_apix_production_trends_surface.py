@@ -221,9 +221,10 @@ def test_feed_has_categorized_trends_tab() -> None:
     assert 'Работы' in feed and 'Тренды' in feed
     assert 'category_emoji' in feed
     assert 'Повторить тренд' in feed
-    assert '`/api/v1/trends/${trend.id}/prepare`' in feed
-    assert '"/api/v1/generate/video"' in feed
-    assert '"/api/v1/generate/image"' in feed
+    assert 'openTrendRunner' in feed
+    assert '`/api/v1/trends/${trend.id}/prepare`' not in feed
+    assert '"/api/v1/generate/video"' not in feed
+    assert '"/api/v1/generate/image"' not in feed
 
 
 def test_repeat_feed_uses_filters_and_safe_video_remix_payload() -> None:
