@@ -6,6 +6,7 @@ import { TrendRunnerPortal } from "@/features/trend-runner";
 import "@/styles/globals.css";
 import "@/styles/color-schemes.css";
 import "@/styles/responsive.css";
+import "@/styles/feed-mobile-polish.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Mini App root element is missing");
