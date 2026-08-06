@@ -13,10 +13,9 @@ from types import ModuleType
 from typing import Any
 
 from api.provider_spec_overrides import apply_provider_spec_overrides
-from api.prompt_privacy import install_miniapp_prompt_privacy, install_web_schema_prompt_privacy
+from api.prompt_privacy import install_miniapp_prompt_privacy
 
 apply_provider_spec_overrides()
-install_web_schema_prompt_privacy()
 
 # Keep legacy APIX Grok keys compatible with saved sessions while routing all
 # new requests through the current KIE Grok Imagine Video 1.5 Preview contract.
