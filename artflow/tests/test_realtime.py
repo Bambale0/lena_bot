@@ -41,9 +41,9 @@ def test_generation_event_payload_matches_frontend_contract() -> None:
     assert payload["id"] == 77
     assert payload["status"] == "done"
     assert payload["gen_type"] == "image"
-    assert payload["prompt"] == "test prompt"
-    assert payload["prompt_hidden"] is False
-    assert payload["prompt_actions_allowed"] is True
+    assert payload["prompt"] == ""
+    assert payload["prompt_hidden"] is True
+    assert payload["prompt_actions_allowed"] is False
     assert payload["result_urls"] == ["https://cdn.test/1.png", "https://cdn.test/2.png"]
 
 
@@ -112,6 +112,8 @@ async def test_generation_ws_sends_snapshot(monkeypatch) -> None:
     assert payload["type"] == "generation.snapshot"
     assert payload["items"][0]["generation_id"] == 77
     assert payload["items"][0]["status"] == "processing"
+    assert payload["items"][0]["prompt"] == ""
+    assert payload["items"][0]["prompt_hidden"] is True
 
 
 @pytest.mark.asyncio
