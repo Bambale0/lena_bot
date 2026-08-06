@@ -19,6 +19,9 @@ from api.web import (
     referrals,
     sessions,
 )
+from api.prompt_privacy import install_web_schema_prompt_privacy
+
+install_web_schema_prompt_privacy()
 
 router = APIRouter()
 router.include_router(health.router)
