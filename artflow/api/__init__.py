@@ -13,6 +13,7 @@ from types import ModuleType
 from typing import Any
 
 from api.provider_spec_overrides import apply_provider_spec_overrides
+from api.prompt_privacy import install_miniapp_prompt_privacy
 
 apply_provider_spec_overrides()
 
@@ -46,6 +47,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_repository_model_labels(repository)
         install_feed_relevance(repository)
         install_feed_media_viewer(module)
+        install_miniapp_prompt_privacy(module)
         if self.finder in sys.meta_path:
             sys.meta_path.remove(self.finder)
 
@@ -81,3 +83,4 @@ else:
     install_repository_model_labels(repository)
     install_feed_relevance(repository)
     install_feed_media_viewer(miniapp_routes)
+    install_miniapp_prompt_privacy(miniapp_routes)
