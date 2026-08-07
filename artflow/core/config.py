@@ -101,11 +101,14 @@ class Settings(BaseSettings):
     KIE_PHOTO_PROMPT_MODEL: str = "gpt-5-2"
     KIE_PHOTO_PROMPT_FALLBACK: str = "gpt-5-5"
 
-    # KIE.AI text assistant
-    KIE_ASSISTANT_MODEL: str = "gpt-5-4"
-    KIE_ASSISTANT_FALLBACK: str = "claude-sonnet-4-5"
+    # Unified GPT-5.6 assistant (bot + mini app + website)
+    KIE_ASSISTANT_MODEL: str = "gpt-5-6-sol"
+    KIE_ASSISTANT_FALLBACK: str = "gpt-5-6-terra"
     COMET_ASSISTANT_MODEL: str = "gpt-5.4"
     COMET_ASSISTANT_FALLBACK: str = "gpt-5.4-mini"
+    ASSISTANT_WEB_SEARCH_ENABLED: bool = True
+    ASSISTANT_DEFAULT_REASONING: str = "medium"
+    ASSISTANT_MAX_OUTPUT_TOKENS: int = 8192
 
     # Feature flags
     SUBSCRIPTION_ENABLED: bool = False
