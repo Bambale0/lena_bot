@@ -26,8 +26,10 @@ from api.seedance25_adapter import (
     install_seedance25_miniapp,
     install_seedance25_provider_support,
 )
+from api.seedance25_pricing import install_seedance25_seed_rows
 
 install_grok15_adapter(_kieai_client)
+install_seedance25_seed_rows()
 install_seedance25_provider_support()
 install_seedance25_keyboard_support()
 

@@ -34,6 +34,21 @@ def test_seedance25_caps_match_official_limits():
     assert VIDEO_CAPS["supports_return_last_frame"] is True
 
 
+def test_seedance25_admin_pricing_rows_are_seeded():
+    import api  # noqa: F401
+    from api.seedance25_pricing import CREDITS_PER_SECOND, MODEL_KEY
+    from core.model_pricing import pricing_variant_key
+    from db import seed
+
+    rows = {item["model_key"]: item for item in seed.DEFAULT_MODEL_COSTS}
+
+    assert rows[MODEL_KEY]["credits"] == CREDITS_PER_SECOND["480p"]
+    for resolution, credits in CREDITS_PER_SECOND.items():
+        key = pricing_variant_key(MODEL_KEY, resolution=resolution)
+        assert rows[key]["credits"] == credits
+        assert "за сек" in rows[key]["display_name"]
+
+
 def test_seedance25_builder_uses_first_last_frame_scenario():
     import api  # noqa: F401
     from api.seedance25_adapter import _seedance25_params
@@ -120,6 +135,7 @@ def test_seedance25_miniapp_control_tokens_are_parsed():
 
 def test_seedance25_miniapp_hook_is_installed_in_bootstrap():
     source = Path("api/__init__.py").read_text(encoding="utf-8")
+    assert "install_seedance25_seed_rows()" in source
     assert "install_seedance25_provider_support()" in source
     assert "install_seedance25_miniapp(module)" in source
 
