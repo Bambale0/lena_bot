@@ -21,17 +21,18 @@ MODEL_KEY = "bytedance/seedance-2-5"
 DISPLAY_NAME = "🌱 Seedance 2.5"
 
 DURATION_AUTO = -1
-DURATIONS = [DURATION_AUTO, *range(4, 31)]
+DURATIONS = [4, 5, 10, 15, 30]
 ASPECT_RATIOS = ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
 RESOLUTIONS = ["480p", "720p"]
 OUTPUT_FORMATS = ["mp4", "mov"]
 CREDITS_PER_SECOND = {"480p": 7.0, "720p": 10.0}
 AUTO_DURATION_BILLING_SECONDS = 30
+CONTROL_PREFIX = "__apix_seedance25:"
 
 logger = logging.getLogger(__name__)
 
 VIDEO_CAPS: dict[str, Any] = {
-    "modes": ["text", "image", "first_last", "reference", "multimodal", "video"],
+    "modes": ["text", "image", "first_last", "multimodal"],
     "duration_options": DURATIONS,
     "aspect_ratios": ASPECT_RATIOS,
     "has_resolution": True,
@@ -40,12 +41,14 @@ VIDEO_CAPS: dict[str, Any] = {
     "max_reference_images": 30,
     "max_reference_videos": 10,
     "max_reference_audios": 10,
+    "max_audio_ids": 10,
     "supports_video_input": True,
     "supports_audio_references": True,
     "supports_audio_generation": True,
     "supports_return_last_frame": True,
     "supports_output_format": True,
     "supports_web_search": True,
+    "supports_auto_duration": True,
     "output_formats": OUTPUT_FORMATS,
     "billing_mode": "per_second",
     "auto_duration_billing_seconds": AUTO_DURATION_BILLING_SECONDS,
@@ -97,6 +100,47 @@ def _duration(value: Any) -> int:
     except (TypeError, ValueError):
         duration = 5
     return max(4, min(30, duration))
+
+
+def _control_payload(raw_values: list[str]) -> tuple[list[str], list[str], dict[str, Any]]:
+    """Split Mini App audio_id plumbing into real refs and UI-only controls.
+
+    Existing mini-app endpoints already send `audio_ids` to video providers. For
+    Seedance 2.5 those values are public audio reference URLs, plus a tiny
+    namespaced control envelope emitted by the Mini App enhancer. This keeps the
+    public API backward compatible while still exposing the full provider UI.
+    """
+    audio_refs: list[str] = []
+    video_refs: list[str] = []
+    options: dict[str, Any] = {}
+    for raw in raw_values:
+        value = str(raw or "").strip()
+        if not value:
+            continue
+        if not value.startswith(CONTROL_PREFIX):
+            audio_refs.append(value)
+            continue
+        payload = value[len(CONTROL_PREFIX):]
+        key, _, data = payload.partition("=")
+        key = key.strip()
+        data = data.strip()
+        if key == "audio_ref" and data:
+            audio_refs.append(data)
+        elif key == "video_ref" and data:
+            video_refs.append(data)
+        elif key == "scenario" and data:
+            options["mode"] = data
+        elif key == "duration" and data:
+            options["duration"] = _duration(data)
+        elif key == "output_format" and data:
+            options["output_format"] = data
+        elif key == "generate_audio":
+            options["generate_audio"] = _bool(data, True)
+        elif key == "return_last_frame":
+            options["return_last_frame"] = _bool(data, False)
+        elif key == "web_search":
+            options["web_search"] = _bool(data, False)
+    return audio_refs[:10], video_refs[:10], options
 
 
 def _seedance25_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -191,10 +235,12 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
         aspect_ratio = kwargs.get("aspect_ratio")
         resolution = kwargs.get("resolution")
         reference_video_url = kwargs.get("reference_video_url")
-        audio_refs = _list(kwargs.get("audio_ids"))
-        mode = str(kwargs.get("grok_mode") or "").lower()
+        audio_refs, extra_video_refs, control_options = _control_payload(_list(kwargs.get("audio_ids")))
+        if "duration" in control_options:
+            duration = control_options["duration"]
+        mode = str(control_options.get("mode") or kwargs.get("grok_mode") or "").lower()
         if mode not in {"text", "image", "first_last", "reference", "multimodal", "video", "audio"}:
-            if reference_video_url or audio_refs:
+            if reference_video_url or audio_refs or extra_video_refs:
                 mode = "multimodal"
             elif image_url:
                 mode = "image"
@@ -203,10 +249,11 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
 
         prepared_images = await video_service._prepare_video_reference_urls(image_url)
         prepared_videos = []
-        if reference_video_url:
-            prepared_video = await video_service._prepare_reference_video_url(reference_video_url)
-            if prepared_video:
-                prepared_videos.append(prepared_video)
+        for raw_video_ref in [reference_video_url, *extra_video_refs]:
+            if raw_video_ref:
+                prepared_video = await video_service._prepare_reference_video_url(raw_video_ref)
+                if prepared_video:
+                    prepared_videos.append(prepared_video)
         prepared_audio_refs = []
         for audio_ref in audio_refs[:10]:
             uploaded = await video_service._upload_local_media(audio_ref, upload_path="audio/apix-video-refs")
@@ -222,12 +269,10 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
                 "duration": duration,
                 "aspect_ratio": aspect_ratio,
                 "resolution": resolution,
-                # Full provider defaults. Dedicated UI/API fields can override
-                # these later without changing the provider builder.
-                "return_last_frame": kwargs.get("return_last_frame", False),
-                "generate_audio": kwargs.get("generate_audio", True),
-                "output_format": kwargs.get("output_format", "mp4"),
-                "web_search": kwargs.get("web_search"),
+                "return_last_frame": control_options.get("return_last_frame", kwargs.get("return_last_frame", False)),
+                "generate_audio": control_options.get("generate_audio", kwargs.get("generate_audio", True)),
+                "output_format": control_options.get("output_format", kwargs.get("output_format", "mp4")),
+                "web_search": control_options.get("web_search", kwargs.get("web_search")),
                 "nsfw_checker": kwargs.get("nsfw_checker"),
             }
         )
@@ -279,12 +324,13 @@ def _install_seedance25_miniapp_normalizer(routes: Any) -> None:
                 grok_mode=grok_mode,
             )
 
-        selected_mode = str(mode or "text").lower()
+        parsed_audio_refs, extra_video_refs, control_options = _control_payload([str(item) for item in (audio_ids or []) if str(item or "").strip()])
+        selected_mode = str(control_options.get("mode") or mode or "text").lower()
         if selected_mode not in VIDEO_CAPS["modes"]:
             selected_mode = "image" if (image_url or reference_urls) else "text"
         image_refs = routes._normalize_public_urls(image_url, *(reference_urls or [])) if (image_url or reference_urls) else []
-        video_refs = routes._normalize_public_urls(video_url) if video_url else []
-        audio_refs = [str(item) for item in (audio_ids or []) if str(item or "").strip()]
+        video_refs = routes._normalize_public_urls(video_url, *extra_video_refs) if (video_url or extra_video_refs) else []
+        audio_refs = parsed_audio_refs
         if len(image_refs) > 30:
             raise routes.HTTPException(status_code=422, detail="Seedance 2.5 supports at most 30 reference images")
         if len(video_refs) > 10:
@@ -292,7 +338,8 @@ def _install_seedance25_miniapp_normalizer(routes: Any) -> None:
         if len(audio_refs) > 10:
             raise routes.HTTPException(status_code=422, detail="Seedance 2.5 supports at most 10 reference audio files")
 
-        normalized_duration = _duration(duration)
+        normalized_duration = _duration(control_options.get("duration", duration))
+        billing_duration = _billing_duration(normalized_duration)
         normalized_resolution = _choice(resolution, RESOLUTIONS, "720p")
         normalized_aspect_ratio = _choice(aspect_ratio, ASPECT_RATIOS, "adaptive")
 
@@ -304,11 +351,10 @@ def _install_seedance25_miniapp_normalizer(routes: Any) -> None:
             if video_refs or audio_refs:
                 raise routes.HTTPException(status_code=422, detail="Seedance 2.5 first/last-frame mode cannot be mixed with video/audio references")
             normalized_image: str | list[str] | None = image_refs[0] if len(image_refs) == 1 else image_refs[:2]
-        elif selected_mode in {"reference", "multimodal", "video", "audio"}:
+        elif selected_mode == "multimodal":
             if not (image_refs or video_refs or audio_refs):
                 raise routes.HTTPException(status_code=422, detail="Seedance 2.5 multimodal mode requires at least one reference")
             normalized_image = image_refs or None
-            selected_mode = "multimodal"
         else:
             if image_refs or video_refs or audio_refs:
                 selected_mode = "multimodal" if (video_refs or audio_refs) else "image"
@@ -316,23 +362,23 @@ def _install_seedance25_miniapp_normalizer(routes: Any) -> None:
             else:
                 normalized_image = None
 
+        control_tokens = [item for item in (audio_ids or []) if str(item).startswith(CONTROL_PREFIX)]
         return {
             "mode": selected_mode,
-            "duration": normalized_duration,
-            "billing_duration": _billing_duration(normalized_duration),
+            # Billing uses this value. The provider can still receive -1 via the
+            # namespaced duration control token parsed by the generate wrapper.
+            "duration": billing_duration,
+            "provider_duration": normalized_duration,
+            "billing_duration": billing_duration,
             "aspect_ratio": normalized_aspect_ratio,
             "resolution": normalized_resolution,
             "image_url": normalized_image,
             "reference_video_url": video_refs[0] if video_refs else None,
             "video_start": None,
             "video_end": None,
-            # Reuse existing route plumbing: the Seedance wrapper interprets
-            # audio_ids as reference_audio_urls only for MODEL_KEY.
-            "audio_ids": audio_refs,
+            "audio_ids": [*audio_refs, *control_tokens],
             "character_ids": [],
             "seed": None,
-            # Reuse grok_mode as an internal mode carrier; the Seedance wrapper
-            # strips it before provider submission.
             "grok_mode": selected_mode,
         }
 
@@ -349,7 +395,7 @@ def install_seedance25_provider_support() -> None:
     kie_model_specs.VIDEO_SPECS[MODEL_KEY] = kie_model_specs.KieModelSpec(
         model=MODEL_KEY,
         media_type=kie_model_specs.KieMediaType.VIDEO,
-        supported_modes=("text", "image", "first_last", "reference", "multimodal", "video"),
+        supported_modes=("text", "image", "first_last", "multimodal"),
         reference_type=kie_model_specs.KieReferenceType.NONE,
         param_builder=_seedance25_params,
     )
