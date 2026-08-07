@@ -54,6 +54,7 @@ def _base_case(contract_id: str) -> dict[str, Any]:
         "video.seedance2": {"prompt": "A dancer in a clean studio", "duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
         "video.seedance2.fast": {"prompt": "A dancer in a clean studio", "duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
         "video.seedance2.mini": {"prompt": "A dancer in a clean studio", "duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
+        "video.seedance25": {"prompt": "A dancer in a clean studio", "duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
         "video.grok.t2v": {"prompt": "A playful robot waves", "duration": 6, "resolution": "480p", "aspect_ratio": "16:9"},
         "video.grok.i2v": {"prompt": "Animate the robot", "image_url": IMAGE_URL, "source_task_id": TASK_ID, "duration": 6, "resolution": "480p", "aspect_ratio": "16:9"},
         "video.happyhorse.t2v": {"prompt": "A horse runs through a field", "duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},

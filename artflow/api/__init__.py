@@ -21,8 +21,15 @@ apply_provider_spec_overrides()
 # new requests through the current KIE Grok Imagine Video 1.5 Preview contract.
 from api import kieai_client as _kieai_client
 from api.grok15_adapter import install_grok15_adapter
+from api.seedance25_adapter import (
+    install_seedance25_keyboard_support,
+    install_seedance25_miniapp,
+    install_seedance25_provider_support,
+)
 
 install_grok15_adapter(_kieai_client)
+install_seedance25_provider_support()
+install_seedance25_keyboard_support()
 
 
 class _MiniappLabelLoader(importlib.abc.Loader):
@@ -38,6 +45,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
 
     def exec_module(self, module: ModuleType) -> None:
         self.wrapped.exec_module(module)
+        from api.admin_model_visibility import install_admin_model_visibility
         from api.feed_media_viewer import install_feed_media_viewer
         from api.video_request_compat import install_video_request_compat
         from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
@@ -50,6 +58,8 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_feed_media_viewer(module)
         install_miniapp_prompt_privacy(module)
         install_video_request_compat(module)
+        install_seedance25_miniapp(module)
+        install_admin_model_visibility(module)
         if self.finder in sys.meta_path:
             sys.meta_path.remove(self.finder)
 
@@ -75,6 +85,7 @@ if "api.miniapp_routes" not in sys.modules:
     _miniapp_label_finder = _MiniappLabelFinder()
     sys.meta_path.insert(0, _miniapp_label_finder)
 else:
+    from api.admin_model_visibility import install_admin_model_visibility
     from api.feed_media_viewer import install_feed_media_viewer
     from api.video_request_compat import install_video_request_compat
     from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
@@ -88,3 +99,5 @@ else:
     install_feed_media_viewer(miniapp_routes)
     install_miniapp_prompt_privacy(miniapp_routes)
     install_video_request_compat(miniapp_routes)
+    install_seedance25_miniapp(miniapp_routes)
+    install_admin_model_visibility(miniapp_routes)
