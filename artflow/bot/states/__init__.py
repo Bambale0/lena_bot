@@ -31,6 +31,7 @@ class VideoGenFSM(StatesGroup):
     omni_audio_input = State()      # Gemini Omni audio ID utility
     omni_character_image = State()  # Gemini Omni character utility, reference image
     omni_character_input = State()  # Gemini Omni character utility, metadata
+    h3_reference_upload = State()   # MiniMax H3 multimodal image/video/audio refs
     prompt_input = State()
     review = State()                # final task + price review before charging
     generating = State()
