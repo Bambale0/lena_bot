@@ -21,8 +21,15 @@ apply_provider_spec_overrides()
 # new requests through the current KIE Grok Imagine Video 1.5 Preview contract.
 from api import kieai_client as _kieai_client
 from api.grok15_adapter import install_grok15_adapter
+from api.seedance25_adapter import (
+    install_seedance25_keyboard_support,
+    install_seedance25_miniapp,
+    install_seedance25_provider_support,
+)
 
 install_grok15_adapter(_kieai_client)
+install_seedance25_provider_support()
+install_seedance25_keyboard_support()
 
 
 class _MiniappLabelLoader(importlib.abc.Loader):
@@ -50,6 +57,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_feed_media_viewer(module)
         install_miniapp_prompt_privacy(module)
         install_video_request_compat(module)
+        install_seedance25_miniapp(module)
         if self.finder in sys.meta_path:
             sys.meta_path.remove(self.finder)
 
@@ -88,3 +96,4 @@ else:
     install_feed_media_viewer(miniapp_routes)
     install_miniapp_prompt_privacy(miniapp_routes)
     install_video_request_compat(miniapp_routes)
+    install_seedance25_miniapp(miniapp_routes)
