@@ -6,6 +6,7 @@ capability patches are installed before keyboards and handlers render models.
 from aiogram import Router
 from aiogram.types import InlineKeyboardButton
 
+from api.minimax_h3_adapter import install_minimax_h3_wizard_support
 from bot.keyboards import models as _model_keyboards
 from bot.services.grok_versions import install_grok_versions
 from bot.services.image_family_routing import install_image_family_routing
@@ -64,12 +65,17 @@ _image_router.include_router(_photo_prompt.router)
 _image_router.include_router(_legacy_image_gen.router)
 _legacy_image_gen.router = _image_router
 
-# Video UX v2: scenario wizard first, legacy technical flow second.
+# Video UX v2: scenario wizard first, multimodal/reference helpers before the
+# legacy technical flow so exact model callbacks can specialize collection.
+from . import minimax_h3_references as _minimax_h3_references
 from . import video_gen as _legacy_video_gen
 from . import video_references as _video_references
 from . import video_wizard as _video_wizard
 
+install_minimax_h3_wizard_support(_video_wizard)
+
 _video_router = Router(name="video_v2")
+_video_router.include_router(_minimax_h3_references.router)
 _video_router.include_router(_video_references.router)
 _video_router.include_router(_video_wizard.router)
 _video_router.include_router(_legacy_video_gen.router)
