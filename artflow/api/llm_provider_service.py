@@ -20,6 +20,7 @@ class ReasoningEffort(StrEnum):
     MEDIUM = "medium"
     HIGH = "high"
     XHIGH = "xhigh"
+    MAX = "max"
 
 
 @dataclass(frozen=True)
@@ -194,7 +195,7 @@ def build_comet_chat_payload(model: str, request: LLMRequest) -> dict[str, Any]:
         "max_completion_tokens": request.max_output_tokens,
         "reasoning_effort": (
             request.reasoning_effort.value
-            if request.reasoning_effort != ReasoningEffort.XHIGH
+            if request.reasoning_effort not in {ReasoningEffort.XHIGH, ReasoningEffort.MAX}
             else ReasoningEffort.HIGH.value
         ),
     }
@@ -242,7 +243,11 @@ def build_kie_claude_payload(model: str, request: LLMRequest) -> dict[str, Any]:
         "messages": messages,
         "stream": False,
         "max_tokens": request.max_output_tokens,
-        "thinkingFlag": request.reasoning_effort in {ReasoningEffort.HIGH, ReasoningEffort.XHIGH},
+        "thinkingFlag": request.reasoning_effort in {
+            ReasoningEffort.HIGH,
+            ReasoningEffort.XHIGH,
+            ReasoningEffort.MAX,
+        },
     }
     if request.system_prompt:
         payload["system"] = request.system_prompt
