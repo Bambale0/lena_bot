@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "@/app/App";
 import { installAdminModelVisibility } from "@/lib/admin-model-visibility";
+import { installSeedance25MiniappEnhancer } from "@/lib/seedance25-miniapp-enhancer";
 import "@/styles/globals.css";
 import "@/styles/color-schemes.css";
 import "@/styles/responsive.css";
@@ -12,6 +13,7 @@ if (!root) throw new Error("Mini App root element is missing");
 
 const legacy = new URLSearchParams(window.location.search).get("legacy") === "1";
 installAdminModelVisibility();
+installSeedance25MiniappEnhancer();
 
 if (legacy) {
   void import("./main.jsx");
