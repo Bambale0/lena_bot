@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,14 +18,16 @@ _COMET_DEFAULT_ASSISTANT_MODEL = "gpt-5.4"
 _COMET_DEFAULT_ASSISTANT_FALLBACK = "gpt-5.4-mini"
 
 _SYSTEM_PROMPT = (
-    "Ты — AI-ассистент внутри Telegram-бота APIX. "
-    "Помогай кратко, по делу и дружелюбно. "
-    "Ты хорошо разбираешься в генерации изображений, видео, музыки, Midjourney, "
-    "промптах, оплатах, референсах и сценариях использования APIX. "
-    "Если вопрос не про APIX, всё равно старайся помочь как обычный полезный ассистент. "
-    "Не придумывай факты о состоянии аккаунта пользователя, если их нет в сообщениях. "
-    "Отвечай на языке пользователя. Обычно это русский. "
-    "Держи ответы компактными, но полезными."
+    "Ты — универсальный AI-ассистент APIX. "
+    "Помогай кратко, по делу и дружелюбно, но для сложных задач проводи полноценный анализ. "
+    "Ты хорошо разбираешься в генерации изображений, видео, музыки, Midjourney, промптах, "
+    "референсах, оплатах и сценариях использования APIX. "
+    "Ты можешь работать с текстом, изображениями и файлами, если они приложены к сообщению. "
+    "Когда доступен веб-поиск и вопрос зависит от актуальных данных, используй поиск вместо догадок. "
+    "Если вопрос не про APIX, помогай как обычный сильный ассистент. "
+    "Не придумывай факты о состоянии аккаунта пользователя, балансе, задачах или выполненных действиях, "
+    "если этих данных нет в контексте или результате инструмента. "
+    "Отвечай на языке пользователя. Обычно это русский."
 )
 
 _ADMIN_SYSTEM_PROMPT = (
@@ -64,6 +67,12 @@ _MODERATION_SCHEMA: dict[str, Any] = {
     "required": ["decision", "risk", "reason", "recommendation"],
     "additionalProperties": False,
 }
+
+_REASONING_DIRECTIVE_RE = re.compile(
+    r"^\s*/(?P<mode>fast|low|medium|deep|high|xhigh|max)\b\s*[:\-]?\s*",
+    re.I,
+)
+_WEB_DIRECTIVE_RE = re.compile(r"^\s*/(?P<mode>web|noweb)\b\s*[:\-]?\s*", re.I)
 
 
 @dataclass(frozen=True)
@@ -179,41 +188,140 @@ def _request_messages(messages: list[dict[str, Any]]) -> tuple[dict[str, Any], .
     return tuple(normalized)
 
 
+def _configured_reasoning_effort() -> llm.ReasoningEffort:
+    raw = str(getattr(settings, "ASSISTANT_DEFAULT_REASONING", "medium") or "medium").strip().lower()
+    aliases = {"fast": "low", "deep": "high"}
+    raw = aliases.get(raw, raw)
+    try:
+        return llm.ReasoningEffort(raw)
+    except ValueError:
+        return llm.ReasoningEffort.MEDIUM
+
+
+def _strip_directive_from_content(content: Any, pattern: re.Pattern[str]) -> tuple[Any, str | None]:
+    if isinstance(content, str):
+        match = pattern.match(content)
+        if not match:
+            return content, None
+        return content[match.end():].lstrip(), str(match.group("mode")).lower()
+    if not isinstance(content, list):
+        return content, None
+
+    copied: list[Any] = []
+    found: str | None = None
+    for block in content:
+        if found is None and isinstance(block, dict) and block.get("type") in {"text", "input_text"}:
+            text = str(block.get("text") or "")
+            match = pattern.match(text)
+            if match:
+                updated = dict(block)
+                updated["text"] = text[match.end():].lstrip()
+                copied.append(updated)
+                found = str(match.group("mode")).lower()
+                continue
+        copied.append(block)
+    return copied, found
+
+
+def _apply_assistant_directives(
+    messages: list[dict[str, Any]],
+    *,
+    web_search: bool,
+    reasoning_effort: llm.ReasoningEffort,
+) -> tuple[list[dict[str, Any]], bool, llm.ReasoningEffort]:
+    prepared = [dict(item) for item in messages]
+    for index in range(len(prepared) - 1, -1, -1):
+        if str(prepared[index].get("role") or "user") != "user":
+            continue
+        content = prepared[index].get("content", "")
+        content, web_mode = _strip_directive_from_content(content, _WEB_DIRECTIVE_RE)
+        content, reasoning_mode = _strip_directive_from_content(content, _REASONING_DIRECTIVE_RE)
+        prepared[index]["content"] = content
+        if web_mode:
+            web_search = web_mode == "web"
+        if reasoning_mode:
+            normalized = {"fast": "low", "deep": "high"}.get(reasoning_mode, reasoning_mode)
+            try:
+                reasoning_effort = llm.ReasoningEffort(normalized)
+            except ValueError:
+                pass
+        break
+    return prepared, web_search, reasoning_effort
+
+
 async def generate_assistant_result(
     messages: list[dict[str, Any]],
     *,
     admin_mode: bool = False,
-    web_search: bool = False,
+    web_search: bool | None = None,
     function_tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
-    reasoning_effort: llm.ReasoningEffort = llm.ReasoningEffort.MEDIUM,
+    reasoning_effort: llm.ReasoningEffort | None = None,
 ) -> AssistantReply:
     system_prompt = _SYSTEM_PROMPT
     if admin_mode:
         system_prompt = f"{system_prompt} {_ADMIN_SYSTEM_PROMPT}"
 
+    resolved_web_search = (
+        bool(getattr(settings, "ASSISTANT_WEB_SEARCH_ENABLED", False))
+        if web_search is None
+        else bool(web_search)
+    )
+    resolved_reasoning = reasoning_effort or _configured_reasoning_effort()
+    prepared_messages, resolved_web_search, resolved_reasoning = _apply_assistant_directives(
+        messages,
+        web_search=resolved_web_search,
+        reasoning_effort=resolved_reasoning,
+    )
+
+    if function_tools:
+        # KIE documents web search and function calling as mutually exclusive.
+        resolved_web_search = False
+
     request = llm.LLMRequest(
-        messages=_request_messages(messages),
+        messages=_request_messages(prepared_messages),
         system_prompt=system_prompt,
-        reasoning_effort=reasoning_effort,
-        web_search=bool(web_search),
+        reasoning_effort=resolved_reasoning,
+        web_search=resolved_web_search,
         function_tools=tuple(function_tools or ()),
         tool_choice=tool_choice,
+        max_output_tokens=max(1, min(128_000, int(getattr(settings, "ASSISTANT_MAX_OUTPUT_TOKENS", 8192) or 8192))),
     )
-    result = await llm.call_with_fallbacks(
-        _assistant_routes(web_search=web_search),
-        request,
-        kie_api_key=str(getattr(settings, "KIE_AI_KEY", "")),
-        comet_api_key=str(getattr(settings, "COMET_API_KEY", "")),
-        comet_base_url=str(
-            getattr(settings, "COMET_BASE_URL", "https://api.cometapi.com")
-        ),
-    )
+    try:
+        result = await llm.call_with_fallbacks(
+            _assistant_routes(web_search=resolved_web_search),
+            request,
+            kie_api_key=str(getattr(settings, "KIE_AI_KEY", "")),
+            comet_api_key=str(getattr(settings, "COMET_API_KEY", "")),
+            comet_base_url=str(getattr(settings, "COMET_BASE_URL", "https://api.cometapi.com")),
+        )
+    except Exception:
+        if not resolved_web_search:
+            raise
+        logger.exception("Assistant web-search route failed; retrying without web search")
+        fallback_request = llm.LLMRequest(
+            messages=request.messages,
+            system_prompt=request.system_prompt,
+            reasoning_effort=request.reasoning_effort,
+            function_tools=request.function_tools,
+            tool_choice=request.tool_choice,
+            max_output_tokens=request.max_output_tokens,
+        )
+        result = await llm.call_with_fallbacks(
+            _assistant_routes(web_search=False),
+            fallback_request,
+            kie_api_key=str(getattr(settings, "KIE_AI_KEY", "")),
+            comet_api_key=str(getattr(settings, "COMET_API_KEY", "")),
+            comet_base_url=str(getattr(settings, "COMET_BASE_URL", "https://api.cometapi.com")),
+        )
+
     text = sanitize_assistant_reply(result.text)
     logger.info(
-        "assistant generated via provider=%s model=%s",
+        "assistant generated via provider=%s model=%s web_search=%s reasoning=%s",
         result.provider.value,
         result.model,
+        resolved_web_search,
+        resolved_reasoning.value,
     )
     return AssistantReply(
         text=text,
@@ -228,8 +336,17 @@ async def generate_assistant_reply(
     messages: list[dict[str, Any]],
     *,
     admin_mode: bool = False,
+    web_search: bool | None = None,
+    reasoning_effort: llm.ReasoningEffort | None = None,
 ) -> str:
-    return (await generate_assistant_result(messages, admin_mode=admin_mode)).text
+    return (
+        await generate_assistant_result(
+            messages,
+            admin_mode=admin_mode,
+            web_search=web_search,
+            reasoning_effort=reasoning_effort,
+        )
+    ).text
 
 
 def sanitize_assistant_reply(value: Any) -> str:
