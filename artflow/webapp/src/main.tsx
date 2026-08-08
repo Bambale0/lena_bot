@@ -8,6 +8,7 @@ import { installSeedance25MiniappEnhancer } from "@/lib/seedance25-miniapp-enhan
 import "@/styles/globals.css";
 import "@/styles/color-schemes.css";
 import "@/styles/responsive.css";
+import "@/styles/feed-mobile-polish.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Mini App root element is missing");
