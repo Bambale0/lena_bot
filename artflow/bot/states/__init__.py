@@ -60,6 +60,7 @@ class MidjourneyFSM(StatesGroup):
 
 class MusicFSM(StatesGroup):
     prompt_input = State()
+    source_prompt_input = State()
 
 
 class PromptUseFSM(StatesGroup):
