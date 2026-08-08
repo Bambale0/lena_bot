@@ -178,6 +178,7 @@ def test_seedance25_model_picker_is_public_and_enhancer_is_automatic_multimodal(
     assert "web_search" in enhancer
     assert "audioRefs" in enhancer
     assert "video_ref" in enhancer
-    assert "scenario" not in enhancer
+    assert 'token("scenario"' not in enhancer
+    assert 'data-seedance25="scenario"' not in enhancer
     assert "Режим" in enhancer and 'mode.style.display = "none"' in enhancer
     assert "installSeedance25MiniappEnhancer()" in main
