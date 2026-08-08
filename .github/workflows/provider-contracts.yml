@@ -32,12 +32,15 @@ jobs:
       - name: Compile provider contract modules
         run: |
           python -m compileall -q \
+            api/minimax_h3_adapter.py \
+            api/minimax_h3_pricing.py \
             api/provider_billing.py \
             api/provider_contract_catalog.py \
             api/provider_operation_bindings.py \
             api/provider_operation_registry.py \
             api/provider_smoke_manifest.py \
             api/web/provider_operations.py \
+            bot/handlers/minimax_h3_references.py \
             bot/services/generation_service.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
@@ -47,17 +50,21 @@ jobs:
       - name: Ruff provider integration
         run: |
           ruff check \
+            api/minimax_h3_adapter.py \
+            api/minimax_h3_pricing.py \
             api/provider_billing.py \
             api/provider_contract_catalog.py \
             api/provider_operation_bindings.py \
             api/provider_operation_registry.py \
             api/provider_smoke_manifest.py \
             api/web/provider_operations.py \
+            bot/handlers/minimax_h3_references.py \
             bot/services/generation_service.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
             scripts/check_provider_product_readiness.py \
             scripts/run_provider_live_smoke.py \
+            tests/test_minimax_h3_adapter.py \
             tests/test_provider_contract_catalog.py \
             tests/test_provider_operation_gateway.py
 
@@ -73,6 +80,7 @@ jobs:
       - name: Provider contract tests
         run: |
           pytest -q \
+            tests/test_minimax_h3_adapter.py \
             tests/test_provider_contract_catalog.py \
             tests/test_provider_operation_gateway.py \
             tests/test_provider_spec_p0.py \

@@ -21,6 +21,12 @@ apply_provider_spec_overrides()
 # new requests through the current KIE Grok Imagine Video 1.5 Preview contract.
 from api import kieai_client as _kieai_client
 from api.grok15_adapter import install_grok15_adapter
+from api.minimax_h3_adapter import (
+    install_minimax_h3_keyboard_support,
+    install_minimax_h3_miniapp,
+    install_minimax_h3_provider_support,
+)
+from api.minimax_h3_pricing import install_minimax_h3_seed_rows
 from api.seedance25_adapter import (
     install_seedance25_keyboard_support,
     install_seedance25_miniapp,
@@ -32,6 +38,9 @@ install_grok15_adapter(_kieai_client)
 install_seedance25_seed_rows()
 install_seedance25_provider_support()
 install_seedance25_keyboard_support()
+install_minimax_h3_seed_rows()
+install_minimax_h3_provider_support()
+install_minimax_h3_keyboard_support()
 
 
 class _MiniappLabelLoader(importlib.abc.Loader):
@@ -61,6 +70,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_miniapp_prompt_privacy(module)
         install_video_request_compat(module)
         install_seedance25_miniapp(module)
+        install_minimax_h3_miniapp(module)
         install_admin_model_visibility(module)
         if self.finder in sys.meta_path:
             sys.meta_path.remove(self.finder)
@@ -102,4 +112,5 @@ else:
     install_miniapp_prompt_privacy(miniapp_routes)
     install_video_request_compat(miniapp_routes)
     install_seedance25_miniapp(miniapp_routes)
+    install_minimax_h3_miniapp(miniapp_routes)
     install_admin_model_visibility(miniapp_routes)
