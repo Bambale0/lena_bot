@@ -1,14 +1,17 @@
-"""Runtime integration for all KIE MiniMax H3 video routes.
+"""MiniMax H3 family integration.
 
-The KIE Market exposes MiniMax H3 as three separate model keys:
+APIX exposes ONE public MiniMax H3 model while keeping KIE's three transport
+routes internal. The provider route is selected from the media that is actually
+present, matching the public model-family pattern already used by Kling/WAN/Grok:
 
-* minimax-h3/text-to-video
-* minimax-h3/image-to-video
-* minimax-h3/reference-to-video
+* no media -> minimax-h3/text-to-video
+* one/two images only -> minimax-h3/image-to-video (first / first+last frame)
+* video/audio refs or >2 images -> minimax-h3/reference-to-video
 
-They share the existing KIE createTask / callback / recordInfo lifecycle, so this
-adapter registers the provider contracts and reuses APIX's current video queue,
-webhook handling, history and billing instead of adding a second task system.
+The capability surface follows the official MiniMax H3 V2 specification:
+4..15 seconds, 768P/2K, native audio, six concrete aspect ratios plus adaptive
+for reference mode, <=9 reference images, <=3 videos and <=3 audio clips, with
+<=12 mixed reference files total.
 """
 from __future__ import annotations
 
@@ -16,62 +19,72 @@ import logging
 from types import SimpleNamespace
 from typing import Any
 
-T2V_MODEL = "minimax-h3/text-to-video"
+PUBLIC_MODEL = "minimax-h3/text-to-video"
+T2V_MODEL = PUBLIC_MODEL
 I2V_MODEL = "minimax-h3/image-to-video"
 REFERENCE_MODEL = "minimax-h3/reference-to-video"
 MODEL_KEYS = (T2V_MODEL, I2V_MODEL, REFERENCE_MODEL)
+INTERNAL_MODELS = (I2V_MODEL, REFERENCE_MODEL)
 
-DISPLAY_NAMES = {
-    T2V_MODEL: "🎞 MiniMax H3 Text",
-    I2V_MODEL: "🎞 MiniMax H3 Image",
-    REFERENCE_MODEL: "🎞 MiniMax H3 Reference",
-}
+PUBLIC_DISPLAY_NAME = "🎞 MiniMax H3"
+DISPLAY_NAMES = {key: PUBLIC_DISPLAY_NAME for key in MODEL_KEYS}
 
 DURATIONS = list(range(4, 16))
 T2V_ASPECT_RATIOS = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
 REFERENCE_ASPECT_RATIOS = ["adaptive", *T2V_ASPECT_RATIOS]
-T2V_RESOLUTIONS = ["2K", "768P"]
-MAX_REFERENCE_IMAGES = 16
+RESOLUTIONS = ["2K", "768P"]
+MAX_REFERENCE_IMAGES = 9
 MAX_REFERENCE_VIDEOS = 3
-MAX_REFERENCE_AUDIOS = 1
-MAX_REFERENCE_VIDEO_SECONDS = 6
+MAX_REFERENCE_AUDIOS = 3
+MAX_REFERENCE_FILES = 12
+MIN_REFERENCE_MEDIA_SECONDS = 2
+MAX_REFERENCE_MEDIA_SECONDS = 15
+MAX_REFERENCE_VIDEO_SECONDS = MAX_REFERENCE_MEDIA_SECONDS  # compatibility alias
+MAX_REFERENCE_TOTAL_SECONDS = 15
 
 logger = logging.getLogger(__name__)
 
+# One user-facing capability contract. `mode` is a collection hint only; actual
+# provider routing is inferred again on the backend from supplied media.
+PUBLIC_CAPS: dict[str, Any] = {
+    "modes": ["text", "image", "video"],
+    "duration_options": DURATIONS,
+    "aspect_ratios": REFERENCE_ASPECT_RATIOS,
+    "aspect_ratio_modes": ["text", "image", "video"],
+    "has_resolution": True,
+    "resolutions": RESOLUTIONS,
+    "resolution_labels": {"768P": "768P", "2K": "2K · максимум"},
+    "max_refs": MAX_REFERENCE_IMAGES,
+    "supports_video_input": True,
+    "max_reference_videos": MAX_REFERENCE_VIDEOS,
+    "max_reference_audios": MAX_REFERENCE_AUDIOS,
+    "max_reference_files": MAX_REFERENCE_FILES,
+    "native_audio": True,
+    "auto_route_by_inputs": True,
+    "billing_mode": "per_second",
+}
+
+# Internal routes are intentionally not presented as separate products.
 VIDEO_CAPS: dict[str, dict[str, Any]] = {
-    T2V_MODEL: {
-        "modes": ["text"],
-        "duration_options": DURATIONS,
-        "aspect_ratios": T2V_ASPECT_RATIOS,
-        "has_resolution": True,
-        "resolutions": T2V_RESOLUTIONS,
-        "billing_mode": "per_second",
-    },
+    T2V_MODEL: dict(PUBLIC_CAPS),
     I2V_MODEL: {
         "modes": ["image"],
         "duration_options": DURATIONS,
         "aspect_ratios": [],
-        "has_resolution": False,
-        "resolutions": [],
-        "max_refs": 2,
+        "has_resolution": True,
+        "resolutions": RESOLUTIONS,
         "billing_mode": "per_second",
     },
     REFERENCE_MODEL: {
-        # Keep image as the transport mode in generic clients. The H3-specific
-        # normalizer accepts images, videos and audio together for this key.
-        "modes": ["image"],
+        "modes": ["image", "video"],
         "duration_options": DURATIONS,
         "aspect_ratios": REFERENCE_ASPECT_RATIOS,
-        "has_resolution": False,
-        "resolutions": [],
+        "has_resolution": True,
+        "resolutions": RESOLUTIONS,
         "max_refs": MAX_REFERENCE_IMAGES,
         "supports_video_input": True,
-        "max_video_refs": MAX_REFERENCE_VIDEOS,
-        # Existing Mini App fields are URL lists. For H3 they carry reference
-        # audio URLs and extra reference video URLs instead of provider IDs.
-        "max_audio_ids": MAX_REFERENCE_AUDIOS,
-        "max_character_ids": MAX_REFERENCE_VIDEOS - 1,
-        "supports_audio_references": True,
+        "max_reference_videos": MAX_REFERENCE_VIDEOS,
+        "max_reference_audios": MAX_REFERENCE_AUDIOS,
         "billing_mode": "per_second",
     },
 }
@@ -94,9 +107,13 @@ def _urls(value: Any) -> list[str]:
         return []
     if isinstance(value, str):
         return [value.strip()] if value.strip() else []
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set)):
         return [str(item).strip() for item in value if str(item or "").strip()]
     return []
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(item for item in values if item))
 
 
 def _duration(value: Any) -> int:
@@ -107,11 +124,37 @@ def _duration(value: Any) -> int:
     return max(4, min(15, parsed))
 
 
-def _choice(value: Any, allowed: list[str], default: str | None = None) -> str | None:
-    if not allowed:
-        return None
-    selected = str(value or default or allowed[0])
-    return selected if selected in allowed else (default or allowed[0])
+def _resolution(value: Any) -> str:
+    raw = str(value or "2K").upper()
+    aliases = {"768P": "768P", "768": "768P", "2K": "2K", "1440P": "2K"}
+    return aliases.get(raw, "2K")
+
+
+def _choice(value: Any, allowed: list[str], default: str) -> str:
+    selected = str(value or default)
+    return selected if selected in allowed else default
+
+
+def route_for_inputs(*, images: list[str], videos: list[str], audios: list[str]) -> str:
+    """Choose the provider route from actual input media, never a UI mode button."""
+    if videos or audios or len(images) > 2:
+        return REFERENCE_MODEL
+    if images:
+        return I2V_MODEL
+    return T2V_MODEL
+
+
+def validate_reference_set(*, images: list[str], videos: list[str], audios: list[str]) -> None:
+    if len(images) > MAX_REFERENCE_IMAGES:
+        raise ValueError(f"MiniMax H3 supports at most {MAX_REFERENCE_IMAGES} reference images")
+    if len(videos) > MAX_REFERENCE_VIDEOS:
+        raise ValueError(f"MiniMax H3 supports at most {MAX_REFERENCE_VIDEOS} reference videos")
+    if len(audios) > MAX_REFERENCE_AUDIOS:
+        raise ValueError(f"MiniMax H3 supports at most {MAX_REFERENCE_AUDIOS} reference audio clips")
+    if len(images) + len(videos) + len(audios) > MAX_REFERENCE_FILES:
+        raise ValueError(f"MiniMax H3 supports at most {MAX_REFERENCE_FILES} mixed reference files")
+    if audios and not (images or videos):
+        raise ValueError("MiniMax H3 audio reference must be accompanied by an image or video reference")
 
 
 def _t2v_input(*, prompt: str, duration: Any, aspect_ratio: Any, resolution: Any) -> dict[str, Any]:
@@ -119,19 +162,22 @@ def _t2v_input(*, prompt: str, duration: Any, aspect_ratio: Any, resolution: Any
         "prompt": prompt,
         "duration": _duration(duration),
         "aspect_ratio": _choice(aspect_ratio, T2V_ASPECT_RATIOS, "16:9"),
-        "resolution": _choice(resolution, T2V_RESOLUTIONS, "2K"),
+        "resolution": _resolution(resolution),
     }
 
 
-def _i2v_input(*, prompt: str, duration: Any, images: list[str]) -> dict[str, Any]:
+def _i2v_input(*, prompt: str, duration: Any, resolution: Any, images: list[str]) -> dict[str, Any]:
     if not images:
-        raise ValueError("MiniMax H3 Image-to-Video requires first_frame_url")
+        raise ValueError("MiniMax H3 Image-to-Video requires a first frame")
+    if len(images) > 2:
+        raise ValueError("MiniMax H3 first/last-frame mode accepts at most two images")
     payload: dict[str, Any] = {
         "prompt": prompt,
         "duration": _duration(duration),
+        "resolution": _resolution(resolution),
         "first_frame_url": images[0],
     }
-    if len(images) > 1:
+    if len(images) == 2:
         payload["last_frame_url"] = images[1]
     return payload
 
@@ -141,23 +187,19 @@ def _reference_input(
     prompt: str,
     duration: Any,
     aspect_ratio: Any,
+    resolution: Any,
     images: list[str],
     videos: list[str],
     audios: list[str],
 ) -> dict[str, Any]:
-    if not (images or videos or audios):
-        raise ValueError("MiniMax H3 Reference-to-Video requires at least one reference")
-    if len(images) > MAX_REFERENCE_IMAGES:
-        raise ValueError(f"MiniMax H3 supports at most {MAX_REFERENCE_IMAGES} reference images")
-    if len(videos) > MAX_REFERENCE_VIDEOS:
-        raise ValueError(f"MiniMax H3 supports at most {MAX_REFERENCE_VIDEOS} reference videos")
-    if len(audios) > MAX_REFERENCE_AUDIOS:
-        raise ValueError(f"MiniMax H3 supports at most {MAX_REFERENCE_AUDIOS} reference audio file")
-
+    validate_reference_set(images=images, videos=videos, audios=audios)
+    if not (images or videos):
+        raise ValueError("MiniMax H3 Reference-to-Video requires an image or video reference")
     payload: dict[str, Any] = {
         "prompt": prompt,
         "duration": _duration(duration),
         "aspect_ratio": _choice(aspect_ratio, REFERENCE_ASPECT_RATIOS, "adaptive"),
+        "resolution": _resolution(resolution),
     }
     if images:
         payload["reference_image_urls"] = images
@@ -174,7 +216,7 @@ def _model_cost(model_key: str, *, resolution: str | None = None):
 
     return SimpleNamespace(
         model_key=model_key,
-        display_name=DISPLAY_NAMES[model_key],
+        display_name=PUBLIC_DISPLAY_NAME,
         gen_type=GenerationType.video,
         credits=float(credits_per_second(model_key, resolution=resolution)),
         is_active=True,
@@ -189,7 +231,6 @@ async def _prepare_audio_reference(video_service: Any, url: str) -> str:
 def _install_generate_wrapper(video_service: Any) -> None:
     if getattr(video_service, "_minimax_h3_generate_wrapper_installed", False):
         return
-
     original_generate_video = video_service.generate_video
 
     async def generate_video(model, prompt: str, *args, **kwargs):
@@ -200,47 +241,57 @@ def _install_generate_wrapper(video_service: Any) -> None:
         image_url = kwargs.get("image_url")
         if args:
             image_url = args[0]
-        prepared_images = await video_service._prepare_video_reference_urls(image_url)
+        images = _dedupe(await video_service._prepare_video_reference_urls(image_url))
 
         raw_videos = _urls(kwargs.get("reference_video_url"))
+        # Compatibility transport for existing Mini App/web payloads. These are
+        # URL values only for H3; Gemini Omni ID semantics never reach this path.
         raw_videos.extend(_urls(kwargs.get("character_ids")))
-        prepared_videos: list[str] = []
-        for raw_url in raw_videos[:MAX_REFERENCE_VIDEOS]:
+        videos: list[str] = []
+        for raw_url in _dedupe(raw_videos)[:MAX_REFERENCE_VIDEOS]:
             prepared = await video_service._prepare_reference_video_url(raw_url)
-            if prepared and prepared not in prepared_videos:
-                prepared_videos.append(prepared)
+            if prepared and prepared not in videos:
+                videos.append(prepared)
 
-        prepared_audios: list[str] = []
-        for raw_url in _urls(kwargs.get("audio_ids"))[:MAX_REFERENCE_AUDIOS]:
+        audios: list[str] = []
+        for raw_url in _dedupe(_urls(kwargs.get("audio_ids")))[:MAX_REFERENCE_AUDIOS]:
             prepared = await _prepare_audio_reference(video_service, raw_url)
-            if prepared:
-                prepared_audios.append(prepared)
+            if prepared and prepared not in audios:
+                audios.append(prepared)
 
+        validate_reference_set(images=images, videos=videos, audios=audios)
+        provider_model = route_for_inputs(images=images, videos=videos, audios=audios)
         duration = kwargs.get("duration", 6)
         aspect_ratio = kwargs.get("aspect_ratio")
         resolution = kwargs.get("resolution")
 
-        if selected.value == T2V_MODEL:
+        if provider_model == T2V_MODEL:
             input_payload = _t2v_input(
                 prompt=prompt,
                 duration=duration,
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
             )
-        elif selected.value == I2V_MODEL:
-            input_payload = _i2v_input(prompt=prompt, duration=duration, images=prepared_images[:2])
+        elif provider_model == I2V_MODEL:
+            input_payload = _i2v_input(
+                prompt=prompt,
+                duration=duration,
+                resolution=resolution,
+                images=images,
+            )
         else:
             input_payload = _reference_input(
                 prompt=prompt,
                 duration=duration,
                 aspect_ratio=aspect_ratio,
-                images=prepared_images[:MAX_REFERENCE_IMAGES],
-                videos=prepared_videos,
-                audios=prepared_audios,
+                resolution=resolution,
+                images=images,
+                videos=videos,
+                audios=audios,
             )
 
         response = await video_service.kieai_client.create_task(
-            {"model": selected.value, "input": input_payload},
+            {"model": provider_model, "input": input_payload},
             callback_url=kwargs.get("callback_url"),
         )
         if not isinstance(response, dict):
@@ -256,12 +307,17 @@ def _install_generate_wrapper(video_service: Any) -> None:
         if not task_id:
             raise RuntimeError(f"KIE.AI MiniMax H3 returned empty taskId: {response!r}")
 
-        logger.info("KIE.AI MiniMax H3 task model=%s task=%s", selected.value, task_id)
-        return video_service.VideoResult(
-            task_id=task_id,
-            provider="kieai",
-            uses_webhook=bool(kwargs.get("callback_url")),
+        logger.info(
+            "KIE.AI MiniMax H3 auto-route public=%s provider=%s images=%d videos=%d audios=%d quality=%s task=%s",
+            selected.value,
+            provider_model,
+            len(images),
+            len(videos),
+            len(audios),
+            _resolution(resolution),
+            task_id,
         )
+        return video_service.VideoResult(task_id=task_id, provider="kieai", uses_webhook=bool(kwargs.get("callback_url")))
 
     video_service.generate_video = generate_video
     video_service._minimax_h3_generate_wrapper_installed = True
@@ -307,65 +363,30 @@ def _install_miniapp_normalizer(routes: Any) -> None:
                 grok_mode=grok_mode,
             )
 
-        normalized_duration = _duration(duration)
-        images = routes._normalize_public_urls(image_url, *(reference_urls or [])) if (image_url or reference_urls) else []
-        videos = routes._normalize_public_urls(video_url, *(character_ids or [])) if (video_url or character_ids) else []
-        audios = routes._normalize_public_urls(*(audio_ids or [])) if audio_ids else []
+        images = _dedupe(routes._normalize_public_urls(image_url, *(reference_urls or []))) if (image_url or reference_urls) else []
+        videos = _dedupe(routes._normalize_public_urls(video_url, *(character_ids or []))) if (video_url or character_ids) else []
+        audios = _dedupe(routes._normalize_public_urls(*(audio_ids or []))) if audio_ids else []
+        try:
+            validate_reference_set(images=images, videos=videos, audios=audios)
+        except ValueError as exc:
+            raise routes.HTTPException(status_code=422, detail=str(exc)) from exc
 
-        if model_key == T2V_MODEL:
-            if images or videos or audios:
-                raise routes.HTTPException(status_code=422, detail="MiniMax H3 Text-to-Video does not accept references")
-            return {
-                "mode": "text",
-                "duration": normalized_duration,
-                "aspect_ratio": _choice(aspect_ratio, T2V_ASPECT_RATIOS, "16:9"),
-                "resolution": _choice(resolution, T2V_RESOLUTIONS, "2K"),
-                "image_url": None,
-                "reference_video_url": None,
-                "video_start": None,
-                "video_end": None,
-                "audio_ids": [],
-                "character_ids": [],
-                "seed": None,
-                "grok_mode": "normal",
-            }
-
-        if model_key == I2V_MODEL:
-            if not images:
-                raise routes.HTTPException(status_code=422, detail="MiniMax H3 Image-to-Video requires a first frame")
-            if len(images) > 2:
-                raise routes.HTTPException(status_code=422, detail="MiniMax H3 Image-to-Video supports first and optional last frame only")
-            if videos or audios:
-                raise routes.HTTPException(status_code=422, detail="MiniMax H3 Image-to-Video does not accept video/audio references")
-            return {
-                "mode": "image",
-                "duration": normalized_duration,
-                "aspect_ratio": None,
-                "resolution": None,
-                "image_url": images[0] if len(images) == 1 else images[:2],
-                "reference_video_url": None,
-                "video_start": None,
-                "video_end": None,
-                "audio_ids": [],
-                "character_ids": [],
-                "seed": None,
-                "grok_mode": "normal",
-            }
-
-        if not (images or videos or audios):
-            raise routes.HTTPException(status_code=422, detail="MiniMax H3 Reference-to-Video requires at least one reference")
-        if len(images) > MAX_REFERENCE_IMAGES:
-            raise routes.HTTPException(status_code=422, detail=f"MiniMax H3 supports at most {MAX_REFERENCE_IMAGES} images")
-        if len(videos) > MAX_REFERENCE_VIDEOS:
-            raise routes.HTTPException(status_code=422, detail=f"MiniMax H3 supports at most {MAX_REFERENCE_VIDEOS} videos")
-        if len(audios) > MAX_REFERENCE_AUDIOS:
-            raise routes.HTTPException(status_code=422, detail=f"MiniMax H3 supports at most {MAX_REFERENCE_AUDIOS} audio reference")
+        provider_model = route_for_inputs(images=images, videos=videos, audios=audios)
+        normalized_ratio: str | None
+        if provider_model == T2V_MODEL:
+            normalized_ratio = _choice(aspect_ratio, T2V_ASPECT_RATIOS, "16:9")
+        elif provider_model == I2V_MODEL:
+            # H3 follows the input frame ratio in first/last-frame mode.
+            normalized_ratio = None
+        else:
+            normalized_ratio = _choice(aspect_ratio, REFERENCE_ASPECT_RATIOS, "adaptive")
 
         return {
-            "mode": "image" if images else "video",
-            "duration": normalized_duration,
-            "aspect_ratio": _choice(aspect_ratio, REFERENCE_ASPECT_RATIOS, "adaptive"),
-            "resolution": None,
+            "mode": "text" if provider_model == T2V_MODEL else ("image" if provider_model == I2V_MODEL else "video"),
+            "provider_model": provider_model,
+            "duration": _duration(duration),
+            "aspect_ratio": normalized_ratio,
+            "resolution": _resolution(resolution),
             "image_url": images or None,
             "reference_video_url": videos or None,
             "video_start": None,
@@ -384,9 +405,9 @@ def install_minimax_h3_provider_support() -> None:
     from api import kie_model_specs, video_service
     from db import repository
 
-    _install_enum_value(video_service.VideoModel, "MINIMAX_H3_T2V", T2V_MODEL)
-    _install_enum_value(video_service.VideoModel, "MINIMAX_H3_I2V", I2V_MODEL)
-    _install_enum_value(video_service.VideoModel, "MINIMAX_H3_REFERENCE", REFERENCE_MODEL)
+    _install_enum_value(video_service.VideoModel, "MINIMAX_H3", T2V_MODEL)
+    _install_enum_value(video_service.VideoModel, "MINIMAX_H3_I2V_INTERNAL", I2V_MODEL)
+    _install_enum_value(video_service.VideoModel, "MINIMAX_H3_REFERENCE_INTERNAL", REFERENCE_MODEL)
 
     kie_model_specs.VIDEO_SPECS[T2V_MODEL] = kie_model_specs.KieModelSpec(
         model=T2V_MODEL,
@@ -400,14 +421,14 @@ def install_minimax_h3_provider_support() -> None:
         supported_modes=("image",),
         reference_type=kie_model_specs.KieReferenceType.FIRST_LAST,
         reference_field="first_frame_url",
-        optional_params={"duration": "duration"},
+        optional_params={"duration": "duration", "resolution": "resolution"},
     )
     kie_model_specs.VIDEO_SPECS[REFERENCE_MODEL] = kie_model_specs.KieModelSpec(
         model=REFERENCE_MODEL,
         media_type=kie_model_specs.KieMediaType.VIDEO,
         supported_modes=("image", "video"),
         reference_type=kie_model_specs.KieReferenceType.NONE,
-        optional_params={"duration": "duration", "aspect_ratio": "aspect_ratio"},
+        optional_params={"duration": "duration", "aspect_ratio": "aspect_ratio", "resolution": "resolution"},
     )
     kie_model_specs.MODEL_SPECS.update({key: kie_model_specs.VIDEO_SPECS[key] for key in MODEL_KEYS})
     _install_generate_wrapper(video_service)
@@ -420,10 +441,10 @@ def install_minimax_h3_provider_support() -> None:
         async def get_all_model_costs(session, *args, **kwargs):
             rows = list(await original_all(session, *args, **kwargs))
             existing = {getattr(row, "model_key", None) for row in rows}
-            for model_key in MODEL_KEYS:
-                if model_key not in existing:
-                    rows.append(_model_cost(model_key))
-            return rows
+            if T2V_MODEL not in existing:
+                rows.append(_model_cost(T2V_MODEL))
+            # Internal KIE endpoints are implementation details, not products.
+            return [row for row in rows if getattr(row, "model_key", None) not in INTERNAL_MODELS]
 
         async def get_model_cost(session, model_key: str, *args, **kwargs):
             row = await original_one(session, model_key, *args, **kwargs)
@@ -447,20 +468,17 @@ def install_minimax_h3_miniapp(routes: Any) -> None:
     install_minimax_h3_provider_support()
     _install_miniapp_normalizer(routes)
 
-    for key, caps in VIDEO_CAPS.items():
-        routes.VIDEO_CAPS[key] = dict(caps)
+    routes.VIDEO_CAPS[PUBLIC_MODEL] = dict(PUBLIC_CAPS)
+    # Internal routes remain accepted for old saved jobs/API calls but are not
+    # inserted into the public order or user-facing catalog.
     friendly = getattr(routes, "_FRIENDLY_MODEL_NAMES", None)
     if isinstance(friendly, dict):
-        friendly.update({
-            T2V_MODEL: "MiniMax H3 Text",
-            I2V_MODEL: "MiniMax H3 Image",
-            REFERENCE_MODEL: "MiniMax H3 Reference",
-        })
+        friendly.update({key: PUBLIC_DISPLAY_NAME for key in MODEL_KEYS})
     order = getattr(routes, "_VIDEO_MODEL_ORDER", None)
     if isinstance(order, list):
-        for key in reversed(MODEL_KEYS):
-            if key not in order:
-                order.insert(0, key)
+        order[:] = [key for key in order if key not in INTERNAL_MODELS]
+        if PUBLIC_MODEL not in order:
+            order.insert(0, PUBLIC_MODEL)
 
 
 def install_minimax_h3_keyboard_support() -> None:
@@ -469,39 +487,37 @@ def install_minimax_h3_keyboard_support() -> None:
     except Exception:
         return
 
-    keyboard_models.VIDEO_CAPS.update({key: dict(caps) for key, caps in VIDEO_CAPS.items()})
-    for key, name in DISPLAY_NAMES.items():
-        keyboard_models.VIDEO_MODEL_DESC[key] = {
-            T2V_MODEL: f"{name} · текст → видео · до 15 сек · 2K",
-            I2V_MODEL: f"{name} · первый/последний кадр → видео",
-            REFERENCE_MODEL: f"{name} · фото + видео + аудио референсы",
-        }[key]
+    keyboard_models.VIDEO_CAPS[PUBLIC_MODEL] = dict(PUBLIC_CAPS)
+    keyboard_models.VIDEO_MODEL_DESC[PUBLIC_MODEL] = (
+        f"{PUBLIC_DISPLAY_NAME} · авто T2V/I2V/Reference · 4–15 сек · 768P/2K · native audio"
+    )
 
     order = getattr(keyboard_models, "_VIDEO_MODEL_ORDER", [])
-    for key in reversed(MODEL_KEYS):
-        if key not in order:
-            order.insert(0, key)
+    order[:] = [key for key in order if key not in INTERNAL_MODELS]
+    if PUBLIC_MODEL not in order:
+        order.insert(0, PUBLIC_MODEL)
 
     groups = getattr(keyboard_models, "_VIDEO_GROUPS", [])
     for group_name, keys in groups:
-        if group_name == "fast" and T2V_MODEL not in keys:
-            keys.insert(0, T2V_MODEL)
-        elif group_name == "i2v" and I2V_MODEL not in keys:
-            keys.insert(0, I2V_MODEL)
-    if not any(group_name == "reference" for group_name, _keys in groups):
-        groups.insert(1, ("reference", [REFERENCE_MODEL]))
-    keyboard_models.VIDEO_GROUP_TITLES["reference"] = "🎛️ По референсам"
+        keys[:] = [key for key in keys if key not in INTERNAL_MODELS]
+        if group_name in {"fast", "i2v"} and PUBLIC_MODEL not in keys:
+            keys.insert(0, PUBLIC_MODEL)
+    # Remove the H3-only technical Reference group introduced by the old integration.
+    groups[:] = [
+        (name, keys)
+        for name, keys in groups
+        if not (name == "reference" and all(key in MODEL_KEYS for key in keys))
+    ]
 
 
 def install_minimax_h3_wizard_support(video_wizard: Any) -> None:
-    """Put H3 into the task-first Telegram wizard recommendations."""
+    """Recommend the same public H3 family for every compatible scenario."""
     scenarios = getattr(video_wizard, "SCENARIOS", {})
-    mapping = {"text": T2V_MODEL, "image": I2V_MODEL, "video": REFERENCE_MODEL}
-    for scenario_name, model_key in mapping.items():
+    for scenario_name in ("text", "image", "video"):
         scenario = scenarios.get(scenario_name)
         if not isinstance(scenario, dict):
             continue
-        recommended = list(scenario.get("recommended") or [])
-        if model_key not in recommended:
-            recommended.insert(0, model_key)
+        recommended = [key for key in list(scenario.get("recommended") or []) if key not in INTERNAL_MODELS]
+        if PUBLIC_MODEL not in recommended:
+            recommended.insert(0, PUBLIC_MODEL)
         scenario["recommended"] = recommended[:3]

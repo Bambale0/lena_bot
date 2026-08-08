@@ -34,14 +34,18 @@ jobs:
           python -m compileall -q \
             api/minimax_h3_adapter.py \
             api/minimax_h3_pricing.py \
+            api/minimax_h3_product_surface.py \
+            api/minimax_h3_runtime_guards.py \
             api/provider_billing.py \
             api/provider_contract_catalog.py \
             api/provider_operation_bindings.py \
             api/provider_operation_registry.py \
             api/provider_smoke_manifest.py \
+            api/web/minimax_h3_uploads.py \
             api/web/provider_operations.py \
             bot/handlers/minimax_h3_references.py \
             bot/services/generation_service.py \
+            bot/services/minimax_h3_ui.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
             scripts/check_provider_product_readiness.py \
@@ -52,19 +56,26 @@ jobs:
           ruff check \
             api/minimax_h3_adapter.py \
             api/minimax_h3_pricing.py \
+            api/minimax_h3_product_surface.py \
+            api/minimax_h3_runtime_guards.py \
             api/provider_billing.py \
             api/provider_contract_catalog.py \
             api/provider_operation_bindings.py \
             api/provider_operation_registry.py \
             api/provider_smoke_manifest.py \
+            api/web/minimax_h3_uploads.py \
             api/web/provider_operations.py \
             bot/handlers/minimax_h3_references.py \
             bot/services/generation_service.py \
+            bot/services/minimax_h3_ui.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
             scripts/check_provider_product_readiness.py \
             scripts/run_provider_live_smoke.py \
             tests/test_minimax_h3_adapter.py \
+            tests/test_minimax_h3_runtime_guards.py \
+            tests/test_minimax_h3_uploads.py \
+            tests/test_model_labels.py \
             tests/test_provider_contract_catalog.py \
             tests/test_provider_operation_gateway.py
 
@@ -81,6 +92,9 @@ jobs:
         run: |
           pytest -q \
             tests/test_minimax_h3_adapter.py \
+            tests/test_minimax_h3_runtime_guards.py \
+            tests/test_minimax_h3_uploads.py \
+            tests/test_model_labels.py \
             tests/test_provider_contract_catalog.py \
             tests/test_provider_operation_gateway.py \
             tests/test_provider_spec_p0.py \

@@ -52,6 +52,8 @@ def test_all_text_and_reference_route_pairs_share_public_name():
         ("kling-2.6/text-to-video", "kling-2.6/image-to-video"),
         ("kling/v3-turbo-text-to-video", "kling/v3-turbo-image-to-video"),
         ("wan/2-7-text-to-video", "wan/2-7-image-to-video"),
+        ("minimax-h3/text-to-video", "minimax-h3/image-to-video"),
+        ("minimax-h3/text-to-video", "minimax-h3/reference-to-video"),
         ("grok-imagine/text-to-video", "grok-imagine/image-to-video"),
         ("happyhorse/text-to-video", "happyhorse/image-to-video"),
     ]
@@ -60,6 +62,14 @@ def test_all_text_and_reference_route_pairs_share_public_name():
         assert canonical_model_key(variant) == canonical
         assert is_internal_variant(variant)
         assert not is_internal_variant(canonical)
+
+
+def test_minimax_h3_has_one_public_name_for_three_provider_routes():
+    assert model_display_name("minimax-h3/text-to-video") == "🎞 MiniMax H3"
+    assert model_display_name("minimax-h3/image-to-video") == "🎞 MiniMax H3"
+    assert model_display_name("minimax-h3/reference-to-video") == "🎞 MiniMax H3"
+    assert canonical_model_key("minimax-h3/image-to-video") == "minimax-h3/text-to-video"
+    assert canonical_model_key("minimax-h3/reference-to-video") == "minimax-h3/text-to-video"
 
 
 def test_every_runtime_image_and_video_model_has_explicit_public_label():
@@ -86,6 +96,9 @@ def test_public_picker_collapses_internal_routes_but_keeps_grok_generations_sepa
     rows = [
         FakeCost("seedream/5-pro-text-to-image", "old text"),
         FakeCost("seedream/5-pro-image-to-image", "old edit"),
+        FakeCost("minimax-h3/text-to-video", "H3 text"),
+        FakeCost("minimax-h3/image-to-video", "H3 image"),
+        FakeCost("minimax-h3/reference-to-video", "H3 refs"),
         FakeCost("grok-imagine/text-to-video", "old video"),
         FakeCost("grok-imagine/image-to-video", "old animate"),
         FakeCost("grok-imagine-video-1-5-preview", "new video"),
@@ -93,11 +106,13 @@ def test_public_picker_collapses_internal_routes_but_keeps_grok_generations_sepa
     public = public_model_items(rows)
     assert [item.model_key for item in public] == [
         "seedream/5-pro-text-to-image",
+        "minimax-h3/text-to-video",
         "grok-imagine/text-to-video",
         "grok-imagine-video-1-5-preview",
     ]
     assert [item.display_name for item in public] == [
         "🔥 HOT · Seedream 5 Pro",
+        "🎞 MiniMax H3",
         "⚡ Grok Imagine Video",
         "🆕 NEW · Grok Imagine Video 1.5",
     ]
@@ -120,6 +135,7 @@ def test_miniapp_uses_shared_catalog_instead_of_legacy_names():
     )
     install_miniapp_model_labels(module)
     assert module._friendly_model_name("seedream/5-pro-image-to-image") == "🔥 HOT · Seedream 5 Pro"
+    assert module._friendly_model_name("minimax-h3/reference-to-video") == "🎞 MiniMax H3"
     assert module._friendly_model_name("grok-imagine/image-to-video") == "⚡ Grok Imagine Video"
     assert module._friendly_model_name("grok-imagine-video-1-5-preview") == "🆕 NEW · Grok Imagine Video 1.5"
     assert "Edit" not in module._friendly_model_name("gpt-image-2-image-to-image")

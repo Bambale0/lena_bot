@@ -27,6 +27,8 @@ from api.minimax_h3_adapter import (
     install_minimax_h3_provider_support,
 )
 from api.minimax_h3_pricing import install_minimax_h3_seed_rows
+from api.minimax_h3_product_surface import install_minimax_h3_product_surface
+from api.minimax_h3_runtime_guards import install_minimax_h3_runtime_guards
 from api.seedance25_adapter import (
     install_seedance25_keyboard_support,
     install_seedance25_miniapp,
@@ -41,7 +43,9 @@ install_seedance25_provider_support()
 install_seedance25_keyboard_support()
 install_minimax_h3_seed_rows()
 install_minimax_h3_provider_support()
+install_minimax_h3_runtime_guards()
 install_minimax_h3_keyboard_support()
+install_minimax_h3_product_surface()
 strip_seedance25_omni_id_controls()
 
 
@@ -73,6 +77,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_video_request_compat(module)
         install_seedance25_miniapp(module)
         install_minimax_h3_miniapp(module)
+        install_minimax_h3_product_surface(module)
         strip_seedance25_omni_id_controls(module)
         install_admin_model_visibility(module)
         if self.finder in sys.meta_path:
@@ -116,5 +121,6 @@ else:
     install_video_request_compat(miniapp_routes)
     install_seedance25_miniapp(miniapp_routes)
     install_minimax_h3_miniapp(miniapp_routes)
+    install_minimax_h3_product_surface(miniapp_routes)
     strip_seedance25_omni_id_controls(miniapp_routes)
     install_admin_model_visibility(miniapp_routes)
