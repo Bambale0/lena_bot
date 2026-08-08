@@ -35,6 +35,8 @@ from api.seedance25_adapter import (
     install_seedance25_provider_support,
 )
 from api.seedance25_pricing import install_seedance25_seed_rows
+from api.suno_source_audio_routes import install_suno_source_audio_routes
+from api.video_runtime_fixes import install_video_runtime_fixes
 from api.video_ui_capability_guards import strip_seedance25_omni_id_controls
 
 install_grok15_adapter(_kieai_client)
@@ -46,6 +48,7 @@ install_minimax_h3_provider_support()
 install_minimax_h3_runtime_guards()
 install_minimax_h3_keyboard_support()
 install_minimax_h3_product_surface()
+install_video_runtime_fixes()
 strip_seedance25_omni_id_controls()
 
 
@@ -78,6 +81,8 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_seedance25_miniapp(module)
         install_minimax_h3_miniapp(module)
         install_minimax_h3_product_surface(module)
+        install_video_runtime_fixes(module)
+        install_suno_source_audio_routes(module)
         strip_seedance25_omni_id_controls(module)
         install_admin_model_visibility(module)
         if self.finder in sys.meta_path:
@@ -122,5 +127,7 @@ else:
     install_seedance25_miniapp(miniapp_routes)
     install_minimax_h3_miniapp(miniapp_routes)
     install_minimax_h3_product_surface(miniapp_routes)
+    install_video_runtime_fixes(miniapp_routes)
+    install_suno_source_audio_routes(miniapp_routes)
     strip_seedance25_omni_id_controls(miniapp_routes)
     install_admin_model_visibility(miniapp_routes)
