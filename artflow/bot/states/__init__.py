@@ -32,6 +32,7 @@ class VideoGenFSM(StatesGroup):
     omni_character_image = State()  # Gemini Omni character utility, reference image
     omni_character_input = State()  # Gemini Omni character utility, metadata
     h3_reference_upload = State()   # MiniMax H3 multimodal image/video/audio refs
+    seedance25_reference_upload = State()  # Seedance 2.5 unified multimodal refs
     prompt_input = State()
     review = State()                # final task + price review before charging
     generating = State()
