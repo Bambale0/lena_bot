@@ -11,6 +11,7 @@ from bot.keyboards import models as _model_keyboards
 from bot.services.grok_versions import install_grok_versions
 from bot.services.image_family_routing import install_image_family_routing
 from bot.services.minimax_h3_ui import install_minimax_h3_handler_presentation
+from bot.services.veo_ui import install_veo_handler_presentation
 from bot.services.video_reference_support import install_video_reference_support
 from bot.ui.model_labels import model_display_name, public_model_items
 
@@ -73,6 +74,7 @@ from . import video_wizard as _video_wizard
 
 install_minimax_h3_wizard_support(_video_wizard)
 install_minimax_h3_handler_presentation(_legacy_video_gen)
+install_veo_handler_presentation(_legacy_video_gen)
 
 _video_router = Router(name="video_v2")
 _video_router.include_router(_minimax_h3_references.router)
