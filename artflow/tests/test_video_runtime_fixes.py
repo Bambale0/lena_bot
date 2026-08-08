@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from api import seedance25_adapter, video_service
 from api.video_runtime_fixes import VEO_PUBLIC_CAPS, install_video_runtime_fixes
+from bot.services.veo_ui import install_veo_handler_presentation
 
 
 @pytest.mark.asyncio
@@ -26,7 +29,7 @@ async def test_seedance_runtime_sends_prompt_inside_provider_input(monkeypatch):
 
     monkeypatch.setattr(video_service.kieai_client, "create_task", create_task)
     monkeypatch.setattr(video_service, "_prepare_video_reference_urls", prepare_images)
-    monkeypatch.setattr(video_service, "_prepare_reference_video_url", prepare_video)
+    monkeypatch.setattr(video_service, "_prepare_video_reference_url", prepare_video)
     monkeypatch.setattr(video_service, "_upload_local_media", upload_media)
 
     result = await video_service.generate_video(
@@ -86,6 +89,16 @@ def test_veo_public_caps_remove_fake_controls_and_enable_image_input():
     assert VEO_PUBLIC_CAPS["veo3"]["has_resolution"] is False
     assert VEO_PUBLIC_CAPS["veo3_fast"]["max_refs"] == 3
     assert VEO_PUBLIC_CAPS["veo3_lite"]["max_refs"] == 3
+
+
+def test_veo_telegram_defaults_are_not_legacy_five_seconds():
+    fake = SimpleNamespace(
+        _DEFAULT_DURATION={"veo3": 5, "veo3_fast": 5, "veo3_lite": 5},
+        _DEFAULT_RES={"veo3": "720p", "veo3_fast": "720p", "veo3_lite": "720p"},
+    )
+    install_veo_handler_presentation(fake)
+    assert fake._DEFAULT_DURATION == {"veo3": 8, "veo3_fast": 8, "veo3_lite": 8}
+    assert fake._DEFAULT_RES == {}
 
 
 @pytest.mark.asyncio
