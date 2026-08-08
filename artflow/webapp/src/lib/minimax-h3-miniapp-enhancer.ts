@@ -1,6 +1,6 @@
 const H3_MODEL = "minimax-h3/text-to-video";
 const GENERATE_VIDEO_PATH = "/api/v1/generate/video";
-const UPLOAD_PATH = "/api/web/upload-media";
+const UPLOAD_PATH = "/api/web/h3/upload-reference";
 const MAX_VIDEOS = 3;
 const MAX_AUDIOS = 3;
 const MIN_SECONDS = 2;
@@ -37,7 +37,6 @@ function primeAutomaticMode(root: HTMLElement): void {
       photoButton.click();
     }
   }
-  // H3 chooses T2V / first-frame / first+last / Reference from actual media.
   modeGroup.style.display = "none";
 }
 
@@ -68,9 +67,7 @@ function mediaDuration(file: File, kind: "video" | "audio"): Promise<number> {
 async function validateMediaFiles(files: File[], kind: "video" | "audio"): Promise<File[]> {
   const maxCount = kind === "video" ? MAX_VIDEOS : MAX_AUDIOS;
   const maxBytes = (kind === "video" ? 50 : 15) * 1024 * 1024;
-  const allowed = kind === "video"
-    ? /\.(mp4|mov)$/i
-    : /\.(mp3|wav)$/i;
+  const allowed = kind === "video" ? /\.(mp4|mov)$/i : /\.(mp3|wav)$/i;
   const picked = files.slice(0, maxCount);
   let total = 0;
   for (const file of picked) {
@@ -182,8 +179,11 @@ async function uploadFile(originalFetch: typeof window.fetch, file: File): Promi
     body: form,
     headers: { "X-Telegram-Init-Data": initData() },
   });
-  if (!response.ok) throw new Error(`Не удалось загрузить референс (${response.status})`);
-  const payload = await response.json() as Record<string, unknown>;
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    const message = String(payload.error || payload.detail || `HTTP ${response.status}`);
+    throw new Error(message);
+  }
   const nested = payload.data && typeof payload.data === "object" ? payload.data as Record<string, unknown> : payload;
   const url = String(nested.url || "").trim();
   if (!url) throw new Error("Сервер не вернул URL загруженного референса");
@@ -223,8 +223,6 @@ function installFetchBridge(): void {
       uploadedAudios.push(await uploadFile(originalFetch, file));
     }
 
-    // Keep compatibility with the current request DTO without exposing Gemini
-    // Omni controls: H3's normalizer interprets these values as URL transports.
     const existingVideo = String(body.video_url || "").trim();
     const existingExtraVideos = Array.isArray(body.character_ids)
       ? body.character_ids.map(String).filter(Boolean)
@@ -242,7 +240,6 @@ function installFetchBridge(): void {
       .filter((item, index, all) => all.indexOf(item) === index)
       .slice(0, MAX_AUDIOS);
 
-    // UI mode is presentation only for H3. Backend derives the provider route.
     body.mode = "image";
     return originalFetch(input, { ...init, body: JSON.stringify(body) });
   };
