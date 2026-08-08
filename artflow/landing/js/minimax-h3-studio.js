@@ -3,7 +3,7 @@
 
   const H3_MODEL = "minimax-h3/text-to-video";
   const GENERATE_PATH = "/api/web/generate/video";
-  const UPLOAD_PATH = "/api/web/upload-media";
+  const UPLOAD_PATH = "/api/web/h3/upload-reference";
   const MAX_IMAGES = 9;
   const MAX_VIDEOS = 3;
   const MAX_AUDIOS = 3;
@@ -278,8 +278,6 @@
     body.duration = Math.max(4, Math.min(15, Number(body.duration) || 6));
     body.resolution = body.resolution === "768P" ? "768P" : "2K";
 
-    // Route is inferred on the backend from actual media. Ratio semantics are
-    // normalized here only to keep the public form intuitive.
     if (!images.length && !videos.length && !body.audio_ids.length) {
       if (!body.aspect_ratio || body.aspect_ratio === "adaptive") body.aspect_ratio = "16:9";
       body.mode = "text";
