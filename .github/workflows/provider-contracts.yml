@@ -83,6 +83,7 @@ jobs:
             tests/test_minimax_h3_uploads.py \
             tests/test_seedance25_auto_multimodal.py \
             tests/test_seedance25_uploads.py \
+            tests/test_seedance25_site_surface.py \
             tests/test_model_labels.py \
             tests/test_provider_contract_catalog.py \
             tests/test_provider_operation_gateway.py
@@ -104,6 +105,7 @@ jobs:
             tests/test_minimax_h3_uploads.py \
             tests/test_seedance25_auto_multimodal.py \
             tests/test_seedance25_uploads.py \
+            tests/test_seedance25_site_surface.py \
             tests/test_seedance25_admin_model_visibility.py \
             tests/test_model_labels.py \
             tests/test_provider_contract_catalog.py \
