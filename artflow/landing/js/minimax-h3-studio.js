@@ -13,6 +13,7 @@
   const MAX_TOTAL_SECONDS = 15;
   const originalFetch = window.fetch.bind(window);
 
+  let selectedImages = [];
   let selectedVideos = [];
   let selectedAudios = [];
 
@@ -31,6 +32,10 @@
       .filter(Boolean);
   }
 
+  function unique(values) {
+    return values.filter(Boolean).filter((item, index, all) => all.indexOf(item) === index);
+  }
+
   function setOptions(select, values, current) {
     if (!select) return;
     const next = current && values.includes(current) ? current : values[0];
@@ -38,10 +43,21 @@
     select.value = next;
   }
 
+  function referenceSection() {
+    return document.querySelector("[data-reference-section]");
+  }
+
   function configureH3Controls() {
-    if (!isH3()) return;
     const form = document.querySelector(".account-composer");
     if (!form) return;
+
+    const reference = referenceSection();
+    if (!isH3()) {
+      if (reference) reference.style.display = "";
+      const referenceInput = form.querySelector('input[name="reference_file"]');
+      if (referenceInput) referenceInput.disabled = false;
+      return;
+    }
 
     const duration = form.querySelector('select[name="duration"]');
     if (duration) setOptions(duration, Array.from({ length: 12 }, (_, index) => String(index + 4)), duration.value);
@@ -63,10 +79,18 @@
     }
 
     const referenceInput = form.querySelector('input[name="reference_file"]');
-    if (referenceInput) {
-      referenceInput.multiple = true;
-      referenceInput.accept = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp,.heic,.heif";
+    if (referenceInput) referenceInput.disabled = true;
+    if (reference) reference.style.display = "none";
+  }
+
+  function validateImageFiles(files) {
+    const picked = Array.from(files || []).slice(0, MAX_IMAGES);
+    const extension = /\.(jpe?g|png|webp|heic|heif)$/i;
+    for (const file of picked) {
+      if (!extension.test(file.name)) throw new Error("Фото H3: JPG/JPEG/PNG/WEBP/HEIC/HEIF");
+      if (file.size > 30 * 1024 * 1024) throw new Error(`${file.name}: максимум 30 МБ`);
     }
+    return picked;
   }
 
   function mediaDuration(file, kind) {
@@ -114,12 +138,12 @@
 
   function ensurePanel() {
     const old = document.querySelector("[data-h3-web-reference-panel]");
+    configureH3Controls();
     if (!isH3()) {
       if (old) old.hidden = true;
       return;
     }
 
-    configureH3Controls();
     if (old) {
       old.hidden = false;
       return;
@@ -136,8 +160,18 @@
         <div>
           <span>MiniMax H3</span>
           <b>Одна модель — маршрут определяется автоматически</b>
-          <p>Без референсов — Text-to-Video; 1 фото — первый кадр; 2 фото — первый+последний; 3+ фото или видео/аудио — Reference-to-Video.</p>
+          <p>Без файлов — Text-to-Video; 1 фото — первый кадр; 2 фото — первый+последний; 3+ фото или любое видео/аудио — Reference-to-Video.</p>
         </div>
+      </div>
+      <div class="composer-row">
+        <label>
+          <span>Фото · до ${MAX_IMAGES}</span>
+          <input data-h3-web-image-files type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp,.heic,.heif" multiple />
+        </label>
+        <label>
+          <span>Фото по URL · до ${MAX_IMAGES}</span>
+          <textarea data-h3-web-image-urls rows="2" placeholder="HTTPS-ссылки, по одной в строке"></textarea>
+        </label>
       </div>
       <div class="composer-row">
         <label>
@@ -152,18 +186,28 @@
       <div class="composer-row">
         <label>
           <span>Видео по URL</span>
-          <textarea data-h3-web-video-urls rows="2" placeholder="До ${MAX_VIDEOS} HTTPS-ссылок, по одной в строке"></textarea>
+          <textarea data-h3-web-video-urls rows="2" placeholder="До ${MAX_VIDEOS} HTTPS-ссылок"></textarea>
         </label>
         <label>
           <span>Аудио по URL</span>
-          <textarea data-h3-web-audio-urls rows="2" placeholder="До ${MAX_AUDIOS} HTTPS-ссылок, по одной в строке"></textarea>
+          <textarea data-h3-web-audio-urls rows="2" placeholder="До ${MAX_AUDIOS} HTTPS-ссылок"></textarea>
         </label>
       </div>
-      <small>Фото: до ${MAX_IMAGES}; все референсы вместе: до ${MAX_FILES}. Видео/аудио: каждый файл ${MIN_SECONDS}–${MAX_SECONDS} сек. Аудио нельзя использовать без фото или видео.</small>
+      <small>Все референсы вместе: до ${MAX_FILES}. Видео/аудио: каждый ${MIN_SECONDS}–${MAX_SECONDS} сек. Аудио нельзя использовать без фото или видео.</small>
       <small data-h3-web-reference-status></small>
     `;
     body.appendChild(panel);
 
+    panel.querySelector("[data-h3-web-image-files]")?.addEventListener("change", (event) => {
+      try {
+        selectedImages = validateImageFiles(event.currentTarget.files);
+        updateStatus("");
+      } catch (error) {
+        selectedImages = [];
+        event.currentTarget.value = "";
+        updateStatus(error instanceof Error ? error.message : "Некорректные фото");
+      }
+    });
     panel.querySelector("[data-h3-web-video-files]")?.addEventListener("change", async (event) => {
       try {
         selectedVideos = await validateFiles(event.currentTarget.files, "video");
@@ -190,7 +234,7 @@
   function updateStatus(error) {
     const status = document.querySelector("[data-h3-web-reference-status]");
     if (!status) return;
-    status.textContent = error || `Файлы: видео ${selectedVideos.length}/${MAX_VIDEOS} · аудио ${selectedAudios.length}/${MAX_AUDIOS}`;
+    status.textContent = error || `Файлы: фото ${selectedImages.length}/${MAX_IMAGES} · видео ${selectedVideos.length}/${MAX_VIDEOS} · аудио ${selectedAudios.length}/${MAX_AUDIOS}`;
     status.style.color = error ? "#ef4444" : "";
   }
 
@@ -239,35 +283,29 @@
     if (String(body.model || "") !== H3_MODEL) return originalFetch(input, init);
 
     const panel = document.querySelector("[data-h3-web-reference-panel]");
-    const extraVideoUrls = parseLines(panel?.querySelector("[data-h3-web-video-urls]")?.value).slice(0, MAX_VIDEOS);
+    const imageUrls = parseLines(panel?.querySelector("[data-h3-web-image-urls]")?.value).slice(0, MAX_IMAGES);
+    const videoUrls = parseLines(panel?.querySelector("[data-h3-web-video-urls]")?.value).slice(0, MAX_VIDEOS);
     const audioUrls = parseLines(panel?.querySelector("[data-h3-web-audio-urls]")?.value).slice(0, MAX_AUDIOS);
 
+    const uploadedImages = [];
+    for (const file of selectedImages.slice(0, MAX_IMAGES)) uploadedImages.push(await upload(file, init));
     const uploadedVideos = [];
     for (const file of selectedVideos.slice(0, MAX_VIDEOS)) uploadedVideos.push(await upload(file, init));
     const uploadedAudios = [];
     for (const file of selectedAudios.slice(0, MAX_AUDIOS)) uploadedAudios.push(await upload(file, init));
 
+    const images = unique([String(body.image_url || "").trim(), ...imageUrls, ...uploadedImages]).slice(0, MAX_IMAGES);
+    body.image_url = images[0] || null;
+    body.reference_urls = images.slice(1);
+
     const existingPrimary = String(body.video_url || "").trim();
     const existingExtra = Array.isArray(body.character_ids) ? body.character_ids.map(String).filter(Boolean) : [];
-    const videos = [existingPrimary, ...existingExtra, ...extraVideoUrls, ...uploadedVideos]
-      .filter(Boolean)
-      .filter((item, index, all) => all.indexOf(item) === index)
-      .slice(0, MAX_VIDEOS);
+    const videos = unique([existingPrimary, ...existingExtra, ...videoUrls, ...uploadedVideos]).slice(0, MAX_VIDEOS);
     body.video_url = videos[0] || null;
     body.character_ids = videos.slice(1);
 
     const existingAudio = Array.isArray(body.audio_ids) ? body.audio_ids.map(String).filter(Boolean) : [];
-    body.audio_ids = [...existingAudio, ...audioUrls, ...uploadedAudios]
-      .filter(Boolean)
-      .filter((item, index, all) => all.indexOf(item) === index)
-      .slice(0, MAX_AUDIOS);
-
-    const images = [String(body.image_url || "").trim(), ...(Array.isArray(body.reference_urls) ? body.reference_urls.map(String) : [])]
-      .filter(Boolean)
-      .filter((item, index, all) => all.indexOf(item) === index)
-      .slice(0, MAX_IMAGES);
-    body.image_url = images[0] || null;
-    body.reference_urls = images.slice(1);
+    body.audio_ids = unique([...existingAudio, ...audioUrls, ...uploadedAudios]).slice(0, MAX_AUDIOS);
 
     const refCount = images.length + videos.length + body.audio_ids.length;
     if (refCount > MAX_FILES) throw new Error(`MiniMax H3: максимум ${MAX_FILES} референсных файлов`);
@@ -280,14 +318,12 @@
 
     if (!images.length && !videos.length && !body.audio_ids.length) {
       if (!body.aspect_ratio || body.aspect_ratio === "adaptive") body.aspect_ratio = "16:9";
-      body.mode = "text";
     } else if (images.length <= 2 && !videos.length && !body.audio_ids.length) {
       body.aspect_ratio = "adaptive";
-      body.mode = "image";
     } else {
       body.aspect_ratio = body.aspect_ratio || "adaptive";
-      body.mode = "video";
     }
+    body.mode = "text";
 
     return originalFetch(input, { ...init, body: JSON.stringify(body) });
   };
