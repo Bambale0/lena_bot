@@ -28,6 +28,7 @@ from api.minimax_h3_adapter import (
 )
 from api.minimax_h3_pricing import install_minimax_h3_seed_rows
 from api.minimax_h3_product_surface import install_minimax_h3_product_surface
+from api.minimax_h3_runtime_guards import install_minimax_h3_runtime_guards
 from api.seedance25_adapter import (
     install_seedance25_keyboard_support,
     install_seedance25_miniapp,
@@ -42,6 +43,7 @@ install_seedance25_provider_support()
 install_seedance25_keyboard_support()
 install_minimax_h3_seed_rows()
 install_minimax_h3_provider_support()
+install_minimax_h3_runtime_guards()
 install_minimax_h3_keyboard_support()
 install_minimax_h3_product_surface()
 strip_seedance25_omni_id_controls()
