@@ -101,7 +101,7 @@ function ensurePanel(): void {
   else section.appendChild(panel);
 
   panel.querySelector<HTMLInputElement>("[data-suno-source-file]")?.addEventListener("change", async (event) => {
-    const input = event.currentTarget;
+    const input = event.currentTarget as HTMLInputElement;
     const file = input.files?.[0] || null;
     input.value = "";
     if (!file) return;
@@ -118,7 +118,8 @@ function ensurePanel(): void {
     }
   });
   panel.querySelector<HTMLSelectElement>("[data-suno-source-operation]")?.addEventListener("change", (event) => {
-    operation = event.currentTarget.value;
+    const select = event.currentTarget as HTMLSelectElement;
+    operation = select.value;
   });
   panel.querySelector<HTMLButtonElement>("[data-suno-source-clear]")?.addEventListener("click", () => {
     sourceFile = null;
