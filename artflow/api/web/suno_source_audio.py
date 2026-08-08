@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, File, UploadFile
 
 from api.suno_source_audio import create_source_audio_generation, upload_source_audio
