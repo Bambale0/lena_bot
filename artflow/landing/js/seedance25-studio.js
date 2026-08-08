@@ -218,3 +218,167 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ensurePanel);
   else ensurePanel();
 })();
+
+// Suno source-audio product surface. It lives in this already-loaded Studio
+// enhancer bundle so the standalone website gets own-audio support without
+// duplicating the core composer.
+(() => {
+  "use strict";
+
+  const NORMAL_PATH = "/api/web/generate/music";
+  const UPLOAD_PATH = "/api/web/music/source-audio";
+  const SOURCE_PATH = "/api/web/music/from-audio";
+  const originalFetch = window.fetch.bind(window);
+  let file = null;
+  let duration = 0;
+
+  function modelSelect() {
+    return document.querySelector("[data-account-model-select]");
+  }
+
+  function selected() {
+    return String(modelSelect()?.value || "").startsWith("suno/");
+  }
+
+  function authHeaders(init) {
+    const source = new Headers(init?.headers || {});
+    const headers = {};
+    const tokenValue = source.get("X-Web-Auth-Token");
+    if (tokenValue) headers["X-Web-Auth-Token"] = tokenValue;
+    return headers;
+  }
+
+  function mediaDuration(audioFile) {
+    return new Promise((resolve, reject) => {
+      const audio = document.createElement("audio");
+      const url = URL.createObjectURL(audioFile);
+      audio.preload = "metadata";
+      audio.onloadedmetadata = () => {
+        const value = Number(audio.duration || 0);
+        URL.revokeObjectURL(url);
+        resolve(value);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Не удалось прочитать аудиофайл"));
+      };
+      audio.src = url;
+    });
+  }
+
+  function setStatus(panel, text, isError = false) {
+    const node = panel?.querySelector("[data-suno-web-status]");
+    if (!node) return;
+    node.textContent = text || (file ? `${file.name} · ${Math.round(duration)} сек` : "Без файла — обычная генерация Suno по описанию");
+    node.style.color = isError ? "#ef4444" : "";
+  }
+
+  function ensurePanel() {
+    const existing = document.querySelector("[data-suno-web-source]");
+    if (!selected()) {
+      if (existing) existing.hidden = true;
+      return;
+    }
+    if (existing) {
+      existing.hidden = false;
+      return;
+    }
+    const body = document.querySelector("[data-optional-section] .composer-disclosure-body");
+    if (!body) return;
+
+    const panel = document.createElement("div");
+    panel.dataset.sunoWebSource = "1";
+    panel.className = "composer-section";
+    panel.innerHTML = `
+      <div class="composer-main-settings-head">
+        <div><span>Suno · свой аудиофайл</span><b>Загрузите трек до 8 минут</b><p>Cover, продолжение трека, добавление вокала или инструментала работают через официальный Suno upload flow.</p></div>
+      </div>
+      <div class="composer-row">
+        <label><span>Исходное аудио</span><input data-suno-web-file type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus" /></label>
+        <label><span>Что сделать</span><select data-suno-web-operation><option value="cover">Cover / изменить стиль</option><option value="extend">Продолжить трек</option><option value="add_vocals">Добавить вокал</option><option value="add_instrumental">Добавить инструментал</option></select></label>
+      </div>
+      <div class="composer-row">
+        <label><span>Название · для вокала/инструментала</span><input data-suno-web-title type="text" maxlength="100" /></label>
+        <label><span>Стиль / теги</span><input data-suno-web-style type="text" maxlength="1000" placeholder="Jazz, cinematic, pop..." /></label>
+      </div>
+      <small data-suno-web-status></small>
+      <button class="button ghost" type="button" data-suno-web-clear hidden>Убрать аудиофайл</button>
+    `;
+    body.appendChild(panel);
+
+    panel.querySelector("[data-suno-web-file]")?.addEventListener("change", async (event) => {
+      const picked = event.currentTarget.files?.[0] || null;
+      event.currentTarget.value = "";
+      if (!picked) return;
+      try {
+        if (!/\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i.test(picked.name)) throw new Error("Поддерживаются MP3, WAV, M4A, AAC, FLAC, OGG и OPUS");
+        if (picked.size > 100 * 1024 * 1024) throw new Error("Файл больше 100 МБ");
+        const seconds = await mediaDuration(picked);
+        if (!seconds || seconds > 480.05) throw new Error("Suno принимает исходное аудио до 8 минут");
+        file = picked;
+        duration = seconds;
+        panel.querySelector("[data-suno-web-clear]").hidden = false;
+        setStatus(panel, "");
+      } catch (error) {
+        file = null;
+        duration = 0;
+        setStatus(panel, error instanceof Error ? error.message : "Некорректный аудиофайл", true);
+      }
+    });
+    panel.querySelector("[data-suno-web-clear]")?.addEventListener("click", () => {
+      file = null;
+      duration = 0;
+      panel.querySelector("[data-suno-web-clear]").hidden = true;
+      setStatus(panel, "");
+    });
+    setStatus(panel, "");
+  }
+
+  async function upload(init) {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await originalFetch(UPLOAD_PATH, {
+      method: "POST",
+      body: form,
+      credentials: "same-origin",
+      headers: authHeaders(init),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.detail || `Upload HTTP ${response.status}`);
+    const data = payload.data || payload;
+    if (!data.url) throw new Error("Suno upload did not return URL");
+    return data;
+  }
+
+  window.fetch = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : (input instanceof URL ? input.toString() : input?.url || "");
+    const isMusic = url.includes(NORMAL_PATH) && String(init.method || "GET").toUpperCase() === "POST";
+    if (!isMusic || !file || typeof init.body !== "string") return originalFetch(input, init);
+
+    let body;
+    try { body = JSON.parse(init.body); } catch { return originalFetch(input, init); }
+    const uploaded = await upload(init);
+    const panel = document.querySelector("[data-suno-web-source]");
+    const operation = panel?.querySelector("[data-suno-web-operation]")?.value || "cover";
+    const title = String(panel?.querySelector("[data-suno-web-title]")?.value || "").trim();
+    const style = String(panel?.querySelector("[data-suno-web-style]")?.value || "").trim();
+    const payload = {
+      ...body,
+      model: modelSelect()?.value || undefined,
+      operation,
+      upload_url: uploaded.url,
+      source_duration: Number(uploaded.duration_seconds || duration || 0),
+      continue_at: operation === "extend" ? Math.max(0.1, Number(uploaded.duration_seconds || duration || 0) - 0.5) : undefined,
+      title: title || undefined,
+      style: style || undefined,
+    };
+    return originalFetch(SOURCE_PATH, { ...init, body: JSON.stringify(payload) });
+  };
+
+  document.addEventListener("change", (event) => {
+    if (event.target === modelSelect()) ensurePanel();
+  }, true);
+  new MutationObserver(ensurePanel).observe(document.documentElement, { childList: true, subtree: true });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ensurePanel);
+  else ensurePanel();
+})();
