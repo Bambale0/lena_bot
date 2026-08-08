@@ -36,6 +36,7 @@ _MODEL_LABELS: dict[str, str] = {
     "bytedance/seedance-2": "🌱 Seedance 2",
     "bytedance/seedance-2-fast": "⚡ Seedance 2 Fast",
     "bytedance/seedance-2-mini": "🚀 Seedance 2 Mini",
+    "bytedance/seedance-2-5": "🌱 Seedance 2.5",
     "minimax-h3/text-to-video": "🎞 MiniMax H3",
     "minimax-h3/image-to-video": "🎞 MiniMax H3",
     "minimax-h3/reference-to-video": "🎞 MiniMax H3",
