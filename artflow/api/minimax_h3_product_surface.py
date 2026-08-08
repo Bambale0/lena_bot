@@ -2,7 +2,8 @@
 
 H3 provider routes are implementation details. The user chooses MiniMax H3 once;
 media presence determines T2V / first-last-frame / omni-reference internally.
-Therefore generic mode selectors must not be rendered for this family.
+The underlying capability contract remains multimodal; only generic mode pickers
+are collapsed to a single automatic product surface.
 """
 from __future__ import annotations
 
@@ -22,8 +23,6 @@ def _force_single_public_mode(caps: Any) -> None:
 
 def install_minimax_h3_product_surface(routes: Any | None = None) -> None:
     """Expose one H3 button and no technical T2V/I2V/Ref2V choice."""
-    h3.PUBLIC_CAPS["modes"] = ["text"]
-    h3.PUBLIC_CAPS["auto_route_by_inputs"] = True
     _force_single_public_mode(h3.VIDEO_CAPS)
 
     try:
