@@ -28,6 +28,16 @@ def strip_seedance25_omni_id_controls(routes: Any | None = None) -> None:
     provider-specific ID controls are removed.
     """
     try:
+        from api import seedance25_adapter
+
+        raw_caps = getattr(seedance25_adapter, "VIDEO_CAPS", None)
+        if isinstance(raw_caps, dict):
+            raw_caps.pop("max_audio_ids", None)
+            raw_caps.pop("max_character_ids", None)
+    except Exception:
+        pass
+
+    try:
         from bot.keyboards import models as keyboard_models
 
         _strip_omni_id_caps(getattr(keyboard_models, "VIDEO_CAPS", None))
