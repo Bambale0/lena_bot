@@ -18,6 +18,7 @@ from api.web import (
     prompts,
     realtime,
     referrals,
+    seedance25_uploads,
     sessions,
 )
 from api.prompt_privacy import install_web_schema_prompt_privacy
@@ -32,6 +33,7 @@ router.include_router(me.router)
 router.include_router(models.router)
 router.include_router(generations.router)
 router.include_router(minimax_h3_uploads.router)
+router.include_router(seedance25_uploads.router)
 router.include_router(feed.router)
 router.include_router(prompts.router)
 router.include_router(realtime.router)
