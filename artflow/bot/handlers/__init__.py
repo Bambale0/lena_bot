@@ -50,8 +50,6 @@ for _key, _description in list(_model_keyboards.IMAGE_MODEL_DESC.items()):
     _label = model_display_name(str(_key), _description)
     _model_keyboards.IMAGE_MODEL_DESC[_key] = f"{_label} · {_suffix}" if _suffix else _label
 
-# Image UX v2: direct task-first flow first, dedicated photo-to-prompt flow
-# second, legacy expert flow last.
 from . import image_gen as _legacy_image_gen
 from . import image_wizard_v2 as _image_wizard_v2
 from . import photo_prompt as _photo_prompt
@@ -66,9 +64,9 @@ _image_router.include_router(_photo_prompt.router)
 _image_router.include_router(_legacy_image_gen.router)
 _legacy_image_gen.router = _image_router
 
-# Video UX v2: scenario wizard first, multimodal/reference helpers before the
-# legacy technical flow so exact model callbacks can specialize collection.
+# Provider-specific automatic collectors must run before the generic mode picker.
 from . import minimax_h3_references as _minimax_h3_references
+from . import seedance25_references as _seedance25_references
 from . import video_gen as _legacy_video_gen
 from . import video_references as _video_references
 from . import video_wizard as _video_wizard
@@ -78,6 +76,7 @@ install_minimax_h3_handler_presentation(_legacy_video_gen)
 
 _video_router = Router(name="video_v2")
 _video_router.include_router(_minimax_h3_references.router)
+_video_router.include_router(_seedance25_references.router)
 _video_router.include_router(_video_references.router)
 _video_router.include_router(_video_wizard.router)
 _video_router.include_router(_legacy_video_gen.router)
