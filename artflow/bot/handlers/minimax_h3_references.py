@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.minimax_h3_adapter import (
     MAX_REFERENCE_AUDIOS,
     MAX_REFERENCE_IMAGES,
-    MAX_REFERENCE_VIDEOS,
     MAX_REFERENCE_VIDEO_SECONDS,
+    MAX_REFERENCE_VIDEOS,
     REFERENCE_MODEL,
 )
 from api.public_files import mirror_telegram_file, save_public_file
