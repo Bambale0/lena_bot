@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import mimetypes
 import os
 import subprocess
@@ -13,7 +12,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 from api import kieai_client, suno_full_service
-from api.music_service import default_music_callback_url, normalize_music_model, register_miniapp_task
+from api.music_service import (
+    default_music_callback_url,
+    normalize_music_model,
+    register_miniapp_task,
+)
 from db import repository as repo
 from db.models import GenerationType
 
@@ -302,7 +305,3 @@ async def create_source_audio_generation(
     register_miniapp_task(task.task_id, gen.id)
     await session.refresh(gen)
     return gen
-
-
-def source_audio_metadata_json(operation: SunoSourceOperation | str, **values: Any) -> str:
-    return json.dumps({"operation": _operation(operation).value, **values}, ensure_ascii=False)
