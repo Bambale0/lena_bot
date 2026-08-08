@@ -7,6 +7,7 @@
   const TOKEN_PREFIX = "__apix_seedance25:";
   const originalFetch = window.fetch.bind(window);
 
+  let imageFiles = [];
   let videoFiles = [];
   let audioFiles = [];
 
@@ -30,7 +31,20 @@
       .slice(0, limit);
   }
 
+  function genericSeedModeLabel() {
+    const grok = document.querySelector('select[name="grok_mode"]');
+    return grok?.closest("label") || null;
+  }
+
+  function applySurface() {
+    const refs = document.querySelector("[data-reference-section]");
+    const seedMode = genericSeedModeLabel();
+    if (refs) refs.style.display = selected() ? "none" : "";
+    if (seedMode) seedMode.style.display = selected() ? "none" : "";
+  }
+
   function ensurePanel() {
+    applySurface();
     const existing = document.querySelector("[data-seedance25-studio]");
     if (!selected()) {
       if (existing) existing.hidden = true;
@@ -51,23 +65,30 @@
       <div class="composer-main-settings-head">
         <div>
           <span>Seedance 2.5</span>
-          <b>Режим определяется автоматически</b>
-          <p>Без референсов — text-to-video; ровно 1 фото — first frame; 2+ фото или любое видео/аудио — multimodal references.</p>
+          <b>Один мультимодальный вход</b>
+          <p>Без референсов — text-to-video; ровно 1 фото — first frame с adaptive ratio; 2+ фото или любое видео/аудио — multimodal references.</p>
         </div>
       </div>
       <div class="composer-row">
         <label>
-          <span>Доп. видео-файлы</span>
-          <input data-s25-video-files type="file" accept="video/mp4,video/quicktime,video/x-matroska,.mp4,.mov,.mkv" multiple />
+          <span>Фото-файлы · до 30</span>
+          <input data-s25-image-files type="file" accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp" multiple />
         </label>
-        <label>
-          <span>Аудио-файлы</span>
-          <input data-s25-audio-files type="file" accept="audio/*,.mp3,.wav,.aac,.m4a,.ogg" multiple />
-        </label>
+        <label><span>Фото по URL</span><textarea data-s25-image-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
       </div>
       <div class="composer-row">
-        <label><span>Доп. video refs по URL</span><textarea data-s25-video-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
-        <label><span>Audio refs по URL</span><textarea data-s25-audio-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
+        <label>
+          <span>Видео-файлы · до 10</span>
+          <input data-s25-video-files type="file" accept="video/mp4,video/quicktime,video/x-matroska,.mp4,.mov,.mkv" multiple />
+        </label>
+        <label><span>Видео по URL</span><textarea data-s25-video-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
+      </div>
+      <div class="composer-row">
+        <label>
+          <span>Аудио-файлы · до 10</span>
+          <input data-s25-audio-files type="file" accept="audio/*,.mp3,.wav,.aac,.m4a,.ogg" multiple />
+        </label>
+        <label><span>Аудио по URL</span><textarea data-s25-audio-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
       </div>
       <div class="composer-row">
         <label><span>Точная длительность 4–30 сек</span><input data-s25-duration type="number" min="4" max="30" /></label>
@@ -84,6 +105,9 @@
     `;
     body.appendChild(panel);
 
+    panel.querySelector("[data-s25-image-files]")?.addEventListener("change", (event) => {
+      imageFiles = Array.from(event.currentTarget.files || []).slice(0, 30);
+    });
     panel.querySelector("[data-s25-video-files]")?.addEventListener("change", (event) => {
       videoFiles = Array.from(event.currentTarget.files || []).slice(0, 10);
     });
@@ -141,13 +165,25 @@
     if (String(body.model || "") !== MODEL) return originalFetch(input, init);
 
     const panel = document.querySelector("[data-seedance25-studio]");
+    const uploadedImages = [];
+    for (const file of imageFiles) uploadedImages.push(await upload(file, init));
     const uploadedVideos = [];
     for (const file of videoFiles) uploadedVideos.push(await upload(file, init));
     const uploadedAudios = [];
     for (const file of audioFiles) uploadedAudios.push(await upload(file, init));
 
+    const imageUrls = lines(panel?.querySelector("[data-s25-image-urls]")?.value, 30);
     const videoUrls = lines(panel?.querySelector("[data-s25-video-urls]")?.value, 10);
     const audioUrls = lines(panel?.querySelector("[data-s25-audio-urls]")?.value, 10);
+
+    const existingImages = unique([
+      String(body.image_url || "").trim(),
+      ...(Array.isArray(body.reference_urls) ? body.reference_urls.map(String) : []),
+    ]);
+    const allImages = unique([...existingImages, ...imageUrls, ...uploadedImages]).slice(0, 30);
+    body.image_url = allImages[0] || null;
+    body.reference_urls = allImages.slice(1);
+
     const primaryVideo = String(body.video_url || "").trim();
     const allVideos = unique([primaryVideo, ...videoUrls, ...uploadedVideos]).slice(0, 10);
     body.video_url = allVideos[0] || null;
