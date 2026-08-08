@@ -54,6 +54,7 @@ jobs:
             bot/handlers/music_gen.py \
             bot/services/generation_service.py \
             bot/services/minimax_h3_ui.py \
+            bot/services/veo_ui.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
             scripts/check_provider_product_readiness.py \
@@ -84,6 +85,7 @@ jobs:
             bot/handlers/music_gen.py \
             bot/services/generation_service.py \
             bot/services/minimax_h3_ui.py \
+            bot/services/veo_ui.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
             scripts/check_provider_product_readiness.py \
