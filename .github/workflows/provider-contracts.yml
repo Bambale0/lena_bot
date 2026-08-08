@@ -35,6 +35,7 @@ jobs:
             api/minimax_h3_adapter.py \
             api/minimax_h3_pricing.py \
             api/minimax_h3_product_surface.py \
+            api/minimax_h3_runtime_guards.py \
             api/provider_billing.py \
             api/provider_contract_catalog.py \
             api/provider_operation_bindings.py \
@@ -56,6 +57,7 @@ jobs:
             api/minimax_h3_adapter.py \
             api/minimax_h3_pricing.py \
             api/minimax_h3_product_surface.py \
+            api/minimax_h3_runtime_guards.py \
             api/provider_billing.py \
             api/provider_contract_catalog.py \
             api/provider_operation_bindings.py \
@@ -71,6 +73,7 @@ jobs:
             scripts/check_provider_product_readiness.py \
             scripts/run_provider_live_smoke.py \
             tests/test_minimax_h3_adapter.py \
+            tests/test_minimax_h3_runtime_guards.py \
             tests/test_minimax_h3_uploads.py \
             tests/test_model_labels.py \
             tests/test_provider_contract_catalog.py \
@@ -89,6 +92,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_minimax_h3_adapter.py \
+            tests/test_minimax_h3_runtime_guards.py \
             tests/test_minimax_h3_uploads.py \
             tests/test_model_labels.py \
             tests/test_provider_contract_catalog.py \
