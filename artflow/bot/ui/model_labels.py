@@ -36,6 +36,9 @@ _MODEL_LABELS: dict[str, str] = {
     "bytedance/seedance-2": "🌱 Seedance 2",
     "bytedance/seedance-2-fast": "⚡ Seedance 2 Fast",
     "bytedance/seedance-2-mini": "🚀 Seedance 2 Mini",
+    "minimax-h3/text-to-video": "🎞 MiniMax H3",
+    "minimax-h3/image-to-video": "🎞 MiniMax H3",
+    "minimax-h3/reference-to-video": "🎞 MiniMax H3",
     "grok-imagine/text-to-video": "⚡ Grok Imagine Video",
     "grok-imagine/image-to-video": "⚡ Grok Imagine Video",
     "grok-imagine-video-1-5-preview": "🆕 NEW · Grok Imagine Video 1.5",
@@ -65,6 +68,8 @@ _CANONICAL_MODEL_KEYS: dict[str, str] = {
     "kling-2.6/image-to-video": "kling-2.6/text-to-video",
     "kling/v3-turbo-image-to-video": "kling/v3-turbo-text-to-video",
     "wan/2-7-image-to-video": "wan/2-7-text-to-video",
+    "minimax-h3/image-to-video": "minimax-h3/text-to-video",
+    "minimax-h3/reference-to-video": "minimax-h3/text-to-video",
     "grok-imagine/image-to-video": "grok-imagine/text-to-video",
     "happyhorse/image-to-video": "happyhorse/text-to-video",
 }
