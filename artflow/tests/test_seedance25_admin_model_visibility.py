@@ -11,24 +11,27 @@ def test_seedance25_model_registered_after_api_bootstrap():
     assert video_service.VideoModel(MODEL_KEY).value == MODEL_KEY
     spec = kie_model_specs.VIDEO_SPECS[MODEL_KEY]
     assert spec.model == MODEL_KEY
-    assert spec.supported_modes == ("text", "image", "first_last", "multimodal")
+    assert spec.supported_modes == ("text", "image", "multimodal")
+    assert "first_last" not in spec.supported_modes
     assert spec.reference_field is None
     assert spec.param_builder is not None
 
 
-def test_seedance25_caps_match_official_limits():
+def test_seedance25_caps_match_product_limits_without_gemini_omni_ids():
     import api  # noqa: F401
     from api.seedance25_adapter import VIDEO_CAPS
 
     assert VIDEO_CAPS["resolutions"] == ["480p", "720p"]
     assert "1080p" not in VIDEO_CAPS["resolutions"]
     assert VIDEO_CAPS["supports_auto_duration"] is True
+    assert VIDEO_CAPS["auto_route_by_inputs"] is True
     assert 4 in VIDEO_CAPS["duration_options"]
     assert 30 in VIDEO_CAPS["duration_options"]
     assert VIDEO_CAPS["max_reference_images"] == 30
     assert VIDEO_CAPS["max_reference_videos"] == 10
     assert VIDEO_CAPS["max_reference_audios"] == 10
-    assert VIDEO_CAPS["max_audio_ids"] == 10
+    assert "max_audio_ids" not in VIDEO_CAPS
+    assert "max_character_ids" not in VIDEO_CAPS
     assert VIDEO_CAPS["output_formats"] == ["mp4", "mov"]
     assert VIDEO_CAPS["supports_audio_generation"] is True
     assert VIDEO_CAPS["supports_return_last_frame"] is True
@@ -49,14 +52,14 @@ def test_seedance25_admin_pricing_rows_are_seeded():
         assert "за сек" in rows[key]["display_name"]
 
 
-def test_seedance25_builder_uses_first_last_frame_scenario():
+def test_seedance25_builder_routes_two_images_to_multimodal_references():
     import api  # noqa: F401
     from api.seedance25_adapter import _seedance25_params
 
     payload = _seedance25_params(
         {
-            "mode": "image",
-            "reference_urls": ["https://cdn.example/first.png", "https://cdn.example/last.png"],
+            "mode": "image",  # ignored: input media determine the route
+            "reference_urls": ["https://cdn.example/first.png", "https://cdn.example/second.png"],
             "duration": 15,
             "resolution": "720p",
             "aspect_ratio": "9:16",
@@ -66,10 +69,12 @@ def test_seedance25_builder_uses_first_last_frame_scenario():
         }
     )
 
-    assert payload["first_frame_url"] == "https://cdn.example/first.png"
-    assert payload["last_frame_url"] == "https://cdn.example/last.png"
-    assert "reference_image_urls" not in payload
-    assert "reference_video_urls" not in payload
+    assert payload["reference_image_urls"] == [
+        "https://cdn.example/first.png",
+        "https://cdn.example/second.png",
+    ]
+    assert "first_frame_url" not in payload
+    assert "last_frame_url" not in payload
     assert payload["duration"] == 15
     assert payload["resolution"] == "720p"
     assert payload["aspect_ratio"] == "9:16"
@@ -78,13 +83,32 @@ def test_seedance25_builder_uses_first_last_frame_scenario():
     assert payload["output_format"] == "mov"
 
 
+def test_seedance25_builder_one_image_is_first_frame_with_adaptive_ratio():
+    import api  # noqa: F401
+    from api.seedance25_adapter import _seedance25_params
+
+    payload = _seedance25_params(
+        {
+            "reference_urls": ["https://cdn.example/first.png"],
+            "aspect_ratio": "16:9",
+            "duration": 5,
+            "resolution": "720p",
+        }
+    )
+
+    assert payload["first_frame_url"] == "https://cdn.example/first.png"
+    assert payload["aspect_ratio"] == "adaptive"
+    assert "last_frame_url" not in payload
+    assert "reference_image_urls" not in payload
+
+
 def test_seedance25_builder_uses_multimodal_reference_scenario():
     import api  # noqa: F401
     from api.seedance25_adapter import _seedance25_params
 
     payload = _seedance25_params(
         {
-            "mode": "multimodal",
+            "mode": "text",  # ignored
             "reference_urls": ["https://cdn.example/ref.png"],
             "reference_video_urls": ["https://cdn.example/ref.mp4"],
             "reference_audio_urls": ["https://cdn.example/ref.mp3"],
@@ -104,13 +128,13 @@ def test_seedance25_builder_uses_multimodal_reference_scenario():
     assert payload["aspect_ratio"] == "adaptive"
 
 
-def test_seedance25_miniapp_control_tokens_are_parsed():
+def test_seedance25_miniapp_control_tokens_ignore_legacy_scenario():
     import api  # noqa: F401
     from api.seedance25_adapter import _control_payload
 
     audio_refs, video_refs, options = _control_payload(
         [
-            "__apix_seedance25:scenario=multimodal",
+            "__apix_seedance25:scenario=first_last",
             "__apix_seedance25:duration=-1",
             "__apix_seedance25:output_format=mov",
             "__apix_seedance25:generate_audio=false",
@@ -124,13 +148,13 @@ def test_seedance25_miniapp_control_tokens_are_parsed():
     assert audio_refs == ["https://cdn.example/ref.mp3"]
     assert video_refs == ["https://cdn.example/ref.mp4"]
     assert options == {
-        "mode": "multimodal",
         "duration": -1,
         "output_format": "mov",
         "generate_audio": False,
         "return_last_frame": True,
         "web_search": True,
     }
+    assert "mode" not in options
 
 
 def test_seedance25_miniapp_hook_is_installed_in_bootstrap():
@@ -140,7 +164,7 @@ def test_seedance25_miniapp_hook_is_installed_in_bootstrap():
     assert "install_seedance25_miniapp(module)" in source
 
 
-def test_seedance25_model_picker_is_public_and_enhancer_is_installed():
+def test_seedance25_model_picker_is_public_and_enhancer_is_automatic_multimodal():
     frontend = Path("webapp/src/lib/admin-model-visibility.ts").read_text(encoding="utf-8")
     enhancer = Path("webapp/src/lib/seedance25-miniapp-enhancer.ts").read_text(encoding="utf-8")
     main = Path("webapp/src/main.tsx").read_text(encoding="utf-8")
@@ -152,6 +176,9 @@ def test_seedance25_model_picker_is_public_and_enhancer_is_installed():
     assert "return_last_frame" in enhancer
     assert "output_format" in enhancer
     assert "web_search" in enhancer
-    assert "audio_ref" in enhancer
+    assert "audioRefs" in enhancer
     assert "video_ref" in enhancer
+    assert 'token("scenario"' not in enhancer
+    assert 'data-seedance25="scenario"' not in enhancer
+    assert "Режим" in enhancer and 'mode.style.display = "none"' in enhancer
     assert "installSeedance25MiniappEnhancer()" in main

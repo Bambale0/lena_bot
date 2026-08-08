@@ -36,14 +36,17 @@ jobs:
             api/minimax_h3_pricing.py \
             api/minimax_h3_product_surface.py \
             api/minimax_h3_runtime_guards.py \
+            api/seedance25_adapter.py \
             api/provider_billing.py \
             api/provider_contract_catalog.py \
             api/provider_operation_bindings.py \
             api/provider_operation_registry.py \
             api/provider_smoke_manifest.py \
             api/web/minimax_h3_uploads.py \
+            api/web/seedance25_uploads.py \
             api/web/provider_operations.py \
             bot/handlers/minimax_h3_references.py \
+            bot/handlers/seedance25_references.py \
             bot/services/generation_service.py \
             bot/services/minimax_h3_ui.py \
             scripts/check_provider_contract_coverage.py \
@@ -58,14 +61,17 @@ jobs:
             api/minimax_h3_pricing.py \
             api/minimax_h3_product_surface.py \
             api/minimax_h3_runtime_guards.py \
+            api/seedance25_adapter.py \
             api/provider_billing.py \
             api/provider_contract_catalog.py \
             api/provider_operation_bindings.py \
             api/provider_operation_registry.py \
             api/provider_smoke_manifest.py \
             api/web/minimax_h3_uploads.py \
+            api/web/seedance25_uploads.py \
             api/web/provider_operations.py \
             bot/handlers/minimax_h3_references.py \
+            bot/handlers/seedance25_references.py \
             bot/services/generation_service.py \
             bot/services/minimax_h3_ui.py \
             scripts/check_provider_contract_coverage.py \
@@ -75,6 +81,9 @@ jobs:
             tests/test_minimax_h3_adapter.py \
             tests/test_minimax_h3_runtime_guards.py \
             tests/test_minimax_h3_uploads.py \
+            tests/test_seedance25_auto_multimodal.py \
+            tests/test_seedance25_uploads.py \
+            tests/test_seedance25_site_surface.py \
             tests/test_model_labels.py \
             tests/test_provider_contract_catalog.py \
             tests/test_provider_operation_gateway.py
@@ -94,6 +103,10 @@ jobs:
             tests/test_minimax_h3_adapter.py \
             tests/test_minimax_h3_runtime_guards.py \
             tests/test_minimax_h3_uploads.py \
+            tests/test_seedance25_auto_multimodal.py \
+            tests/test_seedance25_uploads.py \
+            tests/test_seedance25_site_surface.py \
+            tests/test_seedance25_admin_model_visibility.py \
             tests/test_model_labels.py \
             tests/test_provider_contract_catalog.py \
             tests/test_provider_operation_gateway.py \
