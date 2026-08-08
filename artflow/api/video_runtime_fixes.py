@@ -65,9 +65,9 @@ def _clean_prompt(prompt: Any, *, model_name: str) -> str:
 async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, ...], kwargs: dict[str, Any]):
     clean_prompt = _clean_prompt(prompt, model_name="Seedance 2.5")
     image_url = _arg(args, kwargs, "image_url", 0)
-    duration = _arg(args, kwargs, "duration", 5, 5)
-    aspect_ratio = _arg(args, kwargs, "aspect_ratio", 6)
-    resolution = _arg(args, kwargs, "resolution", 7)
+    duration = _arg(args, kwargs, "duration", 4, 5)
+    aspect_ratio = _arg(args, kwargs, "aspect_ratio", 5)
+    resolution = _arg(args, kwargs, "resolution", 6)
 
     audio_refs, extra_video_refs, control_options = seedance25._control_payload(
         seedance25._list(kwargs.get("audio_ids"))
@@ -159,7 +159,7 @@ async def _veo_generate(
     clean_prompt = _clean_prompt(prompt, model_name="Veo 3.1")
     image_url = _arg(args, kwargs, "image_url", 0)
     last_frame_url = _arg(args, kwargs, "last_frame_url", 1)
-    aspect_ratio = _arg(args, kwargs, "aspect_ratio", 6)
+    aspect_ratio = _arg(args, kwargs, "aspect_ratio", 5)
     generation_type = kwargs.get("veo_generation_type")
     watermark = kwargs.get("watermark")
     callback_url = kwargs.get("callback_url")
