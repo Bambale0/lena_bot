@@ -10,6 +10,7 @@ import { installTelegramNavigation } from "@/lib/telegram-navigation";
 import "@/styles/globals.css";
 import "@/styles/color-schemes.css";
 import "@/styles/responsive.css";
+import "@/styles/performance.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Mini App root element is missing");
