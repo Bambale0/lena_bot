@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { startTransition, useEffect, useState, type ReactNode } from "react";
 import {
   Bot,
   Film,
@@ -61,10 +61,21 @@ function readViewport(): ViewportState {
   return { mode: classifyViewport(width), short: height <= 660, width, height };
 }
 
+function sameViewport(left: ViewportState, right: ViewportState): boolean {
+  return left.mode === right.mode && left.short === right.short && left.width === right.width && left.height === right.height;
+}
+
 function applyViewportCssVars(viewport: ViewportState) {
   if (typeof document === "undefined") return;
-  document.documentElement.style.setProperty("--apix-visual-viewport-width", `${viewport.width}px`);
-  document.documentElement.style.setProperty("--apix-visual-viewport-height", `${viewport.height}px`);
+  const root = document.documentElement;
+  const width = `${viewport.width}px`;
+  const height = `${viewport.height}px`;
+  if (root.style.getPropertyValue("--apix-visual-viewport-width") !== width) {
+    root.style.setProperty("--apix-visual-viewport-width", width);
+  }
+  if (root.style.getPropertyValue("--apix-visual-viewport-height") !== height) {
+    root.style.setProperty("--apix-visual-viewport-height", height);
+  }
 }
 
 function useViewportMode() {
@@ -81,20 +92,18 @@ function useViewportMode() {
       frame = window.requestAnimationFrame(() => {
         const next = readViewport();
         applyViewportCssVars(next);
-        setViewport(next);
+        setViewport((current) => sameViewport(current, next) ? current : next);
       });
     };
     update();
     window.addEventListener("resize", update, { passive: true });
     window.addEventListener("orientationchange", update, { passive: true });
     window.visualViewport?.addEventListener("resize", update, { passive: true });
-    window.visualViewport?.addEventListener("scroll", update, { passive: true });
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
       window.visualViewport?.removeEventListener("resize", update);
-      window.visualViewport?.removeEventListener("scroll", update);
     };
   }, []);
 
@@ -106,6 +115,20 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
   const name = user.full_name || user.first_name || user.username || "Пользователь";
   const initial = name.trim().slice(0, 1).toUpperCase() || "A";
   const viewport = useViewportMode();
+  const [optimisticTab, setOptimisticTab] = useState(activeTab);
+
+  useEffect(() => {
+    setOptimisticTab(activeTab);
+  }, [activeTab]);
+
+  const navigate = (tab: AppTab) => {
+    if (tab === optimisticTab) return;
+    // Paint the pressed/selected state before rendering a potentially heavy screen.
+    setOptimisticTab(tab);
+    startTransition(() => onTabChange(tab));
+    // Haptics are decorative; keep them outside the synchronous interaction task.
+    window.setTimeout(() => haptic("light"), 0);
+  };
 
   return (
     <div
@@ -115,11 +138,11 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
       data-width={viewport.width}
       data-height={viewport.height}
     >
-      <header className="apix-app-header grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-border/70 bg-background/88 px-2 py-1.5 shadow-sm backdrop-blur-2xl">
+      <header className="apix-app-header grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-border/70 bg-background/95 px-2 py-1.5 shadow-sm">
         <button
           type="button"
           className="apix-profile-button apix-focus-ring flex min-w-0 max-w-full items-center gap-2 rounded-lg text-left"
-          onClick={() => onTabChange("profile")}
+          onClick={() => navigate("profile")}
         >
           <span className="apix-profile-avatar grid size-8 shrink-0 place-items-center overflow-hidden rounded-full border border-primary/30 bg-gradient-to-br from-primary via-fuchsia-500 to-cyan-400 text-xs font-bold text-white shadow-md shadow-primary/15">
             {user.photo_url ? <img src={user.photo_url} alt="" className="size-full object-cover" /> : initial}
@@ -140,7 +163,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
       <nav className="apix-bottom-nav apix-glass rounded-2xl p-1" aria-label="Основная навигация">
         <div className="apix-nav-scroll flex min-w-0 gap-1 overflow-x-auto overscroll-x-contain" role="tablist" aria-label="Разделы Mini App">
           {tabs.map(({ id, labelKey, icon: Icon }) => {
-            const active = id === activeTab;
+            const active = id === optimisticTab;
             const label = copy.nav[labelKey];
             return (
               <button
@@ -151,17 +174,14 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
                 aria-current={active ? "page" : undefined}
                 aria-label={label}
                 className={cn(
-                  "apix-nav-item apix-focus-ring flex min-h-12 min-w-[74px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl px-2 text-[10px] font-semibold transition active:scale-[0.97]",
+                  "apix-nav-item apix-focus-ring flex min-h-12 min-w-[74px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl px-2 text-[10px] font-semibold transition-colors duration-100 active:scale-[0.97]",
                   active
                     ? "bg-primary/15 text-primary shadow-inner"
                     : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
                 )}
-                onClick={() => {
-                  haptic("light");
-                  onTabChange(id);
-                }}
+                onClick={() => navigate(id)}
               >
-                <Icon className={cn("size-[18px]", active && "drop-shadow-[0_0_8px_currentColor]")} />
+                <Icon className="size-[18px]" />
                 <span className="apix-nav-label leading-none">{label}</span>
               </button>
             );
