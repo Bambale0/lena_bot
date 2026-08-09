@@ -26,6 +26,10 @@ interface GenerationScreenProps {
 }
 
 const TASK_COUNT_OPTIONS = [1, 2, 3, 4, 6];
+const GEMINI_OMNI_MODEL = "gemini-omni-video";
+const GEMINI_MAX_MEDIA_SLOTS = 7;
+const GEMINI_MAX_TRIM_SECONDS = 10;
+const GEMINI_MAX_SEED = 2_147_483_647;
 
 const titles = {
   image: { title: "Фото", description: "Текст, edit-модели, референсы и пакетный результат.", icon: ImageIcon },
@@ -51,6 +55,16 @@ function modeLabel(mode: string): string {
     avatar: "Аватар",
     audio: "Голос",
     character: "Персонаж",
+  }[mode] || mode;
+}
+
+function modeOptionLabel(mode: string): string {
+  return {
+    fun: "Fun · свободнее",
+    normal: "Normal · универсально",
+    spicy: "Spicy · смелее",
+    low: "Low motion",
+    high: "High motion",
   }[mode] || mode;
 }
 
@@ -125,42 +139,61 @@ function GenerationScreen({
   const availableModels =
     kind === "motion"
       ? models.filter((model) => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"))
-      : models.filter((model) => !/motion-control/i.test(model.key) || kind === "video");
+      : models.filter((model) => !model.modes?.includes("motion") && !/motion-control/i.test(model.key));
   const selectedModel = availableModels.find((model) => model.key === draft.model) || availableModels[0];
   const modes = selectedModel?.modes?.length ? selectedModel.modes : [kind === "motion" ? "motion" : "text"];
-  const ratios = selectedModel?.aspect_ratios?.length ? selectedModel.aspect_ratios : [kind === "image" ? "1:1" : "16:9"];
+  const ratioModes = selectedModel?.aspect_ratio_modes?.length ? selectedModel.aspect_ratio_modes : modes;
+  const ratios = ratioModes.includes(draft.mode) && selectedModel?.aspect_ratios?.length ? selectedModel.aspect_ratios : [];
   const qualities = selectedModel?.quality_options?.length ? selectedModel.quality_options : [];
   const outputCounts = selectedModel?.counts?.length ? selectedModel.counts : [1];
-  const durations = listOr(selectedModel?.duration_options, selectedModel?.durations, [5, 10]);
+  const durations = listOr(selectedModel?.duration_options, selectedModel?.durations, kind === "motion" ? [] : [5, 10]);
   const resolutions = listOr(selectedModel?.resolution_options, selectedModel?.resolutions, ["720p", "1080p"]);
   const modeOptions = selectedModel?.mode_options || [];
   const taskCount = clampTaskCount(draft.taskCount);
   const baseEstimate = kind === "image" ? imageBaseCost(selectedModel, draft.quality, draft.count) : videoBaseCost(selectedModel, draft);
   const estimate = baseEstimate * taskCount;
-  const refsRequired = Boolean(selectedModel && !modelSupports(selectedModel, "text") && modelSupports(selectedModel, "image"));
   const maxRefs = Math.max(1, Number(selectedModel?.max_refs || 1));
-  const tooManyRefs = draft.referenceUrls.length > maxRefs;
+  const maxAudioIds = Math.max(0, Number(selectedModel?.max_audio_ids || 0));
+  const maxCharacterIds = Math.max(0, Number(selectedModel?.max_character_ids || 0));
+  const refsRequired = kind === "motion" || Boolean(selectedModel && !modelSupports(selectedModel, "text") && modelSupports(selectedModel, "image"));
   const missingReference = refsRequired && draft.referenceUrls.length === 0;
-  const videoModeNeedsUpload = draft.mode === "video" || (kind === "motion" && draft.mode !== "text");
-  const missingMotionVideo = videoModeNeedsUpload && kind === "motion" && !draft.videoUrl;
+  const tooManyRefs = draft.referenceUrls.length > maxRefs;
+  const missingVideo = (draft.mode === "video" || kind === "motion") && !draft.videoUrl;
   const missingPrompt = !draft.prompt.trim() && !draft.promptId;
   const insufficientCredits = estimate > Number(user.credits || 0);
   const mediaUploading = referenceUploading || videoUploading;
-  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingMotionVideo || tooManyRefs || insufficientCredits;
+  const invalidSeed = Boolean(
+    selectedModel?.has_seed &&
+    draft.seed != null &&
+    (!Number.isInteger(draft.seed) || draft.seed < 0 || draft.seed > GEMINI_MAX_SEED),
+  );
+  const invalidTrim = Boolean(
+    draft.videoUrl &&
+    draft.videoEnd != null &&
+    (draft.videoEnd <= draft.videoStart || draft.videoEnd - draft.videoStart > GEMINI_MAX_TRIM_SECONDS),
+  );
+  const tooManyAudioIds = draft.audioIds.length > maxAudioIds;
+  const tooManyCharacterIds = draft.characterIds.length > maxCharacterIds;
+  const geminiMediaSlots = selectedModel?.key === GEMINI_OMNI_MODEL
+    ? (draft.mode === "image" ? draft.referenceUrls.length : 0) + (draft.videoUrl ? 2 : 0) + draft.characterIds.length
+    : 0;
+  const mediaQuotaExceeded = selectedModel?.key === GEMINI_OMNI_MODEL && geminiMediaSlots > GEMINI_MAX_MEDIA_SLOTS;
+  const advancedInvalid = invalidSeed || invalidTrim || tooManyAudioIds || tooManyCharacterIds || mediaQuotaExceeded;
+  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid;
   const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion";
   const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input);
   const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);
-  const maxAudioIds = Number(selectedModel?.max_audio_ids || 0);
-  const maxCharacterIds = Number(selectedModel?.max_character_ids || 0);
 
   const syncSelectedModel = (modelKey: string) => {
     const model = availableModels.find((item) => item.key === modelKey);
-    const nextDurations = listOr(model?.duration_options, model?.durations, [5]);
+    const nextDurations = listOr(model?.duration_options, model?.durations, kind === "motion" ? [] : [5]);
     const nextResolutions = listOr(model?.resolution_options, model?.resolutions, ["720p"]);
+    const nextMode = model?.modes?.[0] || (kind === "motion" ? "motion" : "text");
+    const ratioAllowed = (model?.aspect_ratio_modes?.length ? model.aspect_ratio_modes : model?.modes || []).includes(nextMode);
     onChange({
       model: modelKey,
-      mode: model?.modes?.[0] || (kind === "motion" ? "motion" : "text"),
-      aspectRatio: model?.aspect_ratios?.[0] || draft.aspectRatio || (kind === "image" ? "1:1" : "16:9"),
+      mode: nextMode,
+      aspectRatio: ratioAllowed ? model?.aspect_ratios?.[0] || draft.aspectRatio : draft.aspectRatio,
       quality: model?.quality_options?.[0]?.value || "basic",
       duration: nextDurations[0] || draft.duration || 5,
       resolution: nextResolutions[0] || draft.resolution || "720p",
@@ -169,6 +202,8 @@ function GenerationScreen({
       seed: null,
       audioIds: [],
       characterIds: [],
+      referenceUrls: [],
+      videoUrl: "",
       videoStart: 0,
       videoEnd: null,
     });
@@ -176,6 +211,17 @@ function GenerationScreen({
 
   const removeReference = (url: string) => {
     onChange({ referenceUrls: draft.referenceUrls.filter((item) => item !== url) });
+  };
+
+  const changeMode = (mode: string) => {
+    const patch: Partial<GenerationDraft> = { mode };
+    if (mode !== "image" && kind !== "motion") patch.referenceUrls = [];
+    if (mode !== "video" && kind !== "motion") {
+      patch.videoUrl = "";
+      patch.videoStart = 0;
+      patch.videoEnd = null;
+    }
+    onChange(patch);
   };
 
   return (
@@ -203,9 +249,7 @@ function GenerationScreen({
         ) : null}
 
         <Card className="apix-generation-card min-w-0 overflow-hidden">
-          <CardHeader className="apix-generation-card-header pb-2">
-            <CardTitle>Модель и идея</CardTitle>
-          </CardHeader>
+          <CardHeader className="apix-generation-card-header pb-2"><CardTitle>Модель и идея</CardTitle></CardHeader>
           <CardContent className="apix-generation-card-content grid min-w-0 gap-2.5">
             <label className="grid min-w-0 gap-1 text-xs font-medium">
               Модель
@@ -219,7 +263,7 @@ function GenerationScreen({
             {modes.length > 1 || kind !== "image" ? (
               <LabeledChips label="Режим">
                 {modes.map((mode) => (
-                  <button key={mode} type="button" className={cn(chipClass(draft.mode === mode), "shrink-0")} onClick={() => onChange({ mode })}>
+                  <button key={mode} type="button" className={cn(chipClass(draft.mode === mode), "shrink-0")} onClick={() => changeMode(mode)}>
                     {modeLabel(mode)}
                   </button>
                 ))}
@@ -241,7 +285,7 @@ function GenerationScreen({
               <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
                 <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold">Референсы · до {maxRefs}</p>
+                    <p className="text-xs font-semibold">{kind === "motion" ? "Фото персонажа" : `Референсы · до ${maxRefs}`}</p>
                     <p className="text-[10px] text-muted-foreground">Загрузи фото с устройства. Ссылки вставлять не нужно.</p>
                   </div>
                   <label className={cn(chipClass(Boolean(remainingRefs) && !referenceUploading), "inline-flex shrink-0 cursor-pointer items-center gap-1.5") }>
@@ -250,7 +294,7 @@ function GenerationScreen({
                     <input
                       type="file"
                       accept="image/*"
-                      multiple
+                      multiple={maxRefs > 1}
                       className="sr-only"
                       disabled={!remainingRefs || referenceUploading}
                       onChange={(event) => {
@@ -282,7 +326,7 @@ function GenerationScreen({
                     className="min-h-14 font-mono text-base sm:text-xs"
                     value={draft.referenceUrls.join("\n")}
                     placeholder="Опционально: HTTPS-ссылки, по одной в строке"
-                    onChange={(event) => onChange({ referenceUrls: splitUrls(event.target.value) })}
+                    onChange={(event) => onChange({ referenceUrls: splitUrls(event.target.value).slice(0, maxRefs) })}
                   />
                 </details>
               </div>
@@ -293,7 +337,7 @@ function GenerationScreen({
                 <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold">{kind === "motion" ? "Видео движения" : "Видео-референс"}</p>
-                    <p className="text-[10px] text-muted-foreground">Загрузи ролик с устройства, если модель требует видео.</p>
+                    <p className="text-[10px] text-muted-foreground">{kind === "motion" ? "Движение из ролика будет перенесено на персонажа." : "Загрузи ролик, когда выбран режим Видео."}</p>
                   </div>
                   <label className={cn(chipClass(!videoUploading), "inline-flex shrink-0 cursor-pointer items-center gap-1.5") }>
                     {videoUploading ? <LoaderCircle className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
@@ -317,14 +361,14 @@ function GenerationScreen({
                     <div className="flex min-w-0 items-center gap-1 rounded-lg bg-background/70 px-2 py-1 text-[10px]">
                       <Film className="size-3.5 shrink-0 text-primary" />
                       <span className="min-w-0 flex-1 truncate">{shortUrlLabel(draft.videoUrl)}</span>
-                      <button type="button" className="apix-focus-ring grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => onChange({ videoUrl: "" })} aria-label="Убрать видео">
+                      <button type="button" className="apix-focus-ring grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => onChange({ videoUrl: "", videoStart: 0, videoEnd: null })} aria-label="Убрать видео">
                         <X className="size-3.5" />
                       </button>
                     </div>
                     {selectedModel?.supports_video_input ? (
                       <div className="grid grid-cols-2 gap-2">
                         <label className="grid gap-1 text-[10px] text-muted-foreground">Старт, сек<Input type="number" min={0} value={draft.videoStart} onChange={(event) => onChange({ videoStart: Math.max(0, Number(event.target.value) || 0) })} /></label>
-                        <label className="grid gap-1 text-[10px] text-muted-foreground">Конец, сек<Input type="number" min={0} value={draft.videoEnd ?? ""} placeholder="auto" onChange={(event) => onChange({ videoEnd: event.target.value ? Math.max(0, Number(event.target.value) || 0) : null })} /></label>
+                        <label className="grid gap-1 text-[10px] text-muted-foreground">Конец, сек<Input type="number" min={0} value={draft.videoEnd ?? ""} placeholder="auto" aria-invalid={invalidTrim} onChange={(event) => onChange({ videoEnd: event.target.value ? Math.max(0, Number(event.target.value) || 0) : null })} /></label>
                       </div>
                     ) : null}
                   </div>
@@ -332,12 +376,7 @@ function GenerationScreen({
 
                 <details className="apix-help border-0">
                   <summary>Вставить ссылку вручную</summary>
-                  <Input
-                    value={draft.videoUrl}
-                    placeholder="Опционально: https://…/motion.mp4"
-                    inputMode="url"
-                    onChange={(event) => onChange({ videoUrl: event.target.value.trim() })}
-                  />
+                  <Input value={draft.videoUrl} placeholder="Опционально: https://…/motion.mp4" inputMode="url" onChange={(event) => onChange({ videoUrl: event.target.value.trim() })} />
                 </details>
               </div>
             ) : null}
@@ -396,7 +435,7 @@ function GenerationScreen({
                 {modeOptions.length ? (
                   <LabeledChips label="Вариант модели">
                     {modeOptions.map((mode) => (
-                      <button key={mode} type="button" className={cn(chipClass(draft.grokMode === mode), "shrink-0")} onClick={() => onChange({ grokMode: mode })}>{mode}</button>
+                      <button key={mode} type="button" className={cn(chipClass(draft.grokMode === mode), "shrink-0")} onClick={() => onChange({ grokMode: mode })}>{modeOptionLabel(mode)}</button>
                     ))}
                   </LabeledChips>
                 ) : null}
@@ -404,13 +443,13 @@ function GenerationScreen({
                 {selectedModel?.has_seed ? (
                   <label className="grid min-w-0 gap-1 text-xs font-medium">
                     Seed
-                    <Input type="number" value={draft.seed ?? ""} placeholder="auto" onChange={(event) => onChange({ seed: event.target.value ? Number(event.target.value) : null })} />
+                    <Input type="number" min={0} max={GEMINI_MAX_SEED} step={1} value={draft.seed ?? ""} placeholder="auto" aria-invalid={invalidSeed} onChange={(event) => onChange({ seed: event.target.value ? Number(event.target.value) : null })} />
                   </label>
                 ) : null}
 
                 {maxAudioIds > 0 ? (
                   <label className="grid min-w-0 gap-1 text-xs font-medium">
-                    Audio IDs · до {maxAudioIds}
+                    Audio ID · до {maxAudioIds}
                     <Textarea className="min-h-14 font-mono text-base sm:text-xs" value={draft.audioIds.join("\n")} placeholder="по одному ID в строке" onChange={(event) => onChange({ audioIds: splitUrls(event.target.value).slice(0, maxAudioIds) })} />
                   </label>
                 ) : null}
@@ -419,6 +458,7 @@ function GenerationScreen({
                   <label className="grid min-w-0 gap-1 text-xs font-medium">
                     Character IDs · до {maxCharacterIds}
                     <Textarea className="min-h-14 font-mono text-base sm:text-xs" value={draft.characterIds.join("\n")} placeholder="по одному ID в строке" onChange={(event) => onChange({ characterIds: splitUrls(event.target.value).slice(0, maxCharacterIds) })} />
+                    {selectedModel?.key === GEMINI_OMNI_MODEL ? <span className="text-[10px] text-muted-foreground">Media slots: {geminiMediaSlots}/{GEMINI_MAX_MEDIA_SLOTS}. Видео занимает 2, Character ID — 1.</span> : null}
                   </label>
                 ) : null}
               </>
@@ -440,6 +480,7 @@ function GenerationScreen({
               <div>
                 <p className="text-[10px] text-muted-foreground">Стоимость</p>
                 <p className="text-lg font-bold leading-none">{formatCredits(estimate)} кр.</p>
+                {selectedModel?.is_per_second ? <p className="mt-1 text-[10px] text-muted-foreground">{formatCredits(selectedModel.credits_per_sec ?? selectedModel.credits)} кр./сек</p> : null}
                 {taskCount > 1 ? <p className="mt-1 text-[10px] text-muted-foreground">{taskCount} задачи подряд</p> : null}
               </div>
               <Button className="apix-submit-button w-full min-[430px]:w-auto min-[430px]:min-w-[56%]" disabled={disabled} onClick={onSubmit}>
@@ -448,11 +489,16 @@ function GenerationScreen({
               </Button>
             </div>
 
-            <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5" aria-live="polite">
               {missingPrompt ? <ValidationError>Нужен промпт</ValidationError> : null}
-              {missingReference ? <ValidationError>Нужен референс</ValidationError> : null}
+              {missingReference ? <ValidationError>{kind === "motion" ? "Нужно фото персонажа" : "Нужен референс"}</ValidationError> : null}
               {tooManyRefs ? <ValidationError>Лишние референсы</ValidationError> : null}
-              {missingMotionVideo ? <ValidationError>Нужно видео</ValidationError> : null}
+              {missingVideo ? <ValidationError>{kind === "motion" ? "Нужно видео движения" : "Нужно исходное видео"}</ValidationError> : null}
+              {invalidTrim ? <ValidationError>Фрагмент видео: 0–10 сек, конец позже начала</ValidationError> : null}
+              {invalidSeed ? <ValidationError>Seed: целое 0–2147483647</ValidationError> : null}
+              {mediaQuotaExceeded ? <ValidationError>Превышена квота Gemini: {geminiMediaSlots}/{GEMINI_MAX_MEDIA_SLOTS}</ValidationError> : null}
+              {tooManyAudioIds ? <ValidationError>Слишком много Audio ID</ValidationError> : null}
+              {tooManyCharacterIds ? <ValidationError>Слишком много Character ID</ValidationError> : null}
               {mediaUploading ? <ValidationError>Дождись загрузки файла</ValidationError> : null}
               {insufficientCredits ? <ValidationError>Мало кредитов</ValidationError> : null}
               {!availableModels.length ? <ValidationError>Нет моделей</ValidationError> : null}

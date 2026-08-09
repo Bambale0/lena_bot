@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -14,18 +14,64 @@ interface SheetProps {
   onOpenChange: (open: boolean) => void;
 }
 
+const FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
 function Sheet({ open, title, description, children, footer, className, onOpenChange }: SheetProps) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+
   useEffect(() => {
     if (!open) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onOpenChange(false);
-    };
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+
+    const focusFirst = () => {
+      const target = closeRef.current || dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE) || dialogRef.current;
+      target?.focus?.();
+    };
+    window.requestAnimationFrame(focusFirst);
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onOpenChange(false);
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((node) => {
+        const style = window.getComputedStyle(node);
+        return style.display !== "none" && style.visibility !== "hidden";
+      });
+      if (!focusable.length) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialogRef.current.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
     window.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
+      previousFocus?.focus?.();
     };
   }, [open, onOpenChange]);
 
@@ -40,9 +86,12 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
         onClick={() => onOpenChange(false)}
       />
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="apix-sheet-title"
+        aria-describedby={description ? "apix-sheet-description" : undefined}
+        tabIndex={-1}
         className={cn(
           "apix-safe-sheet relative z-10 flex max-h-[calc(100dvh-env(safe-area-inset-top)-4px)] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-border bg-popover shadow-2xl sm:max-h-[92dvh] sm:rounded-2xl",
           className,
@@ -54,9 +103,9 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
             <h2 id="apix-sheet-title" className="truncate text-base font-semibold sm:text-lg">
               {title}
             </h2>
-            {description ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{description}</p> : null}
+            {description ? <p id="apix-sheet-description" className="mt-0.5 truncate text-xs text-muted-foreground">{description}</p> : null}
           </div>
-          <Button variant="ghost" size="icon" className="size-9 min-h-9" aria-label="Закрыть" onClick={() => onOpenChange(false)}>
+          <Button ref={closeRef} variant="ghost" size="icon" className="size-9 min-h-9" aria-label="Закрыть" onClick={() => onOpenChange(false)}>
             <X />
           </Button>
         </header>

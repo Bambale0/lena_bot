@@ -168,6 +168,7 @@ def test_seedance25_model_picker_is_public_and_enhancer_is_automatic_multimodal(
     frontend = Path("webapp/src/lib/admin-model-visibility.ts").read_text(encoding="utf-8")
     enhancer = Path("webapp/src/lib/seedance25-miniapp-enhancer.ts").read_text(encoding="utf-8")
     main = Path("webapp/src/main.tsx").read_text(encoding="utf-8")
+    loader = Path("webapp/src/lib/model-enhancer-loader.ts").read_text(encoding="utf-8")
 
     assert "display: none" not in frontend
     assert "data-apix-admin" not in frontend
@@ -181,4 +182,6 @@ def test_seedance25_model_picker_is_public_and_enhancer_is_automatic_multimodal(
     assert 'token("scenario"' not in enhancer
     assert 'data-seedance25="scenario"' not in enhancer
     assert "Режим" in enhancer and 'mode.style.display = "none"' in enhancer
-    assert "installSeedance25MiniappEnhancer()" in main
+    assert "installModelEnhancerLoader()" in main
+    assert 'import("@/lib/seedance25-miniapp-enhancer")' in loader
+    assert "installSeedance25MiniappEnhancer()" in loader
