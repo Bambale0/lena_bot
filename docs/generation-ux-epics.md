@@ -62,10 +62,41 @@ Status: implemented and closed.
 - Mini App locked/error state continues to avoid invented balances/tasks/demo state;
 - regression coverage added for BackButton wiring, dialog focus behavior, human status labels and controlled locked state.
 
+## #82 — P1 Interaction performance / button latency
+
+Status: implemented and closed.
+
+Root causes found in the canonical Mini App:
+
+- `visualViewport.scroll` caused AppShell viewport state work while the user scrolled;
+- BackButton synchronization observed body-wide DOM/class mutations and used computed-style reads;
+- H3, Seedance and Suno source-audio enhancer code was eagerly installed for every session, including broad MutationObservers and Seedance's periodic DOM scan;
+- mobile glass surfaces used backdrop blur and relatively expensive shadow/filter effects during interaction.
+
+Changes:
+
+- navigation uses an optimistic local selected state and React `startTransition` for the heavier screen update;
+- Telegram haptics are deferred outside the synchronous click task;
+- viewport state is updated only when dimensions/classification actually change and no longer listens to visual-viewport scroll;
+- BackButton synchronization is rAF-throttled and observes only nav aria state plus actual dialog additions/removals;
+- advanced H3, Seedance and Suno source-audio enhancers are code-split and lazy-loaded when their model/surface is entered;
+- mobile/coarse-pointer performance CSS disables backdrop blur, reduces layered shadows and shortens feed-card animation;
+- the shared button component uses short color-only transitions rather than a broad transition;
+- static regression coverage guards these interaction-performance decisions.
+
+Verification on the performance head:
+
+- APIX CI/CD: backend-quality passed;
+- Mini App TypeScript/Vite production build passed;
+- Playwright Mini App smoke: 24/24 passed;
+- Provider Contract Compliance passed;
+- main Mini App JS decreased from about 436.44 kB / 128.45 kB gzip to 417.60 kB / 123.42 kB gzip, while provider-specific enhancer code moved into lazy chunks.
+
 ## Guardrails
 
 - No backend generation rewrite.
 - No new independent Studio implementation.
 - Progressive disclosure remains the default UX.
 - Rare model-specific controls appear only when capability metadata requires them.
+- Performance changes preserve model capabilities rather than deleting advanced features.
 - `main` remains untouched until the branch is reviewed and merged.
