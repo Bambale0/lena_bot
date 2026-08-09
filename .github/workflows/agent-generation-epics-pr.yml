@@ -1,0 +1,52 @@
+name: Apply generation UX epics on PR
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.head_ref == 'agent/generation-ux-parity' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/generation-ux-parity
+          fetch-depth: 0
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Epic 77
+        run: |
+          python tools/apply_generation_epics.py 77
+          git add artflow/api/miniapp_routes.py artflow/webapp/src/features/generation-screen.tsx artflow/tests/test_generation_ux_parity_contract.py
+          git commit -m "feat: complete advanced video parity (#77)"
+      - name: Epic 78
+        run: |
+          python tools/apply_generation_epics.py 78
+          git add -A artflow/docs docs artflow/webapp/src artflow/webapp/tests artflow/tests/test_canonical_generation_surface.py
+          git commit -m "refactor: establish canonical capability UI (#78)"
+      - name: Epic 79
+        run: |
+          python tools/apply_generation_epics.py 79
+          git add artflow/landing/js/riot-site.js artflow/tests/test_web_generation_parity.py
+          git commit -m "feat: align standalone web generation contract (#79)"
+      - name: Epic 80
+        run: |
+          python tools/apply_generation_epics.py 80
+          git add artflow/webapp/src/lib/telegram.ts artflow/webapp/src/app/App.tsx artflow/tests/test_miniapp_navigation_accessibility.py
+          git commit -m "feat: polish generation navigation (#80)"
+      - name: Validate
+        run: |
+          node --check artflow/landing/js/riot-site.js
+          cd artflow
+          pytest tests/test_generation_ux_parity_contract.py tests/test_canonical_generation_surface.py tests/test_web_generation_parity.py tests/test_miniapp_navigation_accessibility.py -q
+          cd webapp
+          npm ci
+          npm run build
+      - name: Push commits
+        run: git push origin HEAD:agent/generation-ux-parity
