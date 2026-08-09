@@ -6,6 +6,7 @@ import { installAdminModelVisibility } from "@/lib/admin-model-visibility";
 import { installMiniMaxH3MiniappEnhancer } from "@/lib/minimax-h3-miniapp-enhancer";
 import { installSeedance25MiniappEnhancer } from "@/lib/seedance25-miniapp-enhancer";
 import { installSunoSourceAudioEnhancer } from "@/lib/suno-source-audio-enhancer";
+import { installTelegramNavigation } from "@/lib/telegram-navigation";
 import "@/styles/globals.css";
 import "@/styles/color-schemes.css";
 import "@/styles/responsive.css";
@@ -27,4 +28,5 @@ if (legacy) {
       <App />
     </StrictMode>,
   );
+  installTelegramNavigation();
 }
