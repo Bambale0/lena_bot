@@ -1,0 +1,284 @@
+name: Apply generation UX epics
+
+on:
+  push:
+    branches:
+      - agent/generation-ux-parity
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/generation-ux-parity
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Epic 77 - advanced video parity
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          backend = Path('artflow/api/miniapp_routes.py')
+          text = backend.read_text()
+          replacements = {
+              'all_refs = _normalize_public_urls(image_url, *(reference_urls or [])) if normalized_mode == "image" else []':
+              'all_refs = _normalize_public_urls(image_url, *(reference_urls or [])) if normalized_mode in {"image", "motion"} else []',
+              'elif normalized_mode == "image":\n        raise HTTPException(status_code=422, detail="Selected mode requires image_url")':
+              'elif normalized_mode in {"image", "motion"}:\n        raise HTTPException(status_code=422, detail="Selected mode requires image_url")',
+              'if "video" not in supported_modes:\n            raise HTTPException(status_code=422, detail="Selected model does not support video input")':
+              'if "video" not in supported_modes and "motion" not in supported_modes:\n            raise HTTPException(status_code=422, detail="Selected model does not support video input")',
+              'if normalized_mode == "video" and not normalized_video_url:\n        raise HTTPException(status_code=422, detail="Selected mode requires video_url")':
+              'if normalized_mode in {"video", "motion"} and not normalized_video_url:\n        raise HTTPException(status_code=422, detail="Selected mode requires video_url")',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'missing backend patch anchor: {old[:90]}')
+              text = text.replace(old, new, 1)
+          backend.write_text(text)
+
+          screen = Path('artflow/webapp/src/features/generation-screen.tsx')
+          text = screen.read_text()
+          old = '''  const refsRequired = Boolean(selectedModel && !modelSupports(selectedModel, "text") && modelSupports(selectedModel, "image"));
+  const maxRefs = Math.max(1, Number(selectedModel?.max_refs || 1));
+  const tooManyRefs = draft.referenceUrls.length > maxRefs;
+  const missingReference = refsRequired && draft.referenceUrls.length === 0;
+  const videoModeNeedsUpload = draft.mode === "video" || (kind === "motion" && draft.mode !== "text");
+  const missingMotionVideo = videoModeNeedsUpload && kind === "motion" && !draft.videoUrl;
+  const missingPrompt = !draft.prompt.trim() && !draft.promptId;
+  const insufficientCredits = estimate > Number(user.credits || 0);
+  const mediaUploading = referenceUploading || videoUploading;
+  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingMotionVideo || tooManyRefs || insufficientCredits;
+  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion";
+  const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input);
+  const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);
+  const maxAudioIds = Number(selectedModel?.max_audio_ids || 0);
+  const maxCharacterIds = Number(selectedModel?.max_character_ids || 0);'''
+          new = '''  const refsRequired = kind === "motion" || Boolean(selectedModel && !modelSupports(selectedModel, "text") && modelSupports(selectedModel, "image"));
+  const maxRefs = Math.max(1, Number(selectedModel?.max_refs || 1));
+  const tooManyRefs = draft.referenceUrls.length > maxRefs;
+  const missingReference = refsRequired && draft.referenceUrls.length === 0;
+  const missingVideo = (draft.mode === "video" || kind === "motion") && !draft.videoUrl;
+  const missingPrompt = !draft.prompt.trim() && !draft.promptId;
+  const insufficientCredits = estimate > Number(user.credits || 0);
+  const mediaUploading = referenceUploading || videoUploading;
+  const maxAudioIds = Number(selectedModel?.max_audio_ids || 0);
+  const maxCharacterIds = Number(selectedModel?.max_character_ids || 0);
+  const invalidSeed = Boolean(selectedModel?.has_seed && draft.seed != null && (!Number.isInteger(draft.seed) || draft.seed < 0 || draft.seed > 2_147_483_647));
+  const invalidTrim = Boolean(draft.videoUrl && draft.videoEnd != null && (draft.videoEnd <= draft.videoStart || draft.videoEnd - draft.videoStart > 10));
+  const geminiMediaSlots = selectedModel?.key === "gemini-omni-video"
+    ? (draft.mode === "image" ? draft.referenceUrls.length : 0) + (draft.videoUrl ? 2 : 0) + draft.characterIds.length
+    : 0;
+  const mediaQuotaExceeded = selectedModel?.key === "gemini-omni-video" && geminiMediaSlots > 7;
+  const tooManyAudioIds = maxAudioIds >= 0 && draft.audioIds.length > maxAudioIds;
+  const tooManyCharacterIds = maxCharacterIds >= 0 && draft.characterIds.length > maxCharacterIds;
+  const advancedInvalid = invalidSeed || invalidTrim || mediaQuotaExceeded || tooManyAudioIds || tooManyCharacterIds;
+  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid;
+  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion";
+  const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input);
+  const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);'''
+          if old not in text:
+              raise SystemExit('missing GenerationScreen validation anchor')
+          text = text.replace(old, new, 1)
+
+          seed_old = '<Input type="number" value={draft.seed ?? ""} placeholder="auto" onChange={(event) => onChange({ seed: event.target.value ? Number(event.target.value) : null })} />'
+          seed_new = '<Input type="number" min={0} max={2147483647} step={1} value={draft.seed ?? ""} placeholder="auto" aria-invalid={invalidSeed} onChange={(event) => onChange({ seed: event.target.value ? Number(event.target.value) : null })} />'
+          if seed_old not in text:
+              raise SystemExit('missing seed input anchor')
+          text = text.replace(seed_old, seed_new, 1)
+          screen.write_text(text)
+
+          test = Path('artflow/tests/test_generation_ux_parity_contract.py')
+          test.write_text('''from pathlib import Path\n\nROOT = Path(__file__).resolve().parents[1]\n\ndef test_motion_normalizer_keeps_both_inputs():\n    src = (ROOT / "api/miniapp_routes.py").read_text()\n    assert 'normalized_mode in {"image", "motion"}' in src\n    assert 'normalized_mode in {"video", "motion"}' in src\n\ndef test_canonical_screen_validates_advanced_video():\n    src = (ROOT / "webapp/src/features/generation-screen.tsx").read_text()\n    for token in ["invalidSeed", "invalidTrim", "mediaQuotaExceeded", "missingVideo"]:\n        assert token in src\n\ndef test_app_sends_full_video_contract():\n    src = (ROOT / "webapp/src/app/App.tsx").read_text()\n    for token in ["video_url: draft.videoUrl", "video_start: draft.videoStart", "video_end: draft.videoEnd", "audio_ids: draft.audioIds", "character_ids: draft.characterIds", "seed: draft.seed", "grok_mode: draft.grokMode"]:\n        assert token in src\n''')
+          PY
+          git add artflow/api/miniapp_routes.py artflow/webapp/src/features/generation-screen.tsx artflow/tests/test_generation_ux_parity_contract.py
+          git commit -m "feat: complete advanced video parity (#77)"
+
+      - name: Epic 78 - canonical generation surface
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          release = Path('artflow/docs/apix_v4_production_release.md')
+          text = release.read_text()
+          note = '''> [!IMPORTANT]\n> **Superseded production entrypoint (2026-08).** The canonical Mini App is `webapp/index.html` → `src/main.tsx` → `src/app/App.tsx`. `src/main.jsx` is legacy-only and is loaded exclusively with `?legacy=1`. New generation capabilities must be implemented in `src/features/generation-screen.tsx` and driven by backend `ModelInfo`.\n\n'''
+          if not text.startswith('> [!IMPORTANT]'):
+              release.write_text(note + text)
+          inventory = Path('artflow/docs/current_surface_inventory.md')
+          text = inventory.read_text()
+          note2 = '''\n## 2026-08 canonical Mini App update\n\nProduction `/app` is the TypeScript/Vite surface: `webapp/index.html` → `src/main.tsx` → `src/app/App.tsx`. `src/main.jsx` is retained only behind `?legacy=1` for rollback/debugging and is not a production source of truth. Generation UI is capability-driven through `ModelInfo` in `src/features/generation-screen.tsx`.\n'''
+          if '2026-08 canonical Mini App update' not in text:
+              inventory.write_text(text + note2)
+          plan = Path('docs/generation-ux-epics.md')
+          text = plan.read_text()
+          status = '''\n## Canonical implementation decision\n\n- Production Mini App: `artflow/webapp/src/main.tsx` → `src/app/App.tsx`.\n- `src/main.jsx` is legacy-only (`?legacy=1`) and must not receive new capability work.\n- Backend `ModelInfo` is the model capability source of truth.\n- `GenerationScreen` is the shared renderer for image, video and motion surfaces.\n- Standalone Web must consume the same backend model metadata and payload fields; it may use a different layout.\n'''
+          if 'Canonical implementation decision' not in text:
+              plan.write_text(text + status)
+          for path in [Path('artflow/webapp/src/advancedVideoControls.jsx'), Path('artflow/webapp/src/generationCapabilities.js'), Path('artflow/webapp/tests/generationCapabilities.test.mjs')]:
+              if path.exists(): path.unlink()
+          test = Path('artflow/tests/test_canonical_generation_surface.py')
+          test.write_text('''from pathlib import Path\n\nROOT = Path(__file__).resolve().parents[1]\n\ndef test_production_entrypoint_is_typescript_app():\n    index = (ROOT / "webapp/index.html").read_text()\n    main = (ROOT / "webapp/src/main.tsx").read_text()\n    assert "/src/main.tsx" in index\n    assert 'from "@/app/App"' in main\n    assert "legacy" in main\n\ndef test_generation_screen_is_modelinfo_driven():\n    src = (ROOT / "webapp/src/features/generation-screen.tsx").read_text()\n    for token in ["aspect_ratios", "quality_options", "durations", "resolutions", "max_refs", "max_audio_ids", "max_character_ids", "has_seed", "video_input_prices", "price_table"]:\n        assert token in src\n''')
+          PY
+          git add -A artflow/docs docs artflow/webapp/src artflow/webapp/tests artflow/tests/test_canonical_generation_surface.py
+          git commit -m "refactor: establish canonical capability UI (#78)"
+
+      - name: Epic 79 - standalone web parity
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('artflow/landing/js/riot-site.js')
+          text = p.read_text()
+          old_music = '''  if (mode === "music") {
+    return {
+      prompt,
+      instrumental: data.get("instrumental") === "1" || data.get("instrumental") === "on",
+    };
+  }'''
+          new_music = '''  if (mode === "music") {
+    return {
+      prompt,
+      instrumental: data.get("instrumental") === "1" || data.get("instrumental") === "on",
+      model: model || undefined,
+      voice_record_id: data.get("voice_record_id") ? Number(data.get("voice_record_id")) : undefined,
+      title: String(data.get("title") || "").trim() || undefined,
+      style: String(data.get("style") || "").trim() || undefined,
+    };
+  }'''
+          if old_music not in text: raise SystemExit('music body anchor missing')
+          text = text.replace(old_music, new_music, 1)
+          old_video = '''    return {
+      model,
+      prompt,
+      mode: selectedMode,
+      duration: Number(data.get("duration") || 5),
+      aspect_ratio: String(data.get("aspect_ratio") || "") || null,
+      resolution: String(data.get("resolution") || "") || null,
+      image_url: referenceUrl && selectedMode === "image" ? referenceUrl : null,
+      video_url: String(data.get("video_url") || "") || null,
+      reference_urls: [],
+    };'''
+          new_video = '''    const refs = Array.from(new Set([referenceUrl, ...String(data.get("reference_urls") || "").split(/[\\n,]+/)].map((value) => String(value || "").trim()).filter(Boolean)));
+    const audioIds = String(data.get("audio_ids") || "").split(/[\\n,]+/).map((value) => value.trim()).filter(Boolean);
+    const characterIds = String(data.get("character_ids") || "").split(/[\\n,]+/).map((value) => value.trim()).filter(Boolean);
+    return {
+      model,
+      prompt,
+      mode: selectedMode,
+      duration: Number(data.get("duration") || 5),
+      aspect_ratio: String(data.get("aspect_ratio") || "") || null,
+      resolution: String(data.get("resolution") || "") || null,
+      image_url: refs[0] && (selectedMode === "image" || selectedMode === "motion") ? refs[0] : null,
+      video_url: String(data.get("video_url") || "") || null,
+      video_start: Number(data.get("video_start") || 0),
+      video_end: data.get("video_end") ? Number(data.get("video_end")) : null,
+      audio_ids: audioIds,
+      character_ids: characterIds,
+      seed: data.get("seed") !== null && String(data.get("seed") || "").trim() ? Number(data.get("seed")) : null,
+      grok_mode: String(data.get("grok_mode") || "normal"),
+      reference_urls: refs.slice(1),
+    };'''
+          if old_video not in text: raise SystemExit('video body anchor missing')
+          text = text.replace(old_video, new_video, 1)
+          old_image = '''  return {
+    model,
+    prompt,
+    aspect_ratio: String(data.get("aspect_ratio") || "") || null,
+    quality: String(data.get("quality") || "basic"),
+    count: Number(data.get("count") || 1),
+    reference_url: referenceUrl || null,
+    reference_urls: [],
+  };'''
+          new_image = '''  const refs = Array.from(new Set([referenceUrl, ...String(data.get("reference_urls") || "").split(/[\\n,]+/)].map((value) => String(value || "").trim()).filter(Boolean)));
+  return {
+    model,
+    prompt,
+    aspect_ratio: String(data.get("aspect_ratio") || "") || null,
+    quality: String(data.get("quality") || "basic"),
+    count: Number(data.get("count") || 1),
+    reference_url: refs[0] || null,
+    reference_urls: refs.slice(1),
+  };'''
+          if old_image not in text: raise SystemExit('image body anchor missing')
+          text = text.replace(old_image, new_image, 1)
+          ref_old = 'const reference = `<label><span>${ru() ? "Ссылка на пример" : "Example URL"}</span><input name="reference" placeholder="https://..."></label><label class="file-drop"><span>${icon("upload")}${ru() ? "Загрузить пример" : "Upload example"}</span><input name="reference_file" type="file" accept="image/png,image/jpeg,image/webp"></label>`;'
+          ref_new = 'const reference = `<label><span>${ru() ? "Ссылка на пример" : "Example URL"}</span><input name="reference" placeholder="https://..."></label>${Number(model.max_refs || 1) > 1 ? `<label><span>${ru() ? "Доп. референсы" : "More references"}</span><textarea name="reference_urls" placeholder="https://... · по одному в строке"></textarea></label>` : ""}<label class="file-drop"><span>${icon("upload")}${ru() ? "Загрузить пример" : "Upload example"}</span><input name="reference_file" type="file" accept="image/png,image/jpeg,image/webp"></label>`;'
+          if ref_old not in text: raise SystemExit('reference controls anchor missing')
+          text = text.replace(ref_old, ref_new, 1)
+          p.write_text(text)
+          test = Path('artflow/tests/test_web_generation_parity.py')
+          test.write_text('''from pathlib import Path\n\nROOT = Path(__file__).resolve().parents[1]\n\ndef test_web_payload_supports_backend_generation_contract():\n    src = (ROOT / "landing/js/riot-site.js").read_text()\n    for token in ["reference_urls", "video_start", "video_end", "audio_ids", "character_ids", "seed", "grok_mode", "voice_record_id"]:\n        assert token in src\n''')
+          PY
+          git add artflow/landing/js/riot-site.js artflow/tests/test_web_generation_parity.py
+          git commit -m "feat: align standalone web generation contract (#79)"
+
+      - name: Epic 80 - navigation and accessibility
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          telegram = Path('artflow/webapp/src/lib/telegram.ts')
+          text = telegram.read_text()
+          anchor = 'export function openExternalUrl(value: string): void {'
+          helper = '''export function syncTelegramBackButton(visible: boolean, onClick: () => void): () => void {
+  const backButton = webApp()?.BackButton;
+  if (!backButton) return () => undefined;
+  if (visible) {
+    backButton.show?.();
+    backButton.onClick?.(onClick);
+  } else {
+    backButton.hide?.();
+  }
+  return () => backButton.offClick?.(onClick);
+}
+
+'''
+          if 'syncTelegramBackButton' not in text:
+              if anchor not in text: raise SystemExit('telegram helper anchor missing')
+              telegram.write_text(text.replace(anchor, helper + anchor, 1))
+          app = Path('artflow/webapp/src/app/App.tsx')
+          text = app.read_text()
+          import_anchor = '  readStartParam,\n  waitForTelegramInitData,'
+          if 'syncTelegramBackButton' not in text:
+              if import_anchor not in text: raise SystemExit('App import anchor missing')
+              text = text.replace(import_anchor, '  readStartParam,\n  syncTelegramBackButton,\n  waitForTelegramInitData,', 1)
+              effect_anchor = '''  useEffect(() => {
+    void initialize();
+  }, [initialize]);'''
+              effect = '''  useEffect(() => {
+    void initialize();
+  }, [initialize]);
+
+  useEffect(() => {
+    const shouldShowBack = taskOpen || balanceOpen || activeTab !== "feed";
+    return syncTelegramBackButton(shouldShowBack, () => {
+      if (taskOpen) { setTaskOpen(false); return; }
+      if (balanceOpen) { setBalanceOpen(false); return; }
+      setActiveTab("feed");
+    });
+  }, [activeTab, balanceOpen, taskOpen]);'''
+              if effect_anchor not in text: raise SystemExit('App effect anchor missing')
+              app.write_text(text.replace(effect_anchor, effect, 1))
+          test = Path('artflow/tests/test_miniapp_navigation_accessibility.py')
+          test.write_text('''from pathlib import Path\n\nROOT = Path(__file__).resolve().parents[1]\n\ndef test_telegram_back_button_is_wired():\n    assert "syncTelegramBackButton" in (ROOT / "webapp/src/lib/telegram.ts").read_text()\n    assert "syncTelegramBackButton" in (ROOT / "webapp/src/app/App.tsx").read_text()\n\ndef test_status_labels_are_human_readable():\n    src = (ROOT / "webapp/src/lib/utils.ts").read_text()\n    for label in ["В очереди", "Создаётся", "Готово", "Ошибка"]:\n        assert label in src\n''')
+          PY
+          git add artflow/webapp/src/lib/telegram.ts artflow/webapp/src/app/App.tsx artflow/tests/test_miniapp_navigation_accessibility.py
+          git commit -m "feat: polish generation navigation (#80)"
+
+      - name: Final validation
+        run: |
+          node --check artflow/landing/js/riot-site.js
+          cd artflow
+          pytest tests/test_generation_ux_parity_contract.py tests/test_canonical_generation_surface.py tests/test_web_generation_parity.py tests/test_miniapp_navigation_accessibility.py -q
+          cd webapp
+          npm ci
+          npm run build
+
+      - name: Push implementation commits
+        run: git push origin HEAD:agent/generation-ux-parity
