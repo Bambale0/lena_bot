@@ -8,17 +8,17 @@
 
 | Surface | Runtime path | Canonical code | Status |
 |---|---|---|---|
-| Standalone Web | `/` | `landing/index.html`, `landing/js/riot-site.js`, `landing/css/riot-site.css` | Production web surface |
+| Standalone Web | `/`, `/studio.html` | `landing/*.html`, `landing/js/prototype-premium.js`, `landing/js/generation-parity.js` | Production web surface |
 | Telegram Mini App | `/app` | `webapp/index.html` → `src/main.tsx` → `src/app/App.tsx` | Production Mini App |
 | Mini App generation UI | `/app` generation tabs | `webapp/src/features/generation-screen.tsx` | Canonical capability renderer |
 | Legacy Mini App | `/app?legacy=1` | `webapp/src/main.jsx` | Rollback/debug only; no new feature work |
-| Static legacy site pages | `/account.html`, `/features.html`, `/guide.html`, `/contact.html` | `landing/*.html`, `landing/js/main.js` | Compatibility/static pages |
+| Static compatibility pages | `/account.html`, `/features.html`, `/guide.html`, `/contact.html` | `landing/*.html`, `landing/js/main.js` | Compatibility/static pages |
 
 ## Generation source of truth
 
 Backend `ModelInfo` returned by `/api/v1/models/image`, `/api/v1/models/video` and `/api/v1/models/music` is the capability source of truth for UI controls.
 
-The contract currently describes, where applicable:
+The contract describes, where applicable:
 
 - modes and media inputs;
 - aspect ratios and mode-dependent aspect availability;
@@ -30,7 +30,7 @@ The contract currently describes, where applicable:
 - Audio IDs / Character IDs / seed;
 - flat, per-second, resolution and duration price tables.
 
-A new provider capability must be added to backend metadata first. Consumer surfaces should render it from metadata rather than add independent hardcoded model forms.
+A new provider capability is added to backend metadata first. Consumer surfaces render it from metadata rather than create independent model-specific forms.
 
 ## Telegram Mini App
 
@@ -48,9 +48,18 @@ The legacy `src/main.jsx` surface is intentionally isolated behind `?legacy=1`. 
 
 ## Standalone Web
 
-Primary SPA routes remain implemented by `landing/js/riot-site.js`, including home, studio, prompts, feed, works, billing and profile.
+The current public website and Studio are the premium HTML surface under `landing/`:
 
-Standalone Web uses `/api/web/*` for web-authenticated adapters and compatible generation routes. Web generation must preserve the same model capability and payload semantics as the Mini App even when desktop layout differs.
+```text
+landing/index.html
+landing/studio.html
+landing/js/prototype-premium.js
+landing/js/generation-parity.js
+```
+
+`prototype-premium.js` owns the existing application shell, auth, model normalization, generation queue, realtime lifecycle, result actions and core Studio composer. `generation-parity.js` extends that existing composer with capability-dependent advanced video and music controls; it does not create a second Studio.
+
+Standalone Web uses `/api/web/*` for web-authenticated adapters. Web generation preserves the same backend payload semantics as the Mini App while keeping a desktop-oriented layout.
 
 ## Generation API
 
@@ -87,7 +96,8 @@ npm ci
 npm run build
 
 cd ..
-node --check landing/js/riot-site.js
+node --check landing/js/prototype-premium.js
+node --check landing/js/generation-parity.js
 ```
 
 Additional contract tests should assert that active backend capabilities have a representable UI/payload path on every supported surface.
