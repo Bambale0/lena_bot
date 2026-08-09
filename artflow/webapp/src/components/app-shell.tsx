@@ -125,6 +125,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
     if (tab === optimisticTab) return;
     // Paint the pressed/selected state before rendering a potentially heavy screen.
     setOptimisticTab(tab);
+    window.dispatchEvent(new CustomEvent("apix:tab-change", { detail: { tab } }));
     startTransition(() => onTabChange(tab));
     // Haptics are decorative; keep them outside the synchronous interaction task.
     window.setTimeout(() => haptic("light"), 0);
