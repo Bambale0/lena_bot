@@ -1,9 +1,11 @@
-"""Compatibility guard for stale Mini App video draft payloads.
+"""Compatibility and canonical normalization guards for Mini App video requests.
 
-The Mini App may keep a previous mode/duration/resolution in local React state
-while the user switches to another video model. Backend validation should still
-protect provider contracts, but a stale client-only value should not turn a
-valid text/video generation form into a generic 422.
+The backend remains the source of truth for model capabilities. This module is
+installed by :mod:`api.__init__` after ``api.miniapp_routes`` is imported and
+wraps its request normalizer so stale browser state cannot leak invalid values
+into provider payloads. Motion Control is handled explicitly because Kling
+motion models consume *both* an image reference and a motion video while their
+logical mode is ``motion``.
 """
 from __future__ import annotations
 
@@ -30,9 +32,8 @@ def _sanitize_mode(kwargs: dict[str, Any], supported_modes: list[str]) -> None:
     has_image_reference = bool(kwargs.get("image_url") or kwargs.get("reference_urls"))
     has_video_reference = bool(kwargs.get("video_url"))
 
-    # Common stale-state case from the Mini App: user previously selected a
-    # video-input model, then switched to Seedance/Grok/etc. The hidden draft
-    # still says mode="video", while the selected model only accepts text/image.
+    # Stale state after switching away from a video-input model must not make a
+    # perfectly valid text/image request fail with a generic 422.
     if requested_mode == "video" and "video" not in supported_modes:
         kwargs["video_url"] = None
         has_video_reference = False
@@ -67,8 +68,65 @@ def _sanitize_discrete_params(routes: Any, kwargs: dict[str, Any], caps: dict[st
         kwargs["grok_mode"] = "normal" if "normal" in mode_options else _first_or_none(mode_options)
 
 
+def _normalize_motion_request(routes: Any, kwargs: dict[str, Any], caps: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a Kling Motion Control request without losing either media input.
+
+    ``miniapp_routes._normalize_video_request`` historically retained image
+    references only for ``mode=image`` and accepted ``video_url`` only for
+    ``mode=video``. Kling Motion's provider contract is different: one image
+    drives the character and one video drives the motion. The provider adapter
+    already maps these to ``input_urls`` + ``video_urls``; this normalizer makes
+    the public request contract match that provider contract.
+    """
+
+    normalize_urls = routes._normalize_public_urls
+    image_urls = normalize_urls(kwargs.get("image_url"), *(kwargs.get("reference_urls") or []))
+    max_refs = max(1, int(caps.get("max_refs", 1) or 1))
+    if not image_urls:
+        raise routes.HTTPException(status_code=422, detail="Motion Control requires an image reference")
+    if len(image_urls) > max_refs:
+        raise routes.HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
+
+    raw_video = kwargs.get("video_url")
+    video_urls = normalize_urls(raw_video) if raw_video else []
+    if not video_urls:
+        raise routes.HTTPException(status_code=422, detail="Motion Control requires a motion video")
+
+    resolutions = list(caps.get("resolutions") or []) if caps.get("has_resolution") else []
+    resolution = _normalized_resolution(routes, str(kwargs.get("model_key") or ""), kwargs.get("resolution"))
+    if resolutions:
+        resolution = routes._normalize_choice(
+            resolution,
+            resolutions,
+            field_name="resolution",
+            default=resolutions[0],
+        )
+    else:
+        resolution = None
+
+    duration = int(kwargs.get("duration") or 5)
+    if duration <= 0:
+        duration = 5
+
+    image_value: str | list[str] = image_urls[0] if len(image_urls) == 1 else image_urls
+    return {
+        "mode": "motion",
+        "duration": duration,
+        "aspect_ratio": None,
+        "resolution": resolution,
+        "image_url": image_value,
+        "reference_video_url": video_urls[0],
+        "video_start": None,
+        "video_end": None,
+        "audio_ids": [],
+        "character_ids": [],
+        "seed": None,
+        "grok_mode": "normal",
+    }
+
+
 def install_video_request_compat(routes: Any) -> None:
-    """Patch Mini App video normalization to tolerate stale UI draft values."""
+    """Patch Mini App video normalization with capability-aware compatibility."""
     if getattr(routes, "_video_request_compat_installed", False):
         return
 
@@ -79,8 +137,11 @@ def install_video_request_compat(routes: Any) -> None:
         caps = dict(getattr(routes, "VIDEO_CAPS", {}).get(model_key, {}) or {})
         supported_modes = list(caps.get("modes") or ["text"])
 
-        # Ignore stale video input for models that cannot consume video. The
-        # user can still use true video-to-video on models with mode="video".
+        if "motion" in supported_modes and str(kwargs.get("mode") or "") == "motion":
+            return _normalize_motion_request(routes, kwargs, caps)
+
+        # Ignore stale video input for models that cannot consume video. True
+        # video-to-video remains untouched for capability-declared models.
         if "video" not in supported_modes and kwargs.get("video_url"):
             kwargs["video_url"] = None
 
