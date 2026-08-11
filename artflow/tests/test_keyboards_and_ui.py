@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from bot.handlers import image_gen
 from bot.handlers.start import _help_text
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
@@ -209,6 +210,19 @@ def test_render_active_image_session_hides_prompt_copy_for_stringified_repeat_re
     assert "📋 Показать промпт" not in texts
     assert "📤 В ленту" in texts
     assert "📚 В библиотеку" in texts
+
+
+def test_repeat_setup_keyboard_exposes_model_switch() -> None:
+    image_session = SimpleNamespace(
+        id=77,
+        model="seedream/5-pro-text-to-image",
+        mode="text",
+    )
+
+    buttons = flatten_buttons(image_gen._repeat_setup_kb(image_session))
+    callbacks = {button.callback_data for button in buttons if button.callback_data}
+
+    assert "img_repeat:model:77" in callbacks
 
 
 def test_render_active_image_session_without_result_keeps_basic_active_actions() -> None:

@@ -723,6 +723,61 @@ async def test_repeat_launch_uses_saved_user_references_not_last_result() -> Non
     assert launch.await_args.kwargs["reference_url"] != "https://example.test/generated-wrong-face.jpg"
 
 
+@pytest.mark.asyncio
+async def test_repeat_model_change_keeps_repeat_flow_and_updates_session() -> None:
+    call = SimpleNamespace(
+        data="img_model:seedream/5-pro-text-to-image",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    state.get_state = AsyncMock(return_value=image_gen.ImageGenFSM.model_select.state)
+    state.get_data = AsyncMock(return_value={
+        "repeat_model_select": True,
+        "pending_image_prompt": "same prompt",
+        "pending_action_type": image_gen.ImageGenerationAction.repeat.value,
+        "image_session_id": 7,
+    })
+    image_session = SimpleNamespace(
+        id=7,
+        model="seedream/4.5-text-to-image",
+        mode="text",
+        aspect_ratio="1:1",
+        quality="basic",
+        count=1,
+        reference_file_id=None,
+        reference_file_ids=None,
+        reference_url=None,
+        last_result_url=None,
+        last_prompt="old prompt",
+    )
+    fake_session = AsyncMock()
+
+    with (
+        patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
+        patch("bot.handlers.image_gen._sync_state_with_image_session", AsyncMock()),
+        patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()) as edit_message,
+        patch("bot.handlers.image_gen.safe_answer_callback", AsyncMock()) as answer_callback,
+    ):
+        await image_gen.cb_image_model(
+            call,
+            state,
+            fake_session,
+            SimpleNamespace(id=42),
+        )
+
+    assert image_session.model == "seedream/5-pro-text-to-image"
+    fake_session.commit.assert_awaited_once()
+    assert any(
+        kwargs.get("repeat_model_select") is False and kwargs.get("pending_action_type") == image_gen.ImageGenerationAction.repeat.value
+        for _, kwargs in state.update_data.await_args_list
+    )
+    assert "Повтор генерации" in edit_message.await_args.args[1]
+    assert "Seedream 5" in edit_message.await_args.args[1]
+    assert edit_message.await_args.kwargs["reply_markup"].inline_keyboard[1][0].callback_data == "img_repeat:model:7"
+    answer_callback.assert_awaited()
+
+
 def test_repeat_defaults_to_portrait_when_model_supports_it() -> None:
     image_session = SimpleNamespace(
         model="seedream/5-pro-text-to-image",
