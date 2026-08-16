@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import html
-import json
 import logging
+import uuid
 from typing import Any
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, Message, URLInputFile
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    Message,
+    URLInputFile,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from api.nexusapi_client import (
-    NEXUS_NANO_BANANA_PRO_ASPECT_RATIOS,
     NEXUS_NANO_BANANA_PRO_MODEL,
     NexusApiClient,
     NexusApiError,
@@ -55,6 +60,10 @@ class NexusTestFSM(StatesGroup):
     awaiting_webhook = State()
 
 
+def _new_idempotency_key() -> str:
+    return str(uuid.uuid4())
+
+
 def _initial_data() -> dict[str, Any]:
     return {
         "nexus_model": NEXUS_NANO_BANANA_PRO_MODEL,
@@ -64,6 +73,7 @@ def _initial_data() -> dict[str, Any]:
         "nexus_seed": None,
         "nexus_image_url": None,
         "nexus_webhook_url": None,
+        "nexus_idempotency_key": _new_idempotency_key(),
         "nexus_last_task_id": None,
     }
 
@@ -74,7 +84,20 @@ async def _ensure_data(state: FSMContext) -> dict[str, Any]:
         defaults = _initial_data()
         await state.update_data(**defaults)
         data = {**data, **defaults}
+    if not data.get("nexus_idempotency_key"):
+        key = _new_idempotency_key()
+        await state.update_data(nexus_idempotency_key=key)
+        data = {**data, "nexus_idempotency_key": key}
     return data
+
+
+async def _change_request(state: FSMContext, **updates: Any) -> None:
+    """Change request inputs and rotate idempotency key for the new body."""
+    await state.update_data(**updates, nexus_idempotency_key=_new_idempotency_key())
+
+
+def _clip(value: str, limit: int = 500) -> str:
+    return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
 def _mode_label(data: dict[str, Any]) -> str:
@@ -90,21 +113,17 @@ def _seed_label(data: dict[str, Any]) -> str:
     return "Авто" if value is None else str(value)
 
 
-def _webhook_label(data: dict[str, Any]) -> str:
-    return "вкл" if data.get("nexus_webhook_url") else "выкл"
-
-
 def _dashboard_text(data: dict[str, Any]) -> str:
     client = NexusApiClient()
-    prompt = str(data.get("nexus_prompt") or "").strip()
-    prompt_preview = prompt if len(prompt) <= 450 else prompt[:447] + "…"
-    image_url = str(data.get("nexus_image_url") or "").strip()
-    webhook_url = str(data.get("nexus_webhook_url") or "").strip()
+    prompt = _clip(str(data.get("nexus_prompt") or "").strip(), 450)
+    image_url = _clip(str(data.get("nexus_image_url") or "").strip())
+    webhook_url = _clip(str(data.get("nexus_webhook_url") or "").strip())
+    idem = str(data.get("nexus_idempotency_key") or "")
     key_state = "✅ настроен" if client.configured else "❌ NEXUS_API_KEY не задан"
-    return (
+    text = (
         "🧪 <b>NexusAPI · Nano Banana Pro</b>\n\n"
-        "Изолированный админский тест. Пользовательские кредиты APIX не списываются, "
-        "боевой провайдер не переключается. Оплата идёт только с баланса NexusAPI.\n\n"
+        "Изолированный админский тест. Кредиты пользователей APIX не списываются, "
+        "боевой провайдер не переключается. Платная генерация расходует только баланс NexusAPI.\n\n"
         f"🔑 API key: <b>{key_state}</b>\n"
         f"🌐 Endpoint: <code>{html.escape(client.base_url)}</code>\n"
         f"🤖 Model: <code>{NEXUS_NANO_BANANA_PRO_MODEL}</code>\n"
@@ -112,22 +131,33 @@ def _dashboard_text(data: dict[str, Any]) -> str:
         f"📐 Формат: <b>{_ratio_label(data)}</b>\n"
         f"🎲 Seed: <b>{_seed_label(data)}</b>\n"
         f"🖼 Reference: <b>{'есть' if image_url else 'нет'}</b>\n"
-        f"🔗 Webhook: <b>{_webhook_label(data)}</b>\n\n"
-        f"✍️ <b>Промпт</b>\n{html.escape(prompt_preview or '—')}\n\n"
-        "Документированные параметры NexusAPI для этой модели: prompt, aspect_ratio, seed, "
-        "image_url и webhook_url. Запуск защищён новым Idempotency-Key, результат проверяется polling'ом."
-        + (f"\n\nПоследняя задача: <code>{html.escape(str(data.get('nexus_last_task_id')))}</code>" if data.get("nexus_last_task_id") else "")
-        + (f"\nReference URL: <code>{html.escape(image_url)}</code>" if image_url else "")
-        + (f"\nWebhook URL: <code>{html.escape(webhook_url)}</code>" if webhook_url else "")
+        f"🔗 Webhook: <b>{'вкл' if webhook_url else 'выкл'}</b>\n"
+        f"🛡 Idempotency: <code>{html.escape(idem)}</code>\n\n"
+        f"✍️ <b>Промпт</b>\n{html.escape(prompt or '—')}\n\n"
+        "Доступны все поля опубликованной NexusAPI-спеки этой модели: prompt, aspect_ratio, "
+        "seed, image_url и webhook_url. Raw payload можно посмотреть до платного запуска."
     )
+    if data.get("nexus_last_task_id"):
+        text += f"\n\nПоследняя задача: <code>{html.escape(str(data['nexus_last_task_id']))}</code>"
+    if image_url:
+        text += f"\nReference URL: <code>{html.escape(image_url)}</code>"
+    if webhook_url:
+        text += f"\nWebhook URL: <code>{html.escape(webhook_url)}</code>"
+    return text
 
 
 def _dashboard_kb(data: dict[str, Any]):
     builder = InlineKeyboardBuilder()
     text_mode = data.get("nexus_mode") != "edit"
     builder.row(
-        InlineKeyboardButton(text=("✅ " if text_mode else "") + "📝 T2I", callback_data="nxt:mode:text"),
-        InlineKeyboardButton(text=("✅ " if not text_mode else "") + "🖼 Edit", callback_data="nxt:mode:edit"),
+        InlineKeyboardButton(
+            text=("✅ " if text_mode else "") + "📝 T2I",
+            callback_data="nxt:mode:text",
+        ),
+        InlineKeyboardButton(
+            text=("✅ " if not text_mode else "") + "🖼 Edit",
+            callback_data="nxt:mode:edit",
+        ),
     )
     builder.row(InlineKeyboardButton(text="✍️ Изменить промпт", callback_data="nxt:prompt"))
     builder.row(
@@ -136,19 +166,25 @@ def _dashboard_kb(data: dict[str, Any]):
     )
     builder.row(
         InlineKeyboardButton(text="🖼 Референс", callback_data="nxt:reference"),
-        InlineKeyboardButton(text=f"🔗 Webhook · {_webhook_label(data)}", callback_data="nxt:webhook"),
+        InlineKeyboardButton(
+            text=f"🔗 Webhook · {'вкл' if data.get('nexus_webhook_url') else 'выкл'}",
+            callback_data="nxt:webhook",
+        ),
     )
     builder.row(
         InlineKeyboardButton(text="📋 Raw payload", callback_data="nxt:payload"),
-        InlineKeyboardButton(text="🌐 Проверить каталог", callback_data="nxt:catalog"),
+        InlineKeyboardButton(text="🌐 Live каталог", callback_data="nxt:catalog"),
     )
     if data.get("nexus_last_task_id"):
-        builder.row(InlineKeyboardButton(text="🔎 Статус последней задачи", callback_data="nxt:status"))
+        builder.row(
+            InlineKeyboardButton(text="🔎 Статус последней задачи", callback_data="nxt:status")
+        )
     builder.row(InlineKeyboardButton(text="🚀 Запустить тест", callback_data="nxt:run"))
     builder.row(
+        InlineKeyboardButton(text="🆕 Новый request ID", callback_data="nxt:newkey"),
         InlineKeyboardButton(text="♻️ Сбросить", callback_data="nxt:reset"),
-        InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"),
     )
+    builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 
 
@@ -156,9 +192,8 @@ def _ratio_kb():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="Авто / не отправлять", callback_data="nxt:ratio:auto"))
     for key, ratio in _RATIO_CALLBACKS.items():
-        if ratio is None:
-            continue
-        builder.button(text=ratio, callback_data=f"nxt:ratio:{key}")
+        if ratio is not None:
+            builder.button(text=ratio, callback_data=f"nxt:ratio:{key}")
     builder.adjust(1, 2, 2, 1)
     builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="nxt:dashboard"))
     return builder.as_markup()
@@ -192,6 +227,12 @@ async def _show_dashboard(message: Message, state: FSMContext) -> None:
     await safe_edit_message(message, _dashboard_text(data), reply_markup=_dashboard_kb(data))
 
 
+async def _answer_dashboard(message: Message, state: FSMContext) -> None:
+    data = await _ensure_data(state)
+    await state.set_state(NexusTestFSM.dashboard)
+    await message.answer(_dashboard_text(data), reply_markup=_dashboard_kb(data))
+
+
 @router.callback_query(F.data == "menu:test")
 async def open_nexus_test(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
@@ -206,19 +247,27 @@ async def nexus_dashboard(call: CallbackQuery, state: FSMContext) -> None:
     await safe_answer_callback(call)
 
 
+@router.callback_query(F.data == "nxt:newkey")
+async def nexus_new_key(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(nexus_idempotency_key=_new_idempotency_key())
+    await _show_dashboard(call.message, state)  # type: ignore[arg-type]
+    await safe_answer_callback(call, "Новый Idempotency-Key")
+
+
 @router.callback_query(F.data.startswith("nxt:mode:"))
 async def nexus_mode(call: CallbackQuery, state: FSMContext) -> None:
     mode = str(call.data or "").rsplit(":", 1)[-1]
     if mode not in {"text", "edit"}:
         await safe_answer_callback(call, "Неизвестный режим", show_alert=True)
         return
-    await state.update_data(nexus_mode=mode)
+    await _change_request(state, nexus_mode=mode)
     if mode == "edit" and not (await state.get_data()).get("nexus_image_url"):
         await state.set_state(NexusTestFSM.awaiting_reference)
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
-            "🖼 <b>Image edit</b>\n\nПришли фото, image-документ или публичный HTTPS URL. "
-            "Файл будет сохранён в публичное хранилище APIX и передан NexusAPI как <code>image_url</code>.",
+            "🖼 <b>Image edit</b>\n\nПришли фото, image-документ или публичный HTTP(S) URL. "
+            "Telegram-файл будет сохранён в публичное хранилище APIX и передан NexusAPI "
+            "как <code>image_url</code>.",
             reply_markup=_reference_kb(),
         )
     else:
@@ -243,18 +292,16 @@ async def nexus_prompt_save(message: Message, state: FSMContext) -> None:
     if not prompt:
         await message.answer("Промпт не может быть пустым.")
         return
-    await state.update_data(nexus_prompt=prompt)
-    data = await _ensure_data(state)
-    await state.set_state(NexusTestFSM.dashboard)
-    await message.answer(_dashboard_text(data), reply_markup=_dashboard_kb(data))
+    await _change_request(state, nexus_prompt=prompt)
+    await _answer_dashboard(message, state)
 
 
 @router.callback_query(F.data == "nxt:ratio")
 async def nexus_ratio_menu(call: CallbackQuery) -> None:
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "📐 <b>Aspect ratio</b>\n\nВыбери одно из значений, опубликованных NexusAPI для Nano Banana Pro, "
-        "или «Авто», чтобы вообще не отправлять поле.",
+        "📐 <b>Aspect ratio</b>\n\nВыбери значение из опубликованной NexusAPI-спеки "
+        "или «Авто», чтобы поле вообще не отправлялось.",
         reply_markup=_ratio_kb(),
     )
     await safe_answer_callback(call)
@@ -266,7 +313,7 @@ async def nexus_ratio_set(call: CallbackQuery, state: FSMContext) -> None:
     if key not in _RATIO_CALLBACKS:
         await safe_answer_callback(call, "Неизвестный формат", show_alert=True)
         return
-    await state.update_data(nexus_aspect_ratio=_RATIO_CALLBACKS[key])
+    await _change_request(state, nexus_aspect_ratio=_RATIO_CALLBACKS[key])
     await _show_dashboard(call.message, state)  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
@@ -275,8 +322,8 @@ async def nexus_ratio_set(call: CallbackQuery, state: FSMContext) -> None:
 async def nexus_seed_menu(call: CallbackQuery) -> None:
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "🎲 <b>Seed</b>\n\nNexusAPI документирует seed как целое число без опубликованного диапазона. "
-        "Можно не отправлять его или ввести любое целое значение для проверки провайдера.",
+        "🎲 <b>Seed</b>\n\nNexusAPI публикует seed как int, но публичная модель-спека "
+        "не задаёт диапазон. Поэтому тест не придумывает собственный лимит.",
         reply_markup=_seed_kb(),
     )
     await safe_answer_callback(call)
@@ -284,7 +331,7 @@ async def nexus_seed_menu(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "nxt:seed:auto")
 async def nexus_seed_clear(call: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(nexus_seed=None)
+    await _change_request(state, nexus_seed=None)
     await _show_dashboard(call.message, state)  # type: ignore[arg-type]
     await safe_answer_callback(call, "Seed убран")
 
@@ -294,8 +341,7 @@ async def nexus_seed_begin(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(NexusTestFSM.awaiting_seed)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "🎲 <b>Введите seed</b>\n\nТолько целое число. Диапазон NexusAPI в публичной документации не указан, "
-        "поэтому клиент не придумывает собственное ограничение.",
+        "🎲 <b>Введите seed</b>\n\nТолько целое число.",
         reply_markup=_seed_kb(),
     )
     await safe_answer_callback(call)
@@ -309,10 +355,8 @@ async def nexus_seed_save(message: Message, state: FSMContext) -> None:
     except ValueError:
         await message.answer("Нужен целый seed, например <code>12345</code>.")
         return
-    await state.update_data(nexus_seed=value)
-    data = await _ensure_data(state)
-    await state.set_state(NexusTestFSM.dashboard)
-    await message.answer(_dashboard_text(data), reply_markup=_dashboard_kb(data))
+    await _change_request(state, nexus_seed=value)
+    await _answer_dashboard(message, state)
 
 
 @router.callback_query(F.data == "nxt:reference")
@@ -320,8 +364,8 @@ async def nexus_reference_begin(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(NexusTestFSM.awaiting_reference)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "🖼 <b>Reference image</b>\n\nПришли фото, image-документ или публичный HTTPS URL. "
-        "NexusAPI принимает его в поле <code>image_url</code>.",
+        "🖼 <b>Reference image</b>\n\nПришли фото, image-документ или публичный HTTP(S) URL. "
+        "NexusAPI получит его в <code>image_url</code>.",
         reply_markup=_reference_kb(),
     )
     await safe_answer_callback(call)
@@ -329,7 +373,7 @@ async def nexus_reference_begin(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "nxt:reference:clear")
 async def nexus_reference_clear(call: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(nexus_image_url=None)
+    await _change_request(state, nexus_image_url=None)
     await _show_dashboard(call.message, state)  # type: ignore[arg-type]
     await safe_answer_callback(call, "Референс убран")
 
@@ -338,10 +382,8 @@ async def nexus_reference_clear(call: CallbackQuery, state: FSMContext) -> None:
 async def nexus_reference_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     best = max(message.photo, key=lambda item: item.file_size or 0)  # type: ignore[arg-type]
     url = await mirror_telegram_file(bot, best.file_id)
-    await state.update_data(nexus_image_url=url, nexus_mode="edit")
-    data = await _ensure_data(state)
-    await state.set_state(NexusTestFSM.dashboard)
-    await message.answer(_dashboard_text(data), reply_markup=_dashboard_kb(data))
+    await _change_request(state, nexus_image_url=url, nexus_mode="edit")
+    await _answer_dashboard(message, state)
 
 
 @router.message(NexusTestFSM.awaiting_reference, F.document)
@@ -349,33 +391,29 @@ async def nexus_reference_document(message: Message, state: FSMContext, bot: Bot
     document = message.document
     mime = str(getattr(document, "mime_type", "") or "").lower() if document else ""
     if not document or not mime.startswith("image/"):
-        await message.answer("Пришли именно изображение как фото или image-документ.", reply_markup=_reference_kb())
+        await message.answer(
+            "Пришли именно изображение как фото или image-документ.",
+            reply_markup=_reference_kb(),
+        )
         return
     telegram_file = await bot.get_file(document.file_id)
     downloaded = await bot.download_file(telegram_file.file_path)
     raw = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
     url = save_public_file(raw, mime, subdir="nexusapi-test")
-    await state.update_data(nexus_image_url=url, nexus_mode="edit")
-    data = await _ensure_data(state)
-    await state.set_state(NexusTestFSM.dashboard)
-    await message.answer(_dashboard_text(data), reply_markup=_dashboard_kb(data))
+    await _change_request(state, nexus_image_url=url, nexus_mode="edit")
+    await _answer_dashboard(message, state)
 
 
 @router.message(NexusTestFSM.awaiting_reference, F.text)
 async def nexus_reference_url(message: Message, state: FSMContext) -> None:
     value = str(message.text or "").strip()
-    if not value.startswith(("https://", "http://")):
-        await message.answer("Нужен публичный http(s) URL или изображение.", reply_markup=_reference_kb())
-        return
     try:
         build_nano_banana_pro_params(prompt="test", image_url=value)
     except ValueError as exc:
         await message.answer(html.escape(str(exc)), reply_markup=_reference_kb())
         return
-    await state.update_data(nexus_image_url=value, nexus_mode="edit")
-    data = await _ensure_data(state)
-    await state.set_state(NexusTestFSM.dashboard)
-    await message.answer(_dashboard_text(data), reply_markup=_dashboard_kb(data))
+    await _change_request(state, nexus_image_url=value, nexus_mode="edit")
+    await _answer_dashboard(message, state)
 
 
 @router.callback_query(F.data == "nxt:webhook")
@@ -383,8 +421,8 @@ async def nexus_webhook_begin(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(NexusTestFSM.awaiting_webhook)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        "🔗 <b>Webhook URL</b>\n\nПоле опциональное. Пришли публичный HTTPS URL для проверки callback NexusAPI. "
-        "Даже с webhook тест продолжит polling, чтобы не зависеть от доставки callback.",
+        "🔗 <b>Webhook URL</b>\n\nПоле опциональное. Пришли контролируемый публичный HTTP(S) URL. "
+        "Даже с webhook тест продолжает polling, чтобы независимо проверить task API.",
         reply_markup=_webhook_kb(),
     )
     await safe_answer_callback(call)
@@ -392,7 +430,7 @@ async def nexus_webhook_begin(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "nxt:webhook:clear")
 async def nexus_webhook_clear(call: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(nexus_webhook_url=None)
+    await _change_request(state, nexus_webhook_url=None)
     await _show_dashboard(call.message, state)  # type: ignore[arg-type]
     await safe_answer_callback(call, "Webhook выключен")
 
@@ -405,10 +443,8 @@ async def nexus_webhook_save(message: Message, state: FSMContext) -> None:
     except ValueError as exc:
         await message.answer(html.escape(str(exc)), reply_markup=_webhook_kb())
         return
-    await state.update_data(nexus_webhook_url=value)
-    data = await _ensure_data(state)
-    await state.set_state(NexusTestFSM.dashboard)
-    await message.answer(_dashboard_text(data), reply_markup=_dashboard_kb(data))
+    await _change_request(state, nexus_webhook_url=value)
+    await _answer_dashboard(message, state)
 
 
 def _current_request(data: dict[str, Any]) -> dict[str, Any]:
@@ -431,7 +467,11 @@ async def nexus_payload(call: CallbackQuery, state: FSMContext) -> None:
     except ValueError as exc:
         await safe_answer_callback(call, str(exc), show_alert=True)
         return
-    text = "📋 <b>Фактический POST /generate</b>\n\n<pre>" + html.escape(pretty_json(payload, max_chars=3000)) + "</pre>"
+    text = (
+        "📋 <b>Фактический POST /generate</b>\n\n<pre>"
+        + html.escape(pretty_json(payload, max_chars=3000))
+        + "</pre>"
+    )
     await safe_edit_message(call.message, text, reply_markup=_dashboard_kb(data))  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
@@ -444,10 +484,12 @@ async def nexus_catalog(call: CallbackQuery, state: FSMContext) -> None:
     try:
         result = await client.get_public_models()
         entry = find_model_in_catalog(result.payload)
-        if entry is None:
-            detail = "Модель nano-banana-pro не найдена в ответе /public/models.\n\n" + pretty_json(result.payload, max_chars=2400)
-        else:
-            detail = pretty_json(entry, max_chars=2600)
+        detail = (
+            pretty_json(entry, max_chars=2600)
+            if entry is not None
+            else "Модель nano-banana-pro не найдена в ответе /public/models.\n\n"
+            + pretty_json(result.payload, max_chars=2400)
+        )
         text = (
             "🌐 <b>NexusAPI live catalog</b>\n\n"
             f"HTTP: <b>{result.status_code}</b> · {result.elapsed_ms} ms\n"
@@ -469,7 +511,11 @@ async def nexus_last_status(call: CallbackQuery, state: FSMContext) -> None:
     await safe_answer_callback(call, "Проверяю статус…")
     try:
         payload = await NexusApiClient().get_task(task_id)
-        text = "🔎 <b>NexusAPI task</b>\n\n<pre>" + html.escape(pretty_json(payload, max_chars=3000)) + "</pre>"
+        text = (
+            "🔎 <b>NexusAPI task</b>\n\n<pre>"
+            + html.escape(pretty_json(payload, max_chars=3000))
+            + "</pre>"
+        )
     except NexusApiError as exc:
         text = "❌ <b>Ошибка проверки task</b>\n\n" + html.escape(str(exc))
     await safe_edit_message(call.message, text, reply_markup=_dashboard_kb(data))  # type: ignore[arg-type]
@@ -483,7 +529,7 @@ async def _send_nexus_result(message: Message, task_payload: dict[str, Any]) -> 
                 URLInputFile(url, filename=f"nexus-nano-banana-pro-{index}.png"),
                 caption=f"✅ NexusAPI result #{index}",
             )
-        except (TelegramBadRequest, Exception) as exc:
+        except Exception as exc:
             logger.warning("Failed to send NexusAPI result URL through Telegram: %s", exc)
             await message.answer(f"✅ Result #{index}:\n{html.escape(url)}")
         sent += 1
@@ -505,12 +551,15 @@ async def _send_nexus_result(message: Message, task_payload: dict[str, Any]) -> 
 
 def _nexus_error_text(exc: Exception) -> str:
     if isinstance(exc, NexusApiTimeout):
-        return "⏱ NexusAPI не завершил задачу за тестовый таймаут. Task ID сохранён — статус можно проверить кнопкой."
+        return (
+            "⏱ NexusAPI не завершил задачу за тестовый таймаут. Task ID сохранён — "
+            "статус можно проверить кнопкой."
+        )
     if isinstance(exc, NexusApiError):
         prefix = {
             401: "🔑 Ключ NexusAPI отклонён.",
             402: "💳 На NexusAPI недостаточно средств.",
-            422: "🧩 NexusAPI отклонил параметры модели.",
+            422: "🧩 NexusAPI отклонил параметры модели или Idempotency-Key.",
             429: "🚦 NexusAPI вернул rate limit.",
         }.get(exc.status_code, "❌ Ошибка NexusAPI.")
         return f"{prefix}\n\n{html.escape(str(exc))}"
@@ -545,6 +594,7 @@ async def nexus_run(call: CallbackQuery, state: FSMContext) -> None:
             seed=params.get("seed"),
             image_url=params.get("image_url"),
             webhook_url=params.get("webhook_url"),
+            idempotency_key=str(data["nexus_idempotency_key"]),
         )
         await state.update_data(nexus_last_task_id=created.task_id)
         await status_message.edit_text(
