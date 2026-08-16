@@ -1,8 +1,12 @@
+import importlib
 from types import SimpleNamespace
 
-import api  # noqa: F401 - initialize provider adapters before repository imports
 
-from bot.ui.main_menu import render_main_menu
+def _render_main_menu(context):
+    # Provider adapters must be initialized before session_service imports db.repository.
+    importlib.import_module("api")
+    module = importlib.import_module("bot.ui.main_menu")
+    return module.render_main_menu(context)
 
 
 def _callbacks(markup):
@@ -20,7 +24,7 @@ def _labels(markup):
 
 def test_admin_button_is_visible_on_main_menu_for_admins():
     ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=True)
-    markup = render_main_menu(ctx).reply_markup
+    markup = _render_main_menu(ctx).reply_markup
 
     assert "menu:admin" in _callbacks(markup)
     assert "👑 Админ-панель" in _labels(markup)
@@ -30,7 +34,7 @@ def test_admin_button_is_visible_on_main_menu_for_admins():
 
 def test_admin_button_is_hidden_from_regular_users():
     ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
-    markup = render_main_menu(ctx).reply_markup
+    markup = _render_main_menu(ctx).reply_markup
 
     assert "menu:admin" not in _callbacks(markup)
     assert "menu:test" not in _callbacks(markup)
