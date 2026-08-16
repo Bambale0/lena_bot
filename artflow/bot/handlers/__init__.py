@@ -83,3 +83,10 @@ _video_router.include_router(_video_references.router)
 _video_router.include_router(_video_wizard.router)
 _video_router.include_router(_legacy_video_gen.router)
 _legacy_video_gen.router = _video_router
+
+# Admin-only provider evaluation routes ride under the existing admin router so
+# webhook and polling entrypoints do not need an additional top-level router.
+from . import admin as _admin
+from . import nexus_test as _nexus_test
+
+_admin.router.include_router(_nexus_test.router)
