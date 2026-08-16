@@ -14,8 +14,8 @@ import httpx
 
 NEXUS_NANO_BANANA_PRO_MODEL = "nano-banana-pro"
 NEXUS_NANO_BANANA_PRO_ASPECT_RATIOS = ("1:1", "16:9", "9:16", "4:3", "3:4")
+NEXUS_NANO_BANANA_PRO_MAX_REFS = 4
 NEXUS_TERMINAL_STATUSES = {"completed", "failed"}
-NEXUS_KNOWN_STATUSES = {"queued", "pending", "processing", *NEXUS_TERMINAL_STATUSES}
 
 
 class NexusApiError(RuntimeError):
@@ -69,6 +69,14 @@ class NexusCatalogResult:
     payload: Any
 
 
+@dataclass(frozen=True)
+class NexusSchemaResult:
+    model_name: str
+    schema_name: str
+    schema: dict[str, Any]
+    elapsed_ms: int
+
+
 def _json_or_text(response: httpx.Response) -> Any:
     try:
         return response.json()
@@ -110,13 +118,28 @@ def _validate_public_http_url(value: str | None, *, field_name: str) -> str | No
     return cleaned
 
 
+def _validate_reference_urls(values: list[str] | tuple[str, ...] | None) -> list[str]:
+    refs: list[str] = []
+    for raw in list(values or []):
+        value = _validate_public_http_url(raw, field_name="image_urls")
+        if value and value not in refs:
+            refs.append(value)
+    if len(refs) > NEXUS_NANO_BANANA_PRO_MAX_REFS:
+        raise ValueError(
+            f"Nano Banana Pro evaluation supports at most {NEXUS_NANO_BANANA_PRO_MAX_REFS} references"
+        )
+    return refs
+
+
 def build_nano_banana_pro_params(
     *,
     prompt: str,
     aspect_ratio: str | None = None,
     seed: int | None = None,
     image_url: str | None = None,
+    image_urls: list[str] | tuple[str, ...] | None = None,
     webhook_url: str | None = None,
+    extra_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     prompt_value = str(prompt or "").strip()
     if not prompt_value:
@@ -132,6 +155,11 @@ def build_nano_banana_pro_params(
         raise ValueError("seed must be an integer")
     seed_value = int(seed) if seed is not None else None
 
+    single_ref = _validate_public_http_url(image_url, field_name="image_url")
+    multi_refs = _validate_reference_urls(image_urls)
+    if single_ref and multi_refs:
+        raise ValueError("Use image_url or image_urls, not both")
+
     params: dict[str, Any] = {
         "model_name": NEXUS_NANO_BANANA_PRO_MODEL,
         "prompt": prompt_value,
@@ -140,23 +168,29 @@ def build_nano_banana_pro_params(
         params["aspect_ratio"] = ratio_value
     if seed_value is not None:
         params["seed"] = seed_value
-
-    image_value = _validate_public_http_url(image_url, field_name="image_url")
-    if image_value:
-        params["image_url"] = image_value
+    if single_ref:
+        params["image_url"] = single_ref
+    if multi_refs:
+        params["image_urls"] = multi_refs
 
     webhook_value = _validate_public_http_url(webhook_url, field_name="webhook_url")
     if webhook_value:
         params["webhook_url"] = webhook_value
 
+    overrides = dict(extra_params or {})
+    for protected in ("model_name", "prompt"):
+        overrides.pop(protected, None)
+    params.update(overrides)
     return params
 
 
-def extract_result_urls(task_payload: dict[str, Any]) -> list[str]:
-    result = task_payload.get("result")
-    if not isinstance(result, dict):
-        return []
+def _result_object(payload: dict[str, Any]) -> dict[str, Any]:
+    result = payload.get("result")
+    return result if isinstance(result, dict) else payload
 
+
+def extract_result_urls(task_payload: dict[str, Any]) -> list[str]:
+    result = _result_object(task_payload)
     candidates: list[Any] = []
     for key in ("image_url", "url"):
         candidates.append(result.get(key))
@@ -181,9 +215,7 @@ def extract_result_urls(task_payload: dict[str, Any]) -> list[str]:
 
 
 def extract_result_base64(task_payload: dict[str, Any]) -> list[bytes]:
-    result = task_payload.get("result")
-    if not isinstance(result, dict):
-        return []
+    result = _result_object(task_payload)
     candidates: list[Any] = [result.get("base64"), result.get("b64_json")]
     images = result.get("images")
     if isinstance(images, list):
@@ -207,7 +239,10 @@ def extract_result_base64(task_payload: dict[str, Any]) -> list[bytes]:
     return decoded
 
 
-def find_model_in_catalog(payload: Any, model_name: str = NEXUS_NANO_BANANA_PRO_MODEL) -> dict[str, Any] | None:
+def find_model_in_catalog(
+    payload: Any,
+    model_name: str = NEXUS_NANO_BANANA_PRO_MODEL,
+) -> dict[str, Any] | None:
     candidates: Any = payload
     if isinstance(payload, dict):
         for key in ("models", "data", "items", "results"):
@@ -225,6 +260,26 @@ def find_model_in_catalog(payload: Any, model_name: str = NEXUS_NANO_BANANA_PRO_
     return None
 
 
+def extract_openapi_model_schema(
+    openapi: Any,
+    model_name: str = NEXUS_NANO_BANANA_PRO_MODEL,
+) -> tuple[str, dict[str, Any]]:
+    if not isinstance(openapi, dict):
+        raise NexusApiError("NexusAPI OpenAPI response is not an object")
+    schemas = openapi.get("components", {}).get("schemas", {})
+    request_schema = schemas.get("GenerateRequest", {}) if isinstance(schemas, dict) else {}
+    params = request_schema.get("properties", {}).get("params", {}) if isinstance(request_schema, dict) else {}
+    mapping = params.get("discriminator", {}).get("mapping", {}) if isinstance(params, dict) else {}
+    ref = mapping.get(model_name) if isinstance(mapping, dict) else None
+    if not isinstance(ref, str) or not ref:
+        raise NexusApiError(f"NexusAPI OpenAPI has no discriminator mapping for {model_name}")
+    schema_name = ref.rsplit("/", 1)[-1]
+    schema = schemas.get(schema_name) if isinstance(schemas, dict) else None
+    if not isinstance(schema, dict):
+        raise NexusApiError(f"NexusAPI OpenAPI schema not found: {schema_name}")
+    return schema_name, schema
+
+
 class NexusApiClient:
     def __init__(
         self,
@@ -234,8 +289,12 @@ class NexusApiClient:
         timeout_seconds: float | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.api_key = str(api_key if api_key is not None else os.getenv("NEXUS_API_KEY", "")).strip()
-        self.base_url = str(base_url if base_url is not None else os.getenv("NEXUS_BASE_URL", "https://nexusapi.dev")).strip().rstrip("/")
+        self.api_key = str(
+            api_key if api_key is not None else os.getenv("NEXUS_API_KEY", "")
+        ).strip()
+        self.base_url = str(
+            base_url if base_url is not None else os.getenv("NEXUS_BASE_URL", "https://nexusapi.dev")
+        ).strip().rstrip("/")
         self.timeout_seconds = float(timeout_seconds or os.getenv("NEXUS_HTTP_TIMEOUT", "30"))
         self._client = client
 
@@ -272,31 +331,27 @@ class NexusApiClient:
             )
         return payload
 
-    async def create_nano_banana_pro(
+    async def create_params(
         self,
+        params: dict[str, Any],
         *,
-        prompt: str,
-        aspect_ratio: str | None = None,
-        seed: int | None = None,
-        image_url: str | None = None,
-        webhook_url: str | None = None,
         idempotency_key: str | None = None,
     ) -> NexusCreateResult:
-        params = build_nano_banana_pro_params(
-            prompt=prompt,
-            aspect_ratio=aspect_ratio,
-            seed=seed,
-            image_url=image_url,
-            webhook_url=webhook_url,
-        )
-        payload = {"params": params}
+        model_name = str(params.get("model_name") or "").strip()
+        prompt = str(params.get("prompt") or "").strip()
+        if not model_name or not prompt:
+            raise ValueError("params must contain model_name and prompt")
+        payload = {"params": dict(params)}
         idem = str(idempotency_key or uuid.uuid4()).strip()
         started = time.monotonic()
         try:
             response = await self._request(
                 "POST",
                 "/generate",
-                headers={**self._auth_headers(idempotency_key=idem), "Content-Type": "application/json"},
+                headers={
+                    **self._auth_headers(idempotency_key=idem),
+                    "Content-Type": "application/json",
+                },
                 json=payload,
             )
         except httpx.RequestError as exc:
@@ -304,10 +359,18 @@ class NexusApiClient:
         elapsed_ms = round((time.monotonic() - started) * 1000)
         data = self._raise_for_status(response)
         if not isinstance(data, dict):
-            raise NexusApiError("NexusAPI returned a non-object create response", status_code=response.status_code, payload=data)
+            raise NexusApiError(
+                "NexusAPI returned a non-object create response",
+                status_code=response.status_code,
+                payload=data,
+            )
         task_id = str(data.get("task_id") or data.get("taskId") or "").strip()
         if not task_id:
-            raise NexusApiError("NexusAPI create response has no task_id", status_code=response.status_code, payload=data)
+            raise NexusApiError(
+                "NexusAPI native /generate response has no task_id",
+                status_code=response.status_code,
+                payload=data,
+            )
         return NexusCreateResult(
             task_id=task_id,
             status_code=response.status_code,
@@ -316,6 +379,29 @@ class NexusApiClient:
             request_payload=payload,
             response_payload=data,
         )
+
+    async def create_nano_banana_pro(
+        self,
+        *,
+        prompt: str,
+        aspect_ratio: str | None = None,
+        seed: int | None = None,
+        image_url: str | None = None,
+        image_urls: list[str] | tuple[str, ...] | None = None,
+        webhook_url: str | None = None,
+        extra_params: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> NexusCreateResult:
+        params = build_nano_banana_pro_params(
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            seed=seed,
+            image_url=image_url,
+            image_urls=image_urls,
+            webhook_url=webhook_url,
+            extra_params=extra_params,
+        )
+        return await self.create_params(params, idempotency_key=idempotency_key)
 
     async def get_task(self, task_id: str) -> dict[str, Any]:
         task_value = str(task_id or "").strip()
@@ -331,7 +417,11 @@ class NexusApiClient:
             raise NexusApiError(f"NexusAPI network error: {exc}") from exc
         payload = self._raise_for_status(response)
         if not isinstance(payload, dict):
-            raise NexusApiError("NexusAPI returned a non-object task response", status_code=response.status_code, payload=payload)
+            raise NexusApiError(
+                "NexusAPI returned a non-object task response",
+                status_code=response.status_code,
+                payload=payload,
+            )
         return payload
 
     async def wait_for_task(
@@ -374,6 +464,24 @@ class NexusApiClient:
         elapsed_ms = round((time.monotonic() - started) * 1000)
         payload = self._raise_for_status(response)
         return NexusCatalogResult(status_code=response.status_code, elapsed_ms=elapsed_ms, payload=payload)
+
+    async def get_model_schema(
+        self,
+        model_name: str = NEXUS_NANO_BANANA_PRO_MODEL,
+    ) -> NexusSchemaResult:
+        started = time.monotonic()
+        try:
+            response = await self._request("GET", "/openapi.json", headers={"Accept": "application/json"})
+        except httpx.RequestError as exc:
+            raise NexusApiError(f"NexusAPI OpenAPI network error: {exc}") from exc
+        openapi = self._raise_for_status(response)
+        schema_name, schema = extract_openapi_model_schema(openapi, model_name)
+        return NexusSchemaResult(
+            model_name=model_name,
+            schema_name=schema_name,
+            schema=schema,
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
 
 
 def pretty_json(value: Any, *, max_chars: int = 3500) -> str:
