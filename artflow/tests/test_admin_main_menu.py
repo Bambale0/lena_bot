@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import api  # noqa: F401 - initialize provider adapters before repository imports
+
 from bot.ui.main_menu import render_main_menu
 
 
