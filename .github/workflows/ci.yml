@@ -40,14 +40,18 @@ jobs:
             api/media_gateway.py \
             api/midjourney_full_service.py \
             api/midjourney_service.py \
+            api/nexusapi_client.py \
             api/photo_prompt_service.py \
             api/provider_contract_catalog.py \
             api/provider_spec_overrides.py \
             api/suno_full_service.py \
             api/video_service.py \
+            bot/handlers/nexus_test.py \
             bot/handlers/video_gen.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
+            tests/test_admin_main_menu.py \
+            tests/test_nexusapi_client.py \
             tests/test_midjourney.py \
             tests/test_photo_prompt_service.py \
             tests/test_provider_contract_catalog.py \
@@ -61,6 +65,8 @@ jobs:
       - name: Pytest maintained PR gate
         run: |
           pytest -q \
+            tests/test_admin_main_menu.py \
+            tests/test_nexusapi_client.py \
             tests/test_apix_legacy_concept_runtime.py \
             tests/test_apix_production_trends_surface.py \
             tests/test_provider_contract_catalog.py \
