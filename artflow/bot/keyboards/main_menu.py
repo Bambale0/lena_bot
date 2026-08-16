@@ -29,6 +29,8 @@ def main_menu_kb(
         InlineKeyboardButton(text=balance_label, callback_data="menu:balance"),
         InlineKeyboardButton(text="☰ Ещё", callback_data="menu:more"),
     )
+    if is_admin:
+        builder.row(InlineKeyboardButton(text="🧪 Тест", callback_data="menu:test"))
     return builder.as_markup()
 
 
