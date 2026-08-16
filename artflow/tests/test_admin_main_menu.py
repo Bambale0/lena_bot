@@ -22,6 +22,8 @@ def test_admin_button_is_visible_on_main_menu_for_admins():
 
     assert "menu:admin" in _callbacks(markup)
     assert "👑 Админ-панель" in _labels(markup)
+    assert "menu:test" in _callbacks(markup)
+    assert "🧪 Тест" in _labels(markup)
 
 
 def test_admin_button_is_hidden_from_regular_users():
@@ -29,3 +31,5 @@ def test_admin_button_is_hidden_from_regular_users():
     markup = render_main_menu(ctx).reply_markup
 
     assert "menu:admin" not in _callbacks(markup)
+    assert "menu:test" not in _callbacks(markup)
+    assert "🧪 Тест" not in _labels(markup)
