@@ -2,9 +2,20 @@
 
 Status: evaluation only. Production routing remains unchanged.
 
-## Public provider contract used by APIX
+## Why the lab is live-schema driven
 
-Native endpoint: `POST https://nexusapi.dev/generate`
+Nexus currently exposes two overlapping descriptions of Nano Banana Pro:
+
+- the dedicated model page documents `prompt`, `aspect_ratio`, `seed`, a single `image_url` and `webhook_url`;
+- the generic API docs expose `image_urls`, and the public catalog advertises Nano Banana Pro with up to four references.
+
+Nexus's own open-source MCP example resolves this kind of drift by reading `/openapi.json`, following `GenerateRequest.properties.params.discriminator.mapping[model_name]`, and showing the live schema before a billable generation.
+
+APIX's admin lab follows the same principle: curated controls cover the published stable fields, while `Live OpenAPI` + `Raw overrides` let an admin test every field that the provider actually exposes at test time.
+
+## Native provider contract
+
+Endpoint: `POST https://nexusapi.dev/generate`
 
 Authentication:
 
@@ -14,7 +25,7 @@ Content-Type: application/json
 Idempotency-Key: <uuid-v4>
 ```
 
-Request body:
+Canonical request shape:
 
 ```json
 {
@@ -29,9 +40,7 @@ Request body:
 }
 ```
 
-Only `model_name` and `prompt` are required. Optional fields are omitted rather than filled with invented defaults.
-
-Published `aspect_ratio` values for Nano Banana Pro:
+Published dedicated-model aspect ratios:
 
 - `1:1`
 - `16:9`
@@ -39,39 +48,55 @@ Published `aspect_ratio` values for Nano Banana Pro:
 - `4:3`
 - `3:4`
 
-`seed` is published as an integer but the public model page does not state a numeric range, so the evaluation client does not invent one.
+`seed` is documented as integer without a public numeric range, so the lab does not invent one.
 
-`image_url` activates image-edit behavior. The dedicated public model schema currently documents one `image_url`, not an `image_urls` array.
+### Reference transport
 
-`webhook_url` is optional. The provider documentation recommends polling for image tasks, so APIX continues polling even when a webhook URL is supplied.
+For one reference the curated lab sends `image_url`, matching the dedicated Nano Banana page.
 
-Create response is expected to return a `task_id`. Task state is inspected with `GET /tasks/{task_id}` until a terminal `completed` or `failed` status. The evaluation UI records intermediate statuses and latency.
+For two to four references it sends `image_urls`, matching the generic Nexus API contract and the public catalog's “up to 4 ref” capability claim. This is intentionally part of provider evaluation because the public docs are not perfectly aligned.
 
-## Admin flow
+If live OpenAPI disagrees with either static description, use `Raw overrides` to send the exact live-schema form and record the provider response.
 
-The Telegram main menu contains `🧪 Тест` only when `MainMenuContext.is_admin` is true. The callback is additionally protected by the existing `IsAdmin` router filter, so hiding the button is not the authorization boundary.
+### Tasks
 
-The test console supports:
+Native `/generate` is treated as asynchronous and expected to return `202 Accepted` plus `task_id`. The lab polls `GET /tasks/{task_id}` until `completed` or `failed`, retaining the observed status history and latency. Result extraction accepts URL and base64 task-result shapes.
 
-1. `Text → Image` and `Image edit`.
+`webhook_url` is optional. Polling remains active even when a webhook is supplied so webhook delivery cannot hide a broken task-status API.
+
+### Idempotency
+
+Each logical request gets one UUID-v4 `Idempotency-Key`. Changing prompt/settings/refs/overrides rotates the key. Re-pressing Run without changing the request reuses the same key, allowing Nexus to de-duplicate accidental repeat POSTs. `Новый Request ID` intentionally rotates the key when the admin wants a new paid run with identical parameters.
+
+## Admin-only Telegram lab
+
+The main menu renders `🧪 Тест` only when `MainMenuContext.is_admin` is true. The test router is also protected with the existing `IsAdmin` filter for both messages and callbacks, so hidden UI is not the authorization boundary.
+
+The lab supports:
+
+1. Text-to-image and image-edit/reference modes.
 2. Prompt editing.
-3. Every published Nano Banana Pro aspect ratio plus `Auto`, which omits the field.
+3. All dedicated-model aspect-ratio controls plus Auto/omit.
 4. Optional integer seed.
-5. Reference image from Telegram photo, Telegram image document, or public HTTP(S) URL.
-6. Optional webhook URL.
-7. Exact raw `/generate` payload preview before spending provider balance.
-8. Live `/public/models` inspection for provider-side model metadata/pricing.
-9. Paid test launch with a fresh `Idempotency-Key`.
-10. Polling lifecycle and last-task inspection.
-11. Friendly diagnostics for 401, 402, 422, 429, network failures and timeouts.
-12. Result delivery from provider URL or base64 payload shapes.
-13. Full diagnostic summary: task ID, create latency, total latency, status history, idempotency key, request payload and final task payload.
+5. Up to four references from Telegram photos, Telegram image documents, or public HTTP(S) URLs.
+6. Automatic `image_url` vs `image_urls` reference transport for parity testing.
+7. Optional webhook URL.
+8. `Live OpenAPI`: fetch and display the exact current NanoBananaPro schema.
+9. `Live каталог`: inspect provider metadata/current pricing instead of hardcoding price.
+10. `Raw overrides`: merge arbitrary JSON fields into `params` after reading live schema; `model_name` and `prompt` remain protected.
+11. Exact final `/generate` payload preview before a paid request.
+12. A stable Request ID / `Idempotency-Key` with explicit manual rotation.
+13. Paid launch against Nexus only; APIX user credits are not debited.
+14. Polling status history and manual last-task inspection.
+15. Friendly diagnostics for 401, 402, 422, 429, network failures and timeouts.
+16. Result delivery back into Telegram.
+17. Diagnostic report with task id, POST latency, total provider time, status history, request id, request payload and final task payload.
 
-The test flow never debits an APIX user's credits and never calls the production `image_service` routing path.
+The production `api/image_service.py` provider path is intentionally untouched.
 
 ## Server configuration
 
-Store the real key only in `artflow/.env` on the server:
+Store the real key only in `artflow/.env` on the test server:
 
 ```env
 NEXUS_API_KEY=...
@@ -83,41 +108,47 @@ NEXUS_POLL_TIMEOUT=120
 
 Do not commit a real API key.
 
-## Acceptance test matrix before production migration
+## Acceptance matrix before provider migration
 
-Run at least the following from `🧪 Тест`:
+| Case | Mode | Settings / input | Expected evidence |
+|---|---|---|---|
+| A | schema | Live OpenAPI | NanoBananaPro schema is visible and recorded |
+| B | catalog | Live catalog | model metadata and current price are visible |
+| C | T2I | Auto ratio, auto seed | completes and returns image |
+| D | T2I | fixed seed | repeat behavior can be compared manually |
+| E | T2I | 1:1 | valid square result |
+| F | T2I | 16:9 | valid landscape result |
+| G | T2I | 9:16 | valid portrait result |
+| H | T2I | 4:3 | completes |
+| I | T2I | 3:4 | completes |
+| J | Edit | one Telegram photo | `image_url` path works and edit follows source |
+| K | Edit | one image document | upload/mirroring path works |
+| L | Edit | one public URL | Nexus can fetch APIX/public media |
+| M | Multi-ref | two refs | `image_urls` is accepted or provider returns actionable 422 |
+| N | Multi-ref | four refs | advertised maximum is actually accepted |
+| O | live-schema extra | Raw overrides | any OpenAPI-only field can be exercised without code change |
+| P | idempotency | press Run twice unchanged | no duplicate logical task/charge |
+| Q | idempotency | New Request ID | identical params can intentionally create a fresh task |
+| R | failures | invalid override | provider 422 is surfaced with raw diagnostic context |
+| S | task lifecycle | paid run | queue/processing/final states and timings are visible |
 
-| Case | Mode | Ratio | Seed | Reference | Expected |
-|---|---|---|---|---|---|
-| A | T2I | Auto | Auto | none | completes and returns image |
-| B | T2I | 1:1 | fixed | none | completes; same seed can be compared manually |
-| C | T2I | 16:9 | Auto | none | landscape result |
-| D | T2I | 9:16 | Auto | none | portrait result |
-| E | T2I | 4:3 | Auto | none | completes |
-| F | T2I | 3:4 | Auto | none | completes |
-| G | Edit | Auto | Auto | Telegram photo | edit follows prompt and source |
-| H | Edit | 1:1 | fixed | image document | completes without upload/reference errors |
-| I | Edit | Auto | Auto | public URL | provider can fetch APIX/public media |
-| J | any | any | any | any | raw payload matches selected controls |
-| K | any | any | any | any | `/public/models` returns the intended model and current price metadata |
-| L | any | any | any | any | task transitions and final payload are visible; no duplicate task from one button press |
-
-Optional webhook should be tested only against a controlled callback endpoint because the public Nano Banana documentation does not publish a webhook signing scheme on the model page.
+Optional webhook tests should use a controlled callback endpoint. The model page itself does not document a signing scheme, so the lab does not invent webhook-authentication behavior.
 
 ## Production migration gate
 
-Do not replace the current Nano Banana Pro provider solely because a basic T2I smoke passes.
+Do not replace the existing Nano Banana Pro route solely because one T2I request succeeds.
 
-Current APIX product behavior has historically exposed a broader Nano Banana Pro contract (more aspect ratios and multiple reference images) than the public Nexus Nano Banana Pro schema currently documents. Before switching production routing, compare the live `/public/models` metadata and real admin smoke results against the capabilities users already have.
+Before switching production routing, establish:
 
-Recommended migration gate:
+- acceptable quality on real APIX prompts;
+- acceptable edit/reference fidelity;
+- verified multi-reference behavior and actual max refs;
+- required aspect-ratio parity;
+- current live cost and commercial margin;
+- median and tail latency;
+- 402/422/429/5xx behavior;
+- correct idempotency under retries/double taps;
+- sufficient result-URL lifetime or immediate mirroring strategy;
+- provider stability over repeated tests.
 
-- image quality is acceptable across representative prompts;
-- edit/reference fidelity is acceptable;
-- median and tail latency are acceptable;
-- 402/429/provider-failure behavior is understood;
-- current price is commercially acceptable;
-- required ratios and reference count have parity, or the product deliberately narrows them;
-- idempotency behaves correctly under repeat clicks/retries;
-- provider result URLs remain usable long enough for APIX to mirror them;
-- only then add NexusAPI to production `image_service` behind an explicit feature flag/provider selector and retain rollback/fallback.
+Only after that should NexusAPI be added to production `image_service` behind an explicit provider selector/feature flag with a rollback/fallback path.
