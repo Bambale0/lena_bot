@@ -19,11 +19,20 @@ def test_mounted_feed_cards_are_not_browser_virtualized() -> None:
     assert "contain-intrinsic-size: none !important" in css
 
 
+def test_infinite_feed_uses_stable_grid_instead_of_balanced_columns() -> None:
+    css = read(PERFORMANCE_CSS)
+
+    assert "columns: auto !important" in css
+    assert "display: grid !important" in css
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in css
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in css
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in css
+    assert "perspective: none !important" in css
+
+
 def test_ios_feed_avoids_expensive_scroll_compositor_effects() -> None:
     css = read(PERFORMANCE_CSS)
 
-    assert ".apix-feed-mosaic" in css
-    assert "perspective: none !important" in css
     assert ".backdrop-blur," in css
     assert "backdrop-filter: none !important" in css
     assert "-webkit-backdrop-filter: none !important" in css
