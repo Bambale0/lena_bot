@@ -53,7 +53,8 @@ jobs:
             tests/test_provider_contract_catalog.py \
             tests/test_video_gen.py \
             tests/test_webapp_routes.py \
-            tests/test_kie_model_specs.py
+            tests/test_kie_model_specs.py \
+            tests/test_miniapp_feed_webkit_stability.py
 
       - name: Provider contract inventory
         run: python scripts/check_provider_contracts_ci.py
@@ -63,6 +64,7 @@ jobs:
           pytest -q \
             tests/test_apix_legacy_concept_runtime.py \
             tests/test_apix_production_trends_surface.py \
+            tests/test_miniapp_feed_webkit_stability.py \
             tests/test_provider_contract_catalog.py \
             tests/test_kie_model_specs.py
 
