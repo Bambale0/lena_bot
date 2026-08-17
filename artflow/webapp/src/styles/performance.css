@@ -12,9 +12,31 @@ button,
   -webkit-tap-highlight-color: transparent;
 }
 
+/*
+ * The feed already has a bounded React render window. Layering browser-level
+ * content skipping on top of that (`content-visibility:auto`) is harmful in
+ * iOS Telegram's WebKit when cards live inside a CSS multi-column container:
+ * WebKit can keep only the intrinsic placeholder and temporarily skip the
+ * card subtree while scrolling, producing the blank dark tiles seen in the
+ * production feed. Keep the DOM windowing, but render every mounted card.
+ */
+.apix-feed-card {
+  content-visibility: visible !important;
+  contain-intrinsic-size: none !important;
+}
+
+/* A 3D perspective on the entire multi-column feed promotes extra compositor
+ * layers and makes WebKit repaint churn worse while columns are scrolling.
+ * No production interaction depends on that perspective.
+ */
+.apix-feed-mosaic {
+  perspective: none !important;
+}
+
 @media (hover: none) and (pointer: coarse), (max-width: 640px) {
   .apix-glass,
   .apix-feed-toolbar,
+  .backdrop-blur,
   .backdrop-blur-sm,
   .backdrop-blur-xl,
   .backdrop-blur-2xl {
@@ -37,9 +59,18 @@ button,
       0 5px 14px color-mix(in oklab, black 9%, transparent);
   }
 
+  /* The feed is continuously scrolling, so entrance/press transforms only
+   * add repaint work and can leave stale compositor layers in iOS WebView.
+   */
   .apix-feed-card {
-    animation-duration: 120ms;
+    animation: none !important;
     box-shadow: 0 4px 12px color-mix(in oklab, black 8%, transparent);
+  }
+
+  .apix-feed-media img,
+  .apix-feed-media video {
+    transition: none !important;
+    transform: none !important;
   }
 
   .apix-feed-card-featured {
