@@ -1,6 +1,4 @@
-/* Interaction-performance overrides for Telegram WebView.
- * Keep synchronous tap feedback cheap on coarse-pointer/mobile surfaces.
- */
+/* Interaction-performance overrides for Telegram WebView. */
 
 button,
 [role="button"],
@@ -12,25 +10,40 @@ button,
   -webkit-tap-highlight-color: transparent;
 }
 
-/*
- * The feed already has a bounded React render window. Layering browser-level
- * content skipping on top of that (`content-visibility:auto`) is harmful in
- * iOS Telegram's WebKit when cards live inside a CSS multi-column container:
- * WebKit can keep only the intrinsic placeholder and temporarily skip the
- * card subtree while scrolling, producing the blank dark tiles seen in the
- * production feed. Keep the DOM windowing, but render every mounted card.
- */
+/* React already limits mounted feed cards, so browser content skipping is disabled. */
 .apix-feed-card {
   content-visibility: visible !important;
   contain-intrinsic-size: none !important;
 }
 
-/* A 3D perspective on the entire multi-column feed promotes extra compositor
- * layers and makes WebKit repaint churn worse while columns are scrolling.
- * No production interaction depends on that perspective.
- */
+/* Keep appended feed batches stable instead of rebalancing CSS columns. */
 .apix-feed-mosaic {
+  columns: auto !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: row;
+  align-items: start;
+  gap: 0.4rem;
   perspective: none !important;
+}
+
+.apix-feed-mosaic > * {
+  min-width: 0;
+  margin-bottom: 0 !important;
+  break-inside: auto !important;
+  align-self: start;
+}
+
+@media (min-width: 390px) {
+  .apix-feed-mosaic {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .apix-feed-mosaic {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 @media (hover: none) and (pointer: coarse), (max-width: 640px) {
@@ -59,9 +72,6 @@ button,
       0 5px 14px color-mix(in oklab, black 9%, transparent);
   }
 
-  /* The feed is continuously scrolling, so entrance/press transforms only
-   * add repaint work and can leave stale compositor layers in iOS WebView.
-   */
   .apix-feed-card {
     animation: none !important;
     box-shadow: 0 4px 12px color-mix(in oklab, black 8%, transparent);
