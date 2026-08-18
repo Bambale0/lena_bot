@@ -1,1 +1,0 @@
-Regression target: Gemini Omni Telegram video-reference mode must accept a MOV sent as a Telegram document followed by PNG documents, keep the flow interactive, expose `✅ Готово`, preserve mixed media, and continue to the normal parameter screen without Seedance router interception.
