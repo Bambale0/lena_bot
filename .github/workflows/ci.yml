@@ -45,6 +45,7 @@ jobs:
             api/provider_spec_overrides.py \
             api/suno_full_service.py \
             api/video_service.py \
+            bot/handlers/gemini_omni_recovery.py \
             bot/handlers/gemini_omni_references.py \
             bot/handlers/video_gen.py \
             bot/handlers/video_references.py \
