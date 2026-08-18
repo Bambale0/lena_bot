@@ -1,1 +1,0 @@
-Telegram may deliver full-quality `.MOV` and `.PNG` attachments as `Document` updates. The Gemini Omni collector therefore classifies documents by MIME type and filename extension instead of relying only on `Message.video` / `Message.photo`.
