@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,6 +10,8 @@ from bot.handlers import gemini_omni_references as omni_refs
 from bot.handlers import video_references
 from bot.states import VideoGenFSM
 from core.gemini_omni import GEMINI_OMNI_VIDEO_MODEL
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _fake_state(**initial: object):
@@ -166,3 +169,12 @@ async def test_omni_done_moves_to_params_without_losing_mixed_refs() -> None:
 
 def test_seedance_video_reference_router_cannot_intercept_gemini_omni() -> None:
     assert f"vid_mode:video:{GEMINI_OMNI_VIDEO_MODEL}" not in video_references._VIDEO_REFERENCE_CALLBACKS
+
+
+def test_gemini_omni_router_runs_before_generic_video_reference_router() -> None:
+    source = (ROOT / "bot" / "handlers" / "__init__.py").read_text(encoding="utf-8")
+    omni = "_video_router.include_router(_gemini_omni_references.router)"
+    generic = "_video_router.include_router(_video_references.router)"
+    assert omni in source
+    assert generic in source
+    assert source.index(omni) < source.index(generic)
