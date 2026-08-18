@@ -1,0 +1,1 @@
+Acceptance: the user-reported sequence `MOV document -> PNG document -> PNG document -> PNG document -> Готово` must remain responsive, preserve one video plus all three image references, report a 5/7 media-slot total, and transition into the normal Gemini Omni parameter flow.
