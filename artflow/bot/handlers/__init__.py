@@ -66,6 +66,7 @@ _image_router.include_router(_legacy_image_gen.router)
 _legacy_image_gen.router = _image_router
 
 # Provider-specific automatic collectors must run before the generic mode picker.
+from . import gemini_omni_recovery as _gemini_omni_recovery
 from . import gemini_omni_references as _gemini_omni_references
 from . import minimax_h3_references as _minimax_h3_references
 from . import seedance25_references as _seedance25_references
@@ -79,6 +80,7 @@ install_veo_handler_presentation(_legacy_video_gen)
 
 _video_router = Router(name="video_v2")
 _video_router.include_router(_gemini_omni_references.router)
+_video_router.include_router(_gemini_omni_recovery.router)
 _video_router.include_router(_minimax_h3_references.router)
 _video_router.include_router(_seedance25_references.router)
 _video_router.include_router(_video_references.router)
