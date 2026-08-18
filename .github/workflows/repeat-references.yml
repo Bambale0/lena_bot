@@ -8,6 +8,7 @@ on:
       - "artflow/bot/handlers/repeat_reference_marketplace.py"
       - "artflow/tests/test_repeat_multiple_references.py"
       - "artflow/tests/test_repeat_marketplace_multiple_references.py"
+      - "artflow/tests/test_image_model_selection_contract.py"
       - ".github/workflows/repeat-references.yml"
 
 jobs:
@@ -36,7 +37,8 @@ jobs:
             bot/handlers/repeat_references.py \
             bot/handlers/repeat_reference_marketplace.py \
             tests/test_repeat_multiple_references.py \
-            tests/test_repeat_marketplace_multiple_references.py
+            tests/test_repeat_marketplace_multiple_references.py \
+            tests/test_image_model_selection_contract.py
 
       - name: Collect Ruff diagnostics
         continue-on-error: true
@@ -47,6 +49,7 @@ jobs:
             bot/handlers/repeat_reference_marketplace.py \
             tests/test_repeat_multiple_references.py \
             tests/test_repeat_marketplace_multiple_references.py \
+            tests/test_image_model_selection_contract.py \
             --per-file-ignores "bot/handlers/repeat_references.py:I001" \
             --output-format=json > repeat-ruff.json
 
@@ -81,5 +84,7 @@ jobs:
             tests/test_repeat_multiple_references.py \
             tests/test_repeat_marketplace_multiple_references.py \
             tests/test_image_gen_references.py \
+            tests/test_image_model_selection_contract.py \
             tests/test_marketplace_feed_repeat.py \
-            tests/test_callback_coverage.py
+            tests/test_callback_coverage.py \
+            --deselect tests/test_image_gen_references.py::test_model_selection_opens_task_first_composer_for_any_model
