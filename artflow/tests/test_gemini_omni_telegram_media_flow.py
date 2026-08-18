@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from bot.handlers import gemini_omni_recovery as omni_recovery
 from bot.handlers import gemini_omni_references as omni_refs
 from bot.handlers import video_references
 from bot.states import VideoGenFSM
@@ -117,6 +118,33 @@ async def test_omni_accepts_mov_document_plus_three_png_documents() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stuck_old_video_upload_state_recovers_on_next_mov_document() -> None:
+    state, data = _fake_state(
+        model_key=GEMINI_OMNI_VIDEO_MODEL,
+        mode="video",
+        ref_file_ids=[],
+        character_ids=[],
+    )
+    mov = _message_with_document(
+        file_id="mov_stuck",
+        file_name="IMG_5888.MOV",
+        mime_type="video/quicktime",
+        file_size=1_400_000,
+    )
+
+    with patch.object(
+        omni_refs,
+        "mirror_telegram_file",
+        AsyncMock(return_value="https://cdn.test/recovered.mov"),
+    ):
+        await omni_recovery.recover_gemini_omni_document(mov, state, MagicMock())
+
+    state.set_state.assert_awaited_with(VideoGenFSM.image_upload)
+    assert data["reference_video_url"] == "https://cdn.test/recovered.mov"
+    assert "Видео добавлено" in mov.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_omni_rejects_media_that_would_overflow_slot_quota() -> None:
     state, data = _fake_state(
         model_key=GEMINI_OMNI_VIDEO_MODEL,
@@ -174,7 +202,10 @@ def test_seedance_video_reference_router_cannot_intercept_gemini_omni() -> None:
 def test_gemini_omni_router_runs_before_generic_video_reference_router() -> None:
     source = (ROOT / "bot" / "handlers" / "__init__.py").read_text(encoding="utf-8")
     omni = "_video_router.include_router(_gemini_omni_references.router)"
+    recovery = "_video_router.include_router(_gemini_omni_recovery.router)"
     generic = "_video_router.include_router(_video_references.router)"
     assert omni in source
+    assert recovery in source
     assert generic in source
     assert source.index(omni) < source.index(generic)
+    assert source.index(recovery) < source.index(generic)
