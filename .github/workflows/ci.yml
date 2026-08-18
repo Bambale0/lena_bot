@@ -45,9 +45,12 @@ jobs:
             api/provider_spec_overrides.py \
             api/suno_full_service.py \
             api/video_service.py \
+            bot/handlers/gemini_omni_references.py \
             bot/handlers/video_gen.py \
+            bot/handlers/video_references.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
+            tests/test_gemini_omni_telegram_media_flow.py \
             tests/test_midjourney.py \
             tests/test_photo_prompt_service.py \
             tests/test_provider_contract_catalog.py \
@@ -64,6 +67,7 @@ jobs:
           pytest -q \
             tests/test_apix_legacy_concept_runtime.py \
             tests/test_apix_production_trends_surface.py \
+            tests/test_gemini_omni_telegram_media_flow.py \
             tests/test_miniapp_feed_webkit_stability.py \
             tests/test_provider_contract_catalog.py \
             tests/test_kie_model_specs.py
