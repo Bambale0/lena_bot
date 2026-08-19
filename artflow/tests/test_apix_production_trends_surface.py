@@ -150,7 +150,7 @@ def test_infinite_feed_uses_intersection_observer_and_growing_limit() -> None:
     api = read(SRC / "lib/api.ts")
     css = read(SRC / "styles/globals.css")
 
-    assert 'export const FEED_PAGE_SIZE = 24' in api
+    assert 'export const FEED_PAGE_SIZE = 96' in api
     assert '`/feed?source=${source}&limit=${limit}`' in api
     assert 'feedLimit + FEED_PAGE_SIZE' in app
     assert 'setFeedHasMore(feed.length >= nextLimit)' in app

@@ -18,7 +18,10 @@ import { asArray, asRecord } from "@/lib/utils";
 
 const API_BASE = "/api/v1";
 const HISTORY_LIMIT = 100;
-export const FEED_PAGE_SIZE = 24;
+// Feed media filters are client-side. Keep one server page large enough that
+// selecting "Видео" does not dead-end just because the first small page was all images.
+// React still mounts works in batches, so this does not multiply the live DOM size.
+export const FEED_PAGE_SIZE = 96;
 
 export class ApiError extends Error {
   readonly status: number;

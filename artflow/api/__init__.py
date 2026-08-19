@@ -67,11 +67,13 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         self.wrapped.exec_module(module)
         from api.admin_model_visibility import install_admin_model_visibility
         from api.feed_media_viewer import install_feed_media_viewer
+        from api.kling_motion_visibility import install_kling_motion_visibility
         from api.video_request_compat import install_video_request_compat
         from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
         from db import repository
         from db.feed_relevance import install_feed_relevance
 
+        install_kling_motion_visibility(repository)
         install_miniapp_model_labels(module)
         install_repository_model_labels(repository)
         install_feed_relevance(repository)
@@ -112,12 +114,14 @@ if "api.miniapp_routes" not in sys.modules:
 else:
     from api.admin_model_visibility import install_admin_model_visibility
     from api.feed_media_viewer import install_feed_media_viewer
+    from api.kling_motion_visibility import install_kling_motion_visibility
     from api.video_request_compat import install_video_request_compat
     from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
     from db import repository
     from db.feed_relevance import install_feed_relevance
 
     miniapp_routes = sys.modules["api.miniapp_routes"]
+    install_kling_motion_visibility(repository)
     install_miniapp_model_labels(miniapp_routes)
     install_repository_model_labels(repository)
     install_feed_relevance(repository)

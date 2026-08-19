@@ -36,6 +36,7 @@ jobs:
             api/advanced_video_service.py \
             api/image_service.py \
             api/kling_grok_service.py \
+            api/kling_motion_visibility.py \
             api/llm_provider_service.py \
             api/media_gateway.py \
             api/midjourney_full_service.py \
@@ -52,6 +53,7 @@ jobs:
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
             tests/test_gemini_omni_telegram_media_flow.py \
+            tests/test_kling_motion_visibility.py \
             tests/test_midjourney.py \
             tests/test_photo_prompt_service.py \
             tests/test_provider_contract_catalog.py \
@@ -70,6 +72,7 @@ jobs:
             tests/test_apix_legacy_concept_runtime.py \
             tests/test_apix_production_trends_surface.py \
             tests/test_gemini_omni_telegram_media_flow.py \
+            tests/test_kling_motion_visibility.py \
             tests/test_miniapp_feed_webkit_stability.py \
             tests/test_provider_contract_catalog.py \
             tests/test_trend_animals_category.py \
