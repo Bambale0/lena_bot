@@ -218,6 +218,21 @@ function FeedScreen({
   }, [source, workFilter]);
 
   useEffect(() => {
+    if (
+      contentMode !== "works" ||
+      workFilter === "all" ||
+      loading ||
+      loadingMore ||
+      visibleItems.length > 0 ||
+      !hasMore ||
+      !onLoadMore
+    ) {
+      return;
+    }
+    onLoadMore();
+  }, [contentMode, hasMore, loading, loadingMore, onLoadMore, visibleItems.length, workFilter]);
+
+  useEffect(() => {
     setVisibleTrendCount(TREND_RENDER_BATCH);
   }, [trendCategory, trendKind]);
 
@@ -525,7 +540,7 @@ function FeedScreen({
           </>
         ) : (
           <div className="grid min-h-28 place-items-center rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">
-            {loading ? "Загружаем работы…" : "По этому фильтру работ пока нет"}
+            {loading || loadingMore ? "Ищем работы по фильтру…" : "По этому фильтру работ пока нет"}
           </div>
         )
       ) : (
