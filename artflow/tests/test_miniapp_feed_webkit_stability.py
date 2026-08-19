@@ -3,6 +3,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PERFORMANCE_CSS = ROOT / "webapp" / "src" / "styles" / "performance.css"
 FEED_SOURCE = ROOT / "webapp" / "src" / "features" / "feed-screen.tsx"
+WEBAPP_API = ROOT / "webapp" / "src" / "lib" / "api.ts"
+WEBAPP_MAIN = ROOT / "webapp" / "src" / "main.tsx"
+VIDEO_STABILIZER = ROOT / "webapp" / "src" / "lib" / "feed-video-stabilizer.ts"
+API_BOOTSTRAP = ROOT / "api" / "__init__.py"
+KLING_VISIBILITY = ROOT / "api" / "kling_motion_visibility.py"
 
 
 def read(path: Path) -> str:
@@ -41,3 +46,33 @@ def test_ios_feed_avoids_expensive_scroll_compositor_effects() -> None:
     assert ".apix-feed-media video" in css
     assert "transition: none !important" in css
     assert "transform: none !important" in css
+
+
+def test_feed_media_filters_do_not_dead_end_on_a_tiny_server_page() -> None:
+    api = read(WEBAPP_API)
+
+    # Photo/video filters are applied in FeedScreen after the API response. A tiny
+    # first page can therefore look empty even when matching media exists later.
+    assert "export const FEED_PAGE_SIZE = 96" in api
+
+
+def test_telegram_webview_video_tiles_prime_a_real_frame_near_viewport() -> None:
+    main = read(WEBAPP_MAIN)
+    stabilizer = read(VIDEO_STABILIZER)
+
+    assert "installFeedVideoStabilizer" in main
+    assert 'video[preload="metadata"]:not([controls])' in stabilizer
+    assert 'rootMargin: "720px 0px"' in stabilizer
+    assert 'video.preload = "auto"' in stabilizer
+    assert "video.currentTime = target" in stabilizer
+
+
+def test_kling_30_motion_is_self_healed_before_video_catalog_reads() -> None:
+    bootstrap = read(API_BOOTSTRAP)
+    visibility = read(KLING_VISIBILITY)
+
+    assert "install_kling_motion_visibility(repository)" in bootstrap
+    assert 'KLING_30_MOTION = "kling-3.0/motion-control"' in visibility
+    assert 'resolution="720p"' in visibility
+    assert 'resolution="1080p"' in visibility
+    assert "row.is_active = True" in visibility
