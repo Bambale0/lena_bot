@@ -50,10 +50,17 @@ def test_ios_feed_avoids_expensive_scroll_compositor_effects() -> None:
 
 def test_feed_media_filters_do_not_dead_end_on_a_tiny_server_page() -> None:
     api = read(WEBAPP_API)
+    feed = read(FEED_SOURCE)
 
-    # Photo/video filters are applied in FeedScreen after the API response. A tiny
-    # first page can therefore look empty even when matching media exists later.
+    # Photo/video filters are applied after the API response, so the first fetch
+    # is broad and an empty local filter keeps backfilling while more data exists.
     assert "export const FEED_PAGE_SIZE = 96" in api
+    assert 'workFilter === "all"' in feed
+    assert "visibleItems.length > 0" in feed
+    assert "!hasMore" in feed
+    assert "!onLoadMore" in feed
+    assert "onLoadMore();" in feed
+    assert "Ищем работы по фильтру…" in feed
 
 
 def test_telegram_webview_video_tiles_prime_a_real_frame_near_viewport() -> None:
