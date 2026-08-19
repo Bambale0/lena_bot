@@ -137,7 +137,10 @@ def test_feed_controls_are_compact_and_actions_stay_inside_media() -> None:
     assert 'grid grid-cols-2 gap-1 rounded-lg bg-muted/45 p-1' not in feed
     assert 'apix-feed-media group relative' in feed
     assert 'cursor-zoom-in' in feed
-    assert 'inline-flex min-h-8 flex-1 items-center justify-center' in feed
+    assert 'grid min-w-0 gap-1' in feed
+    assert 'inline-flex min-h-7 w-full min-w-0 items-center justify-center' in feed
+    assert 'overflow-hidden whitespace-nowrap rounded-full bg-primary/95' in feed
+    assert '<span className="truncate">{remixing ? "Запуск" : "Повторить"}</span>' in feed
     assert 'event.stopPropagation();' in feed
     assert '.apix-feed-toolbar' in css
     assert '.apix-chip-rail' in css
