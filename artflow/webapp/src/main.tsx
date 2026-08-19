@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "@/app/App";
 import { installAdminModelVisibility } from "@/lib/admin-model-visibility";
+import { installFeedVideoStabilizer } from "@/lib/feed-video-stabilizer";
 import { installModelEnhancerLoader } from "@/lib/model-enhancer-loader";
 import { installTelegramNavigation } from "@/lib/telegram-navigation";
 import "@/styles/globals.css";
@@ -19,6 +20,7 @@ installAdminModelVisibility();
 if (legacy) {
   void import("./main.jsx");
 } else {
+  installFeedVideoStabilizer();
   installModelEnhancerLoader();
   createRoot(root).render(
     <StrictMode>
