@@ -46,25 +46,26 @@ function registerVideo(video: HTMLVideoElement, observer: IntersectionObserver |
 export function installFeedVideoStabilizer(): void {
   if (typeof window === "undefined" || typeof document === "undefined") return;
 
-  const intersection = typeof IntersectionObserver === "function"
-    ? new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            const video = entry.target as HTMLVideoElement;
-            intersection.unobserve(video);
-            activateVideo(video);
-          }
-        },
-        { root: null, rootMargin: "720px 0px", threshold: 0 },
-      )
-    : null;
+  let intersection: IntersectionObserver | null = null;
+  if (typeof IntersectionObserver === "function") {
+    intersection = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const video = entry.target as HTMLVideoElement;
+          intersection?.unobserve(video);
+          activateVideo(video);
+        }
+      },
+      { root: null, rootMargin: "720px 0px", threshold: 0 },
+    );
+  }
 
   const scan = (root: ParentNode) => {
     if (root instanceof HTMLVideoElement && root.matches(FEED_VIDEO_SELECTOR)) {
       registerVideo(root, intersection);
     }
-    root.querySelectorAll?.(FEED_VIDEO_SELECTOR).forEach((node) => {
+    root.querySelectorAll(FEED_VIDEO_SELECTOR).forEach((node) => {
       registerVideo(node as HTMLVideoElement, intersection);
     });
   };
