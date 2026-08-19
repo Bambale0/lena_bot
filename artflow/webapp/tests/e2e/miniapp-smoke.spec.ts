@@ -191,7 +191,9 @@ test("one-photo trend runner uploads and runs without exposing generation contro
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Тренды" }).click();
   await expect(page.getByText("Кинопортрет").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "✨ Портреты", exact: true })).toBeVisible();
+  const portraitFilter = page.getByRole("button", { name: "✨ Портреты", exact: true });
+  await expect(portraitFilter).toBeVisible();
+  await portraitFilter.click();
   await page.getByRole("button", { name: /Повторить/ }).first().click();
 
   const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
