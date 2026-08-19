@@ -20,27 +20,39 @@ logger = logging.getLogger(__name__)
 KLING_30_MOTION = "kling-3.0/motion-control"
 _REQUIRED_ROWS = (
     (KLING_30_MOTION, "🕺 Kling 3.0 Motion", 9.0),
-    (pricing_variant_key(KLING_30_MOTION, resolution="720p"), "🕺 Kling 3.0 Motion · 720p · за сек", 9.0),
-    (pricing_variant_key(KLING_30_MOTION, resolution="1080p"), "🕺 Kling 3.0 Motion · 1080p · за сек", 11.0),
+    (
+        pricing_variant_key(KLING_30_MOTION, resolution="720p"),
+        "🕺 Kling 3.0 Motion · 720p · за сек",
+        9.0,
+    ),
+    (
+        pricing_variant_key(KLING_30_MOTION, resolution="1080p"),
+        "🕺 Kling 3.0 Motion · 1080p · за сек",
+        11.0,
+    ),
 )
 
 
 async def _ensure_required_rows(session: Any) -> None:
     keys = [key for key, _name, _credits in _REQUIRED_ROWS]
-    result = await session.execute(select(ModelCost).where(ModelCost.model_key.in_(keys)))
+    result = await session.execute(
+        select(ModelCost).where(ModelCost.model_key.in_(keys))
+    )
     existing = {row.model_key: row for row in result.scalars().all()}
     changed = False
 
     for model_key, display_name, credits in _REQUIRED_ROWS:
         row = existing.get(model_key)
         if row is None:
-            session.add(ModelCost(
-                model_key=model_key,
-                display_name=display_name,
-                gen_type=GenerationType.video,
-                credits=credits,
-                is_active=True,
-            ))
+            session.add(
+                ModelCost(
+                    model_key=model_key,
+                    display_name=display_name,
+                    gen_type=GenerationType.video,
+                    credits=credits,
+                    is_active=True,
+                )
+            )
             changed = True
             continue
 
@@ -50,7 +62,10 @@ async def _ensure_required_rows(session: Any) -> None:
 
     if changed:
         await session.commit()
-        logger.warning("Repaired required Mini App model visibility: %s", KLING_30_MOTION)
+        logger.warning(
+            "Repaired required Mini App model visibility: %s",
+            KLING_30_MOTION,
+        )
 
 
 def install_kling_motion_visibility(repository: Any) -> None:
