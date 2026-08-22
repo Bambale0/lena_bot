@@ -73,6 +73,13 @@ jobs:
       - name: Provider contract inventory
         run: python scripts/check_provider_contracts_ci.py
 
+      - name: Deploy script contract
+        run: |
+          set -Eeuo pipefail
+          bash -n scripts/deploy-production.sh
+          grep -Fq 'docker compose run --rm -T app alembic upgrade head </dev/null' scripts/deploy-production.sh
+          grep -Fq 'verifying Seedance 2.5 feed-repeat runtime and Telegram webhook' scripts/deploy-production.sh
+
       - name: Pytest maintained PR gate
         run: |
           pytest -q \
@@ -203,22 +210,32 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          printf -v remote_command \
-            'DEPLOY_PATH=%q DEPLOY_APP_SUBDIR=%q DEPLOY_BRANCH=%q DEPLOY_PUBLIC_HEALTH_URL=%q bash -s -- %q' \
-            "$DEPLOY_PATH" "$DEPLOY_APP_SUBDIR" "$DEPLOY_BRANCH" "$DEPLOY_PUBLIC_HEALTH_URL" "$GITHUB_SHA"
 
-          ssh \
-            -i "$HOME/.ssh/id_ed25519" \
-            -p "$DEPLOY_PORT" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ConnectTimeout=15 \
-            -o ServerAliveInterval=15 \
-            -o ServerAliveCountMax=4 \
-            "$DEPLOY_USER@$DEPLOY_HOST" \
-            "$remote_command" \
+          remote_script="/tmp/apix-deploy-${GITHUB_SHA}.sh"
+          ssh_opts=(
+            -i "$HOME/.ssh/id_ed25519"
+            -p "$DEPLOY_PORT"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=4
+          )
+
+          # Upload first, execute second. The remote Bash must never parse the
+          # deployment program from stdin: docker/compose child processes are
+          # allowed to own stdin without being able to consume future commands.
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cat > '$remote_script' && chmod 700 '$remote_script'" \
             < artflow/scripts/deploy-production.sh
+
+          printf -v remote_command \
+            'DEPLOY_PATH=%q DEPLOY_APP_SUBDIR=%q DEPLOY_BRANCH=%q DEPLOY_PUBLIC_HEALTH_URL=%q bash %q %q; rc=$?; rm -f %q; exit $rc' \
+            "$DEPLOY_PATH" "$DEPLOY_APP_SUBDIR" "$DEPLOY_BRANCH" "$DEPLOY_PUBLIC_HEALTH_URL" \
+            "$remote_script" "$GITHUB_SHA" "$remote_script"
+
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command"
 
       - name: Verify public production health
         shell: bash
