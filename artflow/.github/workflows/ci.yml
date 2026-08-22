@@ -1,9 +1,16 @@
-name: CI
+name: APIX CI/CD
 
 on:
   push:
     branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apix-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend-quality:
@@ -58,3 +65,75 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  deploy:
+    name: Production Autodeploy
+    runs-on: ubuntu-latest
+    needs:
+      - backend-quality
+      - webapp
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AUTODEPLOY_ENABLED == 'true'
+    environment: production
+    concurrency:
+      group: apix-production-deploy
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DEPLOY_APP_SUBDIR: ${{ vars.DEPLOY_APP_SUBDIR }}
+      DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
+      DEPLOY_PUBLIC_HEALTH_URL: ${{ vars.DEPLOY_PUBLIC_HEALTH_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate deploy configuration
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Missing DEPLOY_HOST secret}"
+          : "${DEPLOY_KNOWN_HOSTS:?Missing DEPLOY_KNOWN_HOSTS secret}"
+          : "${DEPLOY_SSH_PRIVATE_KEY:?Missing DEPLOY_SSH_PRIVATE_KEY secret}"
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 644 "$HOME/.ssh/known_hosts"
+
+      - name: Run production deploy
+        run: |
+          set -euo pipefail
+
+          deploy_user="${DEPLOY_USER:-root}"
+          deploy_port="${DEPLOY_PORT:-22}"
+          deploy_path="${DEPLOY_PATH:-/root/mkdir/lena_bot}"
+          deploy_app_subdir="${DEPLOY_APP_SUBDIR:-artflow}"
+          deploy_branch="${DEPLOY_BRANCH:-main}"
+          deploy_public_health_url="${DEPLOY_PUBLIC_HEALTH_URL:-https://apixbotai.com/api/v1/health}"
+
+          remote_env=()
+          for pair in \
+            "DEPLOY_PATH=$deploy_path" \
+            "DEPLOY_APP_SUBDIR=$deploy_app_subdir" \
+            "DEPLOY_BRANCH=$deploy_branch" \
+            "DEPLOY_PUBLIC_HEALTH_URL=$deploy_public_health_url"
+          do
+            printf -v quoted '%q' "$pair"
+            remote_env+=("$quoted")
+          done
+
+          ssh \
+            -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -p "$deploy_port" \
+            "${deploy_user}@${DEPLOY_HOST}" \
+            "${remote_env[*]} bash -s -- '${GITHUB_SHA}'" \
+            < scripts/deploy-production.sh
