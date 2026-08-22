@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   backend-quality:
@@ -137,6 +138,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Mark production deploy pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          payload=$(printf '{"state":"pending","context":"production/deploy","description":"Production deployment in progress","target_url":"%s"}' "$run_url")
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "$payload" >/dev/null
+
       - name: Deployment preflight
         shell: bash
         run: |
@@ -229,3 +246,27 @@ jobs:
             echo "- Health: \`${DEPLOY_PUBLIC_HEALTH_URL}\`"
             echo "- Result: \`${{ job.status }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish production deploy result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          state="failure"
+          description="Production deployment failed"
+          if [ "$DEPLOY_JOB_STATUS" = "success" ]; then
+            state="success"
+            description="Production deployment succeeded"
+          fi
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          payload=$(printf '{"state":"%s","context":"production/deploy","description":"%s","target_url":"%s"}' "$state" "$description" "$run_url")
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "$payload" >/dev/null
