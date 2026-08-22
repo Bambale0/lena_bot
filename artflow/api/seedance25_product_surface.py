@@ -9,8 +9,6 @@ button.
 """
 from __future__ import annotations
 
-from typing import Any
-
 from api import seedance25_adapter as seedance25
 
 
@@ -18,7 +16,7 @@ SEEDANCE_2_KEY = "bytedance/seedance-2"
 PUBLIC_GROUPS = {"fast", "i2v"}
 
 
-def _insert_before(keys: list[Any], key: str, before: str) -> None:
+def _insert_before(keys: list[object], key: str, before: str) -> None:
     """Insert ``key`` once, preferably immediately before ``before``."""
     keys[:] = [item for item in keys if str(getattr(item, "value", item)) != key]
     try:
