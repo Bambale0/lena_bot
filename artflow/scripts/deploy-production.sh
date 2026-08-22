@@ -140,11 +140,17 @@ wait_for_container redis healthy 120
 log "applying database migrations"
 docker compose run --rm app alembic upgrade head
 
-log "starting app and nginx"
-docker compose up -d --remove-orphans app nginx
+# A green deploy must mean the bot process actually runs the freshly built image.
+# Force recreation avoids a stale long-lived app container surviving an otherwise
+# successful git pull/build cycle.
+log "starting fresh app and nginx containers"
+docker compose up -d --force-recreate --remove-orphans app nginx
 
 wait_for_container app none 120
 wait_for_container nginx none 120
+
+log "verifying Seedance 2.5 feed-repeat runtime and Telegram webhook"
+docker compose exec -T app python scripts/verify_seedance25_production.py
 
 log "checking public health endpoint"
 for attempt in $(seq 1 30); do
