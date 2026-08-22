@@ -9,9 +9,8 @@ button.
 """
 from __future__ import annotations
 
-from api import seedance25_adapter as seedance25
 
-
+MODEL_KEY = "bytedance/seedance-2-5"
 SEEDANCE_2_KEY = "bytedance/seedance-2"
 PUBLIC_GROUPS = {"fast", "i2v"}
 
@@ -33,21 +32,22 @@ def _insert_before(keys: list[object], key: str, before: str) -> None:
 def install_seedance25_product_surface() -> None:
     """Make Seedance 2.5 a durable Telegram product, not only a runtime model."""
     try:
+        from api import seedance25_adapter as seedance25
         from bot.keyboards import models as keyboard_models
     except Exception:
         return
 
-    keyboard_models.VIDEO_CAPS[seedance25.MODEL_KEY] = dict(seedance25.VIDEO_CAPS)
-    keyboard_models.VIDEO_MODEL_DESC[seedance25.MODEL_KEY] = (
+    keyboard_models.VIDEO_CAPS[MODEL_KEY] = dict(seedance25.VIDEO_CAPS)
+    keyboard_models.VIDEO_MODEL_DESC[MODEL_KEY] = (
         f"{seedance25.DISPLAY_NAME} · авто T2V/I2V/Reference · 4–30 сек · 480p/720p"
     )
 
     order = getattr(keyboard_models, "_VIDEO_MODEL_ORDER", None)
     if isinstance(order, list):
-        _insert_before(order, seedance25.MODEL_KEY, SEEDANCE_2_KEY)
+        _insert_before(order, MODEL_KEY, SEEDANCE_2_KEY)
 
     groups = getattr(keyboard_models, "_VIDEO_GROUPS", None)
     if isinstance(groups, list):
         for group_name, keys in groups:
             if group_name in PUBLIC_GROUPS and isinstance(keys, list):
-                _insert_before(keys, seedance25.MODEL_KEY, SEEDANCE_2_KEY)
+                _insert_before(keys, MODEL_KEY, SEEDANCE_2_KEY)
