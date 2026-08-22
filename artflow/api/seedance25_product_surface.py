@@ -7,8 +7,6 @@ listed in ``_VIDEO_GROUPS``. Keep the public product in the same groups as the
 other Seedance models so a clean process restart cannot silently drop its
 button.
 """
-from __future__ import annotations
-
 
 MODEL_KEY = "bytedance/seedance-2-5"
 SEEDANCE_2_KEY = "bytedance/seedance-2"
