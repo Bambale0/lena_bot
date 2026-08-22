@@ -138,7 +138,10 @@ wait_for_container postgres healthy 120
 wait_for_container redis healthy 120
 
 log "applying database migrations"
-docker compose run --rm app alembic upgrade head
+# Never allow a child process to consume the deploy script's stdin. CI now
+# executes this script from a remote file, and /dev/null is defense in depth for
+# manual/legacy streamed execution.
+docker compose run --rm -T app alembic upgrade head </dev/null
 
 # A green deploy must mean the bot process actually runs the freshly built image.
 # Force recreation avoids a stale long-lived app container surviving an otherwise
@@ -150,7 +153,7 @@ wait_for_container app none 120
 wait_for_container nginx none 120
 
 log "verifying Seedance 2.5 feed-repeat runtime and Telegram webhook"
-docker compose exec -T app python scripts/verify_seedance25_production.py
+docker compose exec -T app python scripts/verify_seedance25_production.py </dev/null
 
 log "checking public health endpoint"
 for attempt in $(seq 1 30); do
