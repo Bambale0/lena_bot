@@ -35,6 +35,7 @@ from api.seedance25_adapter import (
     install_seedance25_provider_support,
 )
 from api.seedance25_pricing import install_seedance25_seed_rows
+from api.seedance25_product_surface import install_seedance25_product_surface
 from api.suno_source_audio_routes import install_suno_source_audio_routes
 from api.video_runtime_fixes import install_video_runtime_fixes
 from api.video_ui_capability_guards import strip_seedance25_omni_id_controls
@@ -43,6 +44,7 @@ install_grok15_adapter(_kieai_client)
 install_seedance25_seed_rows()
 install_seedance25_provider_support()
 install_seedance25_keyboard_support()
+install_seedance25_product_surface()
 install_minimax_h3_seed_rows()
 install_minimax_h3_provider_support()
 install_minimax_h3_runtime_guards()
