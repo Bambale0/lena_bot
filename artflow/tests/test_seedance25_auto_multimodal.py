@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import seedance25_adapter as s25
+from api import seedance25_product_surface as s25_surface
 
 
 @pytest.mark.parametrize(
@@ -181,3 +182,37 @@ def test_miniapp_normalizer_ignores_manual_mode_and_routes_from_media(monkeypatc
     assert mixed["mode"] == "multimodal"
     assert mixed["reference_video_url"] == ["https://example.test/motion.mp4"]
     assert mixed["audio_ids"] == ["https://example.test/voice.wav"]
+
+
+def test_telegram_product_surface_restores_seedance25_in_public_video_groups(monkeypatch) -> None:
+    from bot.keyboards import models as keyboard_models
+
+    def key_value(item) -> str:
+        return str(getattr(item, "value", item))
+
+    clean_order = [item for item in keyboard_models._VIDEO_MODEL_ORDER if key_value(item) != s25.MODEL_KEY]
+    clean_groups = [
+        (name, [item for item in keys if key_value(item) != s25.MODEL_KEY])
+        for name, keys in keyboard_models._VIDEO_GROUPS
+    ]
+    monkeypatch.setattr(keyboard_models, "_VIDEO_MODEL_ORDER", clean_order)
+    monkeypatch.setattr(keyboard_models, "_VIDEO_GROUPS", clean_groups)
+    monkeypatch.setattr(keyboard_models, "VIDEO_CAPS", dict(keyboard_models.VIDEO_CAPS))
+    monkeypatch.setattr(keyboard_models, "VIDEO_MODEL_DESC", dict(keyboard_models.VIDEO_MODEL_DESC))
+
+    s25_surface.install_seedance25_product_surface()
+    s25_surface.install_seedance25_product_surface()  # startup hooks may run more than once
+
+    order = [key_value(item) for item in keyboard_models._VIDEO_MODEL_ORDER]
+    groups = {
+        name: [key_value(item) for item in keys]
+        for name, keys in keyboard_models._VIDEO_GROUPS
+    }
+
+    assert s25.MODEL_KEY in keyboard_models.VIDEO_CAPS
+    assert s25.MODEL_KEY in keyboard_models.VIDEO_MODEL_DESC
+    assert order.count(s25.MODEL_KEY) == 1
+    assert order.index(s25.MODEL_KEY) < order.index("bytedance/seedance-2")
+    for group_name in ("fast", "i2v"):
+        assert groups[group_name].count(s25.MODEL_KEY) == 1
+        assert groups[group_name].index(s25.MODEL_KEY) < groups[group_name].index("bytedance/seedance-2")
