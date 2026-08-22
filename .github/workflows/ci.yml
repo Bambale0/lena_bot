@@ -57,11 +57,13 @@ jobs:
             bot/handlers/video_references.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
+            scripts/verify_seedance25_production.py \
             tests/test_gemini_omni_telegram_media_flow.py \
             tests/test_kling_motion_visibility.py \
             tests/test_midjourney.py \
             tests/test_photo_prompt_service.py \
             tests/test_provider_contract_catalog.py \
+            tests/test_seedance25_repeat_keyboard.py \
             tests/test_trend_animals_category.py \
             tests/test_video_gen.py \
             tests/test_webapp_routes.py \
@@ -80,6 +82,7 @@ jobs:
             tests/test_kling_motion_visibility.py \
             tests/test_miniapp_feed_webkit_stability.py \
             tests/test_provider_contract_catalog.py \
+            tests/test_seedance25_repeat_keyboard.py \
             tests/test_trend_animals_category.py \
             tests/test_kie_model_specs.py
 
