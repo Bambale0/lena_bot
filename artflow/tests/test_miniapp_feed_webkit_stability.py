@@ -1,4 +1,7 @@
 from pathlib import Path
+from types import SimpleNamespace
+
+from bot.utils.feed_media import canonical_generation_result_url
 
 ROOT = Path(__file__).resolve().parents[1]
 PERFORMANCE_CSS = ROOT / "webapp" / "src" / "styles" / "performance.css"
@@ -9,6 +12,7 @@ WEBAPP_MAIN = ROOT / "webapp" / "src" / "main.tsx"
 VIDEO_STABILIZER = ROOT / "webapp" / "src" / "lib" / "feed-video-stabilizer.ts"
 API_BOOTSTRAP = ROOT / "api" / "__init__.py"
 KLING_VISIBILITY = ROOT / "api" / "kling_motion_visibility.py"
+START_HANDLER = ROOT / "bot" / "handlers" / "start.py"
 
 
 def read(path: Path) -> str:
@@ -84,6 +88,22 @@ def test_shared_feed_link_hydrates_the_exact_generation_before_rendering_feed() 
     assert "fetch(`/api/web/feed/${id}`" in api
     assert "feed = [exactItem, ...feed.filter((item) => item.id !== exactItem.id)]" in api
     assert "feed = [alreadyLoaded, ...feed.filter((item) => item.id !== requestedFeedId)]" in api
+
+
+def test_telegram_feed_deeplink_uses_same_canonical_video_as_miniapp_feed() -> None:
+    generation = SimpleNamespace(
+        result_url="https://cdn.example/legacy-other-video.mp4",
+        result_urls='["https://cdn.example/correct-feed-video.mp4"]',
+    )
+
+    assert canonical_generation_result_url(generation) == "https://cdn.example/correct-feed-video.mp4"
+
+    start = read(START_HANDLER)
+    repair = "await repair_generation_primary_result_url(session, generation)"
+    render = "await show_feed_card_by_id(message=message, session=session, gen_id=start_payload.target_id)"
+    assert repair in start
+    assert render in start
+    assert start.index(repair) < start.index(render)
 
 
 def test_telegram_webview_video_tiles_prime_a_real_frame_near_viewport() -> None:
