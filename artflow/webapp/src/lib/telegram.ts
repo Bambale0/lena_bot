@@ -2,6 +2,7 @@ import type { StartTarget } from "@/lib/types";
 
 const INIT_DATA_STORAGE_KEY = "apix:telegram-init-data:v2";
 const START_PARAM_STORAGE_KEY = "apix:start-param:v2";
+const DIRECT_START_TARGETS = ["feed", "remix", "prompt", "trend", "task", "profile"] as const;
 
 function webApp(): TelegramWebApp | null {
   return typeof window === "undefined" ? null : window.Telegram?.WebApp ?? null;
@@ -17,6 +18,22 @@ function paramFromUrl(urlValue: string, key: string): string {
   } catch {
     return "";
   }
+}
+
+function directStartTargetFromUrl(urlValue: string): string {
+  if (!urlValue) return "";
+  try {
+    const url = new URL(urlValue, window.location.origin);
+    const hash = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
+    const hashParams = new URLSearchParams(hash);
+    for (const kind of DIRECT_START_TARGETS) {
+      const value = (url.searchParams.get(kind) || hashParams.get(kind) || "").trim();
+      if (value) return `${kind}_${value}`;
+    }
+  } catch {
+    return "";
+  }
+  return "";
 }
 
 function storedValue(key: string): string {
@@ -67,9 +84,14 @@ export function readStartParam(): string {
   const current = window.location.href;
   const early = window.__APIX_EARLY_URL__ || "";
   const candidates = [
+    // Public APIX links use /app?feed=<id> (and the same shape for other targets).
+    // They must outrank sessionStorage, otherwise opening a second shared work in the
+    // same Telegram WebView can resurrect the previously opened feed id.
+    directStartTargetFromUrl(current),
     paramFromUrl(current, "tgWebAppStartParam"),
     new URL(current).searchParams.get("startapp") || "",
     webApp()?.initDataUnsafe?.start_param || "",
+    directStartTargetFromUrl(early),
     paramFromUrl(early, "tgWebAppStartParam"),
     storedValue(START_PARAM_STORAGE_KEY),
   ];
