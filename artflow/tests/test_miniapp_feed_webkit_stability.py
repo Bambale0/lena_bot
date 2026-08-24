@@ -4,6 +4,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PERFORMANCE_CSS = ROOT / "webapp" / "src" / "styles" / "performance.css"
 FEED_SOURCE = ROOT / "webapp" / "src" / "features" / "feed-screen.tsx"
 WEBAPP_API = ROOT / "webapp" / "src" / "lib" / "api.ts"
+TELEGRAM_SOURCE = ROOT / "webapp" / "src" / "lib" / "telegram.ts"
 WEBAPP_MAIN = ROOT / "webapp" / "src" / "main.tsx"
 VIDEO_STABILIZER = ROOT / "webapp" / "src" / "lib" / "feed-video-stabilizer.ts"
 API_BOOTSTRAP = ROOT / "api" / "__init__.py"
@@ -61,6 +62,28 @@ def test_feed_media_filters_do_not_dead_end_on_a_tiny_server_page() -> None:
     assert "!onLoadMore" in feed
     assert "onLoadMore();" in feed
     assert "Ищем работы по фильтру…" in feed
+
+
+def test_shared_feed_link_prefers_fresh_query_target_over_stale_webview_storage() -> None:
+    telegram = read(TELEGRAM_SOURCE)
+
+    assert 'const DIRECT_START_TARGETS = ["feed", "remix", "prompt", "trend", "task", "profile"]' in telegram
+    assert "directStartTargetFromUrl(current)" in telegram
+    assert "directStartTargetFromUrl(early)" in telegram
+    assert "return `${kind}_${value}`" in telegram
+    assert telegram.index("directStartTargetFromUrl(current)") < telegram.index("storedValue(START_PARAM_STORAGE_KEY)")
+
+
+def test_shared_feed_link_hydrates_the_exact_generation_before_rendering_feed() -> None:
+    api = read(WEBAPP_API)
+
+    assert "parseStartTarget(readStartParam())" in api
+    assert 'startTarget?.kind === "feed"' in api
+    assert "const requestedFeedId = Number(startTarget.value)" in api
+    assert "await this.getPublicFeedItem(requestedFeedId, signal)" in api
+    assert "fetch(`/api/web/feed/${id}`" in api
+    assert "feed = [exactItem, ...feed.filter((item) => item.id !== exactItem.id)]" in api
+    assert "feed = [alreadyLoaded, ...feed.filter((item) => item.id !== requestedFeedId)]" in api
 
 
 def test_telegram_webview_video_tiles_prime_a_real_frame_near_viewport() -> None:
