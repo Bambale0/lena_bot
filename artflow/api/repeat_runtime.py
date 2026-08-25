@@ -65,6 +65,16 @@ def _json_list(value: Any) -> list[Any]:
     return list(parsed) if isinstance(parsed, list) else []
 
 
+def _unique_urls(value: Any) -> list[str]:
+    source = value if isinstance(value, (list, tuple)) else [value]
+    result: list[str] = []
+    for item in source:
+        clean = str(item or "").strip()
+        if clean and clean not in result:
+            result.append(clean)
+    return result
+
+
 def _urls_from_image_session(image_session: Any | None) -> list[str]:
     if image_session is None:
         return []
@@ -100,6 +110,39 @@ class _CostView:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._source, name)
+
+
+def install_image_launch_snapshot(image_gen: Any) -> None:
+    """Capture resolved Telegram refs at the deepest common image launch seam."""
+    if getattr(image_gen, "_safe_repeat_launch_snapshot_installed", False):
+        return
+    original_launch = image_gen._launch_session_generation
+
+    async def launch_with_snapshot(**kwargs: Any) -> bool:
+        image_session = kwargs.get("image_session")
+        existing = current_repeat_launch_context()
+        base = {
+            "prompt": kwargs.get("prompt"),
+            "img_service": getattr(image_session, "model", None),
+            "model": getattr(image_session, "model", None),
+            "img_ratio": getattr(image_session, "aspect_ratio", None),
+            "img_quality": getattr(image_session, "quality", None),
+            "img_count": int(getattr(image_session, "count", 1) or 1),
+            "reference_images": _unique_urls(kwargs.get("reference_url")),
+            "parent_generation_id": kwargs.get("parent_generation_id"),
+            "source_feed_gen_id": kwargs.get("source_feed_gen_id"),
+            "action_type": str(getattr(kwargs.get("action_type"), "value", kwargs.get("action_type")) or "initial"),
+        }
+        if existing is not None:
+            base.update(existing.input_params_extra)
+        with repeat_launch_context(
+            input_params_extra=base,
+            credits_override=existing.credits_override if existing is not None else None,
+        ):
+            return await original_launch(**kwargs)
+
+    image_gen._launch_session_generation = launch_with_snapshot
+    image_gen._safe_repeat_launch_snapshot_installed = True
 
 
 def install_repeat_runtime(repository: Any) -> None:
@@ -177,7 +220,10 @@ def install_repeat_runtime(repository: Any) -> None:
         if generation is None:
             return
         payload = _json_dict(getattr(generation, "input_params", None))
-        if str(getattr(getattr(generation, "gen_type", None), "value", getattr(generation, "gen_type", ""))) == "image":
+        gen_type = str(
+            getattr(getattr(generation, "gen_type", None), "value", getattr(generation, "gen_type", ""))
+        )
+        if gen_type == "image":
             provider_id = str(task_id or "").strip()
             _merge_aliases(payload, payload.get("public_task_id"), provider_id)
             if provider_id.startswith("web:"):
@@ -185,7 +231,7 @@ def install_repeat_runtime(repository: Any) -> None:
             generation.input_params = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
             await session.commit()
 
-    async def resolve_image_model_cost_with_override(*args, **kwargs):
+    async def resolve_image_model_cost_with_override(*args: Any, **kwargs: Any):
         result = await original_resolve_image_model_cost(*args, **kwargs)
         context = current_repeat_launch_context()
         if result is None or context is None or context.credits_override is None:
