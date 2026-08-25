@@ -48,7 +48,11 @@ def test_pinterest_provider_prompt_is_explicit_about_reference_roles() -> None:
 @pytest.mark.asyncio
 async def test_provider_wrapper_sends_scene_identity_then_extra_identity_evidence() -> None:
     original = AsyncMock(return_value=SimpleNamespace(task_id="task"))
-    service = SimpleNamespace(generate_image=original)
+    service = SimpleNamespace(
+        generate_image=original,
+        ensure_provider_safe_png_url=lambda url: url,
+        local_upload_path_from_url=lambda _url: None,
+    )
     install_pinterest_provider_contract(service)
     contract = build_pinterest_contract(
         scene_reference="https://example.test/scene.jpg",
@@ -75,4 +79,41 @@ async def test_provider_wrapper_sends_scene_identity_then_extra_identity_evidenc
         "https://example.test/scene.jpg",
         "https://example.test/person.jpg",
         "https://example.test/evidence.jpg",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_provider_wrapper_normalizes_every_pinterest_reference() -> None:
+    original = AsyncMock(return_value=SimpleNamespace(task_id="task"))
+    normalized: list[str] = []
+
+    def normalize(url: str) -> str:
+        normalized.append(url)
+        return url.replace(".heic", ".png").replace(".avif", ".png")
+
+    service = SimpleNamespace(
+        generate_image=original,
+        ensure_provider_safe_png_url=normalize,
+        local_upload_path_from_url=lambda _url: None,
+    )
+    install_pinterest_provider_contract(service)
+    contract = build_pinterest_contract(
+        scene_reference="https://example.test/scene.heic",
+        identity_reference="https://example.test/person.avif",
+        identity_evidence=["https://example.test/person-2.webp"],
+        trend_id=55,
+    )
+
+    with pinterest_provider_context(contract):
+        await service.generate_image("model", "hidden prompt")
+
+    assert normalized == [
+        "https://example.test/scene.heic",
+        "https://example.test/person.avif",
+        "https://example.test/person-2.webp",
+    ]
+    assert original.await_args.kwargs["image_url"] == [
+        "https://example.test/scene.png",
+        "https://example.test/person.png",
+        "https://example.test/person-2.webp",
     ]
