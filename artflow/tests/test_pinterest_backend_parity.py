@@ -9,9 +9,9 @@ from pydantic import ValidationError
 from api.pinterest_contract import (
     PINTEREST_PROMPT_MARKER,
     build_pinterest_contract,
-    is_pinterest_prompt_source,
     install_pinterest_persistence_contract,
     install_pinterest_provider_contract,
+    is_pinterest_prompt_source,
     pinterest_provider_context,
     pinterest_provider_prompt,
 )
