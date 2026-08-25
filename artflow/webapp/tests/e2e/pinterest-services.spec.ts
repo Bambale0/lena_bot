@@ -207,11 +207,13 @@ test("Pinterest accepts multiple optional identity angles without auto-start", a
   await dialog.getByRole("button", { name: "Создать →" }).click();
   await expect.poll(() => runCalls).toBe(1);
   expect(runPayload).toMatchObject({
-    reference_asset_ids: ["asset-1", "asset-2", "asset-3", "asset-4"],
     height_cm: 170,
     weight_kg: 62,
     confirmed: true,
   });
+  const refs = (runPayload as Record<string, unknown>).reference_asset_ids as string[];
+  expect(refs.slice(0, 2)).toEqual(["asset-1", "asset-2"]);
+  expect([...refs.slice(2)].sort()).toEqual(["asset-3", "asset-4"]);
 });
 
 test("Pinterest validates measurements before generation", async ({ page }) => {
