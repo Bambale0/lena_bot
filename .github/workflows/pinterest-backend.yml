@@ -8,8 +8,10 @@ on:
       - "artflow/api/pinterest_service_contract.py"
       - "artflow/api/pinterest_service_routes.py"
       - "artflow/api/miniapp_routes.py"
+      - "artflow/bot/ui/main_menu.py"
       - "artflow/tests/test_pinterest_backend_parity.py"
       - "artflow/tests/test_pinterest_reference_contract.py"
+      - "artflow/tests/test_pinterest_telegram_entry.py"
       - ".github/workflows/pinterest-backend.yml"
   push:
     branches: [main]
@@ -19,8 +21,10 @@ on:
       - "artflow/api/pinterest_service_contract.py"
       - "artflow/api/pinterest_service_routes.py"
       - "artflow/api/miniapp_routes.py"
+      - "artflow/bot/ui/main_menu.py"
       - "artflow/tests/test_pinterest_backend_parity.py"
       - "artflow/tests/test_pinterest_reference_contract.py"
+      - "artflow/tests/test_pinterest_telegram_entry.py"
       - ".github/workflows/pinterest-backend.yml"
   workflow_dispatch:
 
@@ -52,18 +56,22 @@ jobs:
         run: |
           python -m py_compile \
             api/pinterest_service_contract.py \
-            api/pinterest_service_routes.py
+            api/pinterest_service_routes.py \
+            bot/ui/main_menu.py
 
       - name: Ruff Pinterest service
         run: |
           ruff check \
             api/pinterest_service_contract.py \
             api/pinterest_service_routes.py \
+            bot/ui/main_menu.py \
             tests/test_pinterest_backend_parity.py \
-            tests/test_pinterest_reference_contract.py
+            tests/test_pinterest_reference_contract.py \
+            tests/test_pinterest_telegram_entry.py
 
       - name: Pinterest service regression tests
         run: |
           pytest -q \
             tests/test_pinterest_backend_parity.py \
-            tests/test_pinterest_reference_contract.py
+            tests/test_pinterest_reference_contract.py \
+            tests/test_pinterest_telegram_entry.py
