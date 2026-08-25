@@ -21,6 +21,7 @@ apply_provider_spec_overrides()
 # new requests through the current KIE Grok Imagine Video 1.5 Preview contract.
 from api import image_service as _image_service
 from api import kieai_client as _kieai_client
+from api.feed_repeat_contract import install_feed_repeat_contract
 from api.grok15_adapter import install_grok15_adapter
 from api.minimax_h3_adapter import (
     install_minimax_h3_keyboard_support,
@@ -92,6 +93,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_repository_model_labels(repository)
         install_feed_relevance(repository)
         install_feed_media_viewer(module)
+        install_feed_repeat_contract(module)
         install_miniapp_prompt_privacy(module)
         install_pinterest_miniapp_contract(module)
         install_video_request_compat(module)
@@ -141,6 +143,7 @@ else:
     install_repository_model_labels(repository)
     install_feed_relevance(repository)
     install_feed_media_viewer(miniapp_routes)
+    install_feed_repeat_contract(miniapp_routes)
     install_miniapp_prompt_privacy(miniapp_routes)
     install_pinterest_miniapp_contract(miniapp_routes)
     install_video_request_compat(miniapp_routes)
