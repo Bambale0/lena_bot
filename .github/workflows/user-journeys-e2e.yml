@@ -51,6 +51,9 @@ jobs:
       - name: Run exactly 300 user journeys
         run: npm run test:e2e:user-journeys
 
+      - name: Repeat modal deterministic regression
+        run: npx -y @playwright/test test tests/e2e/feed-remix-runner.spec.ts --project=Desktop
+
       - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
