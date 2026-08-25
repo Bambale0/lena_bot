@@ -24,11 +24,10 @@ def _image_model_keys(routes: Any) -> set[str]:
 
 
 def _patch_router_endpoint(routes: Any, original: Any, replacement: Any) -> None:
-    """Replace the FastAPI endpoint captured by the decorator as well as the module symbol."""
+    """Swap only the callable; preserve FastAPI's already-built body/dependency schema."""
     for route in getattr(routes.router, "routes", []):
         if getattr(route, "endpoint", None) is not original:
             continue
-        route.endpoint = replacement
         dependant = getattr(route, "dependant", None)
         if dependant is not None:
             dependant.call = replacement
@@ -99,6 +98,9 @@ def install_feed_repeat_contract(routes: Any) -> None:
             surface=surface,
         )
 
+    # Keep this annotation for any later introspection, but do not make FastAPI
+    # rebuild the route: its original dependant already knows this is JSON body.
+    remix_feed_post_with_reference_contract.__annotations__["body"] = routes.FeedRemixRequest
     routes.remix_feed_post = remix_feed_post_with_reference_contract
     _patch_router_endpoint(routes, original, remix_feed_post_with_reference_contract)
     routes._feed_repeat_contract_installed = True
