@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from inspect import signature
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, create_autospec
 
@@ -164,13 +165,23 @@ async def test_private_recipe_is_redacted_before_generation_and_session_commits(
         )
         await repository.update_image_session_last_prompt("session", 5, "SECRET PRIVATE RECIPE")
 
-    gen_args = create_generation.await_args.args
-    gen_kwargs = create_generation.await_args.kwargs
-    assert gen_args[4] != "SECRET PRIVATE RECIPE"
-    assert gen_kwargs["input_params"]["reference_contract"] == "pinterest_scene_identity"
-    assert gen_kwargs["input_params"]["prompt_hidden"] is True
-    assert create_session.await_args.kwargs["base_prompt"] != "SECRET PRIVATE RECIPE"
-    assert update_last_prompt.await_args.args[2] != "SECRET PRIVATE RECIPE"
+    generation_call = signature(repository_module.create_generation).bind_partial(
+        *create_generation.await_args.args,
+        **create_generation.await_args.kwargs,
+    )
+    session_call = signature(repository_module.create_image_session).bind_partial(
+        *create_session.await_args.args,
+        **create_session.await_args.kwargs,
+    )
+    last_prompt_call = signature(repository_module.update_image_session_last_prompt).bind_partial(
+        *update_last_prompt.await_args.args,
+        **update_last_prompt.await_args.kwargs,
+    )
+    assert generation_call.arguments["prompt"] != "SECRET PRIVATE RECIPE"
+    assert generation_call.arguments["input_params"]["reference_contract"] == "pinterest_scene_identity"
+    assert generation_call.arguments["input_params"]["prompt_hidden"] is True
+    assert session_call.arguments["base_prompt"] != "SECRET PRIVATE RECIPE"
+    assert last_prompt_call.arguments["last_prompt"] != "SECRET PRIVATE RECIPE"
 
 
 def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
