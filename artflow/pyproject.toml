@@ -8,6 +8,4 @@ ignore = ["E402", "E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "api/assistant_service.py" = ["F401"]
-"api/pinterest_contract.py" = ["I001"]
 "api/suno_full_service.py" = ["I001"]
-"bot/handlers/repeat_safe.py" = ["I001"]
