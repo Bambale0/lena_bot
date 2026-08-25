@@ -19,6 +19,7 @@ apply_provider_spec_overrides()
 
 # Keep legacy APIX Grok keys compatible with saved sessions while routing all
 # new requests through the current KIE Grok Imagine Video 1.5 Preview contract.
+from api import image_service as _image_service
 from api import kieai_client as _kieai_client
 from api.grok15_adapter import install_grok15_adapter
 from api.minimax_h3_adapter import (
@@ -29,6 +30,11 @@ from api.minimax_h3_adapter import (
 from api.minimax_h3_pricing import install_minimax_h3_seed_rows
 from api.minimax_h3_product_surface import install_minimax_h3_product_surface
 from api.minimax_h3_runtime_guards import install_minimax_h3_runtime_guards
+from api.pinterest_contract import (
+    install_pinterest_miniapp_contract,
+    install_pinterest_provider_contract,
+)
+from api.repeat_runtime import install_repeat_runtime
 from api.seedance25_adapter import (
     install_seedance25_keyboard_support,
     install_seedance25_miniapp,
@@ -39,6 +45,9 @@ from api.seedance25_product_surface import install_seedance25_product_surface
 from api.suno_source_audio_routes import install_suno_source_audio_routes
 from api.video_runtime_fixes import install_video_runtime_fixes
 from api.video_ui_capability_guards import strip_seedance25_omni_id_controls
+from bot.keyboards import models as _repeat_keyboards
+from bot.services.safe_repeat_ui import install_safe_repeat_keyboard_support
+from db import repository as _repeat_repository
 
 install_grok15_adapter(_kieai_client)
 install_seedance25_seed_rows()
@@ -52,6 +61,9 @@ install_minimax_h3_keyboard_support()
 install_minimax_h3_product_surface()
 install_video_runtime_fixes()
 strip_seedance25_omni_id_controls()
+install_repeat_runtime(_repeat_repository)
+install_safe_repeat_keyboard_support(_repeat_keyboards)
+install_pinterest_provider_contract(_image_service)
 
 
 class _MiniappLabelLoader(importlib.abc.Loader):
@@ -81,6 +93,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_feed_relevance(repository)
         install_feed_media_viewer(module)
         install_miniapp_prompt_privacy(module)
+        install_pinterest_miniapp_contract(module)
         install_video_request_compat(module)
         install_seedance25_miniapp(module)
         install_minimax_h3_miniapp(module)
@@ -129,6 +142,7 @@ else:
     install_feed_relevance(repository)
     install_feed_media_viewer(miniapp_routes)
     install_miniapp_prompt_privacy(miniapp_routes)
+    install_pinterest_miniapp_contract(miniapp_routes)
     install_video_request_compat(miniapp_routes)
     install_seedance25_miniapp(miniapp_routes)
     install_minimax_h3_miniapp(miniapp_routes)
