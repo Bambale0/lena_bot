@@ -93,7 +93,6 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_repository_model_labels(repository)
         install_feed_relevance(repository)
         install_feed_media_viewer(module)
-        install_feed_repeat_contract(module)
         install_miniapp_prompt_privacy(module)
         install_pinterest_miniapp_contract(module)
         install_video_request_compat(module)
@@ -104,6 +103,9 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_suno_source_audio_routes(module)
         strip_seedance25_omni_id_controls(module)
         install_admin_model_visibility(module)
+        # Install after every adapter so FastAPI keeps the final route schema and
+        # only the execution callable is wrapped.
+        install_feed_repeat_contract(module)
         if self.finder in sys.meta_path:
             sys.meta_path.remove(self.finder)
 
@@ -143,7 +145,6 @@ else:
     install_repository_model_labels(repository)
     install_feed_relevance(repository)
     install_feed_media_viewer(miniapp_routes)
-    install_feed_repeat_contract(miniapp_routes)
     install_miniapp_prompt_privacy(miniapp_routes)
     install_pinterest_miniapp_contract(miniapp_routes)
     install_video_request_compat(miniapp_routes)
@@ -154,3 +155,4 @@ else:
     install_suno_source_audio_routes(miniapp_routes)
     strip_seedance25_omni_id_controls(miniapp_routes)
     install_admin_model_visibility(miniapp_routes)
+    install_feed_repeat_contract(miniapp_routes)
