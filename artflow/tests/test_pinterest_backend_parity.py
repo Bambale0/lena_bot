@@ -340,7 +340,7 @@ async def test_service_run_has_no_prompt_or_trend_dependency(monkeypatch: pytest
     assert contract["service_recipe_version"] == PINTEREST_RECIPE_VERSION
     assert contract["service_price_credits"] == 2.0
     assert "trend_id" not in contract
-    assert captured["surface"] == "web"
+    assert captured["surface"] == "miniapp"
     assert result["price_credits"] == 2.0
 
 
