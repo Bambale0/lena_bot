@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import { copyTrendLink, openTrendRunner } from "@/features/trend-runner";
 import { MiniAppApi } from "@/lib/api";
 import { readTelegramInitData } from "@/lib/telegram";
@@ -340,7 +341,8 @@ function TrendsScreen({
       .catch(() => setIsAdmin(false));
   }, [client]);
 
-  const kindFiltered = filter === "all" ? items : items.filter((item) => item.kind === filter);
+  const visibleItems = useMemo(() => items.filter((item) => !isPinterestServiceTrend(item)), [items]);
+  const kindFiltered = filter === "all" ? visibleItems : visibleItems.filter((item) => item.kind === filter);
   const filtered = categoryFilter === "all" ? kindFiltered : kindFiltered.filter((item) => (item.category || "featured") === categoryFilter);
   const availableCategories = TREND_CATEGORIES.filter((category) => kindFiltered.some((item) => (item.category || "featured") === category.value));
 
