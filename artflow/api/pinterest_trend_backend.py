@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from api.image_service import MODEL_ASPECT_RATIOS, ImageModel
@@ -24,14 +24,23 @@ PINTEREST_MODEL = ImageModel.NANO_BANANA_PRO.value
 PINTEREST_QUALITY = "2K"
 PINTEREST_DEFAULT_RATIO = "9:16"
 PINTEREST_SERVICE_ALIAS_ID = 0
+PINTEREST_SERVICE_ID = "pinterest"
+PINTEREST_SERVICE_TITLE = "Pinterest AI"
+PINTEREST_SERVICE_DESCRIPTION = "Повторяй Pinterest-сцены со своей внешностью"
+PINTEREST_SERVICE_BADGE = "Новинка"
 
 
-class PinterestTrendRunRequest(BaseModel):
+class PinterestServiceRunRequest(BaseModel):
     reference_asset_ids: list[str] = Field(min_length=2, max_length=MAX_PINTEREST_REFERENCES)
     height_cm: int = Field(ge=120, le=230)
     weight_kg: int = Field(ge=30, le=250)
     confirmed: bool
     idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+# Backward-compatible symbol for older tests/imports while the public product is
+# now a service and no longer needs a trend id to launch.
+PinterestTrendRunRequest = PinterestServiceRunRequest
 
 
 def _dedupe(values: list[str]) -> list[str]:
@@ -85,7 +94,7 @@ def _scene_matched_ratio(scene_url: str, configured_ratio: str | None) -> str:
 
 
 async def _find_pinterest_service_trend(routes: Any, session: Any) -> Any:
-    """Resolve the canonical published Pinterest service without list pagination."""
+    """Resolve the canonical hidden Pinterest recipe without public list pagination."""
     result = await session.execute(
         routes.select(routes.UserPrompt)
         .where(routes.UserPrompt.tags.any(routes.TREND_TAG))
@@ -103,6 +112,34 @@ async def _resolve_pinterest_trend(routes: Any, session: Any, trend_id: int) -> 
     return await routes._get_public_trend(session, trend_id)
 
 
+async def _service_price_credits(routes: Any, session: Any) -> float:
+    model_cost = await routes.repo.resolve_image_model_cost(
+        session,
+        PINTEREST_MODEL,
+        quality=PINTEREST_QUALITY,
+    )
+    if not model_cost or not getattr(model_cost, "is_active", True):
+        raise HTTPException(status_code=503, detail="Pinterest service pricing is unavailable")
+    return routes._credits_out(getattr(model_cost, "credits", 0))
+
+
+async def _find_idempotent_service_run(
+    routes: Any,
+    session: Any,
+    *,
+    user_id: int,
+    idempotency_key: str,
+) -> Any | None:
+    marker = json.dumps({"pinterest_service_run_key": idempotency_key}, separators=(",", ":"))[1:-1]
+    result = await session.execute(
+        routes.select(routes.Generation)
+        .where(routes.Generation.user_id == user_id, routes.Generation.input_params.like(f"%{marker}%"))
+        .order_by(routes.desc(routes.Generation.created_at), routes.desc(routes.Generation.id))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def _patch_pinterest_run_snapshot(
     routes: Any,
     *,
@@ -111,6 +148,7 @@ async def _patch_pinterest_run_snapshot(
     idempotency_key: str,
     asset_ids: list[str],
     strict: bool,
+    source: str,
 ) -> None:
     generation = await routes.repo.get_generation_by_id(session, generation_id)
     if generation is None:
@@ -123,7 +161,6 @@ async def _patch_pinterest_run_snapshot(
         payload = {}
     payload.update(
         {
-            "trend_run_key": idempotency_key,
             "pinterest_reference_asset_ids": list(asset_ids),
             "pinterest_manual_confirm": bool(strict),
             "prompt_hidden": True,
@@ -131,6 +168,17 @@ async def _patch_pinterest_run_snapshot(
             "feed_prompt_visible": False,
         }
     )
+    if source == "service":
+        payload.update(
+            {
+                "source": "service",
+                "service_id": PINTEREST_SERVICE_ID,
+                "pinterest_service_run_key": idempotency_key,
+            }
+        )
+        payload.pop("trend_run_key", None)
+    else:
+        payload["trend_run_key"] = idempotency_key
     generation.input_params = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     await session.commit()
 
@@ -148,6 +196,7 @@ async def _launch_pinterest(
     session: Any,
     user: Any,
     strict: bool,
+    source: str = "trend",
 ) -> dict[str, Any]:
     if not is_pinterest_prompt_source(trend):
         raise HTTPException(status_code=422, detail="Этот шаблон не является Pinterest-сервисом")
@@ -167,7 +216,7 @@ async def _launch_pinterest(
     if references[0] == references[1]:
         raise HTTPException(status_code=422, detail="Сцена и ваше фото должны быть разными")
 
-    # The reference implementation deliberately locks Pinterest to Banana Pro.
+    # The product contract deliberately locks Pinterest to Banana Pro.
     # Fail closed instead of silently running another provider/model contract.
     if str(getattr(trend, "model", "") or "") != PINTEREST_MODEL:
         raise HTTPException(
@@ -176,11 +225,19 @@ async def _launch_pinterest(
         )
     await routes._validated_model(session, PINTEREST_MODEL, "image")
 
-    existing = await routes._find_idempotent_trend_run(
-        session,
-        user_id=user.id,
-        idempotency_key=idempotency_key,
-    )
+    if source == "service":
+        existing = await _find_idempotent_service_run(
+            routes,
+            session,
+            user_id=user.id,
+            idempotency_key=idempotency_key,
+        )
+    else:
+        existing = await routes._find_idempotent_trend_run(
+            session,
+            user_id=user.id,
+            idempotency_key=idempotency_key,
+        )
     if existing is not None:
         await session.refresh(user)
         return {
@@ -203,6 +260,15 @@ async def _launch_pinterest(
         weight_kg=weight_kg,
         confirmed=confirmed,
     )
+    if source == "service":
+        contract.update(
+            {
+                "source": "service",
+                "service_id": PINTEREST_SERVICE_ID,
+                "service_recipe_id": int(trend.id),
+            }
+        )
+        contract.pop("trend_id", None)
 
     # Import dynamically so this always uses the Mini App function after all
     # API bootstrap wrappers (prompt privacy + Pinterest provider contract).
@@ -233,6 +299,7 @@ async def _launch_pinterest(
         idempotency_key=idempotency_key,
         asset_ids=reference_asset_ids,
         strict=strict,
+        source=source,
     )
     await session.refresh(user)
     return {
@@ -249,7 +316,7 @@ def _remove_route(router: Any, path: str, method: str) -> None:
 
 
 def install_pinterest_trend_backend(routes: Any) -> None:
-    """Install Pinterest-specific backend after ``api.trends_routes`` loads."""
+    """Install the Pinterest service plus legacy trend compatibility routes."""
     if getattr(routes, "_pinterest_trend_backend_installed", False):
         return
 
@@ -262,14 +329,110 @@ def install_pinterest_trend_backend(routes: Any) -> None:
         user=Depends(routes.get_miniapp_user),
     ) -> dict[str, Any]:
         del user
-        trend = await _find_pinterest_service_trend(routes, session)
-        return routes.trend_public_payload(trend)
+        await _find_pinterest_service_trend(routes, session)
+        price_credits = await _service_price_credits(routes, session)
+        return {
+            "id": PINTEREST_SERVICE_ID,
+            "title": PINTEREST_SERVICE_TITLE,
+            "description": PINTEREST_SERVICE_DESCRIPTION,
+            "badge": PINTEREST_SERVICE_BADGE,
+            "price_credits": price_credits,
+            "quality": PINTEREST_QUALITY,
+            "max_identity_angles": MAX_PINTEREST_IDENTITY_ANGLES,
+            "height_min_cm": 120,
+            "height_max_cm": 230,
+            "weight_min_kg": 30,
+            "weight_max_kg": 250,
+            "available": True,
+        }
 
     routes.router.add_api_route(
         "/services/pinterest",
         get_pinterest_service,
         methods=["GET"],
         name="get_pinterest_service",
+    )
+
+    async def upload_pinterest_reference(
+        file: UploadFile = File(...),
+        user=Depends(routes.get_miniapp_user),
+    ) -> routes.TrendUploadResponse:
+        data = await file.read()
+        if not data:
+            raise HTTPException(status_code=422, detail="Empty photo")
+        if len(data) > routes.MAX_TREND_USER_PHOTO_BYTES:
+            raise HTTPException(status_code=413, detail="Photo is too large (max 30 MB)")
+        content_type = str(file.content_type or "application/octet-stream").split(";", 1)[0].lower()
+        filename = str(file.filename or "photo")[:180]
+        if not routes.image_kind_from_upload(data, content_type, filename):
+            raise HTTPException(status_code=422, detail="Upload one JPEG, PNG, WebP, HEIC, HEIF or AVIF photo")
+        url = routes.save_public_file(data, content_type, subdir="services/pinterest")
+        asset_id = routes.sign_uploaded_asset(
+            user_id=user.id,
+            url=url,
+            kind="image",
+            filename=filename,
+            content_type=content_type,
+            size=len(data),
+        )
+        return routes.TrendUploadResponse(
+            asset_id=asset_id,
+            url=url,
+            kind="image",
+            filename=filename,
+            content_type=content_type,
+            size=len(data),
+        )
+
+    routes.router.add_api_route(
+        "/services/pinterest/upload",
+        upload_pinterest_reference,
+        methods=["POST"],
+        response_model=routes.TrendUploadResponse,
+        name="upload_pinterest_reference",
+    )
+
+    async def run_pinterest_service(
+        body: PinterestServiceRunRequest,
+        session=Depends(routes.get_session),
+        user=Depends(routes.get_miniapp_user),
+    ) -> dict[str, Any]:
+        if body.confirmed is not True:
+            raise HTTPException(status_code=422, detail="Подтвердите генерацию кнопкой «Создать»")
+        if len(set(body.reference_asset_ids)) != len(body.reference_asset_ids):
+            raise HTTPException(status_code=422, detail="Не добавляйте одно и то же фото несколько раз")
+
+        recipe = await _find_pinterest_service_trend(routes, session)
+        assets: list[dict[str, Any]] = []
+        for asset_id in body.reference_asset_ids:
+            asset = routes.verify_uploaded_asset(asset_id, user_id=user.id, expected_kind="image")
+            asset["asset_id"] = asset_id
+            assets.append(asset)
+        urls = [str(asset.get("url") or "").strip() for asset in assets]
+        if any(not item for item in urls):
+            raise HTTPException(status_code=422, detail="Дождитесь окончания загрузки всех фото")
+
+        return await _launch_pinterest(
+            routes,
+            trend=recipe,
+            reference_urls=urls,
+            reference_asset_ids=list(body.reference_asset_ids),
+            height_cm=body.height_cm,
+            weight_kg=body.weight_kg,
+            confirmed=True,
+            idempotency_key=body.idempotency_key,
+            session=session,
+            user=user,
+            strict=True,
+            source="service",
+        )
+
+    routes.router.add_api_route(
+        "/services/pinterest/run",
+        run_pinterest_service,
+        methods=["POST"],
+        status_code=202,
+        name="run_pinterest_service",
     )
 
     async def run_trend_with_pinterest_compat(
@@ -282,9 +445,8 @@ def install_pinterest_trend_backend(routes: Any) -> None:
         if not is_pinterest_prompt_source(trend):
             return await original_run(trend_id=trend_id, body=body, session=session, user=user)
 
-        # Compatibility for the already-deployed one-photo runner: the curated
-        # trend preview is the scene and the uploaded user asset is identity.
-        # New clients should use /pinterest-run below for the full 2..7-ref flow.
+        # Legacy compatibility only. New clients use /services/pinterest/* and do
+        # not depend on public trend ids or the generic trend runner.
         asset = routes.verify_uploaded_asset(body.asset_id, user_id=user.id, expected_kind="image")
         scene_url = str(getattr(trend, "preview_url", "") or "").strip()
         identity_url = str(asset.get("url") or "").strip()
@@ -304,6 +466,7 @@ def install_pinterest_trend_backend(routes: Any) -> None:
             session=session,
             user=user,
             strict=False,
+            source="trend",
         )
 
     routes.router.add_api_route(
@@ -347,6 +510,7 @@ def install_pinterest_trend_backend(routes: Any) -> None:
             session=session,
             user=user,
             strict=True,
+            source="trend",
         )
 
     routes.router.add_api_route(
@@ -356,8 +520,12 @@ def install_pinterest_trend_backend(routes: Any) -> None:
         status_code=202,
         name="run_pinterest_trend",
     )
+    routes.PinterestServiceRunRequest = PinterestServiceRunRequest
     routes.PinterestTrendRunRequest = PinterestTrendRunRequest
     routes.PINTEREST_SERVICE_ALIAS_ID = PINTEREST_SERVICE_ALIAS_ID
+    routes.PINTEREST_SERVICE_ID = PINTEREST_SERVICE_ID
     routes.get_pinterest_service = get_pinterest_service
+    routes.upload_pinterest_reference = upload_pinterest_reference
+    routes.run_pinterest_service = run_pinterest_service
     routes.run_pinterest_trend = run_pinterest_trend
     routes._pinterest_trend_backend_installed = True
