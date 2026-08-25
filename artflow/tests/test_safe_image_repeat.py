@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from api.repeat_runtime import current_repeat_launch_context
 from bot.handlers import repeat_safe
 from db import repeat_lookup
 
@@ -34,6 +35,17 @@ def _call(data: str) -> SimpleNamespace:
         from_user=SimpleNamespace(id=777),
         message=SimpleNamespace(answer=AsyncMock(), edit_text=AsyncMock()),
         answer=AsyncMock(),
+    )
+
+
+def _image_source(**extra) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=42,
+        user_id=5,
+        model="nano-banana-pro",
+        gen_type=SimpleNamespace(value="image"),
+        prompt="portrait prompt",
+        **extra,
     )
 
 
@@ -99,12 +111,7 @@ def test_repeat_router_registers_exact_confirm_cancel_before_open_compat() -> No
 async def test_old_and_new_repeat_callbacks_open_confirmation_without_launch(callback_data: str) -> None:
     state = FakeState()
     call = _call(callback_data)
-    generation = SimpleNamespace(
-        id=42,
-        user_id=5,
-        model="nano-banana-pro",
-        gen_type=SimpleNamespace(value="image"),
-        prompt="portrait prompt",
+    generation = _image_source(
         credits_spent=2.5,
         image_session_id=None,
         source_feed_gen_id=None,
@@ -115,7 +122,9 @@ async def test_old_and_new_repeat_callbacks_open_confirmation_without_launch(cal
 
     with patch.object(repeat_safe, "get_repeat_task_by_any_id", AsyncMock(return_value=generation)), patch.object(
         repeat_safe.repo, "resolve_image_model_cost", AsyncMock(return_value=cost)
-    ), patch.object(repeat_safe.image_gen, "_launch_session_generation", AsyncMock()) as launch:
+    ), patch.object(repeat_safe, "_is_admin", return_value=False), patch.object(
+        repeat_safe.image_gen, "_launch_session_generation", AsyncMock()
+    ) as launch:
         await repeat_safe.open_repeat(call, AsyncMock(), state, user, AsyncMock())
 
     launch.assert_not_awaited()
@@ -140,27 +149,37 @@ async def test_confirm_launches_once_and_carries_repeat_parent_metadata() -> Non
             "repeat_source_feed_gen_id": 100,
             "repeat_confirm_key": "repeat-confirm-abc",
             "repeat_cost": 2.5,
+            "repeat_is_admin": False,
         }
     )
     call = _call("repeat_run_confirm_img_abc")
-    source = SimpleNamespace(id=42, user_id=5, model="nano-banana-pro", prompt="portrait prompt")
+    source = _image_source()
     user = SimpleNamespace(id=5, tg_id=777, credits=10)
     image_session = SimpleNamespace(id=501, model="nano-banana-pro", mode="text")
+    captured = {}
+
+    async def launch(**kwargs):
+        captured["kwargs"] = kwargs
+        captured["context"] = current_repeat_launch_context()
+        return True
 
     with patch.object(repeat_safe.repo, "get_generation_by_id", AsyncMock(return_value=source)), patch.object(
         repeat_safe, "find_repeat_by_confirm_key", AsyncMock(return_value=None)
     ), patch.object(repeat_safe.repo, "create_image_session", AsyncMock(return_value=image_session)), patch.object(
-        repeat_safe.image_gen, "_launch_session_generation", AsyncMock(return_value=True)
-    ) as launch:
+        repeat_safe.image_gen, "_launch_session_generation", AsyncMock(side_effect=launch)
+    ) as launch_mock:
         await repeat_safe.confirm_repeat(call, AsyncMock(), state, user, AsyncMock())
 
-    launch.assert_awaited_once()
-    kwargs = launch.await_args.kwargs
+    launch_mock.assert_awaited_once()
+    kwargs = captured["kwargs"]
+    context = captured["context"]
     assert kwargs["parent_generation_id"] == 42
     assert kwargs["source_feed_gen_id"] == 100
     assert kwargs["action_type"].value == "repeat"
-    assert kwargs["input_params_extra"]["repeat_source_task_id"] == "img_abc"
-    assert kwargs["input_params_extra"]["repeat_confirm_key"] == "repeat-confirm-abc"
+    assert context is not None
+    assert context.input_params_extra["repeat_source_task_id"] == "img_abc"
+    assert context.input_params_extra["repeat_confirm_key"] == "repeat-confirm-abc"
+    assert context.credits_override is None
     call.answer.assert_awaited()
 
 
@@ -175,7 +194,7 @@ async def test_confirm_is_idempotent_for_double_click() -> None:
     )
     call = _call("repeat_run_confirm_img_abc")
     user = SimpleNamespace(id=5, tg_id=777, credits=10)
-    existing = SimpleNamespace(id=99, task_id="provider-task")
+    existing = SimpleNamespace(id=99, task_id="provider-task", status=SimpleNamespace(value="processing"))
 
     with patch.object(repeat_safe, "find_repeat_by_confirm_key", AsyncMock(return_value=existing)), patch.object(
         repeat_safe.image_gen, "_launch_session_generation", AsyncMock()
@@ -200,7 +219,7 @@ async def test_missing_required_references_block_confirm() -> None:
         }
     )
     call = _call("repeat_run_confirm_img_abc")
-    source = SimpleNamespace(id=42, user_id=5, model="test/i2i-only", prompt="same prompt")
+    source = _image_source(model="test/i2i-only", prompt="same prompt")
     user = SimpleNamespace(id=5, tg_id=777, credits=10)
 
     with patch.object(repeat_safe.repo, "get_generation_by_id", AsyncMock(return_value=source)), patch.object(
@@ -210,3 +229,37 @@ async def test_missing_required_references_block_confirm() -> None:
 
     launch.assert_not_awaited()
     call.answer.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_repeat_uses_zero_credit_override_only_after_confirm() -> None:
+    state = FakeState(
+        {
+            "repeat_source_generation_id": 42,
+            "repeat_raw_task_id": "img_admin",
+            "repeat_model_key": "nano-banana-pro",
+            "repeat_prompt": "same prompt",
+            "repeat_reference_images": [],
+            "repeat_confirm_key": "repeat-admin",
+            "repeat_is_admin": True,
+            "repeat_cost": 0,
+        }
+    )
+    call = _call("repeat_run_confirm_img_admin")
+    source = _image_source()
+    user = SimpleNamespace(id=5, tg_id=777, credits=0)
+    image_session = SimpleNamespace(id=501)
+    captured = {}
+
+    async def launch(**kwargs):
+        captured["context"] = current_repeat_launch_context()
+        return True
+
+    with patch.object(repeat_safe.repo, "get_generation_by_id", AsyncMock(return_value=source)), patch.object(
+        repeat_safe, "find_repeat_by_confirm_key", AsyncMock(return_value=None)
+    ), patch.object(repeat_safe.repo, "create_image_session", AsyncMock(return_value=image_session)), patch.object(
+        repeat_safe.image_gen, "_launch_session_generation", AsyncMock(side_effect=launch)
+    ):
+        await repeat_safe.confirm_repeat(call, AsyncMock(), state, user, AsyncMock())
+
+    assert captured["context"].credits_override == 0.0
