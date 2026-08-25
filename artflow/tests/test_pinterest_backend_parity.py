@@ -20,6 +20,8 @@ from api.pinterest_trend_backend import (
     MAX_PINTEREST_REFERENCES,
     PINTEREST_MODEL,
     PINTEREST_SERVICE_ALIAS_ID,
+    PINTEREST_SERVICE_ID,
+    PinterestServiceRunRequest,
     PinterestTrendRunRequest,
 )
 from db import repository as repository_module
@@ -191,8 +193,8 @@ async def test_private_recipe_is_redacted_before_generation_and_session_commits(
     assert last_prompt_call.arguments["last_prompt"] != "SECRET PRIVATE RECIPE"
 
 
-def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
-    valid = PinterestTrendRunRequest(
+def test_service_request_requires_two_to_seven_assets_and_measurements() -> None:
+    valid = PinterestServiceRunRequest(
         reference_asset_ids=["signed-scene-asset-0001", "signed-user-asset-0002"],
         height_cm=175,
         weight_kg=72,
@@ -201,10 +203,12 @@ def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
     )
     assert len(valid.reference_asset_ids) == 2
     assert PINTEREST_MODEL == "nano-banana-pro"
+    assert PINTEREST_SERVICE_ID == "pinterest"
     assert PINTEREST_SERVICE_ALIAS_ID == 0
+    assert PinterestTrendRunRequest is PinterestServiceRunRequest
 
     with pytest.raises(ValidationError):
-        PinterestTrendRunRequest(
+        PinterestServiceRunRequest(
             reference_asset_ids=["only-one-asset-0001"],
             height_cm=175,
             weight_kg=72,
@@ -213,7 +217,7 @@ def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
         )
 
     with pytest.raises(ValidationError):
-        PinterestTrendRunRequest(
+        PinterestServiceRunRequest(
             reference_asset_ids=[f"signed-asset-{index:04d}" for index in range(MAX_PINTEREST_REFERENCES + 1)],
             height_cm=175,
             weight_kg=72,
@@ -222,7 +226,7 @@ def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
         )
 
     with pytest.raises(ValidationError):
-        PinterestTrendRunRequest(
+        PinterestServiceRunRequest(
             reference_asset_ids=["signed-scene-asset-0001", "signed-user-asset-0002"],
             height_cm=119,
             weight_kg=72,
@@ -231,7 +235,7 @@ def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
         )
 
     with pytest.raises(ValidationError):
-        PinterestTrendRunRequest(
+        PinterestServiceRunRequest(
             reference_asset_ids=["signed-scene-asset-0001", "signed-user-asset-0002"],
             height_cm=175,
             weight_kg=251,
@@ -240,7 +244,7 @@ def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
         )
 
 
-def test_bootstrap_installs_pinterest_service_routes_and_preserves_generic_route() -> None:
+def test_bootstrap_installs_pinterest_service_routes_and_preserves_legacy_compatibility() -> None:
     from api import trends_routes
 
     methods_by_path = {
@@ -248,7 +252,9 @@ def test_bootstrap_installs_pinterest_service_routes_and_preserves_generic_route
         for route in trends_routes.router.routes
     }
     assert "GET" in methods_by_path["/api/v1/services/pinterest"]
+    assert "POST" in methods_by_path["/api/v1/services/pinterest/upload"]
+    assert "POST" in methods_by_path["/api/v1/services/pinterest/run"]
     assert "POST" in methods_by_path["/api/v1/trends/{trend_id}/run"]
     assert "POST" in methods_by_path["/api/v1/trends/{trend_id}/pinterest-run"]
-    assert getattr(trends_routes, "PINTEREST_SERVICE_ALIAS_ID", None) == 0
+    assert getattr(trends_routes, "PINTEREST_SERVICE_ID", None) == "pinterest"
     assert getattr(trends_routes, "_pinterest_trend_backend_installed", False) is True
