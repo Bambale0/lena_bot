@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import miniapp_routes
 from api.image_service import MODEL_ASPECT_RATIOS, ImageModel
 from api.miniapp_auth import get_miniapp_user
 from api.pinterest_service_contract import (
@@ -152,7 +151,7 @@ async def _find_idempotent_run(
     return result.scalar_one_or_none()
 
 
-def _task_payload(task: miniapp_routes.GenerationOut) -> dict[str, Any]:
+def _task_payload(task: Any) -> dict[str, Any]:
     payload = task.model_dump()
     payload["cost"] = payload.get("credits_spent", 0)
     payload["type"] = payload.get("gen_type")
@@ -276,6 +275,8 @@ async def run_pinterest_service(
         idempotency_key=body.idempotency_key,
     )
     if existing is not None:
+        from api import miniapp_routes
+
         await session.refresh(user)
         task = miniapp_routes.GenerationOut.model_validate(existing, from_attributes=True)
         return {
@@ -314,6 +315,10 @@ async def run_pinterest_service(
     )
     contract["service_recipe_version"] = PINTEREST_RECIPE_VERSION
     contract["service_price_credits"] = price_credits
+
+    # Import only at execution time. The API package mounts this router after
+    # miniapp_routes finishes importing, so there is no package bootstrap cycle.
+    from api import miniapp_routes
 
     request_body = miniapp_routes.ImageGenRequest(
         model=PINTEREST_MODEL,
