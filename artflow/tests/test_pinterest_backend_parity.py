@@ -10,6 +10,7 @@ from api.pinterest_contract import (
     PINTEREST_PROMPT_MARKER,
     build_pinterest_contract,
     is_pinterest_prompt_source,
+    install_pinterest_persistence_contract,
     install_pinterest_provider_contract,
     pinterest_provider_context,
     pinterest_provider_prompt,
@@ -69,9 +70,9 @@ def test_product_metadata_is_scene_first_but_provider_is_identity_first() -> Non
 def test_provider_prompt_contains_identity_scene_and_partial_transfer_guards() -> None:
     prompt = pinterest_provider_prompt("Private scene recipe", height_cm=168, weight_kg=58)
     assert PINTEREST_PROMPT_MARKER in prompt
-    assert "Image 1 is the USER_IDENTITY_REFERENCE" in prompt
-    assert "Image 2 is the SCENE_REFERENCE" in prompt
-    assert "Do not preserve, copy, or reuse the person from Image 2" in prompt
+    assert "Image 1 is the only USER_IDENTITY_REFERENCE" in prompt
+    assert "Image 2 is the only SCENE_REFERENCE" in prompt
+    assert "Do not preserve the person from Image 2" in prompt
     assert "PARTIAL TRANSFER GUARD" in prompt
     assert "Do not copy person from scene reference" in prompt
     assert "Do not replace identity" in prompt
@@ -113,6 +114,59 @@ async def test_provider_sends_only_identity_and_scene_semantic_anchors() -> None
         "https://example.test/scene.jpg",
     ]
     assert "evidence.jpg" not in kwargs["image_url"]
+
+
+@pytest.mark.asyncio
+async def test_private_recipe_is_redacted_before_generation_and_session_commits() -> None:
+    create_generation = AsyncMock(return_value=SimpleNamespace(id=7))
+    create_session = AsyncMock(return_value=SimpleNamespace(id=5))
+    update_last_prompt = AsyncMock(return_value=None)
+    repository = SimpleNamespace(
+        create_generation=create_generation,
+        create_image_session=create_session,
+        update_image_session_last_prompt=update_last_prompt,
+    )
+    install_pinterest_persistence_contract(repository)
+    contract = build_pinterest_contract(
+        scene_reference="https://example.test/scene.jpg",
+        identity_reference="https://example.test/person.jpg",
+        trend_id=42,
+        height_cm=170,
+        weight_kg=60,
+        confirmed=True,
+    )
+
+    with pinterest_provider_context(contract):
+        await repository.create_generation(
+            "session",
+            1,
+            "nano-banana-pro",
+            "image",
+            "SECRET PRIVATE RECIPE",
+            10,
+            input_params={"hidden_prompt": True},
+        )
+        await repository.create_image_session(
+            session="session",
+            user_id=1,
+            model="nano-banana-pro",
+            mode="image",
+            aspect_ratio="3:4",
+            quality="2K",
+            count=1,
+            base_prompt="SECRET PRIVATE RECIPE",
+            reference_url="https://example.test/person.jpg",
+            reference_urls=["https://example.test/person.jpg", "https://example.test/scene.jpg"],
+        )
+        await repository.update_image_session_last_prompt("session", 5, "SECRET PRIVATE RECIPE")
+
+    gen_args = create_generation.await_args.args
+    gen_kwargs = create_generation.await_args.kwargs
+    assert gen_args[4] != "SECRET PRIVATE RECIPE"
+    assert gen_kwargs["input_params"]["reference_contract"] == "pinterest_scene_identity"
+    assert gen_kwargs["input_params"]["prompt_hidden"] is True
+    assert create_session.await_args.kwargs["base_prompt"] != "SECRET PRIVATE RECIPE"
+    assert update_last_prompt.await_args.args[2] != "SECRET PRIVATE RECIPE"
 
 
 def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
