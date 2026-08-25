@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 
+FEED_REMIX_ROUTE = "/api/v1/feed/{gen_id}/remix"
+
+
 def _dedupe_urls(*values: Any) -> list[str]:
     result: list[str] = []
     for value in values:
@@ -23,14 +26,21 @@ def _image_model_keys(routes: Any) -> set[str]:
     return keys
 
 
-def _patch_router_endpoint(routes: Any, original: Any, replacement: Any) -> None:
-    """Swap only the callable; preserve FastAPI's already-built body/dependency schema."""
+def _patch_router_endpoint(routes: Any, replacement: Any) -> bool:
+    """Swap the callable on the stable POST route without rebuilding its schema."""
+    patched = False
     for route in getattr(routes.router, "routes", []):
-        if getattr(route, "endpoint", None) is not original:
+        if getattr(route, "path", None) != FEED_REMIX_ROUTE:
+            continue
+        methods = set(getattr(route, "methods", set()) or set())
+        if "POST" not in methods:
             continue
         dependant = getattr(route, "dependant", None)
-        if dependant is not None:
-            dependant.call = replacement
+        if dependant is None:
+            continue
+        dependant.call = replacement
+        patched = True
+    return patched
 
 
 def install_feed_repeat_contract(routes: Any) -> None:
@@ -98,9 +108,11 @@ def install_feed_repeat_contract(routes: Any) -> None:
             surface=surface,
         )
 
-    # Keep this annotation for any later introspection, but do not make FastAPI
-    # rebuild the route: its original dependant already knows this is JSON body.
+    # Preserve the original FastAPI dependant/body schema. Other API adapters may
+    # wrap the Python symbol, so bind by the stable route path rather than object
+    # identity.
     remix_feed_post_with_reference_contract.__annotations__["body"] = routes.FeedRemixRequest
     routes.remix_feed_post = remix_feed_post_with_reference_contract
-    _patch_router_endpoint(routes, original, remix_feed_post_with_reference_contract)
+    if not _patch_router_endpoint(routes, remix_feed_post_with_reference_contract):
+        raise RuntimeError(f"Feed remix route not found: {FEED_REMIX_ROUTE}")
     routes._feed_repeat_contract_installed = True
