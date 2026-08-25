@@ -30,8 +30,8 @@ from api.minimax_h3_adapter import (
 from api.minimax_h3_pricing import install_minimax_h3_seed_rows
 from api.minimax_h3_product_surface import install_minimax_h3_product_surface
 from api.minimax_h3_runtime_guards import install_minimax_h3_runtime_guards
-from api.pinterest_contract import (
-    install_pinterest_miniapp_contract,
+from api.pinterest_service_contract import (
+    install_pinterest_persistence_contract,
     install_pinterest_provider_contract,
 )
 from api.repeat_runtime import install_repeat_runtime
@@ -64,6 +64,7 @@ strip_seedance25_omni_id_controls()
 install_repeat_runtime(_repeat_repository)
 install_safe_repeat_keyboard_support(_repeat_keyboards)
 install_pinterest_provider_contract(_image_service)
+install_pinterest_persistence_contract(_repeat_repository)
 
 
 class _MiniappLabelLoader(importlib.abc.Loader):
@@ -93,7 +94,6 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_feed_relevance(repository)
         install_feed_media_viewer(module)
         install_miniapp_prompt_privacy(module)
-        install_pinterest_miniapp_contract(module)
         install_video_request_compat(module)
         install_seedance25_miniapp(module)
         install_minimax_h3_miniapp(module)
@@ -142,7 +142,6 @@ else:
     install_feed_relevance(repository)
     install_feed_media_viewer(miniapp_routes)
     install_miniapp_prompt_privacy(miniapp_routes)
-    install_pinterest_miniapp_contract(miniapp_routes)
     install_video_request_compat(miniapp_routes)
     install_seedance25_miniapp(miniapp_routes)
     install_minimax_h3_miniapp(miniapp_routes)
@@ -151,49 +150,3 @@ else:
     install_suno_source_audio_routes(miniapp_routes)
     strip_seedance25_omni_id_controls(miniapp_routes)
     install_admin_model_visibility(miniapp_routes)
-
-
-class _TrendsContractLoader(importlib.abc.Loader):
-    """Install Pinterest-specific routes after the shared trends module loads."""
-
-    def __init__(self, wrapped: importlib.abc.Loader, finder: "_TrendsContractFinder") -> None:
-        self.wrapped = wrapped
-        self.finder = finder
-
-    def create_module(self, spec: Any) -> ModuleType | None:
-        create = getattr(self.wrapped, "create_module", None)
-        return create(spec) if create else None
-
-    def exec_module(self, module: ModuleType) -> None:
-        self.wrapped.exec_module(module)
-        from api.pinterest_trend_backend import install_pinterest_trend_backend
-
-        install_pinterest_trend_backend(module)
-        if self.finder in sys.meta_path:
-            sys.meta_path.remove(self.finder)
-
-
-class _TrendsContractFinder(importlib.abc.MetaPathFinder):
-    target = "api.trends_routes"
-
-    def find_spec(self, fullname: str, path: Any, target: ModuleType | None = None):
-        if fullname != self.target:
-            return None
-        try:
-            sys.meta_path.remove(self)
-            spec = importlib.util.find_spec(fullname)
-        finally:
-            sys.meta_path.insert(0, self)
-        if spec is None or spec.loader is None:
-            return spec
-        spec.loader = _TrendsContractLoader(spec.loader, self)
-        return spec
-
-
-if "api.trends_routes" not in sys.modules:
-    _trends_contract_finder = _TrendsContractFinder()
-    sys.meta_path.insert(0, _trends_contract_finder)
-else:
-    from api.pinterest_trend_backend import install_pinterest_trend_backend
-
-    install_pinterest_trend_backend(sys.modules["api.trends_routes"])
