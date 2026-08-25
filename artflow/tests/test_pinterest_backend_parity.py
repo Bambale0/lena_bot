@@ -88,7 +88,11 @@ def test_provider_prompt_contains_identity_scene_and_partial_transfer_guards() -
 @pytest.mark.asyncio
 async def test_provider_sends_scene_identity_and_optional_identity_evidence() -> None:
     original = AsyncMock(return_value=SimpleNamespace(task_id="task-1"))
-    service = SimpleNamespace(generate_image=original)
+    service = SimpleNamespace(
+        generate_image=original,
+        ensure_provider_safe_png_url=lambda url: url,
+        local_upload_path_from_url=lambda _url: None,
+    )
     install_pinterest_provider_contract(service)
     contract = build_pinterest_contract(
         scene_reference="https://example.test/scene.jpg",
