@@ -14,6 +14,12 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
+    launchOptions: {
+      // User-journey tests provide a deterministic Telegram.WebApp mock via
+      // addInitScript. Do not let the live telegram.org SDK replace that mock
+      // mid-bootstrap and make start_param scenarios depend on external network.
+      args: ["--host-resolver-rules=MAP telegram.org 0.0.0.0"],
+    },
   },
   projects: [
     {
