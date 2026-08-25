@@ -26,7 +26,7 @@ from db.session import get_session
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/services/pinterest", tags=["services", "pinterest"])
+router = APIRouter(prefix="/services/pinterest", tags=["services", "pinterest"])
 
 MIN_PINTEREST_REFERENCES = 2
 MAX_PINTEREST_IDENTITY_ANGLES = 5
@@ -347,3 +347,11 @@ async def run_pinterest_service(
         "credits": _credits_out(user.credits),
         "price_credits": price_credits,
     }
+
+
+def install_pinterest_service_router(parent_router: APIRouter) -> None:
+    """Mount the standalone Pinterest Service on the shared /api/v1 router once."""
+    if getattr(parent_router, "_pinterest_service_router_installed", False):
+        return
+    parent_router.include_router(router)
+    parent_router._pinterest_service_router_installed = True
