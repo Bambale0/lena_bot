@@ -46,4 +46,14 @@ jobs:
         run: python -m compileall -q tests/test_user_journeys_300_integration.py
 
       - name: Run exactly 300 mapped integration journeys
-        run: pytest -q tests/test_user_journeys_300_integration.py
+        run: |
+          set -o pipefail
+          pytest -q -ra --tb=short tests/test_user_journeys_300_integration.py 2>&1 | tee integration-journeys.log
+
+      - name: Upload integration diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-journeys-diagnostics
+          path: artflow/integration-journeys.log
+          if-no-files-found: error
