@@ -7,6 +7,7 @@ from aiogram import Router
 from aiogram.types import InlineKeyboardButton
 
 from api.minimax_h3_adapter import install_minimax_h3_wizard_support
+from api.repeat_runtime import install_image_launch_snapshot
 from bot.keyboards import models as _model_keyboards
 from bot.services.grok_versions import install_grok_versions
 from bot.services.image_family_routing import install_image_family_routing
@@ -54,12 +55,18 @@ for _key, _description in list(_model_keyboards.IMAGE_MODEL_DESC.items()):
 from . import image_gen as _legacy_image_gen
 from . import image_wizard_v2 as _image_wizard_v2
 from . import photo_prompt as _photo_prompt
+from . import repeat_callback_guard as _repeat_callback_guard
 from . import repeat_reference_marketplace as _repeat_reference_marketplace  # noqa: F401
 from . import repeat_references as _repeat_references  # noqa: F401
+from . import repeat_safe as _repeat_safe
 
+install_image_launch_snapshot(_legacy_image_gen)
+_repeat_callback_guard.install_repeat_confirmation_guard(_repeat_safe)
 _photo_prompt.install_photo_prompt_keyboard_hooks(_legacy_image_gen)
 
 _image_router = Router(name="image_v2")
+_image_router.include_router(_repeat_callback_guard.router)
+_image_router.include_router(_repeat_safe.router)
 _image_router.include_router(_image_wizard_v2.router)
 _image_router.include_router(_photo_prompt.router)
 _image_router.include_router(_legacy_image_gen.router)
