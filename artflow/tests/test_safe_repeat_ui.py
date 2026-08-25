@@ -32,11 +32,11 @@ def test_completed_session_image_uses_safe_repeat_callback() -> None:
     install_safe_repeat_keyboard_support(module)
 
     markup = module.image_session_kb(123)
-    assert _callbacks(markup) == ["repeat_image_123"]
+    assert _callbacks(markup) == ["repeat_image_db_123"]
     assert markup.inline_keyboard[0][0].text == "🔁 Повторить генерацию"
 
     generic = module.after_generation_kb(124, "image")
-    assert _callbacks(generic) == ["repeat_image_124"]
+    assert _callbacks(generic) == ["repeat_image_db_124"]
     assert generic.inline_keyboard[0][0].text == "🔁 Повторить генерацию"
 
 
