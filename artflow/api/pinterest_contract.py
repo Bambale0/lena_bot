@@ -17,13 +17,14 @@ PINTEREST SCENE IDENTITY CONTRACT
 
 You are generating a NEW photorealistic image.
 
-Image 1 is the USER_IDENTITY_REFERENCE. Use Image 1 only for the person's face, identity, apparent age, skin tone, facial geometry, hairline, distinctive facial features, natural body build, hair length and hair color.
-Image 2 is the SCENE_REFERENCE. Use Image 2 only for the scene, exact pose, body placement, outfit concept, composition, lighting, camera angle, framing, expression, background and photographic mood.
+Image 1 is the only USER_IDENTITY_REFERENCE. Use Image 1 only for the person's face, identity, apparent age, skin tone, facial geometry, hairline, distinctive facial features, natural body build, hair length and hair color.
+Image 2 is the only SCENE_REFERENCE. Use Image 2 only for the scene, exact pose, body placement, outfit concept, composition, lighting, camera angle, framing, expression, background and photographic mood.
 
 Create a new photo of the person from Image 1 placed naturally into the scene and composition of Image 2.
 
 HARD NEGATIVE RULES
-- Do not preserve, copy, or reuse the person from Image 2.
+- Do not preserve the person from Image 2.
+- Do not copy or reuse the person from Image 2.
 - Do not copy the face, hair identity, ethnicity, apparent age, or skin tone from Image 2.
 - Do not return Image 1 unchanged.
 - Do not return Image 2 unchanged.
@@ -163,6 +164,82 @@ def active_pinterest_contract() -> dict[str, Any] | None:
     return dict(current) if current else None
 
 
+def _private_input_params(value: Any, contract: dict[str, Any]) -> Any:
+    if isinstance(value, dict):
+        payload = dict(value)
+    elif value in (None, ""):
+        payload = {}
+    else:
+        try:
+            parsed = json.loads(str(value))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parsed = {}
+        payload = dict(parsed) if isinstance(parsed, dict) else {}
+    payload.update(contract)
+    payload["prompt_hidden"] = True
+    payload["prompt_actions_allowed"] = False
+    payload["feed_prompt_visible"] = False
+    return payload
+
+
+def install_pinterest_persistence_contract(repository: Any) -> None:
+    """Redact the private Pinterest recipe before the first DB commit.
+
+    ``create_image_generation`` resolves the curated prompt before provider launch.
+    Without this hook the private recipe briefly existed in Generation/ImageSession
+    rows and remained there on provider failure. The reference flow is fail-closed:
+    persistence gets only a safe display label plus role metadata while the provider
+    still receives the private prompt from the in-memory launch path.
+    """
+    if getattr(repository, "_pinterest_persistence_contract_installed", False):
+        return
+
+    original_create_generation = repository.create_generation
+    original_create_image_session = repository.create_image_session
+    original_update_last_prompt = repository.update_image_session_last_prompt
+
+    async def private_create_generation(*args: Any, **kwargs: Any):
+        contract = active_pinterest_contract()
+        if not contract:
+            return await original_create_generation(*args, **kwargs)
+        mutable_args = list(args)
+        if len(mutable_args) > 4:
+            mutable_args[4] = _DISPLAY_PROMPT
+        else:
+            kwargs["prompt"] = _DISPLAY_PROMPT
+        if len(mutable_args) > 10:
+            mutable_args[10] = _private_input_params(mutable_args[10], contract)
+        else:
+            kwargs["input_params"] = _private_input_params(kwargs.get("input_params"), contract)
+        return await original_create_generation(*mutable_args, **kwargs)
+
+    async def private_create_image_session(*args: Any, **kwargs: Any):
+        contract = active_pinterest_contract()
+        if contract:
+            mutable_args = list(args)
+            if len(mutable_args) > 6:
+                mutable_args[6] = _DISPLAY_PROMPT
+            else:
+                kwargs["base_prompt"] = _DISPLAY_PROMPT
+            return await original_create_image_session(*mutable_args, **kwargs)
+        return await original_create_image_session(*args, **kwargs)
+
+    async def private_update_last_prompt(*args: Any, **kwargs: Any):
+        if active_pinterest_contract():
+            mutable_args = list(args)
+            if len(mutable_args) > 2:
+                mutable_args[2] = _DISPLAY_PROMPT
+            else:
+                kwargs["last_prompt"] = _DISPLAY_PROMPT
+            return await original_update_last_prompt(*mutable_args, **kwargs)
+        return await original_update_last_prompt(*args, **kwargs)
+
+    repository.create_generation = private_create_generation
+    repository.create_image_session = private_create_image_session
+    repository.update_image_session_last_prompt = private_update_last_prompt
+    repository._pinterest_persistence_contract_installed = True
+
+
 def install_pinterest_provider_contract(image_service: Any) -> None:
     if getattr(image_service, "_pinterest_provider_contract_installed", False):
         return
@@ -215,8 +292,6 @@ async def _patch_generation_snapshot(
         return
     payload = _json_dict(getattr(generation, "input_params", None))
     payload.update(contract)
-    # Provider/private recipe is needed only during launch. Persist a safe label
-    # so history, Telegram delivery, repeat and public surfaces cannot recover it.
     generation.prompt = _DISPLAY_PROMPT
     generation.input_params = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     await session.commit()
@@ -226,6 +301,7 @@ def install_pinterest_miniapp_contract(miniapp_routes: Any) -> None:
     if getattr(miniapp_routes, "_pinterest_miniapp_contract_installed", False):
         return
     original_create = miniapp_routes.create_image_generation
+    install_pinterest_persistence_contract(miniapp_routes.repo)
 
     async def create_image_generation_with_pinterest(
         body,
