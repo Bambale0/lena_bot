@@ -79,7 +79,7 @@ function ServicesScreen({
   const copy = t("ru").services;
   const [message, setMessage] = useState("");
   const [selectedFileName, setSelectedFileName] = useState("");
-  const [pinterestTrend, setPinterestTrend] = useState<TrendItem | null>(null);
+  const [pinterestTrend, setPinterestTrend] = useState<TrendItem>(() => findPinterestServiceTrend([]));
   const [pinterestLoading, setPinterestLoading] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -90,7 +90,7 @@ function ServicesScreen({
         if (active) setPinterestTrend(findPinterestServiceTrend(Array.isArray(items) ? items : []));
       })
       .catch(() => {
-        if (active) setPinterestTrend(null);
+        if (active) setPinterestTrend(findPinterestServiceTrend([]));
       })
       .finally(() => {
         if (active) setPinterestLoading(false);
@@ -128,20 +128,18 @@ function ServicesScreen({
 
       <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-7">
         {services.map(({ title, description, icon: Icon, tab, pinterest, badge }) => {
-          const unavailable = Boolean(pinterest && !pinterestTrend);
           const serviceTitle = pinterest
-            ? (pinterestLoading ? "Проверяем Pinterest Flow…" : pinterestTrend ? description : "Pinterest Flow пока не опубликован")
+            ? (pinterestLoading ? "Pinterest Flow загружается — можно открыть уже сейчас" : description)
             : description;
           return (
             <button
               key={title}
               type="button"
               title={serviceTitle}
-              disabled={unavailable}
-              className={`apix-focus-ring relative flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border px-1 text-center active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-55 ${pinterest ? "border-primary/40 bg-primary/10" : "border-border bg-card/70"}`}
+              className={`apix-focus-ring relative flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border px-1 text-center active:scale-[0.97] ${pinterest ? "border-primary/40 bg-primary/10" : "border-border bg-card/70"}`}
               onClick={() => {
                 if (pinterest) {
-                  if (pinterestTrend) openTrendRunner(pinterestTrend);
+                  openTrendRunner(pinterestTrend);
                   return;
                 }
                 if (tab) onNavigate(tab);
