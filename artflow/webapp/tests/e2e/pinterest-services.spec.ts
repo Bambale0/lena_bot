@@ -24,16 +24,6 @@ const trends = [
     category_emoji: "✨",
     uses_count: 3,
   },
-  {
-    id: 103,
-    kind: "image",
-    title: "Pinterest AI",
-    description: "Pinterest Flow со своей внешностью",
-    category: "featured",
-    category_title: "Тренды",
-    category_emoji: "🔥",
-    uses_count: 12,
-  },
 ];
 
 async function mockApi(page: import("@playwright/test").Page) {
@@ -66,26 +56,29 @@ test.beforeEach(async ({ page }) => {
   await mockApi(page);
 });
 
-test("Pinterest lives in Services with a new badge and is absent from Trends", async ({ page }) => {
+test("Pinterest stays active in Services even when it is outside the public trends slice", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
 
   await page.getByRole("tab", { name: "Сервисы" }).click();
   const pinterest = page.getByRole("button", { name: /Pinterest/ }).first();
   await expect(pinterest).toBeVisible();
+  await expect(pinterest).toBeEnabled();
   await expect(pinterest.getByText("Новинка", { exact: true })).toBeVisible();
 
   await page.getByRole("tab", { name: "Тренды" }).click();
   await expect(page.getByText("Кинопортрет", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Pinterest AI", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Pinterest", { exact: true })).toHaveCount(0);
 });
 
-test("Pinterest Services tile opens the existing trend runner", async ({ page }) => {
+test("Pinterest Services fallback opens the runner without a public list entry", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Сервисы" }).click();
 
-  await page.getByRole("button", { name: /Pinterest/ }).first().click();
+  const pinterest = page.getByRole("button", { name: /Pinterest/ }).first();
+  await expect(pinterest).toBeEnabled();
+  await pinterest.click();
 
-  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Pinterest AI/ });
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Pinterest/ });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator("input[type=file]")).toHaveCount(1);
   await expect(dialog.locator("select")).toHaveCount(0);
