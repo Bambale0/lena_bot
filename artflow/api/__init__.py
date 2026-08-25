@@ -83,6 +83,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         from api.admin_model_visibility import install_admin_model_visibility
         from api.feed_media_viewer import install_feed_media_viewer
         from api.kling_motion_visibility import install_kling_motion_visibility
+        from api.pinterest_service_routes import install_pinterest_service_router
         from api.video_request_compat import install_video_request_compat
         from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
         from db import repository
@@ -94,6 +95,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_feed_relevance(repository)
         install_feed_media_viewer(module)
         install_miniapp_prompt_privacy(module)
+        install_pinterest_service_router(module.router)
         install_video_request_compat(module)
         install_seedance25_miniapp(module)
         install_minimax_h3_miniapp(module)
@@ -130,6 +132,7 @@ else:
     from api.admin_model_visibility import install_admin_model_visibility
     from api.feed_media_viewer import install_feed_media_viewer
     from api.kling_motion_visibility import install_kling_motion_visibility
+    from api.pinterest_service_routes import install_pinterest_service_router
     from api.video_request_compat import install_video_request_compat
     from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
     from db import repository
@@ -142,6 +145,7 @@ else:
     install_feed_relevance(repository)
     install_feed_media_viewer(miniapp_routes)
     install_miniapp_prompt_privacy(miniapp_routes)
+    install_pinterest_service_router(miniapp_routes.router)
     install_video_request_compat(miniapp_routes)
     install_seedance25_miniapp(miniapp_routes)
     install_minimax_h3_miniapp(miniapp_routes)
