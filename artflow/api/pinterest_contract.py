@@ -18,10 +18,11 @@ PINTEREST SCENE IDENTITY CONTRACT
 
 You are generating a NEW photorealistic image.
 
-Image 1 is the only USER_IDENTITY_REFERENCE. Use Image 1 only for the person's face, identity, apparent age, skin tone, facial geometry, hairline, distinctive facial features, natural body build, hair length and hair color.
+Image 1 is the PRIMARY USER_IDENTITY_REFERENCE. Use Image 1 only for the person's face, identity, apparent age, skin tone, facial geometry, hairline, distinctive facial features, natural body build, hair length and hair color.
 Image 2 is the only SCENE_REFERENCE. Use Image 2 only for the scene, exact pose, body placement, outfit concept, composition, lighting, camera angle, framing, expression, background and photographic mood.
+Images 3 and later, when present, are USER_IDENTITY_EVIDENCE for the SAME person as Image 1. Use them only to reinforce the user's identity, face, hair and natural proportions from additional angles. They never define scene, pose, outfit, background, framing or lighting.
 
-Create a new photo of the person from Image 1 placed naturally into the scene and composition of Image 2.
+Create a new photo of the person from Image 1 placed naturally into the scene and composition of Image 2. When identity-evidence images are present, use them together with Image 1 to keep that same person recognizable and consistent.
 
 HARD NEGATIVE RULES
 - Do not preserve the person from Image 2.
@@ -29,8 +30,8 @@ HARD NEGATIVE RULES
 - Do not copy the face, hair identity, ethnicity, apparent age, or skin tone from Image 2.
 - Do not return Image 1 unchanged.
 - Do not return Image 2 unchanged.
-- Do not use Image 1 as the composition, outfit, background, camera, or pose.
-- Do not average, blend, or morph the two identities. Identity from Image 1 always wins.
+- Do not use Image 1 or identity-evidence images as the composition, outfit, background, camera, or pose.
+- Do not average, blend, or morph identities. Identity from Image 1, supported by identity-evidence images, always wins.
 - Do not output a collage, comparison, screenshot, source image, UI, text, watermark, or split-screen.
 
 PARTIAL TRANSFER GUARD
@@ -41,7 +42,7 @@ PARTIAL TRANSFER GUARD
 QUALITY RULES
 - The result must look like a real new photograph, not an edit preview.
 - Keep face, hands, and body anatomy natural.
-- Keep the user recognizable from Image 1.
+- Keep the user recognizable from Image 1 and any identity-evidence images.
 """
 
 _provider_context: ContextVar[dict[str, Any] | None] = ContextVar(
@@ -102,6 +103,8 @@ def build_pinterest_contract(
             roles.append("identity")
         else:
             roles.append("identity_evidence")
+    provider_images = _unique_urls(identity, scene, evidence)
+    provider_roles = ["identity", "scene", *(["identity_evidence"] * len(evidence))]
     return {
         "flow": PINTEREST_FLOW,
         "source": "trend",
@@ -114,10 +117,10 @@ def build_pinterest_contract(
         "source_reference_images": logical,
         "reference_roles": roles,
         # Nano Banana Pro is more stable when its provider-facing anchors are
-        # identity first and scene second. Product metadata deliberately stays
-        # scene -> identity -> evidence.
-        "provider_reference_images": _unique_urls(identity, scene),
-        "provider_reference_roles": ["identity", "scene"],
+        # identity first and scene second. Additional user angles follow those
+        # two anchors and are explicitly constrained to identity evidence.
+        "provider_reference_images": provider_images,
+        "provider_reference_roles": provider_roles,
         "height_cm": height_cm,
         "weight_kg": weight_kg,
         "confirmed": bool(confirmed),
@@ -361,18 +364,20 @@ def install_pinterest_miniapp_contract(miniapp_routes: Any) -> None:
 
         caps = miniapp_routes.IMAGE_CAPS.get(body.model, {})
         max_refs = int(caps.get("max_refs", 1) or 1)
-        if max_refs < 2:
+        required_refs = 2 + len(evidence)
+        if max_refs < required_refs:
             raise HTTPException(
                 status_code=422,
-                detail="Selected Pinterest model cannot preserve scene and identity separately",
+                detail="Selected Pinterest model cannot preserve all scene and identity references separately",
             )
 
-        # Generic request handling sees two refs, but the provider wrapper owns
-        # the final order and sends identity -> scene only.
+        # Generic request handling validates the same number of references. The
+        # provider wrapper owns the final provider order: identity -> scene ->
+        # additional identity evidence.
         safe_body = body.model_copy(
             update={
                 "reference_url": identity,
-                "reference_urls": [scene],
+                "reference_urls": [scene, *evidence],
             }
         )
         with pinterest_provider_context(contract):
