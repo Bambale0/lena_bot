@@ -11,7 +11,9 @@ def _rewrite_repeat_buttons(markup: Any, *, gen_id: int | None, image_only: bool
             callback = str(getattr(button, "callback_data", "") or "")
             if callback in {f"img_session:repeat:{gen_id}", f"regen:image:{gen_id}"}:
                 button.text = "🔁 Повторить генерацию"
-                button.callback_data = f"repeat_image_{gen_id}"
+                # Namespace our own numeric Generation.id so it can never be
+                # mistaken for a provider task id that happens to be numeric.
+                button.callback_data = f"repeat_image_db_{gen_id}"
     return markup
 
 
