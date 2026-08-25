@@ -4,6 +4,7 @@ import json
 from contextlib import contextmanager
 from contextvars import ContextVar
 from inspect import signature
+from pathlib import Path
 from typing import Any, Iterator
 
 from fastapi import HTTPException
@@ -12,6 +13,7 @@ PINTEREST_PROMPT_MARKER = "PINTEREST_RECREATION_CONTRACT_V2"
 PINTEREST_FLOW = "pinterest_ai"
 PINTEREST_REFERENCE_CONTRACT = "pinterest_scene_identity"
 _DISPLAY_PROMPT = "Pinterest AI: сохранить внешность с ваших фото в выбранной сцене Pinterest."
+_SAFE_PROVIDER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 _PROVIDER_ROLE_PROMPT = f"""{PINTEREST_PROMPT_MARKER}
 PINTEREST SCENE IDENTITY CONTRACT
@@ -192,6 +194,35 @@ def _bound_call(func: Any, args: tuple[Any, ...], kwargs: dict[str, Any], **upda
     return bound.args, bound.kwargs
 
 
+def _register_heif_support() -> None:
+    """Register iPhone HEIC/HEIF decoding for Pillow once at runtime."""
+    try:
+        from pillow_heif import register_heif_opener
+
+        register_heif_opener(thumbnails=False)
+    except Exception as exc:
+        raise RuntimeError("HEIC/HEIF decoder is unavailable") from exc
+
+
+def _provider_safe_reference_urls(image_service: Any, urls: list[str]) -> list[str]:
+    """Normalize local user uploads to provider-supported raster formats.
+
+    Nano Banana Pro officially accepts JPEG/PNG/WebP. The Mini App accepts
+    HEIC/HEIF/AVIF for mobile parity, so local files are converted to PNG before
+    either Comet or KIE sees them. Fail closed instead of silently sending an
+    unsupported original file after credits were charged.
+    """
+    _register_heif_support()
+    safe: list[str] = []
+    for original in urls:
+        normalized = image_service.ensure_provider_safe_png_url(original) or original
+        path = image_service.local_upload_path_from_url(normalized)
+        if path is not None and path.exists() and Path(path).suffix.lower() not in _SAFE_PROVIDER_EXTENSIONS:
+            raise RuntimeError(f"Unsupported Pinterest reference format: {Path(path).suffix.lower() or 'unknown'}")
+        safe.append(normalized)
+    return safe
+
+
 def install_pinterest_persistence_contract(repository: Any) -> None:
     """Redact the private Pinterest recipe before the first DB commit.
 
@@ -272,7 +303,10 @@ def install_pinterest_provider_contract(image_service: Any) -> None:
             mutable_args[1] = provider_prompt
         else:
             kwargs["prompt"] = provider_prompt
-        kwargs["image_url"] = list(contract.get("provider_reference_images") or [])
+        kwargs["image_url"] = _provider_safe_reference_urls(
+            image_service,
+            list(contract.get("provider_reference_images") or []),
+        )
         return await original_generate(*mutable_args, **kwargs)
 
     image_service.generate_image = generate_image_with_roles
