@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from contextvars import ContextVar
+from inspect import signature
 from typing import Any, Iterator
 
 from fastapi import HTTPException
@@ -182,6 +183,14 @@ def _private_input_params(value: Any, contract: dict[str, Any]) -> Any:
     return payload
 
 
+def _bound_call(func: Any, args: tuple[Any, ...], kwargs: dict[str, Any], **updates: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Replace named arguments without depending on positional indexes."""
+    bound = signature(func).bind_partial(*args, **kwargs)
+    for key, value in updates.items():
+        bound.arguments[key] = value
+    return bound.args, bound.kwargs
+
+
 def install_pinterest_persistence_contract(repository: Any) -> None:
     """Redact the private Pinterest recipe before the first DB commit.
 
@@ -202,37 +211,38 @@ def install_pinterest_persistence_contract(repository: Any) -> None:
         contract = active_pinterest_contract()
         if not contract:
             return await original_create_generation(*args, **kwargs)
-        mutable_args = list(args)
-        if len(mutable_args) > 4:
-            mutable_args[4] = _DISPLAY_PROMPT
-        else:
-            kwargs["prompt"] = _DISPLAY_PROMPT
-        if len(mutable_args) > 10:
-            mutable_args[10] = _private_input_params(mutable_args[10], contract)
-        else:
-            kwargs["input_params"] = _private_input_params(kwargs.get("input_params"), contract)
-        return await original_create_generation(*mutable_args, **kwargs)
+        current = signature(original_create_generation).bind_partial(*args, **kwargs)
+        private_params = _private_input_params(current.arguments.get("input_params"), contract)
+        private_args, private_kwargs = _bound_call(
+            original_create_generation,
+            args,
+            kwargs,
+            prompt=_DISPLAY_PROMPT,
+            input_params=private_params,
+        )
+        return await original_create_generation(*private_args, **private_kwargs)
 
     async def private_create_image_session(*args: Any, **kwargs: Any):
-        contract = active_pinterest_contract()
-        if contract:
-            mutable_args = list(args)
-            if len(mutable_args) > 6:
-                mutable_args[6] = _DISPLAY_PROMPT
-            else:
-                kwargs["base_prompt"] = _DISPLAY_PROMPT
-            return await original_create_image_session(*mutable_args, **kwargs)
-        return await original_create_image_session(*args, **kwargs)
+        if not active_pinterest_contract():
+            return await original_create_image_session(*args, **kwargs)
+        private_args, private_kwargs = _bound_call(
+            original_create_image_session,
+            args,
+            kwargs,
+            base_prompt=_DISPLAY_PROMPT,
+        )
+        return await original_create_image_session(*private_args, **private_kwargs)
 
     async def private_update_last_prompt(*args: Any, **kwargs: Any):
-        if active_pinterest_contract():
-            mutable_args = list(args)
-            if len(mutable_args) > 2:
-                mutable_args[2] = _DISPLAY_PROMPT
-            else:
-                kwargs["last_prompt"] = _DISPLAY_PROMPT
-            return await original_update_last_prompt(*mutable_args, **kwargs)
-        return await original_update_last_prompt(*args, **kwargs)
+        if not active_pinterest_contract():
+            return await original_update_last_prompt(*args, **kwargs)
+        private_args, private_kwargs = _bound_call(
+            original_update_last_prompt,
+            args,
+            kwargs,
+            last_prompt=_DISPLAY_PROMPT,
+        )
+        return await original_update_last_prompt(*private_args, **private_kwargs)
 
     repository.create_generation = private_create_generation
     repository.create_image_session = private_create_image_session
