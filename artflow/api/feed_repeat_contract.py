@@ -27,7 +27,7 @@ def _image_model_keys(routes: Any) -> set[str]:
 
 
 def _patch_router_endpoint(routes: Any, replacement: Any) -> bool:
-    """Swap the callable on the stable POST route without rebuilding its schema."""
+    """Swap both route surfaces so FastAPI include_router clones the wrapper."""
     patched = False
     for route in getattr(routes.router, "routes", []):
         if getattr(route, "path", None) != FEED_REMIX_ROUTE:
@@ -38,6 +38,7 @@ def _patch_router_endpoint(routes: Any, replacement: Any) -> bool:
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue
+        route.endpoint = replacement
         dependant.call = replacement
         patched = True
     return patched
@@ -108,9 +109,8 @@ def install_feed_repeat_contract(routes: Any) -> None:
             surface=surface,
         )
 
-    # Preserve the original FastAPI dependant/body schema. Other API adapters may
-    # wrap the Python symbol, so bind by the stable route path rather than object
-    # identity.
+    # Keep the original request-body contract when include_router rebuilds the
+    # APIRoute from route.endpoint.
     remix_feed_post_with_reference_contract.__annotations__["body"] = routes.FeedRemixRequest
     routes.remix_feed_post = remix_feed_post_with_reference_contract
     if not _patch_router_endpoint(routes, remix_feed_post_with_reference_contract):
