@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 PINTEREST_PROMPT_MARKER = "PINTEREST_RECREATION_CONTRACT_V3"
-PINTEREST_FLOW = "pinterest_ai"
+PINTEREST_FLOW = "pinterest"
 PINTEREST_SERVICE_ID = "pinterest"
 PINTEREST_REFERENCE_CONTRACT = "pinterest_scene_identity"
 DISPLAY_PROMPT = "Pinterest AI: сохранить внешность с ваших фото в выбранной сцене Pinterest."
@@ -273,10 +273,15 @@ def install_pinterest_provider_contract(image_service: Any) -> None:
             mutable_args[1] = provider_prompt
         else:
             kwargs["prompt"] = provider_prompt
-        kwargs["image_url"] = _provider_safe_reference_urls(
-            image_service,
-            list(contract.get("provider_reference_images") or []),
-        )
+
+        # Canonicalize by semantic roles instead of trusting caller-provided
+        # ordering. This also keeps historical Repeat flows safe.
+        scene = str(contract.get("scene_reference") or "").strip()
+        identity = str(contract.get("identity_reference") or "").strip()
+        evidence = _unique_urls(contract.get("identity_evidence") or [])
+        canonical = _unique_urls(scene, identity, evidence)
+        provider_refs = canonical or list(contract.get("provider_reference_images") or [])
+        kwargs["image_url"] = _provider_safe_reference_urls(image_service, provider_refs)
         return await original_generate(*mutable_args, **kwargs)
 
     image_service.generate_image = generate_image_with_roles
