@@ -4,6 +4,7 @@ import json
 from contextlib import contextmanager
 from contextvars import ContextVar
 from inspect import signature
+from pathlib import Path
 from typing import Any, Iterator
 
 from fastapi import HTTPException
@@ -12,26 +13,27 @@ PINTEREST_PROMPT_MARKER = "PINTEREST_RECREATION_CONTRACT_V2"
 PINTEREST_FLOW = "pinterest_ai"
 PINTEREST_REFERENCE_CONTRACT = "pinterest_scene_identity"
 _DISPLAY_PROMPT = "Pinterest AI: сохранить внешность с ваших фото в выбранной сцене Pinterest."
+_SAFE_PROVIDER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 _PROVIDER_ROLE_PROMPT = f"""{PINTEREST_PROMPT_MARKER}
 PINTEREST SCENE IDENTITY CONTRACT
 
 You are generating a NEW photorealistic image.
 
-Image 1 is the PRIMARY USER_IDENTITY_REFERENCE. Use Image 1 only for the person's face, identity, apparent age, skin tone, facial geometry, hairline, distinctive facial features, natural body build, hair length and hair color.
-Image 2 is the only SCENE_REFERENCE. Use Image 2 only for the scene, exact pose, body placement, outfit concept, composition, lighting, camera angle, framing, expression, background and photographic mood.
-Images 3 and later, when present, are USER_IDENTITY_EVIDENCE for the SAME person as Image 1. Use them only to reinforce the user's identity, face, hair and natural proportions from additional angles. They never define scene, pose, outfit, background, framing or lighting.
+Image 1 is the only SCENE_REFERENCE. Use Image 1 only for the scene, exact pose, body placement, outfit concept, composition, lighting, camera angle, framing, expression, background and photographic mood.
+Image 2 is the PRIMARY USER_IDENTITY_REFERENCE. Use Image 2 only for the person's face, identity, apparent age, skin tone, facial geometry, hairline, distinctive facial features, natural body build, hair length and hair color.
+Images 3 and later, when present, are USER_IDENTITY_EVIDENCE for the SAME person as Image 2. Use them only to reinforce the user's identity, face, hair and natural proportions from additional angles. They never define scene, pose, outfit, background, framing or lighting.
 
-Create a new photo of the person from Image 1 placed naturally into the scene and composition of Image 2. When identity-evidence images are present, use them together with Image 1 to keep that same person recognizable and consistent.
+Create a new photo of the person from Image 2 placed naturally into the scene and composition of Image 1. When identity-evidence images are present, use them together with Image 2 to keep that same person recognizable and consistent.
 
 HARD NEGATIVE RULES
-- Do not preserve the person from Image 2.
-- Do not copy or reuse the person from Image 2.
-- Do not copy the face, hair identity, ethnicity, apparent age, or skin tone from Image 2.
+- Do not preserve the person from Image 1.
+- Do not copy or reuse the person from Image 1.
+- Do not copy the face, hair identity, ethnicity, apparent age, or skin tone from Image 1.
 - Do not return Image 1 unchanged.
 - Do not return Image 2 unchanged.
-- Do not use Image 1 or identity-evidence images as the composition, outfit, background, camera, or pose.
-- Do not average, blend, or morph identities. Identity from Image 1, supported by identity-evidence images, always wins.
+- Do not use Image 2 or identity-evidence images as the composition, outfit, background, camera, or pose.
+- Do not average, blend, or morph identities. Identity from Image 2, supported by identity-evidence images, always wins.
 - Do not output a collage, comparison, screenshot, source image, UI, text, watermark, or split-screen.
 
 PARTIAL TRANSFER GUARD
@@ -42,7 +44,7 @@ PARTIAL TRANSFER GUARD
 QUALITY RULES
 - The result must look like a real new photograph, not an edit preview.
 - Keep face, hands, and body anatomy natural.
-- Keep the user recognizable from Image 1 and any identity-evidence images.
+- Keep the user recognizable from Image 2 and any identity-evidence images.
 """
 
 _provider_context: ContextVar[dict[str, Any] | None] = ContextVar(
@@ -103,8 +105,6 @@ def build_pinterest_contract(
             roles.append("identity")
         else:
             roles.append("identity_evidence")
-    provider_images = _unique_urls(identity, scene, evidence)
-    provider_roles = ["identity", "scene", *(["identity_evidence"] * len(evidence))]
     return {
         "flow": PINTEREST_FLOW,
         "source": "trend",
@@ -116,11 +116,11 @@ def build_pinterest_contract(
         "reference_images": logical,
         "source_reference_images": logical,
         "reference_roles": roles,
-        # Nano Banana Pro is more stable when its provider-facing anchors are
-        # identity first and scene second. Additional user angles follow those
-        # two anchors and are explicitly constrained to identity evidence.
-        "provider_reference_images": provider_images,
-        "provider_reference_roles": provider_roles,
+        # Reference flow parity: provider order must remain SCENE -> USER ->
+        # additional USER identity evidence. Reordering identity first can make
+        # the provider treat a selfie as the source composition.
+        "provider_reference_images": logical,
+        "provider_reference_roles": roles,
         "height_cm": height_cm,
         "weight_kg": weight_kg,
         "confirmed": bool(confirmed),
@@ -192,6 +192,35 @@ def _bound_call(func: Any, args: tuple[Any, ...], kwargs: dict[str, Any], **upda
     for key, value in updates.items():
         bound.arguments[key] = value
     return bound.args, bound.kwargs
+
+
+def _register_heif_support() -> None:
+    """Register iPhone HEIC/HEIF decoding for Pillow once at runtime."""
+    try:
+        from pillow_heif import register_heif_opener
+
+        register_heif_opener(thumbnails=False)
+    except Exception as exc:
+        raise RuntimeError("HEIC/HEIF decoder is unavailable") from exc
+
+
+def _provider_safe_reference_urls(image_service: Any, urls: list[str]) -> list[str]:
+    """Normalize local user uploads to provider-supported raster formats.
+
+    Nano Banana Pro officially accepts JPEG/PNG/WebP. The Mini App accepts
+    HEIC/HEIF/AVIF for mobile parity, so local files are converted to PNG before
+    either Comet or KIE sees them. Fail closed instead of silently sending an
+    unsupported original file after credits were charged.
+    """
+    _register_heif_support()
+    safe: list[str] = []
+    for original in urls:
+        normalized = image_service.ensure_provider_safe_png_url(original) or original
+        path = image_service.local_upload_path_from_url(normalized)
+        if path is not None and path.exists() and Path(path).suffix.lower() not in _SAFE_PROVIDER_EXTENSIONS:
+            raise RuntimeError(f"Unsupported Pinterest reference format: {Path(path).suffix.lower() or 'unknown'}")
+        safe.append(normalized)
+    return safe
 
 
 def install_pinterest_persistence_contract(repository: Any) -> None:
@@ -274,7 +303,10 @@ def install_pinterest_provider_contract(image_service: Any) -> None:
             mutable_args[1] = provider_prompt
         else:
             kwargs["prompt"] = provider_prompt
-        kwargs["image_url"] = list(contract.get("provider_reference_images") or [])
+        kwargs["image_url"] = _provider_safe_reference_urls(
+            image_service,
+            list(contract.get("provider_reference_images") or []),
+        )
         return await original_generate(*mutable_args, **kwargs)
 
     image_service.generate_image = generate_image_with_roles
@@ -371,13 +403,12 @@ def install_pinterest_miniapp_contract(miniapp_routes: Any) -> None:
                 detail="Selected Pinterest model cannot preserve all scene and identity references separately",
             )
 
-        # Generic request handling validates the same number of references. The
-        # provider wrapper owns the final provider order: identity -> scene ->
-        # additional identity evidence.
+        # Keep validation and persistence in the same role order used by the
+        # Pinterest product contract. Provider wrapper repeats this exact order.
         safe_body = body.model_copy(
             update={
-                "reference_url": identity,
-                "reference_urls": [scene, *evidence],
+                "reference_url": scene,
+                "reference_urls": [identity, *evidence],
             }
         )
         with pinterest_provider_context(contract):

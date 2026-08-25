@@ -70,7 +70,7 @@ test("Pinterest stays active in Services even when it is outside the public tren
   await expect(page.getByText("Pinterest", { exact: true })).toHaveCount(0);
 });
 
-test("Pinterest Services uses the full manual scene + identity + measurements flow", async ({ page }) => {
+test("Pinterest Services matches the approved manual reference UX", async ({ page }) => {
   let uploadIndex = 0;
   let runCalls = 0;
   let runPayload: Record<string, unknown> | null = null;
@@ -104,31 +104,45 @@ test("Pinterest Services uses the full manual scene + identity + measurements fl
   await page.getByRole("tab", { name: "Сервисы" }).click();
   await page.getByRole("button", { name: /Pinterest/ }).first().click();
 
-  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Повтори фото с Pinterest/ });
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("1. Референс Pinterest", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("2. Ваше фото", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("3. Ваши параметры", { exact: true })).toBeVisible();
-  await expect(dialog.getByText(/Сцена, поза, ракурс, одежда, свет и фон берутся из референса/)).toBeVisible();
-  await expect(dialog.getByText(/лицо и внешность — только с ваших фото/)).toBeVisible();
-  await expect(dialog.getByText(/Генерация не запускается после загрузки фото/)).toBeVisible();
-  await expect(dialog.locator("input[type=file]")).toHaveCount(3);
+  await expect(dialog.getByText("Как получить результат 1 в 1", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/Слева — кадр, который повторяем\. Справа — ваше основное фото/)).toBeVisible();
+  await expect(dialog.getByText("РЕФЕРЕНС", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("откуда", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("ТЫ", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("кого вставляем", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Фото, которое повторяем", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Ваше фото", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/Рост и вес обязательны, чтобы руки, шея и пропорции тела совпали с вами/)).toBeVisible();
+  await expect(dialog.getByText(/Загрузка фото сама генерацию не запускает/)).toBeVisible();
+  await expect(dialog.locator("input[type=file]")).toHaveCount(2);
   await expect(dialog.locator('input[type="number"]')).toHaveCount(2);
   await expect(dialog.locator("select")).toHaveCount(0);
   await expect(dialog.locator("textarea")).toHaveCount(0);
 
-  const createButton = dialog.getByRole("button", { name: "Создать изображение" });
+  const createButton = dialog.getByRole("button", { name: "Создать →" });
   await expect(createButton).toBeDisabled();
 
-  const sceneInput = dialog.getByLabel("Загрузить референс Pinterest");
-  await sceneInput.setInputFiles({ name: "scene.jpg", mimeType: "image/jpeg", buffer: Buffer.from("scene") });
-  await expect(dialog.getByText("РЕФЕРЕНС", { exact: true })).toBeVisible();
+  await dialog.getByLabel("Загрузить референс Pinterest").setInputFiles({
+    name: "scene.jpg",
+    mimeType: "image/jpeg",
+    buffer: Buffer.from("scene"),
+  });
   expect(runCalls).toBe(0);
+  await expect(dialog.getByText("Готово ✓", { exact: true }).first()).toBeVisible();
 
-  const identityInput = dialog.getByLabel("Загрузить ваше фото");
-  await identityInput.setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: Buffer.from("identity") });
-  await expect(dialog.getByText("ТЫ", { exact: true })).toBeVisible();
+  await dialog.getByLabel("Загрузить ваше фото").setInputFiles({
+    name: "me.jpg",
+    mimeType: "image/jpeg",
+    buffer: Buffer.from("identity"),
+  });
   expect(runCalls).toBe(0);
+  await expect(dialog.getByText("1–5 ракурсов одного человека", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/Дополнительные ракурсы необязательны/)).toBeVisible();
+  await expect(dialog.getByText(/сцена, свет и поза считаются с референса/)).toBeVisible();
+  await expect(dialog.getByText(/лицо и внешность берутся только с твоего фото/)).toBeVisible();
+  await expect(dialog.locator("input[type=file]")).toHaveCount(3);
   await expect(createButton).toBeDisabled();
 
   await dialog.getByLabel("Рост").fill("165");
@@ -146,14 +160,21 @@ test("Pinterest Services uses the full manual scene + identity + measurements fl
   });
 });
 
-test("Pinterest accepts up to five optional identity angles without auto-start", async ({ page }) => {
+test("Pinterest accepts multiple optional identity angles without auto-start", async ({ page }) => {
   let uploadIndex = 0;
   let runCalls = 0;
   let runPayload: Record<string, unknown> | null = null;
 
   await page.route("**/api/v1/trends/upload", async (route) => {
     uploadIndex += 1;
-    await route.fulfill({ json: { asset_id: `asset-${uploadIndex}`, url: `/uploads/${uploadIndex}.jpg`, kind: "image" } });
+    await route.fulfill({
+      json: {
+        asset_id: `asset-${uploadIndex}`,
+        url: `/uploads/${uploadIndex}.jpg`,
+        kind: "image",
+        filename: `${uploadIndex}.jpg`,
+      },
+    });
   });
   await page.route("**/api/v1/trends/0/pinterest-run", async (route) => {
     runCalls += 1;
@@ -167,22 +188,58 @@ test("Pinterest accepts up to five optional identity angles without auto-start",
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Сервисы" }).click();
   await page.getByRole("button", { name: /Pinterest/ }).first().click();
-  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Повтори фото с Pinterest/ });
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
 
   await dialog.getByLabel("Загрузить референс Pinterest").setInputFiles({ name: "scene.jpg", mimeType: "image/jpeg", buffer: Buffer.from("scene") });
   await dialog.getByLabel("Загрузить ваше фото").setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: Buffer.from("me") });
-  await dialog.getByLabel("Добавить дополнительное фото").setInputFiles({ name: "me-side.jpg", mimeType: "image/jpeg", buffer: Buffer.from("side") });
+  await dialog.getByLabel("Добавить дополнительные ракурсы").setInputFiles([
+    { name: "me-side.jpg", mimeType: "image/jpeg", buffer: Buffer.from("side") },
+    { name: "me-three-quarter.jpg", mimeType: "image/jpeg", buffer: Buffer.from("three-quarter") },
+  ]);
 
   expect(runCalls).toBe(0);
-  await expect(dialog.getByText("ТЫ · 2", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("2/5", { exact: true })).toBeVisible();
+  await expect(dialog.getByAltText("Дополнительный ракурс 1")).toBeVisible();
+  await expect(dialog.getByAltText("Дополнительный ракурс 2")).toBeVisible();
+
   await dialog.getByLabel("Рост").fill("170");
   await dialog.getByLabel("Вес").fill("62");
-  await dialog.getByRole("button", { name: "Создать изображение" }).click();
+  await dialog.getByRole("button", { name: "Создать →" }).click();
   await expect.poll(() => runCalls).toBe(1);
   expect(runPayload).toMatchObject({
-    reference_asset_ids: ["asset-1", "asset-2", "asset-3"],
     height_cm: 170,
     weight_kg: 62,
     confirmed: true,
   });
+  const refs = (runPayload as Record<string, unknown>).reference_asset_ids as string[];
+  expect(refs.slice(0, 2)).toEqual(["asset-1", "asset-2"]);
+  expect([...refs.slice(2)].sort()).toEqual(["asset-3", "asset-4"]);
+});
+
+test("Pinterest validates measurements before generation", async ({ page }) => {
+  let uploadIndex = 0;
+  let runCalls = 0;
+  await page.route("**/api/v1/trends/upload", async (route) => {
+    uploadIndex += 1;
+    await route.fulfill({ json: { asset_id: `asset-${uploadIndex}`, url: `/uploads/${uploadIndex}.jpg`, kind: "image" } });
+  });
+  await page.route("**/api/v1/trends/0/pinterest-run", async (route) => {
+    runCalls += 1;
+    await route.fulfill({ status: 202, json: { ok: true, task: { id: 779, model: "nano-banana-pro", gen_type: "image", status: "pending" } } });
+  });
+
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("tab", { name: "Сервисы" }).click();
+  await page.getByRole("button", { name: /Pinterest/ }).first().click();
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
+
+  await dialog.getByLabel("Загрузить референс Pinterest").setInputFiles({ name: "scene.jpg", mimeType: "image/jpeg", buffer: Buffer.from("scene") });
+  await dialog.getByLabel("Загрузить ваше фото").setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: Buffer.from("me") });
+  await dialog.getByLabel("Рост").fill("119");
+  await dialog.getByLabel("Вес").fill("251");
+
+  await expect(dialog.getByText("Рост должен быть от 120 до 230 см.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Вес должен быть от 30 до 250 кг.", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Создать →" })).toBeDisabled();
+  expect(runCalls).toBe(0);
 });

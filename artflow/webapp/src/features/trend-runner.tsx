@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { Copy, Film, ImageIcon, LoaderCircle, Sparkles, UploadCloud, X } from "lucide-react";
+import { Film, ImageIcon, ImagePlus, LoaderCircle, Plus, Ruler, Weight, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
@@ -14,15 +14,7 @@ import { safeExternalUrl } from "@/lib/utils";
 const TREND_RUNNER_EVENT = "apix:open-trend-runner";
 const API_BASE = "/api/v1";
 const RUNNER_ROOT_ID = "apix-trend-runner-root";
-const ACCEPTED_TREND_PHOTO_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "image/avif",
-].join(",");
-const ACCEPTED_TREND_PHOTO_EXTENSIONS = ".jpg,.jpeg,.png,.webp,.heic,.heif,.avif";
+const ACCEPTED_TREND_PHOTOS = "image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.webp,.heic,.heif,.avif";
 const MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS = 5;
 
 type RunnerPhase = "idle" | "uploading" | "generating" | "error";
@@ -131,32 +123,73 @@ function openTrendRunnerById(trendId: number): void {
   window.dispatchEvent(new CustomEvent<TrendRunnerEventDetail>(TREND_RUNNER_EVENT, { detail: { trendId } }));
 }
 
-function PinterestReferenceCard({
-  item,
+function PinterestPrimarySlot({
   label,
+  badge,
+  emptyLabel,
+  item,
+  busy,
+  uploading,
+  inputRef,
+  inputLabel,
+  onFile,
   onRemove,
-  disabled,
 }: {
-  item: PinterestReference;
-  label: string;
+  label: "РЕФЕРЕНС" | "ТЫ";
+  badge: string;
+  emptyLabel: string;
+  item: PinterestReference | null;
+  busy: boolean;
+  uploading: boolean;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  inputLabel: string;
+  onFile: (file: File) => void;
   onRemove: () => void;
-  disabled: boolean;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-primary/25 bg-primary/5">
-      <img src={item.preview} alt={label} className="h-40 w-full object-cover" />
-      <span className="absolute bottom-2 left-2 rounded-full bg-black/75 px-2.5 py-1 text-[10px] font-black tracking-wide text-white backdrop-blur">
-        {label}
-      </span>
-      <button
-        type="button"
-        aria-label={`Удалить ${label}`}
-        disabled={disabled}
-        className="absolute right-2 top-2 grid size-8 place-items-center rounded-full bg-black/75 text-white backdrop-blur disabled:opacity-50"
-        onClick={onRemove}
-      >
-        <X className="size-4" />
-      </button>
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5 px-1">
+        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">{badge}</span>
+      </div>
+      <div className="relative">
+        <label className="relative flex min-h-44 cursor-pointer flex-col overflow-hidden rounded-2xl border border-dashed border-border/70 bg-secondary/35 text-sm transition hover:border-primary/50">
+          <input
+            ref={inputRef}
+            type="file"
+            accept={ACCEPTED_TREND_PHOTOS}
+            className="absolute inset-0 z-20 cursor-pointer opacity-0"
+            aria-label={inputLabel}
+            disabled={busy}
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = "";
+              if (file) onFile(file);
+            }}
+          />
+          {item ? (
+            <img src={item.preview} alt={label} className="h-36 w-full object-cover" />
+          ) : (
+            <div className="flex h-36 flex-col items-center justify-center gap-2 text-muted-foreground">
+              {uploading ? <LoaderCircle className="size-7 animate-spin text-primary" /> : <ImagePlus className="size-7 text-primary" />}
+              <span className="text-xs font-medium">Загрузить</span>
+            </div>
+          )}
+          <div className="flex min-h-10 items-center justify-center px-2 py-2 text-center text-xs font-medium text-foreground">
+            {item ? "Готово ✓" : emptyLabel}
+          </div>
+        </label>
+        {item && !busy ? (
+          <button
+            type="button"
+            aria-label={`Удалить ${label.toLowerCase()}`}
+            onClick={onRemove}
+            className="absolute right-2 top-2 z-30 flex size-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow"
+          >
+            <X className="size-4" />
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -187,7 +220,8 @@ function PinterestTrendFlow({
   const parsedWeight = Number(weightKg);
   const validHeight = Number.isInteger(parsedHeight) && parsedHeight >= 120 && parsedHeight <= 230;
   const validWeight = Number.isInteger(parsedWeight) && parsedWeight >= 30 && parsedWeight <= 250;
-  const ready = Boolean(scene && identity && validHeight && validWeight && !busy);
+  const primaryReady = Boolean(scene && identity);
+  const ready = Boolean(primaryReady && validHeight && validWeight && !busy);
 
   useEffect(() => {
     onBusyChange(busy);
@@ -205,10 +239,8 @@ function PinterestTrendFlow({
     previewUrls.current.delete(item.preview);
   };
 
-  const uploadReference = async (file: File | null | undefined, slot: "scene" | "identity" | "extra") => {
-    if (!file || busy) return;
-    if (slot === "extra" && identityExtras.length >= MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS) return;
-
+  const uploadOne = async (file: File, slot: "scene" | "identity") => {
+    if (busy) return;
     const preview = URL.createObjectURL(file);
     previewUrls.current.add(preview);
     setError("");
@@ -222,17 +254,52 @@ function PinterestTrendFlow({
       if (slot === "scene") {
         revokePreview(scene);
         setScene(next);
-      } else if (slot === "identity") {
+      } else {
         revokePreview(identity);
         setIdentity(next);
-      } else {
-        setIdentityExtras((current) => [...current, next]);
       }
       setPhase("idle");
     } catch (uploadError) {
       URL.revokeObjectURL(preview);
       previewUrls.current.delete(preview);
       const message = uploadError instanceof Error ? uploadError.message : "Не удалось загрузить фото";
+      setError(message);
+      setPhase("error");
+      toast.error(message);
+    }
+  };
+
+  const uploadExtras = async (files: File[]) => {
+    if (busy || !files.length) return;
+    const available = MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS - identityExtras.length;
+    if (files.length > available) {
+      const message = `Можно добавить максимум ${MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS} дополнительных ракурсов`;
+      setError(message);
+      setPhase("error");
+      toast.error(message);
+      return;
+    }
+
+    const previews = files.map((file) => URL.createObjectURL(file));
+    previews.forEach((url) => previewUrls.current.add(url));
+    setError("");
+    setPhase("uploading");
+    try {
+      const uploaded = await Promise.all(files.map(async (file, index) => {
+        const form = new FormData();
+        form.append("file", file);
+        const result = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
+        if (!result.asset_id) throw new Error("Backend не вернул asset_id");
+        return { ...result, preview: previews[index] } as PinterestReference;
+      }));
+      setIdentityExtras((current) => [...current, ...uploaded]);
+      setPhase("idle");
+    } catch (uploadError) {
+      previews.forEach((url) => {
+        URL.revokeObjectURL(url);
+        previewUrls.current.delete(url);
+      });
+      const message = uploadError instanceof Error ? uploadError.message : "Не удалось загрузить дополнительные ракурсы";
       setError(message);
       setPhase("error");
       toast.error(message);
@@ -281,206 +348,169 @@ function PinterestTrendFlow({
 
   return (
     <div className="grid gap-3">
-      <div className="rounded-xl border border-primary/25 bg-primary/10 p-3">
-        <div className="flex items-center gap-2 text-primary">
-          <Sparkles className="size-4" />
-          <p className="text-sm font-bold">Повтори фото с Pinterest</p>
-        </div>
-        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-          Загрузите Pinterest-референс и свои фото. Сцена, поза, ракурс, одежда, свет и фон берутся из референса, а лицо и внешность — только с ваших фото.
+      <div className="rounded-2xl border border-amber-300/30 bg-amber-200/10 p-3">
+        <p className="text-xs font-semibold text-foreground">Как получить результат 1 в 1</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+          Слева — кадр, который повторяем. Справа — ваше основное фото. Генерация не запускается после загрузки: сначала добавьте все данные и нажмите «Создать».
         </p>
       </div>
 
-      <section className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
-        <div>
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold">1. Референс Pinterest</h3>
-            <span className="text-[10px] font-bold uppercase tracking-wide text-primary">Обязательно</span>
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Загрузите фото из Pinterest, которое хотите повторить. Из него берём композицию, позу, ракурс, одежду, фон и свет. Внешность человека с референса не переносится.
-          </p>
-        </div>
-        {scene ? (
-          <PinterestReferenceCard
-            item={scene}
-            label="РЕФЕРЕНС"
-            disabled={busy}
-            onRemove={() => {
-              revokePreview(scene);
-              setScene(null);
-              setError("");
-              setPhase("idle");
-            }}
-          />
-        ) : null}
-        <input
-          ref={sceneInputRef}
-          type="file"
-          accept={`${ACCEPTED_TREND_PHOTO_TYPES},${ACCEPTED_TREND_PHOTO_EXTENSIONS}`}
-          className="sr-only"
-          aria-label="Загрузить референс Pinterest"
-          disabled={busy}
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            void uploadReference(file, "scene");
+      <div className="grid grid-cols-2 gap-3">
+        <PinterestPrimarySlot
+          label="РЕФЕРЕНС"
+          badge="откуда"
+          emptyLabel="Фото, которое повторяем"
+          item={scene}
+          busy={busy}
+          uploading={phase === "uploading"}
+          inputRef={sceneInputRef}
+          inputLabel="Загрузить референс Pinterest"
+          onFile={(file) => void uploadOne(file, "scene")}
+          onRemove={() => {
+            revokePreview(scene);
+            setScene(null);
+            setError("");
+            setPhase("idle");
           }}
         />
-        <Button type="button" variant="outline" disabled={busy} onClick={() => sceneInputRef.current?.click()}>
-          {phase === "uploading" ? <LoaderCircle className="animate-spin" /> : <UploadCloud />}
-          {scene ? "Заменить референс Pinterest" : "Загрузить референс Pinterest"}
-        </Button>
-      </section>
-
-      <section className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
-        <div>
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold">2. Ваше фото</h3>
-            <span className="text-[10px] font-bold uppercase tracking-wide text-primary">Обязательно</span>
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Добавьте ваше фото для сохранения вашей внешности. На главном фото лицо должно быть чётко видно, без сильных фильтров и перекрытий.
-          </p>
-        </div>
-        {identity ? (
-          <PinterestReferenceCard
-            item={identity}
-            label="ТЫ"
-            disabled={busy}
-            onRemove={() => {
-              revokePreview(identity);
-              setIdentity(null);
-              setError("");
-              setPhase("idle");
-            }}
-          />
-        ) : null}
-        <input
-          ref={identityInputRef}
-          type="file"
-          accept={`${ACCEPTED_TREND_PHOTO_TYPES},${ACCEPTED_TREND_PHOTO_EXTENSIONS}`}
-          className="sr-only"
-          aria-label="Загрузить ваше фото"
-          disabled={busy}
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            void uploadReference(file, "identity");
+        <PinterestPrimarySlot
+          label="ТЫ"
+          badge="кого вставляем"
+          emptyLabel="Ваше фото"
+          item={identity}
+          busy={busy}
+          uploading={phase === "uploading"}
+          inputRef={identityInputRef}
+          inputLabel="Загрузить ваше фото"
+          onFile={(file) => void uploadOne(file, "identity")}
+          onRemove={() => {
+            revokePreview(identity);
+            setIdentity(null);
+            setError("");
+            setPhase("idle");
           }}
         />
-        <Button type="button" variant="outline" disabled={busy} onClick={() => identityInputRef.current?.click()}>
-          {phase === "uploading" ? <LoaderCircle className="animate-spin" /> : <UploadCloud />}
-          {identity ? "Заменить главное фото" : "+ Добавить ваше фото"}
-        </Button>
-
-        <div className="mt-1 border-t border-border/70 pt-3">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold">Дополнительные ракурсы</p>
-            <span className="text-[10px] text-muted-foreground">{identityExtras.length}/5</span>
-          </div>
-          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-            Необязательно. Можно добавить до 5 других фото этого же человека — они помогают точнее сохранить лицо, волосы и пропорции.
-          </p>
-        </div>
-        {identityExtras.length ? (
-          <div className="grid grid-cols-2 gap-2">
-            {identityExtras.map((item, index) => (
-              <PinterestReferenceCard
-                key={`${item.asset_id}-${index}`}
-                item={item}
-                label={`ТЫ · ${index + 2}`}
-                disabled={busy}
-                onRemove={() => removeExtra(index)}
-              />
-            ))}
-          </div>
-        ) : null}
-        <input
-          ref={extraInputRef}
-          type="file"
-          accept={`${ACCEPTED_TREND_PHOTO_TYPES},${ACCEPTED_TREND_PHOTO_EXTENSIONS}`}
-          className="sr-only"
-          aria-label="Добавить дополнительное фото"
-          disabled={busy || identityExtras.length >= MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS}
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            void uploadReference(file, "extra");
-          }}
-        />
-        {identityExtras.length < MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS ? (
-          <Button type="button" variant="secondary" disabled={busy} onClick={() => extraInputRef.current?.click()}>
-            + Добавить фото
-          </Button>
-        ) : null}
-      </section>
-
-      <section className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
-        <div>
-          <h3 className="text-sm font-bold">3. Ваши параметры</h3>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Укажите рост и вес — это помогает сохранить реалистичный масштаб и пропорции тела. Эти данные не появятся на изображении.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="grid gap-1 text-xs font-semibold">
-            Рост
-            <span className="relative">
-              <input
-                type="number"
-                inputMode="numeric"
-                min={120}
-                max={230}
-                step={1}
-                value={heightCm}
-                disabled={busy}
-                placeholder="165"
-                aria-label="Рост"
-                className="h-11 w-full rounded-lg border border-input bg-background px-3 pr-9 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                onChange={(event) => setHeightCm(event.target.value)}
-              />
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">см</span>
-            </span>
-          </label>
-          <label className="grid gap-1 text-xs font-semibold">
-            Вес
-            <span className="relative">
-              <input
-                type="number"
-                inputMode="numeric"
-                min={30}
-                max={250}
-                step={1}
-                value={weightKg}
-                disabled={busy}
-                placeholder="55"
-                aria-label="Вес"
-                className="h-11 w-full rounded-lg border border-input bg-background px-3 pr-9 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                onChange={(event) => setWeightKg(event.target.value)}
-              />
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">кг</span>
-            </span>
-          </label>
-        </div>
-        {heightCm && !validHeight ? <p className="text-[11px] text-destructive">Рост: от 120 до 230 см.</p> : null}
-        {weightKg && !validWeight ? <p className="text-[11px] text-destructive">Вес: от 30 до 250 кг.</p> : null}
-      </section>
-
-      <div className="rounded-xl border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
-        <p className="font-semibold text-foreground">Перед созданием проверьте:</p>
-        <p className="mt-1">РЕФЕРЕНС — нужная сцена из Pinterest. ТЫ — ваше главное фото. Дополнительные фото относятся только к вашей внешности.</p>
-        <p className="mt-1 font-medium text-primary">Генерация не запускается после загрузки фото. Нажмите «Создать изображение», когда всё готово.</p>
       </div>
 
-      {error ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>
+      {primaryReady ? (
+        <>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">1–5 ракурсов одного человека</p>
+              <span className="text-[10px] text-muted-foreground">{identityExtras.length}/{MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS}</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {identityExtras.map((item, index) => (
+                <div key={`${item.asset_id}-${index}`} className="relative size-14 overflow-hidden rounded-xl border border-border/60">
+                  <img src={item.preview} alt={`Дополнительный ракурс ${index + 1}`} className="size-full object-cover" />
+                  {!busy ? (
+                    <button
+                      type="button"
+                      aria-label={`Удалить ракурс ${index + 1}`}
+                      onClick={() => removeExtra(index)}
+                      className="absolute right-0.5 top-0.5 flex size-5 items-center justify-center rounded-full bg-background/90 text-foreground"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+              {identityExtras.length < MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS ? (
+                <label className="relative flex size-14 cursor-pointer items-center justify-center rounded-xl border border-dashed border-border/70 bg-secondary/25 text-muted-foreground hover:border-primary/50 hover:text-foreground">
+                  <input
+                    ref={extraInputRef}
+                    type="file"
+                    multiple
+                    accept={ACCEPTED_TREND_PHOTOS}
+                    className="absolute inset-0 cursor-pointer opacity-0"
+                    aria-label="Добавить дополнительные ракурсы"
+                    disabled={busy}
+                    onChange={(event) => {
+                      const files = Array.from(event.currentTarget.files || []);
+                      event.currentTarget.value = "";
+                      void uploadExtras(files);
+                    }}
+                  />
+                  {phase === "uploading" ? <LoaderCircle className="size-5 animate-spin" /> : <Plus className="size-5" />}
+                </label>
+              ) : null}
+            </div>
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              Дополнительные ракурсы необязательны, но помогают точнее сохранить лицо, волосы и пропорции.
+            </p>
+          </div>
+
+          <div className="space-y-1 text-[11px] text-muted-foreground">
+            <p><span className="text-emerald-500">●</span> сцена, свет и поза считаются с референса</p>
+            <p><span className="text-emerald-500">●</span> лицо и внешность берутся только с твоего фото</p>
+          </div>
+        </>
       ) : null}
 
-      <Button type="button" disabled={!ready} className="min-h-12 w-full" onClick={() => void generate()}>
-        {phase === "generating" ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-        {phase === "generating" ? "Создаём изображение…" : "Создать изображение"}
+      <div className="grid grid-cols-2 gap-3">
+        <label className="space-y-1.5">
+          <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
+            <Ruler className="size-3.5" /> Рост
+          </span>
+          <div className="relative">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={120}
+              max={230}
+              step={1}
+              value={heightCm}
+              onChange={(event) => setHeightCm(event.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+              placeholder="165"
+              disabled={busy}
+              aria-label="Рост"
+              aria-invalid={Boolean(heightCm) && !validHeight}
+              className="h-11 w-full rounded-xl border border-border/70 bg-secondary/25 px-3 pr-9 text-base outline-none transition focus:border-primary/60"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">см</span>
+          </div>
+        </label>
+        <label className="space-y-1.5">
+          <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
+            <Weight className="size-3.5" /> Вес
+          </span>
+          <div className="relative">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={30}
+              max={250}
+              step={1}
+              value={weightKg}
+              onChange={(event) => setWeightKg(event.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+              placeholder="55"
+              disabled={busy}
+              aria-label="Вес"
+              aria-invalid={Boolean(weightKg) && !validWeight}
+              className="h-11 w-full rounded-xl border border-border/70 bg-secondary/25 px-3 pr-9 text-base outline-none transition focus:border-primary/60"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">кг</span>
+          </div>
+        </label>
+      </div>
+      <p className="-mt-1 text-[10px] leading-relaxed text-muted-foreground">
+        Рост и вес обязательны, чтобы руки, шея и пропорции тела совпали с вами.
+      </p>
+      {heightCm && !validHeight ? <p className="text-[10px] text-destructive">Рост должен быть от 120 до 230 см.</p> : null}
+      {weightKg && !validWeight ? <p className="text-[10px] text-destructive">Вес должен быть от 30 до 250 кг.</p> : null}
+
+      {error ? <p className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
+
+      <Button type="button" disabled={!ready} className="h-12 text-base font-semibold" onClick={() => void generate()}>
+        {phase === "generating" ? <LoaderCircle className="size-4 animate-spin" /> : null}
+        {phase === "generating" ? "Генерирую…" : "Создать →"}
       </Button>
+
+      {!ready ? (
+        <p className="text-center text-[10px] text-muted-foreground">
+          Для запуска нужны референс, ваше фото, рост и вес. Загрузка фото сама генерацию не запускает.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -654,10 +684,8 @@ function TrendRunnerPortal() {
     <>
       <Sheet
         open={Boolean(trend)}
-        title={isPinterest ? "✨ Повтори фото с Pinterest" : trend?.title || "Повторить тренд"}
-        description={isPinterest
-          ? "Pinterest-референс + ваши фото + рост и вес. Запуск только по кнопке «Создать изображение»."
-          : "Один снимок. Без настроек. Всё остальное применит backend."}
+        title={isPinterest ? "Повтори фото с Pinterest" : trend?.title || "Повторить тренд"}
+        description={isPinterest ? undefined : "Один снимок. Без настроек. Всё остальное применит backend."}
         onOpenChange={(open) => {
           if (!open) closeRunner();
         }}
@@ -704,7 +732,7 @@ function TrendRunnerPortal() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={`${ACCEPTED_TREND_PHOTO_TYPES},${ACCEPTED_TREND_PHOTO_EXTENSIONS}`}
+                accept={ACCEPTED_TREND_PHOTOS}
                 className="sr-only"
                 disabled={genericBusy}
                 onChange={(event) => {
@@ -715,13 +743,11 @@ function TrendRunnerPortal() {
               />
 
               <Button disabled={genericBusy} className="min-h-12 w-full" onClick={() => fileInputRef.current?.click()}>
-                {genericBusy ? <LoaderCircle className="animate-spin" /> : <UploadCloud />}
+                {genericBusy ? <LoaderCircle className="animate-spin" /> : <ImagePlus />}
                 {phaseLabel}
               </Button>
 
-              {error ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>
-              ) : null}
+              {error ? <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">{error}</div> : null}
 
               <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-2 text-[11px] text-muted-foreground">
                 <X className="mt-0.5 size-3.5 shrink-0" />
