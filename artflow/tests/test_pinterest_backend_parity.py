@@ -60,8 +60,15 @@ def test_product_metadata_is_scene_first_but_provider_is_identity_first() -> Non
     assert contract["provider_reference_images"] == [
         "https://example.test/person.jpg",
         "https://example.test/scene.jpg",
+        "https://example.test/person-side.jpg",
+        "https://example.test/person-back.jpg",
     ]
-    assert contract["provider_reference_roles"] == ["identity", "scene"]
+    assert contract["provider_reference_roles"] == [
+        "identity",
+        "scene",
+        "identity_evidence",
+        "identity_evidence",
+    ]
     assert contract["prompt_hidden"] is True
     assert contract["prompt_actions_allowed"] is False
     assert contract["feed_prompt_visible"] is False
@@ -73,8 +80,10 @@ def test_product_metadata_is_scene_first_but_provider_is_identity_first() -> Non
 def test_provider_prompt_contains_identity_scene_and_partial_transfer_guards() -> None:
     prompt = pinterest_provider_prompt("Private scene recipe", height_cm=168, weight_kg=58)
     assert PINTEREST_PROMPT_MARKER in prompt
-    assert "Image 1 is the only USER_IDENTITY_REFERENCE" in prompt
+    assert "Image 1 is the PRIMARY USER_IDENTITY_REFERENCE" in prompt
     assert "Image 2 is the only SCENE_REFERENCE" in prompt
+    assert "Images 3 and later" in prompt
+    assert "USER_IDENTITY_EVIDENCE" in prompt
     assert "Do not preserve the person from Image 2" in prompt
     assert "PARTIAL TRANSFER GUARD" in prompt
     assert "Do not copy person from scene reference" in prompt
@@ -85,7 +94,7 @@ def test_provider_prompt_contains_identity_scene_and_partial_transfer_guards() -
 
 
 @pytest.mark.asyncio
-async def test_provider_sends_only_identity_and_scene_semantic_anchors() -> None:
+async def test_provider_sends_identity_scene_and_optional_identity_evidence() -> None:
     original = AsyncMock(return_value=SimpleNamespace(task_id="task-1"))
     service = SimpleNamespace(generate_image=original)
     install_pinterest_provider_contract(service)
@@ -112,11 +121,12 @@ async def test_provider_sends_only_identity_and_scene_semantic_anchors() -> None
     kwargs = original.await_args.kwargs
     assert args[0] == "nano-banana-pro"
     assert PINTEREST_PROMPT_MARKER in args[1]
+    assert "USER_IDENTITY_EVIDENCE" in args[1]
     assert kwargs["image_url"] == [
         "https://example.test/person.jpg",
         "https://example.test/scene.jpg",
+        "https://example.test/evidence.jpg",
     ]
-    assert "evidence.jpg" not in kwargs["image_url"]
 
 
 @pytest.mark.asyncio
