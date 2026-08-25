@@ -9,6 +9,7 @@
     "build": "npm run typecheck && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test:e2e": "npx -y @playwright/test test",
+    "test:e2e:user-journeys": "npx -y @playwright/test test -c playwright.user-journeys.config.ts",
     "test:e2e:install": "npx -y @playwright/test install chromium"
   },
   "dependencies": {
