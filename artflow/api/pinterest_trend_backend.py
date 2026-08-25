@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api.image_service import ImageModel, MODEL_ASPECT_RATIOS
+from api.image_service import MODEL_ASPECT_RATIOS, ImageModel
 from api.pinterest_contract import (
     build_pinterest_contract,
     is_pinterest_prompt_source,
