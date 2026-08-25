@@ -5,20 +5,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from api.pinterest_contract import (
-    build_pinterest_contract,
+from api.pinterest_service_contract import (
+    build_pinterest_service_contract,
     install_pinterest_provider_contract,
-    pinterest_provider_context,
     pinterest_provider_prompt,
+    pinterest_service_provider_context,
 )
 
 
-def test_pinterest_contract_keeps_scene_first_product_and_provider_order() -> None:
-    contract = build_pinterest_contract(
+def test_pinterest_service_contract_keeps_scene_first_order() -> None:
+    contract = build_pinterest_service_contract(
         scene_reference="https://example.test/scene.jpg",
         identity_reference="https://example.test/person.jpg",
         identity_evidence=["https://example.test/person-2.jpg"],
-        trend_id=55,
     )
     expected_images = [
         "https://example.test/scene.jpg",
@@ -26,11 +25,13 @@ def test_pinterest_contract_keeps_scene_first_product_and_provider_order() -> No
         "https://example.test/person-2.jpg",
     ]
     expected_roles = ["scene", "identity", "identity_evidence"]
+    assert contract["source"] == "service"
+    assert contract["service_id"] == "pinterest"
+    assert "trend_id" not in contract
     assert contract["reference_images"] == expected_images
     assert contract["reference_roles"] == expected_roles
     assert contract["provider_reference_images"] == expected_images
     assert contract["provider_reference_roles"] == expected_roles
-    assert contract["trend_id"] == 55
 
 
 def test_pinterest_provider_prompt_is_explicit_about_reference_roles() -> None:
@@ -54,14 +55,13 @@ async def test_provider_wrapper_sends_scene_identity_then_extra_identity_evidenc
         local_upload_path_from_url=lambda _url: None,
     )
     install_pinterest_provider_contract(service)
-    contract = build_pinterest_contract(
+    contract = build_pinterest_service_contract(
         scene_reference="https://example.test/scene.jpg",
         identity_reference="https://example.test/person.jpg",
         identity_evidence=["https://example.test/evidence.jpg"],
-        trend_id=55,
     )
 
-    with pinterest_provider_context(contract):
+    with pinterest_service_provider_context(contract):
         await service.generate_image(
             "model",
             "hidden prompt",
@@ -97,14 +97,13 @@ async def test_provider_wrapper_normalizes_every_pinterest_reference() -> None:
         local_upload_path_from_url=lambda _url: None,
     )
     install_pinterest_provider_contract(service)
-    contract = build_pinterest_contract(
+    contract = build_pinterest_service_contract(
         scene_reference="https://example.test/scene.heic",
         identity_reference="https://example.test/person.avif",
         identity_evidence=["https://example.test/person-2.webp"],
-        trend_id=55,
     )
 
-    with pinterest_provider_context(contract):
+    with pinterest_service_provider_context(contract):
         await service.generate_image("model", "hidden prompt")
 
     assert normalized == [

@@ -5,9 +5,9 @@ on:
     paths:
       - "artflow/api/__init__.py"
       - "artflow/api/pinterest_contract.py"
-      - "artflow/api/pinterest_trend_backend.py"
+      - "artflow/api/pinterest_service_contract.py"
+      - "artflow/api/pinterest_service_routes.py"
       - "artflow/api/miniapp_routes.py"
-      - "artflow/api/trends_routes.py"
       - "artflow/tests/test_pinterest_backend_parity.py"
       - "artflow/tests/test_pinterest_reference_contract.py"
       - ".github/workflows/pinterest-backend.yml"
@@ -16,9 +16,9 @@ on:
     paths:
       - "artflow/api/__init__.py"
       - "artflow/api/pinterest_contract.py"
-      - "artflow/api/pinterest_trend_backend.py"
+      - "artflow/api/pinterest_service_contract.py"
+      - "artflow/api/pinterest_service_routes.py"
       - "artflow/api/miniapp_routes.py"
-      - "artflow/api/trends_routes.py"
       - "artflow/tests/test_pinterest_backend_parity.py"
       - "artflow/tests/test_pinterest_reference_contract.py"
       - ".github/workflows/pinterest-backend.yml"
@@ -48,21 +48,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Compile Pinterest backend
+      - name: Compile Pinterest service
         run: |
           python -m py_compile \
-            api/pinterest_contract.py \
-            api/pinterest_trend_backend.py
+            api/pinterest_service_contract.py \
+            api/pinterest_service_routes.py
 
-      - name: Ruff Pinterest backend
+      - name: Ruff Pinterest service
         run: |
           ruff check \
-            api/pinterest_contract.py \
-            api/pinterest_trend_backend.py \
+            api/pinterest_service_contract.py \
+            api/pinterest_service_routes.py \
             tests/test_pinterest_backend_parity.py \
             tests/test_pinterest_reference_contract.py
 
-      - name: Pinterest backend regression tests
+      - name: Pinterest service regression tests
         run: |
           pytest -q \
             tests/test_pinterest_backend_parity.py \
