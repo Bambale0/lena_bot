@@ -26,6 +26,21 @@ const trends = [
   },
 ];
 
+const pinterestService = {
+  id: "pinterest",
+  title: "Pinterest AI",
+  description: "Повторяй Pinterest-сцены со своей внешностью",
+  badge: "Новинка",
+  price_credits: 2,
+  quality: "2K",
+  max_identity_angles: 5,
+  height_min_cm: 120,
+  height_max_cm: 230,
+  weight_min_kg: 30,
+  weight_max_kg: 250,
+  available: true,
+};
+
 async function mockApi(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/me", (route) => route.fulfill({ json: user }));
   await page.route("**/api/v1/models/image", (route) => route.fulfill({ json: [] }));
@@ -34,6 +49,7 @@ async function mockApi(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/history?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: trends }));
+  await page.route("**/api/v1/services/pinterest", (route) => route.fulfill({ json: pinterestService }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/music/voices", (route) => route.fulfill({ json: [] }));
   await page.addInitScript(() => {
@@ -56,7 +72,7 @@ test.beforeEach(async ({ page }) => {
   await mockApi(page);
 });
 
-test("Pinterest stays active in Services even when it is outside the public trends slice", async ({ page }) => {
+test("Pinterest is a priced Service and stays outside Trends", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
 
   await page.getByRole("tab", { name: "Сервисы" }).click();
@@ -64,18 +80,19 @@ test("Pinterest stays active in Services even when it is outside the public tren
   await expect(pinterest).toBeVisible();
   await expect(pinterest).toBeEnabled();
   await expect(pinterest.getByText("Новинка", { exact: true })).toBeVisible();
+  await expect(pinterest.getByText("💋 2", { exact: true })).toBeVisible();
 
   await page.getByRole("tab", { name: "Тренды" }).click();
   await expect(page.getByText("Кинопортрет", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Pinterest", { exact: true })).toHaveCount(0);
 });
 
-test("Pinterest Services matches the approved manual reference UX", async ({ page }) => {
+test("Pinterest Service uses its own API domain and approved manual reference UX", async ({ page }) => {
   let uploadIndex = 0;
   let runCalls = 0;
   let runPayload: Record<string, unknown> | null = null;
 
-  await page.route("**/api/v1/trends/upload", async (route) => {
+  await page.route("**/api/v1/services/pinterest/upload", async (route) => {
     uploadIndex += 1;
     await route.fulfill({
       json: {
@@ -87,7 +104,7 @@ test("Pinterest Services matches the approved manual reference UX", async ({ pag
       },
     });
   });
-  await page.route("**/api/v1/trends/0/pinterest-run", async (route) => {
+  await page.route("**/api/v1/services/pinterest/run", async (route) => {
     runCalls += 1;
     runPayload = route.request().postDataJSON() as Record<string, unknown>;
     await route.fulfill({
@@ -104,8 +121,10 @@ test("Pinterest Services matches the approved manual reference UX", async ({ pag
   await page.getByRole("tab", { name: "Сервисы" }).click();
   await page.getByRole("button", { name: /Pinterest/ }).first().click();
 
-  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
+  const dialog = page.locator("#apix-pinterest-service-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Pinterest AI · сервис", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("2 💋", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Как получить результат 1 в 1", { exact: true })).toBeVisible();
   await expect(dialog.getByText(/Слева — кадр, который повторяем\. Справа — ваше основное фото/)).toBeVisible();
   await expect(dialog.getByText("РЕФЕРЕНС", { exact: true })).toBeVisible();
@@ -121,7 +140,7 @@ test("Pinterest Services matches the approved manual reference UX", async ({ pag
   await expect(dialog.locator("select")).toHaveCount(0);
   await expect(dialog.locator("textarea")).toHaveCount(0);
 
-  const createButton = dialog.getByRole("button", { name: "Создать →" });
+  const createButton = dialog.getByRole("button", { name: "Создать · 2 💋 →" });
   await expect(createButton).toBeDisabled();
 
   await dialog.getByLabel("Загрузить референс Pinterest").setInputFiles({
@@ -165,7 +184,7 @@ test("Pinterest accepts multiple optional identity angles without auto-start", a
   let runCalls = 0;
   let runPayload: Record<string, unknown> | null = null;
 
-  await page.route("**/api/v1/trends/upload", async (route) => {
+  await page.route("**/api/v1/services/pinterest/upload", async (route) => {
     uploadIndex += 1;
     await route.fulfill({
       json: {
@@ -176,7 +195,7 @@ test("Pinterest accepts multiple optional identity angles without auto-start", a
       },
     });
   });
-  await page.route("**/api/v1/trends/0/pinterest-run", async (route) => {
+  await page.route("**/api/v1/services/pinterest/run", async (route) => {
     runCalls += 1;
     runPayload = route.request().postDataJSON() as Record<string, unknown>;
     await route.fulfill({
@@ -188,7 +207,7 @@ test("Pinterest accepts multiple optional identity angles without auto-start", a
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Сервисы" }).click();
   await page.getByRole("button", { name: /Pinterest/ }).first().click();
-  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
+  const dialog = page.locator("#apix-pinterest-service-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
 
   await dialog.getByLabel("Загрузить референс Pinterest").setInputFiles({ name: "scene.jpg", mimeType: "image/jpeg", buffer: Buffer.from("scene") });
   await dialog.getByLabel("Загрузить ваше фото").setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: Buffer.from("me") });
@@ -204,7 +223,7 @@ test("Pinterest accepts multiple optional identity angles without auto-start", a
 
   await dialog.getByLabel("Рост").fill("170");
   await dialog.getByLabel("Вес").fill("62");
-  await dialog.getByRole("button", { name: "Создать →" }).click();
+  await dialog.getByRole("button", { name: "Создать · 2 💋 →" }).click();
   await expect.poll(() => runCalls).toBe(1);
   expect(runPayload).toMatchObject({
     height_cm: 170,
@@ -219,11 +238,11 @@ test("Pinterest accepts multiple optional identity angles without auto-start", a
 test("Pinterest validates measurements before generation", async ({ page }) => {
   let uploadIndex = 0;
   let runCalls = 0;
-  await page.route("**/api/v1/trends/upload", async (route) => {
+  await page.route("**/api/v1/services/pinterest/upload", async (route) => {
     uploadIndex += 1;
     await route.fulfill({ json: { asset_id: `asset-${uploadIndex}`, url: `/uploads/${uploadIndex}.jpg`, kind: "image" } });
   });
-  await page.route("**/api/v1/trends/0/pinterest-run", async (route) => {
+  await page.route("**/api/v1/services/pinterest/run", async (route) => {
     runCalls += 1;
     await route.fulfill({ status: 202, json: { ok: true, task: { id: 779, model: "nano-banana-pro", gen_type: "image", status: "pending" } } });
   });
@@ -231,7 +250,7 @@ test("Pinterest validates measurements before generation", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Сервисы" }).click();
   await page.getByRole("button", { name: /Pinterest/ }).first().click();
-  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
+  const dialog = page.locator("#apix-pinterest-service-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
 
   await dialog.getByLabel("Загрузить референс Pinterest").setInputFiles({ name: "scene.jpg", mimeType: "image/jpeg", buffer: Buffer.from("scene") });
   await dialog.getByLabel("Загрузить ваше фото").setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: Buffer.from("me") });
@@ -240,6 +259,6 @@ test("Pinterest validates measurements before generation", async ({ page }) => {
 
   await expect(dialog.getByText("Рост должен быть от 120 до 230 см.", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Вес должен быть от 30 до 250 кг.", { exact: true })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Создать →" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Создать · 2 💋 →" })).toBeDisabled();
   expect(runCalls).toBe(0);
 });
