@@ -54,12 +54,14 @@ for _key, _description in list(_model_keyboards.IMAGE_MODEL_DESC.items()):
 from . import image_gen as _legacy_image_gen
 from . import image_wizard_v2 as _image_wizard_v2
 from . import photo_prompt as _photo_prompt
+from . import repeat_safe as _repeat_safe
 from . import repeat_reference_marketplace as _repeat_reference_marketplace  # noqa: F401
 from . import repeat_references as _repeat_references  # noqa: F401
 
 _photo_prompt.install_photo_prompt_keyboard_hooks(_legacy_image_gen)
 
 _image_router = Router(name="image_v2")
+_image_router.include_router(_repeat_safe.router)
 _image_router.include_router(_image_wizard_v2.router)
 _image_router.include_router(_photo_prompt.router)
 _image_router.include_router(_legacy_image_gen.router)
