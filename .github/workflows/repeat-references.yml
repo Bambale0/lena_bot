@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "artflow/api/pinterest_contract.py"
+      - "artflow/api/pinterest_service_contract.py"
       - "artflow/api/repeat_runtime.py"
       - "artflow/bot/handlers/__init__.py"
       - "artflow/bot/handlers/repeat_callback_guard.py"
@@ -46,6 +47,7 @@ jobs:
         run: |
           python -m compileall -q \
             api/pinterest_contract.py \
+            api/pinterest_service_contract.py \
             api/repeat_runtime.py \
             bot/handlers/repeat_callback_guard.py \
             bot/handlers/repeat_safe.py \
@@ -67,6 +69,7 @@ jobs:
         run: |
           ruff check \
             api/pinterest_contract.py \
+            api/pinterest_service_contract.py \
             api/repeat_runtime.py \
             bot/handlers/__init__.py \
             bot/handlers/repeat_callback_guard.py \
