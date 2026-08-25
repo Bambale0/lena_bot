@@ -151,3 +151,49 @@ else:
     install_suno_source_audio_routes(miniapp_routes)
     strip_seedance25_omni_id_controls(miniapp_routes)
     install_admin_model_visibility(miniapp_routes)
+
+
+class _TrendsContractLoader(importlib.abc.Loader):
+    """Install Pinterest-specific routes after the shared trends module loads."""
+
+    def __init__(self, wrapped: importlib.abc.Loader, finder: "_TrendsContractFinder") -> None:
+        self.wrapped = wrapped
+        self.finder = finder
+
+    def create_module(self, spec: Any) -> ModuleType | None:
+        create = getattr(self.wrapped, "create_module", None)
+        return create(spec) if create else None
+
+    def exec_module(self, module: ModuleType) -> None:
+        self.wrapped.exec_module(module)
+        from api.pinterest_trend_backend import install_pinterest_trend_backend
+
+        install_pinterest_trend_backend(module)
+        if self.finder in sys.meta_path:
+            sys.meta_path.remove(self.finder)
+
+
+class _TrendsContractFinder(importlib.abc.MetaPathFinder):
+    target = "api.trends_routes"
+
+    def find_spec(self, fullname: str, path: Any, target: ModuleType | None = None):
+        if fullname != self.target:
+            return None
+        try:
+            sys.meta_path.remove(self)
+            spec = importlib.util.find_spec(fullname)
+        finally:
+            sys.meta_path.insert(0, self)
+        if spec is None or spec.loader is None:
+            return spec
+        spec.loader = _TrendsContractLoader(spec.loader, self)
+        return spec
+
+
+if "api.trends_routes" not in sys.modules:
+    _trends_contract_finder = _TrendsContractFinder()
+    sys.meta_path.insert(0, _trends_contract_finder)
+else:
+    from api.pinterest_trend_backend import install_pinterest_trend_backend
+
+    install_pinterest_trend_backend(sys.modules["api.trends_routes"])
