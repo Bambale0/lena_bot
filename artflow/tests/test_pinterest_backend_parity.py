@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 from pydantic import ValidationError
@@ -20,6 +20,7 @@ from api.pinterest_trend_backend import (
     PINTEREST_MODEL,
     PinterestTrendRunRequest,
 )
+from db import repository as repository_module
 
 
 def test_pinterest_detection_does_not_capture_ordinary_image_trends() -> None:
@@ -118,9 +119,12 @@ async def test_provider_sends_only_identity_and_scene_semantic_anchors() -> None
 
 @pytest.mark.asyncio
 async def test_private_recipe_is_redacted_before_generation_and_session_commits() -> None:
-    create_generation = AsyncMock(return_value=SimpleNamespace(id=7))
-    create_session = AsyncMock(return_value=SimpleNamespace(id=5))
-    update_last_prompt = AsyncMock(return_value=None)
+    create_generation = create_autospec(repository_module.create_generation)
+    create_generation.return_value = SimpleNamespace(id=7)
+    create_session = create_autospec(repository_module.create_image_session)
+    create_session.return_value = SimpleNamespace(id=5)
+    update_last_prompt = create_autospec(repository_module.update_image_session_last_prompt)
+    update_last_prompt.return_value = None
     repository = SimpleNamespace(
         create_generation=create_generation,
         create_image_session=create_session,
