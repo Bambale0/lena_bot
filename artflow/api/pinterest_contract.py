@@ -7,19 +7,45 @@ from typing import Any, Iterator
 
 from fastapi import HTTPException
 
+PINTEREST_PROMPT_MARKER = "PINTEREST_RECREATION_CONTRACT_V2"
+PINTEREST_FLOW = "pinterest_ai"
+PINTEREST_REFERENCE_CONTRACT = "pinterest_scene_identity"
+_DISPLAY_PROMPT = "Pinterest AI: сохранить внешность с ваших фото в выбранной сцене Pinterest."
 
-_PROVIDER_ROLE_PROMPT = """Image 1 is the only USER_IDENTITY_REFERENCE.
-Image 2 is the only SCENE_REFERENCE.
+_PROVIDER_ROLE_PROMPT = f"""{PINTEREST_PROMPT_MARKER}
+PINTEREST SCENE IDENTITY CONTRACT
 
-Create a new image of the person from Image 1 placed into the scene, pose, outfit, lighting and composition of Image 2.
+You are generating a NEW photorealistic image.
 
-Do not preserve the person from Image 2.
-Do not return Image 1 unchanged.
-Do not return Image 2 unchanged.
-Do not use extra identity evidence as composition, pose, outfit, or background.
+Image 1 is the USER_IDENTITY_REFERENCE. Use Image 1 only for the person's face, identity, apparent age, skin tone, facial geometry, hairline, distinctive facial features, natural body build, hair length and hair color.
+Image 2 is the SCENE_REFERENCE. Use Image 2 only for the scene, exact pose, body placement, outfit concept, composition, lighting, camera angle, framing, expression, background and photographic mood.
+
+Create a new photo of the person from Image 1 placed naturally into the scene and composition of Image 2.
+
+HARD NEGATIVE RULES
+- Do not preserve, copy, or reuse the person from Image 2.
+- Do not copy the face, hair identity, ethnicity, apparent age, or skin tone from Image 2.
+- Do not return Image 1 unchanged.
+- Do not return Image 2 unchanged.
+- Do not use Image 1 as the composition, outfit, background, camera, or pose.
+- Do not average, blend, or morph the two identities. Identity from Image 1 always wins.
+- Do not output a collage, comparison, screenshot, source image, UI, text, watermark, or split-screen.
+
+PARTIAL TRANSFER GUARD
+- Do not take ONLY hair color, hair length, or body cues from the user while keeping the SCENE_REFERENCE person's face.
+- Do not copy person from scene reference.
+- Do not replace identity. Keep the user's facial structure unchanged.
+
+QUALITY RULES
+- The result must look like a real new photograph, not an edit preview.
+- Keep face, hands, and body anatomy natural.
+- Keep the user recognizable from Image 1.
 """
 
-_provider_context: ContextVar[dict[str, Any] | None] = ContextVar("apix_pinterest_provider_context", default=None)
+_provider_context: ContextVar[dict[str, Any] | None] = ContextVar(
+    "apix_pinterest_provider_context",
+    default=None,
+)
 
 
 def _unique_urls(*values: Any) -> list[str]:
@@ -33,12 +59,34 @@ def _unique_urls(*values: Any) -> list[str]:
     return result
 
 
+def _prompt_tags(prompt_source: Any | None) -> set[str]:
+    return {
+        str(item or "").strip().lower()
+        for item in (getattr(prompt_source, "tags", None) or [])
+        if str(item or "").strip()
+    }
+
+
+def is_pinterest_prompt_source(prompt_source: Any | None) -> bool:
+    if prompt_source is None:
+        return False
+    tags = _prompt_tags(prompt_source)
+    title = str(getattr(prompt_source, "title", "") or "").strip().lower()
+    return bool(
+        {"pinterest", "pinterest-repeat", "repeat-pinterest"} & tags
+        or "pinterest" in title
+    )
+
+
 def build_pinterest_contract(
     *,
     scene_reference: str,
     identity_reference: str,
     identity_evidence: list[str] | None = None,
     trend_id: int | None = None,
+    height_cm: int | None = None,
+    weight_kg: int | None = None,
+    confirmed: bool = False,
 ) -> dict[str, Any]:
     scene = str(scene_reference or "").strip()
     identity = str(identity_reference or "").strip()
@@ -53,23 +101,52 @@ def build_pinterest_contract(
         else:
             roles.append("identity_evidence")
     return {
-        "flow": "pinterest",
+        "flow": PINTEREST_FLOW,
         "source": "trend",
+        "reference_contract": PINTEREST_REFERENCE_CONTRACT,
         "trend_id": trend_id,
         "scene_reference": scene,
         "identity_reference": identity,
         "identity_evidence": evidence,
         "reference_images": logical,
+        "source_reference_images": logical,
         "reference_roles": roles,
-        # Provider-safe array is deliberately limited to the two semantic anchors.
+        # Nano Banana Pro is more stable when its provider-facing anchors are
+        # identity first and scene second. Product metadata deliberately stays
+        # scene -> identity -> evidence.
         "provider_reference_images": _unique_urls(identity, scene),
-        "pinterest_source_url": scene,
+        "provider_reference_roles": ["identity", "scene"],
+        "height_cm": height_cm,
+        "weight_kg": weight_kg,
+        "confirmed": bool(confirmed),
+        "display_prompt": _DISPLAY_PROMPT,
+        "prompt_hidden": True,
+        "prompt_actions_allowed": False,
+        "feed_prompt_visible": False,
+        "pinterest_provider_safe_refs": True,
+        "generic_reference_guidance_disabled": True,
     }
 
 
-def pinterest_provider_prompt(hidden_prompt: str) -> str:
-    prompt = str(hidden_prompt or "").strip()
-    return f"{_PROVIDER_ROLE_PROMPT}\n\nOriginal scene instructions:\n{prompt}" if prompt else _PROVIDER_ROLE_PROMPT
+def pinterest_provider_prompt(
+    hidden_prompt: str,
+    *,
+    height_cm: int | None = None,
+    weight_kg: int | None = None,
+) -> str:
+    measurements: list[str] = []
+    if height_cm is not None:
+        measurements.append(f"height {height_cm} cm")
+    if weight_kg is not None:
+        measurements.append(f"weight {weight_kg} kg")
+    measurement_text = ", ".join(measurements) if measurements else "not provided"
+    original = str(hidden_prompt or "").strip()
+    suffix = f"\n\nPRIVATE SCENE INSTRUCTIONS\n{original}" if original else ""
+    return (
+        f"{_PROVIDER_ROLE_PROMPT}\n"
+        f"- User measurements: {measurement_text}. Use them only for realistic body scale; never render measurement text into the image."
+        f"{suffix}"
+    )
 
 
 @contextmanager
@@ -79,6 +156,11 @@ def pinterest_provider_context(contract: dict[str, Any] | None) -> Iterator[None
         yield
     finally:
         _provider_context.reset(token)
+
+
+def active_pinterest_contract() -> dict[str, Any] | None:
+    current = _provider_context.get()
+    return dict(current) if current else None
 
 
 def install_pinterest_provider_contract(image_service: Any) -> None:
@@ -92,10 +174,16 @@ def install_pinterest_provider_contract(image_service: Any) -> None:
             return await original_generate(*args, **kwargs)
 
         mutable_args = list(args)
+        current_prompt = str(mutable_args[1] if len(mutable_args) >= 2 else kwargs.get("prompt") or "")
+        provider_prompt = pinterest_provider_prompt(
+            current_prompt,
+            height_cm=contract.get("height_cm"),
+            weight_kg=contract.get("weight_kg"),
+        )
         if len(mutable_args) >= 2:
-            mutable_args[1] = pinterest_provider_prompt(str(mutable_args[1] or ""))
+            mutable_args[1] = provider_prompt
         else:
-            kwargs["prompt"] = pinterest_provider_prompt(str(kwargs.get("prompt") or ""))
+            kwargs["prompt"] = provider_prompt
         kwargs["image_url"] = list(contract.get("provider_reference_images") or [])
         return await original_generate(*mutable_args, **kwargs)
 
@@ -127,6 +215,9 @@ async def _patch_generation_snapshot(
         return
     payload = _json_dict(getattr(generation, "input_params", None))
     payload.update(contract)
+    # Provider/private recipe is needed only during launch. Persist a safe label
+    # so history, Telegram delivery, repeat and public surfaces cannot recover it.
+    generation.prompt = _DISPLAY_PROMPT
     generation.input_params = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     await session.commit()
 
@@ -149,31 +240,49 @@ def install_pinterest_miniapp_contract(miniapp_routes: Any) -> None:
         from db.prompt_repository import get_prompt_by_id
 
         prompt_source = await get_prompt_by_id(session, body.prompt_id)
-        if not is_trend_prompt(prompt_source) or trend_kind(prompt_source) != "image":
+        if (
+            not is_trend_prompt(prompt_source)
+            or trend_kind(prompt_source) != "image"
+            or not is_pinterest_prompt_source(prompt_source)
+        ):
+            # Ordinary image trends must never inherit Pinterest role semantics.
             return await original_create(body=body, session=session, user=user, surface=surface)
 
-        scene = str(getattr(prompt_source, "preview_url", "") or "").strip()
-        user_refs = _unique_urls(getattr(body, "reference_url", None), getattr(body, "reference_urls", None))
-        identity = user_refs[0] if user_refs else ""
-        evidence = user_refs[1:]
+        current_contract = active_pinterest_contract()
+        if current_contract:
+            scene = str(current_contract.get("scene_reference") or "").strip()
+            identity = str(current_contract.get("identity_reference") or "").strip()
+            evidence = _unique_urls(current_contract.get("identity_evidence") or [])
+            contract = current_contract
+        else:
+            scene = str(getattr(prompt_source, "preview_url", "") or "").strip()
+            user_refs = _unique_urls(getattr(body, "reference_url", None), getattr(body, "reference_urls", None))
+            identity = user_refs[0] if user_refs else ""
+            evidence = user_refs[1:]
+            contract = build_pinterest_contract(
+                scene_reference=scene,
+                identity_reference=identity,
+                identity_evidence=evidence,
+                trend_id=int(prompt_source.id),
+            )
+
         if not scene:
             raise HTTPException(status_code=409, detail="Pinterest scene reference is missing")
         if not identity:
             raise HTTPException(status_code=422, detail="Upload an identity reference first")
+        if scene == identity:
+            raise HTTPException(status_code=422, detail="Scene and identity references must be different")
 
         caps = miniapp_routes.IMAGE_CAPS.get(body.model, {})
         max_refs = int(caps.get("max_refs", 1) or 1)
         if max_refs < 2:
-            raise HTTPException(status_code=422, detail="Selected trend model cannot preserve scene and identity separately")
+            raise HTTPException(
+                status_code=422,
+                detail="Selected Pinterest model cannot preserve scene and identity separately",
+            )
 
-        contract = build_pinterest_contract(
-            scene_reference=scene,
-            identity_reference=identity,
-            identity_evidence=evidence,
-            trend_id=int(prompt_source.id),
-        )
-        # Product order remains scene -> identity -> evidence in metadata, while
-        # the provider sees identity -> scene for a stable role contract.
+        # Generic request handling sees two refs, but the provider wrapper owns
+        # the final order and sends identity -> scene only.
         safe_body = body.model_copy(
             update={
                 "reference_url": identity,
