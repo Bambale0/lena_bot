@@ -335,7 +335,11 @@ async def run_pinterest_service(
             body=request_body,
             session=session,
             user=user,
-            surface="web",
+            # Pinterest is launched from the Mini App but its completed image and
+            # lossless source file must still be delivered into the user's bot chat.
+            # Only the legacy "web" surface prefixes task ids with web: and suppresses
+            # Telegram completion delivery in main.py.
+            surface="miniapp",
         )
 
     await _patch_service_snapshot(
