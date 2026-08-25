@@ -19,6 +19,7 @@ from api.pinterest_contract import (
 from api.pinterest_trend_backend import (
     MAX_PINTEREST_REFERENCES,
     PINTEREST_MODEL,
+    PINTEREST_SERVICE_ALIAS_ID,
     PinterestTrendRunRequest,
 )
 from db import repository as repository_module
@@ -194,6 +195,7 @@ def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
     )
     assert len(valid.reference_asset_ids) == 2
     assert PINTEREST_MODEL == "nano-banana-pro"
+    assert PINTEREST_SERVICE_ALIAS_ID == 0
 
     with pytest.raises(ValidationError):
         PinterestTrendRunRequest(
@@ -232,13 +234,15 @@ def test_strict_request_requires_two_to_seven_assets_and_measurements() -> None:
         )
 
 
-def test_bootstrap_installs_strict_pinterest_route_and_preserves_generic_route() -> None:
+def test_bootstrap_installs_pinterest_service_routes_and_preserves_generic_route() -> None:
     from api import trends_routes
 
     methods_by_path = {
         getattr(route, "path", ""): set(getattr(route, "methods", set()) or set())
         for route in trends_routes.router.routes
     }
+    assert "GET" in methods_by_path["/api/v1/services/pinterest"]
     assert "POST" in methods_by_path["/api/v1/trends/{trend_id}/run"]
     assert "POST" in methods_by_path["/api/v1/trends/{trend_id}/pinterest-run"]
+    assert getattr(trends_routes, "PINTEREST_SERVICE_ALIAS_ID", None) == 0
     assert getattr(trends_routes, "_pinterest_trend_backend_installed", False) is True

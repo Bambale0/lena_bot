@@ -23,6 +23,7 @@ MAX_PINTEREST_REFERENCES = MIN_PINTEREST_REFERENCES + MAX_PINTEREST_IDENTITY_ANG
 PINTEREST_MODEL = ImageModel.NANO_BANANA_PRO.value
 PINTEREST_QUALITY = "2K"
 PINTEREST_DEFAULT_RATIO = "9:16"
+PINTEREST_SERVICE_ALIAS_ID = 0
 
 
 class PinterestTrendRunRequest(BaseModel):
@@ -81,6 +82,25 @@ def _scene_matched_ratio(scene_url: str, configured_ratio: str | None) -> str:
     selected = min(candidates, key=lambda item: abs((_ratio_value(item) or target) - target))
     logger.info("Pinterest scene ratio resolved scene=%s size=%sx%s ratio=%s", scene_url, width, height, selected)
     return selected
+
+
+async def _find_pinterest_service_trend(routes: Any, session: Any) -> Any:
+    """Resolve the canonical published Pinterest service without list pagination."""
+    result = await session.execute(
+        routes.select(routes.UserPrompt)
+        .where(routes.UserPrompt.tags.any(routes.TREND_TAG))
+        .order_by(routes.desc(routes.UserPrompt.created_at), routes.desc(routes.UserPrompt.id))
+    )
+    for trend in result.scalars().all():
+        if routes.trend_is_public(trend) and is_pinterest_prompt_source(trend):
+            return trend
+    raise HTTPException(status_code=404, detail="Pinterest Flow пока не опубликован")
+
+
+async def _resolve_pinterest_trend(routes: Any, session: Any, trend_id: int) -> Any:
+    if trend_id == PINTEREST_SERVICE_ALIAS_ID:
+        return await _find_pinterest_service_trend(routes, session)
+    return await routes._get_public_trend(session, trend_id)
 
 
 async def _patch_pinterest_run_snapshot(
@@ -237,13 +257,28 @@ def install_pinterest_trend_backend(routes: Any) -> None:
     generic_path = "/api/v1/trends/{trend_id}/run"
     _remove_route(routes.router, generic_path, "POST")
 
+    async def get_pinterest_service(
+        session=Depends(routes.get_session),
+        user=Depends(routes.get_miniapp_user),
+    ) -> dict[str, Any]:
+        del user
+        trend = await _find_pinterest_service_trend(routes, session)
+        return routes.trend_public_payload(trend)
+
+    routes.router.add_api_route(
+        "/services/pinterest",
+        get_pinterest_service,
+        methods=["GET"],
+        name="get_pinterest_service",
+    )
+
     async def run_trend_with_pinterest_compat(
         trend_id: int,
         body: routes.TrendRunRequest,
         session=Depends(routes.get_session),
         user=Depends(routes.get_miniapp_user),
     ) -> dict[str, Any]:
-        trend = await routes._get_public_trend(session, trend_id)
+        trend = await _resolve_pinterest_trend(routes, session, trend_id)
         if not is_pinterest_prompt_source(trend):
             return await original_run(trend_id=trend_id, body=body, session=session, user=user)
 
@@ -290,7 +325,7 @@ def install_pinterest_trend_backend(routes: Any) -> None:
         if len(set(body.reference_asset_ids)) != len(body.reference_asset_ids):
             raise HTTPException(status_code=422, detail="Не добавляйте одно и то же фото несколько раз")
 
-        trend = await routes._get_public_trend(session, trend_id)
+        trend = await _resolve_pinterest_trend(routes, session, trend_id)
         assets: list[dict[str, Any]] = []
         for asset_id in body.reference_asset_ids:
             asset = routes.verify_uploaded_asset(asset_id, user_id=user.id, expected_kind="image")
@@ -322,5 +357,7 @@ def install_pinterest_trend_backend(routes: Any) -> None:
         name="run_pinterest_trend",
     )
     routes.PinterestTrendRunRequest = PinterestTrendRunRequest
+    routes.PINTEREST_SERVICE_ALIAS_ID = PINTEREST_SERVICE_ALIAS_ID
+    routes.get_pinterest_service = get_pinterest_service
     routes.run_pinterest_trend = run_pinterest_trend
     routes._pinterest_trend_backend_installed = True
