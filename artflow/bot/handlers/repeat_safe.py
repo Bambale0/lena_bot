@@ -13,6 +13,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.pinterest_contract import pinterest_provider_context
 from api.public_files import public_url_is_available
 from api.repeat_runtime import repeat_launch_context
 from bot.handlers import image_gen
@@ -144,6 +145,7 @@ def _confirmation_text(data: dict[str, Any]) -> str:
     cost = float(data.get("repeat_cost") or 0)
     prompt = str(data.get("repeat_prompt") or "").strip()
     prompt_line = "🔒 Скрытый трендовый промпт" if data.get("repeat_prompt_hidden") else html.escape(prompt)
+    price_label = "бесплатно" if cost <= 0 else f"{cost:g} 💋"
     lines = [
         "🔁 <b>Повторить эту генерацию?</b>",
         "",
@@ -151,7 +153,7 @@ def _confirmation_text(data: dict[str, Any]) -> str:
         f"• Формат: <b>{html.escape(str(data.get('repeat_aspect_ratio') or 'авто'))}</b>",
         f"• Качество: <b>{html.escape(str(data.get('repeat_quality') or 'по умолчанию'))}</b>",
         f"• Референсы: <b>{len(refs)}</b>",
-        f"• Цена: <b>{'бесплатно' if cost <= 0 else f'{cost:g} 💋'}</b>",
+        f"• Цена: <b>{price_label}</b>",
         "",
         f"📝 {prompt_line}",
         "",
@@ -297,9 +299,7 @@ async def confirm_repeat(
     async with lock:
         existing = await find_repeat_by_confirm_key(session, user_id=db_user.id, confirm_key=confirm_key)
         if existing is not None and not _is_failed(existing):
-            await call.message.answer(  # type: ignore[union-attr]
-                f"✅ Повтор уже поставлен в очередь. ID: img_{existing.id}"
-            )
+            await call.message.answer(f"✅ Повтор уже поставлен в очередь. ID: img_{existing.id}")  # type: ignore[union-attr]
             return
 
         source = await repo.get_generation_by_id(session, source_id)
@@ -322,6 +322,7 @@ async def confirm_repeat(
 
         logical_refs = list(references)
         provider_refs = list(references)
+        provider_contract: dict[str, Any] | None = None
         metadata: dict[str, Any] = {
             "repeat_source_task_id": str(data.get("repeat_raw_task_id") or source_id),
             "repeat_source_generation_id": source_id,
@@ -337,7 +338,7 @@ async def confirm_repeat(
         }
 
         if data.get("repeat_is_pinterest"):
-            contract = pinterest_repeat_contract(
+            provider_contract = pinterest_repeat_contract(
                 {
                     "flow": "pinterest",
                     "scene_reference": data.get("repeat_scene_reference"),
@@ -347,14 +348,14 @@ async def confirm_repeat(
                     "pinterest_source_url": data.get("repeat_pinterest_source_url"),
                 }
             )
-            logical_refs = contract["reference_images"]
-            provider_refs, provider_missing = available_reference_images(contract["provider_reference_images"])
+            logical_refs = provider_contract["reference_images"]
+            provider_refs, provider_missing = available_reference_images(provider_contract["provider_reference_images"])
             if provider_missing or len(provider_refs) < 2:
                 await call.message.answer(  # type: ignore[union-attr]
                     "❌ Для Pinterest-повтора нужны доступные фото сцены и личности. Добавьте фото заново."
                 )
                 return
-            metadata.update(contract)
+            metadata.update(provider_contract)
         else:
             metadata["reference_images"] = logical_refs
 
@@ -385,7 +386,7 @@ async def confirm_repeat(
             with repeat_launch_context(
                 input_params_extra=metadata,
                 credits_override=0.0 if data.get("repeat_is_admin") else None,
-            ):
+            ), pinterest_provider_context(provider_contract):
                 launched = await image_gen._launch_session_generation(
                     source_message=call.message,  # type: ignore[arg-type]
                     state=state,
@@ -410,11 +411,12 @@ async def confirm_repeat(
 
         if launched:
             await state.clear()
+            spent = "0 💋" if data.get("repeat_is_admin") else f"{float(data.get('repeat_cost') or 0):g} 💋"
             await call.message.answer(  # type: ignore[union-attr]
                 "🚀 <b>Повторная генерация запущена</b>\n"
                 f"• Модель: {html.escape(image_gen.get_image_model_label(model_key))}\n"
                 f"• Формат: {html.escape(str(data.get('repeat_aspect_ratio') or 'авто'))}\n"
-                f"• Списано: {'0 💋' if data.get('repeat_is_admin') else f\"{float(data.get('repeat_cost') or 0):g} 💋\"}\n\n"
+                f"• Списано: {spent}\n\n"
                 "Результат придёт в этот чат."
             )
 
