@@ -95,10 +95,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
     )
     builder.row(
         InlineKeyboardButton(text="👑 " + ("Тренды" if lang == "ru" else "Trends"), callback_data="menu:trends"),
-        InlineKeyboardButton(
-            text="📌 Pinterest Flow",
-            web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?service=pinterest"),
-        ),
+        InlineKeyboardButton(text="📌 " + ("Pinterest" if lang == "ru" else "Pinterest"), callback_data="menu:pinterest"),
     )
     builder.row(
         InlineKeyboardButton(text="💋 " + (f"Баланс · {context.balance}" if lang == "ru" else f"Balance · {context.balance}"), callback_data="menu:balance"),

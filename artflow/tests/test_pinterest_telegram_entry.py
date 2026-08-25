@@ -21,10 +21,11 @@ def test_main_menu_places_pinterest_flow_next_to_trends() -> None:
     rows = rendered.reply_markup.inline_keyboard
     trend_row = next(row for row in rows if any(button.callback_data == "menu:trends" for button in row))
 
-    assert [button.text for button in trend_row] == ["👑 Тренды", "📌 Pinterest Flow"]
+    assert [button.text for button in trend_row] == ["👑 Тренды", "📌 Pinterest"]
     pinterest_button = trend_row[1]
-    assert pinterest_button.web_app is not None
-    assert pinterest_button.web_app.url.endswith("/app?service=pinterest")
+    # Pinterest must open the in-bot FSM flow, not a Mini App deep link.
+    assert pinterest_button.callback_data == "menu:pinterest"
+    assert pinterest_button.web_app is None
 
 
 @pytest.mark.asyncio

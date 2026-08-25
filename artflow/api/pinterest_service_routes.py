@@ -255,15 +255,22 @@ async def upload_pinterest_reference(
     )
 
 
-@router.post("/run", status_code=202)
-async def run_pinterest_service(
-    body: PinterestServiceRunRequest,
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_miniapp_user),
+async def launch_pinterest_service(
+    session: AsyncSession,
+    user: User,
+    *,
+    idempotency_key: str,
+    reference_asset_ids: list[str],
+    height_cm: int,
+    weight_kg: int,
 ) -> dict[str, Any]:
-    if body.confirmed is not True:
-        raise HTTPException(status_code=422, detail="Подтвердите генерацию кнопкой «Создать»")
-    if len(set(body.reference_asset_ids)) != len(body.reference_asset_ids):
+    """Shared Pinterest Service launcher.
+
+    Single backend pipeline used by both the Mini App HTTP endpoint and the
+    Telegram Pinterest Flow. Never uses trends / trend_id / UserPrompt /
+    published prompt recipes — the service is a standalone domain.
+    """
+    if len(set(reference_asset_ids)) != len(reference_asset_ids):
         raise HTTPException(status_code=422, detail="Не добавляйте одно и то же фото несколько раз")
 
     await _validate_runtime(session)
@@ -272,7 +279,7 @@ async def run_pinterest_service(
     existing = await _find_idempotent_run(
         session,
         user_id=user.id,
-        idempotency_key=body.idempotency_key,
+        idempotency_key=idempotency_key,
     )
     if existing is not None:
         from api import miniapp_routes
@@ -287,7 +294,7 @@ async def run_pinterest_service(
         }
 
     assets: list[dict[str, Any]] = []
-    for asset_id in body.reference_asset_ids:
+    for asset_id in reference_asset_ids:
         asset = verify_uploaded_asset(asset_id, user_id=user.id, expected_kind="image")
         assets.append(asset)
     references = _dedupe([str(asset.get("url") or "").strip() for asset in assets])
@@ -309,8 +316,8 @@ async def run_pinterest_service(
         scene_reference=scene_reference,
         identity_reference=identity_reference,
         identity_evidence=identity_evidence,
-        height_cm=body.height_cm,
-        weight_kg=body.weight_kg,
+        height_cm=height_cm,
+        weight_kg=weight_kg,
         confirmed=True,
     )
     contract["service_recipe_version"] = PINTEREST_RECIPE_VERSION
@@ -335,18 +342,19 @@ async def run_pinterest_service(
             body=request_body,
             session=session,
             user=user,
-            # Pinterest is launched from the Mini App but its completed image and
-            # lossless source file must still be delivered into the user's bot chat.
-            # Only the legacy "web" surface prefixes task ids with web: and suppresses
-            # Telegram completion delivery in main.py.
+            # Pinterest is launched either from the Mini App or from the Telegram
+            # bot, but in both cases its completed image and lossless source file
+            # must still be delivered into the user's bot chat. Only the legacy
+            # "web" surface prefixes task ids with web: and suppresses Telegram
+            # completion delivery in main.py.
             surface="miniapp",
         )
 
     await _patch_service_snapshot(
         session,
         generation_id=int(task.id),
-        idempotency_key=body.idempotency_key,
-        asset_ids=list(body.reference_asset_ids),
+        idempotency_key=idempotency_key,
+        asset_ids=list(reference_asset_ids),
         price_credits=price_credits,
     )
     await session.refresh(user)
@@ -356,6 +364,24 @@ async def run_pinterest_service(
         "credits": _credits_out(user.credits),
         "price_credits": price_credits,
     }
+
+
+@router.post("/run", status_code=202)
+async def run_pinterest_service(
+    body: PinterestServiceRunRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    if body.confirmed is not True:
+        raise HTTPException(status_code=422, detail="Подтвердите генерацию кнопкой «Создать»")
+    return await launch_pinterest_service(
+        session,
+        user,
+        idempotency_key=body.idempotency_key,
+        reference_asset_ids=list(body.reference_asset_ids),
+        height_cm=body.height_cm,
+        weight_kg=body.weight_kg,
+    )
 
 
 def install_pinterest_service_router(parent_router: APIRouter) -> None:

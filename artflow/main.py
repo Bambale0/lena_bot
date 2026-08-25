@@ -78,6 +78,7 @@ from bot.handlers import (
     midjourney,
     music_gen,
     payment,
+    pinterest_flow,
     stars_payment,
     start,
     trends,
@@ -635,6 +636,7 @@ async def lifespan(app: FastAPI):
     dp.include_router(start.router)
     dp.include_router(assistant.router)
     dp.include_router(trends.router)
+    dp.include_router(pinterest_flow.router)
     dp.include_router(feed.router)
     dp.include_router(image_gen.router)
     dp.include_router(video_gen.router)
