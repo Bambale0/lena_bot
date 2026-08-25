@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import wraps
 from inspect import signature
 from pathlib import Path
 from typing import Any, Iterator
@@ -209,6 +210,7 @@ def install_pinterest_persistence_contract(repository: Any) -> None:
     original_create_image_session = repository.create_image_session
     original_update_last_prompt = repository.update_image_session_last_prompt
 
+    @wraps(original_create_generation)
     async def private_create_generation(*args: Any, **kwargs: Any):
         contract = active_pinterest_service_contract()
         if not contract:
@@ -224,6 +226,7 @@ def install_pinterest_persistence_contract(repository: Any) -> None:
         )
         return await original_create_generation(*private_args, **private_kwargs)
 
+    @wraps(original_create_image_session)
     async def private_create_image_session(*args: Any, **kwargs: Any):
         if not active_pinterest_service_contract():
             return await original_create_image_session(*args, **kwargs)
@@ -235,6 +238,7 @@ def install_pinterest_persistence_contract(repository: Any) -> None:
         )
         return await original_create_image_session(*private_args, **private_kwargs)
 
+    @wraps(original_update_last_prompt)
     async def private_update_last_prompt(*args: Any, **kwargs: Any):
         if not active_pinterest_service_contract():
             return await original_update_last_prompt(*args, **kwargs)
@@ -257,6 +261,7 @@ def install_pinterest_provider_contract(image_service: Any) -> None:
         return
     original_generate = image_service.generate_image
 
+    @wraps(original_generate)
     async def generate_image_with_roles(*args: Any, **kwargs: Any):
         contract = _provider_context.get()
         if not contract:
