@@ -39,14 +39,15 @@ def _call(data: str) -> SimpleNamespace:
 
 
 def _image_source(**extra) -> SimpleNamespace:
-    return SimpleNamespace(
-        id=42,
-        user_id=5,
-        model="nano-banana-pro",
-        gen_type=SimpleNamespace(value="image"),
-        prompt="portrait prompt",
-        **extra,
-    )
+    data = {
+        "id": 42,
+        "user_id": 5,
+        "model": "nano-banana-pro",
+        "gen_type": SimpleNamespace(value="image"),
+        "prompt": "portrait prompt",
+    }
+    data.update(extra)
+    return SimpleNamespace(**data)
 
 
 def test_candidate_task_ids_support_public_provider_and_web_aliases() -> None:
