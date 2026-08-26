@@ -53,11 +53,13 @@ async def test_v2_reference_flow_requests_prompt_instead_of_activating_session()
     )
 
     original.assert_not_awaited()
-    state.update_data.assert_awaited_with(
-        mode="image",
-        image_mode="image",
-        image_session_id=None,
-    )
+    draft_update = state.update_data.await_args.kwargs
+    assert draft_update["mode"] == "image"
+    assert draft_update["image_mode"] == "image"
+    assert draft_update["image_session_id"] is None
+    assert draft_update["pending_image_prompt"] is None
+    assert draft_update["pending_reference_url"] is None
+    assert draft_update["pending_action_type"] is None
     state.set_state.assert_awaited_once_with(ImageGenFSM.prompt_input)
     text = message.answer.await_args.args[0]
     assert "2 референса добавлены" in text
@@ -97,6 +99,9 @@ async def test_v2_reference_flow_does_not_reuse_stale_prompt_from_previous_draft
     original.assert_not_awaited()
     legacy._ensure_active_image_session_from_state.assert_not_awaited()
     legacy._session_reference_url.assert_not_awaited()
+    draft_update = state.update_data.await_args.kwargs
+    assert draft_update["pending_image_prompt"] is None
+    assert draft_update["pending_reference_url"] is None
     state.set_state.assert_awaited_once_with(ImageGenFSM.prompt_input)
     text = message.answer.await_args.args[0]
     assert "Теперь напиши промпт" in text
