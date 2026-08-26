@@ -96,3 +96,14 @@ _video_router.include_router(_video_references.router)
 _video_router.include_router(_video_wizard.router)
 _video_router.include_router(_legacy_video_gen.router)
 _legacy_video_gen.router = _video_router
+
+# The admin category guard is intentionally registered before the legacy trends
+# router. It absorbs only category callbacks; the rest of the existing wizard
+# continues through the original handlers unchanged.
+from . import trends as _legacy_trends
+from . import trend_admin_guard as _trend_admin_guard
+
+_trends_router = Router(name="trends_guarded")
+_trends_router.include_router(_trend_admin_guard.router)
+_trends_router.include_router(_legacy_trends.router)
+_legacy_trends.router = _trends_router
