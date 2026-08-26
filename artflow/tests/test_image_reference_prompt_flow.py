@@ -59,6 +59,8 @@ async def test_v2_reference_flow_requests_prompt_instead_of_activating_session()
     assert draft_update["image_session_id"] is None
     assert draft_update["pending_image_prompt"] is None
     assert draft_update["pending_reference_url"] is None
+    assert draft_update["pending_parent_generation_id"] is None
+    assert draft_update["pending_source_feed_gen_id"] is None
     assert draft_update["pending_action_type"] is None
     state.set_state.assert_awaited_once_with(ImageGenFSM.prompt_input)
     text = message.answer.await_args.args[0]
@@ -82,6 +84,9 @@ async def test_v2_reference_flow_does_not_reuse_stale_prompt_from_previous_draft
             "ref_file_ids": ["ref-1", "ref-2"],
             "pending_image_prompt": "✅ Готово!",
             "pending_reference_url": "https://example.test/old-ref.jpg",
+            "pending_parent_generation_id": 999,
+            "pending_source_feed_gen_id": 555,
+            "pending_action_type": "repeat",
         }
     )
     message = SimpleNamespace(answer=AsyncMock(), bot=object())
@@ -102,6 +107,9 @@ async def test_v2_reference_flow_does_not_reuse_stale_prompt_from_previous_draft
     draft_update = state.update_data.await_args.kwargs
     assert draft_update["pending_image_prompt"] is None
     assert draft_update["pending_reference_url"] is None
+    assert draft_update["pending_parent_generation_id"] is None
+    assert draft_update["pending_source_feed_gen_id"] is None
+    assert draft_update["pending_action_type"] is None
     state.set_state.assert_awaited_once_with(ImageGenFSM.prompt_input)
     text = message.answer.await_args.args[0]
     assert "Теперь напиши промпт" in text
