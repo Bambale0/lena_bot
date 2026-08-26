@@ -55,3 +55,37 @@ def test_available_models_never_returns_inactive_rows() -> None:
     costs = [_cost(image_key, "image", active=False)]
 
     assert trend_admin_flow._available_models(costs, "image") == []
+
+
+def test_category_callback_parser_accepts_existing_keyboard_payload() -> None:
+    kind, category = trend_admin_flow._parse_category_callback("trends:category:featured")
+
+    assert kind is None
+    assert category == "featured"
+
+
+def test_category_callback_parser_accepts_kind_aware_payload() -> None:
+    assert trend_admin_flow._parse_category_callback("trends:category:video:featured") == (
+        "video",
+        "featured",
+    )
+
+
+def test_category_guard_is_not_bound_to_fsm_category_state() -> None:
+    class _FakeState:
+        category = object()
+        model = object()
+
+    fake_trends = SimpleNamespace(
+        TrendAdminFSM=_FakeState,
+        TREND_CATEGORIES={"featured": {"title": "Тренды"}},
+        _cancel_kb=lambda: None,
+    )
+
+    router = trend_admin_flow.build_trend_admin_router(fake_trends)
+    handlers = router.callback_query.handlers
+
+    assert len(handlers) == 1
+    # Only callback-data + admin filters should be present. If an FSM StateFilter
+    # is added again, stale category keyboards will silently stop matching.
+    assert len(handlers[0].filters) == 2
