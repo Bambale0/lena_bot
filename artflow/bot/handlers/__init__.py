@@ -94,5 +94,5 @@ _video_router.include_router(_minimax_h3_references.router)
 _video_router.include_router(_seedance25_references.router)
 _video_router.include_router(_video_references.router)
 _video_router.include_router(_video_wizard.router)
-_image_router.include_router(_legacy_image_gen.router)
+_video_router.include_router(_legacy_video_gen.router)
 _legacy_video_gen.router = _video_router
