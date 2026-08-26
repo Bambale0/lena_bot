@@ -4,7 +4,6 @@ from typing import Any
 
 from bot.states import ImageGenFSM
 
-
 _COMPOSER_STATE_MARKER = "image_params_changed"
 
 
