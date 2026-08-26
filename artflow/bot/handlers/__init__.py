@@ -13,6 +13,7 @@ from bot.services.grok_versions import install_grok_versions
 from bot.services.image_family_routing import install_image_family_routing
 from bot.services.image_reference_prompt_flow import install_image_reference_prompt_flow
 from bot.services.minimax_h3_ui import install_minimax_h3_handler_presentation
+from bot.services.trend_admin_flow import build_trend_admin_router
 from bot.services.veo_ui import install_veo_handler_presentation
 from bot.services.video_reference_support import install_video_reference_support
 from bot.ui.model_labels import model_display_name, public_model_items
@@ -96,3 +97,13 @@ _video_router.include_router(_video_references.router)
 _video_router.include_router(_video_wizard.router)
 _video_router.include_router(_legacy_video_gen.router)
 _legacy_video_gen.router = _video_router
+
+# Trend admin category selection gets a guard before the legacy wizard. This
+# keeps callback spinners short, accepts enum/string generation types, preserves
+# the draft on configuration gaps, and falls back to runtime model capabilities.
+from . import trends as _trends
+
+_trends_router = Router(name="trends_v2")
+_trends_router.include_router(build_trend_admin_router(_trends))
+_trends_router.include_router(_trends.router)
+_trends.router = _trends_router
