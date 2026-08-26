@@ -45,13 +45,36 @@ def _available_models(costs: list[Any], kind: str) -> list[Any]:
     return [item for item in active if _model_key(item) in caps]
 
 
+def _parse_category_callback(value: str | None) -> tuple[str | None, str | None]:
+    """Accept both old `trends:category:<category>` and new kind-aware payloads."""
+
+    parts = str(value or "").split(":")
+    if len(parts) == 4 and parts[:2] == ["trends", "category"] and parts[2] in {"image", "video"}:
+        return parts[2], parts[3]
+    if len(parts) == 3 and parts[:2] == ["trends", "category"]:
+        return None, parts[2]
+    return None, None
+
+
+def _restart_kb():
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➕ Фото-тренд", callback_data="trends:add:image"),
+        InlineKeyboardButton(text="🎬 Видео-тренд", callback_data="trends:add:video"),
+    )
+    builder.row(InlineKeyboardButton(text="Отмена", callback_data="trends:cancel"))
+    return builder.as_markup()
+
+
 def build_trend_admin_router(trends_module: Any) -> Router:
     """Install a resilient category→model step ahead of the legacy handler."""
 
     router = Router(name="trend_admin_guard")
 
+    # Deliberately do not require TrendAdminFSM.category here. Telegram callback
+    # keyboards can outlive an FSM state (deploy/restart, stale message, another
+    # admin action). A state-filtered handler leaves the button spinning forever.
     @router.callback_query(
-        trends_module.TrendAdminFSM.category,
         F.data.startswith("trends:category:"),
         IsAdmin(),
     )
@@ -60,31 +83,40 @@ def build_trend_admin_router(trends_module: Any) -> Router:
         state: FSMContext,
         session: AsyncSession,
     ) -> None:
-        # Always stop Telegram's loading spinner before any DB work.
+        # Always stop Telegram's loading spinner before state/DB work.
         await safe_answer_callback(call)
 
-        category = call.data.split(":", 2)[2]  # type: ignore[union-attr]
+        payload_kind, category = _parse_category_callback(call.data)
         if category not in trends_module.TREND_CATEGORIES:
             await call.message.answer("Эта категория больше недоступна. Выбери другую.")
             return
 
         data = await state.get_data()
-        kind = "video" if data.get("kind") == "video" else "image"
+        state_kind = data.get("kind") if data.get("kind") in {"image", "video"} else None
+        kind = payload_kind or state_kind
+        if kind is None:
+            await call.message.answer(
+                "Этот экран уже устарел, поэтому не могу надёжно продолжить черновик. "
+                "Выбери тип тренда ещё раз — дальше продолжим без зависания.",
+                reply_markup=_restart_kb(),
+            )
+            return
+
         costs = list(await repo.get_all_model_costs(session))
         models = _available_models(costs, kind)
 
         if not models:
-            # Keep the wizard state intact: the admin can retry after pricing/model
+            # Keep the wizard data intact so the admin can retry after pricing/model
             # settings are corrected instead of starting the whole trend again.
-            await state.update_data(category=category)
+            await state.update_data(category=category, kind=kind)
             await call.message.answer(
                 "Не нашёл доступную модель для этого тренда. "
-                "Черновик сохранён — можно вернуться к выбору категории или проверить модели в админке.",
+                "Черновик сохранён — можно повторить выбор или проверить модели в админке.",
                 reply_markup=trends_module._cancel_kb(),
             )
             return
 
-        await state.update_data(category=category)
+        await state.update_data(category=category, kind=kind)
         await state.set_state(trends_module.TrendAdminFSM.model)
         builder = InlineKeyboardBuilder()
         for item in models:
