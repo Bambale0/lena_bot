@@ -25,13 +25,12 @@ def _humanize_review_count(text: str) -> str:
 
 
 def install_image_reference_prompt_flow(legacy_image_gen: Any) -> None:
-    """Keep the v2 composer task-first after one or many reference uploads.
+    """Require a fresh prompt after references in the v2 image composer.
 
-    The v2 composer preselects ratio/quality before the user uploads references.
-    The legacy `_after_ref_upload` helper interprets those preselected values as a
-    completed legacy wizard and activates an ImageSession immediately. That skips
-    the mandatory prompt step. Patch only v2-composer states and delegate every
-    legacy state to the original implementation.
+    Telegram FSM data can survive user-specific navigation paths. Reusing
+    `pending_image_prompt` after uploading references made the flow differ between
+    users and could open review with stale text instead of asking for a prompt.
+    Legacy image flows are left untouched.
     """
 
     original_after_ref_upload = legacy_image_gen._after_ref_upload
@@ -75,57 +74,16 @@ def install_image_reference_prompt_flow(legacy_image_gen: Any) -> None:
             )
             return
 
-        # References switch a dual-mode model to img2img, but must not create an
-        # active series before there is a real prompt attached to the task.
         await state.update_data(
             mode="image",
             image_mode="image",
             image_session_id=None,
+            pending_image_prompt=None,
+            pending_reference_url=None,
+            pending_parent_generation_id=None,
+            pending_source_feed_gen_id=None,
+            pending_action_type=None,
         )
-
-        saved_prompt = str(data.get("pending_image_prompt") or "").strip()
-        bot = getattr(message, "bot", None)
-        if saved_prompt and bot is not None:
-            image_session = await legacy_image_gen._ensure_active_image_session_from_state(
-                session=session,
-                state=state,
-                db_user=db_user,
-            )
-            reference_url = await legacy_image_gen._session_reference_url(
-                bot,
-                image_session,
-                prefer_last_result=False,
-                state=state,
-            )
-            if reference_url:
-                model_cost = await legacy_image_gen.repo.resolve_image_model_cost(
-                    session,
-                    image_session.model,
-                    quality=image_session.quality,
-                )
-                credits = model_cost.credits if model_cost else 1
-                await state.update_data(
-                    pending_image_prompt=saved_prompt,
-                    pending_reference_url=reference_url,
-                    pending_parent_generation_id=None,
-                    pending_source_feed_gen_id=data.get("pending_source_feed_gen_id"),
-                    pending_action_type=legacy_image_gen.ImageGenerationAction.initial.value,
-                    credits=credits,
-                )
-                await state.set_state(ImageGenFSM.review)
-                await message.answer(
-                    _humanize_review_count(
-                        original_review_text(
-                            image_session=image_session,
-                            prompt=saved_prompt,
-                            credits=credits,
-                            has_reference=True,
-                        )
-                    ),
-                    reply_markup=legacy_image_gen._image_review_kb(image_session),
-                )
-                return
-
         await state.set_state(ImageGenFSM.prompt_input)
         await message.answer(
             f"✅ <b>{_reference_status(len(refs))}</b>\n\n"
