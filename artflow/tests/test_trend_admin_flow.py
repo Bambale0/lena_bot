@@ -71,10 +71,24 @@ def test_category_callback_parser_accepts_kind_aware_payload() -> None:
     )
 
 
-def test_category_guard_is_not_bound_to_fsm_category_state() -> None:
+def test_model_selector_keeps_provider_ids_out_of_callback_data() -> None:
+    very_long_model_key = "provider/" + "x" * 120
+    options, markup = trend_admin_flow._model_selector(
+        [_cost(very_long_model_key, "video")]
+    )
+
+    assert options == {"0": very_long_model_key}
+    button = markup.inline_keyboard[0][0]
+    assert button.callback_data == "trends:model-option:0"
+    assert len(button.callback_data.encode("utf-8")) <= 64
+
+
+def test_trend_guard_avoids_fsm_state_filters_for_recovery() -> None:
     class _FakeState:
         category = object()
         model = object()
+        scenario = object()
+        preview = object()
 
     fake_trends = SimpleNamespace(
         TrendAdminFSM=_FakeState,
@@ -85,7 +99,6 @@ def test_category_guard_is_not_bound_to_fsm_category_state() -> None:
     router = trend_admin_flow.build_trend_admin_router(fake_trends)
     handlers = router.callback_query.handlers
 
-    assert len(handlers) == 1
-    # Only callback-data + admin filters should be present. If an FSM StateFilter
-    # is added again, stale category keyboards will silently stop matching.
-    assert len(handlers[0].filters) == 2
+    assert len(handlers) == 2
+    # Both category and compact-model callbacks match by callback data + admin only.
+    assert all(len(handler.filters) == 2 for handler in handlers)
