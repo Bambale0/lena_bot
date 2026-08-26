@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from bot.handlers import trends
+from bot.handlers import trend_admin_guard
 
 
 @pytest.mark.asyncio
@@ -16,7 +16,7 @@ async def test_trend_category_uses_model_key_when_gen_type_metadata_is_missing(m
         gen_type=None,
         is_active=True,
     )
-    monkeypatch.setattr(trends.repo, "get_all_model_costs", AsyncMock(return_value=[model]))
+    monkeypatch.setattr(trend_admin_guard.repo, "get_all_model_costs", AsyncMock(return_value=[model]))
 
     call = SimpleNamespace(
         data="trends:category:featured",
@@ -26,11 +26,11 @@ async def test_trend_category_uses_model_key_when_gen_type_metadata_is_missing(m
     state = AsyncMock()
     state.get_data = AsyncMock(return_value={"kind": "video"})
 
-    await trends.trend_category_pick(call, state, AsyncMock())
+    await trend_admin_guard.trend_category_pick(call, state, AsyncMock())
 
     state.clear.assert_not_awaited()
     state.update_data.assert_awaited_once_with(category="featured")
-    state.set_state.assert_awaited_once_with(trends.TrendAdminFSM.model)
+    state.set_state.assert_awaited_once_with(trend_admin_guard.TrendAdminFSM.model)
     text = call.message.answer.await_args.args[0]
     assert text == "Выбери модель:"
     assert call.message.answer.await_args.kwargs["reply_markup"] is not None
@@ -39,7 +39,7 @@ async def test_trend_category_uses_model_key_when_gen_type_metadata_is_missing(m
 
 @pytest.mark.asyncio
 async def test_trend_category_keeps_wizard_state_when_models_are_temporarily_unavailable(monkeypatch) -> None:
-    monkeypatch.setattr(trends.repo, "get_all_model_costs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(trend_admin_guard.repo, "get_all_model_costs", AsyncMock(return_value=[]))
 
     call = SimpleNamespace(
         data="trends:category:featured",
@@ -49,7 +49,7 @@ async def test_trend_category_keeps_wizard_state_when_models_are_temporarily_una
     state = AsyncMock()
     state.get_data = AsyncMock(return_value={"kind": "video"})
 
-    await trends.trend_category_pick(call, state, AsyncMock())
+    await trend_admin_guard.trend_category_pick(call, state, AsyncMock())
 
     state.clear.assert_not_awaited()
     state.set_state.assert_not_awaited()
