@@ -34,6 +34,29 @@ on:
 jobs:
   security-contracts:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     defaults:
       run:
         working-directory: artflow
@@ -92,3 +115,28 @@ jobs:
             tests/test_feed_engagement_security.py \
             tests/test_password_rate_limit_redis.py \
             tests/test_repository_feed.py
+
+      - name: Alembic migration contract
+        run: alembic upgrade head
+
+      - name: Live Redis persistence smoke
+        run: |
+          python - <<'PY'
+          import asyncio
+
+          from core.password_rate_limit import RedisPasswordRateLimiter
+
+          async def main() -> None:
+              login = "ci-restart-persistence@example.test"
+              first = RedisPasswordRateLimiter(window_seconds=60, max_failures=2)
+              await first.clear(login)
+              await first.record_failure(login)
+              await first.record_failure(login)
+
+              restarted = RedisPasswordRateLimiter(window_seconds=60, max_failures=2)
+              retry_after = await restarted.retry_after(login)
+              assert retry_after > 0, retry_after
+              await restarted.clear(login)
+
+          asyncio.run(main())
+          PY
