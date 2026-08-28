@@ -7,7 +7,11 @@ import pytest
 from redis.exceptions import RedisError
 
 from api.web.auth_rate_limit_guard import install_password_rate_limit
-from core.password_rate_limit import RateLimiterUnavailable, RedisPasswordRateLimiter
+from core.password_rate_limit import (
+    RateLimiterUnavailable,
+    RedisEventRateLimiter,
+    RedisPasswordRateLimiter,
+)
 
 
 class FakeRedis:
@@ -109,6 +113,30 @@ async def test_failed_login_window_survives_new_limiter_instance() -> None:
 
 
 @pytest.mark.asyncio
+async def test_contact_request_window_survives_new_limiter_instance() -> None:
+    redis = FakeRedis()
+    now = [2_000.0]
+    first_process = RedisEventRateLimiter(
+        namespace="auth:contact-request:contact",
+        window_seconds=900,
+        max_events=5,
+        redis_client=redis,
+        clock=lambda: now[0],
+    )
+    for _ in range(5):
+        await first_process.record("email:creator@example.com")
+
+    restarted_process = RedisEventRateLimiter(
+        namespace="auth:contact-request:contact",
+        window_seconds=900,
+        max_events=5,
+        redis_client=redis,
+        clock=lambda: now[0],
+    )
+    assert await restarted_process.retry_after("email:creator@example.com") == 900
+
+
+@pytest.mark.asyncio
 async def test_successful_login_clears_durable_failure_window() -> None:
     redis = FakeRedis()
     limiter = RedisPasswordRateLimiter(
@@ -176,3 +204,97 @@ async def test_password_login_route_records_failures_through_installed_limiter()
     limiter.retry_after.assert_awaited_once_with("creator@example.com")
     limiter.record_failure.assert_awaited_once_with("creator@example.com")
     assert route.dependant.call is auth.password_login
+
+
+@pytest.mark.asyncio
+async def test_contact_auth_routes_use_redis_limiters_not_process_dicts() -> None:
+    async def original_password_login(body, response, session):
+        return {"ok": True}
+
+    async def original_contact_request(body, request, session):
+        return {"ok": True, "data": {"message": "sent"}}
+
+    async def original_contact_verify(body, response, request, session):
+        return {"ok": True, "data": {"user": "creator"}}
+
+    password_route = SimpleNamespace(
+        path="/auth/password-login",
+        endpoint=original_password_login,
+        dependant=SimpleNamespace(call=original_password_login),
+    )
+    request_route = SimpleNamespace(
+        path="/auth/contact/request",
+        endpoint=original_contact_request,
+        dependant=SimpleNamespace(call=original_contact_request),
+    )
+    verify_route = SimpleNamespace(
+        path="/auth/contact/verify",
+        endpoint=original_contact_verify,
+        dependant=SimpleNamespace(call=original_contact_verify),
+    )
+    auth = SimpleNamespace(
+        PASSWORD_LOGIN_WINDOW_SECONDS=900,
+        PASSWORD_LOGIN_MAX_FAILURES=8,
+        CONTACT_AUTH_WINDOW_SECONDS=900,
+        CONTACT_AUTH_REQUESTS_PER_IP=20,
+        CONTACT_AUTH_REQUESTS_PER_CONTACT=5,
+        CONTACT_AUTH_VERIFY_FAILURES_MAX=10,
+        password_login=original_password_login,
+        contact_auth_request=original_contact_request,
+        contact_auth_verify=original_contact_verify,
+        router=SimpleNamespace(routes=[password_route, request_route, verify_route]),
+        error_response=lambda status, message: {"status": status, "message": message},
+        _user_by_login=AsyncMock(return_value=None),
+        verify_password=lambda password, encoded: False,
+        ok=lambda payload: {"ok": True, "data": payload},
+        _auth_payload=lambda user, response=None: {"user": user},
+        _normalize_contact=lambda contact: ("email", contact.strip().lower()),
+        _request_remote_ip=lambda request: "203.0.113.10",
+        _CONTACT_AUTH_REQUESTS={"legacy": [1.0]},
+        _CONTACT_AUTH_VERIFY_FAILURES={"legacy": [1.0]},
+    )
+    password_limiter = SimpleNamespace(
+        retry_after=AsyncMock(return_value=0),
+        record_failure=AsyncMock(),
+        clear=AsyncMock(),
+    )
+    contact_limiters = {
+        name: SimpleNamespace(
+            retry_after=AsyncMock(return_value=0),
+            record=AsyncMock(),
+            clear=AsyncMock(),
+        )
+        for name in ("request_contact", "request_ip", "verify_contact", "verify_ip")
+    }
+
+    install_password_rate_limit(
+        auth,
+        limiter=password_limiter,
+        contact_limiters=contact_limiters,
+    )
+
+    request = object()
+    body = SimpleNamespace(contact="Creator@Example.com")
+    result = await auth.contact_auth_request(body, request, object())
+    assert result["ok"] is True
+    contact_limiters["request_contact"].record.assert_awaited_once_with(
+        "email:creator@example.com"
+    )
+    contact_limiters["request_ip"].record.assert_awaited_once_with("203.0.113.10")
+
+    verified = await auth.contact_auth_verify(body, object(), request, object())
+    assert verified["ok"] is True
+    contact_limiters["verify_contact"].record.assert_awaited_once_with(
+        "email:creator@example.com"
+    )
+    contact_limiters["verify_contact"].clear.assert_awaited_once_with(
+        "email:creator@example.com"
+    )
+    contact_limiters["verify_ip"].clear.assert_awaited_once_with("203.0.113.10")
+
+    assert auth._CONTACT_AUTH_REQUESTS == {}
+    assert auth._CONTACT_AUTH_VERIFY_FAILURES == {}
+    assert auth._contact_auth_request_retry_after() == 0
+    assert auth._contact_auth_verify_retry_after() == 0
+    assert request_route.dependant.call is auth.contact_auth_request
+    assert verify_route.dependant.call is auth.contact_auth_verify
