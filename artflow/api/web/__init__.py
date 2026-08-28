@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from api.prompt_privacy import install_web_schema_prompt_privacy
 from api.web import (
     admin,
     assistant,
@@ -22,9 +23,10 @@ from api.web import (
     sessions,
     suno_source_audio,
 )
-from api.prompt_privacy import install_web_schema_prompt_privacy
+from api.web.auth_rate_limit_guard import install_password_rate_limit
 
 install_web_schema_prompt_privacy()
+install_password_rate_limit(auth)
 
 router = APIRouter()
 router.include_router(health.router)
