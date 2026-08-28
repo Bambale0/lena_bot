@@ -160,7 +160,7 @@ def install_password_rate_limit(
         original_contact_verify = auth_module.contact_auth_verify
 
         # Disable the legacy process-local stores. The wrappers below enforce
-        # the same public limits durably before the original endpoint logic runs.
+        # the same public limits durably around the original endpoint logic.
         if hasattr(auth_module, "_CONTACT_AUTH_REQUESTS"):
             auth_module._CONTACT_AUTH_REQUESTS.clear()
         if hasattr(auth_module, "_CONTACT_AUTH_VERIFY_FAILURES"):
@@ -184,8 +184,6 @@ def install_password_rate_limit(
             ]
             try:
                 retry_after = await _retry_after_for_subjects(pairs)
-                if retry_after <= 0:
-                    await _record_subjects(pairs)
             except RateLimiterUnavailable:
                 return auth_module.error_response(503, _UNAVAILABLE_MESSAGE)
 
@@ -194,7 +192,16 @@ def install_password_rate_limit(
                     429,
                     f"Слишком много запросов кода. Повторите через {retry_after} сек.",
                 )
-            return await original_contact_request(body, request, session)
+
+            result = await original_contact_request(body, request, session)
+            data = result.get("data") if isinstance(result, dict) and result.get("ok") is True else None
+            should_record = isinstance(data, dict) and not data.get("retry_after")
+            if should_record:
+                try:
+                    await _record_subjects(pairs)
+                except RateLimiterUnavailable:
+                    return auth_module.error_response(503, _UNAVAILABLE_MESSAGE)
+            return result
 
         async def contact_auth_verify(body, response, request, session):
             try:
@@ -209,8 +216,6 @@ def install_password_rate_limit(
             ]
             try:
                 retry_after = await _retry_after_for_subjects(pairs)
-                if retry_after <= 0:
-                    await _record_subjects(pairs)
             except RateLimiterUnavailable:
                 return auth_module.error_response(503, _UNAVAILABLE_MESSAGE)
 
@@ -221,11 +226,13 @@ def install_password_rate_limit(
                 )
 
             result = await original_contact_verify(body, response, request, session)
-            if isinstance(result, dict) and result.get("ok") is True:
-                try:
+            try:
+                if isinstance(result, dict) and result.get("ok") is True:
                     await _clear_subjects(pairs)
-                except RateLimiterUnavailable:
-                    return auth_module.error_response(503, _UNAVAILABLE_MESSAGE)
+                elif getattr(result, "status_code", None) == 401:
+                    await _record_subjects(pairs)
+            except RateLimiterUnavailable:
+                return auth_module.error_response(503, _UNAVAILABLE_MESSAGE)
             return result
 
         _copy_endpoint_metadata(contact_auth_request, original_contact_request)
