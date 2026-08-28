@@ -219,6 +219,7 @@ async def test_password_register_binds_site_referral(monkeypatch) -> None:
     monkeypatch.setattr(auth.repo, "set_user_password_hash", AsyncMock(return_value=created))
     monkeypatch.setattr(auth, "hash_password", lambda password: "hash")
 
+
     session = object()
     response = await auth.password_register(
         auth.PasswordRegisterRequest(
@@ -238,6 +239,78 @@ async def test_password_register_binds_site_referral(monkeypatch) -> None:
     assert create_contact_user.await_args.kwargs["referrer"] is referrer
     add_credits.assert_awaited_once()
     assert add_credits.await_args.args[:3] == (session, 10, auth.settings.REFERRAL_L1_CREDITS)
+
+
+@pytest.mark.asyncio
+async def test_contact_auth_request_rate_limits_by_contact(monkeypatch) -> None:
+    auth._CONTACT_AUTH_REQUESTS.clear()
+    monkeypatch.setattr(auth, "_show_debug_auth_code", lambda: True)
+    monkeypatch.setattr(auth.repo, "consume_active_web_auth_codes", AsyncMock())
+    monkeypatch.setattr(auth.repo, "create_web_auth_code", AsyncMock())
+    monkeypatch.setattr(auth.repo, "get_recent_web_auth_code", AsyncMock(return_value=None))
+
+    request = SimpleNamespace(headers={}, client=SimpleNamespace(host="203.0.113.10"))
+    body = auth.ContactAuthRequest(contact="rate-limit@example.test")
+
+    for _ in range(auth.CONTACT_AUTH_REQUESTS_PER_CONTACT):
+        result = await auth.contact_auth_request(body, request=request, session=object())
+        assert result["ok"] is True
+
+    limited = await auth.contact_auth_request(body, request=request, session=object())
+    assert limited.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_contact_auth_verify_rate_limits_after_repeated_failures(monkeypatch) -> None:
+    auth._CONTACT_AUTH_VERIFY_FAILURES.clear()
+    monkeypatch.setattr(auth.repo, "get_active_web_auth_code", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth.repo, "increment_web_auth_attempts", AsyncMock())
+
+    request = SimpleNamespace(headers={}, client=SimpleNamespace(host="203.0.113.20"))
+    response = Response()
+    body = auth.ContactAuthVerifyRequest(contact="verify-limit@example.test", code="000000")
+
+    for _ in range(auth.CONTACT_AUTH_VERIFY_FAILURES_MAX):
+        result = await auth.contact_auth_verify(body, response=response, request=request, session=object())
+        assert result.status_code == 401
+
+    limited = await auth.contact_auth_verify(body, response=response, request=request, session=object())
+    assert limited.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_telegram_login_returns_conflict_when_binding_fails(monkeypatch) -> None:
+    current_user = SimpleNamespace(id=7, tg_id=-7)
+    login_user = {
+        "id": 123456,
+        "username": "bound_user",
+        "first_name": "Bound",
+        "last_name": "User",
+        "photo_url": None,
+    }
+    monkeypatch.setattr(auth, "verify_telegram_login_data", lambda _payload: login_user)
+    monkeypatch.setattr(auth.repo, "get_user_by_tg_id", AsyncMock(side_effect=[current_user, None]))
+    monkeypatch.setattr(auth.repo, "bind_user_telegram", AsyncMock(return_value=None))
+    monkeypatch.setattr("api.miniapp_auth.verify_web_auth_token", lambda _token: -7)
+
+    request = SimpleNamespace(cookies={auth.WEB_AUTH_COOKIE_NAME: "token"})
+    response = Response()
+    result = await auth.telegram_login(
+        auth.TelegramLoginRequest(
+            id=123456,
+            username="bound_user",
+            first_name="Bound",
+            last_name="User",
+            auth_date=123,
+            hash="hash",
+        ),
+        response=response,
+        request=request,
+        session=object(),
+        x_web_auth_token=None,
+    )
+
+    assert result.status_code == 409
 
 
 @pytest.mark.asyncio

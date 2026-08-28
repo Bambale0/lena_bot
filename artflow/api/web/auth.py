@@ -82,8 +82,14 @@ REFERRAL_CODE_RE = re.compile(r"^[A-Za-z0-9_-]{3,128}$")
 PASSWORD_HASH_ITERATIONS = 390_000
 PASSWORD_LOGIN_WINDOW_SECONDS = 15 * 60
 PASSWORD_LOGIN_MAX_FAILURES = 8
+CONTACT_AUTH_WINDOW_SECONDS = 15 * 60
+CONTACT_AUTH_REQUESTS_PER_IP = 20
+CONTACT_AUTH_REQUESTS_PER_CONTACT = 5
+CONTACT_AUTH_VERIFY_FAILURES_MAX = 10
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 _PASSWORD_LOGIN_FAILURES: dict[str, list[float]] = {}
+_CONTACT_AUTH_REQUESTS: dict[str, list[float]] = {}
+_CONTACT_AUTH_VERIFY_FAILURES: dict[str, list[float]] = {}
 
 
 def hash_password(password: str) -> str:
@@ -169,6 +175,32 @@ def _record_password_failure(login: str) -> None:
 
 def _clear_password_failures(login: str) -> None:
     _PASSWORD_LOGIN_FAILURES.pop(_password_attempt_key(login), None)
+
+
+def _rate_limit_retry_after(
+    store: dict[str, list[float]],
+    *,
+    key: str,
+    window_seconds: int,
+    max_events: int,
+) -> int:
+    now = time.monotonic()
+    events = [item for item in store.get(key, []) if now - item < window_seconds]
+    if events:
+        store[key] = events
+    else:
+        store.pop(key, None)
+    if len(events) < max_events:
+        return 0
+    return max(1, int(window_seconds - (now - events[0])))
+
+
+def _record_rate_limit_event(store: dict[str, list[float]], *, key: str) -> None:
+    store.setdefault(key, []).append(time.monotonic())
+
+
+def _clear_rate_limit_events(store: dict[str, list[float]], *, key: str) -> None:
+    store.pop(key, None)
 
 
 def _bot_username() -> str:
@@ -423,6 +455,91 @@ def _request_remote_ip(request: Request | None) -> str | None:
     cf_ip = str(request.headers.get("cf-connecting-ip", "") or "").strip()
     client_host = getattr(getattr(request, "client", None), "host", None)
     return cf_ip or forwarded_for or client_host or None
+
+
+def _contact_auth_request_retry_after(
+    *,
+    contact_type: str,
+    contact: str,
+    request: Request | None,
+) -> int:
+    keys = [f"contact:{contact_type}:{contact}"]
+    remote_ip = _request_remote_ip(request)
+    if remote_ip:
+        keys.append(f"ip:{remote_ip}")
+    retry_after = 0
+    for key in keys:
+        max_events = CONTACT_AUTH_REQUESTS_PER_IP if key.startswith("ip:") else CONTACT_AUTH_REQUESTS_PER_CONTACT
+        retry_after = max(
+            retry_after,
+            _rate_limit_retry_after(
+                _CONTACT_AUTH_REQUESTS,
+                key=key,
+                window_seconds=CONTACT_AUTH_WINDOW_SECONDS,
+                max_events=max_events,
+            ),
+        )
+    return retry_after
+
+
+def _record_contact_auth_request(
+    *,
+    contact_type: str,
+    contact: str,
+    request: Request | None,
+) -> None:
+    _record_rate_limit_event(_CONTACT_AUTH_REQUESTS, key=f"contact:{contact_type}:{contact}")
+    remote_ip = _request_remote_ip(request)
+    if remote_ip:
+        _record_rate_limit_event(_CONTACT_AUTH_REQUESTS, key=f"ip:{remote_ip}")
+
+
+def _contact_auth_verify_retry_after(
+    *,
+    contact_type: str,
+    contact: str,
+    request: Request | None,
+) -> int:
+    keys = [f"contact:{contact_type}:{contact}"]
+    remote_ip = _request_remote_ip(request)
+    if remote_ip:
+        keys.append(f"ip:{remote_ip}")
+    retry_after = 0
+    for key in keys:
+        retry_after = max(
+            retry_after,
+            _rate_limit_retry_after(
+                _CONTACT_AUTH_VERIFY_FAILURES,
+                key=key,
+                window_seconds=CONTACT_AUTH_WINDOW_SECONDS,
+                max_events=CONTACT_AUTH_VERIFY_FAILURES_MAX,
+            ),
+        )
+    return retry_after
+
+
+def _record_contact_auth_verify_failure(
+    *,
+    contact_type: str,
+    contact: str,
+    request: Request | None,
+) -> None:
+    _record_rate_limit_event(_CONTACT_AUTH_VERIFY_FAILURES, key=f"contact:{contact_type}:{contact}")
+    remote_ip = _request_remote_ip(request)
+    if remote_ip:
+        _record_rate_limit_event(_CONTACT_AUTH_VERIFY_FAILURES, key=f"ip:{remote_ip}")
+
+
+def _clear_contact_auth_verify_failures(
+    *,
+    contact_type: str,
+    contact: str,
+    request: Request | None,
+) -> None:
+    _clear_rate_limit_events(_CONTACT_AUTH_VERIFY_FAILURES, key=f"contact:{contact_type}:{contact}")
+    remote_ip = _request_remote_ip(request)
+    if remote_ip:
+        _clear_rate_limit_events(_CONTACT_AUTH_VERIFY_FAILURES, key=f"ip:{remote_ip}")
 
 
 async def _verify_registration_captcha(
@@ -691,6 +808,8 @@ async def telegram_login(
             full_name=full_name,
             photo_url=tg_user.get("photo_url"),
         )
+        if user is None:
+            return error_response(409, "Не удалось привязать Telegram: аккаунт уже используется")
     if not user:
         referrer, referrer_l2, referrer_l3 = await _resolve_referral_chain(
             session,
@@ -779,12 +898,21 @@ async def logout(response: Response) -> dict:
 @router.post("/auth/contact/request")
 async def contact_auth_request(
     body: ContactAuthRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:
         contact_type, contact = _normalize_contact(body.contact)
     except ValueError as exc:
         return error_response(422, str(exc))
+
+    retry_after = _contact_auth_request_retry_after(
+        contact_type=contact_type,
+        contact=contact,
+        request=request,
+    )
+    if retry_after > 0:
+        return error_response(429, f"Слишком много запросов кода. Повторите через {retry_after} сек.")
 
     if contact_type == "phone":
         return error_response(503, "Вход по телефону пока не настроен — используйте Telegram или email")
@@ -856,6 +984,7 @@ async def contact_auth_request(
     }
     if _show_debug_auth_code() and contact_type in {"email", "phone"}:
         payload["debug_code"] = code
+    _record_contact_auth_request(contact_type=contact_type, contact=contact, request=request)
     return ok(payload)
 
 
@@ -863,12 +992,21 @@ async def contact_auth_request(
 async def contact_auth_verify(
     body: ContactAuthVerifyRequest,
     response: Response,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:
         contact_type, contact = _normalize_contact(body.contact)
     except ValueError as exc:
         return error_response(422, str(exc))
+
+    retry_after = _contact_auth_verify_retry_after(
+        contact_type=contact_type,
+        contact=contact,
+        request=request,
+    )
+    if retry_after > 0:
+        return error_response(429, f"Слишком много попыток. Повторите через {retry_after} сек.")
 
     now = datetime.now(timezone.utc)
     code_hash = _hash_auth_code(contact_type, contact, body.code.strip())
@@ -881,9 +1019,11 @@ async def contact_auth_verify(
     )
     if not auth_code:
         await repo.increment_web_auth_attempts(session, contact_type=contact_type, contact=contact, now=now)
+        _record_contact_auth_verify_failure(contact_type=contact_type, contact=contact, request=request)
         return error_response(401, "Неверный или устаревший код")
 
     await repo.consume_web_auth_code(session, auth_code.id, now=now)
+    _clear_contact_auth_verify_failures(contact_type=contact_type, contact=contact, request=request)
     if contact_type == "email":
         user = await repo.get_user_by_email(session, contact)
         if not user:

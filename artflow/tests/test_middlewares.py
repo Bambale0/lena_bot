@@ -21,6 +21,8 @@ async def test_throttling_allows_first_message() -> None:
 
     assert result == "ok"
     handler.assert_called_once()
+    assert redis.set.await_args.kwargs["px"] == 1500
+    assert redis.set.await_args.kwargs["nx"] is True
 
 
 @pytest.mark.asyncio

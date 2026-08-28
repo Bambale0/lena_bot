@@ -496,19 +496,28 @@ async def bind_user_telegram(
     full_name: str | None = None,
     photo_url: str | None = None,
 ) -> User | None:
-    await session.execute(
-        update(User)
-        .where(User.id == user_id)
-        .values(
-            tg_id=tg_id,
-            username=username,
-            full_name=full_name,
-            photo_url=photo_url,
+    tg_is_free = ~select(User.id).where(User.tg_id == tg_id, User.id != user_id).exists()
+    try:
+        result = await session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .where(or_(User.tg_id == tg_id, tg_is_free))
+            .values(
+                tg_id=tg_id,
+                username=username,
+                full_name=full_name,
+                photo_url=photo_url,
+            )
+            .returning(User)
         )
-    )
-    await session.commit()
-    result = await session.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
+        user = result.scalar_one_or_none()
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        return None
+    if user:
+        await session.refresh(user)
+    return user
 
 
 async def bind_user_referrer_once(
@@ -739,7 +748,10 @@ async def redeem_promo_code(
     code: str,
 ) -> PromoRedeemResult:
     normalized = normalize_promo_code(code)
-    promo = await get_promo_code(session, normalized)
+    promo_result = await session.execute(
+        select(PromoCode).where(PromoCode.code == normalized).with_for_update()
+    )
+    promo = promo_result.scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if not promo or not promo.is_active:
         raise ValueError("Промокод не найден или выключен.")
