@@ -215,6 +215,8 @@ async def test_contact_auth_routes_use_redis_limiters_not_process_dicts() -> Non
         return {"ok": True, "data": {"message": "sent"}}
 
     async def original_contact_verify(body, response, request, session):
+        if getattr(body, "code", "") == "bad":
+            return SimpleNamespace(status_code=401)
         return {"ok": True, "data": {"user": "creator"}}
 
     password_route = SimpleNamespace(
@@ -274,19 +276,26 @@ async def test_contact_auth_routes_use_redis_limiters_not_process_dicts() -> Non
     )
 
     request = object()
-    body = SimpleNamespace(contact="Creator@Example.com")
-    result = await auth.contact_auth_request(body, request, object())
+    request_body = SimpleNamespace(contact="Creator@Example.com")
+    result = await auth.contact_auth_request(request_body, request, object())
     assert result["ok"] is True
     contact_limiters["request_contact"].record.assert_awaited_once_with(
         "email:creator@example.com"
     )
     contact_limiters["request_ip"].record.assert_awaited_once_with("203.0.113.10")
 
-    verified = await auth.contact_auth_verify(body, object(), request, object())
-    assert verified["ok"] is True
+    invalid_body = SimpleNamespace(contact="Creator@Example.com", code="bad")
+    invalid = await auth.contact_auth_verify(invalid_body, object(), request, object())
+    assert invalid.status_code == 401
     contact_limiters["verify_contact"].record.assert_awaited_once_with(
         "email:creator@example.com"
     )
+    contact_limiters["verify_ip"].record.assert_awaited_once_with("203.0.113.10")
+    contact_limiters["verify_contact"].clear.assert_not_awaited()
+
+    valid_body = SimpleNamespace(contact="Creator@Example.com", code="good")
+    verified = await auth.contact_auth_verify(valid_body, object(), request, object())
+    assert verified["ok"] is True
     contact_limiters["verify_contact"].clear.assert_awaited_once_with(
         "email:creator@example.com"
     )
