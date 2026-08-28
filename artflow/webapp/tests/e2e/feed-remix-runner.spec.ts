@@ -26,15 +26,16 @@ const imageModels = [
 
 const videoModels = [
   {
-    key: "veo-3.1-fast",
-    display_name: "Veo 3.1 Fast",
-    credits: 20,
-    modes: ["text", "image", "video"],
-    aspect_ratios: ["16:9", "9:16"],
+    key: "bytedance/seedance-2-5",
+    display_name: "🌱 Seedance 2.5",
+    credits: 3,
+    modes: ["text", "image"],
+    aspect_ratios: ["16:9", "9:16", "1:1"],
     durations: [5, 10],
-    resolutions: ["720p", "1080p"],
-    max_refs: 1,
-    supports_video_input: true,
+    resolutions: ["480p", "720p"],
+    max_refs: 4,
+    is_per_second: true,
+    credits_per_sec: 3,
   },
 ];
 
@@ -130,7 +131,10 @@ test("feed work repeat asks for settings and preserves source media payload", as
   await expect(dialog.getByText("Реф #1")).toBeVisible();
   await dialog.getByRole("button", { name: "Запустить повтор" }).click();
 
-  await expect(page.getByRole("dialog", { name: /Задача #9201/ })).toBeVisible();
+  await expect(dialog).toBeHidden();
+  const taskDialogs = page.getByRole("dialog", { name: /Задача #9201/ });
+  await expect(taskDialogs).toHaveCount(1);
+  await expect(taskDialogs).toBeVisible();
   expect(remixPayload).toMatchObject({
     model: "nano-banana-2",
     mode: "image",
