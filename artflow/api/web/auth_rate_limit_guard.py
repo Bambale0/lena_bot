@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 _UNAVAILABLE_MESSAGE = "Вход временно недоступен. Попробуйте ещё раз через минуту."
 
 
-def install_password_rate_limit(auth_module: Any) -> None:
+def install_password_rate_limit(auth_module: Any, *, limiter: Any | None = None) -> None:
     """Replace the password-login call with a Redis-backed failure window.
 
     The existing FastAPI route/dependency graph is preserved; only its callable
@@ -21,10 +21,11 @@ def install_password_rate_limit(auth_module: Any) -> None:
     if getattr(auth_module, "_redis_password_rate_limit_installed", False):
         return
 
-    limiter = RedisPasswordRateLimiter(
-        window_seconds=int(auth_module.PASSWORD_LOGIN_WINDOW_SECONDS),
-        max_failures=int(auth_module.PASSWORD_LOGIN_MAX_FAILURES),
-    )
+    if limiter is None:
+        limiter = RedisPasswordRateLimiter(
+            window_seconds=int(auth_module.PASSWORD_LOGIN_WINDOW_SECONDS),
+            max_failures=int(auth_module.PASSWORD_LOGIN_MAX_FAILURES),
+        )
 
     async def password_login(body, response, session):
         try:
