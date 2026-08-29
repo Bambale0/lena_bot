@@ -5,7 +5,8 @@ on:
     paths:
       - "artflow/api/web/__init__.py"
       - "artflow/bot/middlewares/auth.py"
-      - "artflow/db/session.py"
+      - "artflow/run_polling.py"
+      - "artflow/scripts/reconcile_cryptobot_pending.py"
       - "artflow/db/referral_reward_policy.py"
       - "artflow/db/migrations/versions/031_referral_first_topup_bonus.py"
       - "artflow/tests/test_referral_first_topup_policy.py"
@@ -15,7 +16,8 @@ on:
     paths:
       - "artflow/api/web/__init__.py"
       - "artflow/bot/middlewares/auth.py"
-      - "artflow/db/session.py"
+      - "artflow/run_polling.py"
+      - "artflow/scripts/reconcile_cryptobot_pending.py"
       - "artflow/db/referral_reward_policy.py"
       - "artflow/db/migrations/versions/031_referral_first_topup_bonus.py"
       - "artflow/tests/test_referral_first_topup_policy.py"
@@ -71,7 +73,8 @@ jobs:
           ruff check \
             api/web/__init__.py \
             bot/middlewares/auth.py \
-            db/session.py \
+            run_polling.py \
+            scripts/reconcile_cryptobot_pending.py \
             db/referral_reward_policy.py \
             db/migrations/versions/031_referral_first_topup_bonus.py \
             tests/test_referral_first_topup_policy.py
@@ -81,18 +84,16 @@ jobs:
           python -m py_compile \
             api/web/__init__.py \
             bot/middlewares/auth.py \
-            db/session.py \
+            run_polling.py \
+            scripts/reconcile_cryptobot_pending.py \
             db/referral_reward_policy.py \
             db/migrations/versions/031_referral_first_topup_bonus.py
 
-      - name: Shared DB boundary install contract
+      - name: Payment entrypoint install contract
         run: |
-          python - <<'PY'
-          from db import repository as repo
-          from db.session import AsyncSessionLocal  # noqa: F401
-
-          assert getattr(repo, "_referral_reward_policy_installed", False) is True
-          PY
+          grep -q "install_referral_reward_policy(repo)" api/web/__init__.py
+          grep -q "install_referral_reward_policy(repo)" run_polling.py
+          grep -q "install_referral_reward_policy(repo)" scripts/reconcile_cryptobot_pending.py
 
       - name: Referral regression tests
         run: pytest -q tests/test_referral_first_topup_policy.py
