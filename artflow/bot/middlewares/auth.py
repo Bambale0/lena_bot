@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.maintenance_mode import is_maintenance_mode
 from bot.utils.deep_links import parse_start_payload
 from core.config import settings
+from core.referral_antifraud import ensure_referrer_allowed
 from db import repository as repo
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,12 @@ async def _resolve_referral_chain(
         return None, None, None
     referrer = await repo.get_user_by_referral_code(session, ref_code)
     if not referrer or referrer.tg_id == tg_user_id or referrer.id == current_user_id:
+        return None, None, None
+    if not await ensure_referrer_allowed(
+        session,
+        referrer=referrer,
+        candidate_label=f"telegram:{tg_user_id}",
+    ):
         return None, None, None
 
     chain_user = referrer

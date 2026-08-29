@@ -22,6 +22,7 @@ from api.miniapp_auth import create_web_auth_token, verify_telegram_login_data
 from api.web.deps import WEB_AUTH_COOKIE_NAME, error_response, ok
 from api.web.schemas import UserMe
 from core.config import settings
+from core.referral_antifraud import ensure_referrer_allowed
 from db import repository as repo
 from db.session import get_session
 
@@ -294,6 +295,19 @@ async def _resolve_referral_chain(
         except (TypeError, ValueError):
             tg_id = None
     if referrer.id == current_user_id or (tg_id and int(getattr(referrer, "tg_id", 0) or 0) == tg_id):
+        return None, None, None
+    candidate_bits = []
+    if tg_id is not None:
+        candidate_bits.append(f"tg:{tg_id}")
+    if current_user_id is not None:
+        candidate_bits.append(f"user:{current_user_id}")
+    if not candidate_bits:
+        candidate_bits.append("web:unknown")
+    if not await ensure_referrer_allowed(
+        session,
+        referrer=referrer,
+        candidate_label=",".join(candidate_bits),
+    ):
         return None, None, None
 
     chain_user = referrer
