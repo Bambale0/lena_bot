@@ -5,13 +5,11 @@ from core.config import settings
 from core.request_identity import clear_current_user, reset_current_user
 from db import repository as repo
 from db.feed_engagement_guard import install_feed_engagement_guard
-from db.referral_reward_policy import install_referral_reward_policy
 
 engine = create_async_engine(settings.DATABASE_URL, echo=False, pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 install_feed_engagement_guard(repo)
-install_referral_reward_policy(repo)
 
 
 async def get_session() -> AsyncSession:
