@@ -13,8 +13,11 @@ from bot.services.maintenance_mode import is_maintenance_mode
 from bot.utils.deep_links import parse_start_payload
 from core.config import settings
 from db import repository as repo
+from db.referral_reward_policy import install_referral_reward_policy
 
 logger = logging.getLogger(__name__)
+
+install_referral_reward_policy(repo)
 
 
 async def _notify_referral(bot: Bot | None, tg_id: int, text: str) -> None:
@@ -119,14 +122,29 @@ async def _resolve_referral_chain(
     if referrer.referrer_id and referrer.referrer_id not in seen_ids:
         referrer_l2 = await repo.get_user_by_id(session, referrer.referrer_id)
         if referrer_l2 and (referrer_l2.id in seen_ids or referrer_l2.tg_id == tg_user_id):
-            logger.warning("Referral chain cycle detected at L2: tg_user_id=%s ref_code=%s referrer_id=%s l2_id=%s", tg_user_id, ref_code, referrer.id, referrer_l2.id)
+            logger.warning(
+                "Referral chain cycle detected at L2: tg_user_id=%s ref_code=%s referrer_id=%s l2_id=%s",
+                tg_user_id,
+                ref_code,
+                referrer.id,
+                referrer_l2.id,
+            )
             referrer_l2 = None
         elif referrer_l2:
             seen_ids.add(referrer_l2.id)
     if referrer_l2 and referrer_l2.referrer_id and referrer_l2.referrer_id not in seen_ids:
         referrer_l3 = await repo.get_user_by_id(session, referrer_l2.referrer_id)
-        if referrer_l3 and (referrer_l3.id in seen_ids or referrer_l3.tg_id == tg_user_id):
-            logger.warning("Referral chain cycle detected at L3: tg_user_id=%s ref_code=%s referrer_id=%s l2_id=%s l3_id=%s", tg_user_id, ref_code, referrer.id, referrer_l2.id, referrer_l3.id)
+        if referrer_l3 and (
+            referrer_l3.id in seen_ids or referrer_l3.tg_id == tg_user_id
+        ):
+            logger.warning(
+                "Referral chain cycle detected at L3: tg_user_id=%s ref_code=%s referrer_id=%s l2_id=%s l3_id=%s",
+                tg_user_id,
+                ref_code,
+                referrer.id,
+                referrer_l2.id,
+                referrer_l3.id,
+            )
             referrer_l3 = None
     return referrer, referrer_l2, referrer_l3
 
@@ -188,11 +206,19 @@ class AuthMiddleware(BaseMiddleware):
                 getattr(referrer_l3, "id", None),
             )
             if not ref_code:
-                logger.info("Referral create without payload: tg_id=%s entrypoint=%s", tg_user.id, entrypoint)
+                logger.info(
+                    "Referral create without payload: tg_id=%s entrypoint=%s",
+                    tg_user.id,
+                    entrypoint,
+                )
 
             referral_freeze = settings.REFERRAL_FREEZE
             if referral_freeze and referrer:
-                logger.warning("Referral freeze active: skip bind on create tg_id=%s referrer_id=%s", tg_user.id, referrer.id)
+                logger.warning(
+                    "Referral freeze active: skip bind on create tg_id=%s referrer_id=%s",
+                    tg_user.id,
+                    referrer.id,
+                )
             db_user = await repo.create_user(
                 session,
                 tg_id=tg_user.id,
@@ -204,16 +230,17 @@ class AuthMiddleware(BaseMiddleware):
                 referrer_l3=None if referral_freeze else referrer_l3,
             )
 
-            # Начисляем реферальные бонусы (только L1 — кредитами)
             if referrer and not referral_freeze:
-                logger.info("Referral bind on create: tg_id=%s -> referrer_id=%s", tg_user.id, referrer.id)
-                await repo.add_credits(session, referrer.id, settings.REFERRAL_L1_CREDITS, entry_type="referral_signup_bonus", source_type="user", source_id=str(tg_user.id), note="L1 referral signup bonus")
-                logger.info("Referral L1 bonus: %s -> %s", tg_user.id, referrer.tg_id)
+                logger.info(
+                    "Referral bind on create: tg_id=%s -> referrer_id=%s reward=deferred_until_first_paid_topup",
+                    tg_user.id,
+                    referrer.id,
+                )
                 await _notify_referral(
                     bot,
                     referrer.tg_id,
                     "🎉 По твоей ссылке пришёл новый пользователь!\n"
-                    f"+{settings.REFERRAL_L1_CREDITS} 💋 начислено.",
+                    f"+{settings.REFERRAL_L1_CREDITS} 💋 начислим после его первого пополнения.",
                 )
         elif (
             ref_code
@@ -230,10 +257,20 @@ class AuthMiddleware(BaseMiddleware):
             )
             if referrer:
                 if settings.REFERRAL_FREEZE:
-                    logger.warning("Referral freeze active: skip late-bind tg_id=%s user_id=%s referrer_id=%s", tg_user.id, db_user.id, referrer.id)
+                    logger.warning(
+                        "Referral freeze active: skip late-bind tg_id=%s user_id=%s referrer_id=%s",
+                        tg_user.id,
+                        db_user.id,
+                        referrer.id,
+                    )
                     data["db_user"] = db_user
                     return await handler(event, data)
-                logger.info("Referral late-bind attempt: tg_id=%s user_id=%s referrer_id=%s", tg_user.id, db_user.id, referrer.id)
+                logger.info(
+                    "Referral late-bind attempt: tg_id=%s user_id=%s referrer_id=%s",
+                    tg_user.id,
+                    db_user.id,
+                    referrer.id,
+                )
                 bound = await repo.bind_user_referrer_once(
                     session,
                     db_user.id,
@@ -242,16 +279,26 @@ class AuthMiddleware(BaseMiddleware):
                     referrer_l3=referrer_l3,
                 )
                 if bound:
-                    logger.info("Referral late-bind success: tg_id=%s -> referrer_id=%s", tg_user.id, referrer.id)
-                    await repo.add_credits(session, referrer.id, settings.REFERRAL_L1_CREDITS, entry_type="referral_signup_bonus", source_type="user", source_id=str(tg_user.id), note="L1 referral signup bonus")
-                    logger.info("Referral L1 late bind: %s -> %s (notif skipped - existing user)", tg_user.id, referrer.tg_id)
+                    logger.info(
+                        "Referral late-bind success: tg_id=%s -> referrer_id=%s reward=deferred_until_first_paid_topup",
+                        tg_user.id,
+                        referrer.id,
+                    )
                     db_user = await repo.get_user_by_tg_id(session, tg_user.id)
                 else:
-                    logger.info("Referral late-bind skipped: tg_id=%s user_id=%s already_bound_or_race=true", tg_user.id, db_user.id)
+                    logger.info(
+                        "Referral late-bind skipped: tg_id=%s user_id=%s already_bound_or_race=true",
+                        tg_user.id,
+                        db_user.id,
+                    )
             else:
-                logger.info("Referral late-bind without resolvable referrer: tg_id=%s ref_code=%s entrypoint=%s", tg_user.id, start_payload.raw or ref_code, entrypoint)
+                logger.info(
+                    "Referral late-bind without resolvable referrer: tg_id=%s ref_code=%s entrypoint=%s",
+                    tg_user.id,
+                    start_payload.raw or ref_code,
+                    entrypoint,
+                )
 
-            # Referral code not found — notify user
             if bot:
                 try:
                     await _notify_referral(
@@ -265,10 +312,14 @@ class AuthMiddleware(BaseMiddleware):
                     pass
 
         elif db_user.is_banned:
-            return  # Просто игнорируем забаненных
+            return
 
-        # User has ref_code but already has a referrer — notify them
-        if ref_code and db_user and getattr(db_user, "referrer_id", None) and not db_user.is_banned:
+        if (
+            ref_code
+            and db_user
+            and getattr(db_user, "referrer_id", None)
+            and not db_user.is_banned
+        ):
             if bot:
                 try:
                     await _notify_referral(
