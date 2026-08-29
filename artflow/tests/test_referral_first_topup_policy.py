@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -174,4 +174,4 @@ async def test_payment_retry_recovers_missing_first_topup_reward() -> None:
     result = await repo.confirm_transaction_and_add_credits(object(), "paid-101")
 
     assert result is None
-    award.assert_awaited_once_with(pytest.ANY, paid_tx)
+    award.assert_awaited_once_with(ANY, paid_tx)
