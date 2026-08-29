@@ -23,7 +23,11 @@ from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.utils.dispatcher import create_dispatcher
 from core.config import settings
 from core.logger import setup_logging
+from db import repository as repo
+from db.referral_reward_policy import install_referral_reward_policy
 from db.seed import run_seed
+
+install_referral_reward_policy(repo)
 
 
 async def _make_storage() -> tuple[BaseStorage, object | None]:
