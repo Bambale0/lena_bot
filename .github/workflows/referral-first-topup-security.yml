@@ -91,85 +91,92 @@ jobs:
         run: |
           python - <<'PY'
           import asyncio
+          import os
 
           from sqlalchemy import select
+          from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
           from db.models import CreditLedgerEntry, PaymentProvider, Transaction, TransactionStatus, User
           from db.referral_reward_policy import REFERRAL_FIRST_TOPUP_ENTRY_TYPE, award_referral_first_topup
-          from db.session import AsyncSessionLocal
+
+          engine = create_async_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
+          AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
           async def main() -> None:
-              async with AsyncSessionLocal() as session:
-                  referrer = User(
-                      tg_id=910000001,
-                      username="ci_referrer",
-                      full_name="CI Referrer",
-                      credits=0,
-                      referral_code="ci-referrer-code",
-                      language="ru",
-                  )
-                  session.add(referrer)
-                  await session.flush()
-                  referred = User(
-                      tg_id=910000002,
-                      username="ci_referred",
-                      full_name="CI Referred",
-                      credits=0,
-                      referral_code="ci-referred-code",
-                      referrer_id=referrer.id,
-                      language="ru",
-                  )
-                  session.add(referred)
-                  await session.flush()
-                  first = Transaction(
-                      user_id=referred.id,
-                      amount_rub=500,
-                      credits=50,
-                      provider=PaymentProvider.tbank,
-                      external_id="ci-first-paid-topup",
-                      status=TransactionStatus.paid,
-                  )
-                  session.add(first)
-                  await session.commit()
-                  await session.refresh(first)
-
-                  assert await award_referral_first_topup(session, first) is True
-
-                  balance = (
-                      await session.execute(select(User.credits).where(User.id == referrer.id))
-                  ).scalar_one()
-                  assert balance == 3
-                  ledger_count = len(
-                      list(
-                          (
-                              await session.execute(
-                                  select(CreditLedgerEntry.id).where(
-                                      CreditLedgerEntry.entry_type == REFERRAL_FIRST_TOPUP_ENTRY_TYPE,
-                                      CreditLedgerEntry.source_id == str(referred.id),
-                                  )
-                              )
-                          ).scalars().all()
+              try:
+                  async with AsyncSessionLocal() as session:
+                      referrer = User(
+                          tg_id=910000001,
+                          username="ci_referrer",
+                          full_name="CI Referrer",
+                          credits=0,
+                          referral_code="ci-referrer-code",
+                          language="ru",
                       )
-                  )
-                  assert ledger_count == 1
+                      session.add(referrer)
+                      await session.flush()
+                      referred = User(
+                          tg_id=910000002,
+                          username="ci_referred",
+                          full_name="CI Referred",
+                          credits=0,
+                          referral_code="ci-referred-code",
+                          referrer_id=referrer.id,
+                          language="ru",
+                      )
+                      session.add(referred)
+                      await session.flush()
+                      first = Transaction(
+                          user_id=referred.id,
+                          amount_rub=500,
+                          credits=50,
+                          provider=PaymentProvider.tbank,
+                          external_id="ci-first-paid-topup",
+                          status=TransactionStatus.paid,
+                      )
+                      session.add(first)
+                      await session.commit()
+                      await session.refresh(first)
 
-                  second = Transaction(
-                      user_id=referred.id,
-                      amount_rub=500,
-                      credits=50,
-                      provider=PaymentProvider.tbank,
-                      external_id="ci-second-paid-topup",
-                      status=TransactionStatus.paid,
-                  )
-                  session.add(second)
-                  await session.commit()
-                  await session.refresh(second)
+                      assert await award_referral_first_topup(session, first) is True
 
-                  assert await award_referral_first_topup(session, second) is False
-                  balance_after = (
-                      await session.execute(select(User.credits).where(User.id == referrer.id))
-                  ).scalar_one()
-                  assert balance_after == 3
+                      balance = (
+                          await session.execute(select(User.credits).where(User.id == referrer.id))
+                      ).scalar_one()
+                      assert balance == 3
+                      ledger_count = len(
+                          list(
+                              (
+                                  await session.execute(
+                                      select(CreditLedgerEntry.id).where(
+                                          CreditLedgerEntry.entry_type == REFERRAL_FIRST_TOPUP_ENTRY_TYPE,
+                                          CreditLedgerEntry.source_id == str(referred.id),
+                                      )
+                                  )
+                              ).scalars().all()
+                          )
+                      )
+                      assert ledger_count == 1
+
+                      second = Transaction(
+                          user_id=referred.id,
+                          amount_rub=500,
+                          credits=50,
+                          provider=PaymentProvider.tbank,
+                          external_id="ci-second-paid-topup",
+                          status=TransactionStatus.paid,
+                      )
+                      session.add(second)
+                      await session.commit()
+                      await session.refresh(second)
+
+                      assert await award_referral_first_topup(session, second) is False
+                      balance_after = (
+                          await session.execute(select(User.credits).where(User.id == referrer.id))
+                      ).scalar_one()
+                      assert balance_after == 3
+              finally:
+                  await engine.dispose()
 
           asyncio.run(main())
           PY
