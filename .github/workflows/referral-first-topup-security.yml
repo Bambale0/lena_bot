@@ -1,0 +1,196 @@
+name: Referral Reward Security
+
+on:
+  pull_request:
+    paths:
+      - "artflow/api/web/__init__.py"
+      - "artflow/bot/middlewares/auth.py"
+      - "artflow/run_polling.py"
+      - "artflow/scripts/reconcile_cryptobot_pending.py"
+      - "artflow/db/referral_reward_policy.py"
+      - "artflow/db/migrations/versions/031_referral_first_topup_bonus.py"
+      - "artflow/tests/test_referral_first_topup_policy.py"
+      - ".github/workflows/referral-first-topup-security.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artflow/api/web/__init__.py"
+      - "artflow/bot/middlewares/auth.py"
+      - "artflow/run_polling.py"
+      - "artflow/scripts/reconcile_cryptobot_pending.py"
+      - "artflow/db/referral_reward_policy.py"
+      - "artflow/db/migrations/versions/031_referral_first_topup_bonus.py"
+      - "artflow/tests/test_referral_first_topup_policy.py"
+      - ".github/workflows/referral-first-topup-security.yml"
+
+jobs:
+  referral-reward-contracts:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: artflow
+    env:
+      BOT_TOKEN: "123456:ci-referral"
+      BOT_USERNAME: "TestBot"
+      WEBHOOK_URL: "https://example.test"
+      WEBHOOK_SECRET: "ci-referral-secret"
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/ci"
+      REDIS_URL: "redis://localhost:6379/0"
+      COMET_API_KEY: "ci-referral-comet"
+      ENV: "test"
+      REFERRAL_L1_CREDITS: "3"
+      REFERRAL_FREEZE: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: artflow/requirements*.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Ruff referral policy
+        run: |
+          ruff check \
+            api/web/__init__.py \
+            bot/middlewares/auth.py \
+            run_polling.py \
+            scripts/reconcile_cryptobot_pending.py \
+            db/referral_reward_policy.py \
+            db/migrations/versions/031_referral_first_topup_bonus.py \
+            tests/test_referral_first_topup_policy.py
+
+      - name: Compile referral policy
+        run: |
+          python -m py_compile \
+            api/web/__init__.py \
+            bot/middlewares/auth.py \
+            run_polling.py \
+            scripts/reconcile_cryptobot_pending.py \
+            db/referral_reward_policy.py \
+            db/migrations/versions/031_referral_first_topup_bonus.py
+
+      - name: Payment entrypoint install contract
+        run: |
+          grep -q "install_referral_reward_policy(repo)" api/web/__init__.py
+          grep -q "install_referral_reward_policy(repo)" run_polling.py
+          grep -q "install_referral_reward_policy(repo)" scripts/reconcile_cryptobot_pending.py
+
+      - name: Referral regression tests
+        run: pytest -q tests/test_referral_first_topup_policy.py
+
+      - name: Alembic migration contract
+        run: alembic upgrade head
+
+      - name: Live PostgreSQL first-topup smoke
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+
+          from sqlalchemy import select
+          from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+          from db.models import CreditLedgerEntry, PaymentProvider, Transaction, TransactionStatus, User
+          from db.referral_reward_policy import REFERRAL_FIRST_TOPUP_ENTRY_TYPE, award_referral_first_topup
+
+          engine = create_async_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
+          AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+          async def main() -> None:
+              try:
+                  async with AsyncSessionLocal() as session:
+                      referrer = User(
+                          tg_id=910000001,
+                          username="ci_referrer",
+                          full_name="CI Referrer",
+                          credits=0,
+                          referral_code="ci-referrer-code",
+                          language="ru",
+                      )
+                      session.add(referrer)
+                      await session.flush()
+                      referred = User(
+                          tg_id=910000002,
+                          username="ci_referred",
+                          full_name="CI Referred",
+                          credits=0,
+                          referral_code="ci-referred-code",
+                          referrer_id=referrer.id,
+                          language="ru",
+                      )
+                      session.add(referred)
+                      await session.flush()
+                      first = Transaction(
+                          user_id=referred.id,
+                          amount_rub=500,
+                          credits=50,
+                          provider=PaymentProvider.tbank,
+                          external_id="ci-first-paid-topup",
+                          status=TransactionStatus.paid,
+                      )
+                      session.add(first)
+                      await session.commit()
+                      await session.refresh(first)
+
+                      assert await award_referral_first_topup(session, first) is True
+
+                      balance = (
+                          await session.execute(select(User.credits).where(User.id == referrer.id))
+                      ).scalar_one()
+                      assert balance == 3
+                      ledger_count = len(
+                          list(
+                              (
+                                  await session.execute(
+                                      select(CreditLedgerEntry.id).where(
+                                          CreditLedgerEntry.entry_type == REFERRAL_FIRST_TOPUP_ENTRY_TYPE,
+                                          CreditLedgerEntry.source_id == str(referred.id),
+                                      )
+                                  )
+                              ).scalars().all()
+                          )
+                      )
+                      assert ledger_count == 1
+
+                      second = Transaction(
+                          user_id=referred.id,
+                          amount_rub=500,
+                          credits=50,
+                          provider=PaymentProvider.tbank,
+                          external_id="ci-second-paid-topup",
+                          status=TransactionStatus.paid,
+                      )
+                      session.add(second)
+                      await session.commit()
+                      await session.refresh(second)
+
+                      assert await award_referral_first_topup(session, second) is False
+                      balance_after = (
+                          await session.execute(select(User.credits).where(User.id == referrer.id))
+                      ).scalar_one()
+                      assert balance_after == 3
+              finally:
+                  await engine.dispose()
+
+          asyncio.run(main())
+          PY

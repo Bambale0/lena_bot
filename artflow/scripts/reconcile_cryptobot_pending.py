@@ -13,7 +13,10 @@ from sqlalchemy import select
 from core.config import settings
 from db import repository as repo
 from db.models import PaymentProvider, Transaction, TransactionStatus
+from db.referral_reward_policy import install_referral_reward_policy
 from db.session import AsyncSessionLocal
+
+install_referral_reward_policy(repo)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 logger = logging.getLogger('reconcile_cryptobot_pending')

@@ -57,7 +57,7 @@ _RU = {
     "topup_stars_title": "⭐ <b>Оплата Telegram Stars</b>",
     "topup_stars_desc": "Тариф: {label}\nСтоимость: <b>{stars} ⭐</b>\n\nНажми кнопку ниже для оплаты.",
     "topup_success": "✅ Оплата подтверждена!\nЗачислено: <b>+{credits} 💋</b>\nБаланс: <b>{balance} 💋</b>",
-    "topup_tbank_title": "🏦 <b>Оплата через T-Bанк</b>",
+    "topup_tbank_title": "🏦 <b>Оплата через Т-Банк</b>",
     "topup_tbank_desc": "Тариф: {label}\nСумма: <b>{amount} ₽</b>\n\nОткрой ссылку для оплаты картой или через СБП.\n<i>После успешной оплаты 💋 зачислятся автоматически.</i>",
     "topup_crypto_title": "🪙 <b>Оплата криптой</b>",
     "topup_crypto_desc": "Тариф: {label}\nСумма: <b>{amount} USDT</b>\n\nНажми кнопку для оплаты в CryptoBot.\n<i>После оплаты 💋 зачислятся автоматически.</i>",
@@ -80,7 +80,8 @@ _RU = {
     "referral_conditions": (
         "<b>Как это работает:</b>\n"
         "• Отправляешь другу свою ссылку приглашения\n"
-        "• Когда человек впервые приходит по ней в бота — ты получаешь +{bonus} 💋\n"
+        "• +{bonus} 💋 начисляются один раз после первого успешного платного пополнения приглашённого L1\n"
+        "• Сам переход по ссылке или регистрация бонус не начисляют\n"
         "• L1 — это люди, которых пригласил лично ты\n"
         "• L2 — люди, которых пригласили твои L1\n"
         "• L3 — люди, которых пригласили твои L2\n"
@@ -301,7 +302,8 @@ _EN = {
     "referral_conditions": (
         "<b>How it works:</b>\n"
         "• You send your invite link to a friend\n"
-        "• When a person opens the bot through it for the first time, you get +{bonus} 💋\n"
+        "• +{bonus} 💋 is awarded once after your direct L1 referral's first successful paid top-up\n"
+        "• Opening the referral link or registering alone does not award the bonus\n"
         "• L1 = people invited directly by you\n"
         "• L2 = people invited by your L1\n"
         "• L3 = people invited by your L2\n"

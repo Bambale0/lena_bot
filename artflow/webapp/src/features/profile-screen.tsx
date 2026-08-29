@@ -203,10 +203,12 @@ function ReferralCabinet({
               <Button variant="outline" size="sm" disabled={!referralLink} onClick={() => onCopy(referralLink, "Ссылка")}><Copy /> Копировать</Button>
               <Button size="sm" disabled={!referralLink} onClick={() => onCopy(`Моя ссылка APIX: ${referralLink}`, "Текст для публикации")}><Share2 /> Текст поста</Button>
             </div>
-            <div className="grid gap-1.5 text-xs text-muted-foreground">
-              <p>Бонус L1: {formatCredits(referrals?.bonus_l1_credits)} кр.</p>
-              <p>Комиссии: L1 {formatCredits(referrals?.commission_l1)}% · L2 {formatCredits(referrals?.commission_l2)}% · L3 {formatCredits(referrals?.commission_l3)}%</p>
-              <p>Награда за ремиксы из ленты: {formatCredits(referrals?.feed_remix_reward_rub)} ₽</p>
+            <div className="rounded-xl border border-border bg-muted/35 p-3 text-xs text-muted-foreground">
+              <p className="font-semibold text-foreground">Правила партнёрской программы</p>
+              <p className="mt-1">Бонус L1: +{formatCredits(referrals?.bonus_l1_credits)} 💋 начисляется один раз после первого успешного платного пополнения приглашённого.</p>
+              <p className="mt-1">Регистрация или переход по реферальной ссылке сами по себе бонус не начисляют.</p>
+              <p className="mt-1">Комиссии: L1 {formatCredits(referrals?.commission_l1)}% · L2 {formatCredits(referrals?.commission_l2)}% · L3 {formatCredits(referrals?.commission_l3)}%</p>
+              <p className="mt-1">Награда за ремиксы из ленты: {formatCredits(referrals?.feed_remix_reward_rub)} ₽</p>
             </div>
           </CardContent>
         </Card>
