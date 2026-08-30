@@ -25,11 +25,13 @@ def test_image_entry_opens_model_list_instead_of_resuming_active_session() -> No
     assert "ImageGenFSM.model_select" in source
     assert "image_models_kb(model_costs)" in source
     assert "Шаг 1. Выбери модель" in source
+    assert 'back_callback="menu:main"' in source
     assert "get_active_image_session" not in source
 
 
-def test_model_list_back_does_not_loop_into_the_same_screen() -> None:
+def test_change_model_picker_returns_to_task_without_looping() -> None:
     source = MODEL_FIRST_HANDLER.read_text(encoding="utf-8")
 
-    assert "image_models_first_visible" in source
-    assert 'screen="image_entry"' in source
+    assert 'F.data == "img_menu:advanced"' in source
+    assert 'back_callback = "img_v2:back"' in source
+    assert 'back_text = "← К задаче"' in source
