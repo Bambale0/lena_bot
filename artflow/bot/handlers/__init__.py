@@ -55,6 +55,7 @@ for _key, _description in list(_model_keyboards.IMAGE_MODEL_DESC.items()):
     _model_keyboards.IMAGE_MODEL_DESC[_key] = f"{_label} · {_suffix}" if _suffix else _label
 
 from . import image_gen as _legacy_image_gen
+from . import image_models_first as _image_models_first
 from . import image_wizard_v2 as _image_wizard_v2
 from . import photo_prompt as _photo_prompt
 from . import repeat_callback_guard as _repeat_callback_guard
@@ -70,6 +71,7 @@ _photo_prompt.install_photo_prompt_keyboard_hooks(_legacy_image_gen)
 _image_router = Router(name="image_v2")
 _image_router.include_router(_repeat_callback_guard.router)
 _image_router.include_router(_repeat_safe.router)
+_image_router.include_router(_image_models_first.router)
 _image_router.include_router(_image_wizard_v2.router)
 _image_router.include_router(_photo_prompt.router)
 _image_router.include_router(_legacy_image_gen.router)
