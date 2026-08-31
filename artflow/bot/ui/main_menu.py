@@ -81,7 +81,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
 
     if context.active_image_session:
         builder.row(
-            InlineKeyboardButton(text="🔥 " + ("Продолжить" if lang == "ru" else "Continue"), callback_data="menu:image"),
+            InlineKeyboardButton(text="🔥 " + ("Продолжить" if lang == "ru" else "Continue"), callback_data="img_session:continue"),
             InlineKeyboardButton(text="🆕 " + ("Новая работа" if lang == "ru" else "New work"), callback_data="img_session:new"),
         )
 
