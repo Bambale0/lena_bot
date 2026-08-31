@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN_MENU = ROOT / "bot" / "ui" / "main_menu.py"
-IMAGE_GEN = ROOT / "bot" / "handlers" / "image_gen.py"
+MODEL_FIRST_HANDLER = ROOT / "bot" / "handlers" / "image_models_first.py"
 
 
 def test_main_menu_continue_does_not_reenter_new_image_model_picker() -> None:
@@ -16,8 +16,9 @@ def test_main_menu_continue_does_not_reenter_new_image_model_picker() -> None:
 
 
 def test_active_session_continue_restores_saved_session_state() -> None:
-    source = IMAGE_GEN.read_text(encoding="utf-8")
+    source = MODEL_FIRST_HANDLER.read_text(encoding="utf-8")
 
     assert '@router.callback_query(F.data == "img_session:continue")' in source
     assert "await repo.get_active_image_session(session, db_user.id)" in source
+    assert "from bot.handlers.image_gen import _show_active_image_session_callback" in source
     assert "await _show_active_image_session_callback(call, state, session, db_user, image_session)" in source
