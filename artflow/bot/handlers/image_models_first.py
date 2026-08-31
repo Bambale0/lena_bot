@@ -39,6 +39,26 @@ async def _public_image_model_costs(session: AsyncSession) -> list:
     return public_model_items(await repo.get_all_model_costs(session))
 
 
+@router.callback_query(F.data == "img_session:continue")
+async def resume_active_image_session(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    image_session = await repo.get_active_image_session(session, db_user.id)
+    if not image_session:
+        await safe_answer_callback(call, "Активная серия не найдена", show_alert=True)
+        return
+
+    # Keep the saved model, mode and every stored reference. The model-first
+    # entrypoint is only for a new image task, not for resuming an existing one.
+    from bot.handlers.image_gen import _show_active_image_session_callback
+
+    await _show_active_image_session_callback(call, state, session, db_user, image_session)
+    await safe_answer_callback(call)
+
+
 @router.callback_query(F.data == "menu:image")
 async def open_image_models_first(
     call: CallbackQuery,
