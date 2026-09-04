@@ -113,6 +113,8 @@ _trends.router = _trends_router
 # Admin-only Nexus provider evaluation rides under the existing admin router.
 # The UI is admin-gated and the Nexus router itself is protected by IsAdmin.
 from . import admin as _admin
+from . import nexus_seedance_test as _nexus_seedance_test
 from . import nexus_test as _nexus_test
 
 _admin.router.include_router(_nexus_test.router)
+_admin.router.include_router(_nexus_seedance_test.router)

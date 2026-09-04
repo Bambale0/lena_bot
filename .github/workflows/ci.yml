@@ -55,6 +55,7 @@ jobs:
             bot/handlers/gemini_omni_recovery.py \
             bot/handlers/gemini_omni_references.py \
             bot/handlers/nexus_test.py \
+            bot/handlers/nexus_seedance_test.py \
             bot/handlers/video_gen.py \
             bot/handlers/video_references.py \
             scripts/check_provider_contract_coverage.py \

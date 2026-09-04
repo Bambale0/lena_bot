@@ -39,3 +39,13 @@ def test_admin_button_is_hidden_from_regular_users():
     assert "menu:admin" not in _callbacks(markup)
     assert "menu:test" not in _callbacks(markup)
     assert "🧪 Тест" not in _labels(markup)
+
+
+def test_nexus_test_model_selector_includes_seedance25():
+    importlib.import_module("api")
+    module = importlib.import_module("bot.handlers.nexus_test")
+    markup = module._model_selector_kb()
+
+    assert "nxt:model:nano" in _callbacks(markup)
+    assert "nxt:model:seedance25" in _callbacks(markup)
+    assert "🎬 Seedance 2.5" in _labels(markup)
