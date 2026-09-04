@@ -15,6 +15,12 @@ import httpx
 NEXUS_NANO_BANANA_PRO_MODEL = "nano-banana-pro"
 NEXUS_NANO_BANANA_PRO_ASPECT_RATIOS = ("1:1", "16:9", "9:16", "4:3", "3:4")
 NEXUS_NANO_BANANA_PRO_MAX_REFS = 4
+NEXUS_SEEDANCE25_MODEL = "seedance-2.5"
+NEXUS_SEEDANCE25_ASPECT_RATIOS = ("adaptive", "1:1", "3:4", "4:3", "9:16", "16:9", "21:9")
+NEXUS_SEEDANCE25_RESOLUTIONS = ("480p", "720p")
+NEXUS_SEEDANCE25_MAX_IMAGE_REFS = 30
+NEXUS_SEEDANCE25_MAX_VIDEO_REFS = 10
+NEXUS_SEEDANCE25_MAX_AUDIO_REFS = 10
 NEXUS_TERMINAL_STATUSES = {"completed", "failed"}
 
 
@@ -98,7 +104,7 @@ def _error_detail(payload: Any, status_code: int) -> str:
     labels = {
         401: "NexusAPI rejected the API key",
         402: "NexusAPI account has insufficient balance",
-        422: "NexusAPI rejected the Nano Banana Pro parameters",
+        422: "NexusAPI rejected the generation parameters",
         429: "NexusAPI rate limit exceeded",
     }
     return labels.get(status_code, f"NexusAPI HTTP {status_code}")
@@ -118,17 +124,32 @@ def _validate_public_http_url(value: str | None, *, field_name: str) -> str | No
     return cleaned
 
 
-def _validate_reference_urls(values: list[str] | tuple[str, ...] | None) -> list[str]:
+def _validate_url_list(
+    values: list[str] | tuple[str, ...] | None,
+    *,
+    field_name: str,
+    max_items: int,
+    label: str,
+    item_name: str = "items",
+) -> list[str]:
     refs: list[str] = []
     for raw in list(values or []):
-        value = _validate_public_http_url(raw, field_name="image_urls")
+        value = _validate_public_http_url(raw, field_name=field_name)
         if value and value not in refs:
             refs.append(value)
-    if len(refs) > NEXUS_NANO_BANANA_PRO_MAX_REFS:
-        raise ValueError(
-            f"Nano Banana Pro evaluation supports at most {NEXUS_NANO_BANANA_PRO_MAX_REFS} references"
-        )
+    if len(refs) > max_items:
+        raise ValueError(f"{label} supports at most {max_items} {item_name}")
     return refs
+
+
+def _validate_reference_urls(values: list[str] | tuple[str, ...] | None) -> list[str]:
+    return _validate_url_list(
+        values,
+        field_name="image_urls",
+        max_items=NEXUS_NANO_BANANA_PRO_MAX_REFS,
+        label="Nano Banana Pro evaluation",
+        item_name="references",
+    )
 
 
 def build_nano_banana_pro_params(
@@ -183,6 +204,111 @@ def build_nano_banana_pro_params(
     return params
 
 
+def build_seedance25_params(
+    *,
+    prompt: str,
+    duration: int = 4,
+    aspect_ratio: str = "adaptive",
+    resolution: str = "480p",
+    seed: int | None = None,
+    generate_audio: bool = True,
+    content_filter: bool = False,
+    image_urls: list[str] | tuple[str, ...] | None = None,
+    video_urls: list[str] | tuple[str, ...] | None = None,
+    audio_urls: list[str] | tuple[str, ...] | None = None,
+    start_image_url: str | None = None,
+    end_image_url: str | None = None,
+    webhook_url: str | None = None,
+    extra_params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build params from the live Seedance25Params OpenAPI contract."""
+    prompt_value = str(prompt or "").strip()
+    if not prompt_value:
+        raise ValueError("prompt is required")
+    if len(prompt_value) > 5000:
+        raise ValueError("prompt must be at most 5000 characters")
+
+    if isinstance(duration, bool):
+        raise ValueError("duration must be an integer from 4 to 30")
+    duration_value = int(duration)
+    if duration_value < 4 or duration_value > 30:
+        raise ValueError("duration must be from 4 to 30 seconds")
+
+    ratio_value = str(aspect_ratio or "adaptive").strip()
+    if ratio_value not in NEXUS_SEEDANCE25_ASPECT_RATIOS:
+        raise ValueError(
+            "aspect_ratio must be one of: " + ", ".join(NEXUS_SEEDANCE25_ASPECT_RATIOS)
+        )
+
+    resolution_value = str(resolution or "480p").strip()
+    if resolution_value not in NEXUS_SEEDANCE25_RESOLUTIONS:
+        raise ValueError(
+            "resolution must be one of: " + ", ".join(NEXUS_SEEDANCE25_RESOLUTIONS)
+        )
+
+    seed_value: int | None = None
+    if seed is not None:
+        if isinstance(seed, bool):
+            raise ValueError("seed must be an integer")
+        seed_value = int(seed)
+        if seed_value < -1 or seed_value > 2147483647:
+            raise ValueError("seed must be from -1 to 2147483647")
+
+    images = _validate_url_list(
+        image_urls,
+        field_name="image_urls",
+        max_items=NEXUS_SEEDANCE25_MAX_IMAGE_REFS,
+        label="Seedance 2.5 image_urls",
+    )
+    videos = _validate_url_list(
+        video_urls,
+        field_name="video_urls",
+        max_items=NEXUS_SEEDANCE25_MAX_VIDEO_REFS,
+        label="Seedance 2.5 video_urls",
+    )
+    audios = _validate_url_list(
+        audio_urls,
+        field_name="audio_urls",
+        max_items=NEXUS_SEEDANCE25_MAX_AUDIO_REFS,
+        label="Seedance 2.5 audio_urls",
+    )
+    start_frame = _validate_public_http_url(start_image_url, field_name="start_image_url")
+    end_frame = _validate_public_http_url(end_image_url, field_name="end_image_url")
+    if bool(start_frame) != bool(end_frame):
+        raise ValueError("start_image_url and end_image_url must be provided together")
+
+    params: dict[str, Any] = {
+        "model_name": NEXUS_SEEDANCE25_MODEL,
+        "prompt": prompt_value,
+        "duration": duration_value,
+        "aspect_ratio": ratio_value,
+        "resolution": resolution_value,
+        "generate_audio": bool(generate_audio),
+        "content_filter": bool(content_filter),
+    }
+    if seed_value is not None:
+        params["seed"] = seed_value
+    if images:
+        params["image_urls"] = images
+    if videos:
+        params["video_urls"] = videos
+    if audios:
+        params["audio_urls"] = audios
+    if start_frame and end_frame:
+        params["start_image_url"] = start_frame
+        params["end_image_url"] = end_frame
+
+    webhook_value = _validate_public_http_url(webhook_url, field_name="webhook_url")
+    if webhook_value:
+        params["webhook_url"] = webhook_value
+
+    overrides = dict(extra_params or {})
+    for protected in ("model_name", "prompt"):
+        overrides.pop(protected, None)
+    params.update(overrides)
+    return params
+
+
 def _result_object(payload: dict[str, Any]) -> dict[str, Any]:
     result = payload.get("result")
     return result if isinstance(result, dict) else payload
@@ -191,19 +317,26 @@ def _result_object(payload: dict[str, Any]) -> dict[str, Any]:
 def extract_result_urls(task_payload: dict[str, Any]) -> list[str]:
     result = _result_object(task_payload)
     candidates: list[Any] = []
-    for key in ("image_url", "url"):
+    for key in ("image_url", "video_url", "result_url", "output_url", "url"):
         candidates.append(result.get(key))
-    for key in ("image_urls", "urls"):
+    for key in ("image_urls", "video_urls", "result_urls", "output_urls", "urls"):
         value = result.get(key)
         if isinstance(value, list):
             candidates.extend(value)
-    images = result.get("images")
-    if isinstance(images, list):
-        for item in images:
+    for collection_key in ("images", "videos", "outputs"):
+        items = result.get(collection_key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
             if isinstance(item, str):
                 candidates.append(item)
             elif isinstance(item, dict):
-                candidates.append(item.get("url") or item.get("image_url"))
+                candidates.append(
+                    item.get("url")
+                    or item.get("image_url")
+                    or item.get("video_url")
+                    or item.get("result_url")
+                )
 
     urls: list[str] = []
     for candidate in candidates:

@@ -202,7 +202,10 @@ def _dashboard_kb(data: dict[str, Any]):
         InlineKeyboardButton(text="🆕 Новый Request ID", callback_data="nxt:newkey"),
         InlineKeyboardButton(text="♻️ Сбросить", callback_data="nxt:reset"),
     )
-    builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
+    builder.row(
+        InlineKeyboardButton(text="🧪 Другие модели", callback_data="nxt:model:choose"),
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"),
+    )
     return builder.as_markup()
 
 
@@ -280,8 +283,42 @@ def _current_params(data: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _model_selector_kb():
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🖼 Nano Banana Pro", callback_data="nxt:model:nano"),
+        InlineKeyboardButton(text="🎬 Seedance 2.5", callback_data="nxt:model:seedance25"),
+    )
+    builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
+    return builder.as_markup()
+
+
+async def _show_model_selector(message: Message) -> None:
+    await safe_edit_message(
+        message,
+        "🧪 <b>NexusAPI · Test Lab</b>\n\n"
+        "Выбери модель. Оба контура доступны только администраторам, не списывают APIX-кредиты "
+        "и не меняют боевой provider routing.",
+        reply_markup=_model_selector_kb(),
+    )
+
+
 @router.callback_query(F.data == "menu:test")
 async def open_nexus_test(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _show_model_selector(call.message)  # type: ignore[arg-type]
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data == "nxt:model:choose")
+async def choose_nexus_model(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _show_model_selector(call.message)  # type: ignore[arg-type]
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data == "nxt:model:nano")
+async def open_nano_banana_test(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.update_data(**_initial_data())
     await _show_dashboard(call.message, state)  # type: ignore[arg-type]

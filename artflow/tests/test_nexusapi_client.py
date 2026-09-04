@@ -7,9 +7,11 @@ import pytest
 
 from api.nexusapi_client import (
     NEXUS_NANO_BANANA_PRO_MODEL,
+    NEXUS_SEEDANCE25_MODEL,
     NexusApiClient,
     NexusApiError,
     build_nano_banana_pro_params,
+    build_seedance25_params,
     extract_openapi_model_schema,
     extract_result_base64,
     extract_result_urls,
@@ -259,3 +261,109 @@ async def test_get_model_schema_uses_live_openapi_document():
     assert result.model_name == "nano-banana-pro"
     assert result.schema_name == "NanoBananaPro"
     assert result.schema["properties"]["seed"] == {"type": "integer"}
+
+
+
+def test_build_seedance25_params_matches_live_schema():
+    payload = build_seedance25_params(
+        prompt="cinematic camera move",
+        duration=12,
+        aspect_ratio="21:9",
+        resolution="720p",
+        seed=123,
+        generate_audio=False,
+        content_filter=True,
+        image_urls=["https://cdn.example/ref.png"],
+        video_urls=["https://cdn.example/ref.mp4"],
+        audio_urls=["https://cdn.example/ref.mp3"],
+        webhook_url="https://example.test/nexus-hook",
+    )
+    assert payload == {
+        "model_name": "seedance-2.5",
+        "prompt": "cinematic camera move",
+        "duration": 12,
+        "aspect_ratio": "21:9",
+        "resolution": "720p",
+        "generate_audio": False,
+        "content_filter": True,
+        "seed": 123,
+        "image_urls": ["https://cdn.example/ref.png"],
+        "video_urls": ["https://cdn.example/ref.mp4"],
+        "audio_urls": ["https://cdn.example/ref.mp3"],
+        "webhook_url": "https://example.test/nexus-hook",
+    }
+
+
+def test_build_seedance25_params_validates_duration_seed_and_refs():
+    with pytest.raises(ValueError, match="4 to 30"):
+        build_seedance25_params(prompt="x", duration=31)
+    with pytest.raises(ValueError, match="seed"):
+        build_seedance25_params(prompt="x", seed=2147483648)
+    with pytest.raises(ValueError, match="at most 30"):
+        build_seedance25_params(
+            prompt="x",
+            image_urls=[f"https://cdn.example/{index}.png" for index in range(31)],
+        )
+    with pytest.raises(ValueError, match="at most 10"):
+        build_seedance25_params(
+            prompt="x",
+            video_urls=[f"https://cdn.example/{index}.mp4" for index in range(11)],
+        )
+
+
+def test_build_seedance25_params_requires_frame_pair():
+    with pytest.raises(ValueError, match="provided together"):
+        build_seedance25_params(
+            prompt="transition",
+            start_image_url="https://cdn.example/start.png",
+        )
+    payload = build_seedance25_params(
+        prompt="transition",
+        start_image_url="https://cdn.example/start.png",
+        end_image_url="https://cdn.example/end.png",
+    )
+    assert payload["start_image_url"].endswith("start.png")
+    assert payload["end_image_url"].endswith("end.png")
+
+
+def test_seedance25_live_openapi_discriminator_shape():
+    openapi = {
+        "components": {
+            "schemas": {
+                "GenerateRequest": {
+                    "properties": {
+                        "params": {
+                            "discriminator": {
+                                "mapping": {
+                                    "seedance-2.5": "#/components/schemas/Seedance25Params"
+                                }
+                            }
+                        }
+                    }
+                },
+                "Seedance25Params": {
+                    "type": "object",
+                    "properties": {
+                        "model_name": {"const": "seedance-2.5"},
+                        "duration": {"type": "integer", "minimum": 4, "maximum": 30},
+                    },
+                },
+            }
+        }
+    }
+    schema_name, schema = extract_openapi_model_schema(openapi, NEXUS_SEEDANCE25_MODEL)
+    assert schema_name == "Seedance25Params"
+    assert schema["properties"]["duration"]["maximum"] == 30
+
+
+def test_result_extractor_supports_video_shapes():
+    payload = {
+        "result": {
+            "video_url": "https://cdn.example/result.mp4",
+            "videos": [{"url": "https://cdn.example/alt.mp4"}],
+        }
+    }
+    assert extract_result_urls(payload) == [
+        "https://cdn.example/result.mp4",
+        "https://cdn.example/alt.mp4",
+    ]
