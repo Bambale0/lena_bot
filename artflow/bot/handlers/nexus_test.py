@@ -269,13 +269,11 @@ async def _answer_dashboard(message: Message, state: FSMContext) -> None:
 
 def _current_params(data: dict[str, Any]) -> dict[str, Any]:
     refs = _refs(data) if data.get("nexus_mode") == "edit" else []
-    image_url = refs[0] if len(refs) == 1 else None
-    image_urls = refs if len(refs) > 1 else None
+    image_urls = refs or None
     return build_nano_banana_pro_params(
         prompt=str(data.get("nexus_prompt") or ""),
         aspect_ratio=data.get("nexus_aspect_ratio"),
         seed=data.get("nexus_seed"),
-        image_url=image_url,
         image_urls=image_urls,
         webhook_url=data.get("nexus_webhook_url"),
         extra_params=_overrides(data),
@@ -407,8 +405,8 @@ async def nexus_reference_begin(call: CallbackQuery, state: FSMContext) -> None:
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         "🖼 <b>Добавить reference</b>\n\nПришли фото, image-документ или публичный HTTP(S) URL. "
-        "Один ref отправляется как <code>image_url</code>, 2–4 refs — как <code>image_urls</code>, "
-        "что отдельно позволяет проверить расхождение между model docs и общим Nexus catalog.",
+        "Все 1–4 refs отправляются как <code>image_urls</code> — это текущий контракт Nano Banana Pro. "
+        "Так Nexus гарантированно запускает image-edit, а не обычный text-to-image.",
         reply_markup=_reference_kb(data),
     )
     await safe_answer_callback(call)

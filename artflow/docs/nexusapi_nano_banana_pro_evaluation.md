@@ -6,8 +6,8 @@ Status: evaluation only. Production routing remains unchanged.
 
 Nexus currently exposes two overlapping descriptions of Nano Banana Pro:
 
-- the dedicated model page documents `prompt`, `aspect_ratio`, `seed`, a single `image_url` and `webhook_url`;
-- the generic API docs expose `image_urls`, and the public catalog advertises Nano Banana Pro with up to four references.
+- the current dedicated Nano Banana page documents `image_urls` for image-edit, including a single reference;
+- the public catalog advertises Nano Banana Pro with up to four references.
 
 Nexus's own open-source MCP example resolves this kind of drift by reading `/openapi.json`, following `GenerateRequest.properties.params.discriminator.mapping[model_name]`, and showing the live schema before a billable generation.
 
@@ -34,7 +34,7 @@ Canonical request shape:
     "prompt": "required text",
     "aspect_ratio": "1:1",
     "seed": 12345,
-    "image_url": "https://.../reference.jpg",
+    "image_urls": ["https://.../reference.jpg"],
     "webhook_url": "https://.../callback"
   }
 }
@@ -52,11 +52,9 @@ Published dedicated-model aspect ratios:
 
 ### Reference transport
 
-For one reference the curated lab sends `image_url`, matching the dedicated Nano Banana page.
+For one to four references the curated lab always sends `image_urls`. This matches the current Nano Banana Pro model documentation and prevents a one-reference edit from silently falling back to text-to-image.
 
-For two to four references it sends `image_urls`, matching the generic Nexus API contract and the public catalog's “up to 4 ref” capability claim. This is intentionally part of provider evaluation because the public docs are not perfectly aligned.
-
-If live OpenAPI disagrees with either static description, use `Raw overrides` to send the exact live-schema form and record the provider response.
+If live OpenAPI changes in the future, use `Raw overrides` to send the exact live-schema form and record the provider response.
 
 ### Tasks
 
@@ -79,7 +77,7 @@ The lab supports:
 3. All dedicated-model aspect-ratio controls plus Auto/omit.
 4. Optional integer seed.
 5. Up to four references from Telegram photos, Telegram image documents, or public HTTP(S) URLs.
-6. Automatic `image_url` vs `image_urls` reference transport for parity testing.
+6. Canonical `image_urls` reference transport for one to four refs.
 7. Optional webhook URL.
 8. `Live OpenAPI`: fetch and display the exact current NanoBananaPro schema.
 9. `Live каталог`: inspect provider metadata/current pricing instead of hardcoding price.
@@ -121,10 +119,10 @@ Do not commit a real API key.
 | G | T2I | 9:16 | valid portrait result |
 | H | T2I | 4:3 | completes |
 | I | T2I | 3:4 | completes |
-| J | Edit | one Telegram photo | `image_url` path works and edit follows source |
+| J | Edit | one Telegram photo | `image_urls` contains one public URL and edit follows source |
 | K | Edit | one image document | upload/mirroring path works |
 | L | Edit | one public URL | Nexus can fetch APIX/public media |
-| M | Multi-ref | two refs | `image_urls` is accepted or provider returns actionable 422 |
+| M | Multi-ref | two refs | `image_urls` contains both refs and the edit follows them |
 | N | Multi-ref | four refs | advertised maximum is actually accepted |
 | O | live-schema extra | Raw overrides | any OpenAPI-only field can be exercised without code change |
 | P | idempotency | press Run twice unchanged | no duplicate logical task/charge |
