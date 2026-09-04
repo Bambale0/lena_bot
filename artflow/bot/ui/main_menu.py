@@ -103,10 +103,11 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
     )
     if context.is_admin:
         builder.row(
+            InlineKeyboardButton(text="🧪 " + ("Тест" if lang == "ru" else "Test"), callback_data="menu:test"),
             InlineKeyboardButton(
                 text="👑 " + ("Админ-панель" if lang == "ru" else "Admin panel"),
                 callback_data="menu:admin",
-            )
+            ),
         )
 
     return ScreenRender(

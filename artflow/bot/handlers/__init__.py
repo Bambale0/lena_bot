@@ -109,3 +109,10 @@ _trends_router = Router(name="trends_v2")
 _trends_router.include_router(build_trend_admin_router(_trends))
 _trends_router.include_router(_trends.router)
 _trends.router = _trends_router
+
+# Admin-only Nexus provider evaluation rides under the existing admin router.
+# The UI is admin-gated and the Nexus router itself is protected by IsAdmin.
+from . import admin as _admin
+from . import nexus_test as _nexus_test
+
+_admin.router.include_router(_nexus_test.router)

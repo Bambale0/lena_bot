@@ -46,6 +46,7 @@ jobs:
             api/media_gateway.py \
             api/midjourney_full_service.py \
             api/midjourney_service.py \
+            api/nexusapi_client.py \
             api/photo_prompt_service.py \
             api/provider_contract_catalog.py \
             api/provider_spec_overrides.py \
@@ -53,6 +54,7 @@ jobs:
             api/video_service.py \
             bot/handlers/gemini_omni_recovery.py \
             bot/handlers/gemini_omni_references.py \
+            bot/handlers/nexus_test.py \
             bot/handlers/video_gen.py \
             bot/handlers/video_references.py \
             scripts/check_provider_contract_coverage.py \
@@ -60,6 +62,8 @@ jobs:
             scripts/verify_seedance25_production.py \
             tests/test_gemini_omni_telegram_media_flow.py \
             tests/test_kling_motion_visibility.py \
+            tests/test_admin_main_menu.py \
+            tests/test_nexusapi_client.py \
             tests/test_midjourney.py \
             tests/test_photo_prompt_service.py \
             tests/test_provider_contract_catalog.py \
@@ -87,6 +91,8 @@ jobs:
             tests/test_apix_production_trends_surface.py \
             tests/test_gemini_omni_telegram_media_flow.py \
             tests/test_kling_motion_visibility.py \
+            tests/test_admin_main_menu.py \
+            tests/test_nexusapi_client.py \
             tests/test_miniapp_feed_webkit_stability.py \
             tests/test_provider_contract_catalog.py \
             tests/test_seedance25_repeat_keyboard.py \
