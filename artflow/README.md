@@ -385,7 +385,7 @@ curl -I https://apixbotai.com/app
 curl https://apixbotai.com/api/v1/health
 ```
 
-CI runs backend quality checks and the frontend build on `main` and on pull requests.
+CI runs backend quality checks and the frontend build on `main` and on pull requests. Pushes to `main` also trigger production autodeploy after both jobs pass and the `production` GitHub environment secrets/variables are configured.
 
 ### Локальная разработка (polling)
 

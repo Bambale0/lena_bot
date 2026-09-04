@@ -1,6 +1,4 @@
-/* Interaction-performance overrides for Telegram WebView.
- * Keep synchronous tap feedback cheap on coarse-pointer/mobile surfaces.
- */
+/* Interaction-performance overrides for Telegram WebView. */
 
 button,
 [role="button"],
@@ -12,9 +10,46 @@ button,
   -webkit-tap-highlight-color: transparent;
 }
 
+/* React already limits mounted feed cards, so browser content skipping is disabled. */
+.apix-feed-card {
+  content-visibility: visible !important;
+  contain-intrinsic-size: none !important;
+}
+
+/* Keep appended feed batches stable instead of rebalancing CSS columns. */
+.apix-feed-mosaic {
+  columns: auto !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: row;
+  align-items: start;
+  gap: 0.4rem;
+  perspective: none !important;
+}
+
+.apix-feed-mosaic > * {
+  min-width: 0;
+  margin-bottom: 0 !important;
+  break-inside: auto !important;
+  align-self: start;
+}
+
+@media (min-width: 390px) {
+  .apix-feed-mosaic {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .apix-feed-mosaic {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 @media (hover: none) and (pointer: coarse), (max-width: 640px) {
   .apix-glass,
   .apix-feed-toolbar,
+  .backdrop-blur,
   .backdrop-blur-sm,
   .backdrop-blur-xl,
   .backdrop-blur-2xl {
@@ -38,8 +73,14 @@ button,
   }
 
   .apix-feed-card {
-    animation-duration: 120ms;
+    animation: none !important;
     box-shadow: 0 4px 12px color-mix(in oklab, black 8%, transparent);
+  }
+
+  .apix-feed-media img,
+  .apix-feed-media video {
+    transition: none !important;
+    transform: none !important;
   }
 
   .apix-feed-card-featured {

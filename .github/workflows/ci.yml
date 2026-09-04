@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
 
 jobs:
   backend-quality:
@@ -36,6 +41,7 @@ jobs:
             api/advanced_video_service.py \
             api/image_service.py \
             api/kling_grok_service.py \
+            api/kling_motion_visibility.py \
             api/llm_provider_service.py \
             api/media_gateway.py \
             api/midjourney_full_service.py \
@@ -46,30 +52,51 @@ jobs:
             api/provider_spec_overrides.py \
             api/suno_full_service.py \
             api/video_service.py \
+            bot/handlers/gemini_omni_recovery.py \
+            bot/handlers/gemini_omni_references.py \
             bot/handlers/nexus_test.py \
             bot/handlers/video_gen.py \
+            bot/handlers/video_references.py \
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
+            scripts/verify_seedance25_production.py \
+            tests/test_gemini_omni_telegram_media_flow.py \
+            tests/test_kling_motion_visibility.py \
             tests/test_admin_main_menu.py \
             tests/test_nexusapi_client.py \
             tests/test_midjourney.py \
             tests/test_photo_prompt_service.py \
             tests/test_provider_contract_catalog.py \
+            tests/test_seedance25_repeat_keyboard.py \
+            tests/test_trend_animals_category.py \
             tests/test_video_gen.py \
             tests/test_webapp_routes.py \
-            tests/test_kie_model_specs.py
+            tests/test_kie_model_specs.py \
+            tests/test_miniapp_feed_webkit_stability.py
 
       - name: Provider contract inventory
         run: python scripts/check_provider_contracts_ci.py
 
+      - name: Deploy script contract
+        run: |
+          set -Eeuo pipefail
+          bash -n scripts/deploy-production.sh
+          grep -Fq 'docker compose run --rm -T app alembic upgrade head </dev/null' scripts/deploy-production.sh
+          grep -Fq 'verifying Seedance 2.5 feed-repeat runtime and Telegram webhook' scripts/deploy-production.sh
+
       - name: Pytest maintained PR gate
         run: |
           pytest -q \
-            tests/test_admin_main_menu.py \
-            tests/test_nexusapi_client.py \
             tests/test_apix_legacy_concept_runtime.py \
             tests/test_apix_production_trends_surface.py \
+            tests/test_gemini_omni_telegram_media_flow.py \
+            tests/test_kling_motion_visibility.py \
+            tests/test_admin_main_menu.py \
+            tests/test_nexusapi_client.py \
+            tests/test_miniapp_feed_webkit_stability.py \
             tests/test_provider_contract_catalog.py \
+            tests/test_seedance25_repeat_keyboard.py \
+            tests/test_trend_animals_category.py \
             tests/test_kie_model_specs.py
 
   webapp:
@@ -102,14 +129,18 @@ jobs:
         run: npm run test:e2e
 
   deploy:
+    name: Production Autodeploy
     runs-on: ubuntu-latest
     needs:
       - backend-quality
       - webapp
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AUTODEPLOY_ENABLED == 'true'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     timeout-minutes: 35
     environment:
       name: production
+    concurrency:
+      group: apix-production-deploy
+      cancel-in-progress: false
     env:
       DEPLOY_HOST: ${{ secrets.LENA_HOST || secrets.DEPLOY_HOST }}
       DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.LENA_SSH_KEY || secrets.DEPLOY_SSH_PRIVATE_KEY || secrets.DEPLOY_SSH_KEY }}
@@ -122,6 +153,33 @@ jobs:
       DEPLOY_PUBLIC_HEALTH_URL: ${{ vars.DEPLOY_PUBLIC_HEALTH_URL || 'https://apixbotai.com/api/v1/health' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Mark production deploy pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          payload=$(printf '{"state":"pending","context":"production/deploy","description":"Production deployment in progress","target_url":"%s"}' "$run_url")
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "$payload" >/dev/null
+
+      - name: Deployment preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "event=${GITHUB_EVENT_NAME}"
+          echo "ref=${GITHUB_REF}"
+          echo "sha=${GITHUB_SHA}"
+          echo "branch=${DEPLOY_BRANCH}"
+          echo "path=${DEPLOY_PATH}/${DEPLOY_APP_SUBDIR}"
+          echo "health=${DEPLOY_PUBLIC_HEALTH_URL}"
 
       - name: Validate deployment configuration
         shell: bash
@@ -158,31 +216,83 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          printf -v remote_command \
-            'DEPLOY_PATH=%q DEPLOY_APP_SUBDIR=%q DEPLOY_BRANCH=%q DEPLOY_PUBLIC_HEALTH_URL=%q bash -s -- %q' \
-            "$DEPLOY_PATH" "$DEPLOY_APP_SUBDIR" "$DEPLOY_BRANCH" "$DEPLOY_PUBLIC_HEALTH_URL" "$GITHUB_SHA"
 
-          ssh \
-            -i "$HOME/.ssh/id_ed25519" \
-            -p "$DEPLOY_PORT" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ConnectTimeout=15 \
-            -o ServerAliveInterval=15 \
-            -o ServerAliveCountMax=4 \
-            "$DEPLOY_USER@$DEPLOY_HOST" \
-            "$remote_command" \
+          remote_script="/tmp/apix-deploy-${GITHUB_SHA}.sh"
+          ssh_opts=(
+            -i "$HOME/.ssh/id_ed25519"
+            -p "$DEPLOY_PORT"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=4
+          )
+
+          # Upload first, execute second. The remote Bash must never parse the
+          # deployment program from stdin: docker/compose child processes are
+          # allowed to own stdin without being able to consume future commands.
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cat > '$remote_script' && chmod 700 '$remote_script'" \
             < artflow/scripts/deploy-production.sh
 
+          printf -v remote_command \
+            'DEPLOY_PATH=%q DEPLOY_APP_SUBDIR=%q DEPLOY_BRANCH=%q DEPLOY_PUBLIC_HEALTH_URL=%q bash %q %q; rc=$?; rm -f %q; exit $rc' \
+            "$DEPLOY_PATH" "$DEPLOY_APP_SUBDIR" "$DEPLOY_BRANCH" "$DEPLOY_PUBLIC_HEALTH_URL" \
+            "$remote_script" "$GITHUB_SHA" "$remote_script"
+
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command"
+
+      - name: Verify public production health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 12 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --max-time 15 \
+            "$DEPLOY_PUBLIC_HEALTH_URL" >/dev/null
+
       - name: Record deployment summary
+        if: always()
         shell: bash
         run: |
           {
             echo "## APIX production deployment"
             echo
             echo "- Commit: \`${GITHUB_SHA}\`"
-            echo "- Target: \`${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/${DEPLOY_APP_SUBDIR}\`"
+            echo "- Event: \`${GITHUB_EVENT_NAME}\`"
+            echo "- Target path: \`${DEPLOY_PATH}/${DEPLOY_APP_SUBDIR}\`"
             echo "- Branch: \`${DEPLOY_BRANCH}\`"
             echo "- Health: \`${DEPLOY_PUBLIC_HEALTH_URL}\`"
+            echo "- Result: \`${{ job.status }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish production deploy result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          state="failure"
+          description="Production deployment failed"
+          if [ "$DEPLOY_JOB_STATUS" = "success" ]; then
+            state="success"
+            description="Production deployment succeeded"
+          fi
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          payload=$(printf '{"state":"%s","context":"production/deploy","description":"%s","target_url":"%s"}' "$state" "$description" "$run_url")
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "$payload" >/dev/null

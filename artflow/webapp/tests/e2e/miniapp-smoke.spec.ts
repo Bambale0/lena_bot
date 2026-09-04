@@ -57,6 +57,7 @@ const trends = [
     description: "Загрузите портретное фото",
     user_photo_hint: "Лучше фото по пояс",
     preview_url: "https://example.test/trend.jpg",
+    category: "portrait",
     category_title: "Портреты",
     category_emoji: "✨",
     uses_count: 3,
@@ -68,6 +69,7 @@ const trends = [
     description: "Оживим ваш снимок",
     user_photo_hint: "Нужно одно селфи",
     preview_url: "https://example.test/trend.mp4",
+    category: "photo-video",
     category_title: "Фото → видео",
     category_emoji: "🎬",
     uses_count: 5,
@@ -188,7 +190,10 @@ test("one-photo trend runner uploads and runs without exposing generation contro
 
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Тренды" }).click();
-  await expect(page.getByText("Фото-тренды")).toBeVisible();
+  await expect(page.getByText("Кинопортрет").first()).toBeVisible();
+  const portraitFilter = page.getByRole("button", { name: "✨ Портреты", exact: true });
+  await expect(portraitFilter).toBeVisible();
+  await portraitFilter.click();
   await page.getByRole("button", { name: /Повторить/ }).first().click();
 
   const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });

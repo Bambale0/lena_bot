@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,9 @@ const FOCUSABLE = [
 function Sheet({ open, title, description, children, footer, className, onOpenChange }: SheetProps) {
   const dialogRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const instanceId = useId();
+  const titleId = `${instanceId}-title`;
+  const descriptionId = `${instanceId}-description`;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -89,8 +92,8 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="apix-sheet-title"
-        aria-describedby={description ? "apix-sheet-description" : undefined}
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className={cn(
           "apix-safe-sheet relative z-10 flex max-h-[calc(100dvh-env(safe-area-inset-top)-4px)] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-border bg-popover shadow-2xl sm:max-h-[92dvh] sm:rounded-2xl",
@@ -100,10 +103,10 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
         <div className="mx-auto mt-1.5 h-1 w-9 shrink-0 rounded-full bg-muted-foreground/25 sm:hidden" />
         <header className="flex items-start justify-between gap-3 border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <div className="min-w-0">
-            <h2 id="apix-sheet-title" className="truncate text-base font-semibold sm:text-lg">
+            <h2 id={titleId} className="truncate text-base font-semibold sm:text-lg">
               {title}
             </h2>
-            {description ? <p id="apix-sheet-description" className="mt-0.5 truncate text-xs text-muted-foreground">{description}</p> : null}
+            {description ? <p id={descriptionId} className="mt-0.5 truncate text-xs text-muted-foreground">{description}</p> : null}
           </div>
           <Button ref={closeRef} variant="ghost" size="icon" className="size-9 min-h-9" aria-label="Закрыть" onClick={() => onOpenChange(false)}>
             <X />

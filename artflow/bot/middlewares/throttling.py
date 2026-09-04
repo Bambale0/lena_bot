@@ -36,7 +36,8 @@ class ThrottlingMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         key = f"throttle:{user_id}"
-        result = await self.redis.set(key, 1, ex=int(THROTTLE_LIMIT), nx=True)
+        # Use millisecond TTL so the 1.5 second guard is enforced precisely.
+        result = await self.redis.set(key, 1, px=int(THROTTLE_LIMIT * 1000), nx=True)
         if result is None:
             logger.debug("Throttled user %s", user_id)
             return  # молча игнорируем

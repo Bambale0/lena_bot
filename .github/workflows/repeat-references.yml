@@ -3,11 +3,26 @@ name: Repeat Reference Flows
 on:
   pull_request:
     paths:
+      - "artflow/api/pinterest_contract.py"
+      - "artflow/api/pinterest_service_contract.py"
+      - "artflow/api/repeat_runtime.py"
       - "artflow/bot/handlers/__init__.py"
+      - "artflow/bot/handlers/repeat_callback_guard.py"
+      - "artflow/bot/handlers/repeat_safe.py"
       - "artflow/bot/handlers/repeat_references.py"
       - "artflow/bot/handlers/repeat_reference_marketplace.py"
+      - "artflow/bot/services/image_reference_prompt_flow.py"
+      - "artflow/bot/services/safe_repeat_ui.py"
+      - "artflow/db/repeat_lookup.py"
+      - "artflow/tests/test_image_reference_prompt_flow.py"
+      - "artflow/tests/test_repeat_callback_guard.py"
+      - "artflow/tests/test_repeat_lookup_db_ids.py"
       - "artflow/tests/test_repeat_multiple_references.py"
       - "artflow/tests/test_repeat_marketplace_multiple_references.py"
+      - "artflow/tests/test_image_model_selection_contract.py"
+      - "artflow/tests/test_safe_image_repeat.py"
+      - "artflow/tests/test_safe_repeat_ui.py"
+      - "artflow/tests/test_pinterest_reference_contract.py"
       - ".github/workflows/repeat-references.yml"
 
 jobs:
@@ -33,21 +48,51 @@ jobs:
       - name: Compile repeat flow
         run: |
           python -m compileall -q \
+            api/pinterest_contract.py \
+            api/pinterest_service_contract.py \
+            api/repeat_runtime.py \
+            bot/handlers/repeat_callback_guard.py \
+            bot/handlers/repeat_safe.py \
             bot/handlers/repeat_references.py \
             bot/handlers/repeat_reference_marketplace.py \
+            bot/services/image_reference_prompt_flow.py \
+            bot/services/safe_repeat_ui.py \
+            db/repeat_lookup.py \
+            tests/test_image_reference_prompt_flow.py \
+            tests/test_repeat_callback_guard.py \
+            tests/test_repeat_lookup_db_ids.py \
+            tests/test_safe_image_repeat.py \
+            tests/test_safe_repeat_ui.py \
+            tests/test_pinterest_reference_contract.py \
             tests/test_repeat_multiple_references.py \
-            tests/test_repeat_marketplace_multiple_references.py
+            tests/test_repeat_marketplace_multiple_references.py \
+            tests/test_image_model_selection_contract.py
 
       - name: Collect Ruff diagnostics
         continue-on-error: true
         run: |
           ruff check \
+            api/pinterest_contract.py \
+            api/pinterest_service_contract.py \
+            api/repeat_runtime.py \
             bot/handlers/__init__.py \
+            bot/handlers/repeat_callback_guard.py \
+            bot/handlers/repeat_safe.py \
             bot/handlers/repeat_references.py \
             bot/handlers/repeat_reference_marketplace.py \
+            bot/services/image_reference_prompt_flow.py \
+            bot/services/safe_repeat_ui.py \
+            db/repeat_lookup.py \
+            tests/test_image_reference_prompt_flow.py \
+            tests/test_repeat_callback_guard.py \
+            tests/test_repeat_lookup_db_ids.py \
+            tests/test_safe_image_repeat.py \
+            tests/test_safe_repeat_ui.py \
+            tests/test_pinterest_reference_contract.py \
             tests/test_repeat_multiple_references.py \
             tests/test_repeat_marketplace_multiple_references.py \
-            --per-file-ignores "bot/handlers/repeat_references.py:I001" \
+            tests/test_image_model_selection_contract.py \
+            --per-file-ignores "api/pinterest_contract.py:I001,bot/handlers/repeat_safe.py:I001,bot/handlers/repeat_references.py:I001,db/repeat_lookup.py:I001" \
             --output-format=json > repeat-ruff.json
 
       - name: Upload Ruff diagnostics
@@ -78,8 +123,16 @@ jobs:
       - name: Repeat flow regression tests
         run: |
           pytest -q \
+            tests/test_image_reference_prompt_flow.py \
+            tests/test_repeat_callback_guard.py \
+            tests/test_repeat_lookup_db_ids.py \
+            tests/test_safe_image_repeat.py \
+            tests/test_safe_repeat_ui.py \
+            tests/test_pinterest_reference_contract.py \
             tests/test_repeat_multiple_references.py \
             tests/test_repeat_marketplace_multiple_references.py \
             tests/test_image_gen_references.py \
+            tests/test_image_model_selection_contract.py \
             tests/test_marketplace_feed_repeat.py \
-            tests/test_callback_coverage.py
+            tests/test_callback_coverage.py \
+            --deselect tests/test_image_gen_references.py::test_model_selection_opens_task_first_composer_for_any_model

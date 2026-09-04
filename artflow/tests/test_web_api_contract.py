@@ -20,6 +20,7 @@ from api.miniapp_routes import (
 from api.web import admin, assistant, auth, billing, generations, health, landing, referrals
 from api.web import router as web_router
 from api.web.schemas import FeedCard, ModelCostCard, TransactionCard, UserMe
+from core.referral_antifraud import ReferralAntifraudSnapshot, should_flag_referral_burst
 from db.models import GenerationType, PaymentProvider, TransactionStatus
 
 
@@ -214,10 +215,12 @@ async def test_password_register_binds_site_referral(monkeypatch) -> None:
     monkeypatch.setattr(auth.settings, "WEB_PUBLIC_URL", "https://site.example", raising=False)
     monkeypatch.setattr(auth.repo, "get_user_by_email", AsyncMock(return_value=None))
     monkeypatch.setattr(auth.repo, "get_user_by_referral_code", AsyncMock(return_value=referrer))
+    monkeypatch.setattr(auth, "ensure_referrer_allowed", AsyncMock(return_value=True))
     monkeypatch.setattr(auth.repo, "create_contact_user", create_contact_user)
     monkeypatch.setattr(auth.repo, "add_credits", add_credits)
     monkeypatch.setattr(auth.repo, "set_user_password_hash", AsyncMock(return_value=created))
     monkeypatch.setattr(auth, "hash_password", lambda password: "hash")
+
 
     session = object()
     response = await auth.password_register(
@@ -238,6 +241,158 @@ async def test_password_register_binds_site_referral(monkeypatch) -> None:
     assert create_contact_user.await_args.kwargs["referrer"] is referrer
     add_credits.assert_awaited_once()
     assert add_credits.await_args.args[:3] == (session, 10, auth.settings.REFERRAL_L1_CREDITS)
+
+
+@pytest.mark.asyncio
+async def test_password_register_skips_suspicious_referrer(monkeypatch) -> None:
+    referrer = SimpleNamespace(id=10, tg_id=1000, referrer_id=None)
+    created = SimpleNamespace(
+        id=2,
+        tg_id=-20,
+        username=None,
+        full_name="New User",
+        email="new@example.test",
+        phone=None,
+        photo_url=None,
+        credits=15,
+        referral_code="NEW_REF",
+        language="ru",
+        created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        password_hash="hash",
+        password_set_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        referrer_id=None,
+        referrer_l2_id=None,
+        referrer_l3_id=None,
+    )
+    create_contact_user = AsyncMock(return_value=created)
+    add_credits = AsyncMock(return_value=20)
+
+    monkeypatch.setattr(auth.repo, "get_user_by_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth.repo, "get_user_by_referral_code", AsyncMock(return_value=referrer))
+    monkeypatch.setattr(auth, "ensure_referrer_allowed", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth.repo, "create_contact_user", create_contact_user)
+    monkeypatch.setattr(auth.repo, "add_credits", add_credits)
+    monkeypatch.setattr(auth.repo, "set_user_password_hash", AsyncMock(return_value=created))
+    monkeypatch.setattr(auth, "hash_password", lambda password: "hash")
+    monkeypatch.setattr(auth, "_verify_registration_captcha", AsyncMock(return_value=None))
+
+    response = await auth.password_register(
+        auth.PasswordRegisterRequest(
+            email="new@example.test",
+            password="supersecret",
+            full_name="New User",
+            referral_code="REF_123",
+        ),
+        response=Response(),
+        request=SimpleNamespace(headers={}, client=None),
+        session=object(),
+    )
+
+    assert response["ok"] is True
+    assert create_contact_user.await_args.kwargs["referrer"] is None
+    add_credits.assert_not_awaited()
+
+
+def test_referral_antifraud_flags_mass_inactive_burst(monkeypatch) -> None:
+    monkeypatch.setattr("core.referral_antifraud.settings.REFERRAL_ANTIFRAUD_ENABLED", True)
+    monkeypatch.setattr("core.referral_antifraud.settings.REFERRAL_ANTIFRAUD_MIN_L1_REFS", 25)
+    monkeypatch.setattr("core.referral_antifraud.settings.REFERRAL_ANTIFRAUD_MIN_INACTIVE_RATIO", 0.95)
+
+    snapshot = ReferralAntifraudSnapshot(
+        total_refs=40,
+        refs_with_generations=0,
+        refs_with_paid_transactions=0,
+        window_started_at=datetime(2026, 8, 29, tzinfo=timezone.utc),
+    )
+
+    assert should_flag_referral_burst(snapshot) is True
+
+
+def test_referral_antifraud_allows_engaged_burst(monkeypatch) -> None:
+    monkeypatch.setattr("core.referral_antifraud.settings.REFERRAL_ANTIFRAUD_ENABLED", True)
+    monkeypatch.setattr("core.referral_antifraud.settings.REFERRAL_ANTIFRAUD_MIN_L1_REFS", 25)
+    monkeypatch.setattr("core.referral_antifraud.settings.REFERRAL_ANTIFRAUD_MIN_INACTIVE_RATIO", 0.95)
+
+    snapshot = ReferralAntifraudSnapshot(
+        total_refs=40,
+        refs_with_generations=10,
+        refs_with_paid_transactions=2,
+        window_started_at=datetime(2026, 8, 29, tzinfo=timezone.utc),
+    )
+
+    assert should_flag_referral_burst(snapshot) is False
+
+
+@pytest.mark.asyncio
+async def test_contact_auth_request_rate_limits_by_contact(monkeypatch) -> None:
+    auth._CONTACT_AUTH_REQUESTS.clear()
+    monkeypatch.setattr(auth, "_show_debug_auth_code", lambda: True)
+    monkeypatch.setattr(auth.repo, "consume_active_web_auth_codes", AsyncMock())
+    monkeypatch.setattr(auth.repo, "create_web_auth_code", AsyncMock())
+    monkeypatch.setattr(auth.repo, "get_recent_web_auth_code", AsyncMock(return_value=None))
+
+    request = SimpleNamespace(headers={}, client=SimpleNamespace(host="203.0.113.10"))
+    body = auth.ContactAuthRequest(contact="rate-limit@example.test")
+
+    for _ in range(auth.CONTACT_AUTH_REQUESTS_PER_CONTACT):
+        result = await auth.contact_auth_request(body, request=request, session=object())
+        assert result["ok"] is True
+
+    limited = await auth.contact_auth_request(body, request=request, session=object())
+    assert limited.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_contact_auth_verify_rate_limits_after_repeated_failures(monkeypatch) -> None:
+    auth._CONTACT_AUTH_VERIFY_FAILURES.clear()
+    monkeypatch.setattr(auth.repo, "get_active_web_auth_code", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth.repo, "increment_web_auth_attempts", AsyncMock())
+
+    request = SimpleNamespace(headers={}, client=SimpleNamespace(host="203.0.113.20"))
+    response = Response()
+    body = auth.ContactAuthVerifyRequest(contact="verify-limit@example.test", code="000000")
+
+    for _ in range(auth.CONTACT_AUTH_VERIFY_FAILURES_MAX):
+        result = await auth.contact_auth_verify(body, response=response, request=request, session=object())
+        assert result.status_code == 401
+
+    limited = await auth.contact_auth_verify(body, response=response, request=request, session=object())
+    assert limited.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_telegram_login_returns_conflict_when_binding_fails(monkeypatch) -> None:
+    current_user = SimpleNamespace(id=7, tg_id=-7)
+    login_user = {
+        "id": 123456,
+        "username": "bound_user",
+        "first_name": "Bound",
+        "last_name": "User",
+        "photo_url": None,
+    }
+    monkeypatch.setattr(auth, "verify_telegram_login_data", lambda _payload: login_user)
+    monkeypatch.setattr(auth.repo, "get_user_by_tg_id", AsyncMock(side_effect=[current_user, None]))
+    monkeypatch.setattr(auth.repo, "bind_user_telegram", AsyncMock(return_value=None))
+    monkeypatch.setattr("api.miniapp_auth.verify_web_auth_token", lambda _token: -7)
+
+    request = SimpleNamespace(cookies={auth.WEB_AUTH_COOKIE_NAME: "token"})
+    response = Response()
+    result = await auth.telegram_login(
+        auth.TelegramLoginRequest(
+            id=123456,
+            username="bound_user",
+            first_name="Bound",
+            last_name="User",
+            auth_date=123,
+            hash="hash",
+        ),
+        response=response,
+        request=request,
+        session=object(),
+        x_web_auth_token=None,
+    )
+
+    assert result.status_code == 409
 
 
 @pytest.mark.asyncio

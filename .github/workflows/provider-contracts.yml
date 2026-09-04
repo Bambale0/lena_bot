@@ -37,6 +37,7 @@ jobs:
             api/minimax_h3_product_surface.py \
             api/minimax_h3_runtime_guards.py \
             api/seedance25_adapter.py \
+            api/seedance25_product_surface.py \
             api/suno_source_audio.py \
             api/suno_source_audio_routes.py \
             api/video_runtime_fixes.py \
@@ -68,6 +69,7 @@ jobs:
             api/minimax_h3_product_surface.py \
             api/minimax_h3_runtime_guards.py \
             api/seedance25_adapter.py \
+            api/seedance25_product_surface.py \
             api/suno_source_audio.py \
             api/suno_source_audio_routes.py \
             api/video_runtime_fixes.py \

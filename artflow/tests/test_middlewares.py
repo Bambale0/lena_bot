@@ -21,6 +21,8 @@ async def test_throttling_allows_first_message() -> None:
 
     assert result == "ok"
     handler.assert_called_once()
+    assert redis.set.await_args.kwargs["px"] == 1500
+    assert redis.set.await_args.kwargs["nx"] is True
 
 
 @pytest.mark.asyncio
@@ -83,6 +85,7 @@ async def test_auth_middleware_creates_user_with_referral(monkeypatch) -> None:
     created = SimpleNamespace(id=2, tg_id=222, is_banned=False)
     monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_tg_id", AsyncMock(return_value=None))
     monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_referral_code", AsyncMock(return_value=referrer))
+    monkeypatch.setattr("bot.middlewares.auth.ensure_referrer_allowed", AsyncMock(return_value=True))
     monkeypatch.setattr("bot.middlewares.auth.repo.create_user", AsyncMock(return_value=created))
     monkeypatch.setattr("bot.middlewares.auth.repo.add_credits", AsyncMock(return_value=35))
     handler = AsyncMock(return_value="handled")
@@ -97,6 +100,29 @@ async def test_auth_middleware_creates_user_with_referral(monkeypatch) -> None:
 
     assert result == "handled"
     assert data["db_user"] is created
+
+
+@pytest.mark.asyncio
+async def test_auth_middleware_skips_suspicious_referrer(monkeypatch) -> None:
+    referrer = SimpleNamespace(id=10, tg_id=1000, referrer_id=None)
+    created = SimpleNamespace(id=2, tg_id=222, is_banned=False)
+    create_user = AsyncMock(return_value=created)
+    monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_tg_id", AsyncMock(return_value=None))
+    monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_referral_code", AsyncMock(return_value=referrer))
+    monkeypatch.setattr("bot.middlewares.auth.ensure_referrer_allowed", AsyncMock(return_value=False))
+    monkeypatch.setattr("bot.middlewares.auth.repo.create_user", create_user)
+    handler = AsyncMock(return_value="handled")
+
+    data = {
+        "session": AsyncMock(),
+        "event_from_user": make_user(user_id=222),
+        "event_update": make_update_with_start_payload("REFCODE"),
+        "bot": AsyncMock(),
+    }
+    result = await AuthMiddleware()(handler, make_message(user_id=222), data)
+
+    assert result == "handled"
+    assert create_user.await_args.kwargs["referrer"] is None
 
 
 @pytest.mark.asyncio

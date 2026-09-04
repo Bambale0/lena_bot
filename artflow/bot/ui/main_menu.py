@@ -81,7 +81,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
 
     if context.active_image_session:
         builder.row(
-            InlineKeyboardButton(text="🔥 " + ("Продолжить" if lang == "ru" else "Continue"), callback_data="menu:image"),
+            InlineKeyboardButton(text="🔥 " + ("Продолжить" if lang == "ru" else "Continue"), callback_data="img_session:continue"),
             InlineKeyboardButton(text="🆕 " + ("Новая работа" if lang == "ru" else "New work"), callback_data="img_session:new"),
         )
 
@@ -95,6 +95,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
     )
     builder.row(
         InlineKeyboardButton(text="👑 " + ("Тренды" if lang == "ru" else "Trends"), callback_data="menu:trends"),
+        InlineKeyboardButton(text="📌 " + ("Pinterest" if lang == "ru" else "Pinterest"), callback_data="menu:pinterest"),
     )
     builder.row(
         InlineKeyboardButton(text="💋 " + (f"Баланс · {context.balance}" if lang == "ru" else f"Balance · {context.balance}"), callback_data="menu:balance"),

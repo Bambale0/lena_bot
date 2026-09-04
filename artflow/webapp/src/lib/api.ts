@@ -14,11 +14,15 @@ import type {
   TrendItem,
   UserProfile,
 } from "@/lib/types";
+import { parseStartTarget, readStartParam } from "@/lib/telegram";
 import { asArray, asRecord } from "@/lib/utils";
 
 const API_BASE = "/api/v1";
 const HISTORY_LIMIT = 100;
-export const FEED_PAGE_SIZE = 24;
+// Feed media filters are client-side. Keep one server page large enough that
+// selecting "Видео" does not dead-end just because the first small page was all images.
+// React still mounts works in batches, so this does not multiply the live DOM size.
+export const FEED_PAGE_SIZE = 96;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -79,6 +83,50 @@ function mediaLooksVideo(url: string): boolean {
   return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
 }
 
+function stringArray(value: unknown): string[] {
+  return asArray<unknown>(value)
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function feedItemFromPublicPayload(payload: unknown): FeedItem | null {
+  const root = asRecord(payload);
+  const nested = asRecord(root.data);
+  const item = Object.keys(nested).length ? nested : root;
+  const id = Number(item.id);
+  if (!Number.isInteger(id) || id <= 0) return null;
+
+  const resultUrls = stringArray(item.result_urls);
+  const previewUrls = stringArray(item.preview_urls);
+  const resultUrl = String(item.result_url || resultUrls[0] || "").trim();
+  const previewUrl = String(item.preview_url || previewUrls[0] || resultUrl).trim();
+  const promptVisibility = String(item.prompt_visibility || "").toLowerCase();
+
+  return {
+    id,
+    model: String(item.model || ""),
+    gen_type: String(item.gen_type || item.type || ""),
+    prompt: typeof item.prompt === "string" ? item.prompt : "",
+    prompt_hidden: item.prompt_hidden === true || promptVisibility === "hidden",
+    result_url: resultUrl || undefined,
+    result_urls: resultUrls.length ? resultUrls : (resultUrl ? [resultUrl] : []),
+    preview_url: previewUrl || undefined,
+    preview_urls: previewUrls.length ? previewUrls : (previewUrl ? [previewUrl] : []),
+    likes_count: finiteNumber(item.likes_count ?? item.likes),
+    shares_count: finiteNumber(item.shares_count ?? item.shares),
+    remixes: finiteNumber(item.remixes ?? item.remix_count),
+    aspect_ratio: typeof item.aspect_ratio === "string" ? item.aspect_ratio : null,
+    author: typeof item.author === "string" ? item.author : "Автор",
+    author_photo_url: typeof item.author_photo_url === "string" ? item.author_photo_url : null,
+    is_mine: item.is_mine === true,
+  };
+}
+
 export class MiniAppApi {
   constructor(private readonly initData: string) {}
 
@@ -98,6 +146,17 @@ export class MiniAppApi {
     return (await response.json()) as T;
   }
 
+  async getPublicFeedItem(id: number, signal?: AbortSignal): Promise<FeedItem> {
+    const response = await fetch(`/api/web/feed/${id}`, {
+      signal,
+      headers: { "X-Telegram-Init-Data": this.initData },
+    });
+    if (!response.ok) throw await readApiError(response);
+    const item = feedItemFromPublicPayload(await response.json());
+    if (!item) throw new ApiError("Работа ленты не найдена", 404, "FEED_ITEM_NOT_FOUND");
+    return item;
+  }
+
   async bootstrap(signal?: AbortSignal): Promise<BootstrapData> {
     const [userResult, imageResult, videoResult, historyResult, feedResult, trendsResult, plansResult] =
       await Promise.allSettled([
@@ -112,12 +171,32 @@ export class MiniAppApi {
 
     if (userResult.status === "rejected") throw userResult.reason;
 
+    let feed = asArray<FeedItem>(settledValue(feedResult, []));
+    const startTarget = parseStartTarget(readStartParam());
+    if ((startTarget?.kind === "feed" || startTarget?.kind === "remix") && /^\d+$/.test(startTarget.value)) {
+      const requestedFeedId = Number(startTarget.value);
+      const alreadyLoaded = feed.find((item) => item.id === requestedFeedId);
+      if (alreadyLoaded) {
+        // A shared link must deterministically open its own work, not whichever
+        // recent video happened to be first in the feed response.
+        feed = [alreadyLoaded, ...feed.filter((item) => item.id !== requestedFeedId)];
+      } else {
+        try {
+          const exactItem = await this.getPublicFeedItem(requestedFeedId, signal);
+          feed = [exactItem, ...feed.filter((item) => item.id !== exactItem.id)];
+        } catch (error) {
+          // Keep the rest of Mini App usable if an old/deleted public link is opened.
+          console.warn("Unable to hydrate shared feed item", requestedFeedId, error);
+        }
+      }
+    }
+
     return {
       user: userResult.value,
       imageModels: asArray<ModelInfo>(settledValue(imageResult, [])),
       videoModels: asArray<ModelInfo>(settledValue(videoResult, [])),
       recentTasks: asArray<GenerationTask>(settledValue(historyResult, [])),
-      feed: asArray<FeedItem>(settledValue(feedResult, [])),
+      feed,
       trends: asArray<TrendItem>(settledValue(trendsResult, [])),
       paymentPlans: asArray<PaymentPlan>(settledValue(plansResult, [])),
     };

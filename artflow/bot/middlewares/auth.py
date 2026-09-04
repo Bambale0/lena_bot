@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.maintenance_mode import is_maintenance_mode
 from bot.utils.deep_links import parse_start_payload
 from core.config import settings
+from core.referral_antifraud import ensure_referrer_allowed
 from db import repository as repo
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,12 @@ async def _resolve_referral_chain(
         return None, None, None
     referrer = await repo.get_user_by_referral_code(session, ref_code)
     if not referrer or referrer.tg_id == tg_user_id or referrer.id == current_user_id:
+        return None, None, None
+    if not await ensure_referrer_allowed(
+        session,
+        referrer=referrer,
+        candidate_label=f"telegram:{tg_user_id}",
+    ):
         return None, None, None
 
     chain_user = referrer
@@ -204,16 +211,13 @@ class AuthMiddleware(BaseMiddleware):
                 referrer_l3=None if referral_freeze else referrer_l3,
             )
 
-            # Начисляем реферальные бонусы (только L1 — кредитами)
             if referrer and not referral_freeze:
-                logger.info("Referral bind on create: tg_id=%s -> referrer_id=%s", tg_user.id, referrer.id)
-                await repo.add_credits(session, referrer.id, settings.REFERRAL_L1_CREDITS, entry_type="referral_signup_bonus", source_type="user", source_id=str(tg_user.id), note="L1 referral signup bonus")
-                logger.info("Referral L1 bonus: %s -> %s", tg_user.id, referrer.tg_id)
+                logger.info("Referral bind on create: tg_id=%s -> referrer_id=%s; reward deferred until first paid top-up", tg_user.id, referrer.id)
                 await _notify_referral(
                     bot,
                     referrer.tg_id,
                     "🎉 По твоей ссылке пришёл новый пользователь!\n"
-                    f"+{settings.REFERRAL_L1_CREDITS} 💋 начислено.",
+                    f"+{settings.REFERRAL_L1_CREDITS} 💋 начислим после его первого пополнения.",
                 )
         elif (
             ref_code
@@ -242,9 +246,7 @@ class AuthMiddleware(BaseMiddleware):
                     referrer_l3=referrer_l3,
                 )
                 if bound:
-                    logger.info("Referral late-bind success: tg_id=%s -> referrer_id=%s", tg_user.id, referrer.id)
-                    await repo.add_credits(session, referrer.id, settings.REFERRAL_L1_CREDITS, entry_type="referral_signup_bonus", source_type="user", source_id=str(tg_user.id), note="L1 referral signup bonus")
-                    logger.info("Referral L1 late bind: %s -> %s (notif skipped - existing user)", tg_user.id, referrer.tg_id)
+                    logger.info("Referral late-bind success: tg_id=%s -> referrer_id=%s; reward deferred until first paid top-up", tg_user.id, referrer.id)
                     db_user = await repo.get_user_by_tg_id(session, tg_user.id)
                 else:
                     logger.info("Referral late-bind skipped: tg_id=%s user_id=%s already_bound_or_race=true", tg_user.id, db_user.id)

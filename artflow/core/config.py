@@ -113,12 +113,16 @@ class Settings(BaseSettings):
     REFERRAL_FREEZE: bool = False
 
     # Credits
-    WELCOME_BONUS_CREDITS: int = 6
+    WELCOME_BONUS_CREDITS: int = 0
     REFERRAL_L1_CREDITS: int = 3
     FEED_REMIX_REWARD_RUB: float = 5.0
     REFERRAL_WITHDRAW_MIN_RUB: float = 1000.0
     REFERRAL_EXCHANGE_MIN_RUB: float = 100.0
     REFERRAL_EXCHANGE_RUB_PER_CREDIT: float = 10.0
+    REFERRAL_ANTIFRAUD_ENABLED: bool = True
+    REFERRAL_ANTIFRAUD_WINDOW_MINUTES: int = 60
+    REFERRAL_ANTIFRAUD_MIN_L1_REFS: int = 25
+    REFERRAL_ANTIFRAUD_MIN_INACTIVE_RATIO: float = 0.95
 
     # Referral commissions
     REFERRAL_COMMISSION_L1: float = 0.30
@@ -128,6 +132,13 @@ class Settings(BaseSettings):
     # Polling
     POLLING_INTERVAL: float = 3.0
     POLLING_TIMEOUT: int = 600
+
+    @model_validator(mode="after")
+    def disable_welcome_bonus(self) -> "Settings":
+        # New accounts must start at zero even if an old production .env still
+        # contains WELCOME_BONUS_CREDITS=3 (or another legacy value).
+        self.WELCOME_BONUS_CREDITS = 0
+        return self
 
     @model_validator(mode="after")
     def require_provider_webhook_security(self) -> "Settings":

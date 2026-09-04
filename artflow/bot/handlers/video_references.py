@@ -8,17 +8,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.public_files import mirror_telegram_file
 from bot.keyboards.main_menu import back_to_menu_kb
-from bot.states import VideoGenFSM
-from bot.ui.model_labels import model_display_name
 from bot.services.video_reference_support import (
     SEEDANCE_VIDEO_REFERENCE_MODELS,
-    supports_video_reference,
     video_reference_limits,
 )
+from bot.states import VideoGenFSM
+from bot.ui.model_labels import model_display_name
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 
 router = Router(name="video_references_v2")
+_VIDEO_REFERENCE_CALLBACKS = {
+    f"vid_mode:video:{model_key}" for model_key in SEEDANCE_VIDEO_REFERENCE_MODELS
+}
 
 
 def _done_kb(count: int, max_refs: int):
@@ -30,12 +32,9 @@ def _done_kb(count: int, max_refs: int):
     return builder.as_markup()
 
 
-@router.callback_query(VideoGenFSM.mode_select, F.data.startswith("vid_mode:video:"))
+@router.callback_query(VideoGenFSM.mode_select, F.data.in_(_VIDEO_REFERENCE_CALLBACKS))
 async def choose_video_reference_mode(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     model_key = (call.data or "").split(":", 2)[-1]
-    if not supports_video_reference(model_key):
-        return
-
     await state.update_data(
         model_key=model_key,
         mode="video",
@@ -85,7 +84,10 @@ async def upload_video_reference(message: Message, state: FSMContext, bot: Bot) 
     refs = [str(item) for item in (data.get("reference_video_urls") or []) if item]
     max_refs = limits.get("max_refs", 1)
     if len(refs) >= max_refs:
-        await message.answer("Лимит видео-референсов уже достигнут.", reply_markup=_done_kb(len(refs), max_refs))
+        await message.answer(
+            "Лимит видео-референсов уже достигнут.",
+            reply_markup=_done_kb(len(refs), max_refs),
+        )
         return
 
     url = await mirror_telegram_file(bot, message.video.file_id, is_video=True)  # type: ignore[union-attr]

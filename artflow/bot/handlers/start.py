@@ -15,6 +15,7 @@ from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.ui.router import render_screen
 from bot.utils.deep_links import parse_start_payload
+from bot.utils.feed_media import repair_generation_primary_result_url
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db import repository as repo
@@ -135,6 +136,13 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, session:
     parts = (message.text or "").split(maxsplit=1)
     start_payload = parse_start_payload(parts[1] if len(parts) == 2 else None)
     if start_payload.target_kind == "feed" and start_payload.target_id is not None:
+        # Public Mini App feed cards render the first canonical item from
+        # result_urls. Old rows may keep a stale legacy result_url, which made a
+        # Telegram deep link show another video for the same feed id. Repair the
+        # legacy primary before the bot renderer re-reads the card.
+        generation = await repo.get_generation_by_id(session, start_payload.target_id)
+        if generation is not None:
+            await repair_generation_primary_result_url(session, generation)
         from bot.handlers.feed import show_feed_card_by_id
         await show_feed_card_by_id(message=message, session=session, gen_id=start_payload.target_id)
         return

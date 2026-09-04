@@ -218,6 +218,21 @@ function FeedScreen({
   }, [source, workFilter]);
 
   useEffect(() => {
+    if (
+      contentMode !== "works" ||
+      workFilter === "all" ||
+      loading ||
+      loadingMore ||
+      visibleItems.length > 0 ||
+      !hasMore ||
+      !onLoadMore
+    ) {
+      return;
+    }
+    onLoadMore();
+  }, [contentMode, hasMore, loading, loadingMore, onLoadMore, visibleItems.length, workFilter]);
+
+  useEffect(() => {
     setVisibleTrendCount(TREND_RENDER_BATCH);
   }, [trendCategory, trendKind]);
 
@@ -483,20 +498,20 @@ function FeedScreen({
                           </span>
                         </div>
                         {isFeatured && item.prompt && !item.prompt_hidden ? <span className="line-clamp-2 text-left text-[10px] font-semibold leading-tight opacity-95">{item.prompt}</span> : null}
-                        <div className="flex items-center gap-1.5">
+                        <div className="grid min-w-0 gap-1">
+                          <span className="min-w-0 max-w-full justify-self-start truncate rounded-full bg-black/35 px-2 py-1 text-[8px] text-white/85 backdrop-blur">{item.model}</span>
                           <button
                             type="button"
-                            className="apix-focus-ring inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-xl bg-primary px-2 text-[10px] font-bold text-primary-foreground shadow-lg shadow-black/20 active:scale-[0.98] disabled:opacity-75"
+                            className="apix-focus-ring inline-flex min-h-7 w-full min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full bg-primary/95 px-2 text-[9px] font-bold leading-none text-primary-foreground shadow-md shadow-black/20 active:scale-[0.98] disabled:opacity-75"
                             disabled={remixing}
                             onClick={(event) => {
                               event.stopPropagation();
                               onRemix(item);
                             }}
                           >
-                            <Repeat2 className={cn("size-3.5", remixing && "animate-spin")} />
-                            {remixing ? "Запуск" : "Повторить"}
+                            <Repeat2 className={cn("size-3 shrink-0", remixing && "animate-spin")} />
+                            <span className="truncate">{remixing ? "Запуск" : "Повторить"}</span>
                           </button>
-                          <span className="min-w-0 truncate rounded-full bg-black/35 px-2 py-1 text-[8px] text-white/85 backdrop-blur">{item.model}</span>
                         </div>
                       </div>
                     </div>
@@ -525,7 +540,7 @@ function FeedScreen({
           </>
         ) : (
           <div className="grid min-h-28 place-items-center rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">
-            {loading ? "Загружаем работы…" : "По этому фильтру работ пока нет"}
+            {loading || loadingMore ? "Ищем работы по фильтру…" : "По этому фильтру работ пока нет"}
           </div>
         )
       ) : (

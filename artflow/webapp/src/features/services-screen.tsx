@@ -8,6 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  fetchPinterestServiceInfo,
+  openPinterestService,
+  type PinterestServiceInfo,
+} from "@/features/pinterest-service-runner";
 import { t } from "@/lib/i18n";
 import { readTelegramInitData } from "@/lib/telegram";
 import type { AppTab, AssistantMessage, PhotoPromptResult } from "@/lib/types";
@@ -77,7 +82,26 @@ function ServicesScreen({
   const copy = t("ru").services;
   const [message, setMessage] = useState("");
   const [selectedFileName, setSelectedFileName] = useState("");
+  const [pinterestService, setPinterestService] = useState<PinterestServiceInfo | null>(null);
+  const [pinterestLoading, setPinterestLoading] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchPinterestServiceInfo()
+      .then((info) => {
+        if (active) setPinterestService(info);
+      })
+      .catch(() => {
+        if (active) setPinterestService(null);
+      })
+      .finally(() => {
+        if (active) setPinterestLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const send = () => {
     const value = message.trim();
@@ -86,6 +110,12 @@ function ServicesScreen({
     setMessage("");
   };
 
+  const pinterestPrice = pinterestLoading
+    ? "…"
+    : pinterestService
+      ? formatKisses(pinterestService.price_credits, { compact: true })
+      : "—";
+
   const services = [
     { title: "Оживить", description: "Image-to-video", icon: Film, tab: "video" as AppTab },
     { title: "Изменить", description: "Edit-модели", icon: ImageIcon, tab: "photo" as AppTab },
@@ -93,6 +123,14 @@ function ServicesScreen({
     { title: "Avatar", description: "Фото и аудио", icon: Headphones, tab: "video" as AppTab },
     { title: "Партнёры", description: "Рефералы", icon: Users, tab: "profile" as AppTab },
     { title: "Помощь", description: "Task ID и ошибки", icon: LifeBuoy, tab: "profile" as AppTab },
+    {
+      title: "Pinterest",
+      description: pinterestService?.description || "Pinterest AI со своей внешностью",
+      icon: Sparkles,
+      pinterest: true,
+      badge: "Новинка",
+      price: pinterestPrice,
+    },
   ];
 
   return (
@@ -104,19 +142,32 @@ function ServicesScreen({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
-        {services.map(({ title, description, icon: Icon, tab }) => (
-          <button
-            key={title}
-            type="button"
-            title={description}
-            className="apix-focus-ring flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border border-border bg-card/70 px-1 text-center active:scale-[0.97]"
-            onClick={() => onNavigate(tab)}
-          >
-            <span className="grid size-8 place-items-center rounded-lg bg-primary/12 text-primary"><Icon className="size-4" /></span>
-            <span className="text-[9px] font-semibold leading-none">{title}</span>
-          </button>
-        ))}
+      <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-7">
+        {services.map(({ title, description, icon: Icon, tab, pinterest, badge, price }) => {
+          const serviceTitle = pinterest
+            ? `${description}${pinterestLoading ? " · цена загружается" : pinterestService ? ` · запуск ${pinterestPrice}` : " · откройте для повторной проверки"}`
+            : description;
+          return (
+            <button
+              key={title}
+              type="button"
+              title={serviceTitle}
+              className={`apix-focus-ring relative flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border px-1 text-center active:scale-[0.97] ${pinterest ? "border-primary/40 bg-primary/10" : "border-border bg-card/70"}`}
+              onClick={() => {
+                if (pinterest) {
+                  openPinterestService(pinterestService || undefined);
+                  return;
+                }
+                if (tab) onNavigate(tab);
+              }}
+            >
+              {badge ? <span className="absolute right-1 top-1 rounded-full border border-primary/25 bg-primary/15 px-1.5 py-0.5 text-[6px] font-black uppercase tracking-wide text-primary">{badge}</span> : null}
+              {price ? <span className="absolute left-1 top-1 rounded-full border border-border/70 bg-background/80 px-1.5 py-0.5 text-[6px] font-black tracking-wide text-foreground">{price}</span> : null}
+              <span className={`grid size-8 place-items-center rounded-lg ${pinterest ? "bg-primary/20 text-primary" : "bg-primary/12 text-primary"}`}><Icon className="size-4" /></span>
+              <span className="max-w-full truncate text-[9px] font-semibold leading-none">{title}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">

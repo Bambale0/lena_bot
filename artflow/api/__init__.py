@@ -19,6 +19,7 @@ apply_provider_spec_overrides()
 
 # Keep legacy APIX Grok keys compatible with saved sessions while routing all
 # new requests through the current KIE Grok Imagine Video 1.5 Preview contract.
+from api import image_service as _image_service
 from api import kieai_client as _kieai_client
 from api.grok15_adapter import install_grok15_adapter
 from api.minimax_h3_adapter import (
@@ -29,20 +30,30 @@ from api.minimax_h3_adapter import (
 from api.minimax_h3_pricing import install_minimax_h3_seed_rows
 from api.minimax_h3_product_surface import install_minimax_h3_product_surface
 from api.minimax_h3_runtime_guards import install_minimax_h3_runtime_guards
+from api.pinterest_service_contract import (
+    install_pinterest_persistence_contract,
+    install_pinterest_provider_contract,
+)
+from api.repeat_runtime import install_repeat_runtime
 from api.seedance25_adapter import (
     install_seedance25_keyboard_support,
     install_seedance25_miniapp,
     install_seedance25_provider_support,
 )
 from api.seedance25_pricing import install_seedance25_seed_rows
+from api.seedance25_product_surface import install_seedance25_product_surface
 from api.suno_source_audio_routes import install_suno_source_audio_routes
 from api.video_runtime_fixes import install_video_runtime_fixes
 from api.video_ui_capability_guards import strip_seedance25_omni_id_controls
+from bot.keyboards import models as _repeat_keyboards
+from bot.services.safe_repeat_ui import install_safe_repeat_keyboard_support
+from db import repository as _repeat_repository
 
 install_grok15_adapter(_kieai_client)
 install_seedance25_seed_rows()
 install_seedance25_provider_support()
 install_seedance25_keyboard_support()
+install_seedance25_product_surface()
 install_minimax_h3_seed_rows()
 install_minimax_h3_provider_support()
 install_minimax_h3_runtime_guards()
@@ -50,6 +61,10 @@ install_minimax_h3_keyboard_support()
 install_minimax_h3_product_surface()
 install_video_runtime_fixes()
 strip_seedance25_omni_id_controls()
+install_repeat_runtime(_repeat_repository)
+install_safe_repeat_keyboard_support(_repeat_keyboards)
+install_pinterest_provider_contract(_image_service)
+install_pinterest_persistence_contract(_repeat_repository)
 
 
 class _MiniappLabelLoader(importlib.abc.Loader):
@@ -67,16 +82,20 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         self.wrapped.exec_module(module)
         from api.admin_model_visibility import install_admin_model_visibility
         from api.feed_media_viewer import install_feed_media_viewer
+        from api.kling_motion_visibility import install_kling_motion_visibility
+        from api.pinterest_service_routes import install_pinterest_service_router
         from api.video_request_compat import install_video_request_compat
         from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
         from db import repository
         from db.feed_relevance import install_feed_relevance
 
+        install_kling_motion_visibility(repository)
         install_miniapp_model_labels(module)
         install_repository_model_labels(repository)
         install_feed_relevance(repository)
         install_feed_media_viewer(module)
         install_miniapp_prompt_privacy(module)
+        install_pinterest_service_router(module.router)
         install_video_request_compat(module)
         install_seedance25_miniapp(module)
         install_minimax_h3_miniapp(module)
@@ -112,17 +131,21 @@ if "api.miniapp_routes" not in sys.modules:
 else:
     from api.admin_model_visibility import install_admin_model_visibility
     from api.feed_media_viewer import install_feed_media_viewer
+    from api.kling_motion_visibility import install_kling_motion_visibility
+    from api.pinterest_service_routes import install_pinterest_service_router
     from api.video_request_compat import install_video_request_compat
     from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
     from db import repository
     from db.feed_relevance import install_feed_relevance
 
     miniapp_routes = sys.modules["api.miniapp_routes"]
+    install_kling_motion_visibility(repository)
     install_miniapp_model_labels(miniapp_routes)
     install_repository_model_labels(repository)
     install_feed_relevance(repository)
     install_feed_media_viewer(miniapp_routes)
     install_miniapp_prompt_privacy(miniapp_routes)
+    install_pinterest_service_router(miniapp_routes.router)
     install_video_request_compat(miniapp_routes)
     install_seedance25_miniapp(miniapp_routes)
     install_minimax_h3_miniapp(miniapp_routes)

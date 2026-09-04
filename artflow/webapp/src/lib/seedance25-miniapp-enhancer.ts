@@ -289,9 +289,10 @@ function patchCreateVideo(): void {
       }
 
       // UI mode is deliberately meaningless for Seedance 2.5. Backend derives
-      // text / first-frame / multimodal from the actual refs above.
+      // text / first-frame / multimodal from the actual refs above. Keep the
+      // generic request field schema-valid: VideoGenRequest.grok_mode is a str.
       body.mode = "text";
-      body.grok_mode = null;
+      body.grok_mode = "normal";
       body.audio_ids = [...audioRefs, ...tokens];
       body.character_ids = [];
     }
