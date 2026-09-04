@@ -17,7 +17,7 @@ from api.nexusapi_client import (
 )
 
 
-def test_build_nano_banana_pro_params_matches_documented_schema():
+def test_build_nano_banana_pro_params_normalizes_single_ref_to_image_urls():
     payload = build_nano_banana_pro_params(
         prompt="make it cinematic",
         aspect_ratio="16:9",
@@ -30,7 +30,7 @@ def test_build_nano_banana_pro_params_matches_documented_schema():
         "prompt": "make it cinematic",
         "aspect_ratio": "16:9",
         "seed": 123,
-        "image_url": "https://cdn.example/ref.png",
+        "image_urls": ["https://cdn.example/ref.png"],
         "webhook_url": "https://example.test/nexus-hook",
     }
 

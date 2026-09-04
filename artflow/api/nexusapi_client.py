@@ -168,10 +168,9 @@ def build_nano_banana_pro_params(
         params["aspect_ratio"] = ratio_value
     if seed_value is not None:
         params["seed"] = seed_value
-    if single_ref:
-        params["image_url"] = single_ref
-    if multi_refs:
-        params["image_urls"] = multi_refs
+    reference_urls = [single_ref] if single_ref else multi_refs
+    if reference_urls:
+        params["image_urls"] = reference_urls
 
     webhook_value = _validate_public_http_url(webhook_url, field_name="webhook_url")
     if webhook_value:
