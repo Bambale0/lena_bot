@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb, balance_screen_kb
+from bot.legal_offer import PUBLIC_OFFER_PAGES
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db import repository as repo
@@ -36,8 +37,29 @@ def referral_screen_kb(lang: str = "ru"):
     builder.button(text="👥 " + ("Мои партнёры" if lang == "ru" else "My partners"), callback_data="referral:list")
     builder.button(text="💸 " + ("Вывести деньги" if lang == "ru" else "Withdraw money"), callback_data="referral:withdraw")
     builder.button(text="💋 " + ("Купить поцелуи" if lang == "ru" else "Buy kisses"), callback_data="referral:exchange")
+    builder.button(text="📄 " + ("Публичная оферта" if lang == "ru" else "Public offer"), callback_data="referral:offer")
     builder.button(text=t("btn_main_menu", lang), callback_data="menu:main")
-    builder.adjust(1, 2, 1)
+    builder.adjust(1, 2, 1, 1)
+    return builder.as_markup()
+
+
+def public_offer_kb(page: int, lang: str = "ru"):
+    total = len(PUBLIC_OFFER_PAGES)
+    safe_page = max(0, min(int(page), total - 1))
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if safe_page > 0:
+        nav.append(("⬅️", f"referral:offer:{safe_page - 1}"))
+    nav.append((f"{safe_page + 1}/{total}", f"referral:offer:{safe_page}"))
+    if safe_page + 1 < total:
+        nav.append(("➡️", f"referral:offer:{safe_page + 1}"))
+    for text, callback in nav:
+        builder.button(text=text, callback_data=callback)
+    builder.button(
+        text="👥 " + ("Партнёрский раздел" if lang == "ru" else "Partner section"),
+        callback_data="referrals",
+    )
+    builder.adjust(len(nav), 1)
     return builder.as_markup()
 
 
@@ -180,6 +202,33 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
     if withdrawal_lines:
         text += "\n\n💸 <b>" + ("Последние операции" if lang == "ru" else "Recent operations") + ":</b>\n" + "\n".join(withdrawal_lines)
     await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data == "referral:offer")
+async def cb_public_offer(call: CallbackQuery, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    await safe_edit_message(  # type: ignore[arg-type]
+        call.message,
+        PUBLIC_OFFER_PAGES[0],
+        reply_markup=public_offer_kb(0, lang),
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data.startswith("referral:offer:"))
+async def cb_public_offer_page(call: CallbackQuery, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    try:
+        page = int(str(call.data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        page = 0
+    page = max(0, min(page, len(PUBLIC_OFFER_PAGES) - 1))
+    await safe_edit_message(  # type: ignore[arg-type]
+        call.message,
+        PUBLIC_OFFER_PAGES[page],
+        reply_markup=public_offer_kb(page, lang),
+    )
     await safe_answer_callback(call)
 
 
