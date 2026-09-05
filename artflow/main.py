@@ -38,7 +38,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api import comet_fallback
+from api import comet_fallback, nexus_image_adapter
 from api.comet_client import close_client, get_client
 from api.kie_webhook import (
     extract_error,
@@ -1199,10 +1199,18 @@ async def kie_webhook(
     payload = await request.json()
     task_id = extract_task_id(payload)
     if not task_id:
-        logger.warning("KIE webhook without task_id: %s", payload)
+        logger.warning("Provider webhook without task_id provider=%s: %s", provider or "kie", payload)
         return {"ok": True}
+
     lookup_task_id = task_id
-    if provider == "comet" and comet_kind:
+    if provider == "nexus":
+        try:
+            payload = await nexus_image_adapter.get_nexus_task_payload(task_id)
+        except Exception as exc:
+            logger.warning("Nexus webhook canonical task fetch failed task_id=%s: %s", task_id, exc)
+            raise HTTPException(status_code=503, detail="Nexus task status temporarily unavailable") from exc
+        lookup_task_id = nexus_image_adapter.prefix_nexus_task_id(task_id)
+    elif provider == "comet" and comet_kind:
         lookup_task_id = comet_fallback.prefixed_task_id(comet_kind, task_id)
 
     async with AsyncSessionLocal() as session:

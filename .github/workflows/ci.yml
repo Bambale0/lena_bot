@@ -65,6 +65,7 @@ jobs:
             tests/test_kling_motion_visibility.py \
             tests/test_admin_main_menu.py \
             tests/test_nexusapi_client.py \
+            tests/test_nexus_image_migration.py \
             tests/test_midjourney.py \
             tests/test_photo_prompt_service.py \
             tests/test_provider_contract_catalog.py \
@@ -94,6 +95,7 @@ jobs:
             tests/test_kling_motion_visibility.py \
             tests/test_admin_main_menu.py \
             tests/test_nexusapi_client.py \
+            tests/test_nexus_image_migration.py \
             tests/test_miniapp_feed_webkit_stability.py \
             tests/test_provider_contract_catalog.py \
             tests/test_seedance25_repeat_keyboard.py \

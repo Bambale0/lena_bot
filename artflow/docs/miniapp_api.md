@@ -102,8 +102,10 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 | Модель | Значения | Provider route |
 |--------|----------|----------------|
 | seedream/4.5-text-to-image | `basic` (2K), `high` (4K) | KIE.AI primary, CometAPI fallback при ошибке старта |
-| nano-banana-pro | `2K`, `4K` | CometAPI primary |
-| nano-banana-2 | `2K`, `4K` | CometAPI primary |
+| nano-banana-pro | `2K`, `4K` | NexusAPI |
+| nano-banana-2 | `2K`, `4K` | NexusAPI |
+| nano-banana-pro-vip | `1K`, `2K` | NexusAPI |
+| gpt-image-2-vip | provider-managed | NexusAPI |
 | nano-banana-2-lite | `1K`, `2K` | KIE/KIE Market |
 | остальные | `basic` | по backend model routing |
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 
 from api import comet_fallback, image_service, video_service
@@ -280,110 +279,59 @@ async def test_image_service_uses_comet_fallback_after_kie_create_error(monkeypa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("model", "expected_model_key"),
+    ("model", "expected_model_name"),
     [
         (ImageModel.NANO_BANANA_2, "nano-banana-2"),
         (ImageModel.NANO_BANANA_PRO, "nano-banana-pro"),
     ],
 )
-async def test_image_service_uses_comet_primary_for_nano_banana_models(
+async def test_image_service_routes_nano_banana_models_to_nexus(
     monkeypatch,
     model: ImageModel,
-    expected_model_key: str,
+    expected_model_name: str,
 ) -> None:
-    comet_calls: list[dict] = []
+    calls: list[dict] = []
 
-    async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
-        raise AssertionError("nano-banana-2/pro must use CometAPI directly")
+    async def fake_create_nexus_image_task(**kwargs):
+        calls.append(kwargs)
+        return "nexus:task_1"
 
-    async def fake_generate_image(**kwargs):
-        comet_calls.append(kwargs)
-        return comet_fallback.CometImageResult(urls=["https://cdn.example.test/image.jpg"])
-
-    monkeypatch.setattr(image_service.kieai_client, "create_task", fake_create_task)
-    monkeypatch.setattr(image_service.comet_fallback, "generate_image", fake_generate_image)
+    monkeypatch.setattr(image_service.nexus_image_adapter, "create_nexus_image_task", fake_create_nexus_image_task)
+    monkeypatch.setattr(
+        image_service.comet_fallback,
+        "generate_image",
+        AsyncMock(side_effect=AssertionError("migrated Nano models must not call CometAPI")),
+    )
+    monkeypatch.setattr(
+        image_service.kieai_client,
+        "create_task",
+        AsyncMock(side_effect=AssertionError("migrated Nano models must not call KIE.AI")),
+    )
 
     result = await image_service.generate_image(
         model,
         "new editorial look",
         image_url=["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"],
         aspect_ratio="16:9",
-        n=4,
+        n=1,
         quality="4K",
-    )
-
-    assert result.is_async is False
-    assert result.url == "https://cdn.example.test/image.jpg"
-    assert comet_calls[0]["model_key"] == expected_model_key
-    assert comet_calls[0]["reference_urls"] == ["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"]
-    assert comet_calls[0]["aspect_ratio"] == "16:9"
-    assert comet_calls[0]["resolution"] == "4K"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status_code", [402, 403, 429, 500])
-async def test_nano_banana_falls_back_to_kie_when_comet_is_unavailable(
-    monkeypatch,
-    status_code: int,
-) -> None:
-    request = httpx.Request("POST", "https://api.cometapi.com/v1beta/models/test:generateContent")
-    response = httpx.Response(status_code, request=request)
-    kie_calls: list[tuple[dict, str | None]] = []
-
-    async def fake_generate_image(**kwargs):
-        raise httpx.HTTPStatusError("Comet unavailable", request=request, response=response)
-
-    async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
-        kie_calls.append((payload, callback_url))
-        return {"code": 200, "data": {"taskId": "kie_task_1"}}
-
-    monkeypatch.setattr(image_service.comet_fallback, "generate_image", fake_generate_image)
-    monkeypatch.setattr(image_service.kieai_client, "create_task", fake_create_task)
-
-    result = await image_service.generate_image(
-        ImageModel.NANO_BANANA_2,
-        "keep the same person",
-        image_url=["https://example.test/ref.jpg"],
-        aspect_ratio="9:16",
-        quality="2K",
-        callback_url="https://example.test/webhook/kie",
+        callback_url="https://example.test/webhook/kie?secret=abc",
     )
 
     assert result.is_async is True
-    assert result.task_id == "kie_task_1"
-    assert kie_calls == [
-        (
-            {
-                "model": "nano-banana-2",
-                "input": {
-                    "prompt": "keep the same person",
-                    "image_input": ["https://example.test/ref.jpg"],
-                    "aspect_ratio": "9:16",
-                    "resolution": "2K",
-                    "output_format": "jpg",
-                },
-            },
-            "https://example.test/webhook/kie",
-        )
+    assert result.task_id == "nexus:task_1"
+    assert calls == [
+        {
+            "model_key": model.value,
+            "prompt": "new editorial look",
+            "image_urls": ["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"],
+            "aspect_ratio": "16:9",
+            "quality": "4K",
+            "callback_url": "https://example.test/webhook/kie?secret=abc",
+            "output_format": None,
+        }
     ]
-
-
-@pytest.mark.asyncio
-async def test_nano_banana_does_not_fallback_to_kie_for_bad_comet_request(monkeypatch) -> None:
-    request = httpx.Request("POST", "https://api.cometapi.com/v1beta/models/test:generateContent")
-    response = httpx.Response(400, request=request)
-
-    async def fake_generate_image(**kwargs):
-        raise httpx.HTTPStatusError("Bad request", request=request, response=response)
-
-    create_task = AsyncMock()
-    monkeypatch.setattr(image_service.comet_fallback, "generate_image", fake_generate_image)
-    monkeypatch.setattr(image_service.kieai_client, "create_task", create_task)
-
-    with pytest.raises(httpx.HTTPStatusError):
-        await image_service.generate_image(ImageModel.NANO_BANANA_PRO, "portrait")
-
-    create_task.assert_not_awaited()
+    assert expected_model_name == model.value
 
 
 @pytest.mark.asyncio
