@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb
-from core.config import settings
+from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED
 from db import repository as repo
 from db.models import PaymentProvider, TransactionStatus, User
 
@@ -32,7 +32,7 @@ def _plan_stars_price(plan) -> int:
 @router.callback_query(F.data == "topup:stars")
 async def cb_topup_stars(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     lang = db_user.language or "ru"
-    if not settings.TELEGRAM_STARS_ENABLED:
+    if not TELEGRAM_STARS_CHECKOUT_ENABLED:
         await call.answer(t("error_not_available", lang), show_alert=True)
         return
 
@@ -60,7 +60,7 @@ async def cb_stars_plan(
 ) -> None:
     """Create Telegram Stars invoice."""
     lang = db_user.language or "ru"
-    if not settings.TELEGRAM_STARS_ENABLED:
+    if not TELEGRAM_STARS_CHECKOUT_ENABLED:
         await call.answer(t("error_not_available", lang), show_alert=True)
         return
 
@@ -112,10 +112,6 @@ async def on_successful_payment(
     message: Message, session: AsyncSession, db_user: User, bot: Bot
 ) -> None:
     lang = db_user.language or "ru"
-    if not settings.TELEGRAM_STARS_ENABLED:
-        logger.warning("Stars successful_payment ignored while feature is disabled")
-        return
-
     payment = message.successful_payment
     if not payment or payment.currency != "XTR":
         return

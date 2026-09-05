@@ -49,7 +49,7 @@ def test_generation_payment_and_admin_contracts_are_kept() -> None:
     assert 'api(`/feed/${genId}/remix`' in main
     assert 'api(`/generations/${genId}/share`' in main
     assert '"/topup/tbank"' in main
-    assert '"/topup/stars"' in main
+    assert '"/topup/stars"' not in main
     assert '"/topup/crypto"' in main
     assert '"/topup/lava"' in main
     assert 'api("/admin/overview")' in main

@@ -6,79 +6,66 @@ from unittest.mock import AsyncMock
 import pytest
 
 from bot.handlers import stars_payment
-from db.models import PaymentProvider, TransactionStatus
+
+
+def test_stars_are_not_advertised_even_with_legacy_flag_enabled(monkeypatch) -> None:
+    from api.web import billing
+    from bot.keyboards.payment import rub_methods_kb
+
+    monkeypatch.setattr(billing.settings, "TELEGRAM_STARS_ENABLED", True, raising=False)
+    monkeypatch.setattr(billing.settings, "TBANK_TERMINAL_KEY", "terminal", raising=False)
+    monkeypatch.setattr(billing.settings, "TBANK_PASSWORD", "password", raising=False)
+    monkeypatch.setattr(billing.settings, "CRYPTOBOT_TOKEN", "crypto", raising=False)
+    monkeypatch.setattr("bot.keyboards.payment.settings.TELEGRAM_STARS_ENABLED", True, raising=False)
+
+    method_keys = [item["key"] for item in billing.enabled_payment_methods()]
+    keyboard_callbacks = [
+        button.callback_data
+        for row in rub_methods_kb().inline_keyboard
+        for button in row
+    ]
+
+    assert "stars" not in method_keys
+    assert "topup:stars" not in keyboard_callbacks
 
 
 @pytest.mark.asyncio
-async def test_stars_plan_creates_xtr_invoice(monkeypatch) -> None:
-    monkeypatch.setattr("bot.handlers.stars_payment.settings.TELEGRAM_STARS_ENABLED", True)
+async def test_stars_plan_is_blocked_after_checkout_retirement(monkeypatch) -> None:
+    create_transaction = AsyncMock()
+    monkeypatch.setattr("bot.handlers.stars_payment.repo.create_transaction", create_transaction)
 
     call = SimpleNamespace(
         data="topup:stars_plan:credits_100",
         from_user=SimpleNamespace(id=12345),
         answer=AsyncMock(),
     )
-    session = AsyncMock()
-    db_user = SimpleNamespace(id=7, language="ru")
-    bot = AsyncMock()
-    plan = SimpleNamespace(key="credits_100", label="Профи", price_rub=999.0, price_stars=120, credits=100)
-    tx = SimpleNamespace(id=55)
 
-    monkeypatch.setattr("bot.handlers.stars_payment.repo.get_price_plan_by_key", AsyncMock(return_value=plan))
-    monkeypatch.setattr("bot.handlers.stars_payment.repo.get_transaction_by_external_id", AsyncMock(return_value=None))
-    create_transaction = AsyncMock(return_value=tx)
-    monkeypatch.setattr("bot.handlers.stars_payment.repo.create_transaction", create_transaction)
-
-    await stars_payment.cb_stars_plan(call, session, db_user, bot)
-
-    create_transaction.assert_awaited_once()
-    assert create_transaction.await_args.kwargs["provider"] == PaymentProvider.telegram_stars
-    bot.send_invoice.assert_awaited_once()
-    assert bot.send_invoice.await_args.kwargs["currency"] == "XTR"
-    assert bot.send_invoice.await_args.kwargs["provider_token"] == ""
-    assert bot.send_invoice.await_args.kwargs["payload"] == "stars:55:credits_100"
-    call.answer.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_stars_plan_reuses_pending_transaction(monkeypatch) -> None:
-    monkeypatch.setattr("bot.handlers.stars_payment.settings.TELEGRAM_STARS_ENABLED", True)
-
-    call = SimpleNamespace(
-        data="topup:stars_plan:credits_15",
-        from_user=SimpleNamespace(id=12345),
-        answer=AsyncMock(),
-    )
-    session = AsyncMock()
-    db_user = SimpleNamespace(id=7, language="ru")
-    bot = AsyncMock()
-    plan = SimpleNamespace(key="credits_15", label="Мини", price_rub=150.0, price_stars=100, credits=15)
-    tx = SimpleNamespace(
-        id=55,
-        user_id=db_user.id,
-        provider=PaymentProvider.telegram_stars,
-        status=TransactionStatus.pending,
+    await stars_payment.cb_stars_plan(
+        call, AsyncMock(), SimpleNamespace(id=7, language="ru"), AsyncMock()
     )
 
-    monkeypatch.setattr("bot.handlers.stars_payment.repo.get_price_plan_by_key", AsyncMock(return_value=plan))
-    get_transaction = AsyncMock(return_value=tx)
-    monkeypatch.setattr("bot.handlers.stars_payment.repo.get_transaction_by_external_id", get_transaction)
-    create_transaction = AsyncMock()
-    monkeypatch.setattr("bot.handlers.stars_payment.repo.create_transaction", create_transaction)
-
-    await stars_payment.cb_stars_plan(call, session, db_user, bot)
-
-    get_transaction.assert_awaited_once_with(session, "stars_pending:7:credits_15")
     create_transaction.assert_not_awaited()
-    bot.send_invoice.assert_awaited_once()
-    assert bot.send_invoice.await_args.kwargs["payload"] == "stars:55:credits_15"
     call.answer.assert_awaited_once()
+    assert call.answer.await_args.kwargs["show_alert"] is True
 
 
 @pytest.mark.asyncio
-async def test_successful_stars_payment_is_idempotent(monkeypatch) -> None:
-    monkeypatch.setattr("bot.handlers.stars_payment.settings.TELEGRAM_STARS_ENABLED", True)
+async def test_stars_root_callback_is_blocked_after_checkout_retirement(monkeypatch) -> None:
+    get_plans = AsyncMock()
+    monkeypatch.setattr("bot.handlers.stars_payment.repo.get_active_price_plans", get_plans)
+    call = SimpleNamespace(data="topup:stars", answer=AsyncMock())
 
+    await stars_payment.cb_topup_stars(
+        call, AsyncMock(), SimpleNamespace(id=7, language="ru")
+    )
+
+    get_plans.assert_not_awaited()
+    call.answer.assert_awaited_once()
+    assert call.answer.await_args.kwargs["show_alert"] is True
+
+
+@pytest.mark.asyncio
+async def test_successful_legacy_stars_payment_is_still_idempotent(monkeypatch) -> None:
     payment = SimpleNamespace(
         currency="XTR",
         invoice_payload="stars:55:credits_100",
@@ -112,22 +99,3 @@ async def test_successful_stars_payment_is_idempotent(monkeypatch) -> None:
     }
     accrue.assert_awaited_once_with(session, db_user, tx.amount_rub, bot)
     message.answer.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_stars_plan_is_blocked_when_feature_disabled(monkeypatch) -> None:
-    monkeypatch.setattr("bot.handlers.stars_payment.settings.TELEGRAM_STARS_ENABLED", False)
-    create_transaction = AsyncMock()
-    monkeypatch.setattr("bot.handlers.stars_payment.repo.create_transaction", create_transaction)
-
-    call = SimpleNamespace(
-        data="topup:stars_plan:credits_100",
-        from_user=SimpleNamespace(id=12345),
-        answer=AsyncMock(),
-    )
-
-    await stars_payment.cb_stars_plan(call, AsyncMock(), SimpleNamespace(id=7, language="ru"), AsyncMock())
-
-    create_transaction.assert_not_awaited()
-    call.answer.assert_awaited_once()
-    assert call.answer.await_args.kwargs["show_alert"] is True

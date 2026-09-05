@@ -17,8 +17,6 @@ def enabled_payment_methods() -> list[dict[str, str]]:
     methods: list[dict[str, str]] = []
     if getattr(settings, "TBANK_TERMINAL_KEY", "") and getattr(settings, "TBANK_PASSWORD", ""):
         methods.append({"key": "tbank", "provider": "tbank", "label": "Карта", "status": "enabled"})
-    if getattr(settings, "TELEGRAM_STARS_ENABLED", False):
-        methods.append({"key": "stars", "provider": "telegram_stars", "label": "Telegram", "status": "enabled"})
     if getattr(settings, "CRYPTOBOT_TOKEN", ""):
         methods.append({"key": "crypto", "provider": "cryptobot", "label": "Крипто", "status": "enabled"})
     if settings.lava_is_enabled():

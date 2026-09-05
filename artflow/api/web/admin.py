@@ -12,7 +12,7 @@ from api.web.auth import web_referral_link
 from api.web.billing import enabled_payment_methods
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import enum_value, iso_datetime
-from core.config import settings
+from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
 from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
@@ -397,7 +397,7 @@ async def _admin_overview_payload(session: AsyncSession) -> dict:
             "web_public_url": settings.WEB_PUBLIC_URL,
             "captcha_enabled": bool(getattr(settings, "WEB_CAPTCHA_ENABLED", False)),
             "kie_webhook_secret": bool(getattr(settings, "KIE_WEBHOOK_SECRET", "")),
-            "telegram_stars_enabled": bool(getattr(settings, "TELEGRAM_STARS_ENABLED", False)),
+            "telegram_stars_enabled": TELEGRAM_STARS_CHECKOUT_ENABLED,
             "email_auth_enabled": bool(getattr(settings, "WEB_AUTH_EMAIL_ENABLED", False)),
             "payment_methods": enabled_payment_methods(),
         },

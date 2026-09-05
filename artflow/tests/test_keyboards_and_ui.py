@@ -428,9 +428,9 @@ def test_topup_keyboard_keeps_decimal_price() -> None:
     assert buttons[0].text == "💳 10 сек · Pro — 10 💋 · 199.5₽"
 
 
-def test_topup_keyboard_hides_stars_by_default() -> None:
-    plans = [SimpleNamespace(label="15 💋", credits=15, price_rub=150.0, key="credits_15")]
-    buttons = flatten_buttons(topup_kb(plans))
+def test_rub_methods_keyboard_never_exposes_stars(monkeypatch) -> None:
+    monkeypatch.setattr("bot.keyboards.payment.settings.TELEGRAM_STARS_ENABLED", True, raising=False)
+    buttons = flatten_buttons(rub_methods_kb())
     assert all(button.callback_data != "topup:stars" for button in buttons)
 
 

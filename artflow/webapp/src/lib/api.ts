@@ -358,7 +358,7 @@ export class MiniAppApi {
     };
   }
 
-  createPayment(provider: "stars" | "tbank" | "crypto" | "lava", planKey: string): Promise<Record<string, unknown>> {
+  createPayment(provider: "tbank" | "crypto" | "lava", planKey: string): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>(`/topup/${provider}`, {
       method: "POST",
       body: JSON.stringify({ plan_key: planKey }),

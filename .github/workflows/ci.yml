@@ -68,6 +68,7 @@ jobs:
             tests/test_nexus_image_migration.py \
             tests/test_nexus_admin_pricing.py \
             tests/test_referral_commission_defaults.py \
+            tests/test_stars_payment.py \
             tests/test_midjourney.py \
             tests/test_photo_prompt_service.py \
             tests/test_provider_contract_catalog.py \
@@ -100,6 +101,7 @@ jobs:
             tests/test_nexus_image_migration.py \
             tests/test_nexus_admin_pricing.py \
             tests/test_referral_commission_defaults.py \
+            tests/test_stars_payment.py \
             tests/test_miniapp_feed_webkit_stability.py \
             tests/test_provider_contract_catalog.py \
             tests/test_seedance25_repeat_keyboard.py \
