@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     REFERRAL_FREEZE: bool = False
 
     # Credits
-    WELCOME_BONUS_CREDITS: int = 0
+    WELCOME_BONUS_CREDITS: int = 3
     REFERRAL_L1_CREDITS: int = 3
     FEED_REMIX_REWARD_RUB: float = 5.0
     REFERRAL_WITHDRAW_MIN_RUB: float = 1000.0
@@ -143,13 +143,6 @@ class Settings(BaseSettings):
     # Polling
     POLLING_INTERVAL: float = 3.0
     POLLING_TIMEOUT: int = 600
-
-    @model_validator(mode="after")
-    def disable_welcome_bonus(self) -> "Settings":
-        # New accounts must start at zero even if an old production .env still
-        # contains WELCOME_BONUS_CREDITS=3 (or another legacy value).
-        self.WELCOME_BONUS_CREDITS = 0
-        return self
 
     @model_validator(mode="after")
     def require_provider_webhook_security(self) -> "Settings":
