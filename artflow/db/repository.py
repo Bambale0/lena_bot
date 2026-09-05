@@ -17,7 +17,7 @@ from sqlalchemy.orm import aliased
 
 from api.public_files import mirror_url, public_url_is_available
 from core.config import settings
-from core.model_pricing import image_pricing_keys, video_pricing_keys
+from core.model_pricing import image_pricing_keys, pricing_variant_key, video_pricing_keys
 from db.models import (
     CreditLedgerEntry,
     FeedRemixPayout,
@@ -2466,6 +2466,36 @@ async def set_model_family_costs(
     for root in roots:
         clauses.append(ModelCost.model_key == root)
         clauses.append(ModelCost.model_key.startswith(f"{root}__"))
+
+    result = await session.execute(
+        update(ModelCost)
+        .where(or_(*clauses))
+        .values(credits=credits)
+        .returning(ModelCost.id)
+    )
+    updated_ids = list(result.scalars().all())
+    await session.commit()
+    return len(updated_ids)
+
+
+async def set_model_family_quality_costs(
+    session: AsyncSession,
+    model_roots: tuple[str, ...] | list[str],
+    quality: str,
+    credits: float,
+    *,
+    sync_base: bool = False,
+) -> int:
+    """Set one quality tier across all internal routes of a commercial model."""
+    roots = tuple(dict.fromkeys(str(root).strip() for root in model_roots if str(root).strip()))
+    quality = str(quality).strip()
+    if not roots or not quality:
+        return 0
+
+    keys = [pricing_variant_key(root, quality=quality) for root in roots]
+    clauses = [ModelCost.model_key.in_(keys)]
+    if sync_base:
+        clauses.append(ModelCost.model_key.in_(roots))
 
     result = await session.execute(
         update(ModelCost)
