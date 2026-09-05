@@ -89,21 +89,9 @@ def onboarding_kb(lang: str = "ru"):
 
 
 def _stars_help_text(lang: str) -> str:
-    if not settings.TELEGRAM_STARS_ENABLED:
-        if lang == "en":
-            return "⭐ <b>Telegram Stars</b>\n\nStars top-up is not available yet. Please use T-Bank or CryptoBot for now."
-        return "⭐ <b>Telegram Stars</b>\n\nПополнение через Stars пока недоступно. Сейчас используй T-Bank или CryptoBot."
     if lang == "en":
-        return (
-            "⭐ <b>Telegram Stars</b>\n\nTop up opens directly inside Telegram.\n"
-            "Choose <b>Top up → Telegram Stars</b>, select a pack and confirm payment.\n\n"
-            "If payment succeeds, credits arrive automatically."
-        )
-    return (
-        "⭐ <b>Telegram Stars</b>\n\nПополнение открывается прямо внутри Telegram.\n"
-        "Выбери <b>Пополнение → Telegram Stars</b>, укажи пакет и подтверди оплату.\n\n"
-        "Если платёж прошёл успешно, 💋 начислятся автоматически."
-    )
+        return "⭐ <b>Telegram Stars</b>\n\nStars are no longer available as a payment method. Please choose another available payment option."
+    return "⭐ <b>Telegram Stars</b>\n\nStars больше не используются как способ оплаты. Выбери другой доступный вариант пополнения."
 
 
 def _help_text(lang: str) -> str:

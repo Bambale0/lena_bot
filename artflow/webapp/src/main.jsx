@@ -552,11 +552,9 @@ function TopupModal({ onClose }) {
     try {
       const endpoint = method === "crypto"
         ? "/topup/crypto"
-        : method === "stars"
-          ? "/topup/stars"
-          : method === "lava"
-            ? "/topup/lava"
-            : "/topup/tbank";
+        : method === "lava"
+          ? "/topup/lava"
+          : "/topup/tbank";
       const res = await api(endpoint, { method: "POST", body: JSON.stringify({ plan_key: selected }) });
       const url = res.invoice_link || res.pay_url;
       if (!url) throw new Error("Платёжная ссылка не получена");
@@ -587,7 +585,7 @@ function TopupModal({ onClose }) {
               >
                 <b>{p.title || p.label}</b>
                 <span>{p.credits} 💋</span>
-                <em>{method === "stars" ? `${p.price_stars} ⭐` : formatRub(p)}</em>
+                <em>{formatRub(p)}</em>
               </button>
             ))}
           </div>
@@ -595,7 +593,6 @@ function TopupModal({ onClose }) {
 
         <div className="tabs" style={{ marginTop: 16 }}>
           {paymentMethods.includes("tbank") && <button className={method === "tbank" ? "active" : ""} onClick={() => setMethod("tbank")}>💳 Т-Банк</button>}
-          {paymentMethods.includes("stars") && <button className={method === "stars" ? "active" : ""} onClick={() => setMethod("stars")}>⭐ Stars</button>}
           {paymentMethods.includes("crypto") && <button className={method === "crypto" ? "active" : ""} onClick={() => setMethod("crypto")}>₮ Крипто</button>}
           {paymentMethods.includes("lava") && <button className={method === "lava" ? "active" : ""} onClick={() => setMethod("lava")}>💸 Lava</button>}
         </div>
@@ -3135,7 +3132,6 @@ function Help({ onNotice }) {
       </div>
       <div className="tabs soft">
         <button className={topic === "main" ? "active" : ""} onClick={() => setTopic("main")}>Как пользоваться</button>
-        <button className={topic === "stars" ? "active" : ""} onClick={() => setTopic("stars")}>Telegram Stars</button>
       </div>
       {loading ? <Spinner /> : <div className="helpText">{text.replace(/<[^>]+>/g, "")}</div>}
     </section>

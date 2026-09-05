@@ -4,6 +4,9 @@ import os
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Telegram Stars checkout is retired. Historical Stars settlements remain supported.
+TELEGRAM_STARS_CHECKOUT_ENABLED = False
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

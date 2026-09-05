@@ -46,8 +46,6 @@ def rub_methods_kb(lang: str = "ru") -> InlineKeyboardMarkup:
             callback_data="topup:tbank",
         )
     )
-    if settings.TELEGRAM_STARS_ENABLED:
-        builder.row(InlineKeyboardButton(text="⭐ Telegram Stars", callback_data="topup:stars"))
     if settings.lava_is_enabled():
         builder.row(InlineKeyboardButton(text="💸 Lava", callback_data="topup:lava"))
     builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:topup"))

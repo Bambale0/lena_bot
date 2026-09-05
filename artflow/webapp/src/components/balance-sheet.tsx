@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Banknote, Bitcoin, CheckCircle2, CreditCard, Info, Send, ShieldCheck, Star } from "lucide-react";
+import { Banknote, Bitcoin, CheckCircle2, CreditCard, Info, Send, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,18 +8,17 @@ import { t } from "@/lib/i18n";
 import type { PaymentPlan, UserProfile } from "@/lib/types";
 import { formatCredits, formatKisses } from "@/lib/utils";
 
-type PaymentProvider = "stars" | "tbank" | "crypto" | "lava";
+type PaymentProvider = "tbank" | "crypto" | "lava";
 
 interface PaymentMethod {
   id: PaymentProvider;
   title: string;
   subtitle: string;
-  icon: typeof Star;
+  icon: typeof CreditCard;
   badge?: string;
 }
 
 const methods: PaymentMethod[] = [
-  { id: "stars", title: "Telegram Stars", subtitle: "Оплата внутри Telegram", icon: Star, badge: "быстро" },
   { id: "tbank", title: "Карта", subtitle: "T-Bank / банковская карта", icon: Banknote },
   { id: "crypto", title: "CryptoBot", subtitle: "USDT и крипто-оплата", icon: Bitcoin },
   { id: "lava", title: "СБП / Lava", subtitle: "Российская оплата по ссылке", icon: Send },
@@ -35,7 +34,6 @@ interface BalanceSheetProps {
 }
 
 function planPrice(plan: PaymentPlan, method: PaymentProvider): string {
-  if (method === "stars" && plan.price_stars) return `${plan.price_stars} ⭐`;
   if (method === "crypto" && plan.price_usdt) return `${plan.price_usdt} USDT`;
   if (plan.price_rub) return `${plan.price_rub} ₽`;
   return "";
@@ -43,7 +41,6 @@ function planPrice(plan: PaymentPlan, method: PaymentProvider): string {
 
 function methodAvailable(method: PaymentProvider, plans: PaymentPlan[]): boolean {
   if (!plans.length) return true;
-  if (method === "stars") return plans.some((plan) => Number(plan.price_stars || 0) > 0);
   if (method === "crypto") return plans.some((plan) => Number(plan.price_usdt || 0) > 0);
   return plans.some((plan) => Number(plan.price_rub || 0) > 0);
 }
@@ -51,7 +48,7 @@ function methodAvailable(method: PaymentProvider, plans: PaymentPlan[]): boolean
 function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceSheetProps) {
   const copy = t(user.language);
   const [selectedPlanKey, setSelectedPlanKey] = useState("");
-  const [method, setMethod] = useState<PaymentProvider>("stars");
+  const [method, setMethod] = useState<PaymentProvider>("tbank");
 
   const availableMethods = useMemo(() => {
     const filtered = methods.filter((item) => methodAvailable(item.id, plans));
@@ -59,7 +56,7 @@ function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceS
   }, [plans]);
 
   useEffect(() => {
-    if (!availableMethods.some((item) => item.id === method)) setMethod(availableMethods[0]?.id || "stars");
+    if (!availableMethods.some((item) => item.id === method)) setMethod(availableMethods[0]?.id || "tbank");
   }, [availableMethods, method]);
 
   const selectedPlan = useMemo(() => {

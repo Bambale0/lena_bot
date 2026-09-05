@@ -532,8 +532,6 @@ async def _set_bot_commands(bot: Bot, *, schedule_retry: bool = True) -> None:
         BotCommand(command="trends", description="Тренды от администратора"),
         BotCommand(command="prompts", description="Библиотека промптов"),
     ]
-    if settings.TELEGRAM_STARS_ENABLED:
-        commands.insert(3, BotCommand(command="starshelp", description="Telegram Stars"))
     if settings.ADMIN_IDS:
         commands.append(BotCommand(command="admin", description="Админ-панель"))
     retry_after = 0

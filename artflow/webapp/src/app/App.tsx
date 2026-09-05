@@ -18,7 +18,6 @@ import {
   haptic,
   notifyHaptic,
   openExternalUrl,
-  openTelegramInvoice,
   parseStartTarget,
   readStartParam,
   waitForTelegramInitData,
@@ -670,25 +669,14 @@ function App() {
     }
   }, [api, photoPromptBusy]);
 
-  const pay = useCallback(async (provider: "stars" | "tbank" | "crypto" | "lava", plan: PaymentPlan) => {
+  const pay = useCallback(async (provider: "tbank" | "crypto" | "lava", plan: PaymentPlan) => {
     if (!api || paymentBusy) return;
     setPaymentBusy(true);
     try {
       const result = await api.createPayment(provider, plan.key);
       const url = String(result.invoice_link || result.invoice_url || result.pay_url || result.url || "");
       if (!url) throw new Error("Платёжная ссылка не получена");
-      if (provider === "stars") {
-        openTelegramInvoice(url, (status) => {
-          if (status === "paid") {
-            toast.success("Оплата прошла");
-            setBalanceOpen(false);
-            void refreshCore();
-          } else if (status === "failed") toast.error("Оплата не прошла");
-          else if (status === "cancelled") toast.info("Оплата отменена");
-        });
-      } else {
-        openExternalUrl(url);
-      }
+      openExternalUrl(url);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Не удалось создать платёж");
     } finally {

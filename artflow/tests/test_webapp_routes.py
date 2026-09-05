@@ -767,30 +767,16 @@ async def test_webapp_plans_use_label_as_title(client, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_topup_stars_returns_invoice_link(client, monkeypatch) -> None:
+async def test_topup_stars_is_retired_even_when_legacy_flag_is_enabled(client, monkeypatch) -> None:
     monkeypatch.setattr("api.miniapp_routes.settings.TELEGRAM_STARS_ENABLED", True)
-    monkeypatch.setattr(
-        "api.miniapp_routes.repo.get_price_plan_by_key",
-        AsyncMock(return_value=SimpleNamespace(key="credits_15", label="мини", credits=15, price_rub=150.0, price_stars=100)),
-    )
-    monkeypatch.setattr(
-        "api.miniapp_routes.repo.get_transaction_by_external_id",
-        AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        "api.miniapp_routes.repo.create_transaction",
-        AsyncMock(return_value=SimpleNamespace(id=901)),
-    )
-    monkeypatch.setattr(
-        "main.bot",
-        SimpleNamespace(create_invoice_link=AsyncMock(return_value="https://t.me/invoice/test-stars-link")),
-    )
+    create_transaction = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.create_transaction", create_transaction)
 
     response = await client.post("/api/v1/topup/stars", json={"plan_key": "credits_15"})
 
-    assert response.status_code == 200
-    assert response.json()["invoice_link"] == "https://t.me/invoice/test-stars-link"
-    assert response.json()["amount_stars"] == 100
+    assert response.status_code == 404
+    assert "not available" in response.json()["detail"]
+    create_transaction.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2189,37 +2175,20 @@ async def test_refresh_suno_voice_stores_validation_phrase(client, monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_topup_stars_reuses_pending_transaction(client, monkeypatch) -> None:
+async def test_payment_methods_never_advertise_stars(client, monkeypatch) -> None:
     monkeypatch.setattr("api.miniapp_routes.settings.TELEGRAM_STARS_ENABLED", True)
-    pending_tx = SimpleNamespace(
-        id=902,
-        user_id=1,
-        provider="telegram_stars",
-        status="pending",
-    )
-    pending_tx.provider = __import__("db.models", fromlist=["PaymentProvider"]).PaymentProvider.telegram_stars
-    pending_tx.status = __import__("db.models", fromlist=["TransactionStatus"]).TransactionStatus.pending
-
+    monkeypatch.setattr("api.miniapp_routes.settings.TBANK_TERMINAL_KEY", "terminal")
+    monkeypatch.setattr("api.miniapp_routes.settings.TBANK_PASSWORD", "password")
+    monkeypatch.setattr("api.miniapp_routes.settings.CRYPTOBOT_TOKEN", "crypto")
     monkeypatch.setattr(
-        "api.miniapp_routes.repo.get_price_plan_by_key",
-        AsyncMock(return_value=SimpleNamespace(key="credits_15", label="мини", credits=15, price_rub=150.0, price_stars=100)),
-    )
-    monkeypatch.setattr(
-        "api.miniapp_routes.repo.get_transaction_by_external_id",
-        AsyncMock(return_value=pending_tx),
-    )
-    create_transaction = AsyncMock()
-    monkeypatch.setattr("api.miniapp_routes.repo.create_transaction", create_transaction)
-    monkeypatch.setattr(
-        "main.bot",
-        SimpleNamespace(create_invoice_link=AsyncMock(return_value="https://t.me/invoice/test-stars-link-2")),
+        "api.miniapp_routes.repo.get_active_price_plans",
+        AsyncMock(return_value=[SimpleNamespace(key="credits_15")]),
     )
 
-    response = await client.post("/api/v1/topup/stars", json={"plan_key": "credits_15"})
+    response = await client.get("/api/v1/payment-methods")
 
     assert response.status_code == 200
-    assert response.json()["transaction_id"] == 902
-    create_transaction.assert_not_awaited()
+    assert "stars" not in response.json()
 
 
 @pytest.mark.asyncio

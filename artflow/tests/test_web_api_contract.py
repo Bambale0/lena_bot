@@ -540,8 +540,8 @@ def test_enabled_payment_methods_match_topup_providers(monkeypatch) -> None:
 
     methods = billing.enabled_payment_methods()
 
-    assert [item["key"] for item in methods] == ["tbank", "stars", "crypto", "lava"]
-    assert [item["label"] for item in methods] == ["Карта", "Telegram", "Крипто", "Lava"]
+    assert [item["key"] for item in methods] == ["tbank", "crypto", "lava"]
+    assert [item["label"] for item in methods] == ["Карта", "Крипто", "Lava"]
 
 
 def test_web_router_exposes_realtime_websocket_alias() -> None:

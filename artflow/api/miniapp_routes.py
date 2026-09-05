@@ -61,7 +61,7 @@ from bot.utils.telegram_images import (
     send_image_to_chat,
     send_original_document_to_chat,
 )
-from core.config import settings
+from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
 from core.trends import is_trend_prompt, trend_kind
 from core.gemini_omni import (
     GEMINI_OMNI_MAX_AUDIO_IDS,
@@ -3571,8 +3571,6 @@ async def list_payment_methods(
     methods: list[str] = []
     if settings.TBANK_TERMINAL_KEY and settings.TBANK_PASSWORD:
         methods.append("tbank")
-    if settings.TELEGRAM_STARS_ENABLED:
-        methods.append("stars")
     if settings.CRYPTOBOT_TOKEN:
         methods.append("crypto")
     if settings.LAVA_API_KEY and any(settings.lava_offer_id_for_plan(key) for key in plan_keys):
@@ -3591,8 +3589,6 @@ async def list_payment_options(
     methods: list[str] = []
     if settings.TBANK_TERMINAL_KEY and settings.TBANK_PASSWORD:
         methods.append("tbank")
-    if settings.TELEGRAM_STARS_ENABLED:
-        methods.append("stars")
     if settings.CRYPTOBOT_TOKEN:
         methods.append("crypto")
     if settings.LAVA_API_KEY and lava_plan_keys:
@@ -3665,8 +3661,8 @@ async def topup_stars(
     """Create a Telegram Stars invoice link for the mini app."""
     from main import bot
 
-    if not settings.TELEGRAM_STARS_ENABLED:
-        raise HTTPException(status_code=404, detail="Telegram Stars are not enabled")
+    if not TELEGRAM_STARS_CHECKOUT_ENABLED:
+        raise HTTPException(status_code=404, detail="Telegram Stars are not available")
 
     plan = await repo.get_price_plan_by_key(session, body.plan_key)
     if not plan:
