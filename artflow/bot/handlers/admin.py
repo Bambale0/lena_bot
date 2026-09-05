@@ -70,6 +70,7 @@ class AdminFSM(StatesGroup):
     edit_model_display_name = State()
     edit_model_key = State()
     edit_model_credits = State()
+    edit_nexus_model_credits = State()
     # Credits management
     await_credits_tg_id = State()
     await_credits_amount = State()
@@ -92,6 +93,7 @@ def admin_menu_kb():
     builder.button(text="💸 Заявки на вывод", callback_data="adm:withdrawals")
     builder.button(text="💳 Прайс-лист", callback_data="adm:price")
     builder.button(text="🎟 Промокоды", callback_data="adm:promos")
+    builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
     builder.button(text="💰 Начислить кредиты", callback_data="adm:add_credits")
     builder.button(text="🚫 Бан / Разбан", callback_data="adm:ban")
@@ -1429,6 +1431,23 @@ _MODELS_PAGE_SIZE = 12
 _MODEL_EDIT_CALLBACK = "adm:mc:"
 _MODEL_COST_CALLBACK = "adm:mcc:"
 _MODEL_NAME_CALLBACK = "adm:mcn:"
+_NEXUS_MODEL_CALLBACK = "adm:nx:"
+_NEXUS_PRICE_CALLBACK = "adm:nxp:"
+
+_NEXUS_ADMIN_GROUPS: dict[str, dict[str, object]] = {
+    "nano_pro": {"label": "🍌 Nano Banana Pro", "roots": ("nano-banana-pro",)},
+    "banana2": {"label": "🍌 Banana 2", "roots": ("nano-banana-2",)},
+    "seedream5": {
+        "label": "🌸 Seedream 5 Pro",
+        "roots": ("seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"),
+    },
+    "gpt2": {
+        "label": "🤖 GPT 2",
+        "roots": ("gpt-image-2-text-to-image", "gpt-image-2-image-to-image"),
+    },
+    "nano_pro_vip": {"label": "🍌 Нана Банано Про ВИП", "roots": ("nano-banana-pro-vip",)},
+    "gpt2_vip": {"label": "🤖 ГПТ 2 ВИП", "roots": ("gpt-image-2-vip",)},
+}
 
 
 def _model_callback_key(data: str | None, *prefixes: str) -> str:
@@ -1489,6 +1508,54 @@ def _related_costs_text(costs: list, current_key: str) -> str:
     return "\n".join(lines)
 
 
+def _nexus_group_rows(costs: list, roots: tuple[str, ...]) -> list:
+    return [
+        item
+        for item in costs
+        if any(item.model_key == root or item.model_key.startswith(f"{root}__") for root in roots)
+    ]
+
+
+def _nexus_price_summary(costs: list, roots: tuple[str, ...]) -> str:
+    values = sorted({float(item.credits) for item in _nexus_group_rows(costs, roots)})
+    if not values:
+        return "нет цены"
+    if len(values) == 1:
+        return f"{_fmt_price(values[0])} кр"
+    return f"{_fmt_price(values[0])}–{_fmt_price(values[-1])} кр"
+
+
+def _nexus_models_kb(costs: list) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for slug, config in _NEXUS_ADMIN_GROUPS.items():
+        label = str(config["label"])
+        roots = tuple(config["roots"])
+        builder.button(
+            text=f"{label} — {_nexus_price_summary(costs, roots)}",
+            callback_data=f"{_NEXUS_MODEL_CALLBACK}{slug}",
+        )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="⚙️ Все модели", callback_data="adm:models"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="adm:back"))
+    return builder.as_markup()
+
+
+def _nexus_model_kb(slug: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✏️ Задать цену", callback_data=f"{_NEXUS_PRICE_CALLBACK}{slug}")
+    builder.button(text="← Nexus модели", callback_data="adm:nexus_models")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _nexus_done_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def _models_kb(costs: list, page: int) -> "InlineKeyboardMarkup":
     """Build paginated model costs keyboard."""
     costs = _sort_model_costs_for_admin(costs)
@@ -1532,6 +1599,92 @@ def _models_kb(costs: list, page: int) -> "InlineKeyboardMarkup":
     builder.row(*nav_row)
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="adm:back"))
     return builder.as_markup()
+
+
+@router.callback_query(F.data == "adm:nexus_models")
+async def cb_nexus_models(call: CallbackQuery, session: AsyncSession) -> None:
+    costs = await repo.get_all_model_costs(session)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        "🧩 <b>Nexus модели — цены</b>\n\n"
+        "Здесь только коммерческие Nexus-модели. Цена задаётся для модели целиком: "
+        "все её режимы и варианты качества будут синхронизированы.\n\n"
+        "Нажми на модель:",
+        reply_markup=_nexus_models_kb(costs),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith(_NEXUS_MODEL_CALLBACK))
+async def cb_nexus_model(call: CallbackQuery, session: AsyncSession) -> None:
+    slug = _model_callback_key(call.data, _NEXUS_MODEL_CALLBACK)
+    config = _NEXUS_ADMIN_GROUPS.get(slug)
+    if not config:
+        await call.answer("Модель не найдена", show_alert=True)
+        return
+    costs = await repo.get_all_model_costs(session)
+    roots = tuple(config["roots"])
+    summary = _nexus_price_summary(costs, roots)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        f"🧩 <b>{config['label']}</b>\n\n"
+        f"Текущая цена: <b>{summary}</b>\n\n"
+        "Если сейчас цены различаются по качеству или режиму, показывается диапазон. "
+        "Новая цена будет одной для всех внутренних вариантов этой модели.",
+        reply_markup=_nexus_model_kb(slug),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith(_NEXUS_PRICE_CALLBACK))
+async def cb_nexus_price_start(call: CallbackQuery, state: FSMContext) -> None:
+    slug = _model_callback_key(call.data, _NEXUS_PRICE_CALLBACK)
+    config = _NEXUS_ADMIN_GROUPS.get(slug)
+    if not config:
+        await call.answer("Модель не найдена", show_alert=True)
+        return
+    await state.set_state(AdminFSM.edit_nexus_model_credits)
+    await state.update_data(edit_nexus_model_slug=slug)
+    await call.message.answer(  # type: ignore[union-attr]
+        f"Введи новую цену для <b>{config['label']}</b> в кредитах.\n"
+        "Можно дробное число, например: <code>2,5</code>"
+    )
+    await call.answer()
+
+
+@router.message(AdminFSM.edit_nexus_model_credits)
+async def handle_nexus_model_credits(
+    message: Message,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
+    try:
+        new_credits = float((message.text or "").strip().replace(",", "."))
+    except ValueError:
+        await message.answer("Введи число, например <code>2,5</code>.")
+        return
+    if new_credits <= 0:
+        await message.answer("Цена должна быть больше нуля.")
+        return
+
+    data = await state.get_data()
+    slug = str(data.get("edit_nexus_model_slug") or "")
+    config = _NEXUS_ADMIN_GROUPS.get(slug)
+    if not config:
+        await state.clear()
+        await message.answer("❌ Модель не найдена", reply_markup=_nexus_done_kb())
+        return
+
+    roots = tuple(config["roots"])
+    updated = await repo.set_model_family_costs(session, roots, new_credits)
+    await state.clear()
+    if not updated:
+        await message.answer("❌ Не найдено ни одной ценовой позиции модели", reply_markup=_nexus_done_kb())
+        return
+
+    await message.answer(
+        f"✅ <b>{config['label']}</b>: новая цена <b>{_fmt_price(new_credits)} кр</b>.\n"
+        f"Синхронизировано ценовых позиций: <b>{updated}</b>.",
+        reply_markup=_nexus_done_kb(),
+    )
 
 
 @router.callback_query(F.data == "adm:models")
