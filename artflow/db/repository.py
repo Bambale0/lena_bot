@@ -2444,3 +2444,35 @@ async def set_model_cost(session: AsyncSession, model_key: str, credits: float) 
     )
     await session.commit()
     return result.scalar_one_or_none() is not None
+
+
+async def set_model_family_costs(
+    session: AsyncSession,
+    model_roots: tuple[str, ...] | list[str],
+    credits: float,
+) -> int:
+    """Set one commercial price across base, mode and quality variants.
+
+    A root matches both the exact model key and pricing variants using the
+    ``<root>__...`` convention. This keeps the admin's commercial model price
+    authoritative even when ``resolve_image_model_cost`` prefers a quality
+    variant over the base row.
+    """
+    roots = tuple(dict.fromkeys(str(root).strip() for root in model_roots if str(root).strip()))
+    if not roots:
+        return 0
+
+    clauses = []
+    for root in roots:
+        clauses.append(ModelCost.model_key == root)
+        clauses.append(ModelCost.model_key.startswith(f"{root}__"))
+
+    result = await session.execute(
+        update(ModelCost)
+        .where(or_(*clauses))
+        .values(credits=credits)
+        .returning(ModelCost.id)
+    )
+    updated_ids = list(result.scalars().all())
+    await session.commit()
+    return len(updated_ids)
