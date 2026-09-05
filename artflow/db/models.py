@@ -64,6 +64,7 @@ class PaymentProvider(str, enum.Enum):
     tbank = "tbank"
     telegram_stars = "telegram_stars"
     lava = "lava"
+    tribute = "tribute"
 
 
 class PromoRewardType(str, enum.Enum):

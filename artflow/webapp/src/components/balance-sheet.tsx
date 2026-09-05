@@ -8,7 +8,7 @@ import { t } from "@/lib/i18n";
 import type { PaymentPlan, UserProfile } from "@/lib/types";
 import { formatCredits, formatKisses } from "@/lib/utils";
 
-type PaymentProvider = "tbank" | "crypto" | "lava";
+type PaymentProvider = "tbank" | "crypto" | "tribute" | "lava";
 
 interface PaymentMethod {
   id: PaymentProvider;
@@ -21,6 +21,7 @@ interface PaymentMethod {
 const methods: PaymentMethod[] = [
   { id: "tbank", title: "Карта", subtitle: "T-Bank / банковская карта", icon: Banknote },
   { id: "crypto", title: "CryptoBot", subtitle: "USDT и крипто-оплата", icon: Bitcoin },
+  { id: "tribute", title: "Tribute", subtitle: "Карта / СБП через Tribute", icon: CreditCard },
   { id: "lava", title: "СБП / Lava", subtitle: "Российская оплата по ссылке", icon: Send },
 ];
 
@@ -28,6 +29,7 @@ interface BalanceSheetProps {
   open: boolean;
   user: UserProfile;
   plans: PaymentPlan[];
+  availableProviders: string[];
   busy?: boolean;
   onOpenChange: (open: boolean) => void;
   onPay: (provider: PaymentProvider, plan: PaymentPlan) => void;
@@ -45,15 +47,15 @@ function methodAvailable(method: PaymentProvider, plans: PaymentPlan[]): boolean
   return plans.some((plan) => Number(plan.price_rub || 0) > 0);
 }
 
-function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceSheetProps) {
+function BalanceSheet({ open, user, plans, availableProviders, busy, onOpenChange, onPay }: BalanceSheetProps) {
   const copy = t(user.language);
   const [selectedPlanKey, setSelectedPlanKey] = useState("");
   const [method, setMethod] = useState<PaymentProvider>("tbank");
 
-  const availableMethods = useMemo(() => {
-    const filtered = methods.filter((item) => methodAvailable(item.id, plans));
-    return filtered.length ? filtered : methods;
-  }, [plans]);
+  const availableMethods = useMemo(
+    () => methods.filter((item) => availableProviders.includes(item.id) && methodAvailable(item.id, plans)),
+    [availableProviders, plans],
+  );
 
   useEffect(() => {
     if (!availableMethods.some((item) => item.id === method)) setMethod(availableMethods[0]?.id || "tbank");
@@ -64,10 +66,10 @@ function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceS
     return plans.find((plan) => plan.key === selectedPlanKey) || plans[0];
   }, [plans, selectedPlanKey]);
 
-  const selectedMethod = availableMethods.find((item) => item.id === method) || availableMethods[0] || methods[0];
-  const MethodIcon = selectedMethod.icon;
-  const selectedPrice = selectedPlan ? planPrice(selectedPlan, method) : "";
-  const payDisabled = busy || !selectedPlan || !selectedPrice;
+  const selectedMethod = availableMethods.find((item) => item.id === method) || availableMethods[0];
+  const MethodIcon = selectedMethod?.icon || CreditCard;
+  const selectedPrice = selectedPlan && selectedMethod ? planPrice(selectedPlan, selectedMethod.id) : "";
+  const payDisabled = busy || !selectedPlan || !selectedMethod || !selectedPrice;
 
   return (
     <Sheet
@@ -125,7 +127,11 @@ function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceS
         <section className="grid gap-2">
           <h3 className="text-sm font-semibold">{copy.balance.methodStep}</h3>
           <div className="grid gap-2">
-            {availableMethods.map((item) => {
+            {!availableMethods.length ? (
+              <div className="rounded-xl border border-dashed border-border p-3 text-center text-xs text-muted-foreground">
+                {copy.balance.unavailableMethod}
+              </div>
+            ) : availableMethods.map((item) => {
               const Icon = item.icon;
               const active = method === item.id;
               return (
@@ -156,9 +162,9 @@ function BalanceSheet({ open, user, plans, busy, onOpenChange, onPay }: BalanceS
               <p className="text-[10px] text-muted-foreground">{selectedPlan ? `${selectedPlan.title || selectedPlan.key} · ${selectedPrice || copy.balance.unavailableMethod}` : copy.balance.selectPlan}</p>
             </div>
           </div>
-          <Button className="w-full" disabled={payDisabled} onClick={() => selectedPlan && selectedPrice && onPay(method, selectedPlan)}>
+          <Button className="w-full" disabled={payDisabled} onClick={() => selectedPlan && selectedMethod && selectedPrice && onPay(selectedMethod.id, selectedPlan)}>
             <MethodIcon className="size-4" />
-            {busy ? copy.balance.creating : `${copy.balance.payVia} ${selectedMethod.title}`}
+            {busy ? copy.balance.creating : selectedMethod ? `${copy.balance.payVia} ${selectedMethod.title}` : copy.balance.unavailableMethod}
           </Button>
           <div className="mt-2 grid gap-1.5 text-[10px] text-muted-foreground">
             <p className="flex items-start gap-1.5"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />{copy.balance.safety}</p>

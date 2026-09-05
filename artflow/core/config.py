@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     LAVA_WEBHOOK_PATH: str = "/webhook/lava"
     LAVA_DEFAULT_EMAIL: str = "buyer@example.com"
 
+    # Tribute Shop API
+    TRIBUTE_API_KEY: str = ""
+    TRIBUTE_API_BASE_URL: str = "https://tribute.tg/api/v1"
+    TRIBUTE_WEBHOOK_PATH: str = "/webhook/tribute"
+    TRIBUTE_HTTP_TIMEOUT: float = 30.0
+    TRIBUTE_SUCCESS_URL: str = ""
+    TRIBUTE_FAIL_URL: str = ""
+
     # Email auth delivery
     WEB_AUTH_EMAIL_ENABLED: bool = False
     RESEND_API_KEY: str = ""

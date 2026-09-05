@@ -190,6 +190,7 @@ export interface BootstrapData {
   feed: FeedItem[];
   trends: TrendItem[];
   paymentPlans: PaymentPlan[];
+  paymentMethods: string[];
 }
 
 export interface GenerationDraft {

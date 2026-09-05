@@ -669,7 +669,7 @@ function App() {
     }
   }, [api, photoPromptBusy]);
 
-  const pay = useCallback(async (provider: "tbank" | "crypto" | "lava", plan: PaymentPlan) => {
+  const pay = useCallback(async (provider: "tbank" | "crypto" | "tribute" | "lava", plan: PaymentPlan) => {
     if (!api || paymentBusy) return;
     setPaymentBusy(true);
     try {
@@ -813,7 +813,7 @@ function App() {
         {screen}
       </AppShell>
       <TaskDetailSheet task={selectedTask} open={taskOpen} busy={taskBusy} onOpenChange={setTaskOpen} onRefresh={(task) => void refreshTask(task)} onShare={(task) => void toggleTaskShare(task)} onToggleLibrary={(task) => void toggleTaskLibrary(task)} />
-      <BalanceSheet open={balanceOpen} user={data.user} plans={data.paymentPlans} busy={paymentBusy} onOpenChange={setBalanceOpen} onPay={(provider, plan) => void pay(provider, plan)} />
+      <BalanceSheet open={balanceOpen} user={data.user} plans={data.paymentPlans} availableProviders={data.paymentMethods} busy={paymentBusy} onOpenChange={setBalanceOpen} onPay={(provider, plan) => void pay(provider, plan)} />
       <Toaster richColors position="top-center" closeButton />
     </>
   );

@@ -92,6 +92,9 @@ from api.miniapp_routes import (
     topup_tbank as miniapp_topup_tbank,
 )
 from api.miniapp_routes import (
+    topup_tribute as miniapp_topup_tribute,
+)
+from api.miniapp_routes import (
     verify_suno_voice as miniapp_verify_suno_voice,
 )
 from api.public_files import save_public_file
@@ -554,6 +557,17 @@ async def topup_crypto(
     if auth_error := _auth_required(user):
         return auth_error
     return await _call_miniapp(miniapp_topup_crypto, body=body, session=session, user=user)
+
+
+@router.post("/billing/topup/tribute")
+async def topup_tribute(
+    body: TopupRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_topup_tribute, body=body, session=session, user=user)
 
 
 @router.post("/billing/topup/lava")

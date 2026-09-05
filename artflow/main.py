@@ -142,6 +142,14 @@ from payments.lava import (
     webhook_contract_id as lava_webhook_contract_id,
 )
 from payments.tbank import verify_notification_token
+from payments.tribute import (
+    get_order_status as tribute_get_order_status,
+    verify_webhook_signature as tribute_verify_webhook_signature,
+    webhook_amount_rub as tribute_webhook_amount_rub,
+    webhook_currency as tribute_webhook_currency,
+    webhook_order_uuid as tribute_webhook_order_uuid,
+    webhook_status as tribute_webhook_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1182,6 +1190,117 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
                         logger.warning("Failed to notify user %s: %s", user.tg_id, e)
 
     return PlainTextResponse("OK")
+
+
+@app.post(settings.TRIBUTE_WEBHOOK_PATH)
+async def tribute_webhook(request: Request) -> dict:
+    body = await request.body()
+    signature = request.headers.get("trbt-signature", "")
+    if not settings.TRIBUTE_API_KEY:
+        raise HTTPException(status_code=503, detail="Tribute is not configured")
+    if not tribute_verify_webhook_signature(settings.TRIBUTE_API_KEY, body, signature):
+        raise HTTPException(status_code=401, detail="Invalid Tribute signature")
+
+    try:
+        data = json.loads(body)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid Tribute webhook JSON") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Invalid Tribute webhook payload")
+
+    event_name = str(data.get("name") or "").strip().lower()
+    if event_name not in {"shop_order", "shop_order_payment_failed", "shop_order_refunded"}:
+        return {"status": "ok"}
+
+    external_id = tribute_webhook_order_uuid(data)
+    if not external_id:
+        raise HTTPException(status_code=400, detail="Tribute webhook missing order uuid")
+
+    async with AsyncSessionLocal() as session:
+        tx = await repo.get_transaction_by_external_id(session, external_id)
+        if not tx:
+            logger.warning("Tribute webhook for unknown order uuid: %s", external_id)
+            return {"status": "ok"}
+        if tx.provider != PaymentProvider.tribute:
+            logger.warning("Tribute order uuid belongs to another provider: %s", external_id)
+            return {"status": "ok"}
+
+        if event_name == "shop_order":
+            if tx.status != TransactionStatus.pending:
+                return {"status": "ok"}
+            if tribute_webhook_status(data) != "paid":
+                logger.warning("Tribute shop_order without paid status: %s", external_id)
+                return {"status": "ok"}
+            currency = tribute_webhook_currency(data)
+            if currency != "rub":
+                logger.warning("Tribute currency mismatch order=%s currency=%s", external_id, currency)
+                return {"status": "ok"}
+            amount_rub = tribute_webhook_amount_rub(data)
+            if amount_rub is None or round(amount_rub, 2) != round(float(tx.amount_rub), 2):
+                logger.warning(
+                    "Tribute amount mismatch order=%s expected=%s actual=%s",
+                    external_id,
+                    tx.amount_rub,
+                    amount_rub,
+                )
+                return {"status": "ok"}
+
+            try:
+                verified_status = await tribute_get_order_status(external_id)
+            except Exception as exc:
+                logger.error("Tribute order verification failed order=%s: %s", external_id, exc)
+                raise HTTPException(status_code=503, detail="Tribute verification unavailable") from exc
+            if verified_status != "paid":
+                logger.warning("Tribute order not paid server-side order=%s status=%s", external_id, verified_status)
+                raise HTTPException(status_code=503, detail="Tribute order is not paid yet")
+
+            confirmed = await repo.confirm_transaction_and_add_credits(
+                session,
+                external_id,
+                note="Payment confirmed via tribute",
+            )
+            if confirmed:
+                paid_tx, new_balance = confirmed
+                user = await repo.get_user_by_id(session, paid_tx.user_id)
+                if user:
+                    await _accrue_referral_commissions(session, user, paid_tx.amount_rub, bot)
+                    if bot:
+                        try:
+                            await bot.send_message(
+                                user.tg_id,
+                                f"✅ Оплата через Tribute подтверждена!\n"
+                                f"Зачислено: <b>+{paid_tx.credits} 💋</b>\n"
+                                f"Баланс: <b>{new_balance} 💋</b>",
+                                reply_markup=back_to_menu_kb(),
+                            )
+                        except Exception as exc:
+                            logger.warning("Failed to notify Tribute payer %s: %s", user.tg_id, exc)
+            return {"status": "ok"}
+
+        if event_name == "shop_order_payment_failed":
+            if tx.status == TransactionStatus.pending:
+                await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
+            return {"status": "ok"}
+
+        if event_name == "shop_order_refunded":
+            was_paid = tx.status == TransactionStatus.paid
+            refunded_tx = await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
+            if refunded_tx and was_paid:
+                await repo.add_credits(
+                    session,
+                    refunded_tx.user_id,
+                    -refunded_tx.credits,
+                    entry_type="payment_refund",
+                    source_type="transaction",
+                    source_id=str(refunded_tx.id),
+                    note="Refund via tribute",
+                )
+                user = await repo.get_user_by_id(session, refunded_tx.user_id)
+                if user:
+                    await _reverse_referral_commissions(session, user, refunded_tx.amount_rub)
+            return {"status": "ok"}
+
+    return {"status": "ok"}
 
 
 @app.post(settings.KIE_WEBHOOK_PATH)
