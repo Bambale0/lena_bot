@@ -93,6 +93,7 @@ _IMAGE_VARIANT_COSTS = [
     ("wan/2-7-image-pro", "🌊 WAN 2.7 Image Pro", [("1K", 4), ("2K", 5), ("4K", 6)]),
     ("nano-banana-2", "🍌 Nano Banana 2", [("2K", 1.5), ("4K", 2.5)]),
     ("nano-banana-pro", "🍌 Nano Banana Pro", [("2K", 2), ("4K", 3)]),
+    ("nano-banana-pro-vip", "🍌 Нана Банано Про ВИП", [("2K", 8), ("1K", 8)]),
 ]
 
 # ─── Per-second pricing for video models ─────────────────────────────────────
