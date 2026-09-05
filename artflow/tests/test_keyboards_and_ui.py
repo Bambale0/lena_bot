@@ -441,3 +441,9 @@ def test_rub_methods_keyboard_shows_lava_when_configured(monkeypatch) -> None:
     buttons = flatten_buttons(rub_methods_kb())
 
     assert any(button.callback_data == "topup:lava" for button in buttons)
+
+def test_rub_methods_keyboard_shows_tribute_when_configured(monkeypatch) -> None:
+    monkeypatch.setattr("bot.keyboards.payment.settings.TRIBUTE_API_KEY", "tribute-key", raising=False)
+    buttons = flatten_buttons(rub_methods_kb())
+
+    assert any(button.callback_data == "topup:tribute" for button in buttons)

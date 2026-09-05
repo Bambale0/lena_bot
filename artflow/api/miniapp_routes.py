@@ -3573,6 +3573,8 @@ async def list_payment_methods(
         methods.append("tbank")
     if settings.CRYPTOBOT_TOKEN:
         methods.append("crypto")
+    if settings.TRIBUTE_API_KEY:
+        methods.append("tribute")
     if settings.LAVA_API_KEY and any(settings.lava_offer_id_for_plan(key) for key in plan_keys):
         methods.append("lava")
     return methods
@@ -3740,6 +3742,45 @@ async def topup_crypto(
     )
 
     return {"pay_url": invoice.pay_url, "transaction_id": tx.id, "credits": plan.credits, "amount_usdt": usdt_amount}
+
+
+@router.post("/topup/tribute")
+async def topup_tribute(
+    body: TopupRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Create a one-time Tribute Shop order for a credit pack."""
+    from payments.tribute import create_order as tribute_create_order
+
+    if not settings.TRIBUTE_API_KEY:
+        raise HTTPException(status_code=404, detail="Tribute is not enabled")
+
+    plan = await repo.get_price_plan_by_key(session, body.plan_key)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    try:
+        order = await tribute_create_order(plan, user.id)
+    except Exception as exc:
+        logger.error("Tribute order error user=%s: %s", user.id, exc)
+        raise HTTPException(status_code=502, detail="Payment service error")
+
+    tx = await repo.create_transaction(
+        session=session,
+        user_id=user.id,
+        amount_rub=plan.price_rub,
+        credits=plan.credits,
+        provider=PaymentProvider.tribute,
+        external_id=order.order_uuid,
+    )
+    return {
+        "pay_url": order.payment_url,
+        "transaction_id": tx.id,
+        "credits": plan.credits,
+        "amount_rub": plan.price_rub,
+        "provider": "tribute",
+    }
 
 
 @router.post("/topup/lava")

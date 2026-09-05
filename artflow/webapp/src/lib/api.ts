@@ -158,7 +158,7 @@ export class MiniAppApi {
   }
 
   async bootstrap(signal?: AbortSignal): Promise<BootstrapData> {
-    const [userResult, imageResult, videoResult, historyResult, feedResult, trendsResult, plansResult] =
+    const [userResult, imageResult, videoResult, historyResult, feedResult, trendsResult, plansResult, paymentMethodsResult] =
       await Promise.allSettled([
         this.request<UserProfile>("/me", {}, signal),
         this.request<unknown>("/models/image", {}, signal),
@@ -167,6 +167,7 @@ export class MiniAppApi {
         this.request<unknown>(`/feed?source=recent&limit=${FEED_PAGE_SIZE}`, {}, signal),
         this.request<unknown>("/trends?limit=32", {}, signal),
         this.request<unknown>("/plans", {}, signal),
+        this.request<unknown>("/payment-methods", {}, signal),
       ]);
 
     if (userResult.status === "rejected") throw userResult.reason;
@@ -199,6 +200,7 @@ export class MiniAppApi {
       feed,
       trends: asArray<TrendItem>(settledValue(trendsResult, [])),
       paymentPlans: asArray<PaymentPlan>(settledValue(plansResult, [])),
+      paymentMethods: stringArray(settledValue(paymentMethodsResult, [])),
     };
   }
 
@@ -358,7 +360,7 @@ export class MiniAppApi {
     };
   }
 
-  createPayment(provider: "tbank" | "crypto" | "lava", planKey: string): Promise<Record<string, unknown>> {
+  createPayment(provider: "tbank" | "crypto" | "tribute" | "lava", planKey: string): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>(`/topup/${provider}`, {
       method: "POST",
       body: JSON.stringify({ plan_key: planKey }),

@@ -46,6 +46,8 @@ def rub_methods_kb(lang: str = "ru") -> InlineKeyboardMarkup:
             callback_data="topup:tbank",
         )
     )
+    if settings.TRIBUTE_API_KEY:
+        builder.row(InlineKeyboardButton(text="🟣 Tribute", callback_data="topup:tribute"))
     if settings.lava_is_enabled():
         builder.row(InlineKeyboardButton(text="💸 Lava", callback_data="topup:lava"))
     builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:topup"))
@@ -116,4 +118,17 @@ def lava_plans_kb(plans: list[PricePlan], lang: str = "ru", currency: str = "rub
             )
         )
     builder.row(InlineKeyboardButton(text=back_text, callback_data=back_cb))
+    return builder.as_markup()
+
+def tribute_plans_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    back_text = "← " + ("Назад" if lang == "ru" else "Back")
+    for plan in plans:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"🟣 {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else _fmt_amount(plan.credits)} 💋 · {_fmt_amount(plan.price_rub)}₽",
+                callback_data=f"topup:tribute_plan:{plan.key}",
+            )
+        )
+    builder.row(InlineKeyboardButton(text=back_text, callback_data="topup:rub"))
     return builder.as_markup()

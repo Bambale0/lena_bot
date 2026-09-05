@@ -19,12 +19,13 @@ from bot.keyboards.payment import (
     rub_methods_kb,
     rub_plans_kb,
     topup_kb,
+    tribute_plans_kb,
 )
 from bot.states import PromoFSM
 from core.config import settings
 from db import repository as repo
 from db.models import PaymentProvider, PromoRewardType, TransactionStatus, User
-from payments import cryptobot, lava, tbank
+from payments import cryptobot, lava, tbank, tribute
 
 logger = logging.getLogger(__name__)
 router = Router(name="payment")
@@ -81,7 +82,7 @@ def _promo_success_text(result: repo.PromoRedeemResult) -> str:
         return (
             "✅ <b>Промокод активирован</b>\n\n"
             f"Скидка: <b>{value}</b>\n"
-            "Она применится к следующей оплате T-Bank или CryptoBot."
+            "Она применится к следующей оплате T-Bank, CryptoBot или Tribute."
         )
     return (
         "✅ <b>Промокод активирован</b>\n\n"
@@ -153,6 +154,28 @@ async def _reconcile_transaction_status(
             return TransactionStatus.failed, None
         return TransactionStatus.pending, None
 
+    if tx.provider == PaymentProvider.tribute and tx.external_id:
+        status = await tribute.get_order_status(tx.external_id)
+        if status == "paid":
+            confirmed = await repo.confirm_transaction_and_add_credits(
+                session,
+                tx.external_id,
+                note="Payment confirmed via tribute",
+            )
+            balance = None
+            if confirmed:
+                paid_tx, balance = confirmed
+                user = await repo.get_user_by_id(session, paid_tx.user_id)
+                if user:
+                    from main import _accrue_referral_commissions
+
+                    await _accrue_referral_commissions(session, user, paid_tx.amount_rub, None)
+            return TransactionStatus.paid, balance
+        if status == "failed":
+            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.failed)
+            return TransactionStatus.failed, None
+        return TransactionStatus.pending, None
+
     return tx.status, None
 
 
@@ -189,6 +212,69 @@ async def cb_topup_tbank_menu(call: CallbackQuery, session: AsyncSession, db_use
     await call.message.edit_text(  # type: ignore[union-attr]
         t("topup_tbank_title", lang) + "\n\n" + t("topup_select_plan", lang),
         reply_markup=rub_plans_kb(plans, lang=lang),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "topup:tribute")
+async def cb_topup_tribute(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    if not settings.TRIBUTE_API_KEY:
+        await call.answer("Tribute сейчас недоступен" if lang == "ru" else "Tribute is unavailable right now", show_alert=True)
+        return
+    plans = await repo.get_active_price_plans(session)
+    text = (
+        "🟣 <b>Оплата через Tribute</b>\n\nВыбери пакет. Оплата откроется на защищённой странице Tribute.\n\n" + t("topup_select_plan", lang)
+        if lang == "ru"
+        else "🟣 <b>Pay with Tribute</b>\n\nChoose a plan. Checkout opens on Tribute.\n\n" + t("topup_select_plan", lang)
+    )
+    await call.message.edit_text(text, reply_markup=tribute_plans_kb(plans, lang=lang))  # type: ignore[union-attr]
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("topup:tribute_plan:"))
+async def cb_topup_tribute_plan(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    lang = db_user.language or "ru"
+    if not settings.TRIBUTE_API_KEY:
+        await call.answer("Tribute сейчас недоступен" if lang == "ru" else "Tribute is unavailable right now", show_alert=True)
+        return
+    plan_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
+    plan = await repo.get_price_plan_by_key(session, plan_key)
+    if not plan:
+        await call.answer(t("error_not_found", lang), show_alert=True)
+        return
+
+    pay_amount, discount_text, discount_redemption = await _active_discount_text(session, db_user.id, plan.price_rub)
+    try:
+        order = await tribute.create_order(plan, db_user.id, amount_rub=pay_amount)
+    except Exception as exc:
+        logger.error("Tribute order error: %s", exc)
+        await call.answer(t("error_generic", lang), show_alert=True)
+        return
+
+    tx = await repo.create_transaction(
+        session,
+        user_id=db_user.id,
+        amount_rub=pay_amount,
+        credits=plan.credits,
+        provider=PaymentProvider.tribute,
+        external_id=order.order_uuid,
+    )
+    if discount_redemption:
+        await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
+
+    await call.message.edit_text(  # type: ignore[union-attr]
+        (
+            f"🟣 <b>Tribute</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(pay_amount)} ₽</b>"
+            if lang == "ru"
+            else f"🟣 <b>Tribute</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(pay_amount)} ₽</b>"
+        ) + discount_text,
+        reply_markup=payment_link_kb(
+            "🟣 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
+            order.payment_url,
+            order.order_uuid,
+            lang=lang,
+        ),
     )
     await call.answer()
 

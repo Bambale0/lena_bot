@@ -535,13 +535,14 @@ def test_enabled_payment_methods_match_topup_providers(monkeypatch) -> None:
     monkeypatch.setattr(billing.settings, "TBANK_PASSWORD", "password", raising=False)
     monkeypatch.setattr(billing.settings, "TELEGRAM_STARS_ENABLED", True, raising=False)
     monkeypatch.setattr(billing.settings, "CRYPTOBOT_TOKEN", "crypto", raising=False)
+    monkeypatch.setattr(billing.settings, "TRIBUTE_API_KEY", "tribute", raising=False)
     monkeypatch.setattr(billing.settings, "LAVA_API_KEY", "lava", raising=False)
     monkeypatch.setenv("LAVA_OFFER_ID_CREDITS_100", "offer-1")
 
     methods = billing.enabled_payment_methods()
 
-    assert [item["key"] for item in methods] == ["tbank", "crypto", "lava"]
-    assert [item["label"] for item in methods] == ["Карта", "Крипто", "Lava"]
+    assert [item["key"] for item in methods] == ["tbank", "crypto", "tribute", "lava"]
+    assert [item["label"] for item in methods] == ["Карта", "Крипто", "Tribute", "Lava"]
 
 
 def test_web_router_exposes_realtime_websocket_alias() -> None:
