@@ -125,7 +125,7 @@ class Settings(BaseSettings):
     REFERRAL_ANTIFRAUD_MIN_INACTIVE_RATIO: float = 0.95
 
     # Referral commissions
-    REFERRAL_COMMISSION_L1: float = 0.30
+    REFERRAL_COMMISSION_L1: float = 0.40
     REFERRAL_COMMISSION_L2: float = 0.07
     REFERRAL_COMMISSION_L3: float = 0.03
 
