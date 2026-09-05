@@ -169,6 +169,7 @@ _FRIENDLY_MODEL_NAMES: dict[str, str] = {
     "google/nano-banana": "Nano Banana",
     "nano-banana-2": "Nano Banana 2",
     "nano-banana-pro": "Nano Banana Pro",
+    "nano-banana-pro-vip": "Нана Банано Про ВИП",
     "qwen/text-to-image": "Qwen",
     "qwen/image-to-image": "Qwen Edit",
     "qwen/image-edit": "Qwen Edit Pro",
@@ -176,6 +177,7 @@ _FRIENDLY_MODEL_NAMES: dict[str, str] = {
     "qwen2/image-edit": "Qwen 2 Edit",
     "gpt-image-2-text-to-image": "GPT Image 2",
     "gpt-image-2-image-to-image": "GPT Image 2 Edit",
+    "gpt-image-2-vip": "ГПТ 2 ВИП",
     "kling-2.6/text-to-video": "Kling 2.6",
     "kling-2.6/image-to-video": "Kling 2.6 Animate",
     "kling-2.6/motion-control": "Kling Motion",
@@ -470,7 +472,7 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             if gen.model in _MIDJOURNEY_IMAGE_MODEL_KEYS:
                 result_url = await midjourney_service.poll_mj_image(task_id)
             else:
-                result_urls = await image_service.poll_kieai_result_urls(task_id)
+                result_urls = await image_service.poll_image_result_urls(task_id)
                 result_url = result_urls[0] if result_urls else None
         elif gen.gen_type == GenerationType.video:
             if gen.model in _MIDJOURNEY_VIDEO_MODEL_KEYS:

@@ -59,7 +59,7 @@ def _configure_gpt_image_2() -> None:
     base.update(
         modes=["text", "image"],
         aspect_ratio_modes=["text", "image"],
-        max_refs=16,
+        max_refs=4,
         quality_options=list(_GPT_IMAGE_2_QUALITY_OPTIONS),
         has_quality=True,
     )
@@ -68,14 +68,14 @@ def _configure_gpt_image_2() -> None:
     edit.update(
         modes=["image"],
         aspect_ratio_modes=["image"],
-        max_refs=16,
+        max_refs=4,
         quality_options=list(_GPT_IMAGE_2_QUALITY_OPTIONS),
         has_quality=True,
     )
 
     HIDDEN_IMAGE_MODELS.add(ImageModel.GPT_IMAGE_2_I2I)
     IMAGE_MODEL_DESC[ImageModel.GPT_IMAGE_2_T2I] = (
-        "🤖 GPT Image 2 · текст или до 16 фото-референсов · 1K/2K/4K"
+        "🤖 GPT Image 2 · текст или до 4 фото-референсов · 1K/2K/4K"
     )
 
 

@@ -95,8 +95,8 @@ _IMAGE_TEST = ("tests/test_image_provider_contracts.py",)
 _IMAGE_SURFACES = {"telegram": True, "miniapp": True}
 
 IMAGE_CONTRACTS = (
-    _c("image.seedream5.t2i", "kie", "seedream/5-pro-text-to-image", ("text",), ("https://docs.kie.ai/market/seedream/5-pro-text-to-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.seedream5.t2i", **_IMAGE_SURFACES),
-    _c("image.seedream5.i2i", "kie", "seedream/5-pro-image-to-image", ("image",), ("https://docs.kie.ai/market/seedream/5-pro-image-to-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.seedream5.i2i", **_IMAGE_SURFACES),
+    _c("image.seedream5.t2i", "nexus", "seedream/5-pro-text-to-image", ("text",), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.seedream5.t2i", notes="Nexus model_name=seedream-5.0-pro", **_IMAGE_SURFACES),
+    _c("image.seedream5.i2i", "nexus", "seedream/5-pro-image-to-image", ("image",), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.seedream5.i2i", notes="Nexus model_name=seedream-5.0-pro", **_IMAGE_SURFACES),
     _c("image.seedream45.t2i", "kie", "seedream/4.5-text-to-image", ("text",), ("https://docs.kie.ai/market/seedream/4-5-text-to-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.seedream45.t2i", **_IMAGE_SURFACES),
     _c("image.seedream45.edit", "kie", "seedream/4.5-edit", ("image",), ("https://docs.kie.ai/market/seedream/4-5-edit",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.seedream45.edit", **_IMAGE_SURFACES),
     _c("image.grok.t2i", "kie", "grok-imagine/text-to-image", ("text",), ("https://docs.kie.ai/market/grok-imagine/text-to-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.grok.t2i", **_IMAGE_SURFACES),
@@ -104,16 +104,18 @@ IMAGE_CONTRACTS = (
     _c("image.wan27", "kie", "wan/2-7-image", ("text", "image"), ("https://docs.kie.ai/market/wan/2-7-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.wan27", **_IMAGE_SURFACES),
     _c("image.wan27.pro", "kie", "wan/2-7-image-pro", ("text", "image"), ("https://docs.kie.ai/market/wan/2-7-image-pro",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.wan27.pro", **_IMAGE_SURFACES),
     _c("image.nano.legacy", "kie", "google/nano-banana", ("text",), ("https://docs.kie.ai/market/google/nano-banana",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.nano.legacy", **_IMAGE_SURFACES),
-    _c("image.nano2", "comet", "nano-banana-2", ("text", "image"), ("https://ai.google.dev/gemini-api/docs/image-generation",), _IMAGE_BACKEND, ("tests/test_image_service.py",), smoke="image.nano2", **_IMAGE_SURFACES),
+    _c("image.nano2", "nexus", "nano-banana-2", ("text", "image"), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.nano2", **_IMAGE_SURFACES),
     _c("image.nano2.lite", "kie", "nano-banana-2-lite", ("text", "image"), ("https://docs.kie.ai/market/google/nano-banana-2-lite",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.nano2.lite", **_IMAGE_SURFACES),
-    _c("image.nano.pro", "comet", "nano-banana-pro", ("text", "image"), ("https://ai.google.dev/gemini-api/docs/image-generation",), _IMAGE_BACKEND, ("tests/test_image_service.py",), smoke="image.nano.pro", **_IMAGE_SURFACES),
+    _c("image.nano.pro", "nexus", "nano-banana-pro", ("text", "image"), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.nano.pro", **_IMAGE_SURFACES),
+    _c("image.nano.pro.vip", "nexus", "nano-banana-pro-vip", ("text", "image"), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.nano.pro.vip", **_IMAGE_SURFACES),
     _c("image.qwen.t2i", "kie", "qwen/text-to-image", ("text",), ("https://docs.kie.ai/market/qwen/text-to-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.qwen.t2i", **_IMAGE_SURFACES),
     _c("image.qwen.i2i", "kie", "qwen/image-to-image", ("image",), ("https://docs.kie.ai/market/qwen/image-to-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.qwen.i2i", **_IMAGE_SURFACES),
     _c("image.qwen.edit", "kie", "qwen/image-edit", ("image",), ("https://docs.kie.ai/market/qwen/image-edit",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.qwen.edit", **_IMAGE_SURFACES),
     _c("image.qwen2.t2i", "kie", "qwen2/text-to-image", ("text",), ("https://docs.kie.ai/market/qwen2/text-to-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.qwen2.t2i", **_IMAGE_SURFACES),
     _c("image.qwen2.edit", "kie", "qwen2/image-edit", ("image",), ("https://docs.kie.ai/market/qwen2/image-edit",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.qwen2.edit", **_IMAGE_SURFACES),
-    _c("image.gpt2.t2i", "kie", "gpt-image-2-text-to-image", ("text",), ("https://docs.kie.ai/market/gpt/gpt-image-2-text-to-image",), _IMAGE_BACKEND, ("tests/test_gpt_image_2_references.py",), smoke="image.gpt2.t2i", **_IMAGE_SURFACES),
-    _c("image.gpt2.i2i", "kie", "gpt-image-2-image-to-image", ("image",), ("https://docs.kie.ai/market/gpt/gpt-image-2-image-to-image",), _IMAGE_BACKEND, ("tests/test_gpt_image_2_references.py",), smoke="image.gpt2.i2i", **_IMAGE_SURFACES),
+    _c("image.gpt2.t2i", "nexus", "gpt-image-2-text-to-image", ("text",), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.gpt2.t2i", notes="Nexus model_name=gpt-image-2", **_IMAGE_SURFACES),
+    _c("image.gpt2.i2i", "nexus", "gpt-image-2-image-to-image", ("image",), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.gpt2.i2i", notes="Nexus model_name=gpt-image-2", **_IMAGE_SURFACES),
+    _c("image.gpt2.vip", "nexus", "gpt-image-2-vip", ("text", "image"), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.gpt2.vip", **_IMAGE_SURFACES),
 )
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from api import image_service, public_files
@@ -48,8 +50,8 @@ def test_gpt_image_2_without_references_keeps_text_endpoint() -> None:
     assert "nsfw_checker" not in payload
 
 
-def test_gpt_image_2_supports_sixteen_references() -> None:
-    refs = [f"https://example.test/ref-{index}.jpg" for index in range(16)]
+def test_gpt_image_2_supports_four_references() -> None:
+    refs = [f"https://example.test/ref-{index}.jpg" for index in range(4)]
 
     resolved_model, payload = _build_input(
         ImageModel.GPT_IMAGE_2_T2I,
@@ -64,10 +66,10 @@ def test_gpt_image_2_supports_sixteen_references() -> None:
     assert payload["input_urls"] == refs
 
 
-def test_gpt_image_2_rejects_more_than_sixteen_references() -> None:
-    refs = [f"https://example.test/ref-{index}.jpg" for index in range(17)]
+def test_gpt_image_2_rejects_more_than_four_references() -> None:
+    refs = [f"https://example.test/ref-{index}.jpg" for index in range(5)]
 
-    with pytest.raises(ValueError, match="at most 16 reference images"):
+    with pytest.raises(ValueError, match="at most 4 reference images"):
         _build_input(
             ImageModel.GPT_IMAGE_2_T2I,
             prompt="Use all references",
@@ -84,8 +86,8 @@ def test_gpt_image_2_capabilities_are_unified_for_all_surfaces() -> None:
 
     assert text_caps["modes"] == ["text", "image"]
     assert text_caps["aspect_ratio_modes"] == ["text", "image"]
-    assert text_caps["max_refs"] == 16
-    assert edit_caps["max_refs"] == 16
+    assert text_caps["max_refs"] == 4
+    assert edit_caps["max_refs"] == 4
     assert text_caps["quality_options"] == [
         ("2K", "🔷 2K (стандарт)"),
         ("4K", "💎 4K (высокое)"),
@@ -113,7 +115,7 @@ def test_gpt_image_2_capabilities_are_unified_for_all_surfaces() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gpt_image_2_uploads_local_references_before_create_task(tmp_path, monkeypatch) -> None:
+async def test_gpt_image_2_routes_references_to_nexus_without_kie_upload(tmp_path, monkeypatch) -> None:
     first = tmp_path / "first.jpg"
     second = tmp_path / "second.jpg"
     first.write_bytes(JPEG)
@@ -124,79 +126,69 @@ async def test_gpt_image_2_uploads_local_references_before_create_task(tmp_path,
     monkeypatch.setattr(public_files.settings, "WEB_PUBLIC_URL", "https://example.test")
     monkeypatch.setattr(public_files.settings, "STATIC_UPLOAD_URL_PATH", "/static/upload")
 
-    uploaded: list[str] = []
-    created: list[dict] = []
+    calls: list[dict] = []
 
-    async def fake_upload_file_stream(
-        data: bytes,
-        *,
-        filename: str,
-        content_type: str,
-        upload_path: str = "images/apix-refs",
-    ) -> str:
-        assert data
-        assert content_type == "image/jpeg"
-        uploaded.append(filename)
-        return f"https://kie-files.test/{filename}"
+    async def fake_create_nexus_image_task(**kwargs):
+        calls.append(kwargs)
+        return "nexus:task_gpt_image_2"
 
-    async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
-        created.append(payload)
-        return {"code": 200, "data": {"taskId": "task_gpt_image_2"}}
+    monkeypatch.setattr(image_service.nexus_image_adapter, "create_nexus_image_task", fake_create_nexus_image_task)
+    monkeypatch.setattr(
+        image_service.kieai_client,
+        "upload_file_stream",
+        AsyncMock(side_effect=AssertionError("GPT Image 2 refs must not be uploaded to KIE")),
+    )
+    monkeypatch.setattr(
+        image_service.kieai_client,
+        "create_task",
+        AsyncMock(side_effect=AssertionError("GPT Image 2 must not create a KIE task")),
+    )
+    monkeypatch.setattr(
+        image_service.comet_fallback,
+        "generate_image",
+        AsyncMock(side_effect=AssertionError("GPT Image 2 must not use Comet")),
+    )
 
-    async def forbidden_comet_fallback(**_kwargs):
-        raise AssertionError("GPT Image 2 must not use generic Comet fallback")
-
-    monkeypatch.setattr(image_service.kieai_client, "upload_file_stream", fake_upload_file_stream)
-    monkeypatch.setattr(image_service.kieai_client, "create_task", fake_create_task)
-    monkeypatch.setattr(image_service.comet_fallback, "generate_image", forbidden_comet_fallback)
-
+    refs = [
+        "https://example.test/static/upload/first.jpg",
+        "https://example.test/static/upload/second.jpg",
+    ]
     result = await image_service.generate_image(
         ImageModel.GPT_IMAGE_2_T2I,
         "Combine both references",
-        image_url=[
-            "https://example.test/static/upload/first.jpg",
-            "https://example.test/static/upload/second.jpg",
-        ],
+        image_url=refs,
         aspect_ratio="16:9",
         quality="2K",
+        callback_url="https://example.test/webhook/kie?secret=abc",
     )
 
     assert result.is_async is True
-    assert result.task_id == "task_gpt_image_2"
-    assert uploaded == ["first.jpg", "second.jpg"]
-    assert created == [
+    assert result.task_id == "nexus:task_gpt_image_2"
+    assert calls == [
         {
-            "model": ImageModel.GPT_IMAGE_2_I2I.value,
-            "input": {
-                "prompt": "Combine both references",
-                "aspect_ratio": "16:9",
-                "resolution": "2K",
-                "input_urls": [
-                    "https://kie-files.test/first.jpg",
-                    "https://kie-files.test/second.jpg",
-                ],
-            },
+            "model_key": ImageModel.GPT_IMAGE_2_T2I.value,
+            "prompt": "Combine both references",
+            "image_urls": refs,
+            "aspect_ratio": "16:9",
+            "quality": "2K",
+            "callback_url": "https://example.test/webhook/kie?secret=abc",
+            "output_format": None,
         }
     ]
 
 
 @pytest.mark.asyncio
-async def test_gpt_image_2_provider_failure_never_substitutes_seedream(monkeypatch) -> None:
-    comet_called = False
+async def test_gpt_image_2_nexus_failure_never_uses_old_providers(monkeypatch) -> None:
+    async def fail_nexus(**_kwargs):
+        raise RuntimeError("nexus unavailable")
 
-    async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
-        assert payload["model"] == ImageModel.GPT_IMAGE_2_I2I.value
-        return {"code": 500, "msg": "provider unavailable", "data": None}
+    kie_create = AsyncMock()
+    comet_create = AsyncMock()
+    monkeypatch.setattr(image_service.nexus_image_adapter, "create_nexus_image_task", fail_nexus)
+    monkeypatch.setattr(image_service.kieai_client, "create_task", kie_create)
+    monkeypatch.setattr(image_service.comet_fallback, "generate_image", comet_create)
 
-    async def fake_comet_fallback(**_kwargs):
-        nonlocal comet_called
-        comet_called = True
-        raise AssertionError("generic fallback must be disabled")
-
-    monkeypatch.setattr(image_service.kieai_client, "create_task", fake_create_task)
-    monkeypatch.setattr(image_service.comet_fallback, "generate_image", fake_comet_fallback)
-
-    with pytest.raises(RuntimeError, match="fallback disabled to prevent model substitution"):
+    with pytest.raises(RuntimeError, match="nexus unavailable"):
         await image_service.generate_image(
             ImageModel.GPT_IMAGE_2_T2I,
             "Edit the portrait",
@@ -205,4 +197,5 @@ async def test_gpt_image_2_provider_failure_never_substitutes_seedream(monkeypat
             quality="2K",
         )
 
-    assert comet_called is False
+    kie_create.assert_not_awaited()
+    comet_create.assert_not_awaited()

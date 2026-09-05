@@ -44,6 +44,7 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "nano-banana-2",              "display_name": "🍌 Nano Banana 2",        "gen_type": GenerationType.image, "credits": 1.5},
     {"model_key": "nano-banana-2-lite",         "display_name": "🍌 Nano Banana 2 Lite 🔥", "gen_type": GenerationType.image, "credits": 1.0},
     {"model_key": "nano-banana-pro",            "display_name": "🍌 Nano Banana Pro",      "gen_type": GenerationType.image, "credits": 2},
+    {"model_key": "nano-banana-pro-vip",        "display_name": "🍌 Нана Банано Про ВИП",  "gen_type": GenerationType.image, "credits": 8},
     {"model_key": "qwen/text-to-image",         "display_name": "🟣 Qwen",             "gen_type": GenerationType.image, "credits": 3},
     {"model_key": "qwen/image-to-image",        "display_name": "🟣 Qwen Edit",             "gen_type": GenerationType.image, "credits": 3},
     {"model_key": "qwen/image-edit",            "display_name": "🟣 Qwen Edit",            "gen_type": GenerationType.image, "credits": 3},
@@ -70,6 +71,7 @@ DEFAULT_MODEL_COSTS = [
     # ── GPT Image 2 ─────────────────────────────────────────────────────────
     {"model_key": "gpt-image-2-text-to-image",   "display_name": "🤖 GPT Image 2",                 "gen_type": GenerationType.image, "credits": 4},
     {"model_key": "gpt-image-2-image-to-image", "display_name": "🤖 GPT Image 2 Edit",                 "gen_type": GenerationType.image, "credits": 4},
+    {"model_key": "gpt-image-2-vip",            "display_name": "🤖 ГПТ 2 ВИП",                         "gen_type": GenerationType.image, "credits": 5},
     # ── Музыка ────────────────────────────────────────────────────────────────
     {"model_key": "suno/v5.5",                  "display_name": "🎵 Suno 5.5",                    "gen_type": GenerationType.music, "credits": 10},
     {"model_key": "suno/v4.5",                  "display_name": "🎵 Suno 4.5",                    "gen_type": GenerationType.music, "credits": 10},

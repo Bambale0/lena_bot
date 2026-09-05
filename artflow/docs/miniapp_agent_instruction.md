@@ -164,9 +164,9 @@ services/
 
 ```text
 Per-model provider routing in api/image_service.py / api/video_service.py
-Image nano-banana-2 and nano-banana-pro: CometAPI primary
+Image nano-banana-2, nano-banana-pro, Seedream 5 Pro, GPT Image 2 and their configured VIP variants: NexusAPI primary via api/nexus_image_adapter.py
 Other KIE image/video models: KIE.AI primary
-CometAPI fallback only when supported KIE create/start fails
+Provider fallbacks are used only where the exact-model contract explicitly supports them
 ```
 
 Это правило должно быть зафиксировано в одном месте и использоваться всеми поверхностями. Сейчас image routing живёт в `api/image_service.py`, поэтому Mini App не должен дублировать provider-логику на фронте.

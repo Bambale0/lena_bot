@@ -30,7 +30,7 @@ Telegram bot работает через webhook, не через polling.
 - Alembic
 - Redis используется для aiogram FSM
 - KIE.AI используется для многих image/video generation моделей
-- `nano-banana-2` и `nano-banana-pro` используют CometAPI как primary provider
+- `nano-banana-2`, `nano-banana-pro`, Seedream 5 Pro, GPT Image 2 и VIP-варианты используют NexusAPI как primary provider
 - Telegram webhook endpoint: `settings.WEBHOOK_PATH`
 - KIE webhook endpoint должен быть: `settings.KIE_WEBHOOK_PATH`, по умолчанию `/webhook/kie`
 
@@ -55,7 +55,7 @@ payload["callBackUrl"] = callback_url
 
 Важно: KIE ожидает ключ `callBackUrl` с большой `B`.
 
-3. В `api/image_service.py` `generate_image()` должен принимать `callback_url`. Для KIE image-моделей он передается в `kieai_client.create_task(...)`; `nano-banana-2` и `nano-banana-pro` идут в CometAPI primary и не вызывают KIE.
+3. В `api/image_service.py` `generate_image()` должен принимать `callback_url`. Для оставшихся KIE image-моделей он передается в `kieai_client.create_task(...)`. `nano-banana-2`, `nano-banana-pro`, Seedream 5 Pro и GPT Image 2 маршрутизируются через `api/nexus_image_adapter.py`; VIP-варианты Nano Banana Pro и GPT Image 2 также идут через NexusAPI.
 
 4. В `main.py` должен быть endpoint:
 
@@ -146,7 +146,7 @@ def image_session_kb(gen_id: int | None = None) -> InlineKeyboardMarkup:
 
 Требования:
 
-1. При создании KIE-задачи для изображений обязательно передавать callback URL. Исключение: `nano-banana-2` и `nano-banana-pro`, потому что они маршрутизируются в CometAPI primary.
+1. При создании асинхронной image-задачи обязательно передавать callback URL. Nexus-модели (`nano-banana-2`, `nano-banana-pro`, Seedream 5 Pro, GPT Image 2 и VIP-варианты) получают тот же callback через `webhook_url`; оставшиеся KIE-модели используют KIE callback contract.
 
 ```python
 callback_url = f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}"

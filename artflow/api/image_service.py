@@ -1,9 +1,9 @@
 # api/image_service.py
 """Image generation with exact provider/model contracts.
 
-Only Nano Banana 2 and Nano Banana Pro intentionally use Comet/Gemini as their
-primary provider. KIE-backed models are never silently substituted with a
-universal Seedream request when their provider fails.
+Selected APIX image models route to NexusAPI while keeping their historical
+public model keys stable. Remaining KIE-backed models are never silently
+substituted with a different model when their configured provider fails.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ except ImportError:
     class StrEnum(str, Enum):
         pass
 
-from api import comet_fallback, kieai_client
+from api import comet_fallback, kieai_client, nexus_image_adapter
 from api.kie_model_specs import IMAGE_SPECS, build_kie_input, resolve_model_for_reference
 from api.public_files import ensure_provider_safe_png_url, local_upload_path_from_url
 
@@ -47,6 +47,7 @@ class ImageModel(StrEnum):
     NANO_BANANA_2 = "nano-banana-2"
     NANO_BANANA_2_LITE = "nano-banana-2-lite"
     NANO_BANANA_PRO = "nano-banana-pro"
+    NANO_BANANA_PRO_VIP = "nano-banana-pro-vip"
     # Qwen
     QWEN_T2I = "qwen/text-to-image"
     QWEN_I2I = "qwen/image-to-image"
@@ -56,12 +57,16 @@ class ImageModel(StrEnum):
     # GPT Image 2
     GPT_IMAGE_2_T2I = "gpt-image-2-text-to-image"
     GPT_IMAGE_2_I2I = "gpt-image-2-image-to-image"
+    GPT_IMAGE_2_VIP = "gpt-image-2-vip"
 
 
 _SUPPORTS_IMG2IMG: set[ImageModel] = {
     ImageModel(spec.model)
     for spec in IMAGE_SPECS.values()
     if "image" in spec.supported_modes and spec.model in {item.value for item in ImageModel}
+} | {
+    ImageModel.NANO_BANANA_PRO_VIP,
+    ImageModel.GPT_IMAGE_2_VIP,
 }
 
 _QUALITY_MODELS: set[ImageModel] = {
@@ -71,6 +76,8 @@ _QUALITY_MODELS: set[ImageModel] = {
     ImageModel.SEEDREAM_45_EDIT,
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.GPT_IMAGE_2_I2I,
+    ImageModel.NANO_BANANA_PRO_VIP,
+    ImageModel.GPT_IMAGE_2_VIP,
 }
 
 _COUNT_MODELS: set[ImageModel] = {
@@ -83,18 +90,17 @@ _SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
     ImageModel.NANO_BANANA_PRO,
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.GPT_IMAGE_2_I2I,
+    ImageModel.NANO_BANANA_PRO_VIP,
 }
 
 _GPT_IMAGE_2_MODELS = {
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.GPT_IMAGE_2_I2I,
+    ImageModel.GPT_IMAGE_2_VIP,
 }
-_MAX_GPT_IMAGE_2_REFERENCES = 16
+_MAX_GPT_IMAGE_2_REFERENCES = 4
 
-_COMET_PRIMARY_IMAGE_MODELS = {
-    ImageModel.NANO_BANANA_2,
-    ImageModel.NANO_BANANA_PRO,
-}
+_COMET_PRIMARY_IMAGE_MODELS: set[ImageModel] = set()
 
 _COMET_FALLBACK_HTTP_STATUSES = {401, 402, 403, 408, 425, 429}
 
@@ -119,13 +125,15 @@ _REFERENCE_LIMITS: dict[str, int] = {
     ImageModel.GROK_I2I.value: 7,
     ImageModel.WAN_27.value: 9,
     ImageModel.WAN_27_PRO.value: 9,
-    ImageModel.NANO_BANANA_2.value: 14,
+    ImageModel.NANO_BANANA_2.value: 4,
     ImageModel.NANO_BANANA_2_LITE.value: 10,
-    ImageModel.NANO_BANANA_PRO.value: 8,
+    ImageModel.NANO_BANANA_PRO.value: 4,
+    ImageModel.NANO_BANANA_PRO_VIP.value: 14,
     ImageModel.QWEN_I2I.value: 1,
     ImageModel.QWEN_EDIT.value: 1,
     ImageModel.QWEN2_EDIT.value: 1,
-    ImageModel.GPT_IMAGE_2_I2I.value: _MAX_GPT_IMAGE_2_REFERENCES,
+    ImageModel.GPT_IMAGE_2_I2I.value: 4,
+    ImageModel.GPT_IMAGE_2_VIP.value: 4,
 }
 _GROK_MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 
@@ -139,9 +147,10 @@ MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.WAN_27: ["1:1", "16:9", "4:3", "21:9", "3:4", "9:16", "8:1", "1:8"],
     ImageModel.WAN_27_PRO: ["1:1", "16:9", "4:3", "21:9", "3:4", "9:16", "8:1", "1:8"],
     ImageModel.NANO_BANANA: ["auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"],
-    ImageModel.NANO_BANANA_2: ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+    ImageModel.NANO_BANANA_2: ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
     ImageModel.NANO_BANANA_2_LITE: ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
     ImageModel.NANO_BANANA_PRO: ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+    ImageModel.NANO_BANANA_PRO_VIP: ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
     ImageModel.QWEN_T2I: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
     ImageModel.QWEN_I2I: [],
     ImageModel.QWEN_EDIT: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
@@ -161,6 +170,19 @@ MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
         "21:9",
     ],
     ImageModel.GPT_IMAGE_2_I2I: [
+        "auto",
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "2:1",
+        "1:2",
+        "21:9",
+    ],
+    ImageModel.GPT_IMAGE_2_VIP: [
         "auto",
         "1:1",
         "3:2",
@@ -395,6 +417,20 @@ async def generate_image(
 
     prompt = _validate_prompt(prompt)
     _validate_reference_count(model, image_url)
+
+    if nexus_image_adapter.is_nexus_image_model(model.value):
+        task_id = await nexus_image_adapter.create_nexus_image_task(
+            model_key=model.value,
+            prompt=prompt,
+            image_urls=_reference_list(image_url),
+            aspect_ratio=aspect_ratio,
+            quality=quality,
+            callback_url=callback_url,
+            output_format=output_format,
+        )
+        logger.info("NexusAPI image task %s: %s", model.value, task_id)
+        return ImageResult(is_async=True, task_id=task_id)
+
     prepared_image_url = await _prepare_reference_urls_for_model(model, image_url)
     resolved_model, inp = _build_input(
         model,
@@ -756,5 +792,16 @@ async def poll_kieai_status(task_id: str) -> str | None:
     return urls[0] if urls else None
 
 
-poll_seedream_status = poll_kieai_status
-poll_wan27pro_status = poll_kieai_status
+async def poll_image_result_urls(task_id: str) -> list[str] | None:
+    if nexus_image_adapter.is_nexus_task_id(task_id):
+        return await nexus_image_adapter.poll_nexus_image_result_urls(task_id)
+    return await poll_kieai_result_urls(task_id)
+
+
+async def poll_image_status(task_id: str) -> str | None:
+    urls = await poll_image_result_urls(task_id)
+    return urls[0] if urls else None
+
+
+poll_seedream_status = poll_image_status
+poll_wan27pro_status = poll_image_status

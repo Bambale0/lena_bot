@@ -225,3 +225,47 @@ async def test_kie_webhook_maps_comet_kind_to_prefixed_task_id(monkeypatch) -> N
     assert get_generation_by_task_id.await_args.args == (_FAKE_SESSION, "comet:kling-image2video:kling_task_1")
     finish_generation.assert_awaited_once()
     assert finish_generation.await_args.args[1:] == (77, "https://cdn.test/video.mp4")
+
+
+@pytest.mark.asyncio
+async def test_provider_webhook_canonicalizes_nexus_task_before_existing_delivery_pipeline(monkeypatch) -> None:
+    get_generation_by_task_id = AsyncMock(
+        return_value=SimpleNamespace(
+            id=88,
+            user_id=42,
+            status=SimpleNamespace(value="processing"),
+            gen_type=main.GenerationType.image,
+            image_session_id=None,
+            model="nano-banana-pro",
+            prompt="portrait",
+            credits_spent=2,
+            source_feed_gen_id=None,
+            action_type=None,
+        )
+    )
+    finish_generation = AsyncMock()
+    canonical_payload = {
+        "task_id": "nexus_task_1",
+        "status": "completed",
+        "result": {"image_url": "https://cdn.test/nexus-result.png"},
+    }
+
+    monkeypatch.setattr(main.settings, "KIE_WEBHOOK_SECRET", "expected-secret")
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.nexus_image_adapter, "get_nexus_task_payload", AsyncMock(return_value=canonical_payload))
+    monkeypatch.setattr(main.repo, "get_generation_by_task_id", get_generation_by_task_id)
+    monkeypatch.setattr(main.repo, "get_user_by_id", AsyncMock(return_value=SimpleNamespace(id=42, tg_id=555111)))
+    monkeypatch.setattr(main.repo, "finish_generation", finish_generation)
+    monkeypatch.setattr(main, "mirror_url", AsyncMock(side_effect=lambda url: url))
+    monkeypatch.setattr(main, "bot", None)
+
+    async with AsyncClient(transport=ASGITransport(app=main.app), base_url="http://test") as client:
+        response = await client.post(
+            "/webhook/kie?secret=expected-secret&provider=nexus",
+            json={"task_id": "nexus_task_1"},
+        )
+
+    assert response.status_code == 200
+    assert get_generation_by_task_id.await_args.args == (_FAKE_SESSION, "nexus:nexus_task_1")
+    finish_generation.assert_awaited_once()
+    assert finish_generation.await_args.args[1:] == (88, "https://cdn.test/nexus-result.png")
