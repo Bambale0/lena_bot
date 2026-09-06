@@ -22,15 +22,21 @@ class TributeDigitalProduct:
     plan_key: str
     product_id: int
     payment_url: str
+    currency: str
+    amount_minor: int
+
+    @property
+    def amount_major(self) -> float:
+        return self.amount_minor / 100.0
 
 
 TRIBUTE_DIGITAL_PRODUCTS: dict[str, TributeDigitalProduct] = {
-    "credits_15": TributeDigitalProduct("credits_15", 152362, "https://web.tribute.tg/p/DDs"),
-    "credits_25": TributeDigitalProduct("credits_25", 152363, "https://web.tribute.tg/p/DDt"),
-    "credits_50": TributeDigitalProduct("credits_50", 152364, "https://web.tribute.tg/p/DDu"),
-    "credits_100_999": TributeDigitalProduct("credits_100_999", 152365, "https://web.tribute.tg/p/DDv"),
-    "credits_200": TributeDigitalProduct("credits_200", 152366, "https://web.tribute.tg/p/DDw"),
-    "credits_500": TributeDigitalProduct("credits_500", 152367, "https://web.tribute.tg/p/DDx"),
+    "credits_15": TributeDigitalProduct("credits_15", 152362, "https://web.tribute.tg/p/DDs", "usd", 200),
+    "credits_25": TributeDigitalProduct("credits_25", 152363, "https://web.tribute.tg/p/DDt", "usd", 300),
+    "credits_50": TributeDigitalProduct("credits_50", 152364, "https://web.tribute.tg/p/DDu", "usd", 590),
+    "credits_100_999": TributeDigitalProduct("credits_100_999", 152365, "https://web.tribute.tg/p/DDv", "usd", 1200),
+    "credits_200": TributeDigitalProduct("credits_200", 152366, "https://web.tribute.tg/p/DDw", "usd", 2400),
+    "credits_500": TributeDigitalProduct("credits_500", 152367, "https://web.tribute.tg/p/DDx", "usd", 5800),
 }
 TRIBUTE_DIGITAL_PRODUCTS_BY_ID: dict[int, TributeDigitalProduct] = {
     item.product_id: item for item in TRIBUTE_DIGITAL_PRODUCTS.values()
@@ -151,6 +157,20 @@ def digital_product_plan_keys() -> set[str]:
     return set(TRIBUTE_DIGITAL_PRODUCTS)
 
 
+def digital_product_price_usd(plan_key: str) -> float | None:
+    product = digital_product_for_plan(plan_key)
+    if product is None or product.currency != "usd":
+        return None
+    return product.amount_major
+
+
+def digital_product_price_text(plan_key: str) -> str | None:
+    value = digital_product_price_usd(plan_key)
+    if value is None:
+        return None
+    return f"${value:.2f}".rstrip("0").rstrip(".")
+
+
 def digital_purchase_external_id(purchase_id: int | str) -> str:
     return f"digital:{int(purchase_id)}"
 
@@ -177,16 +197,18 @@ async def get_digital_product_checkout(plan: Any) -> TributeDigitalProduct:
         raise RuntimeError("Tribute product is not digital")
     if str(data.get("status") or "").strip().lower() != "approved":
         raise RuntimeError("Tribute digital product is not approved")
-    if str(data.get("currency") or "").strip().lower() != "rub":
-        raise RuntimeError("Tribute digital product currency must be RUB")
+    currency = str(data.get("currency") or "").strip().lower()
+    if currency != mapping.currency:
+        raise RuntimeError(
+            f"Tribute digital product currency mismatch for {plan.key}: "
+            f"expected {mapping.currency}, got {currency}"
+        )
     if data.get("starsAmountEnabled") is True:
         raise RuntimeError("Tribute digital product must have Stars payments disabled")
-
-    expected_amount_minor = int(round(float(plan.price_rub) * 100))
-    if amount_minor != expected_amount_minor:
+    if amount_minor != mapping.amount_minor:
         raise RuntimeError(
             f"Tribute digital product price mismatch for {plan.key}: "
-            f"expected {expected_amount_minor}, got {amount_minor}"
+            f"expected {mapping.amount_minor}, got {amount_minor}"
         )
 
     web_link = str(data.get("webLink") or "").strip()
@@ -256,6 +278,16 @@ def webhook_order_uuid(data: dict[str, Any]) -> str:
     if not isinstance(payload, dict):
         return ""
     return str(payload.get("uuid") or "").strip()
+
+
+def webhook_amount_minor(data: dict[str, Any]) -> int | None:
+    payload = data.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return int(payload.get("amount"))
+    except (TypeError, ValueError):
+        return None
 
 
 def webhook_amount_rub(data: dict[str, Any]) -> float | None:

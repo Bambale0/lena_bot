@@ -345,8 +345,8 @@ async def test_tribute_digital_product_webhook_credits_mapped_purchase_atomicall
         "payload": {
             "product_id": 152362,
             "product_name": "Mini",
-            "amount": 15000,
-            "currency": "rub",
+            "amount": 200,
+            "currency": "usd",
             "telegram_user_id": 12321321,
             "telegram_username": "buyer",
             "purchase_id": 78901,
@@ -396,7 +396,7 @@ async def test_tribute_digital_product_webhook_creates_missing_apix_user(monkeyp
     payload = {
         "name": "new_digital_product",
         "payload": {
-            "product_id": 152362, "amount": 15000, "currency": "rub",
+            "product_id": 152362, "amount": 200, "currency": "usd",
             "telegram_user_id": 12321321, "telegram_username": "buyer", "purchase_id": 78902,
         },
     }
@@ -432,7 +432,7 @@ async def test_tribute_digital_product_duplicate_paid_purchase_is_idempotent(mon
     payload = {
         "name": "new_digital_product",
         "payload": {
-            "product_id": 152362, "amount": 15000, "currency": "rub",
+            "product_id": 152362, "amount": 200, "currency": "usd",
             "telegram_user_id": 12321321, "purchase_id": 78901,
         },
     }
@@ -467,7 +467,7 @@ async def test_tribute_digital_product_refund_reverses_purchase_once(monkeypatch
     payload = {
         "name": "digital_product_refunded",
         "payload": {
-            "product_id": 152362, "amount": 15000, "currency": "rub",
+            "product_id": 152362, "amount": 200, "currency": "usd",
             "telegram_user_id": 12321321, "purchase_id": 78901,
         },
     }
@@ -493,7 +493,7 @@ async def test_tribute_digital_product_unknown_product_is_ignored(monkeypatch) -
     payload = {
         "name": "new_digital_product",
         "payload": {
-            "product_id": 999999, "amount": 15000, "currency": "rub",
+            "product_id": 999999, "amount": 200, "currency": "usd",
             "telegram_user_id": 12321321, "purchase_id": 78901,
         },
     }

@@ -767,6 +767,22 @@ async def test_webapp_plans_use_label_as_title(client, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_webapp_plans_expose_tribute_usd_price_for_mapped_pack(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_active_price_plans",
+        AsyncMock(return_value=[
+            SimpleNamespace(key="credits_15", label="мини", credits=15, price_rub=150.0),
+        ]),
+    )
+
+    response = await client.get("/api/v1/plans")
+
+    assert response.status_code == 200
+    assert response.json()[0]["price_rub"] == 150.0
+    assert response.json()[0]["price_tribute_usd"] == 2.0
+
+
+@pytest.mark.asyncio
 async def test_topup_stars_is_retired_even_when_legacy_flag_is_enabled(client, monkeypatch) -> None:
     monkeypatch.setattr("api.miniapp_routes.settings.TELEGRAM_STARS_ENABLED", True)
     create_transaction = AsyncMock()
@@ -2253,7 +2269,7 @@ async def test_topup_tribute_returns_fixed_digital_product_without_pending_trans
     monkeypatch.setattr("api.miniapp_routes.repo.create_transaction", create_transaction)
     monkeypatch.setattr(
         "payments.tribute.get_digital_product_checkout",
-        AsyncMock(return_value=SimpleNamespace(payment_url="https://web.tribute.tg/p/DDs")),
+        AsyncMock(return_value=SimpleNamespace(payment_url="https://web.tribute.tg/p/DDs", amount_major=2.0)),
     )
 
     response = await client.post("/api/v1/topup/tribute", json={"plan_key": "credits_15"})
@@ -2263,6 +2279,7 @@ async def test_topup_tribute_returns_fixed_digital_product_without_pending_trans
         "pay_url": "https://web.tribute.tg/p/DDs",
         "credits": 15.0,
         "amount_rub": 150.0,
+        "amount_usd": 2.0,
         "provider": "tribute",
     }
     create_transaction.assert_not_awaited()

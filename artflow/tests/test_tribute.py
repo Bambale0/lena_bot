@@ -139,15 +139,15 @@ async def test_tribute_rejects_shop_with_wrong_webhook_url(monkeypatch) -> None:
 
 def test_tribute_digital_product_catalog_matches_supplied_links() -> None:
     assert {
-        key: (item.product_id, item.payment_url)
+        key: (item.product_id, item.payment_url, item.currency, item.amount_minor)
         for key, item in tribute.TRIBUTE_DIGITAL_PRODUCTS.items()
     } == {
-        "credits_15": (152362, "https://web.tribute.tg/p/DDs"),
-        "credits_25": (152363, "https://web.tribute.tg/p/DDt"),
-        "credits_50": (152364, "https://web.tribute.tg/p/DDu"),
-        "credits_100_999": (152365, "https://web.tribute.tg/p/DDv"),
-        "credits_200": (152366, "https://web.tribute.tg/p/DDw"),
-        "credits_500": (152367, "https://web.tribute.tg/p/DDx"),
+        "credits_15": (152362, "https://web.tribute.tg/p/DDs", "usd", 200),
+        "credits_25": (152363, "https://web.tribute.tg/p/DDt", "usd", 300),
+        "credits_50": (152364, "https://web.tribute.tg/p/DDu", "usd", 590),
+        "credits_100_999": (152365, "https://web.tribute.tg/p/DDv", "usd", 1200),
+        "credits_200": (152366, "https://web.tribute.tg/p/DDw", "usd", 2400),
+        "credits_500": (152367, "https://web.tribute.tg/p/DDx", "usd", 5800),
     }
     assert tribute.digital_product_for_id(152365).plan_key == "credits_100_999"
     assert tribute.digital_purchase_external_id(78901) == "digital:78901"
@@ -161,15 +161,15 @@ def test_tribute_digital_webhook_extractors() -> None:
             "purchase_id": 78901,
             "telegram_user_id": 12321321,
             "telegram_username": "durov",
-            "amount": 15000,
-            "currency": "rub",
+            "amount": 200,
+            "currency": "usd",
         },
     }
     assert tribute.webhook_product_id(data) == 152362
     assert tribute.webhook_purchase_id(data) == 78901
     assert tribute.webhook_telegram_user_id(data) == 12321321
     assert tribute.webhook_telegram_username(data) == "durov"
-    assert tribute.webhook_amount_rub(data) == 150.0
+    assert tribute.webhook_amount_minor(data) == 200
 
 
 @pytest.mark.asyncio
@@ -182,8 +182,8 @@ async def test_tribute_digital_product_checkout_verifies_live_product(monkeypatc
             "id": 152362,
             "type": "digital",
             "status": "approved",
-            "currency": "rub",
-            "amount": 15000,
+            "currency": "usd",
+            "amount": 200,
             "starsAmountEnabled": False,
             "webLink": "https://web.tribute.tg/p/DDs",
         }),
@@ -206,8 +206,8 @@ async def test_tribute_digital_product_checkout_rejects_price_drift(monkeypatch)
             "id": 152362,
             "type": "digital",
             "status": "approved",
-            "currency": "rub",
-            "amount": 14900,
+            "currency": "usd",
+            "amount": 199,
             "webLink": "https://web.tribute.tg/p/DDs",
         }),
     )
@@ -226,8 +226,8 @@ async def test_tribute_digital_product_checkout_rejects_stars_enabled(monkeypatc
             "id": 152362,
             "type": "digital",
             "status": "approved",
-            "currency": "rub",
-            "amount": 15000,
+            "currency": "usd",
+            "amount": 200,
             "starsAmountEnabled": True,
             "webLink": "https://web.tribute.tg/p/DDs",
         }),

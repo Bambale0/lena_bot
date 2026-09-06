@@ -140,6 +140,7 @@ export interface PaymentPlan {
   credits: number;
   price_rub?: number;
   price_usdt?: number;
+  price_tribute_usd?: number;
   price_stars?: number;
 }
 

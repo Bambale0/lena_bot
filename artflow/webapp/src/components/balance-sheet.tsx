@@ -37,6 +37,7 @@ interface BalanceSheetProps {
 
 function planPrice(plan: PaymentPlan, method: PaymentProvider): string {
   if (method === "crypto" && plan.price_usdt) return `${plan.price_usdt} USDT`;
+  if (method === "tribute" && plan.price_tribute_usd) return `$${plan.price_tribute_usd}`;
   if (plan.price_rub) return `${plan.price_rub} ₽`;
   return "";
 }
@@ -44,6 +45,7 @@ function planPrice(plan: PaymentPlan, method: PaymentProvider): string {
 function methodAvailable(method: PaymentProvider, plans: PaymentPlan[]): boolean {
   if (!plans.length) return true;
   if (method === "crypto") return plans.some((plan) => Number(plan.price_usdt || 0) > 0);
+  if (method === "tribute") return plans.some((plan) => Number(plan.price_tribute_usd || 0) > 0);
   return plans.some((plan) => Number(plan.price_rub || 0) > 0);
 }
 
