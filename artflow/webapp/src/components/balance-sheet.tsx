@@ -21,7 +21,7 @@ interface PaymentMethod {
 const methods: PaymentMethod[] = [
   { id: "tbank", title: "Карта", subtitle: "T-Bank / банковская карта", icon: Banknote },
   { id: "crypto", title: "CryptoBot", subtitle: "USDT и крипто-оплата", icon: Bitcoin },
-  { id: "tribute", title: "Tribute", subtitle: "Карта / СБП через Tribute", icon: CreditCard },
+  { id: "tribute", title: "USD", subtitle: "Оплата в долларах", icon: CreditCard },
   { id: "lava", title: "СБП / Lava", subtitle: "Российская оплата по ссылке", icon: Send },
 ];
 
