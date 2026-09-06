@@ -36,6 +36,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api import comet_fallback, nexus_image_adapter
@@ -51,7 +52,6 @@ from api.midjourney_service import MJButton, MJTaskResult
 from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import WEB_TASK_PREFIX, is_web_task_id
 from api.miniapp_routes import router as miniapp_router
-from api.trends_routes import router as trends_api_router
 from api.music_service import (
     SUNO_VOICE_FAILED_STATUSES,
     SUNO_VOICE_STATUS_AWAITING_VERIFICATION,
@@ -67,6 +67,7 @@ from api.music_service import (
 )
 from api.public_files import UPLOAD_ROOT, local_upload_path_from_url, mirror_url, save_public_file
 from api.realtime import router as realtime_router
+from api.trends_routes import router as trends_api_router
 from api.web import router as web_router
 from bot.handlers import (
     admin,
@@ -143,12 +144,40 @@ from payments.lava import (
 )
 from payments.tbank import verify_notification_token
 from payments.tribute import (
+    digital_product_for_id as tribute_digital_product_for_id,
+)
+from payments.tribute import (
+    digital_purchase_external_id as tribute_digital_purchase_external_id,
+)
+from payments.tribute import (
     get_order_status as tribute_get_order_status,
+)
+from payments.tribute import (
     verify_webhook_signature as tribute_verify_webhook_signature,
+)
+from payments.tribute import (
     webhook_amount_rub as tribute_webhook_amount_rub,
+)
+from payments.tribute import (
     webhook_currency as tribute_webhook_currency,
+)
+from payments.tribute import (
     webhook_order_uuid as tribute_webhook_order_uuid,
+)
+from payments.tribute import (
+    webhook_product_id as tribute_webhook_product_id,
+)
+from payments.tribute import (
+    webhook_purchase_id as tribute_webhook_purchase_id,
+)
+from payments.tribute import (
     webhook_status as tribute_webhook_status,
+)
+from payments.tribute import (
+    webhook_telegram_user_id as tribute_webhook_telegram_user_id,
+)
+from payments.tribute import (
+    webhook_telegram_username as tribute_webhook_telegram_username,
 )
 
 logger = logging.getLogger(__name__)
@@ -1209,9 +1238,128 @@ async def tribute_webhook(request: Request) -> dict:
         raise HTTPException(status_code=400, detail="Invalid Tribute webhook payload")
 
     event_name = str(data.get("name") or "").strip().lower()
-    if event_name not in {"shop_order", "shop_order_payment_failed", "shop_order_refunded"}:
+    supported_events = {
+        "new_digital_product",
+        "digital_product_refunded",
+        "shop_order",
+        "shop_order_payment_failed",
+        "shop_order_refunded",
+    }
+    if event_name not in supported_events:
         return {"status": "ok"}
 
+    # Current APIX Tribute checkout uses fixed Digital Products. A signed
+    # product_id selects the plan, while purchase_id is the idempotency key.
+    if event_name in {"new_digital_product", "digital_product_refunded"}:
+        product_id = tribute_webhook_product_id(data)
+        purchase_id = tribute_webhook_purchase_id(data)
+        if product_id is None or purchase_id is None:
+            raise HTTPException(status_code=400, detail="Tribute digital product webhook missing product/purchase id")
+
+        product = tribute_digital_product_for_id(product_id)
+        if product is None:
+            logger.warning("Ignoring unmapped Tribute digital product id=%s purchase=%s", product_id, purchase_id)
+            return {"status": "ok"}
+
+        external_id = tribute_digital_purchase_external_id(purchase_id)
+        async with AsyncSessionLocal() as session:
+            if event_name == "digital_product_refunded":
+                tx = await repo.get_transaction_by_external_id(session, external_id)
+                if not tx:
+                    logger.warning("Tribute refund for unknown digital purchase=%s", purchase_id)
+                    return {"status": "ok"}
+                if tx.provider != PaymentProvider.tribute:
+                    logger.warning("Tribute digital purchase belongs to another provider: %s", external_id)
+                    return {"status": "ok"}
+                was_paid = tx.status == TransactionStatus.paid
+                refunded_tx = await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
+                if refunded_tx and was_paid:
+                    await repo.add_credits(
+                        session,
+                        refunded_tx.user_id,
+                        -refunded_tx.credits,
+                        entry_type="payment_refund",
+                        source_type="transaction",
+                        source_id=str(refunded_tx.id),
+                        note="Refund via tribute digital product",
+                    )
+                    user = await repo.get_user_by_id(session, refunded_tx.user_id)
+                    if user:
+                        await _reverse_referral_commissions(session, user, refunded_tx.amount_rub)
+                return {"status": "ok"}
+
+            telegram_user_id = tribute_webhook_telegram_user_id(data)
+            if telegram_user_id is None:
+                # Without Telegram ID there is no safe APIX account to credit.
+                # Return 503 so Tribute retries rather than silently losing a paid purchase.
+                raise HTTPException(status_code=503, detail="Tribute purchase has no Telegram user id")
+
+            plan = await repo.get_price_plan_by_key(session, product.plan_key)
+            if not plan or not plan.is_active:
+                logger.error("Mapped Tribute plan is unavailable product=%s plan=%s", product_id, product.plan_key)
+                raise HTTPException(status_code=503, detail="Mapped APIX plan is unavailable")
+
+            currency = tribute_webhook_currency(data)
+            if currency != "rub":
+                logger.error("Tribute digital product currency mismatch product=%s currency=%s", product_id, currency)
+                raise HTTPException(status_code=503, detail="Tribute product currency mismatch")
+
+            user = await repo.get_user_by_tg_id(session, telegram_user_id)
+            if user is None:
+                user = await repo.create_user(
+                    session,
+                    tg_id=telegram_user_id,
+                    username=tribute_webhook_telegram_username(data),
+                    full_name=None,
+                    welcome_credits=settings.WELCOME_BONUS_CREDITS,
+                )
+
+            tx = await repo.get_transaction_by_external_id(session, external_id)
+            if tx is None:
+                try:
+                    tx = await repo.create_transaction(
+                        session,
+                        user_id=user.id,
+                        amount_rub=float(plan.price_rub),
+                        credits=float(plan.credits),
+                        provider=PaymentProvider.tribute,
+                        external_id=external_id,
+                    )
+                except IntegrityError:
+                    await session.rollback()
+                    tx = await repo.get_transaction_by_external_id(session, external_id)
+                    if tx is None:
+                        raise
+
+            if tx.provider != PaymentProvider.tribute or tx.user_id != user.id:
+                logger.error("Tribute digital purchase collision external_id=%s", external_id)
+                raise HTTPException(status_code=503, detail="Tribute purchase collision")
+            if tx.status != TransactionStatus.pending:
+                return {"status": "ok"}
+
+            confirmed = await repo.confirm_transaction_and_add_credits(
+                session,
+                external_id,
+                note="Payment confirmed via tribute digital product",
+            )
+            if confirmed:
+                paid_tx, new_balance = confirmed
+                await _accrue_referral_commissions(session, user, paid_tx.amount_rub, bot)
+                if bot:
+                    try:
+                        await bot.send_message(
+                            user.tg_id,
+                            f"✅ Оплата через Tribute подтверждена!\n"
+                            f"Зачислено: <b>+{paid_tx.credits} 💋</b>\n"
+                            f"Баланс: <b>{new_balance} 💋</b>",
+                            reply_markup=back_to_menu_kb(),
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to notify Tribute payer %s: %s", user.tg_id, exc)
+            return {"status": "ok"}
+
+    # Backward compatibility for Shop API orders created before migration to
+    # fixed Digital Product links.
     external_id = tribute_webhook_order_uuid(data)
     if not external_id:
         raise HTTPException(status_code=400, detail="Tribute webhook missing order uuid")

@@ -3574,7 +3574,10 @@ async def list_payment_methods(
     if settings.CRYPTOBOT_TOKEN:
         methods.append("crypto")
     if settings.TRIBUTE_API_KEY:
-        methods.append("tribute")
+        from payments import tribute
+
+        if any(key in tribute.digital_product_plan_keys() for key in plan_keys):
+            methods.append("tribute")
     if settings.LAVA_API_KEY and any(settings.lava_offer_id_for_plan(key) for key in plan_keys):
         methods.append("lava")
     return methods
@@ -3750,33 +3753,24 @@ async def topup_tribute(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> dict:
-    """Create a one-time Tribute Shop order for a credit pack."""
-    from payments.tribute import create_order as tribute_create_order
+    """Return the fixed Tribute Digital Product checkout for a credit pack."""
+    from payments import tribute
 
     if not settings.TRIBUTE_API_KEY:
         raise HTTPException(status_code=404, detail="Tribute is not enabled")
 
     plan = await repo.get_price_plan_by_key(session, body.plan_key)
-    if not plan:
+    if not plan or not plan.is_active or tribute.digital_product_for_plan(plan.key) is None:
         raise HTTPException(status_code=404, detail="Plan not found")
 
     try:
-        order = await tribute_create_order(plan, user.id)
+        product = await tribute.get_digital_product_checkout(plan)
     except Exception as exc:
-        logger.error("Tribute order error user=%s: %s", user.id, exc)
+        logger.error("Tribute digital product error user=%s plan=%s: %s", user.id, plan.key, exc)
         raise HTTPException(status_code=502, detail="Payment service error")
 
-    tx = await repo.create_transaction(
-        session=session,
-        user_id=user.id,
-        amount_rub=plan.price_rub,
-        credits=plan.credits,
-        provider=PaymentProvider.tribute,
-        external_id=order.order_uuid,
-    )
     return {
-        "pay_url": order.payment_url,
-        "transaction_id": tx.id,
+        "pay_url": product.payment_url,
         "credits": plan.credits,
         "amount_rub": plan.price_rub,
         "provider": "tribute",

@@ -17,6 +17,26 @@ class TributeOrder:
     payment_url: str
 
 
+@dataclass(frozen=True, slots=True)
+class TributeDigitalProduct:
+    plan_key: str
+    product_id: int
+    payment_url: str
+
+
+TRIBUTE_DIGITAL_PRODUCTS: dict[str, TributeDigitalProduct] = {
+    "credits_15": TributeDigitalProduct("credits_15", 152362, "https://web.tribute.tg/p/DDs"),
+    "credits_25": TributeDigitalProduct("credits_25", 152363, "https://web.tribute.tg/p/DDt"),
+    "credits_50": TributeDigitalProduct("credits_50", 152364, "https://web.tribute.tg/p/DDu"),
+    "credits_100_999": TributeDigitalProduct("credits_100_999", 152365, "https://web.tribute.tg/p/DDv"),
+    "credits_200": TributeDigitalProduct("credits_200", 152366, "https://web.tribute.tg/p/DDw"),
+    "credits_500": TributeDigitalProduct("credits_500", 152367, "https://web.tribute.tg/p/DDx"),
+}
+TRIBUTE_DIGITAL_PRODUCTS_BY_ID: dict[int, TributeDigitalProduct] = {
+    item.product_id: item for item in TRIBUTE_DIGITAL_PRODUCTS.values()
+}
+
+
 def _api_base_url() -> str:
     return settings.TRIBUTE_API_BASE_URL.rstrip("/")
 
@@ -113,6 +133,104 @@ async def create_order(
     if not order_uuid or not payment_url:
         raise RuntimeError("Tribute did not return order uuid/paymentUrl")
     return TributeOrder(order_uuid=order_uuid, payment_url=payment_url)
+
+
+def digital_product_for_plan(plan_key: str) -> TributeDigitalProduct | None:
+    return TRIBUTE_DIGITAL_PRODUCTS.get(str(plan_key))
+
+
+def digital_product_for_id(product_id: int | str) -> TributeDigitalProduct | None:
+    try:
+        parsed = int(product_id)
+    except (TypeError, ValueError):
+        return None
+    return TRIBUTE_DIGITAL_PRODUCTS_BY_ID.get(parsed)
+
+
+def digital_product_plan_keys() -> set[str]:
+    return set(TRIBUTE_DIGITAL_PRODUCTS)
+
+
+def digital_purchase_external_id(purchase_id: int | str) -> str:
+    return f"digital:{int(purchase_id)}"
+
+
+async def get_product(product_id: int) -> dict[str, Any]:
+    return await _request("GET", f"/products/{int(product_id)}")
+
+
+async def get_digital_product_checkout(plan: Any) -> TributeDigitalProduct:
+    mapping = digital_product_for_plan(str(plan.key))
+    if mapping is None:
+        raise RuntimeError(f"No Tribute digital product mapped for plan {plan.key}")
+
+    data = await get_product(mapping.product_id)
+    try:
+        product_id = int(data.get("id"))
+        amount_minor = int(data.get("amount"))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Tribute digital product returned invalid id/amount") from exc
+
+    if product_id != mapping.product_id:
+        raise RuntimeError("Tribute digital product id mismatch")
+    if str(data.get("type") or "").strip().lower() != "digital":
+        raise RuntimeError("Tribute product is not digital")
+    if str(data.get("status") or "").strip().lower() != "approved":
+        raise RuntimeError("Tribute digital product is not approved")
+    if str(data.get("currency") or "").strip().lower() != "rub":
+        raise RuntimeError("Tribute digital product currency must be RUB")
+    if data.get("starsAmountEnabled") is True:
+        raise RuntimeError("Tribute digital product must have Stars payments disabled")
+
+    expected_amount_minor = int(round(float(plan.price_rub) * 100))
+    if amount_minor != expected_amount_minor:
+        raise RuntimeError(
+            f"Tribute digital product price mismatch for {plan.key}: "
+            f"expected {expected_amount_minor}, got {amount_minor}"
+        )
+
+    web_link = str(data.get("webLink") or "").strip()
+    if web_link and web_link.rstrip("/") != mapping.payment_url.rstrip("/"):
+        raise RuntimeError("Tribute digital product web link mismatch")
+    return mapping
+
+
+def webhook_product_id(data: dict[str, Any]) -> int | None:
+    payload = data.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return int(payload.get("product_id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def webhook_purchase_id(data: dict[str, Any]) -> int | None:
+    payload = data.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return int(payload.get("purchase_id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def webhook_telegram_user_id(data: dict[str, Any]) -> int | None:
+    payload = data.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return int(payload.get("telegram_user_id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def webhook_telegram_username(data: dict[str, Any]) -> str | None:
+    payload = data.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    value = str(payload.get("telegram_username") or "").strip().lstrip("@")
+    return value or None
 
 
 async def get_order_status(order_uuid: str) -> str:

@@ -2235,7 +2235,7 @@ async def test_payment_methods_advertise_tribute_when_configured(client, monkeyp
     monkeypatch.setattr("api.miniapp_routes.settings.LAVA_API_KEY", "")
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_active_price_plans",
-        AsyncMock(return_value=[SimpleNamespace(key="credits_100")]),
+        AsyncMock(return_value=[SimpleNamespace(key="credits_15")]),
     )
 
     response = await client.get("/api/v1/payment-methods")
@@ -2245,29 +2245,24 @@ async def test_payment_methods_advertise_tribute_when_configured(client, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_topup_tribute_creates_transaction_from_web_payment_url(client, monkeypatch) -> None:
-    from db.models import PaymentProvider
-
-    plan = SimpleNamespace(key="credits_100", label="100 💋", credits=100.0, price_rub=199.0)
-    create_transaction = AsyncMock(return_value=SimpleNamespace(id=501))
+async def test_topup_tribute_returns_fixed_digital_product_without_pending_transaction(client, monkeypatch) -> None:
+    plan = SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0, is_active=True)
+    create_transaction = AsyncMock()
     monkeypatch.setattr("api.miniapp_routes.settings.TRIBUTE_API_KEY", "tribute-key")
     monkeypatch.setattr("api.miniapp_routes.repo.get_price_plan_by_key", AsyncMock(return_value=plan))
     monkeypatch.setattr("api.miniapp_routes.repo.create_transaction", create_transaction)
     monkeypatch.setattr(
-        "payments.tribute.create_order",
-        AsyncMock(
-            return_value=SimpleNamespace(
-                order_uuid="tribute-order-1",
-                payment_url="https://web.tribute.tg/shop/pay/order-1",
-            )
-        ),
+        "payments.tribute.get_digital_product_checkout",
+        AsyncMock(return_value=SimpleNamespace(payment_url="https://web.tribute.tg/p/DDs")),
     )
 
-    response = await client.post("/api/v1/topup/tribute", json={"plan_key": "credits_100"})
+    response = await client.post("/api/v1/topup/tribute", json={"plan_key": "credits_15"})
 
     assert response.status_code == 200
-    assert response.json()["pay_url"] == "https://web.tribute.tg/shop/pay/order-1"
-    assert "webapp_payment_url" not in response.json()
-    create_transaction.assert_awaited_once()
-    assert create_transaction.await_args.kwargs["provider"] == PaymentProvider.tribute
-    assert create_transaction.await_args.kwargs["external_id"] == "tribute-order-1"
+    assert response.json() == {
+        "pay_url": "https://web.tribute.tg/p/DDs",
+        "credits": 15.0,
+        "amount_rub": 150.0,
+        "provider": "tribute",
+    }
+    create_transaction.assert_not_awaited()

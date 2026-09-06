@@ -135,3 +135,103 @@ async def test_tribute_rejects_shop_with_wrong_webhook_url(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="webhook URL must be configured"):
         await tribute.create_order(plan, user_id=7)
+
+
+def test_tribute_digital_product_catalog_matches_supplied_links() -> None:
+    assert {
+        key: (item.product_id, item.payment_url)
+        for key, item in tribute.TRIBUTE_DIGITAL_PRODUCTS.items()
+    } == {
+        "credits_15": (152362, "https://web.tribute.tg/p/DDs"),
+        "credits_25": (152363, "https://web.tribute.tg/p/DDt"),
+        "credits_50": (152364, "https://web.tribute.tg/p/DDu"),
+        "credits_100_999": (152365, "https://web.tribute.tg/p/DDv"),
+        "credits_200": (152366, "https://web.tribute.tg/p/DDw"),
+        "credits_500": (152367, "https://web.tribute.tg/p/DDx"),
+    }
+    assert tribute.digital_product_for_id(152365).plan_key == "credits_100_999"
+    assert tribute.digital_purchase_external_id(78901) == "digital:78901"
+
+
+def test_tribute_digital_webhook_extractors() -> None:
+    data = {
+        "name": "new_digital_product",
+        "payload": {
+            "product_id": 152362,
+            "purchase_id": 78901,
+            "telegram_user_id": 12321321,
+            "telegram_username": "durov",
+            "amount": 15000,
+            "currency": "rub",
+        },
+    }
+    assert tribute.webhook_product_id(data) == 152362
+    assert tribute.webhook_purchase_id(data) == 78901
+    assert tribute.webhook_telegram_user_id(data) == 12321321
+    assert tribute.webhook_telegram_username(data) == "durov"
+    assert tribute.webhook_amount_rub(data) == 150.0
+
+
+@pytest.mark.asyncio
+async def test_tribute_digital_product_checkout_verifies_live_product(monkeypatch) -> None:
+    plan = SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0)
+    monkeypatch.setattr(
+        tribute,
+        "get_product",
+        AsyncMock(return_value={
+            "id": 152362,
+            "type": "digital",
+            "status": "approved",
+            "currency": "rub",
+            "amount": 15000,
+            "starsAmountEnabled": False,
+            "webLink": "https://web.tribute.tg/p/DDs",
+        }),
+    )
+
+    product = await tribute.get_digital_product_checkout(plan)
+
+    assert product.plan_key == "credits_15"
+    assert product.product_id == 152362
+    assert product.payment_url == "https://web.tribute.tg/p/DDs"
+
+
+@pytest.mark.asyncio
+async def test_tribute_digital_product_checkout_rejects_price_drift(monkeypatch) -> None:
+    plan = SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0)
+    monkeypatch.setattr(
+        tribute,
+        "get_product",
+        AsyncMock(return_value={
+            "id": 152362,
+            "type": "digital",
+            "status": "approved",
+            "currency": "rub",
+            "amount": 14900,
+            "webLink": "https://web.tribute.tg/p/DDs",
+        }),
+    )
+
+    with pytest.raises(RuntimeError, match="price mismatch"):
+        await tribute.get_digital_product_checkout(plan)
+
+
+@pytest.mark.asyncio
+async def test_tribute_digital_product_checkout_rejects_stars_enabled(monkeypatch) -> None:
+    plan = SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0)
+    monkeypatch.setattr(
+        tribute,
+        "get_product",
+        AsyncMock(return_value={
+            "id": 152362,
+            "type": "digital",
+            "status": "approved",
+            "currency": "rub",
+            "amount": 15000,
+            "starsAmountEnabled": True,
+            "webLink": "https://web.tribute.tg/p/DDs",
+        }),
+    )
+
+    with pytest.raises(RuntimeError, match="Stars payments disabled"):
+        await tribute.get_digital_product_checkout(plan)
