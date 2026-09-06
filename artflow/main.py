@@ -156,6 +156,9 @@ from payments.tribute import (
     verify_webhook_signature as tribute_verify_webhook_signature,
 )
 from payments.tribute import (
+    webhook_amount_minor as tribute_webhook_amount_minor,
+)
+from payments.tribute import (
     webhook_amount_rub as tribute_webhook_amount_rub,
 )
 from payments.tribute import (
@@ -1300,9 +1303,17 @@ async def tribute_webhook(request: Request) -> dict:
                 raise HTTPException(status_code=503, detail="Mapped APIX plan is unavailable")
 
             currency = tribute_webhook_currency(data)
-            if currency != "rub":
-                logger.error("Tribute digital product currency mismatch product=%s currency=%s", product_id, currency)
-                raise HTTPException(status_code=503, detail="Tribute product currency mismatch")
+            amount_minor = tribute_webhook_amount_minor(data)
+            if currency != product.currency or amount_minor != product.amount_minor:
+                logger.error(
+                    "Tribute digital product payment mismatch product=%s expected=%s/%s actual=%s/%s",
+                    product_id,
+                    product.currency,
+                    product.amount_minor,
+                    currency,
+                    amount_minor,
+                )
+                raise HTTPException(status_code=503, detail="Tribute product payment mismatch")
 
             user = await repo.get_user_by_tg_id(session, telegram_user_id)
             if user is None:

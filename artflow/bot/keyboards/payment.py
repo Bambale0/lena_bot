@@ -121,12 +121,15 @@ def lava_plans_kb(plans: list[PricePlan], lang: str = "ru", currency: str = "rub
     return builder.as_markup()
 
 def tribute_plans_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
+    from payments import tribute
+
     builder = InlineKeyboardBuilder()
     back_text = "← " + ("Назад" if lang == "ru" else "Back")
     for plan in plans:
+        price_text = tribute.digital_product_price_text(plan.key) or f"{_fmt_amount(plan.price_rub)}₽"
         builder.row(
             InlineKeyboardButton(
-                text=f"🟣 {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else _fmt_amount(plan.credits)} 💋 · {_fmt_amount(plan.price_rub)}₽",
+                text=f"🟣 {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else _fmt_amount(plan.credits)} 💋 · {price_text}",
                 callback_data=f"topup:tribute_plan:{plan.key}",
             )
         )

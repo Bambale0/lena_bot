@@ -540,7 +540,12 @@ function TopupModal({ onClose }) {
     };
   }, [reloadPlans]);
 
-  const formatRub = (plan) => {
+  const formatPlanPrice = (plan) => {
+    if (method === "tribute" && Number(plan?.price_tribute_usd || 0) > 0) {
+      const value = Number(plan.price_tribute_usd);
+      return `$${String(value.toFixed(2)).replace(/\.?0+$/, "")}`;
+    }
+    if (method === "crypto" && Number(plan?.price_usdt || 0) > 0) return `${plan.price_usdt} USDT`;
     if (plan?.price_rub_display) return plan.price_rub_display;
     const value = Number(plan?.price_rub || 0);
     return `${String(value.toFixed(2)).replace(/\.?0+$/, "")}₽`;
@@ -587,7 +592,7 @@ function TopupModal({ onClose }) {
               >
                 <b>{p.title || p.label}</b>
                 <span>{p.credits} 💋</span>
-                <em>{formatRub(p)}</em>
+                <em>{formatPlanPrice(p)}</em>
               </button>
             ))}
           </div>

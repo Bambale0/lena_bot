@@ -54,7 +54,13 @@ from api.music_service import (
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.public_files import preview_public_image_url, public_url_is_available
 from api.video_service import VideoModel
-from bot.keyboards.models import _IMAGE_MODEL_ORDER, _VIDEO_MODEL_ORDER, IMAGE_CAPS, VIDEO_CAPS, image_session_kb
+from bot.keyboards.models import (
+    _IMAGE_MODEL_ORDER,
+    _VIDEO_MODEL_ORDER,
+    IMAGE_CAPS,
+    VIDEO_CAPS,
+    image_session_kb,
+)
 from bot.utils.deep_links import build_start_payload
 from bot.utils.telegram_images import (
     send_image_group_to_chat,
@@ -62,7 +68,6 @@ from bot.utils.telegram_images import (
     send_original_document_to_chat,
 )
 from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
-from core.trends import is_trend_prompt, trend_kind
 from core.gemini_omni import (
     GEMINI_OMNI_MAX_AUDIO_IDS,
     GEMINI_OMNI_MAX_CHARACTER_IDS,
@@ -72,6 +77,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.trends import is_trend_prompt, trend_kind
 from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
@@ -3610,6 +3616,8 @@ async def list_plans(
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     plans = await repo.get_active_price_plans(session)
+    from payments import tribute
+
     return [
         {
             "key": p.key,
@@ -3620,6 +3628,7 @@ async def list_plans(
             "price_rub_display": f"{_fmt_amount(p.price_rub)}₽",
             "price_stars": _plan_stars_price(p),
             "price_usdt": round(p.price_rub / 90, 2),  # approximate
+            "price_tribute_usd": tribute.digital_product_price_usd(p.key),
         }
         for p in plans
     ]
@@ -3773,6 +3782,7 @@ async def topup_tribute(
         "pay_url": product.payment_url,
         "credits": plan.credits,
         "amount_rub": plan.price_rub,
+        "amount_usd": product.amount_major,
         "provider": "tribute",
     }
 

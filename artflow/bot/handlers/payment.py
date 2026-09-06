@@ -255,11 +255,12 @@ async def cb_topup_tribute_plan(call: CallbackQuery, session: AsyncSession, db_u
         await call.answer(t("error_generic", lang), show_alert=True)
         return
 
+    price_text = tribute.digital_product_price_text(plan.key) or f"{_fmt_amount(plan.price_rub)} ₽"
     await call.message.edit_text(  # type: ignore[union-attr]
         (
-            f"🟣 <b>Tribute</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(plan.price_rub)} ₽</b>\n\nПосле оплаты 💋 начислятся автоматически."
+            f"🟣 <b>Tribute</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{price_text}</b>\n\nПосле оплаты 💋 начислятся автоматически."
             if lang == "ru"
-            else f"🟣 <b>Tribute</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(plan.price_rub)} ₽</b>\n\nCredits are added automatically after payment."
+            else f"🟣 <b>Tribute</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{price_text}</b>\n\nCredits are added automatically after payment."
         ),
         reply_markup=payment_link_kb(
             "🟣 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
