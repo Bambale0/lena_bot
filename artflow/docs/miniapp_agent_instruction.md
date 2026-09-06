@@ -164,8 +164,8 @@ services/
 
 ```text
 Per-model provider routing in api/image_service.py / api/video_service.py
-Image nano-banana-2, nano-banana-pro, Seedream 5 Pro, GPT Image 2 and their configured VIP variants: NexusAPI primary via api/nexus_image_adapter.py
-Other KIE image/video models: KIE.AI primary
+Image nano-banana-2, nano-banana-pro, GPT Image 2 and their configured VIP variants: NexusAPI primary via api/nexus_image_adapter.py
+Seedream 5 Pro and other KIE image/video models: KIE.AI primary
 Provider fallbacks are used only where the exact-model contract explicitly supports them
 ```
 

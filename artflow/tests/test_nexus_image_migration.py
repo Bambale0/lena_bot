@@ -18,8 +18,6 @@ from db.seed import DEFAULT_MODEL_COSTS
     [
         ("nano-banana-pro", "nano-banana-pro"),
         ("nano-banana-2", "nano-banana-2"),
-        ("seedream/5-pro-text-to-image", "seedream-5.0-pro"),
-        ("seedream/5-pro-image-to-image", "seedream-5.0-pro"),
         ("gpt-image-2-text-to-image", "gpt-image-2"),
         ("gpt-image-2-image-to-image", "gpt-image-2"),
         ("nano-banana-pro-vip", "nano-banana-pro-vip"),
@@ -51,24 +49,11 @@ def test_nano_banana_pro_nexus_payload_preserves_refs_quality_ratio_and_webhook(
     }
 
 
-def test_seedream_5_pro_nexus_payload_maps_existing_quality_without_ux_change() -> None:
-    payload = nexus_image_adapter.build_nexus_image_params(
-        model_key="seedream/5-pro-image-to-image",
-        prompt="make it cinematic",
-        image_urls=["https://example.test/a.jpg", "https://example.test/b.jpg"],
-        aspect_ratio="16:9",
-        quality="high",
-        output_format="png",
-    )
-
-    assert payload == {
-        "model_name": "seedream-5.0-pro",
-        "prompt": "make it cinematic",
-        "image_urls": ["https://example.test/a.jpg", "https://example.test/b.jpg"],
-        "aspect_ratio": "16:9",
-        "resolution": "2K",
-        "output_format": "png",
-    }
+def test_seedream_5_pro_is_excluded_from_nexus_adapter() -> None:
+    for model_key in ("seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"):
+        assert nexus_image_adapter.is_nexus_image_model(model_key) is False
+        with pytest.raises(ValueError, match="Unsupported Nexus image model"):
+            nexus_image_adapter.nexus_model_name(model_key)
 
 
 @pytest.mark.parametrize("model_key", ["gpt-image-2-text-to-image", "gpt-image-2-vip"])
@@ -92,7 +77,6 @@ def test_nexus_reference_limits_match_live_contract() -> None:
     cases = {
         "nano-banana-pro": 4,
         "nano-banana-2": 4,
-        "seedream/5-pro-image-to-image": 10,
         "gpt-image-2-image-to-image": 4,
         "nano-banana-pro-vip": 14,
         "gpt-image-2-vip": 4,
@@ -122,8 +106,6 @@ def test_nexus_reference_limits_match_live_contract() -> None:
     [
         ImageModel.NANO_BANANA_PRO,
         ImageModel.NANO_BANANA_2,
-        ImageModel.SEEDREAM_5_PRO_T2I,
-        ImageModel.SEEDREAM_5_PRO_I2I,
         ImageModel.GPT_IMAGE_2_T2I,
         ImageModel.GPT_IMAGE_2_I2I,
         ImageModel.NANO_BANANA_PRO_VIP,
@@ -140,7 +122,6 @@ async def test_generate_image_routes_migrated_models_only_to_nexus(monkeypatch, 
 
     refs = None
     if model in {
-        ImageModel.SEEDREAM_5_PRO_I2I,
         ImageModel.GPT_IMAGE_2_I2I,
     }:
         refs = ["https://example.test/ref.jpg"]
@@ -159,6 +140,43 @@ async def test_generate_image_routes_migrated_models_only_to_nexus(monkeypatch, 
     nexus_create.assert_awaited_once()
     kie_create.assert_not_awaited()
     comet_create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "refs"),
+    [
+        (ImageModel.SEEDREAM_5_PRO_T2I, None),
+        (ImageModel.SEEDREAM_5_PRO_I2I, ["https://example.test/ref.jpg"]),
+    ],
+)
+async def test_seedream_5_pro_routes_to_kie_not_nexus(monkeypatch, model: ImageModel, refs) -> None:
+    nexus_create = AsyncMock(side_effect=AssertionError("Seedream 5 Pro must not call Nexus"))
+    kie_create = AsyncMock(return_value={"code": 200, "data": {"taskId": "kie_seedream_task"}})
+    monkeypatch.setattr(image_service.nexus_image_adapter, "create_nexus_image_task", nexus_create)
+    monkeypatch.setattr(image_service.kieai_client, "create_task", kie_create)
+
+    result = await image_service.generate_image(
+        model,
+        "test prompt",
+        image_url=refs,
+        aspect_ratio="9:16",
+        quality="high",
+        callback_url="https://apix.example/webhook/kie?secret=abc",
+        output_format="png",
+    )
+
+    assert result.is_async is True
+    assert result.task_id == "kie_seedream_task"
+    nexus_create.assert_not_awaited()
+    kie_create.assert_awaited_once()
+    payload = kie_create.await_args.args[0]
+    assert payload["model"] == model.value
+    assert payload["input"]["prompt"] == "test prompt"
+    assert payload["input"]["quality"] == "high"
+    assert payload["input"]["output_format"] == "png"
+    if refs:
+        assert payload["input"]["image_urls"] == refs
 
 
 @pytest.mark.asyncio
@@ -203,13 +221,11 @@ def test_vip_bootstrap_prices_are_added_without_repricing_existing_models() -> N
     assert rows["gpt-image-2-vip"]["credits"] == 5
 
 
-def test_provider_inventory_marks_all_migrated_image_contracts_as_nexus() -> None:
+def test_provider_inventory_matches_active_image_transports() -> None:
     by_model = {contract.model: contract for contract in IMAGE_CONTRACTS}
     migrated = {
         "nano-banana-pro",
         "nano-banana-2",
-        "seedream/5-pro-text-to-image",
-        "seedream/5-pro-image-to-image",
         "gpt-image-2-text-to-image",
         "gpt-image-2-image-to-image",
         "nano-banana-pro-vip",
@@ -219,6 +235,11 @@ def test_provider_inventory_marks_all_migrated_image_contracts_as_nexus() -> Non
         contract = by_model[key]
         assert contract.provider == "nexus"
         assert "https://nexusapi.dev/openapi.json" in contract.official_docs
+
+    for key in ("seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"):
+        contract = by_model[key]
+        assert contract.provider == "kie"
+        assert any("docs.kie.ai/market/seedream/5-pro" in url for url in contract.official_docs)
 
 @pytest.mark.asyncio
 async def test_miniapp_model_catalog_exposes_both_vip_models_with_exact_names(monkeypatch) -> None:

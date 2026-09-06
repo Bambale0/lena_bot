@@ -337,7 +337,7 @@ Provider layer:
 
 - `ImageModel` enum - только поддерживаемые ключи.
 - `api/kie_model_specs.py` - source of truth для KIE-compatible provider payload.
-- `api/image_service.py` - сохраняет публичные APIX model keys и выбирает provider. `nano-banana-2`, `nano-banana-pro`, Seedream 5 Pro, GPT Image 2 и их VIP-варианты идут в NexusAPI через `api/nexus_image_adapter.py`; остальные модели используют свой явно настроенный provider.
+- `api/image_service.py` - сохраняет публичные APIX model keys и выбирает provider. `nano-banana-2`, `nano-banana-pro`, GPT Image 2 и их VIP-варианты идут в NexusAPI через `api/nexus_image_adapter.py`; Seedream 5 Pro идёт через KIE.AI Market, остальные модели используют свой явно настроенный provider.
 - local uploaded refs для некоторых моделей надо сначала загрузить/provider-friendly URL.
 
 ### 8.4 Video generation
@@ -661,7 +661,7 @@ The site talks to `/api/web/*`, not `/api/v1/*`.
 
 ### 12.1 KIE.AI
 
-KIE remains the primary provider for many image/video/music tasks, but provider routing is per model. `nano-banana-2`, `nano-banana-pro`, Seedream 5 Pro, GPT Image 2 and their configured VIP variants use NexusAPI through `api/nexus_image_adapter.py`; `nano-banana-2-lite` remains on the KIE/KIE Market path.
+KIE remains the primary provider for many image/video/music tasks, but provider routing is per model. `nano-banana-2`, `nano-banana-pro`, GPT Image 2 and their configured VIP variants use NexusAPI through `api/nexus_image_adapter.py`; Seedream 5 Pro and `nano-banana-2-lite` use the KIE/KIE Market path.
 
 Patterns:
 

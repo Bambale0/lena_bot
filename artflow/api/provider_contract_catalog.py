@@ -95,8 +95,8 @@ _IMAGE_TEST = ("tests/test_image_provider_contracts.py",)
 _IMAGE_SURFACES = {"telegram": True, "miniapp": True}
 
 IMAGE_CONTRACTS = (
-    _c("image.seedream5.t2i", "nexus", "seedream/5-pro-text-to-image", ("text",), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.seedream5.t2i", notes="Nexus model_name=seedream-5.0-pro", **_IMAGE_SURFACES),
-    _c("image.seedream5.i2i", "nexus", "seedream/5-pro-image-to-image", ("image",), ("https://nexusapi.dev/openapi.json", "https://github.com/mat12121212/nexusapi-examples"), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.seedream5.i2i", notes="Nexus model_name=seedream-5.0-pro", **_IMAGE_SURFACES),
+    _c("image.seedream5.t2i", "kie", "seedream/5-pro-text-to-image", ("text",), ("https://docs.kie.ai/market/seedream/5-pro-text-to-image",), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.seedream5.t2i", notes="KIE Market route restored after persistent Nexus task failures", **_IMAGE_SURFACES),
+    _c("image.seedream5.i2i", "kie", "seedream/5-pro-image-to-image", ("image",), ("https://docs.kie.ai/market/seedream/5-pro-image-to-image",), _IMAGE_BACKEND, ("tests/test_nexus_image_migration.py",), smoke="image.seedream5.i2i", notes="KIE Market route restored after persistent Nexus task failures", **_IMAGE_SURFACES),
     _c("image.seedream45.t2i", "kie", "seedream/4.5-text-to-image", ("text",), ("https://docs.kie.ai/market/seedream/4-5-text-to-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.seedream45.t2i", **_IMAGE_SURFACES),
     _c("image.seedream45.edit", "kie", "seedream/4.5-edit", ("image",), ("https://docs.kie.ai/market/seedream/4-5-edit",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.seedream45.edit", **_IMAGE_SURFACES),
     _c("image.grok.t2i", "kie", "grok-imagine/text-to-image", ("text",), ("https://docs.kie.ai/market/grok-imagine/text-to-image",), _IMAGE_BACKEND, _IMAGE_TEST, smoke="image.grok.t2i", **_IMAGE_SURFACES),
