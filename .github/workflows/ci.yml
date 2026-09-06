@@ -104,6 +104,7 @@ jobs:
             tests/test_referral_commission_defaults.py \
             tests/test_stars_payment.py \
             tests/test_tribute.py \
+            tests/test_plan_payment_method_choice.py \
             tests/test_payment_webhooks.py \
             tests/test_miniapp_feed_webkit_stability.py \
             tests/test_provider_contract_catalog.py \
