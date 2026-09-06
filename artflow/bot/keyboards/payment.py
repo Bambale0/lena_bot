@@ -19,7 +19,7 @@ def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(
                 text=f"💳 {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else _fmt_amount(plan.credits)} 💋 · {_fmt_amount(plan.price_rub)}₽",
-                callback_data=f"topup:rub:{plan.key}",
+                callback_data=f"topup:plan:{plan.key}",
             )
         )
 
@@ -36,6 +36,38 @@ def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:balance"))
     return builder.as_markup()
 
+
+
+def plan_payment_methods_kb(plan: PricePlan, lang: str = "ru") -> InlineKeyboardMarkup:
+    """Payment methods for a package chosen from the main top-up list."""
+    from payments import tribute
+
+    builder = InlineKeyboardBuilder()
+    back_text = "← " + ("Назад" if lang == "ru" else "Back")
+
+    if settings.TBANK_TERMINAL_KEY and settings.TBANK_PASSWORD:
+        builder.row(
+            InlineKeyboardButton(
+                text="💳 T-Bank / СБП" if lang == "ru" else "💳 T-Bank / Card",
+                callback_data=f"topup:rub:{plan.key}",
+            )
+        )
+    if settings.TRIBUTE_API_KEY and tribute.digital_product_for_plan(plan.key) is not None:
+        price_text = tribute.digital_product_price_text(plan.key)
+        label = f"🟣 Tribute · {price_text}" if price_text else "🟣 Tribute"
+        builder.row(InlineKeyboardButton(text=label, callback_data=f"topup:tribute_plan:{plan.key}"))
+    if settings.CRYPTOBOT_TOKEN:
+        builder.row(
+            InlineKeyboardButton(
+                text="🪙 CryptoBot",
+                callback_data=f"topup:crypto_plan:{plan.key}",
+            )
+        )
+    if settings.lava_is_enabled() and settings.lava_offer_id_for_plan(plan.key):
+        builder.row(InlineKeyboardButton(text="💸 Lava", callback_data=f"topup:lava_plan:{plan.key}"))
+
+    builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:topup"))
+    return builder.as_markup()
 
 def rub_methods_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()

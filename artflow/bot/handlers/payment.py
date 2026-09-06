@@ -16,6 +16,7 @@ from bot.keyboards.payment import (
     crypto_plans_kb,
     lava_plans_kb,
     payment_link_kb,
+    plan_payment_methods_kb,
     rub_methods_kb,
     rub_plans_kb,
     topup_kb,
@@ -186,6 +187,31 @@ async def cb_topup(call: CallbackQuery, session: AsyncSession, db_user: User) ->
     await call.message.edit_text(  # type: ignore[union-attr]
         t("topup_title", lang),
         reply_markup=topup_kb(plans, lang=lang),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("topup:plan:"))
+async def cb_topup_plan_methods(
+    call: CallbackQuery, session: AsyncSession, db_user: User
+) -> None:
+    """Choose payment provider before creating any provider-side invoice."""
+    lang = db_user.language or "ru"
+    plan_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
+    plan = await repo.get_price_plan_by_key(session, plan_key)
+    if not plan or not plan.is_active:
+        await call.answer(t("error_not_found", lang), show_alert=True)
+        return
+
+    credits_text = _fmt_amount(float(plan.credits))
+    text = (
+        f"💋 <b>{plan.label}</b>\n\nПакет: <b>{credits_text} 💋</b>\n\nВыбери способ оплаты."
+        if lang == "ru"
+        else f"💋 <b>{plan.label}</b>\n\nPackage: <b>{credits_text} 💋</b>\n\nChoose a payment method."
+    )
+    await call.message.edit_text(  # type: ignore[union-attr]
+        text,
+        reply_markup=plan_payment_methods_kb(plan, lang=lang),
     )
     await call.answer()
 
