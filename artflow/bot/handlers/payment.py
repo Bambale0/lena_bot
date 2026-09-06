@@ -222,11 +222,15 @@ async def cb_topup_tribute(call: CallbackQuery, session: AsyncSession, db_user: 
     if not settings.TRIBUTE_API_KEY:
         await call.answer("Tribute сейчас недоступен" if lang == "ru" else "Tribute is unavailable right now", show_alert=True)
         return
-    plans = await repo.get_active_price_plans(session)
+    allowed_plan_keys = tribute.digital_product_plan_keys()
+    plans = [plan for plan in await repo.get_active_price_plans(session) if plan.key in allowed_plan_keys]
+    if not plans:
+        await call.answer("Tribute сейчас недоступен" if lang == "ru" else "Tribute is unavailable right now", show_alert=True)
+        return
     text = (
-        "🟣 <b>Оплата через Tribute</b>\n\nВыбери пакет. Оплата откроется на защищённой странице Tribute.\n\n" + t("topup_select_plan", lang)
+        "🟣 <b>Оплата через Tribute</b>\n\nВыбери пакет. Оплата откроется на странице Tribute, а 💋 начислятся автоматически после подтверждения платежа.\n\n" + t("topup_select_plan", lang)
         if lang == "ru"
-        else "🟣 <b>Pay with Tribute</b>\n\nChoose a plan. Checkout opens on Tribute.\n\n" + t("topup_select_plan", lang)
+        else "🟣 <b>Pay with Tribute</b>\n\nChoose a plan. Checkout opens on Tribute and credits are added automatically after payment confirmation.\n\n" + t("topup_select_plan", lang)
     )
     await call.message.edit_text(text, reply_markup=tribute_plans_kb(plans, lang=lang))  # type: ignore[union-attr]
     await call.answer()
@@ -240,39 +244,27 @@ async def cb_topup_tribute_plan(call: CallbackQuery, session: AsyncSession, db_u
         return
     plan_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
     plan = await repo.get_price_plan_by_key(session, plan_key)
-    if not plan:
+    if not plan or not plan.is_active or tribute.digital_product_for_plan(plan.key) is None:
         await call.answer(t("error_not_found", lang), show_alert=True)
         return
 
-    pay_amount, discount_text, discount_redemption = await _active_discount_text(session, db_user.id, plan.price_rub)
     try:
-        order = await tribute.create_order(plan, db_user.id, amount_rub=pay_amount)
+        product = await tribute.get_digital_product_checkout(plan)
     except Exception as exc:
-        logger.error("Tribute order error: %s", exc)
+        logger.error("Tribute digital product error plan=%s: %s", plan.key, exc)
         await call.answer(t("error_generic", lang), show_alert=True)
         return
 
-    tx = await repo.create_transaction(
-        session,
-        user_id=db_user.id,
-        amount_rub=pay_amount,
-        credits=plan.credits,
-        provider=PaymentProvider.tribute,
-        external_id=order.order_uuid,
-    )
-    if discount_redemption:
-        await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
-
     await call.message.edit_text(  # type: ignore[union-attr]
         (
-            f"🟣 <b>Tribute</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(pay_amount)} ₽</b>"
+            f"🟣 <b>Tribute</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(plan.price_rub)} ₽</b>\n\nПосле оплаты 💋 начислятся автоматически."
             if lang == "ru"
-            else f"🟣 <b>Tribute</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(pay_amount)} ₽</b>"
-        ) + discount_text,
+            else f"🟣 <b>Tribute</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(plan.price_rub)} ₽</b>\n\nCredits are added automatically after payment."
+        ),
         reply_markup=payment_link_kb(
             "🟣 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
-            order.payment_url,
-            order.order_uuid,
+            product.payment_url,
+            None,
             lang=lang,
         ),
     )
