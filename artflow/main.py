@@ -1360,7 +1360,7 @@ async def tribute_webhook(request: Request) -> dict:
                     try:
                         await bot.send_message(
                             user.tg_id,
-                            f"✅ Оплата через Tribute подтверждена!\n"
+                            f"✅ Оплата в USD подтверждена!\n"
                             f"Зачислено: <b>+{paid_tx.credits} 💋</b>\n"
                             f"Баланс: <b>{new_balance} 💋</b>",
                             reply_markup=back_to_menu_kb(),
@@ -1427,7 +1427,7 @@ async def tribute_webhook(request: Request) -> dict:
                         try:
                             await bot.send_message(
                                 user.tg_id,
-                                f"✅ Оплата через Tribute подтверждена!\n"
+                                f"✅ Оплата в USD подтверждена!\n"
                                 f"Зачислено: <b>+{paid_tx.credits} 💋</b>\n"
                                 f"Баланс: <b>{new_balance} 💋</b>",
                                 reply_markup=back_to_menu_kb(),

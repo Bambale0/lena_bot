@@ -35,7 +35,7 @@ def test_plan_payment_methods_include_tbank_tribute_and_crypto_without_stars(mon
     assert "topup:tribute_plan:credits_100_999" in callbacks
     assert "topup:crypto_plan:credits_100_999" in callbacks
     assert all("stars" not in str(callback or "").lower() for callback in callbacks)
-    assert any(text.startswith("🟣 Tribute · $12") for text in texts)
+    assert any(text.startswith("💵 USD · $12") for text in texts)
 
 
 @pytest.mark.asyncio

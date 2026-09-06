@@ -54,7 +54,7 @@ def plan_payment_methods_kb(plan: PricePlan, lang: str = "ru") -> InlineKeyboard
         )
     if settings.TRIBUTE_API_KEY and tribute.digital_product_for_plan(plan.key) is not None:
         price_text = tribute.digital_product_price_text(plan.key)
-        label = f"🟣 Tribute · {price_text}" if price_text else "🟣 Tribute"
+        label = f"💵 USD · {price_text}" if price_text else "💵 USD"
         builder.row(InlineKeyboardButton(text=label, callback_data=f"topup:tribute_plan:{plan.key}"))
     if settings.CRYPTOBOT_TOKEN:
         builder.row(
@@ -79,7 +79,7 @@ def rub_methods_kb(lang: str = "ru") -> InlineKeyboardMarkup:
         )
     )
     if settings.TRIBUTE_API_KEY:
-        builder.row(InlineKeyboardButton(text="🟣 Tribute", callback_data="topup:tribute"))
+        builder.row(InlineKeyboardButton(text="💵 USD", callback_data="topup:tribute"))
     if settings.lava_is_enabled():
         builder.row(InlineKeyboardButton(text="💸 Lava", callback_data="topup:lava"))
     builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:topup"))

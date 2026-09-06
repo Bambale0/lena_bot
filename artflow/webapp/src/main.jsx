@@ -601,7 +601,7 @@ function TopupModal({ onClose }) {
         <div className="tabs" style={{ marginTop: 16 }}>
           {paymentMethods.includes("tbank") && <button className={method === "tbank" ? "active" : ""} onClick={() => setMethod("tbank")}>💳 Т-Банк</button>}
           {paymentMethods.includes("crypto") && <button className={method === "crypto" ? "active" : ""} onClick={() => setMethod("crypto")}>₮ Крипто</button>}
-          {paymentMethods.includes("tribute") && <button className={method === "tribute" ? "active" : ""} onClick={() => setMethod("tribute")}>🟣 Tribute</button>}
+          {paymentMethods.includes("tribute") && <button className={method === "tribute" ? "active" : ""} onClick={() => setMethod("tribute")}>💵 USD</button>}
           {paymentMethods.includes("lava") && <button className={method === "lava" ? "active" : ""} onClick={() => setMethod("lava")}>💸 Lava</button>}
         </div>
 

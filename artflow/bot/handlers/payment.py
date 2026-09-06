@@ -83,7 +83,7 @@ def _promo_success_text(result: repo.PromoRedeemResult) -> str:
         return (
             "✅ <b>Промокод активирован</b>\n\n"
             f"Скидка: <b>{value}</b>\n"
-            "Она применится к следующей оплате T-Bank, CryptoBot или Tribute."
+            "Она применится к следующей оплате T-Bank, CryptoBot или USD."
         )
     return (
         "✅ <b>Промокод активирован</b>\n\n"
@@ -246,17 +246,17 @@ async def cb_topup_tbank_menu(call: CallbackQuery, session: AsyncSession, db_use
 async def cb_topup_tribute(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     lang = db_user.language or "ru"
     if not settings.TRIBUTE_API_KEY:
-        await call.answer("Tribute сейчас недоступен" if lang == "ru" else "Tribute is unavailable right now", show_alert=True)
+        await call.answer("Оплата в USD сейчас недоступна" if lang == "ru" else "USD payment is unavailable right now", show_alert=True)
         return
     allowed_plan_keys = tribute.digital_product_plan_keys()
     plans = [plan for plan in await repo.get_active_price_plans(session) if plan.key in allowed_plan_keys]
     if not plans:
-        await call.answer("Tribute сейчас недоступен" if lang == "ru" else "Tribute is unavailable right now", show_alert=True)
+        await call.answer("Оплата в USD сейчас недоступна" if lang == "ru" else "USD payment is unavailable right now", show_alert=True)
         return
     text = (
-        "🟣 <b>Оплата через Tribute</b>\n\nВыбери пакет. Оплата откроется на странице Tribute, а 💋 начислятся автоматически после подтверждения платежа.\n\n" + t("topup_select_plan", lang)
+        "💵 <b>Оплата в USD</b>\n\nВыбери пакет. Откроется защищённая страница оплаты, а 💋 начислятся автоматически после подтверждения платежа.\n\n" + t("topup_select_plan", lang)
         if lang == "ru"
-        else "🟣 <b>Pay with Tribute</b>\n\nChoose a plan. Checkout opens on Tribute and credits are added automatically after payment confirmation.\n\n" + t("topup_select_plan", lang)
+        else "💵 <b>Pay in USD</b>\n\nChoose a plan. Secure checkout will open and credits are added automatically after payment confirmation.\n\n" + t("topup_select_plan", lang)
     )
     await call.message.edit_text(text, reply_markup=tribute_plans_kb(plans, lang=lang))  # type: ignore[union-attr]
     await call.answer()
@@ -266,7 +266,7 @@ async def cb_topup_tribute(call: CallbackQuery, session: AsyncSession, db_user: 
 async def cb_topup_tribute_plan(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
     lang = db_user.language or "ru"
     if not settings.TRIBUTE_API_KEY:
-        await call.answer("Tribute сейчас недоступен" if lang == "ru" else "Tribute is unavailable right now", show_alert=True)
+        await call.answer("Оплата в USD сейчас недоступна" if lang == "ru" else "USD payment is unavailable right now", show_alert=True)
         return
     plan_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
     plan = await repo.get_price_plan_by_key(session, plan_key)
@@ -284,12 +284,12 @@ async def cb_topup_tribute_plan(call: CallbackQuery, session: AsyncSession, db_u
     price_text = tribute.digital_product_price_text(plan.key) or f"{_fmt_amount(plan.price_rub)} ₽"
     await call.message.edit_text(  # type: ignore[union-attr]
         (
-            f"🟣 <b>Tribute</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{price_text}</b>\n\nПосле оплаты 💋 начислятся автоматически."
+            f"💵 <b>USD</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{price_text}</b>\n\nПосле оплаты 💋 начислятся автоматически."
             if lang == "ru"
-            else f"🟣 <b>Tribute</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{price_text}</b>\n\nCredits are added automatically after payment."
+            else f"💵 <b>USD</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{price_text}</b>\n\nCredits are added automatically after payment."
         ),
         reply_markup=payment_link_kb(
-            "🟣 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
+            "💵 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
             product.payment_url,
             None,
             lang=lang,
