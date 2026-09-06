@@ -14,8 +14,6 @@ NEXUS_TASK_PREFIX = "nexus:"
 NEXUS_IMAGE_MODEL_MAP: dict[str, str] = {
     "nano-banana-pro": "nano-banana-pro",
     "nano-banana-2": "nano-banana-2",
-    "seedream/5-pro-text-to-image": "seedream-5.0-pro",
-    "seedream/5-pro-image-to-image": "seedream-5.0-pro",
     "gpt-image-2-text-to-image": "gpt-image-2",
     "gpt-image-2-image-to-image": "gpt-image-2",
     "nano-banana-pro-vip": "nano-banana-pro-vip",
@@ -25,7 +23,6 @@ NEXUS_IMAGE_MODEL_MAP: dict[str, str] = {
 NEXUS_IMAGE_REFERENCE_LIMITS: dict[str, int] = {
     "nano-banana-pro": 4,
     "nano-banana-2": 4,
-    "seedream-5.0-pro": 10,
     "gpt-image-2": 4,
     "nano-banana-pro-vip": 14,
     "gpt-image-2-vip": 4,
@@ -44,7 +41,6 @@ _NANO_RATIOS = {
     "4:5",
     "21:9",
 }
-_SEEDREAM_RATIOS = {"1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"}
 _GPT_RATIOS = {
     "auto",
     "1:1",
@@ -67,7 +63,6 @@ _GPT_RATIOS = {
 NEXUS_IMAGE_ASPECT_RATIOS: dict[str, set[str]] = {
     "nano-banana-pro": _NANO_RATIOS,
     "nano-banana-2": _NANO_RATIOS,
-    "seedream-5.0-pro": _SEEDREAM_RATIOS,
     "gpt-image-2": _GPT_RATIOS,
     "nano-banana-pro-vip": _NANO_RATIOS,
     "gpt-image-2-vip": _GPT_RATIOS,
@@ -188,13 +183,6 @@ def build_nexus_image_params(
         params["image_size"] = quality_value if quality_value in {"1K", "2K", "4K"} else "2K"
     elif model_name == "nano-banana-pro-vip":
         params["image_size"] = quality_value if quality_value in {"1K", "2K"} else "2K"
-    elif model_name == "seedream-5.0-pro":
-        resolution = {"basic": "1K", "high": "2K"}.get(quality_value, quality_value)
-        params["resolution"] = resolution if resolution in {"1K", "1.5K", "2K"} else "2K"
-        fmt = str(output_format or "").strip().lower()
-        if fmt in {"jpeg", "jpg", "png"}:
-            params["output_format"] = fmt
-
     # The live GptImage2Params/GptImage2VipParams schemas intentionally expose
     # no resolution field. APIX keeps its existing quality control for UX and
     # billing continuity, but does not send an unsupported provider parameter.
