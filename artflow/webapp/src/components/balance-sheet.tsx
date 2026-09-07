@@ -42,6 +42,18 @@ function planPrice(plan: PaymentPlan, method: PaymentProvider): string {
   return "";
 }
 
+function compactPrice(value: number): string {
+  return value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function planListPrice(plan: PaymentPlan): string {
+  const rubValue = Number(plan.price_rub || 0);
+  const usdValue = Number(plan.price_tribute_usd || 0);
+  const rub = rubValue > 0 ? `${compactPrice(rubValue)}₽` : "";
+  const usd = usdValue > 0 ? `$${compactPrice(usdValue)}` : "";
+  return [rub, usd].filter(Boolean).join(" | ");
+}
+
 function methodAvailable(method: PaymentProvider, plans: PaymentPlan[]): boolean {
   if (!plans.length) return true;
   if (method === "crypto") return plans.some((plan) => Number(plan.price_usdt || 0) > 0);
@@ -101,7 +113,7 @@ function BalanceSheet({ open, user, plans, availableProviders, busy, onOpenChang
             <div className="grid gap-2 min-[430px]:grid-cols-2">
               {plans.map((plan) => {
                 const active = selectedPlan?.key === plan.key;
-                const price = planPrice(plan, method) || copy.balance.priceBeforePayment;
+                const price = planListPrice(plan) || copy.balance.priceBeforePayment;
                 return (
                   <button
                     key={plan.key}
@@ -114,7 +126,7 @@ function BalanceSheet({ open, user, plans, availableProviders, busy, onOpenChang
                       {active ? <CheckCircle2 className="size-4 shrink-0 text-primary" /> : null}
                     </div>
                     <p className="text-lg font-bold">{formatKisses(plan.credits)}</p>
-                    <p className="text-[10px] text-muted-foreground">от {price}</p>
+                    <p className="text-[10px] text-muted-foreground">{price}</p>
                   </button>
                 );
               })}

@@ -13,10 +13,12 @@ def _callbacks(markup) -> list[str | None]:
     return [button.callback_data for row in markup.inline_keyboard for button in row]
 
 
-def test_main_topup_package_routes_to_payment_method_choice() -> None:
+def test_main_topup_package_routes_to_payment_method_choice(monkeypatch) -> None:
     plan = SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999")
+    monkeypatch.setattr("bot.keyboards.payment.settings.TRIBUTE_API_KEY", "tribute", raising=False)
     buttons = [button for row in topup_kb([plan]).inline_keyboard for button in row]
     assert buttons[0].callback_data == "topup:plan:credits_100_999"
+    assert buttons[0].text == "💳 Профи — 100 💋 · 1000₽ | $12"
 
 
 def test_plan_payment_methods_include_tbank_tribute_and_crypto_without_stars(monkeypatch) -> None:
@@ -69,7 +71,7 @@ async def test_main_package_click_opens_method_choice_without_creating_tbank_inv
     call.answer.assert_awaited_once()
 
 
-def test_main_topup_shows_usd_as_tribute_and_lava_separately(monkeypatch) -> None:
+def test_main_topup_embeds_usd_price_and_removes_currency_shortcuts(monkeypatch) -> None:
     plan = SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999")
     monkeypatch.setattr("bot.keyboards.payment.settings.TRIBUTE_API_KEY", "tribute", raising=False)
     monkeypatch.setattr("bot.keyboards.payment.settings.CRYPTOBOT_TOKEN", "crypto", raising=False)
@@ -80,10 +82,14 @@ def test_main_topup_shows_usd_as_tribute_and_lava_separately(monkeypatch) -> Non
     callbacks = [button.callback_data for button in buttons]
     labels = [button.text for button in buttons]
 
-    assert "topup:tribute" in callbacks
-    assert "topup:lava" in callbacks
+    assert buttons[0].text == "💳 Профи — 100 💋 · 1000₽ | $12"
+    assert "topup:tribute" not in callbacks
+    assert "topup:rub" not in callbacks
     assert "topup:usd" not in callbacks
-    assert "💵 USD" in labels
+    assert "topup:crypto" in callbacks
+    assert "topup:lava" in callbacks
+    assert "💵 USD" not in labels
+    assert "₽ Рубль" not in labels
     assert "💸 Lava" in labels
 
 

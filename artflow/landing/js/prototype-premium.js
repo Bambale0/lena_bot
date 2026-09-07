@@ -368,6 +368,13 @@ function formatCurrency(value) {
   return `${formatNumber(value)}₽`;
 }
 
+function formatPlanListPrice(plan) {
+  const rub = plan?.price_rub_display || formatCurrency(plan?.price_rub || 0);
+  const usdValue = Number(plan?.price_tribute_usd || 0);
+  const usd = usdValue > 0 ? `$${formatNumber(usdValue)}` : "";
+  return [rub, usd].filter(Boolean).join(" | ");
+}
+
 function paymentMethodKey(method) {
   if (typeof method === "string") return method;
   return String(method?.key || method?.provider || "");
@@ -3380,7 +3387,7 @@ function renderBilling() {
       <article>
         <span>${index === 1 ? "Популярный пакет" : "Пополнить"}</span>
         <b>${escapeHtml(plan.label || plan.title || plan.key)}</b>
-        <p>${formatNumber(plan.credits)} на баланс · ${escapeHtml(plan.price_rub_display || formatCurrency(plan.price_rub || 0))}</p>
+        <p>${formatNumber(plan.credits)} на баланс · ${escapeHtml(formatPlanListPrice(plan))}</p>
         <div class="pay-actions">
           ${methodButtons(plan, index === 1)}
         </div>

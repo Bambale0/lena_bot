@@ -551,6 +551,13 @@ function TopupModal({ onClose }) {
     return `${String(value.toFixed(2)).replace(/\.?0+$/, "")}₽`;
   };
 
+  const formatPlanListPrice = (plan) => {
+    const rub = plan?.price_rub_display || `${String(Number(plan?.price_rub || 0).toFixed(2)).replace(/\.?0+$/, "")}₽`;
+    const usdValue = Number(plan?.price_tribute_usd || 0);
+    const usd = usdValue > 0 ? `$${String(usdValue.toFixed(2)).replace(/\.?0+$/, "")}` : "";
+    return [rub, usd].filter(Boolean).join(" | ");
+  };
+
   async function handlePay() {
     if (!selected) return;
     setBusy(true); setErr(null);
@@ -592,7 +599,7 @@ function TopupModal({ onClose }) {
               >
                 <b>{p.title || p.label}</b>
                 <span>{p.credits} 💋</span>
-                <em>{formatPlanPrice(p)}</em>
+                <em>{formatPlanListPrice(p)}</em>
               </button>
             ))}
           </div>
