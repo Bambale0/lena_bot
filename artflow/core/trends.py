@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from core.trend_user_fields import TrendUserFieldsError, normalize_trend_user_fields
 from db.models import PromptStatus, UserPrompt
 
 TREND_TAG = "trend"
@@ -59,6 +60,14 @@ def trend_category_payload(category: str) -> dict[str, str]:
     return {"key": key, "title": meta["title"], "emoji": meta["emoji"]}
 
 
+
+def trend_user_fields(prompt: UserPrompt) -> list[dict[str, Any]]:
+    raw = getattr(prompt, "trend_user_fields", None) or []
+    try:
+        return normalize_trend_user_fields(raw, prompt=str(prompt.prompt_text or ""))
+    except TrendUserFieldsError:
+        return []
+
 def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
     """Structured resolver for legacy tag-backed trends.
 
@@ -89,6 +98,7 @@ def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
         "kind": kind,
         "category": trend_category(prompt),
         "settings_version": 1,
+        "user_fields": trend_user_fields(prompt),
     }
 
 
@@ -145,6 +155,7 @@ def trend_public_payload(prompt: UserPrompt) -> dict[str, Any]:
         "uses_count": int(prompt.uses_count or 0),
         "likes": int(prompt.likes or 0),
         "created_at": created_at.isoformat() if created_at else "",
+        "user_fields": trend_user_fields(prompt),
     }
 
 

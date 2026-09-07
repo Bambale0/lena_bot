@@ -9,7 +9,7 @@ import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import { copyTrendLink, openTrendRunner } from "@/features/trend-runner";
 import { MiniAppApi } from "@/lib/api";
 import { readTelegramInitData } from "@/lib/telegram";
-import type { ModelInfo, TrendItem } from "@/lib/types";
+import type { ModelInfo, TrendItem, TrendUserField } from "@/lib/types";
 import { cn, safeExternalUrl } from "@/lib/utils";
 
 interface TrendsScreenProps {
@@ -23,6 +23,14 @@ interface TrendsScreenProps {
 }
 
 type TrendKind = "image" | "video";
+type TrendAdminItem = TrendItem & {
+  prompt_template: string;
+  model: string;
+  settings: Record<string, unknown> & { user_fields?: TrendUserField[] };
+  status?: string;
+  is_public?: boolean;
+};
+
 type TrendCategory = {
   value: string;
   label: string;
@@ -151,6 +159,9 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
   const [ratio, setRatio] = useState("");
   const [quality, setQuality] = useState("");
   const [resolution, setResolution] = useState("");
+  const [userFields, setUserFields] = useState<TrendUserField[]>([]);
+  const [adminTrends, setAdminTrends] = useState<TrendAdminItem[]>([]);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [imageModels, setImageModels] = useState<ModelInfo[]>([]);
   const [videoModels, setVideoModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -166,10 +177,12 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
     Promise.all([
       client.request<unknown>("/models/image"),
       client.request<unknown>("/models/video"),
+      client.request<TrendAdminItem[]>("/admin/trends"),
     ])
-      .then(([images, videos]) => {
+      .then(([images, videos, trends]) => {
         setImageModels(normalizeModels(images));
         setVideoModels(normalizeModels(videos));
+        setAdminTrends(Array.isArray(trends) ? trends : []);
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : "Не удалось загрузить модели"))
       .finally(() => setLoadingModels(false));
@@ -182,6 +195,39 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
     }
     if (!models.some((item) => item.key === model)) setModel(models[0].key);
   }, [model, models]);
+
+  function resetAdminForm(): void {
+    setEditingId(null); setKind("image"); setCategory("animals"); setTitle(""); setDescription(""); setPromptTemplate(""); setPreviewUrl(""); setScenario("image"); setDuration(5); setRatio(""); setQuality(""); setResolution(""); setUserFields([]);
+  }
+
+  function selectExistingTrend(rawId: string): void {
+    if (!rawId) { resetAdminForm(); return; }
+    const item = adminTrends.find((trend) => trend.id === Number(rawId));
+    if (!item) return;
+    const settings = item.settings || {};
+    setEditingId(item.id);
+    setKind(item.kind);
+    setCategory(String(settings.category || item.category || "featured"));
+    setTitle(item.title || "");
+    setDescription(item.description || "");
+    setPromptTemplate(item.prompt_template || "");
+    setPreviewUrl(item.preview_url || "");
+    setModel(item.model || "");
+    setScenario(String(settings.scenario || "image"));
+    setDuration(Number(settings.duration || 5));
+    setRatio(String(settings.ratio || ""));
+    setQuality(String(settings.quality || ""));
+    setResolution(String(settings.resolution || ""));
+    setUserFields(Array.isArray(settings.user_fields) ? settings.user_fields.slice(0, 6) : []);
+  }
+
+  function addUserField(): void {
+    setUserFields((current) => current.length >= 6 ? current : [...current, { key: `Поле ${current.length + 1}`, label: `Поле ${current.length + 1}`, type: "text", required: true, max_length: 80 }]);
+  }
+
+  function updateUserField(index: number, patch: Partial<TrendUserField>): void {
+    setUserFields((current) => current.map((field, fieldIndex) => fieldIndex === index ? { ...field, ...patch } : field));
+  }
 
   async function uploadPreview(file: File) {
     if (uploading) return;
@@ -207,9 +253,20 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       toast.error("Заполни название, модель, preview и скрытый prompt");
       return;
     }
+    const normalizedUserFields = userFields.map((field) => {
+      const label = field.label.trim();
+      return { ...field, key: label, label, required: field.required !== false, placeholder: String(field.placeholder || "").trim(), max_length: field.type === "text" ? Math.max(1, Math.min(160, field.max_length || 80)) : undefined, min: field.type === "number" ? field.min : undefined, max: field.type === "number" ? field.max : undefined };
+    });
+    if (normalizedUserFields.some((field) => !field.key || field.key.includes("{{") || field.key.includes("}}"))) { toast.error("Укажи корректное название каждого поля"); return; }
+    if (new Set(normalizedUserFields.map((field) => field.key)).size !== normalizedUserFields.length) { toast.error("Названия полей не должны повторяться"); return; }
+    const missingField = normalizedUserFields.find((field) => !promptTemplate.includes(`{{${field.key}}}`));
+    if (missingField) { toast.error(`Добавь {{${missingField.key}}} в скрытый prompt`); return; }
+    const invalidRange = normalizedUserFields.find((field) => field.type === "number" && typeof field.min === "number" && typeof field.max === "number" && field.min > field.max);
+    if (invalidRange) { toast.error(`Проверь диапазон поля «${invalidRange.label}»`); return; }
     setBusy(true);
     try {
-      await client.request<TrendItem>("/admin/trends", {
+      const endpoint = editingId ? `/admin/trends/${editingId}/update` : "/admin/trends";
+      await client.request<TrendItem>(endpoint, {
         method: "POST",
         body: JSON.stringify({
           kind,
@@ -226,15 +283,12 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
             quality: kind === "image" ? quality || undefined : undefined,
             resolution: kind === "video" ? resolution || undefined : undefined,
             requires_reference: kind === "image" || scenario === "image",
+            user_fields: normalizedUserFields,
           },
         }),
       });
-      setTitle("");
-      setDescription("");
-      setPromptTemplate("");
-      setPreviewUrl("");
-      setCategory("animals");
-      toast.success(category === "animals" ? "Тренд добавлен в «С животными»" : "Тренд опубликован");
+      resetAdminForm();
+      toast.success(editingId ? "Изменения сохранены" : category === "animals" ? "Тренд добавлен в «С животными»" : "Тренд опубликован");
       setOpen(false);
       onCreated();
     } catch (error) {
@@ -246,7 +300,7 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
 
   if (!open) {
     return (
-      <Button className="w-full sm:w-auto" onClick={() => setOpen(true)}>
+      <Button className="w-full sm:w-auto" onClick={() => { resetAdminForm(); setOpen(true); }}>
         <Plus className="size-4" />
         Добавить тренд
       </Button>
@@ -257,7 +311,7 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
     <Card className="grid gap-3 p-3 shadow-none">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h2 className="text-sm font-bold">Добавить тренд</h2>
+          <h2 className="text-sm font-bold">{editingId ? "Редактировать тренд" : "Добавить тренд"}</h2>
           <p className="text-[10px] text-muted-foreground">Категория «С животными» теперь поддерживается напрямую.</p>
         </div>
         <Button variant="ghost" size="icon" className="size-8 min-h-8" onClick={() => setOpen(false)} aria-label="Закрыть форму">
@@ -265,9 +319,17 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
         </Button>
       </div>
 
+      <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">
+        Режим
+        <select className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs text-foreground" value={editingId || ""} onChange={(event) => selectExistingTrend(event.target.value)}>
+          <option value="">Новый тренд</option>
+          {adminTrends.map((item) => <option key={item.id} value={item.id}>Редактировать: {item.title}</option>)}
+        </select>
+      </label>
+
       <div className="grid grid-cols-2 gap-1">
-        <Button variant={kind === "image" ? "default" : "outline"} onClick={() => setKind("image")}>🖼 Фото</Button>
-        <Button variant={kind === "video" ? "default" : "outline"} onClick={() => setKind("video")}>🎬 Видео</Button>
+        <Button variant={kind === "image" ? "default" : "outline"} disabled={editingId !== null} onClick={() => setKind("image")}>🖼 Фото</Button>
+        <Button variant={kind === "video" ? "default" : "outline"} disabled={editingId !== null} onClick={() => setKind("video")}>🎬 Видео</Button>
       </div>
 
       <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">
@@ -318,8 +380,21 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       />
       {previewUrl ? <TrendPreview item={{ kind, preview_url: previewUrl, title }} /> : null}
 
+      <div className="grid gap-2 rounded-xl border border-border bg-muted/20 p-3">
+        <div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-foreground">Поля пользователя</p><p className="mt-1 text-[10px] text-muted-foreground">Можно добавить и старому тренду. Например «Возраст» → {"{{Возраст}}"}.</p></div><Button type="button" variant="outline" size="sm" disabled={userFields.length >= 6} onClick={addUserField}><Plus className="size-3.5" />Поле</Button></div>
+        {userFields.map((field, index) => <div key={index} className="grid gap-2 rounded-lg border border-border bg-background/50 p-2">
+          <div className="grid grid-cols-[1fr_90px_auto] gap-2">
+            <input className="min-h-9 min-w-0 rounded-lg border border-border bg-background px-2 text-xs" value={field.label} maxLength={48} placeholder="Возраст" onChange={(event) => { const label = event.target.value; updateUserField(index, { key: label, label }); }} />
+            <select className="min-h-9 rounded-lg border border-border bg-background px-2 text-xs" value={field.type} onChange={(event) => { const type = event.target.value as "text" | "number"; updateUserField(index, type === "number" ? { type, min: field.min ?? 1, max: field.max ?? 120, max_length: undefined, placeholder: field.placeholder || "28" } : { type, min: undefined, max: undefined, max_length: 80 }); }}><option value="text">Текст</option><option value="number">Число</option></select>
+            <Button type="button" variant="ghost" size="icon" className="size-9 min-h-9" onClick={() => setUserFields((current) => current.filter((_, i) => i !== index))}><X className="size-4" /></Button>
+          </div>
+          {field.type === "number" ? <div className="grid grid-cols-3 gap-2"><input type="number" className="min-h-9 rounded-lg border border-border bg-background px-2 text-xs" value={field.min ?? ""} placeholder="Мин." onChange={(event) => updateUserField(index, { min: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" className="min-h-9 rounded-lg border border-border bg-background px-2 text-xs" value={field.max ?? ""} placeholder="Макс." onChange={(event) => updateUserField(index, { max: event.target.value === "" ? undefined : Number(event.target.value) })} /><input className="min-h-9 rounded-lg border border-border bg-background px-2 text-xs" value={field.placeholder || ""} placeholder="28" onChange={(event) => updateUserField(index, { placeholder: event.target.value.slice(0, 80) })} /></div> : <input className="min-h-9 rounded-lg border border-border bg-background px-2 text-xs" value={field.placeholder || ""} placeholder="Например, Анна" onChange={(event) => updateUserField(index, { placeholder: event.target.value.slice(0, 80) })} />}
+          <p className="text-[9px] text-muted-foreground">Маркер: <code>{`{{${field.label.trim() || "Название"}}}`}</code></p>
+        </div>)}
+      </div>
+
       <textarea className="min-h-32 rounded-lg border border-border bg-background p-3 text-xs" value={promptTemplate} onChange={(event) => setPromptTemplate(event.target.value)} placeholder="Скрытый канонический prompt — до 8000 символов" maxLength={8000} />
-      <Button disabled={busy || uploading || loadingModels || !model} onClick={() => void submit()}>{busy ? "Публикую…" : category === "animals" ? "🦁 Опубликовать в «С животными»" : "Опубликовать тренд"}</Button>
+      <Button disabled={busy || uploading || loadingModels || !model} onClick={() => void submit()}>{busy ? (editingId ? "Сохраняю…" : "Публикую…") : editingId ? "Сохранить изменения" : category === "animals" ? "🦁 Опубликовать в «С животными»" : "Опубликовать тренд"}</Button>
     </Card>
   );
 }

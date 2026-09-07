@@ -6,6 +6,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     ARRAY,
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -426,6 +427,7 @@ class UserPrompt(Base):
     preview_url: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(String(64))
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
+    trend_user_fields: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     likes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     status: Mapped[PromptStatus] = mapped_column(

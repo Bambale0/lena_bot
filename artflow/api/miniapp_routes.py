@@ -77,6 +77,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind
 from db import repository as repo
 from db.models import (
@@ -1218,6 +1219,7 @@ class ImageGenRequest(BaseModel):
     model: str
     prompt: str = Field(..., min_length=1, max_length=4000)
     prompt_id: int | None = None
+    trend_user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
     aspect_ratio: str | None = None
     quality: str = "basic"
     count: int = Field(default=1, ge=1, le=6)
@@ -1229,6 +1231,7 @@ class VideoGenRequest(BaseModel):
     model: str
     prompt: str = Field(..., min_length=1, max_length=4000)
     prompt_id: int | None = None
+    trend_user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
     mode: str = "text"                    # "text" | "image" | "video"
     duration: int = Field(default=5, ge=2, le=30)
     aspect_ratio: str | None = None
@@ -1913,6 +1916,14 @@ async def create_image_generation(
             raise HTTPException(status_code=404, detail="Prompt not found or not public")
         user_prompt = prompt_source.prompt_text
         if is_trend_prompt(prompt_source):
+            try:
+                user_prompt = render_trend_prompt(
+                    str(prompt_source.prompt_text or ""),
+                    list(getattr(prompt_source, "trend_user_fields", None) or []),
+                    body.trend_user_values,
+                )
+            except TrendUserFieldsError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             if trend_kind(prompt_source) != "image":
                 raise HTTPException(status_code=422, detail="Selected trend is not an image trend")
             if prompt_source.model and body.model != prompt_source.model:
@@ -2100,6 +2111,14 @@ async def create_video_generation(
             raise HTTPException(status_code=404, detail="Prompt not found or not public")
         user_prompt = prompt_source.prompt_text
         if is_trend_prompt(prompt_source):
+            try:
+                user_prompt = render_trend_prompt(
+                    str(prompt_source.prompt_text or ""),
+                    list(getattr(prompt_source, "trend_user_fields", None) or []),
+                    body.trend_user_values,
+                )
+            except TrendUserFieldsError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             if trend_kind(prompt_source) != "video":
                 raise HTTPException(status_code=422, detail="Selected trend is not a video trend")
             if prompt_source.model and body.model != prompt_source.model:
