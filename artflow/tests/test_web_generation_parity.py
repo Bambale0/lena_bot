@@ -49,3 +49,18 @@ def test_existing_web_runtime_already_supports_multi_reference_and_exact_pricing
         "creditsPerSec",
     ):
         assert token in src
+
+
+def test_public_site_billing_keeps_tribute_usd_provider_parity():
+    src = (ROOT / "landing/js/prototype-premium.js").read_text()
+    assert 'tribute: "USD"' in src
+    assert '["tbank", "stars", "crypto", "tribute", "lava"].includes(provider)' in src
+
+
+def test_public_site_busts_cached_payment_runtime_after_tribute_fix():
+    expected = "prototype-premium.js?v=20260907_tribute_usd"
+    pages = sorted((ROOT / "landing").glob("*.html"))
+    referenced = [path for path in pages if "prototype-premium.js?v=" in path.read_text()]
+    assert referenced
+    for path in referenced:
+        assert expected in path.read_text(), path.name

@@ -375,7 +375,7 @@ function paymentMethodKey(method) {
 
 function paymentMethodLabel(method) {
   const key = paymentMethodKey(method);
-  const labels = { tbank: "Карта", stars: "Telegram", crypto: "Крипто", lava: "Lava" };
+  const labels = { tbank: "Карта", stars: "Telegram", crypto: "Крипто", tribute: "USD", lava: "Lava" };
   return method?.label || labels[key] || key;
 }
 
@@ -4735,7 +4735,7 @@ async function topup(provider, planKey) {
   }
   try {
     const fallbackMethod = paymentMethodKey(enabledPaymentMethods()[0]) || "tbank";
-    const method = ["tbank", "stars", "crypto", "lava"].includes(provider) ? provider : fallbackMethod;
+    const method = ["tbank", "stars", "crypto", "tribute", "lava"].includes(provider) ? provider : fallbackMethod;
     const result = await request(`/billing/topup/${method}`, { method: "POST", body: JSON.stringify({ plan_key: planKey }) });
     const url = result.pay_url || result.invoice_link;
     if (url) window.open(url, "_blank", "noopener,noreferrer");
