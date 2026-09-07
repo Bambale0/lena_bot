@@ -67,3 +67,33 @@ async def test_main_package_click_opens_method_choice_without_creating_tbank_inv
     assert "topup:rub:credits_100_999" in callbacks
     assert "topup:tribute_plan:credits_100_999" in callbacks
     call.answer.assert_awaited_once()
+
+
+def test_main_topup_shows_usd_as_tribute_and_lava_separately(monkeypatch) -> None:
+    plan = SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999")
+    monkeypatch.setattr("bot.keyboards.payment.settings.TRIBUTE_API_KEY", "tribute", raising=False)
+    monkeypatch.setattr("bot.keyboards.payment.settings.CRYPTOBOT_TOKEN", "crypto", raising=False)
+    monkeypatch.setattr("bot.keyboards.payment.settings.LAVA_API_KEY", "lava", raising=False)
+    monkeypatch.setenv("LAVA_OFFER_ID_CREDITS_100", "offer-1")
+
+    buttons = [button for row in topup_kb([plan]).inline_keyboard for button in row]
+    callbacks = [button.callback_data for button in buttons]
+    labels = [button.text for button in buttons]
+
+    assert "topup:tribute" in callbacks
+    assert "topup:lava" in callbacks
+    assert "topup:usd" not in callbacks
+    assert "💵 USD" in labels
+    assert "💸 Lava" in labels
+
+
+@pytest.mark.asyncio
+async def test_legacy_usd_callback_routes_to_tribute_not_lava(monkeypatch) -> None:
+    call = SimpleNamespace(data="topup:usd", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+    db_user = SimpleNamespace(id=7, language="ru")
+    tribute_handler = AsyncMock()
+    monkeypatch.setattr(payment, "cb_topup_tribute", tribute_handler)
+
+    await payment.cb_topup_usd(call, AsyncMock(), db_user)
+
+    tribute_handler.assert_awaited_once()

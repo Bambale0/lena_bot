@@ -356,21 +356,8 @@ async def cb_topup_lava_plan(call: CallbackQuery, session: AsyncSession, db_user
 
 @router.callback_query(F.data == "topup:usd")
 async def cb_topup_usd(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
-    lang = db_user.language or "ru"
-    plans = [plan for plan in await repo.get_active_price_plans(session) if settings.lava_offer_id_for_plan(plan.key)]
-    if not plans:
-        await call.answer("Lava сейчас недоступна" if lang == "ru" else "Lava is unavailable right now", show_alert=True)
-        return
-    text = (
-        "💸 <b>Оплата через Lava</b>\n\nВыбери пакет, оплата откроется в Lava.\n\n" + t("topup_select_plan", lang)
-        if lang == "ru"
-        else "💸 <b>Pay with Lava</b>\n\nChoose a plan, checkout opens in Lava.\n\n" + t("topup_select_plan", lang)
-    )
-    await call.message.edit_text(  # type: ignore[union-attr]
-        text,
-        reply_markup=lava_plans_kb(plans, lang=lang, currency="rub"),
-    )
-    await call.answer()
+    """Backward-compatible alias for old bot messages: USD is Tribute, never Lava."""
+    await cb_topup_tribute(call, session, db_user)
 
 
 @router.callback_query(F.data == "topup:crypto")

@@ -23,13 +23,23 @@ def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
             )
         )
 
-    currency_texts = {
-        "usd": "💸 Lava" if settings.lava_is_enabled() else ("💵 Доллар" if lang == "ru" else "💵 Dollar"),
-        "rub": "₽ Рубль" if lang == "ru" else "₽ Ruble",
-        "crypto": "🪙 Крипта" if lang == "ru" else "🪙 Crypto",
-    }
-    for key in ("usd", "rub", "crypto"):
-        builder.row(InlineKeyboardButton(text=currency_texts[key], callback_data=f"topup:{key}"))
+    if settings.TRIBUTE_API_KEY:
+        builder.row(InlineKeyboardButton(text="💵 USD", callback_data="topup:tribute"))
+    builder.row(
+        InlineKeyboardButton(
+            text="₽ Рубль" if lang == "ru" else "₽ Ruble",
+            callback_data="topup:rub",
+        )
+    )
+    if settings.CRYPTOBOT_TOKEN:
+        builder.row(
+            InlineKeyboardButton(
+                text="🪙 Крипта" if lang == "ru" else "🪙 Crypto",
+                callback_data="topup:crypto",
+            )
+        )
+    if settings.lava_is_enabled():
+        builder.row(InlineKeyboardButton(text="💸 Lava", callback_data="topup:lava"))
     builder.row(
         InlineKeyboardButton(text="🎟 Ввести промокод", callback_data="promo:enter"),
     )
@@ -165,5 +175,5 @@ def tribute_plans_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboard
                 callback_data=f"topup:tribute_plan:{plan.key}",
             )
         )
-    builder.row(InlineKeyboardButton(text=back_text, callback_data="topup:rub"))
+    builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:topup"))
     return builder.as_markup()
