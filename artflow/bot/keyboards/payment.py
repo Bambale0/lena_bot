@@ -11,6 +11,16 @@ def _fmt_amount(value: float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
+def _plan_list_price(plan: PricePlan) -> str:
+    rub = f"{_fmt_amount(plan.price_rub)}₽"
+    if not settings.TRIBUTE_API_KEY:
+        return rub
+    from payments import tribute
+
+    usd = tribute.digital_product_price_text(plan.key)
+    return f"{rub} | {usd}" if usd else rub
+
+
 def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     back_text = "← " + ("Назад" if lang == "ru" else "Back")
@@ -18,19 +28,13 @@ def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
     for plan in plans:
         builder.row(
             InlineKeyboardButton(
-                text=f"💳 {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else _fmt_amount(plan.credits)} 💋 · {_fmt_amount(plan.price_rub)}₽",
+                text=f"💳 {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else _fmt_amount(plan.credits)} 💋 · {_plan_list_price(plan)}",
                 callback_data=f"topup:plan:{plan.key}",
             )
         )
 
-    if settings.TRIBUTE_API_KEY:
-        builder.row(InlineKeyboardButton(text="💵 USD", callback_data="topup:tribute"))
-    builder.row(
-        InlineKeyboardButton(
-            text="₽ Рубль" if lang == "ru" else "₽ Ruble",
-            callback_data="topup:rub",
-        )
-    )
+    # Package buttons already show RUB | USD and open provider choice.
+    # Keep legacy topup:tribute/topup:rub handlers for old Telegram messages only.
     if settings.CRYPTOBOT_TOKEN:
         builder.row(
             InlineKeyboardButton(

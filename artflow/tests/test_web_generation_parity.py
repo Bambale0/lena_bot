@@ -58,9 +58,21 @@ def test_public_site_billing_keeps_tribute_usd_provider_parity():
 
 
 def test_public_site_busts_cached_payment_runtime_after_tribute_fix():
-    expected = "prototype-premium.js?v=20260907_tribute_usd"
+    expected = "prototype-premium.js?v=20260907_dual_prices"
     pages = sorted((ROOT / "landing").glob("*.html"))
     referenced = [path for path in pages if "prototype-premium.js?v=" in path.read_text()]
     assert referenced
     for path in referenced:
         assert expected in path.read_text(), path.name
+
+
+def test_payment_plan_cards_show_rub_and_tribute_usd_together_across_web_surfaces():
+    landing = (ROOT / "landing/js/prototype-premium.js").read_text()
+    legacy_miniapp = (ROOT / "webapp/src/main.jsx").read_text()
+    current_miniapp = (ROOT / "webapp/src/components/balance-sheet.tsx").read_text()
+
+    assert 'return [rub, usd].filter(Boolean).join(" | ")' in landing
+    assert 'return [rub, usd].filter(Boolean).join(" | ")' in legacy_miniapp
+    assert 'return [rub, usd].filter(Boolean).join(" | ")' in current_miniapp
+    assert 'formatPlanListPrice(p)' in legacy_miniapp
+    assert 'planListPrice(plan)' in current_miniapp
