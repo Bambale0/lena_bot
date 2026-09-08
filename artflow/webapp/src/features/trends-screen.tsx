@@ -85,7 +85,7 @@ function TrendCard({ trend, index }: { trend: TrendItem; index: number }) {
           <div className="grid size-full place-items-center text-muted-foreground">{isVideo ? <Film /> : <ImageIcon />}</div>
         )}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-2 pb-2 pt-12 text-white">
-          <div className="mb-1 flex items-center gap-1 text-[8px] opacity-85">
+          <div className="mb-1 flex items-center gap-1 text-[10px] opacity-85">
             <span>{trend.category_emoji || (isVideo ? "🎬" : "🖼️")}</span>
             <span className="truncate">{trend.category_title || (isVideo ? "Видео-тренд" : "Фото-тренд")}</span>
             {trend.uses_count ? <span className="ml-auto">↻ {trend.uses_count}</span> : null}

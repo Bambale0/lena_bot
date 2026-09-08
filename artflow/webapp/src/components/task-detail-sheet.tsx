@@ -8,6 +8,7 @@ import type { GenerationTask } from "@/lib/types";
 import {
   firstMedia,
   formatCredits,
+  formatKisses,
   formatRelativeDate,
   generationStatusLabel,
   isPendingTask,
@@ -111,7 +112,7 @@ function TaskDetailSheet({
           <Badge variant="outline">{task.gen_type}</Badge>
           {task.aspect_ratio ? <Badge variant="outline">{task.aspect_ratio}</Badge> : null}
           {task.duration ? <Badge variant="outline">{task.duration} сек</Badge> : null}
-          <Badge variant="outline">{formatCredits(task.credits_spent)} кр.</Badge>
+          <Badge variant="outline">{formatKisses(task.credits_spent, { compact: true })}</Badge>
           {isPendingTask(task) ? (
             <Button variant="ghost" size="sm" className="ml-auto" disabled={busy} onClick={() => onRefresh(task)}>
               <RefreshCw className={busy ? "animate-spin" : ""} /> Обновить
@@ -130,7 +131,7 @@ function TaskDetailSheet({
               <button type="button" aria-label="Скопировать Task ID" onClick={() => copy(String(task.task_id || task.id), "Task ID")}><Copy className="size-3.5" /></button>
             </dd>
             <dt className="text-muted-foreground">Модель</dt><dd className="truncate text-right">{task.model}</dd>
-            <dt className="text-muted-foreground">Стоимость</dt><dd className="text-right">{formatCredits(task.credits_spent)} кредитов</dd>
+            <dt className="text-muted-foreground">Стоимость</dt><dd className="text-right">{formatKisses(task.credits_spent)}</dd>
           </dl>
         </details>
 

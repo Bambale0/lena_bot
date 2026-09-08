@@ -13,7 +13,7 @@ const TINY_PNG = Buffer.from(
   "base64",
 );
 
-const NAV_TABS = ["Лента", "Фото", "Видео", "Motion", "Тренды", "Сервисы", "Профиль", "Настройки"] as const;
+const NAV_TABS = ["Лента", "Фото", "Видео", "Тренды", "Ещё"] as const;
 
 type Json = Record<string, unknown>;
 
@@ -608,7 +608,8 @@ registerDomain("11 · Настройки, сервисы и профиль по�
   await openApp(page);
   const branch = seed % 3;
   if (branch === 0) {
-    await page.getByRole("tab", { name: "Настройки", exact: true }).click();
+    await page.getByRole("tab", { name: "Ещё", exact: true }).click();
+    await page.getByRole("button", { name: /Настройки/ }).click();
     await expect(page.getByText("Цветовая схема")).toBeVisible();
     const schemeButtons = page.locator("[data-apix-preview-scheme]");
     await expect(schemeButtons).toHaveCount(4);
@@ -616,11 +617,11 @@ registerDomain("11 · Настройки, сервисы и профиль по�
     await page.getByRole("button", { name: /English/ }).click();
     expect(captures.language).toMatchObject({ language: "en" });
   } else if (branch === 1) {
-    await page.getByRole("tab", { name: "Сервисы", exact: true }).click();
+    await page.getByRole("tab", { name: "Ещё", exact: true }).click();
     await expect(page.getByText("Музыка / Suno")).toBeVisible();
     await expect(page.getByPlaceholder("Текст песни или идея трека")).toBeVisible();
   } else {
-    await page.getByRole("tab", { name: "Профиль", exact: true }).click();
+    await page.locator(".apix-profile-button").click();
     await expect(page.getByRole("heading", { name: `Кабинет ${seed}` })).toBeVisible();
     await expect(page.getByText("История").first()).toBeVisible();
     await page.getByRole("button", { name: "История задач", exact: true }).click();

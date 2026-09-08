@@ -12,18 +12,18 @@ APIX should feel like one product across every surface. Users choose the result 
 
 ### P0 / High
 
-- [ ] Unify customer-facing currency language: `💋 / поцелуи`; keep `credits` only in internal code/admin technical contexts.
-- [ ] Align Telegram image generation with the scenario-first video flow instead of forcing model-first entry.
-- [ ] Add an explicit review/confirmation step before paid music generation.
+- [x] Unify customer-facing currency language: `💋 / поцелуи`; keep `credits` only in internal code/admin technical contexts.
+- [x] Align Telegram image generation with the scenario-first video flow instead of forcing model-first entry.
+- [x] Add an explicit review/confirmation step before paid music generation.
 
 ### P1 / Medium
 
-- [ ] Reduce Mini App primary navigation to the core destinations and move secondary destinations behind `Ещё`/profile/services.
-- [ ] Remove tiny 6–9 px product copy/badges from mobile surfaces.
-- [ ] Make Services a real tools catalog, not duplicate navigation.
-- [ ] Fix Pinterest price symbol from `💎` to `💋`.
-- [ ] Replace Telegram history's technical list with user-facing task cards/actions.
-- [ ] Replace zero-count flash/skeleton problems on the public model catalog and remove `credits` wording.
+- [x] Reduce Mini App primary navigation to the core destinations and move secondary destinations behind `Ещё`/profile/services.
+- [x] Remove tiny 6–9 px product copy/badges from active mobile surfaces.
+- [x] Make Services a real tools catalog, not duplicate navigation.
+- [x] Fix Pinterest price symbol from `💎` to `💋`.
+- [x] Replace Telegram history's technical list with user-facing task cards/actions.
+- [x] Replace zero-count flash/skeleton problems on the public model catalog and remove `credits` wording.
 
 ### P2 / Cleanup
 
@@ -42,9 +42,9 @@ APIX should feel like one product across every surface. Users choose the result 
 
 ## Verification
 
-- [ ] Backend focused tests
-- [ ] Telegram handler/keyboard regression tests
+- [x] Backend focused tests
+- [x] Telegram handler/keyboard regression tests
 - [ ] Mini App Playwright smoke
 - [ ] 300 user-journey Mini App suite
 - [ ] Website internal-link audit
-- [ ] Changed-file lint/type checks
+- [x] Changed-file lint/type checks

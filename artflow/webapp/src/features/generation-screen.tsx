@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { GenerationDraft, ModelInfo, UserProfile } from "@/lib/types";
-import { cn, formatCredits, modelSupports, splitUrls } from "@/lib/utils";
+import { cn, formatCredits, formatKisses, modelSupports, splitUrls } from "@/lib/utils";
 
 interface GenerationScreenProps {
   kind: "image" | "video" | "motion";
@@ -235,7 +235,7 @@ function GenerationScreen({
               <p className="apix-generation-subtitle truncate text-[11px] text-muted-foreground">{selectedModel?.display_name || copy.description}</p>
             </div>
           </div>
-          <Badge variant="outline" className="apix-generation-balance shrink-0">{formatCredits(user.credits)} кр.</Badge>
+          <Badge variant="outline" className="apix-generation-balance shrink-0">{formatKisses(user.credits, { compact: true })}</Badge>
         </div>
 
         {draft.promptId ? (
@@ -255,7 +255,7 @@ function GenerationScreen({
               Модель
               <Select value={selectedModel?.key || ""} onChange={(event) => syncSelectedModel(event.target.value)}>
                 {availableModels.map((model) => (
-                  <option key={model.key} value={model.key}>{model.display_name} · {formatCredits(model.credits)} кр.</option>
+                  <option key={model.key} value={model.key}>{model.display_name} · {formatKisses(model.credits, { compact: true })}</option>
                 ))}
               </Select>
             </label>
@@ -479,8 +479,8 @@ function GenerationScreen({
             <div className="apix-launch-row flex items-center justify-between gap-2">
               <div>
                 <p className="text-[10px] text-muted-foreground">Стоимость</p>
-                <p className="text-lg font-bold leading-none">{formatCredits(estimate)} кр.</p>
-                {selectedModel?.is_per_second ? <p className="mt-1 text-[10px] text-muted-foreground">{formatCredits(selectedModel.credits_per_sec ?? selectedModel.credits)} кр./сек</p> : null}
+                <p className="text-lg font-bold leading-none">{formatKisses(estimate, { compact: true })}</p>
+                {selectedModel?.is_per_second ? <p className="mt-1 text-[10px] text-muted-foreground">{formatKisses(selectedModel.credits_per_sec ?? selectedModel.credits, { compact: true })}/сек</p> : null}
                 {taskCount > 1 ? <p className="mt-1 text-[10px] text-muted-foreground">{taskCount} задачи подряд</p> : null}
               </div>
               <Button className="apix-submit-button w-full min-[430px]:w-auto min-[430px]:min-w-[56%]" disabled={disabled} onClick={onSubmit}>
@@ -500,7 +500,7 @@ function GenerationScreen({
               {tooManyAudioIds ? <ValidationError>Слишком много Audio ID</ValidationError> : null}
               {tooManyCharacterIds ? <ValidationError>Слишком много Character ID</ValidationError> : null}
               {mediaUploading ? <ValidationError>Дождись загрузки файла</ValidationError> : null}
-              {insufficientCredits ? <ValidationError>Мало кредитов</ValidationError> : null}
+              {insufficientCredits ? <ValidationError>Не хватает 💋</ValidationError> : null}
               {!availableModels.length ? <ValidationError>Нет моделей</ValidationError> : null}
             </div>
           </CardContent>

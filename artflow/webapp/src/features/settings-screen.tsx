@@ -138,7 +138,7 @@ function SchemeButton({
 function InfoPill({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-xl border border-border bg-background/55 px-2 py-1.5">
-      <p className="text-[9px] text-muted-foreground">{label}</p>
+      <p className="text-[10px] text-muted-foreground">{label}</p>
       <p className="truncate text-xs font-semibold text-foreground">{value}</p>
     </div>
   );

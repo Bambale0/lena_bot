@@ -5,9 +5,6 @@ import {
   Flame,
   GalleryVerticalEnd,
   ImageIcon,
-  Orbit,
-  Settings,
-  UserRound,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -21,11 +18,8 @@ const tabs: Array<{ id: AppTab; labelKey: keyof ReturnType<typeof t>["nav"]; ico
   { id: "feed", labelKey: "feed", icon: GalleryVerticalEnd },
   { id: "photo", labelKey: "photo", icon: ImageIcon },
   { id: "video", labelKey: "video", icon: Film },
-  { id: "motion", labelKey: "motion", icon: Orbit },
   { id: "trends", labelKey: "trends", icon: Flame },
   { id: "services", labelKey: "services", icon: Bot },
-  { id: "profile", labelKey: "profile", icon: UserRound },
-  { id: "settings", labelKey: "settings", icon: Settings },
 ];
 
 interface AppShellProps {
