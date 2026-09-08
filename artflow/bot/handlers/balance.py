@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb, balance_screen_kb
 from bot.legal_offer import PUBLIC_OFFER_PAGES
+from bot.ui.model_labels import model_display_name
+from bot.utils.feed_media import canonical_generation_result_url
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db import repository as repo
@@ -463,6 +465,52 @@ async def handle_exchange_amount(
     )
 
 
+def _history_type_label(gen_type) -> tuple[str, str]:
+    value = getattr(gen_type, "value", gen_type)
+    if value == GenerationType.video.value:
+        return "🎬", "Видео"
+    if value == GenerationType.music.value:
+        return "🎵", "Музыка"
+    return "🎨", "Изображение"
+
+
+def _history_status_label(status) -> tuple[str, str]:
+    value = getattr(status, "value", status)
+    return {
+        "done": ("✅", "Готово"),
+        "pending": ("⏳", "В очереди"),
+        "processing": ("🔄", "Создаётся"),
+        "failed": ("❌", "Ошибка"),
+    }.get(str(value or ""), ("•", "Статус обновляется"))
+
+
+def _history_keyboard(history) -> object:
+    builder = InlineKeyboardBuilder()
+    for gen in history[:8]:
+        icon, kind = _history_type_label(gen.gen_type)
+        builder.button(text=f"{icon} {kind} #{gen.id}", callback_data=f"history:view:{gen.id}")
+    builder.button(text="🏠 Главное меню", callback_data="menu:main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _history_detail_keyboard(gen) -> object:
+    builder = InlineKeyboardBuilder()
+    result_url = canonical_generation_result_url(gen)
+    if result_url:
+        builder.button(text="↗️ Открыть результат", url=result_url)
+    gen_type = getattr(getattr(gen, "gen_type", None), "value", getattr(gen, "gen_type", None))
+    if gen_type == GenerationType.image.value:
+        raw_id = str(getattr(gen, "task_id", None) or gen.id)
+        builder.button(text="🔁 Повторить", callback_data=f"repeat_result_{raw_id}")
+    elif gen_type == GenerationType.video.value:
+        builder.button(text="✏️ Изменить и повторить", callback_data=f"reprompt:video:{gen.id}")
+    builder.button(text="← К моим работам", callback_data="menu:history")
+    builder.button(text="🏠 Главное меню", callback_data="menu:main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 @router.callback_query(F.data == "menu:history")
 async def cb_history(
     call: CallbackQuery, session: AsyncSession, db_user: User
@@ -471,26 +519,53 @@ async def cb_history(
     history = await repo.get_user_history(session, db_user.id, limit=10)
 
     if not history:
-        await call.message.edit_text(  # type: ignore[union-attr]
-            t("history_empty", lang),
-            reply_markup=back_to_menu_kb(),
-        )
-        await call.answer()
+        await safe_edit_message(call.message, t("history_empty", lang), reply_markup=back_to_menu_kb())
+        await safe_answer_callback(call)
         return
 
-    lines = [t("history_title", lang) + "\n"]
-    for i, gen in enumerate(history, 1):
-        icon = "🎨" if gen.gen_type == GenerationType.image else "🎬"
-        status_icon = {"done": "✅", "pending": "⏳", "failed": "❌", "processing": "🔄"}.get(
-            gen.status.value, "❓"
-        )
-        lines.append(
-            f"{i}. {icon} {status_icon} <code>{gen.model}</code>\n"
-            f"   <i>{gen.prompt[:60]}{'...' if len(gen.prompt) > 60 else ''}</i>\n"
-            f"   -{gen.credits_spent} 💋"
-        )
-
-    await call.message.edit_text(  # type: ignore[union-attr]
-        "\n".join(lines), reply_markup=back_to_menu_kb()
+    ready = sum(1 for gen in history if getattr(getattr(gen, "status", None), "value", getattr(gen, "status", None)) == "done")
+    active = sum(1 for gen in history if getattr(getattr(gen, "status", None), "value", getattr(gen, "status", None)) in {"pending", "processing"})
+    text = (
+        "📂 <b>Мои работы</b>\n\n"
+        f"Последние: <b>{len(history)}</b> · готово: <b>{ready}</b>"
+        + (f" · в работе: <b>{active}</b>" if active else "")
+        + "\n\nОткрой работу, чтобы посмотреть результат, стоимость и доступные действия."
     )
-    await call.answer()
+    await safe_edit_message(call.message, text, reply_markup=_history_keyboard(history))
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data.startswith("history:view:"))
+async def cb_history_view(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+    raw_id = str(call.data or "").rsplit(":", 1)[-1]
+    if not raw_id.isdigit():
+        await safe_answer_callback(call, "Работа не найдена", show_alert=True)
+        return
+    gen = await repo.get_generation_by_id(session, int(raw_id))
+    if not gen or getattr(gen, "user_id", None) != db_user.id:
+        await safe_answer_callback(call, "Работа не найдена", show_alert=True)
+        return
+
+    icon, kind = _history_type_label(gen.gen_type)
+    status_icon, status = _history_status_label(gen.status)
+    model = model_display_name(str(gen.model))
+    prompt = str(getattr(gen, "prompt", "") or "").strip()
+    prompt_line = (prompt[:220] + "…") if len(prompt) > 220 else prompt
+    hidden_prompt = bool(getattr(gen, "source_feed_gen_id", None))
+    if hidden_prompt:
+        prompt_line = "Промпт скрыт автором исходной работы"
+    elif not prompt_line:
+        prompt_line = "Описание не сохранено"
+
+    text = (
+        f"{icon} <b>{kind} #{gen.id}</b>\n\n"
+        f"{status_icon} {status}\n"
+        f"🤖 {model}\n"
+        f"💋 Стоимость: <b>{float(gen.credits_spent or 0):g}</b>\n\n"
+        f"📝 {prompt_line}"
+    )
+    if getattr(gen, "error_msg", None) and getattr(getattr(gen, "status", None), "value", getattr(gen, "status", None)) == "failed":
+        text += "\n\nПопробуй повторить позже или выбери другую модель."
+
+    await safe_edit_message(call.message, text, reply_markup=_history_detail_keyboard(gen))
+    await safe_answer_callback(call)

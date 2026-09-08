@@ -7,17 +7,11 @@ import pytest
 
 from api import miniapp_routes
 from api import pinterest_service_routes as pinterest_routes
-from bot.ui.main_menu import render_main_menu
+from bot.ui.navigation_v2 import render_create_hub
 
 
-def test_main_menu_places_pinterest_flow_next_to_trends() -> None:
-    context = SimpleNamespace(
-        active_image_session=None,
-        balance=9047.5,
-        is_admin=True,
-    )
-
-    rendered = render_main_menu(context, "ru")
+def test_create_hub_places_pinterest_flow_next_to_trends() -> None:
+    rendered = render_create_hub("ru", is_admin=True)
     rows = rendered.reply_markup.inline_keyboard
     trend_row = next(row for row in rows if any(button.callback_data == "menu:trends" for button in row))
 

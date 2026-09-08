@@ -41,7 +41,7 @@ def _home_text(context: MainMenuContext, lang: str, *, show_session: bool) -> st
             "😊 <b>App</b> — the full visual workspace with models, references, feed and payments.\n"
             "✨ <b>Create</b> — a quick guided flow inside the bot.\n"
             "🤖 <b>AI Assistant</b> — describe the goal and let APIX help choose the path.\n\n"
-            f"💋 Balance: <b>{context.balance} credits</b>. The exact price is shown before every launch."
+            f"💋 Balance: <b>{context.balance} kisses</b>. The exact price is shown before every launch."
         )
     else:
         base = (
@@ -50,7 +50,7 @@ def _home_text(context: MainMenuContext, lang: str, *, show_session: bool) -> st
             "😊 <b>Приложение</b> — полноценная визуальная студия с моделями, референсами, лентой и оплатой.\n"
             "✨ <b>Создать</b> — быстрый пошаговый запуск прямо в боте.\n"
             "🤖 <b>AI-ассистент</b> — опиши задачу обычными словами, и APIX поможет выбрать путь.\n\n"
-            f"💋 На балансе: <b>{context.balance} кредитов</b>. Точную стоимость покажем до запуска."
+            f"💋 На балансе: <b>{context.balance} 💋</b>. Точную стоимость покажем до запуска."
         )
 
     if not show_session or not context.active_image_session:
@@ -92,10 +92,6 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
     builder.row(
         InlineKeyboardButton(text="📂 " + ("Мои работы" if lang == "ru" else "My work"), callback_data="menu:history"),
         InlineKeyboardButton(text="🔥 " + ("Лента идей" if lang == "ru" else "Ideas feed"), callback_data="menu:feed"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="👑 " + ("Тренды" if lang == "ru" else "Trends"), callback_data="menu:trends"),
-        InlineKeyboardButton(text="📌 " + ("Pinterest" if lang == "ru" else "Pinterest"), callback_data="menu:pinterest"),
     )
     builder.row(
         InlineKeyboardButton(text="💋 " + (f"Баланс · {context.balance}" if lang == "ru" else f"Balance · {context.balance}"), callback_data="menu:balance"),

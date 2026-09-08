@@ -274,12 +274,68 @@ async def test_cb_history_with_items() -> None:
     call = make_callback(data="menu:history")
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
-    mock_gen = MagicMock()
-    mock_gen.gen_type = GenerationType("image")
-    mock_gen.status.value = "done"
-    mock_gen.model = "sdxl"
-    mock_gen.prompt = "a beautiful cat"
-    mock_gen.credits_spent = 5
+    mock_gen = SimpleNamespace(
+        id=77,
+        user_id=42,
+        gen_type=GenerationType.image,
+        status=SimpleNamespace(value="done"),
+        model="nano-banana-2",
+        prompt="a beautiful cat",
+        credits_spent=5,
+        task_id="task-77",
+        result_url="https://example.com/result.png",
+        result_urls=None,
+        source_feed_gen_id=None,
+        error_msg=None,
+    )
     with patch("bot.handlers.balance.repo", AsyncMock(get_user_history=AsyncMock(return_value=[mock_gen]))):
         await balance.cb_history(call, AsyncMock(), SimpleNamespace(id=42, language="ru"))
     call.message.edit_text.assert_awaited_once()
+    text = call.message.edit_text.await_args.args[0]
+    assert "Мои работы" in text
+    markup = call.message.edit_text.await_args.kwargs["reply_markup"]
+    assert markup.inline_keyboard[0][0].callback_data == "history:view:77"
+
+
+@pytest.mark.asyncio
+async def test_cb_history_view_uses_human_model_name_and_actions() -> None:
+    call = make_callback(data="history:view:77")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    mock_gen = SimpleNamespace(
+        id=77,
+        user_id=42,
+        gen_type=GenerationType.image,
+        status=SimpleNamespace(value="done"),
+        model="nano-banana-2",
+        prompt="a beautiful cat",
+        credits_spent=5,
+        task_id="task-77",
+        result_url="https://example.com/result.png",
+        result_urls=None,
+        source_feed_gen_id=None,
+        error_msg=None,
+    )
+    with (
+        patch("bot.handlers.balance.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=mock_gen))),
+        patch("bot.handlers.balance.canonical_generation_result_url", return_value="https://example.com/result.png"),
+    ):
+        await balance.cb_history_view(call, AsyncMock(), SimpleNamespace(id=42, language="ru"))
+    text = call.message.edit_text.await_args.args[0]
+    assert "Nano Banana 2" in text
+    assert "nano-banana-2" not in text
+    assert "5" in text and "💋" in text
+    markup = call.message.edit_text.await_args.kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row if b.callback_data]
+    assert "repeat_result_task-77" in callbacks
+
+
+@pytest.mark.asyncio
+async def test_cb_history_view_rejects_other_users_generation() -> None:
+    call = make_callback(data="history:view:77")
+    call.answer = AsyncMock()
+    foreign = SimpleNamespace(id=77, user_id=999)
+    with patch("bot.handlers.balance.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=foreign))):
+        await balance.cb_history_view(call, AsyncMock(), SimpleNamespace(id=42, language="ru"))
+    call.answer.assert_awaited()
+    assert call.answer.await_args.kwargs.get("show_alert") is True

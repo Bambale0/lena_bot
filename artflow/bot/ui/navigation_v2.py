@@ -23,6 +23,10 @@ def render_create_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRend
         InlineKeyboardButton(text="🎵 " + ("Музыка" if lang == "ru" else "Music"), callback_data="menu:music"),
         InlineKeyboardButton(text="🤖 " + ("Подобрать через AI" if lang == "ru" else "Choose with AI"), callback_data="menu:assistant"),
     )
+    builder.row(
+        InlineKeyboardButton(text="👑 " + ("Тренды" if lang == "ru" else "Trends"), callback_data="menu:trends"),
+        InlineKeyboardButton(text="📌 Pinterest", callback_data="menu:pinterest"),
+    )
     if is_admin:
         builder.row(InlineKeyboardButton(text="🖌️ Midjourney", callback_data="menu:mj"))
     builder.row(InlineKeyboardButton(text="🏠 " + ("На главную" if lang == "ru" else "Home"), callback_data="menu:main"))
@@ -41,6 +45,8 @@ def render_create_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRend
             "Полноценный трек, инструментал или песня по идее, настроению и жанру.\n\n"
             "🤖 <b>Подобрать через AI</b>\n"
             "Подойдёт, если пока есть только задумка. Ассистент поможет сформулировать запрос и выбрать сценарий.\n\n"
+            "👑 <b>Тренды</b> — готовые сценарии, которые можно повторить со своими материалами.\n"
+            "📌 <b>Pinterest</b> — повторить сцену с сохранением своей внешности.\n\n"
             "Стоимость и итоговые параметры будут показаны до запуска."
         )
     else:
@@ -51,7 +57,9 @@ def render_create_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRend
             "📸 <b>Prompt from photo</b> — upload an image and turn its scene, style and lighting into a reusable prompt.\n"
             "🎬 <b>Video</b> — text-to-video, animate photos, control motion and create with sound.\n"
             "🎵 <b>Music</b> — make a complete track from an idea, mood or genre.\n"
-            "🤖 <b>Choose with AI</b> — turn a rough idea into the right workflow.\n\n"
+            "🤖 <b>Choose with AI</b> — turn a rough idea into the right workflow.\n"
+            "👑 <b>Trends</b> — reuse ready scenarios with your own media.\n"
+            "📌 <b>Pinterest</b> — recreate a scene while keeping your identity.\n\n"
             "Price and final settings are always shown before launch."
         )
     return ScreenRender(text=text, reply_markup=builder.as_markup())

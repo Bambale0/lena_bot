@@ -260,7 +260,7 @@ async def cb_photo_to_prompt(
         "📸 <b>Фото → Промпт</b>\n\n"
         "Отправь фотографию. Я разберу объект, стиль, композицию, свет, палитру, "
         "настроение, текстуры и ракурс, а затем подготовлю подробный промпт на английском.\n\n"
-        "Анализ бесплатный — кредиты не списываются.",
+        "Анализ бесплатный — 💋 не списываются.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="❌ Отмена", callback_data="img:cancel_prompt")]

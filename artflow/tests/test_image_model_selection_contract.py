@@ -37,7 +37,8 @@ async def test_model_selection_opens_task_first_composer_with_db_user() -> None:
         if button.callback_data
     ]
     assert "GPT Image 2" in text
-    assert "Можно сразу отправлять" in text
+    assert "Что хочешь сделать?" in text
+    assert "Стоимость покажу перед платным запуском" in text
     assert "Выбери параметры" not in text
     assert "img_v2:ratio" in callbacks
     assert "img_v2:quality" in callbacks

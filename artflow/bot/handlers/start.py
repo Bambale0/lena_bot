@@ -51,7 +51,7 @@ def _onboarding_text(db_user: User, lang: str) -> str:
             "1. Choose what you want to create.\n"
             "2. Describe the result in plain language.\n"
             "3. Review the price and launch generation.\n\n"
-            f"Your balance: <b>{db_user.credits} credits</b>. The price is always shown before launch.\n\n"
+            f"Your balance: <b>{db_user.credits} kisses</b>. The price is always shown before launch.\n\n"
             "Choose your first goal:"
         )
     return (
@@ -61,7 +61,7 @@ def _onboarding_text(db_user: User, lang: str) -> str:
         "1. Выбери, что хочешь получить.\n"
         "2. Опиши результат обычными словами.\n"
         "3. Проверь стоимость и запусти генерацию.\n\n"
-        f"На балансе: <b>{db_user.credits} кредитов</b>. Стоимость всегда показывается до запуска.\n\n"
+        f"На балансе: <b>{db_user.credits} 💋</b>. Стоимость всегда показывается до запуска.\n\n"
         "Выбери первую задачу:"
     )
 

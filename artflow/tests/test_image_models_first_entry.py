@@ -2,31 +2,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 HANDLERS_INIT = ROOT / "bot" / "handlers" / "__init__.py"
 MODEL_FIRST_HANDLER = ROOT / "bot" / "handlers" / "image_models_first.py"
 
 
-def test_model_first_router_precedes_existing_image_wizard() -> None:
+def test_task_first_wizard_precedes_advanced_model_picker() -> None:
     source = HANDLERS_INIT.read_text(encoding="utf-8")
 
-    model_first = source.index("_image_router.include_router(_image_models_first.router)")
     wizard = source.index("_image_router.include_router(_image_wizard_v2.router)")
+    model_first = source.index("_image_router.include_router(_image_models_first.router)")
     legacy = source.index("_image_router.include_router(_legacy_image_gen.router)")
 
-    assert model_first < wizard < legacy
+    assert wizard < model_first < legacy
 
 
-def test_image_entry_opens_model_list_instead_of_resuming_active_session() -> None:
+def test_advanced_model_picker_no_longer_owns_main_image_entry() -> None:
     source = MODEL_FIRST_HANDLER.read_text(encoding="utf-8")
 
-    assert 'F.data == "menu:image"' in source
-    assert "ImageGenFSM.model_select" in source
+    assert 'F.data == "menu:image"' not in source
+    assert 'F.data == "img_menu:advanced"' in source
     assert "image_models_kb(model_costs)" in source
-    assert "Шаг 1. Выбери модель" in source
-    assert 'back_callback="menu:main"' in source
-    assert "get_active_image_session" not in source
 
 
 def test_change_model_picker_returns_to_task_without_looping() -> None:

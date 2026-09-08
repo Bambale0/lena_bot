@@ -13,7 +13,7 @@ def main_menu_kb(
     builder = InlineKeyboardBuilder()
     if has_active_image_session:
         builder.row(
-            InlineKeyboardButton(text="🔥 Продолжить работу", callback_data="menu:image"),
+            InlineKeyboardButton(text="🔥 Продолжить работу", callback_data="img_session:continue"),
             InlineKeyboardButton(text="🆕 Новая работа", callback_data="img_session:new"),
         )
     builder.row(

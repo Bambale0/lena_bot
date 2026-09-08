@@ -108,7 +108,7 @@ def confirmation_text(data: dict, price_credits: float | None) -> str:
         "ТЫ ✅\n\n"
         f"Рост:\n{int(data.get('height_cm') or 0)} см\n\n"
         f"Вес:\n{int(data.get('weight_kg') or 0)} кг\n\n"
-        f"Стоимость:\n{price:g} 💎\n\n"
+        f"Стоимость:\n{price:g} 💋\n\n"
         "Создать?"
     )
 

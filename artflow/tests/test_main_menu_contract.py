@@ -78,12 +78,16 @@ def test_v2_create_hub_preserves_all_creation_entrypoints_and_explains_them():
         "img:photo2prompt",
         "menu:music",
         "menu:assistant",
+        "menu:trends",
+        "menu:pinterest",
         "menu:main",
     ]
     assert "карточки товаров" in screen.text
     assert "Промпт по фото" in screen.text
     assert "оживление фото" in screen.text
     assert "только задумка" in screen.text
+    assert "готовые сценарии" in screen.text
+    assert "Pinterest" in screen.text
 
     admin_cb = callbacks(render_create_hub(lang="ru", is_admin=True).reply_markup)
     assert "menu:mj" in admin_cb
@@ -101,12 +105,13 @@ def test_v2_more_hub_preserves_secondary_features_and_explains_them():
     assert "menu:admin" in admin_cb
 
 
-def test_image_entry_keeps_photo_prompt_visible():
+def test_image_entry_is_scenario_first_and_keeps_advanced_controls_optional():
     screen = render_image_scenarios()
-    assert "Можно сразу отправлять" in screen.text
-    assert "APIX сам выберет" in screen.text
-    assert "Промпт по фото" in screen.text
+    assert "Что хочешь сделать?" in screen.text
+    assert "Стоимость покажу перед платным запуском" in screen.text
     assert callbacks(screen.reply_markup) == [
+        "img_v2:text",
+        "img_v2:edit",
         "img_v2:ratio",
         "img_v2:quality",
         "img_v2:refs",
@@ -137,7 +142,7 @@ def test_v2_main_menu_preserves_active_work_shortcuts():
     )
     screen = render_main_menu(ctx)
     cb = callbacks(screen.reply_markup)
-    assert cb[:2] == ["menu:image", "img_session:new"]
+    assert cb[:2] == ["img_session:continue", "img_session:new"]
     assert "menu:create" in cb
     assert "menu:history" in cb
     assert "активная серия" in screen.text

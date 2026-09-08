@@ -18,7 +18,7 @@ def test_onboarding_explains_flow_and_balance():
     text = _onboarding_text(user, "ru")
 
     assert "Привет, Игорь" in text
-    assert "25 кредитов" in text
+    assert "25 💋" in text
     assert "Стоимость всегда показывается до запуска" in text
 
 
