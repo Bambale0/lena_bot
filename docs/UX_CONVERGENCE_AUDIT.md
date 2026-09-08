@@ -46,5 +46,5 @@ APIX should feel like one product across every surface. Users choose the result 
 - [x] Telegram handler/keyboard regression tests
 - [ ] Mini App Playwright smoke
 - [ ] 300 user-journey Mini App suite
-- [ ] Website internal-link audit
+- [x] Website internal-link audit
 - [x] Changed-file lint/type checks
