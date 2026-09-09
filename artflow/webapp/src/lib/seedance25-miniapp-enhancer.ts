@@ -16,7 +16,6 @@ type Seedance25Options = {
   generateAudio: boolean;
   returnLastFrame: boolean;
   webSearch: boolean;
-  imageFiles: File[];
   videoFiles: File[];
   audioFiles: File[];
   videoRefs: string[];
@@ -35,7 +34,6 @@ const DEFAULT_OPTIONS: Seedance25Options = {
   generateAudio: true,
   returnLastFrame: false,
   webSearch: false,
-  imageFiles: [],
   videoFiles: [],
   audioFiles: [],
   videoRefs: [],
@@ -87,6 +85,15 @@ function genericReferenceCard(root: HTMLElement): HTMLElement | null {
   ) || null;
 }
 
+function ensurePhotoReferenceSurface(root: HTMLElement): void {
+  if (genericReferenceCard(root)) return;
+  const mode = parameterGroup(root, "Режим");
+  const imageModeButton = Array.from(mode?.querySelectorAll<HTMLButtonElement>("button") || []).find(
+    (button) => button.textContent?.trim() === "Фото",
+  );
+  imageModeButton?.click();
+}
+
 function applyAutomaticSurface(): void {
   const select = selectedModelSelect();
   const root = select?.closest<HTMLElement>(".apix-generation-layout") || document.body;
@@ -99,9 +106,16 @@ function applyAutomaticSurface(): void {
     return;
   }
 
+  // Seedance routes from the actual media, but the React generation screen only
+  // mounts its normal image-reference uploader while the UI draft is in image
+  // mode. Select that draft mode invisibly so users keep the standard "Добавить"
+  // uploader, progress state and removable uploaded-reference list.
+  ensurePhotoReferenceSurface(root);
+
   // Provider scenario is an implementation detail. Seedance derives it from refs.
   if (mode) mode.style.display = "none";
-  if (genericRefs) genericRefs.style.display = "none";
+  const mountedRefs = genericReferenceCard(root);
+  if (mountedRefs) mountedRefs.style.display = "";
 }
 
 function renderPanel(): HTMLElement {
@@ -113,13 +127,9 @@ function renderPanel(): HTMLElement {
     <div class="min-w-0">
       <p class="text-xs font-semibold">Seedance 2.5 · референсы</p>
       <p class="text-[10px] text-muted-foreground">
-        Режим определяется автоматически: без референсов — текст → видео; ровно 1 фото — первый кадр; 2+ фото или любое видео/аудио — мультимодальные референсы.
+        Режим определяется автоматически. Фото добавляй через обычный блок «Референсы» ниже: 1 фото станет первым кадром, 2+ фото — мультимодальными референсами. Видео и аудио можно добавить здесь.
       </p>
     </div>
-    <label class="grid min-w-0 gap-1 text-xs font-medium">
-      Фото · до ${MAX_IMAGES}
-      <input data-seedance25="imageFiles" type="file" accept="image/*" multiple class="w-full text-xs" />
-    </label>
     <label class="grid min-w-0 gap-1 text-xs font-medium">
       Видео · до ${MAX_VIDEOS}
       <input data-seedance25="videoFiles" type="file" accept="video/mp4,video/quicktime,video/x-matroska,.mp4,.mov,.mkv" multiple class="w-full text-xs" />
@@ -177,7 +187,6 @@ function renderPanel(): HTMLElement {
   const generateAudio = panel.querySelector<HTMLInputElement>('[data-seedance25="generateAudio"]');
   const returnLastFrame = panel.querySelector<HTMLInputElement>('[data-seedance25="returnLastFrame"]');
   const webSearch = panel.querySelector<HTMLInputElement>('[data-seedance25="webSearch"]');
-  const imageFiles = panel.querySelector<HTMLInputElement>('[data-seedance25="imageFiles"]');
   const videoFiles = panel.querySelector<HTMLInputElement>('[data-seedance25="videoFiles"]');
   const audioFiles = panel.querySelector<HTMLInputElement>('[data-seedance25="audioFiles"]');
   const videoRefs = panel.querySelector<HTMLTextAreaElement>('[data-seedance25="videoRefs"]');
@@ -200,7 +209,6 @@ function renderPanel(): HTMLElement {
       generateAudio: Boolean(generateAudio?.checked),
       returnLastFrame: Boolean(returnLastFrame?.checked),
       webSearch: Boolean(webSearch?.checked),
-      imageFiles: Array.from(imageFiles?.files || []).slice(0, MAX_IMAGES),
       videoFiles: Array.from(videoFiles?.files || []).slice(0, MAX_VIDEOS),
       audioFiles: Array.from(audioFiles?.files || []).slice(0, MAX_AUDIOS),
       videoRefs: splitLines(videoRefs?.value || "", MAX_VIDEOS),
@@ -258,7 +266,6 @@ function patchCreateVideo(): void {
     if (body.model === MODEL_KEY) {
       const options = readOptions();
 
-      const uploadedImages = await Promise.all(options.imageFiles.map(uploadReference));
       const uploadedVideos = await Promise.all(options.videoFiles.map(uploadReference));
       const uploadedAudios = await Promise.all(options.audioFiles.map(uploadReference));
 
@@ -266,7 +273,7 @@ function patchCreateVideo(): void {
         String(body.image_url || "").trim(),
         ...(Array.isArray(body.reference_urls) ? body.reference_urls.map(String) : []),
       ]);
-      const images = unique([...existingImages, ...uploadedImages]).slice(0, MAX_IMAGES);
+      const images = existingImages.slice(0, MAX_IMAGES);
       body.image_url = images[0] || null;
       body.reference_urls = images.slice(1);
 
