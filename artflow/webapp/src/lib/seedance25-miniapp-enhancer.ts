@@ -85,15 +85,6 @@ function genericReferenceCard(root: HTMLElement): HTMLElement | null {
   ) || null;
 }
 
-function ensurePhotoReferenceSurface(root: HTMLElement): void {
-  if (genericReferenceCard(root)) return;
-  const mode = parameterGroup(root, "Режим");
-  const imageModeButton = Array.from(mode?.querySelectorAll<HTMLButtonElement>("button") || []).find(
-    (button) => button.textContent?.trim() === "Фото",
-  );
-  imageModeButton?.click();
-}
-
 function applyAutomaticSurface(): void {
   const select = selectedModelSelect();
   const root = select?.closest<HTMLElement>(".apix-generation-layout") || document.body;
@@ -106,13 +97,8 @@ function applyAutomaticSurface(): void {
     return;
   }
 
-  // Seedance routes from the actual media, but the React generation screen only
-  // mounts its normal image-reference uploader while the UI draft is in image
-  // mode. Select that draft mode invisibly so users keep the standard "Добавить"
-  // uploader, progress state and removable uploaded-reference list.
-  ensurePhotoReferenceSurface(root);
-
-  // Provider scenario is an implementation detail. Seedance derives it from refs.
+  // Provider scenario is an implementation detail. The React screen mounts its
+  // standard photo-reference uploader explicitly for Seedance 2.5.
   if (mode) mode.style.display = "none";
   const mountedRefs = genericReferenceCard(root);
   if (mountedRefs) mountedRefs.style.display = "";
@@ -127,7 +113,7 @@ function renderPanel(): HTMLElement {
     <div class="min-w-0">
       <p class="text-xs font-semibold">Seedance 2.5 · референсы</p>
       <p class="text-[10px] text-muted-foreground">
-        Режим определяется автоматически. Фото добавляй через обычный блок «Референсы» ниже: 1 фото станет первым кадром, 2+ фото — мультимодальными референсами. Видео и аудио можно добавить здесь.
+        Без референсов Seedance создаёт видео по тексту. Любое добавленное фото, видео или аудио участвует как мультимодальный референс — первый кадр отдельно не используется.
       </p>
     </div>
     <label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -296,7 +282,7 @@ function patchCreateVideo(): void {
       }
 
       // UI mode is deliberately meaningless for Seedance 2.5. Backend derives
-      // text / first-frame / multimodal from the actual refs above. Keep the
+      // text / multimodal from the actual refs above. Keep the
       // generic request field schema-valid: VideoGenRequest.grok_mode is a str.
       body.mode = "text";
       body.grok_mode = "normal";

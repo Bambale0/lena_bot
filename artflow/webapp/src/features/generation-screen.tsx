@@ -190,7 +190,7 @@ function GenerationScreen({
   const mediaQuotaExceeded = selectedModel?.key === GEMINI_OMNI_MODEL && geminiMediaSlots > GEMINI_MAX_MEDIA_SLOTS;
   const advancedInvalid = invalidSeed || invalidTrim || tooManyAudioIds || tooManyCharacterIds || mediaQuotaExceeded;
   const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid;
-  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion";
+  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion" || selectedModel?.key === SEEDANCE_25_MODEL;
   const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input);
   const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);
 

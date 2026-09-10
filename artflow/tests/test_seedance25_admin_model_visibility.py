@@ -11,7 +11,7 @@ def test_seedance25_model_registered_after_api_bootstrap():
     assert video_service.VideoModel(MODEL_KEY).value == MODEL_KEY
     spec = kie_model_specs.VIDEO_SPECS[MODEL_KEY]
     assert spec.model == MODEL_KEY
-    assert spec.supported_modes == ("text", "image", "multimodal")
+    assert spec.supported_modes == ("text", "multimodal")
     assert "first_last" not in spec.supported_modes
     assert spec.reference_field is None
     assert spec.param_builder is not None
@@ -83,7 +83,7 @@ def test_seedance25_builder_routes_two_images_to_multimodal_references():
     assert payload["output_format"] == "mov"
 
 
-def test_seedance25_builder_one_image_is_first_frame_with_adaptive_ratio():
+def test_seedance25_builder_one_image_is_multimodal_reference():
     import api  # noqa: F401
     from api.seedance25_adapter import _seedance25_params
 
@@ -96,10 +96,10 @@ def test_seedance25_builder_one_image_is_first_frame_with_adaptive_ratio():
         }
     )
 
-    assert payload["first_frame_url"] == "https://cdn.example/first.png"
-    assert payload["aspect_ratio"] == "adaptive"
+    assert payload["reference_image_urls"] == ["https://cdn.example/first.png"]
+    assert payload["aspect_ratio"] == "16:9"
+    assert "first_frame_url" not in payload
     assert "last_frame_url" not in payload
-    assert "reference_image_urls" not in payload
 
 
 def test_seedance25_builder_uses_multimodal_reference_scenario():

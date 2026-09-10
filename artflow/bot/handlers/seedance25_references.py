@@ -54,9 +54,7 @@ def _text(data: dict) -> str:
         "🌱 <b>Seedance 2.5</b>\n\n"
         "Просто пришли нужные референсы — режим выбирать не надо:\n"
         "• без референсов → текст в видео\n"
-        "• ровно 1 фото → первый кадр\n"
-        "• 2+ фото → мультимодальные референсы\n"
-        "• любое видео или аудио → мультимодальные референсы\n\n"
+        "• любое фото, видео или аудио → мультимодальные референсы\n\n"
         f"🖼 Фото: <b>{images}/{MAX_REFERENCE_IMAGES}</b>\n"
         f"🎬 Видео: <b>{videos}/{MAX_REFERENCE_VIDEOS}</b>\n"
         f"🎵 Аудио: <b>{audios}/{MAX_REFERENCE_AUDIOS}</b>\n\n"
@@ -76,7 +74,7 @@ async def _go_params(call: CallbackQuery, state: FSMContext) -> None:
     )
     await state.update_data(
         mode=route,
-        aspect_ratio="adaptive" if route == "image" else data.get("aspect_ratio"),
+        aspect_ratio=data.get("aspect_ratio"),
     )
     updated = await state.get_data()
     await state.set_state(VideoGenFSM.params_select)

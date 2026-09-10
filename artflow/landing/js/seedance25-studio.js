@@ -66,7 +66,7 @@
         <div>
           <span>Seedance 2.5</span>
           <b>Один мультимодальный вход</b>
-          <p>Без референсов — text-to-video; ровно 1 фото — first frame с adaptive ratio; 2+ фото или любое видео/аудио — multimodal references.</p>
+          <p>Без референсов — text-to-video. Любое фото, видео или аудио — multimodal references; отдельного first frame режима нет.</p>
         </div>
       </div>
       <div class="composer-row">
