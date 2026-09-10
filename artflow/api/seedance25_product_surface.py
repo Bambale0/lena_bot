@@ -37,7 +37,7 @@ def install_seedance25_product_surface() -> None:
 
     keyboard_models.VIDEO_CAPS[MODEL_KEY] = dict(seedance25.VIDEO_CAPS)
     keyboard_models.VIDEO_MODEL_DESC[MODEL_KEY] = (
-        f"{seedance25.DISPLAY_NAME} · авто T2V/I2V/Reference · 4–30 сек · 480p/720p"
+        f"{seedance25.DISPLAY_NAME} · T2V/Multimodal · 4–30 сек · 480p/720p"
     )
 
     order = getattr(keyboard_models, "_VIDEO_MODEL_ORDER", None)

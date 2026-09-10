@@ -5,11 +5,10 @@ text/image/first-last/reference provider scenarios manually. APIX derives the
 provider payload from the media that is actually present:
 
 * no references -> text-to-video;
-* exactly one image and no video/audio -> image-to-video using first_frame_url;
-* two or more images, or any video/audio reference -> multimodal reference mode.
+* any image, video or audio reference -> multimodal reference mode.
 
-This intentionally removes the previous two-image first+last-frame behaviour:
-for APIX, two images are ordinary Seedance 2.5 reference images.
+Seedance 2.5 never treats a single image as a first frame in APIX. Every supplied
+media item remains an ordinary multimodal reference.
 """
 from __future__ import annotations
 
@@ -36,7 +35,7 @@ MAX_REFERENCE_AUDIOS = 10
 logger = logging.getLogger(__name__)
 
 VIDEO_CAPS: dict[str, Any] = {
-    "modes": ["text", "image", "multimodal"],
+    "modes": ["text", "multimodal"],
     "auto_route_by_inputs": True,
     "duration_options": DURATIONS,
     "aspect_ratios": ASPECT_RATIOS,
@@ -114,8 +113,6 @@ def route_for_inputs(*, images: list[str], videos: list[str], audios: list[str])
     """Return APIX's automatic Seedance scenario from real inputs only."""
     if not images and not videos and not audios:
         return "text"
-    if len(images) == 1 and not videos and not audios:
-        return "image"
     return "multimodal"
 
 
@@ -179,9 +176,6 @@ def _seedance25_params(params: dict[str, Any]) -> dict[str, Any]:
     route = route_for_inputs(images=image_refs, videos=video_refs, audios=audio_refs)
 
     aspect_ratio = _choice(params.get("aspect_ratio"), ASPECT_RATIOS, "adaptive")
-    # A single image is the first frame; its own frame ratio is authoritative.
-    if route == "image":
-        aspect_ratio = "adaptive"
 
     out: dict[str, Any] = {
         "resolution": _choice(params.get("resolution"), RESOLUTIONS, "720p"),
@@ -196,10 +190,6 @@ def _seedance25_params(params: dict[str, Any]) -> dict[str, Any]:
         out["web_search"] = _bool(params.get("web_search"), False)
     if params.get("nsfw_checker") is not None:
         out["nsfw_checker"] = _bool(params.get("nsfw_checker"), False)
-
-    if route == "image":
-        out["first_frame_url"] = image_refs[0]
-        return out
 
     if route == "multimodal":
         if image_refs:
@@ -284,7 +274,7 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
                 "reference_video_urls": prepared_videos,
                 "reference_audio_urls": prepared_audio_refs,
                 "duration": duration,
-                "aspect_ratio": "adaptive" if route == "image" else aspect_ratio,
+                "aspect_ratio": aspect_ratio,
                 "resolution": resolution,
                 "return_last_frame": control_options.get("return_last_frame", kwargs.get("return_last_frame", False)),
                 "generate_audio": control_options.get("generate_audio", kwargs.get("generate_audio", True)),
@@ -395,13 +385,9 @@ def _install_seedance25_miniapp_normalizer(routes: Any) -> None:
         billing_duration = _billing_duration(normalized_duration)
         normalized_resolution = _choice(resolution, RESOLUTIONS, "720p")
         normalized_aspect_ratio = _choice(aspect_ratio, ASPECT_RATIOS, "adaptive")
-        if route == "image":
-            normalized_aspect_ratio = "adaptive"
 
         if route == "text":
             normalized_image: str | list[str] | None = None
-        elif route == "image":
-            normalized_image = image_refs[0]
         else:
             normalized_image = image_refs or None
 
@@ -435,7 +421,7 @@ def install_seedance25_provider_support() -> None:
     kie_model_specs.VIDEO_SPECS[MODEL_KEY] = kie_model_specs.KieModelSpec(
         model=MODEL_KEY,
         media_type=kie_model_specs.KieMediaType.VIDEO,
-        supported_modes=("text", "image", "multimodal"),
+        supported_modes=("text", "multimodal"),
         reference_type=kie_model_specs.KieReferenceType.NONE,
         param_builder=_seedance25_params,
     )

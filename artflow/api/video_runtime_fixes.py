@@ -104,7 +104,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
             "reference_video_urls": prepared_videos,
             "reference_audio_urls": prepared_audio_refs,
             "duration": duration,
-            "aspect_ratio": "adaptive" if route == "image" else aspect_ratio,
+            "aspect_ratio": aspect_ratio,
             "resolution": resolution,
             "return_last_frame": control_options.get("return_last_frame", kwargs.get("return_last_frame", False)),
             "generate_audio": control_options.get("generate_audio", kwargs.get("generate_audio", True)),

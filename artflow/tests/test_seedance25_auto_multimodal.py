@@ -12,7 +12,7 @@ from api import seedance25_product_surface as s25_surface
     ("images", "videos", "audios", "expected"),
     [
         ([], [], [], "text"),
-        (["one.jpg"], [], [], "image"),
+        (["one.jpg"], [], [], "multimodal"),
         (["one.jpg", "two.jpg"], [], [], "multimodal"),
         (["one.jpg"], ["motion.mp4"], [], "multimodal"),
         (["one.jpg"], [], ["sound.wav"], "multimodal"),
@@ -24,7 +24,7 @@ def test_route_is_derived_only_from_actual_references(images, videos, audios, ex
     assert s25.route_for_inputs(images=images, videos=videos, audios=audios) == expected
 
 
-def test_one_photo_is_first_frame_and_aspect_ratio_is_adaptive() -> None:
+def test_one_photo_is_multimodal_reference_and_keeps_requested_ratio() -> None:
     payload = s25._seedance25_params(
         {
             "reference_image_urls": ["https://example.test/first.jpg"],
@@ -33,10 +33,10 @@ def test_one_photo_is_first_frame_and_aspect_ratio_is_adaptive() -> None:
             "resolution": "720p",
         }
     )
-    assert payload["first_frame_url"] == "https://example.test/first.jpg"
-    assert payload["aspect_ratio"] == "adaptive"
+    assert payload["reference_image_urls"] == ["https://example.test/first.jpg"]
+    assert payload["aspect_ratio"] == "16:9"
+    assert "first_frame_url" not in payload
     assert "last_frame_url" not in payload
-    assert "reference_image_urls" not in payload
 
 
 def test_two_photos_are_multimodal_refs_not_first_last_frames() -> None:
@@ -158,9 +158,9 @@ def test_miniapp_normalizer_ignores_manual_mode_and_routes_from_media(monkeypatc
     assert text["mode"] == "text"
 
     one = _normalize(routes, image_url="https://example.test/one.jpg")
-    assert one["mode"] == "image"
-    assert one["image_url"] == "https://example.test/one.jpg"
-    assert one["aspect_ratio"] == "adaptive"
+    assert one["mode"] == "multimodal"
+    assert one["image_url"] == ["https://example.test/one.jpg"]
+    assert one["aspect_ratio"] == "16:9"
 
     two = _normalize(
         routes,
