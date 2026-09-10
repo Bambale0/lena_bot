@@ -4,6 +4,7 @@ import { AlertCircle, Film, ImageIcon, LoaderCircle, Orbit, Upload, WandSparkles
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DurationSlider } from "@/components/ui/duration-slider";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -429,11 +430,12 @@ function GenerationScreen({
             ) : (
               <>
                 {durations.length ? (
-                  <LabeledChips label="Длительность">
-                    {durations.map((duration) => (
-                      <button key={duration} type="button" className={cn(chipClass(draft.duration === duration), "shrink-0")} onClick={() => onChange({ duration })}>{duration} сек</button>
-                    ))}
-                  </LabeledChips>
+                  <DurationSlider
+                    values={durations}
+                    value={draft.duration}
+                    onChange={(duration) => onChange({ duration })}
+                    disabled={submitting || mediaUploading}
+                  />
                 ) : null}
 
                 {resolutions.length ? (
