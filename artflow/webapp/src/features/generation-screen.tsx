@@ -428,13 +428,48 @@ function GenerationScreen({
               </>
             ) : (
               <>
-                {durations.length ? (
-                  <LabeledChips label="Длительность">
-                    {durations.map((duration) => (
-                      <button key={duration} type="button" className={cn(chipClass(draft.duration === duration), "shrink-0")} onClick={() => onChange({ duration })}>{duration} сек</button>
-                    ))}
-                  </LabeledChips>
-                ) : null}
+                {durations.length ? (() => {
+                  const durationIndex = Math.max(0, durations.indexOf(draft.duration));
+                  const selectedDuration = durations[durationIndex] ?? draft.duration;
+                  return (
+                    <div className="apix-parameter-group grid min-w-0 gap-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium">Длительность</p>
+                        <Badge variant="outline" className="shrink-0">{selectedDuration} сек</Badge>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={Math.max(0, durations.length - 1)}
+                        step={1}
+                        value={durationIndex}
+                        disabled={durations.length <= 1}
+                        aria-label="Длительность видео"
+                        aria-valuetext={`${selectedDuration} секунд`}
+                        className="apix-focus-ring h-8 w-full cursor-pointer accent-primary disabled:cursor-default disabled:opacity-60"
+                        onChange={(event) => {
+                          const nextDuration = durations[Number(event.target.value)];
+                          if (nextDuration != null) onChange({ duration: nextDuration });
+                        }}
+                      />
+                      <div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+                        {durations.map((duration) => (
+                          <button
+                            key={duration}
+                            type="button"
+                            className={cn(
+                              "apix-focus-ring min-w-0 rounded px-1 py-0.5 text-[10px] transition",
+                              duration === selectedDuration ? "font-semibold text-primary" : "text-muted-foreground hover:text-foreground",
+                            )}
+                            onClick={() => onChange({ duration })}
+                          >
+                            {duration} сек
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })() : null}
 
                 {resolutions.length ? (
                   <LabeledChips label="Разрешение">
