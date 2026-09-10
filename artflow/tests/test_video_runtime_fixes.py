@@ -45,8 +45,9 @@ async def test_seedance_runtime_sends_prompt_inside_provider_input(monkeypatch):
     assert result.task_id == "seedance-task"
     assert calls[0][0]["model"] == seedance25_adapter.MODEL_KEY
     assert calls[0][0]["input"]["prompt"] == "оживи фото"
-    assert calls[0][0]["input"]["first_frame_url"] == "https://example.test/ref.jpg"
-    assert calls[0][0]["input"]["aspect_ratio"] == "adaptive"
+    assert calls[0][0]["input"]["reference_image_urls"] == ["https://example.test/ref.jpg"]
+    assert calls[0][0]["input"]["aspect_ratio"] == "16:9"
+    assert "first_frame_url" not in calls[0][0]["input"]
 
 
 @pytest.mark.asyncio
