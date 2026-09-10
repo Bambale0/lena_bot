@@ -4,6 +4,7 @@ import { Film, ImageIcon, LoaderCircle, Repeat2, UploadCloud, X } from "lucide-r
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { DurationSlider } from "@/components/ui/duration-slider";
 import { Sheet } from "@/components/ui/sheet";
 import type { FeedItem, GenerationTask, ModelInfo } from "@/lib/types";
 import { notifyHaptic } from "@/lib/telegram";
@@ -431,13 +432,13 @@ function FeedRemixRunnerPortal() {
               </select>
             </label>
           ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <label className="grid gap-1 text-xs font-semibold">
-                Длительность
-                <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={duration} onChange={(event) => setDuration(Number(event.target.value) || 5)} disabled={busy}>
-                  {durations.map((value) => <option key={value} value={value}>{value} сек</option>)}
-                </select>
-              </label>
+            <div className="grid gap-3">
+              <DurationSlider
+                values={durations}
+                value={duration}
+                onChange={setDuration}
+                disabled={busy}
+              />
               <label className="grid gap-1 text-xs font-semibold">
                 Разрешение
                 <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={resolution} onChange={(event) => setResolution(event.target.value)} disabled={busy}>
