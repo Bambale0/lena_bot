@@ -14,8 +14,9 @@ def test_video_generation_uses_duration_slider_bound_to_model_options() -> None:
     assert 'onChange({ duration: nextDuration })' in source
 
 
-def test_duration_slider_keeps_model_minimum_and_maximum_visible() -> None:
+def test_duration_slider_shows_clickable_supported_duration_ticks() -> None:
     source = (ROOT / "webapp/src/features/generation-screen.tsx").read_text(encoding="utf-8")
 
-    assert '<span>{durations[0]} сек</span>' in source
-    assert '<span>{durations[durations.length - 1]} сек</span>' in source
+    assert 'durations.map((duration) =>' in source
+    assert 'onClick={() => onChange({ duration })}' in source
+    assert '{duration} сек' in source
