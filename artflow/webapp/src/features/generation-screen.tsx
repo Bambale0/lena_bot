@@ -452,9 +452,20 @@ function GenerationScreen({
                           if (nextDuration != null) onChange({ duration: nextDuration });
                         }}
                       />
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                        <span>{durations[0]} сек</span>
-                        {durations.length > 1 ? <span>{durations[durations.length - 1]} сек</span> : null}
+                      <div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+                        {durations.map((duration) => (
+                          <button
+                            key={duration}
+                            type="button"
+                            className={cn(
+                              "apix-focus-ring min-w-0 rounded px-1 py-0.5 text-[10px] transition",
+                              duration === selectedDuration ? "font-semibold text-primary" : "text-muted-foreground hover:text-foreground",
+                            )}
+                            onClick={() => onChange({ duration })}
+                          >
+                            {duration} сек
+                          </button>
+                        ))}
                       </div>
                     </div>
                   );
