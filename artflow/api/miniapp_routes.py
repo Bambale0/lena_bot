@@ -54,6 +54,7 @@ from api.music_service import (
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.public_files import preview_public_image_url, public_url_is_available
 from api.video_service import VideoModel
+from api.video_prompt_limits import seedance_prompt_max_chars, validate_seedance_prompt
 from bot.keyboards.models import (
     _IMAGE_MODEL_ORDER,
     _VIDEO_MODEL_ORDER,
@@ -1227,7 +1228,9 @@ class ImageGenRequest(BaseModel):
 
 class VideoGenRequest(BaseModel):
     model: str
-    prompt: str = Field(..., min_length=1, max_length=4000)
+    # Model-specific validation happens after prompt_id resolution. Keep the DTO
+    # wide enough for Seedance 2.5, whose KIE contract accepts 30k characters.
+    prompt: str = Field(..., min_length=1, max_length=30000)
     prompt_id: int | None = None
     mode: str = "text"                    # "text" | "image" | "video"
     duration: int = Field(default=5, ge=2, le=30)
@@ -2104,6 +2107,14 @@ async def create_video_generation(
                 raise HTTPException(status_code=422, detail="Selected trend is not a video trend")
             if prompt_source.model and body.model != prompt_source.model:
                 raise HTTPException(status_code=422, detail="Trend must use its configured model")
+
+    try:
+        validate_seedance_prompt(body.model, user_prompt)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if seedance_prompt_max_chars(body.model) is None and len(user_prompt) > 4000:
+        # Preserve the historical contract for non-Seedance video models.
+        raise HTTPException(status_code=422, detail="Video prompt must be at most 4000 characters for this model")
 
     prompt_meta = {
         "prompt_id": getattr(prompt_source, "id", None),

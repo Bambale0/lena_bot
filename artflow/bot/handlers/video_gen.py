@@ -13,12 +13,13 @@ import aiohttp
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, FSInputFile, Message
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import polling, video_service
 from api.public_files import mirror_telegram_file
 from api.video_service import VideoModel
+from api.video_prompt_limits import append_telegram_seedance_prompt_chunk, seedance_prompt_max_chars
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     VIDEO_CAPS,
@@ -48,6 +49,35 @@ from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 router = Router(name="video_gen")
+
+
+def _long_prompt_done_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Готово", callback_data="vid_prompt:done"),
+    ]])
+
+
+async def _launch_collected_seedance_prompt(
+    *,
+    source_message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    bot: Bot,
+    prompt: str,
+) -> None:
+    data = await state.get_data()
+    await state.update_data(seedance_prompt_buffer="")
+    await _launch_video_generation_from_state(
+        source_message=source_message,
+        state=state,
+        session=session,
+        db_user=db_user,
+        bot=bot,
+        prompt=prompt,
+        source_feed_gen_id=data.get("source_feed_gen_id"),
+        parent_generation_id=data.get("parent_generation_id"),
+    )
 
 
 def _kie_callback_url() -> str:
@@ -1522,6 +1552,30 @@ async def _launch_video_generation_from_state(
 
 # ── Prompt / motion video URL ─────────────────────────────────────────────────
 
+@router.callback_query(VideoGenFSM.prompt_input, F.data == "vid_prompt:done")
+async def finish_long_video_prompt(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
+) -> None:
+    data = await state.get_data()
+    model_key = str(data.get("model_key") or "")
+    prompt = str(data.get("seedance_prompt_buffer") or "")
+    limit = seedance_prompt_max_chars(model_key)
+    if limit is None or not prompt:
+        await call.answer("Нет собранного промпта", show_alert=True)
+        return
+    await call.answer()
+    if call.message is None:
+        return
+    await _launch_collected_seedance_prompt(
+        source_message=call.message,
+        state=state,
+        session=session,
+        db_user=db_user,
+        bot=bot,
+        prompt=prompt,
+    )
+
+
 @router.message(VideoGenFSM.prompt_input, F.text)
 async def handle_video_prompt(
     message: Message, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
@@ -1529,7 +1583,8 @@ async def handle_video_prompt(
     data = await state.get_data()
     model_key: str = data["model_key"]
     motion_step: str | None = data.get("motion_step")
-    prompt = message.text.strip()  # type: ignore[union-attr]
+    raw_prompt = message.text or ""  # type: ignore[union-attr]
+    prompt = raw_prompt.strip()
 
     # Motion Control: step 2 — user sent reference video URL
     if motion_step == "video_url":
@@ -1558,6 +1613,35 @@ async def handle_video_prompt(
     if motion_step == "prompt":
         prompt = prompt if prompt != "-" else ""
         await state.update_data(motion_prompt=prompt, motion_step="done")
+
+    # Telegram cannot carry a 20k/30k prompt in one text message: clients split
+    # long pasted text into 4096-char messages. Reassemble those chunks verbatim
+    # for Seedance instead of launching on (and losing everything after) part 1.
+    prompt_limit = seedance_prompt_max_chars(model_key) if motion_step is None else None
+    previous_prompt = str(data.get("seedance_prompt_buffer") or "")
+    if prompt_limit is not None and (previous_prompt or len(raw_prompt) >= 4096):
+        try:
+            combined_prompt, awaiting_more = append_telegram_seedance_prompt_chunk(
+                model_key, previous_prompt, raw_prompt
+            )
+        except ValueError:
+            await state.update_data(seedance_prompt_buffer="")
+            await message.answer(
+                f"❌ Промпт длиннее максимума модели: {prompt_limit} символов. Отправь короче.",
+                reply_markup=back_to_menu_kb(),
+            )
+            return
+        if awaiting_more:
+            await state.update_data(seedance_prompt_buffer=combined_prompt)
+            await message.answer(
+                f"🧩 Принял часть промпта: {len(combined_prompt)}/{prompt_limit}. "
+                "Пришли продолжение — Telegram сам делит длинный текст. "
+                "Если это всё, нажми «Готово».",
+                reply_markup=_long_prompt_done_kb(),
+            )
+            return
+        prompt = combined_prompt
+        await state.update_data(seedance_prompt_buffer="")
 
     updated = await state.get_data()
     await _launch_video_generation_from_state(

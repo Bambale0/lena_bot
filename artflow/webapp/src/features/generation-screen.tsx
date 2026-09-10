@@ -30,6 +30,15 @@ const GEMINI_OMNI_MODEL = "gemini-omni-video";
 const GEMINI_MAX_MEDIA_SLOTS = 7;
 const GEMINI_MAX_TRIM_SECONDS = 10;
 const GEMINI_MAX_SEED = 2_147_483_647;
+const SEEDANCE_20_MODELS = new Set(["bytedance/seedance-2", "bytedance/seedance-2-fast", "bytedance/seedance-2-mini"]);
+const SEEDANCE_25_MODEL = "bytedance/seedance-2-5";
+
+function promptMaxLength(kind: "image" | "video" | "motion", modelKey: string | undefined): number {
+  if (kind !== "video") return 4000;
+  if (modelKey === SEEDANCE_25_MODEL) return 30000;
+  if (modelKey && SEEDANCE_20_MODELS.has(modelKey)) return 20000;
+  return 4000;
+}
 
 const titles = {
   image: { title: "Фото", description: "Текст, edit-модели, референсы и пакетный результат.", icon: ImageIcon },
@@ -160,6 +169,7 @@ function GenerationScreen({
   const tooManyRefs = draft.referenceUrls.length > maxRefs;
   const missingVideo = (draft.mode === "video" || kind === "motion") && !draft.videoUrl;
   const missingPrompt = !draft.prompt.trim() && !draft.promptId;
+  const maxPromptLength = promptMaxLength(kind, selectedModel?.key);
   const insufficientCredits = estimate > Number(user.credits || 0);
   const mediaUploading = referenceUploading || videoUploading;
   const invalidSeed = Boolean(
@@ -277,8 +287,10 @@ function GenerationScreen({
                 value={draft.prompt}
                 disabled={Boolean(draft.promptId)}
                 placeholder={draft.promptId ? "Скрытый промпт тренда" : "Сцена, стиль, свет, движение, детали"}
+                maxLength={maxPromptLength}
                 onChange={(event) => onChange({ prompt: event.target.value })}
               />
+              {!draft.promptId ? <span className="text-[10px] text-muted-foreground">{draft.prompt.length.toLocaleString("ru-RU")} / {maxPromptLength.toLocaleString("ru-RU")}</span> : null}
             </label>
 
             {showReferenceUploader ? (

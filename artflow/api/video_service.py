@@ -25,6 +25,7 @@ except ImportError:
 from api import comet_fallback, kieai_client
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
 from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
+from api.video_prompt_limits import validate_seedance_prompt
 from core.gemini_omni import (
     build_gemini_omni_audio_payload,
     build_gemini_omni_character_payload,
@@ -276,6 +277,9 @@ async def generate_video(
     enable_translation: bool = False,
 ) -> VideoResult:
     del image_bytes  # the URL/file-upload path is the canonical provider contract
+
+    # Never truncate Seedance prompts. Validate the exact KIE contract before upload/submission.
+    prompt = validate_seedance_prompt(model.value, prompt)
 
     image_url = await _prepare_video_reference_urls(image_url)
     last_frame_url = await _prepare_video_reference_url(last_frame_url)
