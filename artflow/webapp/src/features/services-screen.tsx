@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Camera, Film, Headphones, ImageIcon, LifeBuoy, Music2, RefreshCw, Send, Sparkles, Upload, Users } from "lucide-react";
+import { Bot, Camera, Film, Headphones, ImageIcon, Music2, Orbit, RefreshCw, Send, Settings, Sparkles, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -117,12 +117,11 @@ function ServicesScreen({
       : "—";
 
   const services = [
-    { title: "Оживить", description: "Image-to-video", icon: Film, tab: "video" as AppTab },
-    { title: "Изменить", description: "Edit-модели", icon: ImageIcon, tab: "photo" as AppTab },
-    { title: "Музыка", description: "Suno генерация", icon: Music2, tab: "services" as AppTab },
+    { title: "Motion", description: "Перенести движение", icon: Orbit, tab: "motion" as AppTab },
+    { title: "Оживить", description: "Фото → видео", icon: Film, tab: "video" as AppTab },
+    { title: "Изменить", description: "Редактировать фото", icon: ImageIcon, tab: "photo" as AppTab },
+    { title: "Музыка", description: "Suno", icon: Music2, tab: "services" as AppTab },
     { title: "Avatar", description: "Фото и аудио", icon: Headphones, tab: "video" as AppTab },
-    { title: "Партнёры", description: "Рефералы", icon: Users, tab: "profile" as AppTab },
-    { title: "Помощь", description: "Task ID и ошибки", icon: LifeBuoy, tab: "profile" as AppTab },
     {
       title: "Pinterest",
       description: pinterestService?.description || "Pinterest AI со своей внешностью",
@@ -140,6 +139,7 @@ function ServicesScreen({
           <div className="flex items-center gap-2"><h1 className="text-lg font-bold tracking-tight sm:text-xl">{copy.title}</h1><Badge variant="outline">AI</Badge></div>
           <details className="apix-help"><summary>{copy.whatHere}</summary><p className="pb-2">{copy.whatHereText}</p></details>
         </div>
+        <Button variant="ghost" size="sm" onClick={() => onNavigate("settings")}><Settings className="size-4" /> Настройки</Button>
       </div>
 
       <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-7">
@@ -161,10 +161,10 @@ function ServicesScreen({
                 if (tab) onNavigate(tab);
               }}
             >
-              {badge ? <span className="absolute right-1 top-1 rounded-full border border-primary/25 bg-primary/15 px-1.5 py-0.5 text-[6px] font-black uppercase tracking-wide text-primary">{badge}</span> : null}
-              {price ? <span className="absolute left-1 top-1 rounded-full border border-border/70 bg-background/80 px-1.5 py-0.5 text-[6px] font-black tracking-wide text-foreground">{price}</span> : null}
+              {badge ? <span className="absolute right-1 top-1 rounded-full border border-primary/25 bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">{badge}</span> : null}
+              {price ? <span className="absolute left-1 top-1 rounded-full border border-border/70 bg-background/80 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-foreground">{price}</span> : null}
               <span className={`grid size-8 place-items-center rounded-lg ${pinterest ? "bg-primary/20 text-primary" : "bg-primary/12 text-primary"}`}><Icon className="size-4" /></span>
-              <span className="max-w-full truncate text-[9px] font-semibold leading-none">{title}</span>
+              <span className="max-w-full truncate text-[11px] font-semibold leading-none">{title}</span>
             </button>
           );
         })}

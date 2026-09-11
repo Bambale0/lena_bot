@@ -13,8 +13,7 @@ from bot.ui.image_menu import render_image_scenarios
 from bot.ui.model_labels import model_display_name
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
-from db.models import ImageSession
-from db.models import User
+from db.models import ImageSession, User
 
 router = Router(name="image_wizard_v2")
 
@@ -280,23 +279,8 @@ async def open_image_composer(
     session: AsyncSession,
     db_user: User,
 ) -> None:
-    image_session = await repo.get_active_image_session(session, db_user.id)
-    if image_session:
-        await state.clear()
-        await state.update_data(**_sync_active_session_state(image_session))
-        await state.set_state(ImageGenFSM.session_active)
-        from bot.ui.router import render_screen
-
-        screen = await render_screen(
-            screen="image_active",
-            session=session,
-            db_user=db_user,
-            extra={"image_session": image_session},
-        )
-        await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)
-        await safe_answer_callback(call)
-        return
-
+    # `Создать → Изображение` always starts a fresh task. Continuing an active
+    # series has its own explicit `🔥 Продолжить` entrypoint on the home screen.
     if not await _prepare_default_flow(
         call=call,
         state=state,
@@ -470,7 +454,6 @@ async def start_edit_image(
 
 @router.callback_query(F.data == "img_v2:add_reference")
 async def add_reference(call: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
     await state.update_data(mode="image", image_mode="image")
     await state.set_state(ImageGenFSM.image_upload)
     await safe_edit_message(

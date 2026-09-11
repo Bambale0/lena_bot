@@ -75,7 +75,7 @@ test.beforeEach(async ({ page }) => {
 test("Pinterest is a priced Service and stays outside Trends", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
 
-  await page.getByRole("tab", { name: "Сервисы" }).click();
+  await page.getByRole("tab", { name: "Ещё" }).click();
   const pinterest = page.getByRole("button", { name: /Pinterest/ }).first();
   await expect(pinterest).toBeVisible();
   await expect(pinterest).toBeEnabled();
@@ -118,7 +118,7 @@ test("Pinterest Service uses its own API domain and approved manual reference UX
   });
 
   await page.goto("/?tgWebAppData=test");
-  await page.getByRole("tab", { name: "Сервисы" }).click();
+  await page.getByRole("tab", { name: "Ещё" }).click();
   await page.getByRole("button", { name: /Pinterest/ }).first().click();
 
   const dialog = page.locator("#apix-pinterest-service-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
@@ -205,7 +205,7 @@ test("Pinterest accepts multiple optional identity angles without auto-start", a
   });
 
   await page.goto("/?tgWebAppData=test");
-  await page.getByRole("tab", { name: "Сервисы" }).click();
+  await page.getByRole("tab", { name: "Ещё" }).click();
   await page.getByRole("button", { name: /Pinterest/ }).first().click();
   const dialog = page.locator("#apix-pinterest-service-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
 
@@ -248,7 +248,7 @@ test("Pinterest validates measurements before generation", async ({ page }) => {
   });
 
   await page.goto("/?tgWebAppData=test");
-  await page.getByRole("tab", { name: "Сервисы" }).click();
+  await page.getByRole("tab", { name: "Ещё" }).click();
   await page.getByRole("button", { name: /Pinterest/ }).first().click();
   const dialog = page.locator("#apix-pinterest-service-root").getByRole("dialog", { name: "Повтори фото с Pinterest" });
 

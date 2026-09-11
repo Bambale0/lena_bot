@@ -9,7 +9,7 @@ import pytest
 from api import pinterest_service_routes as PSR
 from bot.handlers import pinterest_flow as pf
 from bot.handlers.pinterest_flow import PinterestFlow
-from bot.ui.main_menu import render_main_menu
+from bot.ui.navigation_v2 import render_create_hub
 
 
 class FakeState:
@@ -79,9 +79,8 @@ def complete_state_ok(overrides=None):
 
 # ── Entry ─────────────────────────────────────────────────────────────────────
 
-def test_menu_places_pinterest_next_to_trends_and_opens_fsm() -> None:
-    context = SimpleNamespace(active_image_session=None, balance=100.0, is_admin=True)
-    rendered = render_main_menu(context, "ru")
+def test_create_hub_places_pinterest_next_to_trends_and_opens_fsm() -> None:
+    rendered = render_create_hub("ru", is_admin=True)
     rows = rendered.reply_markup.inline_keyboard
     trend_row = next(row for row in rows if any(b.callback_data == "menu:trends" for b in row))
     assert [b.text for b in trend_row] == ["👑 Тренды", "📌 Pinterest"]

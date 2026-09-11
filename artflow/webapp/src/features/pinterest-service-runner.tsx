@@ -154,7 +154,7 @@ function PinterestPrimarySlot({
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5 px-1">
         <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
-        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">{badge}</span>
+        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">{badge}</span>
       </div>
       <div className="relative">
         <label className="relative flex min-h-44 cursor-pointer flex-col overflow-hidden rounded-2xl border border-dashed border-border/70 bg-secondary/35 text-sm transition hover:border-primary/50">

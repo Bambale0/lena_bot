@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { GenerationTask, ReferralStats, UserProfile } from "@/lib/types";
-import { firstMedia, formatCredits, formatRelativeDate, generationStatusLabel } from "@/lib/utils";
+import { firstMedia, formatCredits, formatKisses, formatRelativeDate, generationStatusLabel } from "@/lib/utils";
 
 interface ProfileScreenProps {
   user: UserProfile;
@@ -252,11 +252,11 @@ function ReferralCabinet({
         </Card>
 
         <Card>
-          <CardHeader className="pb-2"><CardTitle>Обмен в кредиты</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle>Обмен на 💋</CardTitle></CardHeader>
           <CardContent className="grid gap-2">
             <Input value={exchangeAmount} inputMode="decimal" placeholder={`Сумма, мин. ${formatCredits(minExchange)} ₽`} onChange={(event) => setExchangeAmount(event.target.value)} />
-            <Button variant="outline" disabled={busy || available <= 0} onClick={requestExchange}>Обменять на кредиты</Button>
-            <p className="text-[10px] text-muted-foreground">Курс: {formatCredits(referrals?.exchange_rate_rub_per_credit || 0)} ₽ за 1 кредит.</p>
+            <Button variant="outline" disabled={busy || available <= 0} onClick={requestExchange}>Получить 💋</Button>
+            <p className="text-[10px] text-muted-foreground">Курс: {formatCredits(referrals?.exchange_rate_rub_per_credit || 0)} ₽ за 1 💋.</p>
           </CardContent>
         </Card>
 
@@ -269,7 +269,7 @@ function ReferralCabinet({
                   <strong>{formatCredits(item.amount_rub)} ₽</strong>
                   <Badge variant="outline">{item.status}</Badge>
                 </div>
-                <p className="mt-1 truncate text-[10px] text-muted-foreground">{item.payout_details === "AUTO_CREDITS" ? `Обмен на ${formatCredits(item.amount_credits)} кр.` : item.payout_details}</p>
+                <p className="mt-1 truncate text-[10px] text-muted-foreground">{item.payout_details === "AUTO_CREDITS" ? `Обмен на ${formatKisses(item.amount_credits)}` : item.payout_details}</p>
               </div>
             )) : <p className="text-xs text-muted-foreground">Заявок пока нет</p>}
           </CardContent>
@@ -304,10 +304,10 @@ function TaskTile({ task, onOpenTask }: { task: GenerationTask; onOpenTask: (tas
       <div className="relative aspect-square bg-muted">
         {media ? video ? <video src={media} muted playsInline preload="metadata" className="size-full object-cover" /> : <img src={media} alt="" loading="lazy" className="size-full object-cover" /> : <div className="grid size-full place-items-center text-muted-foreground"><Sparkles className="size-4" /></div>}
         {video ? <span className="absolute inset-0 grid place-items-center"><span className="grid size-8 place-items-center rounded-full bg-black/55 text-white"><Play className="ml-0.5 size-3.5" /></span></span> : null}
-        <Badge variant={task.status === "failed" ? "destructive" : task.status === "done" ? "success" : "warning"} className="absolute left-1 top-1 px-1.5 py-0 text-[8px]">{generationStatusLabel(task.status)}</Badge>
-        {task.is_public_feed ? <Badge variant="outline" className="absolute bottom-1 left-1 bg-background/80 px-1.5 py-0 text-[8px]">в профиле</Badge> : null}
+        <Badge variant={task.status === "failed" ? "destructive" : task.status === "done" ? "success" : "warning"} className="absolute left-1 top-1 px-1.5 py-0 text-[10px]">{generationStatusLabel(task.status)}</Badge>
+        {task.is_public_feed ? <Badge variant="outline" className="absolute bottom-1 left-1 bg-background/80 px-1.5 py-0 text-[10px]">в профиле</Badge> : null}
       </div>
-      <div className="px-2 py-1.5"><p className="truncate text-[10px] font-semibold">{task.model}</p><p className="mt-0.5 flex justify-between gap-1 text-[9px] text-muted-foreground"><span>{formatRelativeDate(task.created_at)}</span><span>{formatCredits(task.credits_spent)}</span></p></div>
+      <div className="px-2 py-1.5"><p className="truncate text-[10px] font-semibold">{task.model}</p><p className="mt-0.5 flex justify-between gap-1 text-[10px] text-muted-foreground"><span>{formatRelativeDate(task.created_at)}</span><span>{formatKisses(task.credits_spent, { compact: true })}</span></p></div>
     </button>
   );
 }
@@ -316,14 +316,14 @@ function HistoryRow({ task, onOpenTask }: { task: GenerationTask; onOpenTask: (t
   return (
     <button type="button" className="apix-focus-ring flex items-center gap-2 rounded-xl border border-border bg-card/55 p-2 text-left" onClick={() => onOpenTask(task)}>
       <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Sparkles className="size-4" /></span>
-      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold">{task.model}</span><span className="block truncate text-[10px] text-muted-foreground">{formatRelativeDate(task.created_at)} · {formatCredits(task.credits_spent)} кр.</span></span>
+      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold">{task.model}</span><span className="block truncate text-[10px] text-muted-foreground">{formatRelativeDate(task.created_at)} · {formatKisses(task.credits_spent, { compact: true })}</span></span>
       <Badge variant={task.status === "failed" ? "destructive" : task.status === "done" ? "success" : "warning"}>{generationStatusLabel(task.status)}</Badge>
     </button>
   );
 }
 
 function MiniStat({ label, value }: { label: string; value: string | number }) {
-  return <div className="rounded-xl border border-border bg-card/55 px-2 py-2 text-center"><p className="truncate text-sm font-bold">{value}</p><p className="truncate text-[9px] text-muted-foreground">{label}</p></div>;
+  return <div className="rounded-xl border border-border bg-card/55 px-2 py-2 text-center"><p className="truncate text-sm font-bold">{value}</p><p className="truncate text-[10px] text-muted-foreground">{label}</p></div>;
 }
 
 function Stat({ label, value, icon: Icon }: { label: string; value: string | number; icon: typeof History }) {
@@ -331,7 +331,7 @@ function Stat({ label, value, icon: Icon }: { label: string; value: string | num
     <div className="min-w-0 rounded-lg border border-border bg-card/55 px-1.5 py-2 text-center">
       <Icon className="mx-auto mb-0.5 size-3.5 text-primary" />
       <p className="truncate text-xs font-bold">{value}</p>
-      <p className="truncate text-[8px] text-muted-foreground">{label}</p>
+      <p className="truncate text-[10px] text-muted-foreground">{label}</p>
     </div>
   );
 }

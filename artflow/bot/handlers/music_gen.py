@@ -8,7 +8,7 @@ from api.suno_source_audio import create_source_audio_generation, upload_source_
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.states import MusicFSM
 from bot.ui.router import render_screen
-from bot.utils.telegram_ui import safe_answer_callback
+from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import GenerationType, User
 
@@ -33,6 +33,19 @@ async def _resolve_active_music_model(session: AsyncSession):
     return None
 
 
+async def _resolve_music_model_for_key(session: AsyncSession, model_key: str | None):
+    key = str(model_key or "").strip()
+    if key:
+        model_cost = await repo.get_model_cost(session, key)
+        if (
+            model_cost
+            and getattr(model_cost, "gen_type", None) == GenerationType.music
+            and getattr(model_cost, "is_active", True)
+        ):
+            return model_cost
+    return await _resolve_active_music_model(session)
+
+
 def _music_model_title(model_key: str | None) -> str:
     key = str(model_key or "").lower()
     if "5.5" in key or "v5_5" in key:
@@ -53,6 +66,56 @@ def _source_actions_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🎹 Добавить инструментал", callback_data="music:source:add_instrumental")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
         ]
+    )
+
+
+def _review_kb(cost: float, *, affordable: bool = True) -> InlineKeyboardMarkup:
+    rows = []
+    if affordable:
+        rows.append([InlineKeyboardButton(text=f"🚀 Создать за {cost:g} 💋", callback_data="music:review:launch")])
+    else:
+        rows.append([InlineKeyboardButton(text="💋 Пополнить баланс", callback_data="menu:balance")])
+    rows.append([InlineKeyboardButton(text="✏️ Изменить описание", callback_data="music:review:edit")])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _source_operation_label(operation: str) -> str:
+    return {
+        "cover": "Изменить стиль",
+        "extend": "Продолжить трек",
+        "add_vocals": "Добавить вокал",
+        "add_instrumental": "Добавить инструментал",
+    }.get(operation, "Обработка аудио")
+
+
+def _review_text(data: dict, *, balance: float, cost: float) -> str:
+    model_name = str(data.get("music_model_name") or "Suno")
+    prompt = str(data.get("music_review_prompt") or "").strip()
+    kind = str(data.get("music_review_kind") or "prompt")
+    if kind == "source":
+        mode_label = _source_operation_label(str(data.get("music_review_operation") or ""))
+    else:
+        mode_label = "Без текста" if data.get("instrumental") else "С текстом"
+    after = max(0.0, float(balance) - float(cost))
+    return (
+        "🎵 <b>Проверь перед запуском</b>\n\n"
+        f"Модель: <b>{model_name}</b>\n"
+        f"Режим: <b>{mode_label}</b>\n"
+        f"Стоимость: <b>{cost:g} 💋</b>\n"
+        f"После запуска останется: <b>{after:g} 💋</b>\n\n"
+        f"Описание:\n<i>{prompt}</i>\n\n"
+        "💋 спишутся только после нажатия «Создать»."
+    )
+
+
+async def _show_music_review(message: Message, state: FSMContext, db_user: User, *, cost: float) -> None:
+    data = await state.get_data()
+    affordable = float(db_user.credits or 0) >= float(cost)
+    await state.set_state(MusicFSM.review)
+    await message.answer(
+        _review_text(data, balance=float(db_user.credits or 0), cost=cost),
+        reply_markup=_review_kb(cost, affordable=affordable),
     )
 
 
@@ -186,87 +249,163 @@ async def music_source_prompt(msg: Message, state: FSMContext, session: AsyncSes
         title, style = parts
         prompt = style
 
-    model_cost = await _resolve_active_music_model(session)
-    selected_model_key = data.get("music_model_key") or getattr(model_cost, "model_key", MUSIC_MODEL_KEY)
+    selected_model_key = str(data.get("music_model_key") or MUSIC_MODEL_KEY)
+    model_cost = await _resolve_music_model_for_key(session, selected_model_key)
+    selected_model_key = str(getattr(model_cost, "model_key", None) or selected_model_key)
+    music_cost = float(getattr(model_cost, "credits", DEFAULT_MUSIC_CREDITS) or DEFAULT_MUSIC_CREDITS)
     continue_at = max(0.1, source_duration - 0.5) if operation == "extend" else None
-    await msg.answer("⏳ Запускаю обработку аудио...", reply_markup=back_to_menu_kb())
-    try:
-        gen = await create_source_audio_generation(
-            session=session,
-            user=db_user,
-            operation=operation,
-            upload_url=upload_url,
-            prompt=prompt,
-            model_key=selected_model_key,
-            instrumental=bool(data.get("instrumental", False)),
-            style=style,
-            title=title,
-            continue_at=continue_at,
-            source_duration=source_duration,
-            surface="telegram",
-        )
-        if gen.task_id:
-            register_task(str(gen.task_id), msg.from_user.id)  # type: ignore[union-attr]
-        await msg.answer(
-            "🎵 <b>Задача с твоим аудио запущена!</b>\n\nРезультат придёт сюда автоматически.",
-            reply_markup=back_to_menu_kb(),
-        )
-    except PermissionError as exc:
-        await msg.answer(f"😔 {exc}", reply_markup=back_to_menu_kb())
-    except ValueError as exc:
-        await msg.answer(f"❌ {exc}", reply_markup=back_to_menu_kb())
-    except Exception as exc:
-        await msg.answer(f"❌ Ошибка запуска: {exc}", reply_markup=back_to_menu_kb())
-    await state.clear()
+    await state.update_data(
+        music_review_kind="source",
+        music_review_prompt=prompt,
+        music_review_operation=operation,
+        music_review_upload_url=upload_url,
+        music_review_style=style,
+        music_review_title=title,
+        music_review_continue_at=continue_at,
+        music_review_source_duration=source_duration,
+        music_review_cost=music_cost,
+        music_model_key=selected_model_key,
+        music_model_name=_music_model_title(selected_model_key),
+    )
+    await _show_music_review(msg, state, db_user, cost=music_cost)
 
 
 @router.message(MusicFSM.prompt_input, F.text)
 async def music_prompt(msg: Message, state: FSMContext, session: AsyncSession, db_user: User):
     data = await state.get_data()
-    model_cost = await _resolve_active_music_model(session)
+    selected_model_key = str(data.get("music_model_key") or MUSIC_MODEL_KEY)
+    model_cost = await _resolve_music_model_for_key(session, selected_model_key)
+    selected_model_key = str(getattr(model_cost, "model_key", None) or selected_model_key)
     music_cost = float(model_cost.credits) if model_cost else float(DEFAULT_MUSIC_CREDITS)
-
-    if db_user.credits < music_cost:
-        await msg.answer(
-            f"😔 Недостаточно 💋 для музыки.\nНужно: <b>{music_cost:g}</b>, у тебя: <b>{db_user.credits:g}</b>",
-            reply_markup=back_to_menu_kb(),
-        )
-        await state.clear()
-        return
-
-    ok = await repo.spend_credits(session, db_user.id, music_cost)
-    if not ok:
-        await msg.answer(
-            "😔 Не удалось списать 💋 для генерации. Попробуй ещё раз.",
-            reply_markup=back_to_menu_kb(),
-        )
-        await state.clear()
-        return
-
-    selected_model_key = data.get("music_model_key") or getattr(model_cost, "model_key", MUSIC_MODEL_KEY)
-    gen = await repo.create_generation(
-        session,
-        db_user.id,
-        selected_model_key,
-        GenerationType.music,
-        msg.text,
-        music_cost,
+    await state.update_data(
+        music_review_kind="prompt",
+        music_review_prompt=str(msg.text or "").strip(),
+        music_review_cost=music_cost,
+        music_model_key=selected_model_key,
+        music_model_name=_music_model_title(selected_model_key),
     )
+    await _show_music_review(msg, state, db_user, cost=music_cost)
 
-    await msg.answer("⏳ Генерирую...", reply_markup=back_to_menu_kb())
 
+@router.callback_query(F.data == "music:review:edit")
+async def music_review_edit(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    if not data.get("music_review_prompt"):
+        await safe_answer_callback(call, "Эта подготовка уже устарела", show_alert=True)
+        return
+    if data.get("music_review_kind") == "source":
+        await state.set_state(MusicFSM.source_prompt_input)
+        text = "✏️ Отправь новое описание для этой операции с аудио."
+    else:
+        await state.set_state(MusicFSM.prompt_input)
+        text = "✏️ Отправь новое описание трека."
+    await safe_edit_message(call.message, text, reply_markup=back_to_menu_kb())
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data == "music:review:launch")
+async def music_review_launch(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    data = await state.get_data()
+    prompt = str(data.get("music_review_prompt") or "").strip()
+    if not prompt:
+        await safe_answer_callback(call, "Эта подготовка уже устарела", show_alert=True)
+        return
+
+    selected_model_key = str(data.get("music_model_key") or MUSIC_MODEL_KEY)
+    model_cost = await _resolve_music_model_for_key(session, selected_model_key)
+    selected_model_key = str(getattr(model_cost, "model_key", None) or selected_model_key)
+    current_cost = float(getattr(model_cost, "credits", DEFAULT_MUSIC_CREDITS) or DEFAULT_MUSIC_CREDITS)
+    reviewed_cost = float(data.get("music_review_cost") or current_cost)
+    if current_cost != reviewed_cost:
+        await state.update_data(music_review_cost=current_cost)
+        refreshed = {**data, "music_review_cost": current_cost}
+        await safe_edit_message(
+            call.message,
+            _review_text(refreshed, balance=float(db_user.credits or 0), cost=current_cost),
+            reply_markup=_review_kb(current_cost, affordable=float(db_user.credits or 0) >= current_cost),
+        )
+        await safe_answer_callback(call, "Цена обновилась — проверь ещё раз", show_alert=True)
+        return
+
+    if float(db_user.credits or 0) < current_cost:
+        await safe_answer_callback(
+            call,
+            f"Недостаточно 💋. Нужно {current_cost:g}, у тебя {float(db_user.credits or 0):g}.",
+            show_alert=True,
+        )
+        return
+
+    await safe_edit_message(call.message, "⏳ <b>Запускаю музыку…</b>", reply_markup=None)
+    await safe_answer_callback(call)
+
+    if data.get("music_review_kind") == "source":
+        try:
+            gen = await create_source_audio_generation(
+                session=session,
+                user=db_user,
+                operation=str(data.get("music_review_operation") or ""),
+                upload_url=str(data.get("music_review_upload_url") or ""),
+                prompt=prompt,
+                model_key=selected_model_key,
+                instrumental=bool(data.get("instrumental", False)),
+                style=data.get("music_review_style"),
+                title=data.get("music_review_title"),
+                continue_at=data.get("music_review_continue_at"),
+                source_duration=data.get("music_review_source_duration"),
+                surface="telegram",
+            )
+            if gen.task_id:
+                register_task(str(gen.task_id), call.from_user.id)
+            await call.message.answer(
+                "🎵 <b>Задача с твоим аудио запущена!</b>\n\nРезультат придёт сюда автоматически.",
+                reply_markup=back_to_menu_kb(),
+            )
+        except PermissionError:
+            await call.message.answer("😔 Не хватает 💋 для запуска. Пополни баланс и попробуй снова.", reply_markup=back_to_menu_kb())
+        except ValueError:
+            await call.message.answer("❌ Не удалось подготовить эту операцию. Проверь исходное аудио и описание.", reply_markup=back_to_menu_kb())
+        except Exception:
+            await call.message.answer("❌ Не удалось запустить обработку аудио. Попробуй ещё раз чуть позже.", reply_markup=back_to_menu_kb())
+        await state.clear()
+        return
+
+    if not await repo.spend_credits(session, db_user.id, current_cost):
+        await call.message.answer("😔 Не удалось списать 💋. Попробуй ещё раз.", reply_markup=back_to_menu_kb())
+        await state.clear()
+        return
+
+
+    gen = None
     try:
-        task_id = await create_music_task(msg.text, data.get("instrumental", False), model_key=selected_model_key)
-        register_task(task_id, msg.from_user.id)  # type: ignore[union-attr]
+        gen = await repo.create_generation(
+            session,
+            db_user.id,
+            selected_model_key,
+            GenerationType.music,
+            prompt,
+            current_cost,
+        )
+        task_id = await create_music_task(prompt, bool(data.get("instrumental", False)), model_key=selected_model_key)
+        register_task(task_id, call.from_user.id)
         register_miniapp_task(task_id, gen.id)
         await repo.update_generation_task(session, gen.id, task_id)
-        await msg.answer(
-            "🎵 <b>Генерация запущена!</b>\n\nТрек придёт сюда автоматически (~1-2 мин).",
+        await call.message.answer(
+            "🎵 <b>Генерация запущена!</b>\n\nТрек придёт сюда автоматически (~1–2 мин).",
             reply_markup=back_to_menu_kb(),
         )
-    except Exception as e:
-        if await repo.fail_generation(session, gen.id, str(e)):
-            await repo.add_credits(session, db_user.id, music_cost)
-        await msg.answer(f"❌ Ошибка: {e}", reply_markup=back_to_menu_kb())
-
+    except Exception as exc:
+        should_refund = gen is None
+        if gen is not None:
+            should_refund = await repo.fail_generation(session, gen.id, str(exc))
+        if should_refund:
+            await repo.add_credits(session, db_user.id, current_cost)
+        await call.message.answer(
+            "❌ Не удалось запустить генерацию. 💋 возвращены. Попробуй ещё раз чуть позже.",
+            reply_markup=back_to_menu_kb(),
+        )
     await state.clear()

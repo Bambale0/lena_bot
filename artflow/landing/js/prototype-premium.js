@@ -2560,7 +2560,7 @@ function updateGenerationEstimate() {
   const name = cleanModelName(model?.name || model?.key || "Выбранный режим");
   note.innerHTML = `
     <span>Стоимость запуска</span>
-    <b>${formatNumber(estimate.amount)} ${escapeHtml(estimate.unit)}</b>
+    <b>${formatNumber(estimate.amount)} 💋 ${escapeHtml(estimate.unit)}</b>
     <small>${escapeHtml(name)}</small>
   `;
 }
@@ -2926,7 +2926,7 @@ function renderModels() {
         </div>
         <div class="model-price">
           <span>Стоимость</span>
-          <strong>${escapeHtml(group.creditsLabel)}</strong>
+          <strong>${escapeHtml(group.creditsLabel)} 💋</strong>
           <small>${unitLabel(group.type)}</small>
         </div>
         <a class="model-action" href="${escapeHtml(detailHref)}">Открыть</a>
@@ -2983,7 +2983,7 @@ function renderAuth() {
   const credits = formatNumber(state.user?.credits || 0);
   $$("[data-account-status]").forEach((accountStatus) => {
     accountStatus.textContent = authed
-      ? `${name} · баланс ${credits}`
+      ? `${name} · баланс ${credits} 💋`
       : checking ? "Проверяем вход..."
         : state.fallbackMode ? "Backend недоступен" : "Гость · войдите или зарегистрируйтесь";
   });
@@ -2994,7 +2994,7 @@ function renderAuth() {
     node.hidden = authed || checking;
   });
 $$("[data-user-pill]").forEach((userPill) => {
-    userPill.textContent = authed ? `Баланс ${credits}` : checking ? "..." : "Войти";
+    userPill.textContent = authed ? `Баланс ${credits} 💋` : checking ? "..." : "Войти";
     if (authed) userPill.dataset.accountTarget = "billing";
     else delete userPill.dataset.accountTarget;
   });
@@ -3041,7 +3041,7 @@ function renderAccountModelsMini() {
       <button class="model-mini${isActive ? " active" : ""}" type="button" data-mini-model="${escapeHtml(model.key)}" aria-pressed="${isActive ? "true" : "false"}">
         <span>${typeLabel(group.type)}</span>
         <b>${escapeHtml(group.name)}</b>
-        <small>${escapeHtml(group.creditsLabel)} ${unitLabel(group.type)}${capabilities ? ` · ${escapeHtml(capabilities)}` : ""}</small>
+        <small>${escapeHtml(group.creditsLabel)} 💋 ${unitLabel(group.type)}${capabilities ? ` · ${escapeHtml(capabilities)}` : ""}</small>
       </button>
     `;
   }).join("");
@@ -3377,7 +3377,7 @@ function renderBilling() {
   grid.innerHTML = `
     <article>
       <span>Баланс</span>
-      <b>${balance}</b>
+      <b>${balance} 💋</b>
       <p>${state.user
         ? `${methods.length ? methods.map(paymentMethodLabel).join(" / ") : "Способы оплаты скоро появятся"} · ожидают оплаты: ${pending.length}`
         : "Войдите, чтобы увидеть баланс."}</p>
@@ -3387,7 +3387,7 @@ function renderBilling() {
       <article>
         <span>${index === 1 ? "Популярный пакет" : "Пополнить"}</span>
         <b>${escapeHtml(plan.label || plan.title || plan.key)}</b>
-        <p>${formatNumber(plan.credits)} на баланс · ${escapeHtml(formatPlanListPrice(plan))}</p>
+        <p>${formatNumber(plan.credits)} 💋 на баланс · ${escapeHtml(formatPlanListPrice(plan))}</p>
         <div class="pay-actions">
           ${methodButtons(plan, index === 1)}
         </div>

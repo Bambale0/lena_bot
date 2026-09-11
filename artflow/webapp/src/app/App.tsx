@@ -722,7 +722,7 @@ function App() {
     try {
       await api.exchangeReferralBalance(amountRub);
       notifyHaptic("success");
-      toast.success("Партнёрский баланс обменян на кредиты");
+      toast.success("Партнёрский баланс обменян на 💋");
       await refreshReferrals();
       void refreshCore();
     } catch (error) {

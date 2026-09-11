@@ -132,7 +132,7 @@ test.beforeEach(async ({ page }) => {
 test("renders feed-first shell without horizontal overflow", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
   await expect(page.getByRole("tab", { name: "Лента" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Настройки" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Ещё" })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(2);
 });
@@ -148,7 +148,8 @@ test("payment cabinet uses kisses wording", async ({ page }) => {
 
 test("settings expose color schemes and language switch", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
-  await page.getByRole("tab", { name: "Настройки" }).click();
+  await page.getByRole("tab", { name: "Ещё" }).click();
+  await page.getByRole("button", { name: /Настройки/ }).click();
   await expect(page.getByText("Цветовая схема")).toBeVisible();
   await expect(page.getByText("Поцелуй")).toBeVisible();
   await page.getByRole("button", { name: /English/ }).click();
@@ -157,7 +158,7 @@ test("settings expose color schemes and language switch", async ({ page }) => {
 
 test("services expose mobile-friendly Suno music panel", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
-  await page.getByRole("tab", { name: "Сервисы" }).click();
+  await page.getByRole("tab", { name: "Ещё" }).click();
   await expect(page.getByText("Музыка / Suno")).toBeVisible();
   await expect(page.getByPlaceholder("Текст песни или идея трека")).toBeVisible();
 });

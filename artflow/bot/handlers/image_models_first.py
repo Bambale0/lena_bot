@@ -59,29 +59,6 @@ async def resume_active_image_session(
     await safe_answer_callback(call)
 
 
-@router.callback_query(F.data == "menu:image")
-async def open_image_models_first(
-    call: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User,
-) -> None:
-    await state.clear()
-    await state.set_state(ImageGenFSM.model_select)
-    model_costs = await _public_image_model_costs(session)
-
-    await safe_edit_message(
-        call.message,
-        _model_list_text(float(db_user.credits or 0)),
-        reply_markup=_model_list_kb(
-            model_costs,
-            back_text="🏠 Главное меню",
-            back_callback="menu:main",
-        ),
-    )
-    await safe_answer_callback(call)
-
-
 @router.callback_query(F.data == "img_menu:advanced")
 async def reopen_image_model_picker(
     call: CallbackQuery,

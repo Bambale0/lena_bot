@@ -30,13 +30,15 @@ def test_image_entry_is_task_first_not_model_first():
     assert "📐 Формат" in texts
     assert "💎 Качество" in texts
     assert "📎 Референсы" in texts
-    assert "🧠 Сменить модель" in texts
+    assert "🧠 Другая модель" in texts
     assert "✅ Продолжить" not in texts
     assert "img_v2:ratio" in callbacks
     assert "img_v2:quality" in callbacks
     assert "img_menu:advanced" in callbacks
-    assert "Можно сразу отправлять" in screen.text
-    assert "APIX сам выберет подходящий внутренний режим" in screen.text
+    assert "Что хочешь сделать?" in screen.text
+    assert "✨ Создать с нуля" in texts
+    assert "🪄 Изменить фото" in texts
+    assert "Стоимость покажу перед платным запуском" in screen.text
 
 
 def test_image_entry_continue_appears_after_params_changed():
@@ -54,12 +56,14 @@ def test_selected_model_uses_same_task_first_composer():
     callbacks = _callbacks(screen.reply_markup)
 
     assert "GPT Image 2" in screen.text
-    assert "Можно сразу отправлять" in screen.text
-    assert "APIX сам выберет подходящий внутренний режим" in screen.text
+    assert "Что хочешь сделать?" in screen.text
+    assert "✨ Создать с нуля" in texts
+    assert "🪄 Изменить фото" in texts
+    assert "Стоимость покажу перед платным запуском" in screen.text
     assert "📐 Формат" in texts
     assert "💎 Качество" in texts
     assert "📎 Референсы" in texts
-    assert "🧠 Сменить модель" in texts
+    assert "🧠 Другая модель" in texts
     assert "✅ Продолжить" not in texts
     assert "img_v2:ratio" in callbacks
     assert "img_v2:quality" in callbacks

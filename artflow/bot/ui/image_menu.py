@@ -32,12 +32,16 @@ def _pretty_quality(value: str | None) -> str:
 def _image_start_kb(*, show_continue: bool = False):
     builder = InlineKeyboardBuilder()
     builder.row(
+        InlineKeyboardButton(text="✨ Создать с нуля", callback_data="img_v2:text"),
+        InlineKeyboardButton(text="🪄 Изменить фото", callback_data="img_v2:edit"),
+    )
+    builder.row(
         InlineKeyboardButton(text="📐 Формат", callback_data="img_v2:ratio"),
         InlineKeyboardButton(text="💎 Качество", callback_data="img_v2:quality"),
     )
     builder.row(
         InlineKeyboardButton(text="📎 Референсы", callback_data="img_v2:refs"),
-        InlineKeyboardButton(text="🧠 Сменить модель", callback_data="img_menu:advanced"),
+        InlineKeyboardButton(text="🧠 Другая модель", callback_data="img_menu:advanced"),
     )
     builder.row(
         InlineKeyboardButton(text="📸 Промпт по фото", callback_data="img:photo2prompt"),
@@ -58,17 +62,15 @@ def render_image_scenarios(
     show_continue: bool = False,
 ) -> ScreenRender:
     text = (
-        f"🎨 <b>{model_title}</b>\n\n"
-        "Можно сразу отправлять:\n\n"
-        "📝 текст — создать изображение с нуля;\n"
-        "🖼 фото — использовать как референс;\n"
-        "🖼 фото + подпись — сразу подготовить задачу;\n"
-        "📚 несколько фото — собрать композицию или сохранить персонажа.\n\n"
-        "APIX сам выберет подходящий внутренний режим.\n"
-        "Нужно разобрать готовое изображение в текст — нажми «Промпт по фото».\n\n"
-        f"Референсы: {reference_count}/{max_refs}\n"
-        f"Формат: {aspect_ratio}\n"
-        f"Качество: {quality}"
+        "🎨 <b>Что хочешь сделать?</b>\n\n"
+        "✨ <b>Создать с нуля</b> — опиши результат обычными словами.\n"
+        "🪄 <b>Изменить фото</b> — пришли одно или несколько изображений и напиши, что поменять.\n\n"
+        f"APIX уже выбрал подходящий вариант: <b>{model_title}</b>. "
+        "Модель можно сменить вручную, но это необязательно.\n\n"
+        f"📎 Референсы: {reference_count}/{max_refs}\n"
+        f"📐 Формат: {aspect_ratio}\n"
+        f"💎 Качество: {quality}\n\n"
+        "Стоимость покажу перед платным запуском."
     )
     return ScreenRender(text=text, reply_markup=_image_start_kb(show_continue=show_continue))
 

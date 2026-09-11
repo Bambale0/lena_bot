@@ -489,9 +489,9 @@ function FeedScreen({
                             <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-white/20">
                               {item.author_photo_url ? <img src={item.author_photo_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <UserRound className="size-3" />}
                             </span>
-                            <span className="truncate text-[9px] font-semibold">{item.author || "Автор"}</span>
+                            <span className="truncate text-[10px] font-semibold">{item.author || "Автор"}</span>
                           </span>
-                          <span className="flex shrink-0 items-center gap-1 text-[8px] opacity-85">
+                          <span className="flex shrink-0 items-center gap-1 text-[10px] opacity-85">
                             {isFeatured ? <span>выбор</span> : null}
                             {item.is_mine ? <span>моё</span> : null}
                             {item.aspect_ratio ? <span>{item.aspect_ratio}</span> : null}
@@ -499,10 +499,10 @@ function FeedScreen({
                         </div>
                         {isFeatured && item.prompt && !item.prompt_hidden ? <span className="line-clamp-2 text-left text-[10px] font-semibold leading-tight opacity-95">{item.prompt}</span> : null}
                         <div className="grid min-w-0 gap-1">
-                          <span className="min-w-0 max-w-full justify-self-start truncate rounded-full bg-black/35 px-2 py-1 text-[8px] text-white/85 backdrop-blur">{item.model}</span>
+                          <span className="min-w-0 max-w-full justify-self-start truncate rounded-full bg-black/35 px-2 py-1 text-[10px] text-white/85 backdrop-blur">{item.model}</span>
                           <button
                             type="button"
-                            className="apix-focus-ring inline-flex min-h-7 w-full min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full bg-primary/95 px-2 text-[9px] font-bold leading-none text-primary-foreground shadow-md shadow-black/20 active:scale-[0.98] disabled:opacity-75"
+                            className="apix-focus-ring inline-flex min-h-7 w-full min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full bg-primary/95 px-2 text-[10px] font-bold leading-none text-primary-foreground shadow-md shadow-black/20 active:scale-[0.98] disabled:opacity-75"
                             disabled={remixing}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -516,7 +516,7 @@ function FeedScreen({
                       </div>
                     </div>
 
-                    <div className="flex gap-2 px-2 py-1.5 text-[9px] text-muted-foreground">
+                    <div className="flex gap-2 px-2 py-1.5 text-[10px] text-muted-foreground">
                       <span>♥ {item.likes_count || 0}</span>
                       <span>↗ {item.shares_count || 0}</span>
                       <span>↻ {item.remixes || 0}</span>
@@ -598,7 +598,7 @@ function TrendCategorySurface({
                   <div className="grid size-full place-items-center text-muted-foreground">{isVideo ? <Film /> : <ImageIcon />}</div>
                 )}
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-10 text-white">
-                  <div className="mb-1 flex items-center gap-1 text-[8px] opacity-85">
+                  <div className="mb-1 flex items-center gap-1 text-[10px] opacity-85">
                     <span>{trend.category_emoji || (isVideo ? "🎬" : "🖼️")}</span>
                     <span className="truncate">{trend.category_title || trend.kind}</span>
                     {trend.uses_count ? <span className="ml-auto">↻ {trend.uses_count}</span> : null}

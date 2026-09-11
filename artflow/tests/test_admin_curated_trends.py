@@ -76,7 +76,7 @@ def test_source_files_keep_admin_and_canonical_contracts():
     assert 'user_prompt = prompt_source.prompt_text' in mini
     assert 'prompt_id: int | None = None' in mini
     assert 'hidden_prompt' in mini
-    assert 'callback_data="menu:trends"' in open("bot/ui/main_menu.py", encoding="utf-8").read()
+    assert 'callback_data="menu:trends"' in open("bot/ui/navigation_v2.py", encoding="utf-8").read()
     assert 'Command("trends")' in bot
     assert 'api("/trends?limit=80")' in web
     assert 'api("/feed?source=top_day' not in web
