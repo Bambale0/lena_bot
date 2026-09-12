@@ -54,7 +54,7 @@ from api.music_service import (
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.public_files import preview_public_image_url, public_url_is_available
 from api.video_service import VideoModel
-from api.video_prompt_limits import seedance_prompt_max_chars, validate_seedance_prompt
+from api.video_prompt_limits import validate_video_prompt, video_prompt_max_chars
 from bot.keyboards.models import (
     _IMAGE_MODEL_ORDER,
     _VIDEO_MODEL_ORDER,
@@ -2109,10 +2109,10 @@ async def create_video_generation(
                 raise HTTPException(status_code=422, detail="Trend must use its configured model")
 
     try:
-        validate_seedance_prompt(body.model, user_prompt)
+        validate_video_prompt(body.model, user_prompt)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if seedance_prompt_max_chars(body.model) is None and len(user_prompt) > 4000:
+    if video_prompt_max_chars(body.model) is None and len(user_prompt) > 4000:
         # Preserve the historical contract for non-Seedance video models.
         raise HTTPException(status_code=422, detail="Video prompt must be at most 4000 characters for this model")
 
@@ -2217,6 +2217,8 @@ async def create_video_generation(
         user_prompt, total_credits,
         input_params=normalized,
     )
+    failed_generation_id = gen.id
+    failed_user_id = user.id
 
     try:
         result = await video_service.generate_video(
@@ -2238,8 +2240,8 @@ async def create_video_generation(
     except Exception as exc:
         logger.error("miniapp video gen error user=%s: %s", user.id, exc)
         await session.rollback()
-        if await repo.fail_generation(session, gen.id, str(exc)):
-            await repo.add_credits(session, user.id, total_credits)
+        if await repo.fail_generation(session, failed_generation_id, str(exc)):
+            await repo.add_credits(session, failed_user_id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
@@ -2889,6 +2891,8 @@ async def remix_feed_post(
         source_feed_gen_id=gen_id,
         input_params=normalized_video if gen_type == "video" else None,
     )
+    failed_generation_id = gen.id
+    failed_user_id = user.id
 
     try:
         if gen_type == "video":
@@ -2921,8 +2925,8 @@ async def remix_feed_post(
     except Exception as exc:
         logger.error("feed remix error user=%s gen=%s: %s", user.id, gen_id, exc)
         await session.rollback()
-        if await repo.fail_generation(session, gen.id, str(exc)):
-            await repo.add_credits(session, user.id, total_credits)
+        if await repo.fail_generation(session, failed_generation_id, str(exc)):
+            await repo.add_credits(session, failed_user_id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
     if gen_type == "image" and not getattr(result, "is_async", True):
