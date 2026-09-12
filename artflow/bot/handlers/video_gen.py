@@ -24,7 +24,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import polling, video_service
 from api.public_files import mirror_telegram_file
-from api.video_prompt_limits import append_telegram_seedance_prompt_chunk, seedance_prompt_max_chars
+from api.video_prompt_limits import (
+    append_telegram_seedance_prompt_chunk,
+    seedance_prompt_max_chars,
+    validate_video_prompt,
+    video_prompt_max_chars,
+)
 from api.video_service import VideoModel
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
@@ -1648,6 +1653,16 @@ async def handle_video_prompt(
             return
         prompt = combined_prompt
         await state.update_data(seedance_prompt_buffer="")
+
+    try:
+        prompt = validate_video_prompt(model_key, prompt)
+    except ValueError:
+        limit = video_prompt_max_chars(model_key)
+        await message.answer(
+            f"❌ Промпт длиннее максимума модели: {limit} символов. Отправь короче.",
+            reply_markup=back_to_menu_kb(),
+        )
+        return
 
     updated = await state.get_data()
     await _launch_video_generation_from_state(

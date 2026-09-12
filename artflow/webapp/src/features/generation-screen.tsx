@@ -32,11 +32,13 @@ const GEMINI_MAX_TRIM_SECONDS = 10;
 const GEMINI_MAX_SEED = 2_147_483_647;
 const SEEDANCE_20_MODELS = new Set(["bytedance/seedance-2", "bytedance/seedance-2-fast", "bytedance/seedance-2-mini"]);
 const SEEDANCE_25_MODEL = "bytedance/seedance-2-5";
+const KLING_3_MODELS = new Set(["kling-3.0/video", "kling/v3-turbo-text-to-video", "kling/v3-turbo-image-to-video"]);
 
 function promptMaxLength(kind: "image" | "video" | "motion", modelKey: string | undefined): number {
   if (kind !== "video") return 4000;
   if (modelKey === SEEDANCE_25_MODEL) return 30000;
   if (modelKey && SEEDANCE_20_MODELS.has(modelKey)) return 20000;
+  if (modelKey && KLING_3_MODELS.has(modelKey)) return 2500;
   return 4000;
 }
 

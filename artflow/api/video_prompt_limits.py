@@ -2,6 +2,7 @@ from __future__ import annotations
 
 SEEDANCE_20_PROMPT_MAX_CHARS = 20_000
 SEEDANCE_25_PROMPT_MAX_CHARS = 30_000
+KLING_3_PROMPT_MAX_CHARS = 2_500
 TELEGRAM_TEXT_MESSAGE_MAX_CHARS = 4096
 
 _SEEDANCE_20_MODELS = frozenset({
@@ -10,6 +11,30 @@ _SEEDANCE_20_MODELS = frozenset({
     "bytedance/seedance-2-mini",
 })
 _SEEDANCE_25_MODELS = frozenset({"bytedance/seedance-2-5"})
+_KLING_3_MODELS = frozenset({
+    "kling-3.0/video",
+    "kling/v3-turbo-text-to-video",
+    "kling/v3-turbo-image-to-video",
+})
+
+
+def video_prompt_max_chars(model: str) -> int | None:
+    key = str(model or "").strip()
+    if key in _SEEDANCE_20_MODELS:
+        return SEEDANCE_20_PROMPT_MAX_CHARS
+    if key in _SEEDANCE_25_MODELS:
+        return SEEDANCE_25_PROMPT_MAX_CHARS
+    if key in _KLING_3_MODELS:
+        return KLING_3_PROMPT_MAX_CHARS
+    return None
+
+
+def validate_video_prompt(model: str, prompt: str) -> str:
+    value = str(prompt or "")
+    limit = video_prompt_max_chars(model)
+    if limit is not None and len(value) > limit:
+        raise ValueError(f"Prompt for {model} must be at most {limit} characters")
+    return value
 
 
 def seedance_prompt_max_chars(model: str) -> int | None:
@@ -22,11 +47,9 @@ def seedance_prompt_max_chars(model: str) -> int | None:
 
 
 def validate_seedance_prompt(model: str, prompt: str) -> str:
-    value = str(prompt or "")
-    limit = seedance_prompt_max_chars(model)
-    if limit is not None and len(value) > limit:
-        raise ValueError(f"Prompt for {model} must be at most {limit} characters")
-    return value
+    # Backward-compatible name used by existing call sites; validation is now
+    # provider-aware for all models with a documented hard prompt limit.
+    return validate_video_prompt(model, prompt)
 
 
 def append_telegram_seedance_prompt_chunk(

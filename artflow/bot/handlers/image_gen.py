@@ -626,27 +626,36 @@ async def _ensure_active_image_session_from_state(
 ) -> ImageSession:
     data = await state.get_data()
     existing = await repo.get_active_image_session(session, db_user.id)
+    raw_model_key = str(data.get("model_key") or "").strip()
+    if existing and not raw_model_key:
+        await _sync_state_with_image_session(state, existing)
+        return existing
+
+    model_key = _image_model_key(raw_model_key or NANA_BANANO_DEFAULT_MODEL)
+    if raw_model_key != model_key:
+        await state.update_data(model_key=model_key)
+
     if existing:
         try:
             state_session_id = int(data.get("image_session_id") or 0)
         except (TypeError, ValueError):
             state_session_id = 0
-        if state_session_id == getattr(existing, "id", None) and existing.model == data["model_key"]:
+        if state_session_id == getattr(existing, "id", None) and existing.model == model_key:
             return existing
 
     aspect_ratio = data.get("aspect_ratio")
     mode = data.get("image_mode") or data.get("mode", "text")
     quality = _normalize_session_quality(
-        data["model_key"],
+        model_key,
         aspect_ratio,
         data.get("quality", "basic"),
     )
-    count = _normalize_image_count(data["model_key"], data.get("count", 1))
+    count = _normalize_image_count(model_key, data.get("count", 1))
 
     image_session = await repo.create_image_session(
         session=session,
         user_id=db_user.id,
-        model=data["model_key"],
+        model=model_key,
         mode=mode,
         aspect_ratio=aspect_ratio,
         quality=quality,

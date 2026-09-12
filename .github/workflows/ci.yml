@@ -110,7 +110,8 @@ jobs:
             tests/test_provider_contract_catalog.py \
             tests/test_seedance25_repeat_keyboard.py \
             tests/test_trend_animals_category.py \
-            tests/test_kie_model_specs.py
+            tests/test_kie_model_specs.py \
+            tests/test_runtime_reliability.py
 
   webapp:
     runs-on: ubuntu-latest
