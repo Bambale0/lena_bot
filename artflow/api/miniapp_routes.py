@@ -2218,6 +2218,7 @@ async def create_video_generation(
         input_params=normalized,
     )
     failed_generation_id = gen.id
+    failed_user_id = user.id
 
     try:
         result = await video_service.generate_video(
@@ -2240,7 +2241,7 @@ async def create_video_generation(
         logger.error("miniapp video gen error user=%s: %s", user.id, exc)
         await session.rollback()
         if await repo.fail_generation(session, failed_generation_id, str(exc)):
-            await repo.add_credits(session, user.id, total_credits)
+            await repo.add_credits(session, failed_user_id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
     await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
@@ -2891,6 +2892,7 @@ async def remix_feed_post(
         input_params=normalized_video if gen_type == "video" else None,
     )
     failed_generation_id = gen.id
+    failed_user_id = user.id
 
     try:
         if gen_type == "video":
@@ -2924,7 +2926,7 @@ async def remix_feed_post(
         logger.error("feed remix error user=%s gen=%s: %s", user.id, gen_id, exc)
         await session.rollback()
         if await repo.fail_generation(session, failed_generation_id, str(exc)):
-            await repo.add_credits(session, user.id, total_credits)
+            await repo.add_credits(session, failed_user_id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
     if gen_type == "image" and not getattr(result, "is_async", True):
