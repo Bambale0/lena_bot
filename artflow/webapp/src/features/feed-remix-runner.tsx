@@ -162,6 +162,8 @@ function FeedRemixRunnerPortal() {
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
   const aspectRatios = modelAspectRatios(selectedModel);
   const durations = modelDurations(selectedModel);
+  const durationIndex = Math.max(0, durations.indexOf(duration));
+  const selectedDuration = durations[durationIndex] ?? duration;
   const resolutions = modelResolutions(selectedModel);
   const modeOptions = selectedModel?.modes?.length ? selectedModel.modes : [bucket === "video" ? "image" : "image"];
   const qualityOptions = selectedModel?.quality_options?.length ? selectedModel.quality_options : [{ value: "basic", label: "Базовое" }];
@@ -431,13 +433,44 @@ function FeedRemixRunnerPortal() {
               </select>
             </label>
           ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <label className="grid gap-1 text-xs font-semibold">
-                Длительность
-                <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={duration} onChange={(event) => setDuration(Number(event.target.value) || 5)} disabled={busy}>
-                  {durations.map((value) => <option key={value} value={value}>{value} сек</option>)}
-                </select>
-              </label>
+            <div className="grid gap-3">
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold">Длительность</span>
+                  <span className="rounded-lg border border-border bg-muted/45 px-2 py-1 text-xs font-semibold">{selectedDuration} сек</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(0, durations.length - 1)}
+                  step={1}
+                  value={durationIndex}
+                  disabled={busy || durations.length <= 1}
+                  aria-label="Длительность видео в повторе"
+                  aria-valuetext={`${selectedDuration} секунд`}
+                  className="apix-focus-ring h-8 w-full cursor-pointer accent-primary disabled:cursor-default disabled:opacity-60"
+                  onChange={(event) => {
+                    const nextDuration = durations[Number(event.target.value)];
+                    if (nextDuration != null) setDuration(nextDuration);
+                  }}
+                />
+                <div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+                  {durations.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={cn(
+                        "apix-focus-ring rounded px-1 py-0.5 transition",
+                        value === selectedDuration ? "font-semibold text-primary" : "hover:text-foreground",
+                      )}
+                      disabled={busy}
+                      onClick={() => setDuration(value)}
+                    >
+                      {value} сек
+                    </button>
+                  ))}
+                </div>
+              </div>
               <label className="grid gap-1 text-xs font-semibold">
                 Разрешение
                 <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={resolution} onChange={(event) => setResolution(event.target.value)} disabled={busy}>
