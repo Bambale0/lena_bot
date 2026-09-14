@@ -8,7 +8,6 @@ import pytest
 from api import seedance25_adapter as s25
 from api import seedance25_product_surface as s25_surface
 from bot.handlers import seedance25_references as s25_refs
-from bot.states import VideoGenFSM
 
 
 @pytest.mark.parametrize(
