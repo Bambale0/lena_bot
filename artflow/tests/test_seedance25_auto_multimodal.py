@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from api import seedance25_adapter as s25
 from api import seedance25_product_surface as s25_surface
+from bot.handlers import seedance25_references as s25_refs
+from bot.states import VideoGenFSM
 
 
 @pytest.mark.parametrize(
@@ -103,6 +106,38 @@ def test_ui_scenario_control_is_ignored() -> None:
     assert audio_refs == ["https://example.test/voice.wav"]
     assert video_refs == ["https://example.test/motion.mp4"]
     assert "mode" not in options
+
+
+def test_feed_repeat_seedance25_hides_text_only_escape_hatch() -> None:
+    markup = s25_refs._kb(require_image_reference=True)
+    callbacks = [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert "s25ref:none" not in callbacks
+    assert "s25ref:done" in callbacks
+
+
+@pytest.mark.asyncio
+async def test_feed_repeat_seedance25_cannot_continue_without_photo_reference() -> None:
+    call = SimpleNamespace(message=SimpleNamespace(), answer=AsyncMock())
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "feed_force_reference": True,
+        "ref_file_ids": [],
+        "reference_video_url": [],
+        "audio_ids": [],
+    })
+
+    await s25_refs._go_params(call, state)
+
+    state.set_state.assert_not_awaited()
+    state.update_data.assert_not_awaited()
+    call.answer.assert_awaited_once()
+    assert call.answer.await_args.kwargs["show_alert"] is True
+    assert "фото-референс" in call.answer.await_args.args[0]
 
 
 class _FakeHTTPException(Exception):
