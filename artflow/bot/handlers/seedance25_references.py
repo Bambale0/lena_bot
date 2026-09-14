@@ -39,17 +39,27 @@ def _counts(data: dict) -> tuple[int, int, int]:
     )
 
 
-def _kb() -> object:
+def _kb(*, require_image_reference: bool = False) -> object:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="✅ Референсы готовы", callback_data="s25ref:done"))
-    builder.row(InlineKeyboardButton(text="➡️ Без референсов", callback_data="s25ref:none"))
+    if not require_image_reference:
+        builder.row(InlineKeyboardButton(text="➡️ Без референсов", callback_data="s25ref:none"))
     builder.row(InlineKeyboardButton(text="🗑 Очистить", callback_data="s25ref:clear"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 
 
+def _kb_for_data(data: dict) -> object:
+    return _kb(require_image_reference=bool(data.get("feed_force_reference")))
+
+
 def _text(data: dict) -> str:
     images, videos, audios = _counts(data)
+    feed_requirement = (
+        "\n\n🔒 Для повтора тренда добавь хотя бы одно своё фото."
+        if data.get("feed_force_reference")
+        else ""
+    )
     return (
         "🌱 <b>Seedance 2.5</b>\n\n"
         "Просто пришли нужные референсы — режим выбирать не надо:\n"
@@ -59,6 +69,7 @@ def _text(data: dict) -> str:
         f"🎬 Видео: <b>{videos}/{MAX_REFERENCE_VIDEOS}</b>\n"
         f"🎵 Аудио: <b>{audios}/{MAX_REFERENCE_AUDIOS}</b>\n\n"
         "Можно смешивать фото, видео и аудио в одной генерации."
+        + feed_requirement
     )
 
 
@@ -67,6 +78,13 @@ async def _go_params(call: CallbackQuery, state: FSMContext) -> None:
 
     data = await state.get_data()
     images, videos, audios = _counts(data)
+    if data.get("feed_force_reference") and images < 1:
+        await safe_answer_callback(
+            call,
+            "Для повтора тренда нужен хотя бы один фото-референс.",
+            show_alert=True,
+        )
+        return
     route = route_for_inputs(
         images=[str(item) for item in (data.get("ref_file_ids") or []) if item],
         videos=_as_list(data.get("reference_video_url")),
@@ -132,12 +150,25 @@ async def choose_seedance25(
         wizard_review_enabled=bool(old.get("wizard_review_enabled", True)),
         wizard_scenario=old.get("wizard_scenario", "advanced"),
     )
-    await safe_edit_message(call.message, _text(await state.get_data()), reply_markup=_kb())
+    updated = await state.get_data()
+    await safe_edit_message(
+        call.message,
+        _text(updated),
+        reply_markup=_kb_for_data(updated),
+    )
     await safe_answer_callback(call)
 
 
 @router.callback_query(VideoGenFSM.seedance25_reference_upload, F.data == "s25ref:none")
 async def no_seedance25_refs(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    if data.get("feed_force_reference"):
+        await safe_answer_callback(
+            call,
+            "Для повтора тренда сначала загрузи своё фото/референс.",
+            show_alert=True,
+        )
+        return
     await state.update_data(
         image_url=None,
         image_file_id=None,
@@ -158,7 +189,8 @@ async def clear_seedance25_refs(call: CallbackQuery, state: FSMContext) -> None:
         reference_video_url=None,
         audio_ids=[],
     )
-    await safe_edit_message(call.message, _text(await state.get_data()), reply_markup=_kb())
+    updated = await state.get_data()
+    await safe_edit_message(call.message, _text(updated), reply_markup=_kb_for_data(updated))
     await safe_answer_callback(call, "Очищено")
 
 
@@ -167,13 +199,14 @@ async def add_seedance25_photo(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     refs = [str(item) for item in (data.get("ref_file_ids") or []) if item]
     if len(refs) >= MAX_REFERENCE_IMAGES:
-        await message.answer(f"Лимит фото — {MAX_REFERENCE_IMAGES}.", reply_markup=_kb())
+        await message.answer(f"Лимит фото — {MAX_REFERENCE_IMAGES}.", reply_markup=_kb_for_data(data))
         return
     best = max(message.photo, key=lambda item: item.file_size or 0)  # type: ignore[arg-type]
     if best.file_id not in refs:
         refs.append(best.file_id)
     await state.update_data(ref_file_ids=refs, image_file_id=refs[0], image_url=None)
-    await message.answer(_text(await state.get_data()), reply_markup=_kb())
+    updated = await state.get_data()
+    await message.answer(_text(updated), reply_markup=_kb_for_data(updated))
 
 
 @router.message(VideoGenFSM.seedance25_reference_upload, F.video)
@@ -181,13 +214,14 @@ async def add_seedance25_video(message: Message, state: FSMContext, bot: Bot) ->
     data = await state.get_data()
     refs = _as_list(data.get("reference_video_url"))
     if len(refs) >= MAX_REFERENCE_VIDEOS:
-        await message.answer(f"Лимит видео — {MAX_REFERENCE_VIDEOS}.", reply_markup=_kb())
+        await message.answer(f"Лимит видео — {MAX_REFERENCE_VIDEOS}.", reply_markup=_kb_for_data(data))
         return
     url = await mirror_telegram_file(bot, message.video.file_id, is_video=True)  # type: ignore[union-attr]
     if url not in refs:
         refs.append(url)
     await state.update_data(reference_video_url=refs)
-    await message.answer(_text(await state.get_data()), reply_markup=_kb())
+    updated = await state.get_data()
+    await message.answer(_text(updated), reply_markup=_kb_for_data(updated))
 
 
 async def _save_audio(message: Message, bot: Bot) -> str | None:
@@ -208,16 +242,17 @@ async def add_seedance25_audio(message: Message, state: FSMContext, bot: Bot) ->
     data = await state.get_data()
     refs = [str(item) for item in (data.get("audio_ids") or []) if item]
     if len(refs) >= MAX_REFERENCE_AUDIOS:
-        await message.answer(f"Лимит аудио — {MAX_REFERENCE_AUDIOS}.", reply_markup=_kb())
+        await message.answer(f"Лимит аудио — {MAX_REFERENCE_AUDIOS}.", reply_markup=_kb_for_data(data))
         return
     url = await _save_audio(message, bot)
     if not url:
-        await message.answer("Пришли аудиофайл или voice-сообщение.", reply_markup=_kb())
+        await message.answer("Пришли аудиофайл или voice-сообщение.", reply_markup=_kb_for_data(data))
         return
     if url not in refs:
         refs.append(url)
     await state.update_data(audio_ids=refs)
-    await message.answer(_text(await state.get_data()), reply_markup=_kb())
+    updated = await state.get_data()
+    await message.answer(_text(updated), reply_markup=_kb_for_data(updated))
 
 
 @router.callback_query(VideoGenFSM.seedance25_reference_upload, F.data == "s25ref:done")
@@ -226,8 +261,11 @@ async def finish_seedance25_refs(call: CallbackQuery, state: FSMContext) -> None
 
 
 @router.message(VideoGenFSM.seedance25_reference_upload)
-async def invalid_seedance25_ref(message: Message) -> None:
-    await message.answer(
-        "Здесь можно отправить фото, видео, аудио/voice или нажать «Без референсов».",
-        reply_markup=_kb(),
+async def invalid_seedance25_ref(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    text = (
+        "Для повтора тренда сначала пришли своё фото-референс."
+        if data.get("feed_force_reference")
+        else "Здесь можно отправить фото, видео, аудио/voice или нажать «Без референсов»."
     )
+    await message.answer(text, reply_markup=_kb_for_data(data))

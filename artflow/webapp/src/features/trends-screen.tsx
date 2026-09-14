@@ -54,6 +54,12 @@ function normalizeModels(value: unknown): ModelInfo[] {
   return [];
 }
 
+function modelDurations(model?: ModelInfo): number[] {
+  if (model?.duration_options?.length) return model.duration_options;
+  if (model?.durations?.length) return model.durations;
+  return [5, 10];
+}
+
 function TrendPreview({ item }: { item: Pick<TrendItem, "kind" | "preview_url" | "title"> }) {
   const media = safeExternalUrl(item.preview_url || "");
   if (!media) {
@@ -159,6 +165,10 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const models = kind === "video" ? videoModels : imageModels;
+  const selectedModel = useMemo(() => models.find((item) => item.key === model), [model, models]);
+  const durationOptions = useMemo(() => modelDurations(selectedModel), [selectedModel]);
+  const durationIndex = Math.max(0, durationOptions.indexOf(duration));
+  const selectedDuration = durationOptions[durationIndex] ?? duration;
 
   useEffect(() => {
     if (!open || imageModels.length || videoModels.length || loadingModels) return;
@@ -182,6 +192,11 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
     }
     if (!models.some((item) => item.key === model)) setModel(models[0].key);
   }, [model, models]);
+
+  useEffect(() => {
+    if (kind !== "video") return;
+    if (!durationOptions.includes(duration)) setDuration(durationOptions[0] || 5);
+  }, [duration, durationOptions, kind]);
 
   async function uploadPreview(file: File) {
     if (uploading) return;
@@ -288,11 +303,45 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       </label>
 
       {kind === "video" ? (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid gap-2">
           <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">Сценарий<select className="min-h-10 rounded-lg border border-border bg-background px-2 text-xs text-foreground" value={scenario} onChange={(event) => setScenario(event.target.value)}><option value="image">Фото → видео</option><option value="text">Текст → видео</option></select></label>
-          <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">Длительность<input className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs" type="number" min={2} max={30} value={duration} onChange={(event) => setDuration(Number(event.target.value || 5))} /></label>
-          <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">Формат<input className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs" value={ratio} onChange={(event) => setRatio(event.target.value)} placeholder="9:16" /></label>
-          <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">Разрешение<input className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs" value={resolution} onChange={(event) => setResolution(event.target.value)} placeholder="720p" /></label>
+          <div className="grid gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold text-muted-foreground">Длительность</span>
+              <Badge variant="outline">{selectedDuration} сек</Badge>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(0, durationOptions.length - 1)}
+              step={1}
+              value={durationIndex}
+              disabled={durationOptions.length <= 1}
+              aria-label="Длительность видео-тренда"
+              aria-valuetext={`${selectedDuration} секунд`}
+              className="apix-focus-ring h-8 w-full cursor-pointer accent-primary disabled:cursor-default disabled:opacity-60"
+              onChange={(event) => {
+                const nextDuration = durationOptions[Number(event.target.value)];
+                if (nextDuration != null) setDuration(nextDuration);
+              }}
+            />
+            <div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+              {durationOptions.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={cn("apix-focus-ring rounded px-1 py-0.5 transition", value === selectedDuration ? "font-semibold text-primary" : "hover:text-foreground")}
+                  onClick={() => setDuration(value)}
+                >
+                  {value} сек
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">Формат<input className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs" value={ratio} onChange={(event) => setRatio(event.target.value)} placeholder="9:16" /></label>
+            <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">Разрешение<input className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs" value={resolution} onChange={(event) => setResolution(event.target.value)} placeholder="720p" /></label>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">
