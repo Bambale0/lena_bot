@@ -246,7 +246,26 @@ def test_repeat_feed_uses_filters_safe_video_payload_and_normalized_media_urls()
     assert 'type WorkFilter = "all" | "image" | "video" | "mine"' in feed
     assert 'visibleItems' in feed
     assert 'Все' in feed and 'Фото' in feed and 'Видео' in feed and 'Мои' in feed
-    assert 'const HISTORY_LIMIT = 100' in api
+    assert 'const HISTORY_PAGE_SIZE = 100' in api
+
+
+def test_profile_history_pages_through_all_generations_without_total_cap() -> None:
+    api = read(SRC / "lib/api.ts")
+    app = read(SRC / "app/App.tsx")
+    routes = read(ROOT / "api/miniapp_routes.py")
+    repository = read(ROOT / "db/repository.py")
+
+    assert 'async getHistory(signal?: AbortSignal): Promise<GenerationTask[]>' in api
+    assert '`/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`' in api
+    assert 'if (page.length < HISTORY_PAGE_SIZE) break;' in api
+    assert 'offset: int = Query(default=0, ge=0)' in routes
+    assert 'limit=limit, offset=offset' in routes
+    assert 'offset: int = 0' in repository
+    assert '.offset(offset)' in repository
+    assert '.order_by(desc(Generation.created_at), desc(Generation.id))' in repository
+    assert '"/history?limit=" + HISTORY_PAGE_SIZE + "&offset=0"' in api
+    assert 'const freshTaskIds = new Set(core.recentTasks.map((task) => task.id));' in app
+    assert '...current.recentTasks.filter((task) => !freshTaskIds.has(task.id))' in app
 
 
 def test_workflows_have_polling_and_secure_task_actions() -> None:
