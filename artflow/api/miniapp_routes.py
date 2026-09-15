@@ -2582,12 +2582,13 @@ async def get_generation(
 @router.get("/history", response_model=list[GenerationOut])
 async def get_history(
     limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> list[GenerationOut]:
-    """Last N generations for the current user."""
+    """Paginated generations for the current user, newest first."""
     await _reconcile_user_active_generations(session, user.id)
-    gens = await repo.get_user_history(session, user.id, limit=limit)
+    gens = await repo.get_user_history(session, user.id, limit=limit, offset=offset)
     return [_gen_out(g) for g in gens]
 
 
