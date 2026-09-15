@@ -354,7 +354,18 @@ function App() {
     const controller = new AbortController();
     try {
       const core = await api.refreshCore(controller.signal);
-      setData((current) => (current ? { ...current, ...core } : current));
+      setData((current) => {
+        if (!current) return current;
+        const freshTaskIds = new Set(core.recentTasks.map((task) => task.id));
+        return {
+          ...current,
+          user: core.user,
+          recentTasks: [
+            ...core.recentTasks,
+            ...current.recentTasks.filter((task) => !freshTaskIds.has(task.id)),
+          ],
+        };
+      });
       setSelectedTask((current) => {
         if (!current) return current;
         return core.recentTasks.find((task) => task.id === current.id) || current;
