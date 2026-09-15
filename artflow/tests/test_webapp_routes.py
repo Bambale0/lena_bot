@@ -507,13 +507,14 @@ async def test_webapp_my_feed_returns_only_current_user_cards(client, monkeypatc
     get_user_feed_generations = AsyncMock(return_value=[card])
     monkeypatch.setattr("api.miniapp_routes.repo.get_user_feed_generations", get_user_feed_generations)
 
-    response = await client.get("/api/v1/me/feed?limit=200")
+    response = await client.get("/api/v1/me/feed?limit=500")
 
     assert response.status_code == 200
     assert response.json()[0]["is_mine"] is True
     assert response.json()[0]["result_urls"] == ["https://cdn.example.test/mine.jpg"]
     get_user_feed_generations.assert_awaited_once()
     assert get_user_feed_generations.await_args.args[1] == 1
+    assert get_user_feed_generations.await_args.kwargs["limit"] == 500
 
 
 @pytest.mark.asyncio

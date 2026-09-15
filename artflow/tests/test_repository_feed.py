@@ -172,3 +172,18 @@ async def test_top_feed_keeps_relevance_sort_separate_from_recent(monkeypatch) -
     compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
     assert "generations.gen_type IN ('image', 'video')" in compiled
     assert loader.await_args.kwargs["sort_by_score"] is True
+
+
+@pytest.mark.asyncio
+async def test_user_feed_keeps_all_own_posts_newest_first_without_relevance_sort(monkeypatch) -> None:
+    session = AsyncMock()
+    loader = AsyncMock(return_value=[])
+    monkeypatch.setattr(repository, "_feed_cards_from_stmt", loader)
+
+    await repository.get_user_feed_generations(session, user_id=32, limit=500)
+
+    statement = loader.await_args.args[1]
+    compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "generations.user_id = 32" in compiled
+    assert "ORDER BY generations.created_at DESC, generations.id DESC" in compiled
+    assert loader.await_args.kwargs["sort_by_score"] is False

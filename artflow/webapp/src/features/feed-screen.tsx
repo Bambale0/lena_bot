@@ -53,6 +53,7 @@ interface MediaViewerState {
 
 const WORK_RENDER_BATCH = 30;
 const TREND_RENDER_BATCH = 24;
+const MY_FEED_FETCH_LIMIT = 500;
 
 const sourceFilters = [
   { value: "recent" as const, label: "Новые" },
@@ -152,6 +153,8 @@ function FeedScreen({
 }: FeedScreenProps) {
   const [contentMode, setContentMode] = useState<ContentMode>("works");
   const [workFilter, setWorkFilter] = useState<WorkFilter>("all");
+  const [myItems, setMyItems] = useState<FeedItem[]>([]);
+  const [myLoading, setMyLoading] = useState(false);
   const [visibleWorkCount, setVisibleWorkCount] = useState(WORK_RENDER_BATCH);
   const [viewer, setViewer] = useState<MediaViewerState | null>(null);
   const [trends, setTrends] = useState<TrendItem[]>([]);
@@ -161,20 +164,39 @@ function FeedScreen({
   const [visibleTrendCount, setVisibleTrendCount] = useState(TREND_RENDER_BATCH);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
+  const loadMyFeed = useCallback(async () => {
+    setMyLoading(true);
+    try {
+      const response = await fetch(`/api/v1/me/feed?limit=${MY_FEED_FETCH_LIMIT}`, { headers: authHeaders() });
+      if (!response.ok) throw new Error(await apiErrorMessage(response));
+      const payload = (await response.json()) as unknown;
+      setMyItems(Array.isArray(payload) ? payload as FeedItem[] : []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось загрузить мои работы");
+    } finally {
+      setMyLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (workFilter === "mine") void loadMyFeed();
+  }, [loadMyFeed, workFilter]);
+
   const visibleItems = useMemo(() => {
+    if (workFilter === "mine") return myItems;
     return items.filter((item) => {
-      if (workFilter === "mine") return Boolean(item.is_mine);
       if (workFilter === "video") return itemLooksVideo(item);
       if (workFilter === "image") return !itemLooksVideo(item);
       return true;
     });
-  }, [items, workFilter]);
+  }, [items, myItems, workFilter]);
 
   const renderedItems = useMemo(() => {
     return visibleItems.slice(0, visibleWorkCount);
   }, [visibleItems, visibleWorkCount]);
 
   const canRevealMoreWorks = renderedItems.length < visibleItems.length;
+  const worksLoading = workFilter === "mine" ? myLoading : loading;
 
   const filteredTrendBase = useMemo(() => {
     return trends.filter((trend) => trendKind === "all" || trend.kind === trendKind);
@@ -221,6 +243,7 @@ function FeedScreen({
     if (
       contentMode !== "works" ||
       workFilter === "all" ||
+      workFilter === "mine" ||
       loading ||
       loadingMore ||
       visibleItems.length > 0 ||
@@ -242,18 +265,18 @@ function FeedScreen({
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (!entry?.isIntersecting || loading || loadingMore) return;
+        if (!entry?.isIntersecting || worksLoading || loadingMore) return;
         if (canRevealMoreWorks) {
           setVisibleWorkCount((current) => Math.min(current + WORK_RENDER_BATCH, visibleItems.length));
           return;
         }
-        if (hasMore && onLoadMore) onLoadMore();
+        if (workFilter !== "mine" && hasMore && onLoadMore) onLoadMore();
       },
       { root: null, rootMargin: "640px 0px", threshold: 0 },
     );
     observer.observe(target);
     return () => observer.disconnect();
-  }, [canRevealMoreWorks, contentMode, hasMore, loading, loadingMore, onLoadMore, visibleItems.length]);
+  }, [canRevealMoreWorks, contentMode, hasMore, loadingMore, onLoadMore, visibleItems.length, workFilter, worksLoading]);
 
   useEffect(() => {
     if (!viewer) return undefined;
@@ -337,11 +360,11 @@ function FeedScreen({
               variant="ghost"
               size="icon"
               className="size-8 min-h-8 shrink-0 rounded-xl"
-              disabled={contentMode === "works" ? loading : trendsLoading}
-              onClick={contentMode === "works" ? onRefresh : () => void loadTrends()}
+              disabled={contentMode === "works" ? worksLoading : trendsLoading}
+              onClick={contentMode === "works" ? (workFilter === "mine" ? () => void loadMyFeed() : onRefresh) : () => void loadTrends()}
               aria-label="Обновить ленту"
             >
-              <RefreshCw className={cn("size-4", (contentMode === "works" ? loading : trendsLoading) && "animate-spin")} />
+              <RefreshCw className={cn("size-4", (contentMode === "works" ? worksLoading : trendsLoading) && "animate-spin")} />
             </Button>
           </div>
         </div>
@@ -527,11 +550,11 @@ function FeedScreen({
             </div>
 
             <div ref={sentinelRef} className="grid min-h-16 place-items-center pb-2 text-xs text-muted-foreground">
-              {loadingMore ? (
+              {worksLoading || (workFilter !== "mine" && loadingMore) ? (
                 <span className="inline-flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Подгружаем ещё…</span>
               ) : canRevealMoreWorks ? (
                 <Button variant="ghost" size="sm" onClick={() => setVisibleWorkCount((current) => Math.min(current + WORK_RENDER_BATCH, visibleItems.length))}>Показать ещё</Button>
-              ) : hasMore && onLoadMore ? (
+              ) : workFilter !== "mine" && hasMore && onLoadMore ? (
                 <Button variant="ghost" size="sm" onClick={onLoadMore}>Загрузить ещё</Button>
               ) : (
                 <span>Это всё по текущей подборке</span>
@@ -540,7 +563,7 @@ function FeedScreen({
           </>
         ) : (
           <div className="grid min-h-28 place-items-center rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">
-            {loading || loadingMore ? "Ищем работы по фильтру…" : "По этому фильтру работ пока нет"}
+            {worksLoading || (workFilter !== "mine" && loadingMore) ? "Ищем работы по фильтру…" : "По этому фильтру работ пока нет"}
           </div>
         )
       ) : (

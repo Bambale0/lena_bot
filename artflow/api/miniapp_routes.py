@@ -1474,12 +1474,12 @@ async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
 
 @router.get("/me/feed")
 async def get_my_feed(
-    limit: int = 200,
+    limit: int = Query(500, ge=1, le=1000),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> list[dict]:
-    """Current user's public image feed posts."""
-    cards = await repo.get_user_feed_generations(session, user.id, limit=max(1, limit))
+    """Current user's public image/video feed posts."""
+    cards = await repo.get_user_feed_generations(session, user.id, limit=limit)
     return [_feed_card_out(card, user) for card in cards]
 
 
