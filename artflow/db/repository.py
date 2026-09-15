@@ -1883,12 +1883,16 @@ async def get_last_session_generation(
 
 
 async def get_user_history(
-    session: AsyncSession, user_id: int, limit: int = 20
+    session: AsyncSession,
+    user_id: int,
+    limit: int = 20,
+    offset: int = 0,
 ) -> list[Generation]:
     result = await session.execute(
         select(Generation)
         .where(Generation.user_id == user_id)
-        .order_by(desc(Generation.created_at))
+        .order_by(desc(Generation.created_at), desc(Generation.id))
+        .offset(offset)
         .limit(limit)
     )
     return list(result.scalars().all())
