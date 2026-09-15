@@ -126,3 +126,24 @@ def test_kling_30_motion_is_self_healed_before_video_catalog_reads() -> None:
     assert 'resolution="720p"' in visibility
     assert 'resolution="1080p"' in visibility
     assert "row.is_active = True" in visibility
+
+
+def test_infinite_feed_load_more_preserves_already_rendered_cards() -> None:
+    app = read(ROOT / "webapp" / "src" / "app" / "App.tsx")
+
+    assert "function mergeFeedPage(current: FeedItem[], incoming: FeedItem[])" in app
+    assert "...current.map((item) => incomingById.get(item.id) || item)" in app
+    assert "...incoming.filter((item) => !currentIds.has(item.id))" in app
+    assert "feed: mergeFeedPage(current.feed, feed)" in app
+
+
+def test_feed_sources_keep_recent_and_top_as_distinct_backend_queries() -> None:
+    miniapp = read(ROOT / "api" / "miniapp_routes.py")
+    web = read(ROOT / "api" / "web" / "feed.py")
+
+    for source in (miniapp, web):
+        assert 'source == "top_day"' in source
+        assert 'source == "top"' in source
+        assert "repo.get_top_day_generations" in source
+        assert "repo.get_top_generations" in source
+        assert "repo.get_feed_generations" in source

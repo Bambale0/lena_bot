@@ -219,11 +219,17 @@ DTO карточки `FeedGenerationCard` (`db/repository.py:62`) дополня
 
 `get_feed_generations(limit=30/100)`:
 
-- фильтры: image, done, result_url, public;
+- фильтры: image/video, done, result_url, public;
 - берёт newest `limit * 3`;
 - затем `_feed_cards_from_stmt` добавляет author/session/remix_count;
-- сортирует в Python по score и created_at;
+- обычная лента сохраняет детерминированный порядок `created_at DESC, id DESC`;
+- лайки, шеры и ремиксы других публикаций не могут вытолкнуть уже видимую работу из «Новых»;
 - возвращает первые `limit`.
+
+`get_top_generations(limit=...)`:
+
+- использует тот же публичный пул;
+- relevance score применяется только для явного экрана «Лучшие».
 
 `get_top_day_generations(limit=10)`:
 

@@ -1351,7 +1351,13 @@ def _feed_score(gen: Generation, remix_count: int) -> float:
     return float(score)
 
 
-async def _feed_cards_from_stmt(session: AsyncSession, stmt, *, require_media: bool = True) -> list[FeedGenerationCard]:
+async def _feed_cards_from_stmt(
+    session: AsyncSession,
+    stmt,
+    *,
+    require_media: bool = True,
+    sort_by_score: bool = True,
+) -> list[FeedGenerationCard]:
     remix_counts = (
         select(
             Generation.parent_generation_id.label("parent_id"),
@@ -1401,13 +1407,15 @@ async def _feed_cards_from_stmt(session: AsyncSession, stmt, *, require_media: b
                 score=_feed_score(gen, remix_total),
             )
         )
-    cards.sort(
-        key=lambda card: (
-            card.score,
-            card.generation.created_at or datetime.min.replace(tzinfo=timezone.utc),
-        ),
-        reverse=True,
-    )
+    if sort_by_score:
+        cards.sort(
+            key=lambda card: (
+                card.score,
+                card.generation.created_at or datetime.min.replace(tzinfo=timezone.utc),
+                card.generation.id,
+            ),
+            reverse=True,
+        )
     return cards
 
 
@@ -1416,6 +1424,12 @@ async def get_feed_generations(
     *,
     limit: int = 100,
 ) -> list[FeedGenerationCard]:
+    """Return the public feed in deterministic newest-first order.
+
+    The default feed is intentionally not relevance-ranked: once a publication
+    is visible in the recent feed, engagement changes on other posts must not
+    make it disappear while a user is scrolling.
+    """
     stmt = (
         select(Generation)
         .where(
@@ -1424,10 +1438,31 @@ async def get_feed_generations(
             Generation.result_url.is_not(None),
             Generation.is_public_feed.is_(True),
         )
-        .order_by(desc(Generation.created_at))
+        .order_by(desc(Generation.created_at), desc(Generation.id))
         .limit(max(limit, 1) * 3)
     )
-    cards = await _feed_cards_from_stmt(session, stmt)
+    cards = await _feed_cards_from_stmt(session, stmt, sort_by_score=False)
+    return cards[:limit]
+
+
+async def get_top_generations(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+) -> list[FeedGenerationCard]:
+    """Return relevance-ranked public works for the explicit Top view."""
+    stmt = (
+        select(Generation)
+        .where(
+            Generation.gen_type.in_((GenerationType.image, GenerationType.video)),
+            Generation.status == GenerationStatus.done,
+            Generation.result_url.is_not(None),
+            Generation.is_public_feed.is_(True),
+        )
+        .order_by(desc(Generation.created_at), desc(Generation.id))
+        .limit(max(limit, 1) * 3)
+    )
+    cards = await _feed_cards_from_stmt(session, stmt, sort_by_score=True)
     return cards[:limit]
 
 
