@@ -251,6 +251,7 @@ def test_repeat_feed_uses_filters_safe_video_payload_and_normalized_media_urls()
 
 def test_profile_history_pages_through_all_generations_without_total_cap() -> None:
     api = read(SRC / "lib/api.ts")
+    app = read(SRC / "app/App.tsx")
     routes = read(ROOT / "api/miniapp_routes.py")
     repository = read(ROOT / "db/repository.py")
 
@@ -262,6 +263,9 @@ def test_profile_history_pages_through_all_generations_without_total_cap() -> No
     assert 'offset: int = 0' in repository
     assert '.offset(offset)' in repository
     assert '.order_by(desc(Generation.created_at), desc(Generation.id))' in repository
+    assert '"/history?limit=" + HISTORY_PAGE_SIZE + "&offset=0"' in api
+    assert 'const freshTaskIds = new Set(core.recentTasks.map((task) => task.id));' in app
+    assert '...current.recentTasks.filter((task) => !freshTaskIds.has(task.id))' in app
 
 
 def test_workflows_have_polling_and_secure_task_actions() -> None:
