@@ -2603,6 +2603,8 @@ async def get_feed(
     """Public image feed — prompt is hidden from non-authors."""
     if source == "top_day":
         cards = await repo.get_top_day_generations(session, limit=limit)
+    elif source == "top":
+        cards = await repo.get_top_generations(session, limit=limit)
     else:
         cards = await repo.get_feed_generations(session, limit=limit)
     return [_feed_card_out(c, user) for c in cards]

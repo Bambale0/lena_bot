@@ -96,8 +96,10 @@ def _generation_value(value) -> str:
 
 async def _feed_payloads(session: AsyncSession, source: str, limit: int, *, compact: bool = False) -> list[dict]:
     repo_limit = max(limit * 4, limit, 120)
-    if source in {"top", "top_day"}:
+    if source == "top_day":
         cards = await repo.get_top_day_generations(session, limit=repo_limit)
+    elif source == "top":
+        cards = await repo.get_top_generations(session, limit=repo_limit)
     else:
         cards = await repo.get_feed_generations(session, limit=repo_limit)
     payloads: list[dict] = []

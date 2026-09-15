@@ -105,6 +105,15 @@ function uniqueStrings(items: string[]): string[] {
   return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
 }
 
+function mergeFeedPage(current: FeedItem[], incoming: FeedItem[]): FeedItem[] {
+  const incomingById = new Map(incoming.map((item) => [item.id, item]));
+  const currentIds = new Set(current.map((item) => item.id));
+  return [
+    ...current.map((item) => incomingById.get(item.id) || item),
+    ...incoming.filter((item) => !currentIds.has(item.id)),
+  ];
+}
+
 function App() {
   const [mode, setMode] = useState<AppMode>("booting");
   const [errorMessage, setErrorMessage] = useState("");
@@ -562,7 +571,7 @@ function App() {
     setFeedLoadingMore(true);
     try {
       const feed = await api.getFeed(feedSource, nextLimit);
-      setData((current) => current ? { ...current, feed } : current);
+      setData((current) => current ? { ...current, feed: mergeFeedPage(current.feed, feed) } : current);
       setFeedLimit(nextLimit);
       setFeedHasMore(feed.length >= nextLimit);
     } catch (error) {

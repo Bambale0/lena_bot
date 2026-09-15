@@ -144,3 +144,31 @@ async def test_get_top_day_generations_includes_video_posts(monkeypatch) -> None
     statement = repository._feed_cards_from_stmt.await_args.args[1]
     compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
     assert "generations.gen_type IN ('image', 'video')" in compiled
+
+
+@pytest.mark.asyncio
+async def test_recent_feed_keeps_newest_first_and_disables_score_sort(monkeypatch) -> None:
+    session = AsyncMock()
+    loader = AsyncMock(return_value=[])
+    monkeypatch.setattr(repository, "_feed_cards_from_stmt", loader)
+
+    await repository.get_feed_generations(session, limit=10)
+
+    statement = loader.await_args.args[1]
+    compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "ORDER BY generations.created_at DESC, generations.id DESC" in compiled
+    assert loader.await_args.kwargs["sort_by_score"] is False
+
+
+@pytest.mark.asyncio
+async def test_top_feed_keeps_relevance_sort_separate_from_recent(monkeypatch) -> None:
+    session = AsyncMock()
+    loader = AsyncMock(return_value=[])
+    monkeypatch.setattr(repository, "_feed_cards_from_stmt", loader)
+
+    await repository.get_top_generations(session, limit=10)
+
+    statement = loader.await_args.args[1]
+    compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "generations.gen_type IN ('image', 'video')" in compiled
+    assert loader.await_args.kwargs["sort_by_score"] is True
