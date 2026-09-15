@@ -77,3 +77,41 @@ async def test_send_database_backup_raises_if_no_admin_received_file(monkeypatch
 
     with pytest.raises(db_backup_scheduler.DatabaseBackupError):
         await db_backup_scheduler.send_database_backup_to_admins(bot)
+
+
+@pytest.mark.asyncio
+async def test_send_database_backup_splits_oversized_dump_for_telegram(monkeypatch, tmp_path) -> None:
+    backup_path = tmp_path / "artflow_db_big.dump"
+    backup_path.write_bytes(b"abcdefghij")
+    backup = db_backup_scheduler.DatabaseBackup(
+        path=backup_path,
+        created_at=datetime(2026, 9, 15, 10, 0, tzinfo=timezone.utc),
+        size_bytes=backup_path.stat().st_size,
+    )
+    bot = SimpleNamespace(send_document=AsyncMock())
+
+    monkeypatch.setattr(db_backup_scheduler.settings, "ADMIN_IDS", [101], raising=False)
+    monkeypatch.setattr(db_backup_scheduler, "TELEGRAM_BACKUP_PART_BYTES", 4)
+    monkeypatch.setattr(db_backup_scheduler, "create_database_backup", AsyncMock(return_value=backup))
+    monkeypatch.setattr(db_backup_scheduler, "cleanup_old_backups", lambda: None)
+
+    original_split = db_backup_scheduler._split_backup_for_telegram
+    monkeypatch.setattr(
+        db_backup_scheduler,
+        "_split_backup_for_telegram",
+        lambda path: original_split(path, max_bytes=4),
+    )
+
+    sent = await db_backup_scheduler.send_database_backup_to_admins(bot)
+
+    assert sent == 1
+    assert bot.send_document.await_count == 3
+    filenames = [call.kwargs["document"].filename for call in bot.send_document.await_args_list]
+    assert filenames == [
+        "artflow_db_big.dump.part001",
+        "artflow_db_big.dump.part002",
+        "artflow_db_big.dump.part003",
+    ]
+    assert all("Часть:" in call.kwargs["caption"] for call in bot.send_document.await_args_list)
+    assert backup_path.exists()
+    assert not list(tmp_path.glob("artflow_db_big.dump.part*"))

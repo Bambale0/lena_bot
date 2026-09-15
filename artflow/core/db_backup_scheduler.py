@@ -18,6 +18,7 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 
 STATE_PATH = Path("data/db_backup_state.json")
+TELEGRAM_BACKUP_PART_BYTES = 45 * 1024 * 1024
 
 
 class DatabaseBackupError(RuntimeError):
@@ -160,6 +161,45 @@ def cleanup_old_backups() -> None:
             logger.warning("Failed to remove old DB backup %s: %s", old_backup, exc)
 
 
+def _split_backup_for_telegram(path: Path, *, max_bytes: int = TELEGRAM_BACKUP_PART_BYTES) -> list[Path]:
+    """Split an oversized dump into Telegram-safe binary chunks.
+
+    The original custom-format pg_dump archive is kept untouched on disk.
+    Multipart files are temporary transport artifacts and can be concatenated
+    byte-for-byte to recover the original dump.
+    """
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be positive")
+    if path.stat().st_size <= max_bytes:
+        return [path]
+
+    for stale_part in path.parent.glob(f"{path.name}.part*"):
+        stale_part.unlink(missing_ok=True)
+
+    parts: list[Path] = []
+    with path.open("rb") as source:
+        index = 1
+        while True:
+            chunk = source.read(max_bytes)
+            if not chunk:
+                break
+            part = path.with_name(f"{path.name}.part{index:03d}")
+            part.write_bytes(chunk)
+            parts.append(part)
+            index += 1
+    return parts
+
+
+def _cleanup_transport_parts(backup_path: Path, parts: list[Path]) -> None:
+    for part in parts:
+        if part == backup_path:
+            continue
+        try:
+            part.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning("Failed to remove DB backup transport part %s: %s", part, exc)
+
+
 async def send_database_backup_to_admins(bot: Bot) -> int:
     admin_ids = [int(admin_id) for admin_id in settings.ADMIN_IDS or []]
     if not admin_ids:
@@ -167,23 +207,34 @@ async def send_database_backup_to_admins(bot: Bot) -> int:
         return 0
 
     backup = await create_database_backup()
-    caption = (
+    parts = await asyncio.to_thread(_split_backup_for_telegram, backup.path)
+    base_caption = (
         "🗄 <b>Резервная копия БД</b>\n"
         f"Время UTC: <code>{backup.created_at.strftime('%Y-%m-%d %H:%M:%S')}</code>\n"
         f"Размер: <code>{_format_size(backup.size_bytes)}</code>"
     )
 
     sent = 0
-    for admin_id in admin_ids:
-        try:
-            await bot.send_document(
-                chat_id=admin_id,
-                document=FSInputFile(backup.path, filename=backup.path.name),
-                caption=caption,
-            )
-            sent += 1
-        except Exception as exc:
-            logger.warning("Failed to send DB backup to admin %s: %s", admin_id, exc)
+    try:
+        for admin_id in admin_ids:
+            try:
+                for index, part in enumerate(parts, start=1):
+                    caption = base_caption
+                    if len(parts) > 1:
+                        caption += (
+                            f"\nЧасть: <code>{index}/{len(parts)}</code>"
+                            "\nДля восстановления объедините части по порядку в один .dump файл."
+                        )
+                    await bot.send_document(
+                        chat_id=admin_id,
+                        document=FSInputFile(part, filename=part.name),
+                        caption=caption,
+                    )
+                sent += 1
+            except Exception as exc:
+                logger.warning("Failed to send DB backup to admin %s: %s", admin_id, exc)
+    finally:
+        await asyncio.to_thread(_cleanup_transport_parts, backup.path, parts)
 
     await asyncio.to_thread(cleanup_old_backups)
     if sent == 0:
