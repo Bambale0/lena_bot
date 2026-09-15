@@ -18,7 +18,7 @@ import { parseStartTarget, readStartParam } from "@/lib/telegram";
 import { asArray, asRecord } from "@/lib/utils";
 
 const API_BASE = "/api/v1";
-const HISTORY_LIMIT = 100;
+const HISTORY_PAGE_SIZE = 100;
 // Feed media filters are client-side. Keep one server page large enough that
 // selecting "Видео" does not dead-end just because the first small page was all images.
 // React still mounts works in batches, so this does not multiply the live DOM size.
@@ -157,13 +157,32 @@ export class MiniAppApi {
     return item;
   }
 
+  async getHistory(signal?: AbortSignal): Promise<GenerationTask[]> {
+    const history: GenerationTask[] = [];
+    const seen = new Set<number>();
+
+    for (let offset = 0; ; offset += HISTORY_PAGE_SIZE) {
+      const page = asArray<GenerationTask>(
+        await this.request<unknown>(`/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`, {}, signal),
+      );
+      for (const task of page) {
+        if (seen.has(task.id)) continue;
+        seen.add(task.id);
+        history.push(task);
+      }
+      if (page.length < HISTORY_PAGE_SIZE) break;
+    }
+
+    return history;
+  }
+
   async bootstrap(signal?: AbortSignal): Promise<BootstrapData> {
     const [userResult, imageResult, videoResult, historyResult, feedResult, trendsResult, plansResult, paymentMethodsResult] =
       await Promise.allSettled([
         this.request<UserProfile>("/me", {}, signal),
         this.request<unknown>("/models/image", {}, signal),
         this.request<unknown>("/models/video", {}, signal),
-        this.request<unknown>(`/history?limit=${HISTORY_LIMIT}`, {}, signal),
+        this.getHistory(signal),
         this.request<unknown>(`/feed?source=recent&limit=${FEED_PAGE_SIZE}`, {}, signal),
         this.request<unknown>("/trends?limit=32", {}, signal),
         this.request<unknown>("/plans", {}, signal),
@@ -196,7 +215,7 @@ export class MiniAppApi {
       user: userResult.value,
       imageModels: asArray<ModelInfo>(settledValue(imageResult, [])),
       videoModels: asArray<ModelInfo>(settledValue(videoResult, [])),
-      recentTasks: asArray<GenerationTask>(settledValue(historyResult, [])),
+      recentTasks: settledValue(historyResult, []),
       feed,
       trends: asArray<TrendItem>(settledValue(trendsResult, [])),
       paymentPlans: asArray<PaymentPlan>(settledValue(plansResult, [])),
@@ -207,9 +226,9 @@ export class MiniAppApi {
   async refreshCore(signal?: AbortSignal): Promise<{ user: UserProfile; recentTasks: GenerationTask[] }> {
     const [user, history] = await Promise.all([
       this.request<UserProfile>("/me", {}, signal),
-      this.request<unknown>(`/history?limit=${HISTORY_LIMIT}`, {}, signal),
+      this.getHistory(signal),
     ]);
-    return { user, recentTasks: asArray<GenerationTask>(history) };
+    return { user, recentTasks: history };
   }
 
   getGeneration(id: number, signal?: AbortSignal): Promise<GenerationTask> {
