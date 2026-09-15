@@ -147,3 +147,15 @@ def test_feed_sources_keep_recent_and_top_as_distinct_backend_queries() -> None:
         assert "repo.get_top_day_generations" in source
         assert "repo.get_top_generations" in source
         assert "repo.get_feed_generations" in source
+
+
+def test_my_feed_uses_dedicated_server_query_instead_of_filtering_loaded_public_slice() -> None:
+    feed = read(FEED_SOURCE)
+    routes = read(ROOT / "api" / "miniapp_routes.py")
+
+    assert "const MY_FEED_FETCH_LIMIT = 500" in feed
+    assert "fetch(`/api/v1/me/feed?limit=${MY_FEED_FETCH_LIMIT}`" in feed
+    assert 'if (workFilter === "mine") return myItems;' in feed
+    assert 'workFilter !== "mine" && hasMore && onLoadMore' in feed
+    assert '@router.get("/me/feed")' in routes
+    assert "Query(500, ge=1, le=1000)" in routes

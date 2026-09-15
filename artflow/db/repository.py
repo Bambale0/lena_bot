@@ -1472,6 +1472,7 @@ async def get_user_feed_generations(
     *,
     limit: int = 200,
 ) -> list[FeedGenerationCard]:
+    """Return the user's own public works in deterministic newest-first order."""
     stmt = (
         select(Generation)
         .where(
@@ -1481,10 +1482,10 @@ async def get_user_feed_generations(
             Generation.result_url.is_not(None),
             Generation.is_public_feed.is_(True),
         )
-        .order_by(desc(Generation.created_at))
+        .order_by(desc(Generation.created_at), desc(Generation.id))
         .limit(max(limit, 1) * 3)
     )
-    cards = await _feed_cards_from_stmt(session, stmt)
+    cards = await _feed_cards_from_stmt(session, stmt, sort_by_score=False)
     return cards[:limit]
 
 

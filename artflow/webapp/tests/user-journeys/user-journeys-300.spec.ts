@@ -29,6 +29,7 @@ type Captures = {
 type MockOptions = {
   user?: Json;
   feed?: Json[];
+  myFeed?: Json[];
   feedBySource?: Record<string, Json[]>;
   publicFeed?: Record<number, Json>;
   trends?: Json[];
@@ -195,6 +196,7 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
   const user = { ...baseUser, ...(options.user || {}) };
   const captures = options.captures || {};
   const feed = options.feed || [];
+  const myFeed = options.myFeed || feed.filter((item) => item.is_mine === true);
   const feedBySource = options.feedBySource || {};
   const publicFeed = options.publicFeed || {};
   const trends = options.trends || [];
@@ -281,6 +283,7 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
     if (path === "/api/v1/models/video") return route.fulfill({ json: videos });
     if (path === "/api/v1/models/music") return route.fulfill({ json: music });
     if (path === "/api/v1/history") return route.fulfill({ json: history });
+    if (path === "/api/v1/me/feed" && method === "GET") return route.fulfill({ json: myFeed });
     if (path === "/api/v1/plans") return route.fulfill({ json: plans });
     if (path === "/api/v1/referrals") return route.fulfill({ json: defaultReferrals });
     if (path === "/api/v1/music/voices") return route.fulfill({ json: [] });
