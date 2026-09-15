@@ -156,6 +156,7 @@ def test_my_feed_uses_dedicated_server_query_instead_of_filtering_loaded_public_
     assert "const MY_FEED_FETCH_LIMIT = 500" in feed
     assert "fetch(`/api/v1/me/feed?limit=${MY_FEED_FETCH_LIMIT}`" in feed
     assert 'if (workFilter === "mine") return myItems;' in feed
+    assert 'if (workFilter === "mine") return visibleItems;' in feed
     assert 'workFilter !== "mine" && hasMore && onLoadMore' in feed
     assert '@router.get("/me/feed")' in routes
     assert "Query(500, ge=1, le=1000)" in routes
