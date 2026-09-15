@@ -228,7 +228,7 @@ export class MiniAppApi {
       this.request<UserProfile>("/me", {}, signal),
       this.request<unknown>("/history?limit=" + HISTORY_PAGE_SIZE + "&offset=0", {}, signal),
     ]);
-    return { user, recentTasks: history };
+    return { user, recentTasks: asArray<GenerationTask>(history) };
   }
 
   getGeneration(id: number, signal?: AbortSignal): Promise<GenerationTask> {
