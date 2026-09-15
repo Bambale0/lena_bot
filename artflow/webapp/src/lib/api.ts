@@ -226,7 +226,7 @@ export class MiniAppApi {
   async refreshCore(signal?: AbortSignal): Promise<{ user: UserProfile; recentTasks: GenerationTask[] }> {
     const [user, history] = await Promise.all([
       this.request<UserProfile>("/me", {}, signal),
-      this.getHistory(signal),
+      this.request<unknown>("/history?limit=" + HISTORY_PAGE_SIZE + "&offset=0", {}, signal),
     ]);
     return { user, recentTasks: history };
   }
