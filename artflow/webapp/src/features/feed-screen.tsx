@@ -192,10 +192,11 @@ function FeedScreen({
   }, [items, myItems, workFilter]);
 
   const renderedItems = useMemo(() => {
+    if (workFilter === "mine") return visibleItems;
     return visibleItems.slice(0, visibleWorkCount);
-  }, [visibleItems, visibleWorkCount]);
+  }, [visibleItems, visibleWorkCount, workFilter]);
 
-  const canRevealMoreWorks = renderedItems.length < visibleItems.length;
+  const canRevealMoreWorks = workFilter !== "mine" && renderedItems.length < visibleItems.length;
   const worksLoading = workFilter === "mine" ? myLoading : loading;
 
   const filteredTrendBase = useMemo(() => {
