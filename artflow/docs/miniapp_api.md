@@ -139,7 +139,7 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 | Метод | Путь | Описание |
 |-------|------|---------|
 | GET | `/generations/{id}` | Один результат (polling) |
-| GET | `/history?limit=20` | История генераций пользователя |
+| GET | `/history?limit=20&offset=0` | Личная история генераций пользователя; страницы можно дочитывать без общего лимита |
 
 **GET /generations/{id} — ответ (done):**
 ```json
