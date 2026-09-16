@@ -106,6 +106,22 @@ export async function photoPrompt(file) {
   return response.json();
 }
 
+export async function videoPrompt(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetchWithTimeout(`${API_BASE}/video-prompt`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: form,
+  }, PHOTO_PROMPT_TIMEOUT_MS);
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response, `Video prompt ${response.status}`);
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
 export function listItems(payload) {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.items)) return payload.items;

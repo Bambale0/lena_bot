@@ -8,6 +8,7 @@ import type {
   ModelInfo,
   PaymentPlan,
   PhotoPromptResult,
+  VideoPromptResult,
   PreparedTrend,
   ReferralStats,
   ReferralWithdrawal,
@@ -395,6 +396,18 @@ export class MiniAppApi {
       prompt_en: typeof record.prompt_en === "string" ? record.prompt_en : undefined,
       prompt_ru: typeof record.prompt_ru === "string" ? record.prompt_ru : undefined,
       negative_prompt: typeof record.negative_prompt === "string" ? record.negative_prompt : undefined,
+      model_hint: typeof record.model_hint === "string" ? record.model_hint : undefined,
+    };
+  }
+
+  async videoPrompt(file: File): Promise<VideoPromptResult> {
+    const form = new FormData();
+    form.append("file", file);
+    const payload = await this.request<unknown>("/video-prompt", { method: "POST", body: form });
+    const record = asRecord(payload);
+    return {
+      prompt: String(record.prompt || ""),
+      credits_spent: typeof record.credits_spent === "number" ? record.credits_spent : undefined,
       model_hint: typeof record.model_hint === "string" ? record.model_hint : undefined,
     };
   }

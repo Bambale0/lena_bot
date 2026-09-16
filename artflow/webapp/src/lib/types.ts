@@ -234,3 +234,9 @@ export interface PhotoPromptResult {
   negative_prompt?: string;
   model_hint?: string;
 }
+
+export interface VideoPromptResult {
+  prompt: string;
+  credits_spent?: number;
+  model_hint?: string;
+}

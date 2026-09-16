@@ -661,7 +661,10 @@ def image_scenarios_kb() -> InlineKeyboardMarkup:
                 callback_data=f"img_scn:{scenario_key}",
             )
         )
-    builder.row(InlineKeyboardButton(text="📸 Фото → промпт", callback_data="img:photo2prompt"))
+    builder.row(
+        InlineKeyboardButton(text="📸 Фото → промпт", callback_data="img:photo2prompt"),
+        InlineKeyboardButton(text="🎬 Видео → промпт", callback_data="vid:video2prompt"),
+    )
     builder.row(InlineKeyboardButton(text="🧠 Все нейросети", callback_data="img_menu:advanced"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
     return builder.as_markup()

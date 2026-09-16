@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import ipaddress
 import json
 import logging
@@ -52,9 +53,19 @@ from api.music_service import (
     upload_suno_voice_audio,
 )
 from api.photo_prompt_service import generate_prompt_from_photo
-from api.public_files import preview_public_image_url, public_url_is_available
-from api.video_service import VideoModel
+from api.public_files import (
+    delete_public_file,
+    preview_public_image_url,
+    public_url_is_available,
+    save_public_file,
+)
 from api.video_prompt_limits import validate_video_prompt, video_prompt_max_chars
+from api.video_prompt_service import (
+    VIDEO_PROMPT_MODEL_KEY,
+    generate_prompt_from_video_url,
+    is_supported_video_prompt_video,
+)
+from api.video_service import VideoModel
 from bot.keyboards.models import (
     _IMAGE_MODEL_ORDER,
     _VIDEO_MODEL_ORDER,
@@ -115,6 +126,7 @@ MAX_CONCURRENT = 6
 STALE_GENERATION_TIMEOUT = timedelta(minutes=20)
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_PHOTO_PROMPT_BYTES = 20 * 1024 * 1024
+MAX_VIDEO_PROMPT_BYTES = 100 * 1024 * 1024
 MAX_SUNO_VOICE_AUDIO_BYTES = 30 * 1024 * 1024
 MAX_REFERENCE_REDIRECTS = 3
 FEED_REMIX_MAX_REFS = 4
@@ -1690,6 +1702,85 @@ async def miniapp_photo_prompt(
         raise HTTPException(status_code=502, detail=f"Photo prompt failed: {e}")
 
     return {"prompt": prompt}
+
+
+async def _resolve_video_prompt_cost(session: AsyncSession):
+    model_cost = await repo.get_model_cost(session, VIDEO_PROMPT_MODEL_KEY)
+    if model_cost is None or not getattr(model_cost, "is_active", True):
+        raise HTTPException(status_code=503, detail="Video prompt price is not configured")
+    return model_cost
+
+
+@router.post("/video-prompt")
+async def miniapp_video_prompt(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+):
+    """Generate prompt from uploaded video for miniapp studio."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    if len(data) > MAX_VIDEO_PROMPT_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
+
+    mime = file.content_type or "video/mp4"
+    if not is_supported_video_prompt_video(data, mime):
+        raise HTTPException(status_code=422, detail="Only MP4, MOV and WebM videos are supported")
+
+    model_cost = await _resolve_video_prompt_cost(session)
+    credits = float(model_cost.credits or 0)
+    if credits <= 0:
+        raise HTTPException(status_code=503, detail="Video prompt price is not configured")
+
+    source_id = f"video-prompt:{hashlib.sha256(data).hexdigest()[:24]}"
+    spent = await repo.spend_credits(
+        session,
+        user.id,
+        credits,
+        entry_type="video_prompt_spend",
+        source_type=VIDEO_PROMPT_MODEL_KEY,
+        source_id=source_id,
+        note="Video to prompt analysis",
+    )
+    if not spent:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Недостаточно кредитов. Нужно {credits:g} 💋",
+        )
+
+    video_url: str | None = None
+    try:
+        video_url = await asyncio.to_thread(
+            save_public_file,
+            data,
+            mime,
+            subdir="video-prompt",
+            unique=True,
+        )
+        result = await generate_prompt_from_video_url(video_url)
+        prompt = result.text if hasattr(result, "text") else str(result)
+    except Exception as e:
+        await repo.add_credits(
+            session,
+            user.id,
+            credits,
+            entry_type="video_prompt_refund",
+            source_type=VIDEO_PROMPT_MODEL_KEY,
+            source_id=source_id,
+            note=f"Video prompt refund: {type(e).__name__}",
+        )
+        logger.exception("miniapp video prompt error user=%s: %s", user.id, e)
+        raise HTTPException(status_code=502, detail=f"Video prompt failed: {e}")
+    finally:
+        if video_url and not await asyncio.to_thread(delete_public_file, video_url):
+            logger.warning("miniapp video prompt temporary file cleanup failed user=%s", user.id)
+
+    return {
+        "prompt": prompt,
+        "credits_spent": credits,
+        "model_hint": getattr(model_cost, "display_name", None) or "Видео → промпт",
+    }
 
 
 @router.post("/prompt/improve")

@@ -37,6 +37,7 @@ import type {
   PreparedTrend,
   ReferralStats,
   TrendItem,
+  VideoPromptResult,
 } from "@/lib/types";
 import { firstMedia, isPendingTask } from "@/lib/utils";
 
@@ -145,6 +146,8 @@ function App() {
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [photoPromptBusy, setPhotoPromptBusy] = useState(false);
   const [photoPromptResult, setPhotoPromptResult] = useState<PhotoPromptResult | null>(null);
+  const [videoPromptBusy, setVideoPromptBusy] = useState(false);
+  const [videoPromptResult, setVideoPromptResult] = useState<VideoPromptResult | null>(null);
   const [referenceUploadingKind, setReferenceUploadingKind] = useState<GenerationDraft["kind"] | null>(null);
   const [videoUploadingKind, setVideoUploadingKind] = useState<GenerationDraft["kind"] | null>(null);
   const [imageDraft, setImageDraft] = useState<GenerationDraft>(() => emptyDraft("image"));
@@ -699,6 +702,21 @@ function App() {
     }
   }, [api, photoPromptBusy]);
 
+  const createVideoPrompt = useCallback(async (file: File) => {
+    if (!api || videoPromptBusy) return;
+    setVideoPromptBusy(true);
+    setVideoPromptResult(null);
+    try {
+      const result = await api.videoPrompt(file);
+      setVideoPromptResult(result);
+      toast.success("Видео-промпт готов");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось проанализировать видео");
+    } finally {
+      setVideoPromptBusy(false);
+    }
+  }, [api, videoPromptBusy]);
+
   const pay = useCallback(async (provider: "tbank" | "crypto" | "tribute" | "lava", plan: PaymentPlan) => {
     if (!api || paymentBusy) return;
     setPaymentBusy(true);
@@ -816,7 +834,7 @@ function App() {
       return <TrendsScreen items={data.trends} filter={trendsFilter} loading={trendsLoading} preparingId={preparingTrendId} onFilterChange={setTrendsFilter} onRefresh={() => void loadTrends()} onPrepare={(trend) => void prepareTrend(trend)} />;
     }
     if (activeTab === "services") {
-      return <ServicesScreen messages={assistantMessages} assistantBusy={assistantBusy} photoPromptBusy={photoPromptBusy} photoPromptResult={photoPromptResult} onAssistantSend={(message) => void sendAssistant(message)} onPhotoPrompt={(file) => void createPhotoPrompt(file)} onUsePrompt={(prompt) => { setImageDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("photo"); }} onNavigate={setActiveTab} />;
+      return <ServicesScreen messages={assistantMessages} assistantBusy={assistantBusy} photoPromptBusy={photoPromptBusy} photoPromptResult={photoPromptResult} videoPromptBusy={videoPromptBusy} videoPromptResult={videoPromptResult} onAssistantSend={(message) => void sendAssistant(message)} onPhotoPrompt={(file) => void createPhotoPrompt(file)} onVideoPrompt={(file) => void createVideoPrompt(file)} onUsePrompt={(prompt) => { setImageDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("photo"); }} onUseVideoPrompt={(prompt) => { setVideoDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("video"); }} onNavigate={setActiveTab} />;
     }
     if (activeTab === "settings") {
       return <SettingsScreen user={data.user} busy={languageBusy} onLanguageChange={(language) => void changeLanguage(language)} onResetApp={() => void initialize()} />;

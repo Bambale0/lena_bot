@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import ipaddress
 import mimetypes
+import secrets
 import shutil
 import socket
 from pathlib import Path
@@ -399,7 +400,13 @@ def ensure_video_reference_aspect_url(
         return image_url
 
 
-def save_public_file(data: bytes, content_type: str | None = None, *, subdir: str | None = None) -> str:
+def save_public_file(
+    data: bytes,
+    content_type: str | None = None,
+    *,
+    subdir: str | None = None,
+    unique: bool = False,
+) -> str:
     upload_dir = get_static_upload_directory()
     if is_video_content_type(content_type):
         ext = detect_video_extension(data, content_type)
@@ -408,13 +415,26 @@ def save_public_file(data: bytes, content_type: str | None = None, *, subdir: st
     else:
         ext = detect_image_extension(data, content_type)
     digest = hashlib.sha256(data).hexdigest()[:32]
-    filename = f"{digest}{ext}"
+    suffix = f"-{secrets.token_hex(8)}" if unique else ""
+    filename = f"{digest}{suffix}{ext}"
     rel_name = f"{subdir.strip('/')}/{filename}" if subdir else filename
     rel = _safe_upload_relative_path(rel_name)
     path = upload_dir / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return public_upload_url(str(rel))
+
+
+def delete_public_file(url: str | None) -> bool:
+    """Delete a local public upload without following arbitrary URL paths."""
+    path = local_upload_path_from_url(url)
+    if path is None or not path.exists() or not path.is_file():
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True
 
 
 def _download_public_url(url: str) -> tuple[bytes, str | None]:

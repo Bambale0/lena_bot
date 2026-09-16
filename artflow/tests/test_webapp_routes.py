@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -206,6 +206,111 @@ async def test_photo_prompt_rejects_large_file_before_provider_call(client, monk
     )
 
     assert response.status_code == 413
+    generate_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_video_prompt_rejects_disguised_non_video(client, monkeypatch) -> None:
+    generate_prompt = AsyncMock()
+    spend = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.generate_prompt_from_video_url", generate_prompt)
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend)
+
+    response = await client.post(
+        "/api/v1/video-prompt",
+        files={"file": ("fake.mp4", b"not a video", "video/mp4")},
+    )
+
+    assert response.status_code == 422
+    assert "MP4, MOV and WebM" in response.json()["detail"]
+    generate_prompt.assert_not_awaited()
+    spend.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_video_prompt_spends_configured_price_and_returns_prompt(client, monkeypatch) -> None:
+    cost = SimpleNamespace(model_key="llm.video-prompt", display_name="Видео → промпт", credits=3.0)
+    get_model_cost = AsyncMock(return_value=cost)
+    spend = AsyncMock(return_value=True)
+    add_credits = AsyncMock()
+    save_public = MagicMock(return_value="https://cdn.example.test/video.mp4")
+    delete_public = MagicMock(return_value=True)
+    generate_prompt = AsyncMock(return_value="точный видеопромпт")
+    monkeypatch.setattr("api.miniapp_routes.repo.get_model_cost", get_model_cost)
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend)
+    monkeypatch.setattr("api.miniapp_routes.repo.add_credits", add_credits)
+    monkeypatch.setattr("api.miniapp_routes.save_public_file", save_public)
+    monkeypatch.setattr("api.miniapp_routes.delete_public_file", delete_public)
+    monkeypatch.setattr("api.miniapp_routes.generate_prompt_from_video_url", generate_prompt)
+
+    response = await client.post(
+        "/api/v1/video-prompt",
+        files={"file": ("clip.mp4", b"\x00\x00\x00\x18ftypmp42payload", "video/mp4")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "prompt": "точный видеопромпт",
+        "credits_spent": 3.0,
+        "model_hint": "Видео → промпт",
+    }
+    get_model_cost.assert_awaited_once()
+    spend.assert_awaited_once()
+    assert spend.await_args.args[:3] == (ANY, 1, 3.0)
+    assert spend.await_args.kwargs["entry_type"] == "video_prompt_spend"
+    assert spend.await_args.kwargs["source_type"] == "llm.video-prompt"
+    save_public.assert_called_once()
+    assert save_public.call_args.kwargs["unique"] is True
+    delete_public.assert_called_once_with("https://cdn.example.test/video.mp4")
+    generate_prompt.assert_awaited_once_with("https://cdn.example.test/video.mp4")
+    add_credits.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_video_prompt_refunds_on_provider_error(client, monkeypatch) -> None:
+    cost = SimpleNamespace(model_key="llm.video-prompt", display_name="Видео → промпт", credits=3.0)
+    monkeypatch.setattr("api.miniapp_routes.repo.get_model_cost", AsyncMock(return_value=cost))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", AsyncMock(return_value=True))
+    add_credits = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.add_credits", add_credits)
+    monkeypatch.setattr("api.miniapp_routes.save_public_file", MagicMock(return_value="https://cdn.example.test/video.mp4"))
+    delete_public = MagicMock(return_value=True)
+    monkeypatch.setattr("api.miniapp_routes.delete_public_file", delete_public)
+    monkeypatch.setattr(
+        "api.miniapp_routes.generate_prompt_from_video_url",
+        AsyncMock(side_effect=RuntimeError("provider down")),
+    )
+
+    response = await client.post(
+        "/api/v1/video-prompt",
+        files={"file": ("clip.mp4", b"\x00\x00\x00\x18ftypmp42payload", "video/mp4")},
+    )
+
+    assert response.status_code == 502
+    add_credits.assert_awaited_once()
+    assert add_credits.await_args.args[:3] == (ANY, 1, 3.0)
+    assert add_credits.await_args.kwargs["entry_type"] == "video_prompt_refund"
+    assert add_credits.await_args.kwargs["source_type"] == "llm.video-prompt"
+    delete_public.assert_called_once_with("https://cdn.example.test/video.mp4")
+
+
+@pytest.mark.asyncio
+async def test_video_prompt_does_not_persist_file_when_balance_is_insufficient(client, monkeypatch) -> None:
+    cost = SimpleNamespace(model_key="llm.video-prompt", display_name="Видео → промпт", credits=3.0)
+    save_public = MagicMock()
+    generate_prompt = AsyncMock()
+    monkeypatch.setattr("api.miniapp_routes.repo.get_model_cost", AsyncMock(return_value=cost))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", AsyncMock(return_value=False))
+    monkeypatch.setattr("api.miniapp_routes.save_public_file", save_public)
+    monkeypatch.setattr("api.miniapp_routes.generate_prompt_from_video_url", generate_prompt)
+
+    response = await client.post(
+        "/api/v1/video-prompt",
+        files={"file": ("clip.mp4", b"\x00\x00\x00\x18ftypmp42payload", "video/mp4")},
+    )
+
+    assert response.status_code == 402
+    save_public.assert_not_called()
     generate_prompt.assert_not_awaited()
 
 

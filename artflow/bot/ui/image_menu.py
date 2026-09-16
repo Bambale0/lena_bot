@@ -41,6 +41,7 @@ def _image_start_kb(*, show_continue: bool = False):
     )
     builder.row(
         InlineKeyboardButton(text="📸 Промпт по фото", callback_data="img:photo2prompt"),
+        InlineKeyboardButton(text="🎬 Промпт по видео", callback_data="vid:video2prompt"),
     )
     if show_continue:
         builder.row(InlineKeyboardButton(text="✅ Продолжить", callback_data="img_v2:continue"))
@@ -65,7 +66,7 @@ def render_image_scenarios(
         "🖼 фото + подпись — сразу подготовить задачу;\n"
         "📚 несколько фото — собрать композицию или сохранить персонажа.\n\n"
         "APIX сам выберет подходящий внутренний режим.\n"
-        "Нужно разобрать готовое изображение в текст — нажми «Промпт по фото».\n\n"
+        "Нужно разобрать готовое изображение или видео в текст — нажми «Промпт по фото» или «Промпт по видео».\n\n"
         f"Референсы: {reference_count}/{max_refs}\n"
         f"Формат: {aspect_ratio}\n"
         f"Качество: {quality}"
