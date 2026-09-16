@@ -50,3 +50,8 @@ yarn-error.log*
 .bin
 .log
 nginx.conf.bak3
+
+# HappyFox relay: local certs/secrets, never commit
+happyfox-relay-cert/
+*happyfox*
+*happy-fox*
