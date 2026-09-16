@@ -1471,8 +1471,14 @@ async def get_user_feed_generations(
     user_id: int,
     *,
     limit: int = 200,
+    offset: int = 0,
 ) -> list[FeedGenerationCard]:
-    """Return the user's own public works in deterministic newest-first order."""
+    """Return the user's own public works in deterministic newest-first order.
+
+    Bounded window (see /me/feed docstring): offset paging is supported, but
+    callers should stay within the documented cap — deep offsets re-scan and
+    re-join the user's public rows.
+    """
     stmt = (
         select(Generation)
         .where(
@@ -1483,6 +1489,7 @@ async def get_user_feed_generations(
             Generation.is_public_feed.is_(True),
         )
         .order_by(desc(Generation.created_at), desc(Generation.id))
+        .offset(max(offset, 0))
         .limit(max(limit, 1) * 3)
     )
     cards = await _feed_cards_from_stmt(session, stmt, sort_by_score=False)

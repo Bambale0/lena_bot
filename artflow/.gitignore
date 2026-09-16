@@ -51,7 +51,12 @@ yarn-error.log*
 .log
 nginx.conf.bak3
 
-# HappyFox relay: local certs/secrets, never commit
+# HappyFox relay: local certs/secrets, never commit.
+# NOTE: keep this narrowly scoped to the relay directory + known secret
+# filenames. Blanket *happyfox* globs would silently ignore future source
+# files such as bot/handlers/happyfox.py or docs/happyfox_relay.md.
 happyfox-relay-cert/
-*happyfox*
-*happy-fox*
+happyfox-relay-cert/*.pem
+happyfox-relay-cert/*.key
+happyfox-relay-cert/*.p12
+happyfox-relay-cert/secrets*.json

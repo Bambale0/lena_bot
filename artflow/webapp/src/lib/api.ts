@@ -18,7 +18,12 @@ import { parseStartTarget, readStartParam } from "@/lib/telegram";
 import { asArray, asRecord } from "@/lib/utils";
 
 const API_BASE = "/api/v1";
-const HISTORY_PAGE_SIZE = 100;
+export const HISTORY_PAGE_SIZE = 100;
+// Bootstrap must never hang the loading screen: even if a proxy strips
+// `offset` (or rows shift under paging), stop after this many pages and
+// keep whatever was already accumulated.
+export const MAX_HISTORY_PAGES = 100;
+export const MAX_HISTORY_ITEMS = HISTORY_PAGE_SIZE * MAX_HISTORY_PAGES;
 // Feed media filters are client-side. Keep one server page large enough that
 // selecting "Видео" does not dead-end just because the first small page was all images.
 // React still mounts works in batches, so this does not multiply the live DOM size.
@@ -161,19 +166,34 @@ export class MiniAppApi {
     const history: GenerationTask[] = [];
     const seen = new Set<number>();
 
-    for (let offset = 0; ; offset += HISTORY_PAGE_SIZE) {
-      const page = asArray<GenerationTask>(
-        await this.request<unknown>(`/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`, {}, signal),
-      );
-      for (const task of page) {
+    for (let pageIndex = 0; pageIndex < MAX_HISTORY_PAGES; pageIndex += 1) {
+      const offset = pageIndex * HISTORY_PAGE_SIZE;
+      let pageItems: GenerationTask[];
+      try {
+        pageItems = asArray<GenerationTask>(
+          await this.request<unknown>(`/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`, {}, signal),
+        );
+      } catch (error) {
+        // Keep partial history instead of wiping the profile: a transient
+        // failure on page N must not discard the N-1 pages already loaded.
+        if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
+        console.warn("Mini App history page failed, keeping partial history", offset, error);
+        break;
+      }
+      let added = 0;
+      for (const task of pageItems) {
         if (seen.has(task.id)) continue;
         seen.add(task.id);
         history.push(task);
+        added += 1;
       }
-      if (page.length < HISTORY_PAGE_SIZE) break;
+      if (pageItems.length < HISTORY_PAGE_SIZE) break;
+      // Backend ignores offset (deploy skew / proxy strips query) or rows
+      // churned under us: same ids forever. Stop instead of hammering /history.
+      if (added === 0) break;
     }
 
-    return history;
+    return history.slice(0, MAX_HISTORY_ITEMS);
   }
 
   async bootstrap(signal?: AbortSignal): Promise<BootstrapData> {
@@ -226,7 +246,7 @@ export class MiniAppApi {
   async refreshCore(signal?: AbortSignal): Promise<{ user: UserProfile; recentTasks: GenerationTask[] }> {
     const [user, history] = await Promise.all([
       this.request<UserProfile>("/me", {}, signal),
-      this.request<unknown>("/history?limit=" + HISTORY_PAGE_SIZE + "&offset=0", {}, signal),
+      this.request<unknown>(`/history?limit=${HISTORY_PAGE_SIZE}&offset=0`, {}, signal),
     ]);
     return { user, recentTasks: asArray<GenerationTask>(history) };
   }

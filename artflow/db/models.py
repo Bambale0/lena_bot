@@ -12,6 +12,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -135,6 +136,14 @@ class WebAuthCode(Base):
 
 class Generation(Base):
     __tablename__ = "generations"
+    __table_args__ = (
+        Index(
+            "ix_generations_user_history",
+            "user_id",
+            "created_at",
+            "id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)

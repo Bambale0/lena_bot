@@ -257,15 +257,23 @@ def test_profile_history_pages_through_all_generations_without_total_cap() -> No
 
     assert 'async getHistory(signal?: AbortSignal): Promise<GenerationTask[]>' in api
     assert '`/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`' in api
-    assert 'if (page.length < HISTORY_PAGE_SIZE) break;' in api
+    # Bounded loop: page ceiling + zero-new-ids break keep bootstrap from
+    # hanging when offset is ignored (deploy skew / proxy strips query).
+    assert 'export const MAX_HISTORY_PAGES' in api
+    assert 'if (added === 0) break;' in api
+    # Partial results survive a mid-stream page failure.
+    assert 'keeping partial history' in api
     assert 'offset: int = Query(default=0, ge=0)' in routes
     assert 'limit=limit, offset=offset' in routes
+    # Reconcile (provider polling) runs once for the first page, not per page.
+    assert 'if offset == 0:' in routes
     assert 'offset: int = 0' in repository
     assert '.offset(offset)' in repository
     assert '.order_by(desc(Generation.created_at), desc(Generation.id))' in repository
-    assert '"/history?limit=" + HISTORY_PAGE_SIZE + "&offset=0"' in api
+    assert '`/history?limit=${HISTORY_PAGE_SIZE}&offset=0`' in api
     assert 'const freshTaskIds = new Set(core.recentTasks.map((task) => task.id));' in app
     assert '...current.recentTasks.filter((task) => !freshTaskIds.has(task.id))' in app
+    # Behavioural coverage lives in tests/test_history_pagination.py.
 
 
 def test_workflows_have_polling_and_secure_task_actions() -> None:

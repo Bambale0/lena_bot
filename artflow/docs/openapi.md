@@ -2,7 +2,7 @@
 
 - Version: `1.0.0`
 - OpenAPI: `3.1.0`
-- Paths: `49`
+- Paths: `51`
 
 APIX AI API for Telegram auth, content generation, billing, prompt library, feed, and provider webhooks.
 
@@ -501,13 +501,14 @@ Responses:
 - Auth: not declared
 - Request body: none
 
-Last N generations for the current user.
+Paginated generations for the current user, newest first.
 
 Parameters:
 
 | Name | In | Required | Type |
 | --- | --- | --- | --- |
 | `limit` | `query` | no | `integer` |
+| `offset` | `query` | no | `integer` |
 | `x-telegram-init-data` | `header` | no | `string | null` |
 | `x-web-auth-token` | `header` | no | `string | null` |
 
@@ -528,6 +529,33 @@ Parameters:
 
 | Name | In | Required | Type |
 | --- | --- | --- | --- |
+| `x-telegram-init-data` | `header` | no | `string | null` |
+| `x-web-auth-token` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `422`: Validation Error (`application/json`)
+
+#### `GET /api/v1/me/feed`
+
+- Summary: Get My Feed
+- Operation ID: `get_my_feed_api_v1_me_feed_get`
+- Auth: not declared
+- Request body: none
+
+Current user's public image/video feed posts.
+
+NOTE (parity): unlike /history, this stays a bounded window (max 1000):
+feed cards join user/session/remix metadata and are heavy, and the "Мои"
+tab re-fetches on every selection. Paging beyond that needs cursor
+pagination, not offset.
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `limit` | `query` | no | `integer` |
+| `offset` | `query` | no | `integer` |
 | `x-telegram-init-data` | `header` | no | `string | null` |
 | `x-web-auth-token` | `header` | no | `string | null` |
 
@@ -946,6 +974,29 @@ Parameters:
 | --- | --- | --- | --- |
 | `x-telegram-init-data` | `header` | no | `string | null` |
 | `x-web-auth-token` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `422`: Validation Error (`application/json`)
+
+### web
+
+#### `GET /api/web/history`
+
+- Summary: History
+- Operation ID: `history_api_web_history_get`
+- Auth: not declared
+- Request body: none
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `limit` | `query` | no | `integer` |
+| `offset` | `query` | no | `integer` |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
 
 Responses:
 - `200`: Successful Response (`application/json`)

@@ -467,6 +467,10 @@ async def handle_exchange_amount(
 async def cb_history(
     call: CallbackQuery, session: AsyncSession, db_user: User
 ) -> None:
+    # NOTE (parity): Telegram shows only the 10 newest generations per message
+    # on purpose — chat UX, not a data cap. Full unbounded history lives in
+    # the Mini App profile (GET /api/v1/history with offset paging) and, for
+    # parity, the site (GET /api/web/history with offset paging).
     lang = db_user.language or "ru"
     history = await repo.get_user_history(session, db_user.id, limit=10)
 

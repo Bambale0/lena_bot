@@ -1475,11 +1475,18 @@ async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
 @router.get("/me/feed")
 async def get_my_feed(
     limit: int = Query(500, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> list[dict]:
-    """Current user's public image/video feed posts."""
-    cards = await repo.get_user_feed_generations(session, user.id, limit=limit)
+    """Current user's public image/video feed posts.
+
+    NOTE (parity): unlike /history, this stays a bounded window (max 1000):
+    feed cards join user/session/remix metadata and are heavy, and the "Мои"
+    tab re-fetches on every selection. Paging beyond that needs cursor
+    pagination, not offset.
+    """
+    cards = await repo.get_user_feed_generations(session, user.id, limit=limit, offset=offset)
     return [_feed_card_out(card, user) for card in cards]
 
 
@@ -2587,7 +2594,12 @@ async def get_history(
     user: User = Depends(get_miniapp_user),
 ) -> list[GenerationOut]:
     """Paginated generations for the current user, newest first."""
-    await _reconcile_user_active_generations(session, user.id)
+    # Reconcile only the first page: provider polling is per active
+    # generation, and re-running it for every bootstrap page would multiply
+    # external calls P×K. Later pages are stable history; their pending
+    # items (if any) converge on the next offset=0 poll / refresh.
+    if offset == 0:
+        await _reconcile_user_active_generations(session, user.id)
     gens = await repo.get_user_history(session, user.id, limit=limit, offset=offset)
     return [_gen_out(g) for g in gens]
 

@@ -12,7 +12,7 @@ import { ProfileScreen } from "@/features/profile-screen";
 import { ServicesScreen } from "@/features/services-screen";
 import { SettingsScreen } from "@/features/settings-screen";
 import { TrendsScreen } from "@/features/trends-screen";
-import { ApiError, FEED_PAGE_SIZE, MiniAppApi } from "@/lib/api";
+import { ApiError, FEED_PAGE_SIZE, MAX_HISTORY_ITEMS, MiniAppApi } from "@/lib/api";
 import {
   configureTelegramWebApp,
   haptic,
@@ -151,6 +151,7 @@ function App() {
   const [videoDraft, setVideoDraft] = useState<GenerationDraft>(() => emptyDraft("video"));
   const [motionDraft, setMotionDraft] = useState<GenerationDraft>(() => emptyDraft("motion"));
   const processedStartParam = useRef("");
+  const refreshAbortRef = useRef<AbortController | null>(null);
 
   const hydrateDraftDefaults = useCallback((bootstrap: BootstrapData) => {
     const firstImage = bootstrap.imageModels[0];
@@ -351,19 +352,29 @@ function App() {
 
   const refreshCore = useCallback(async () => {
     if (!api || document.visibilityState !== "visible") return;
+    // Abort the previous poll before starting a new one: the old code
+    // returned a cleanup function that no caller ever ran.
+    refreshAbortRef.current?.abort();
     const controller = new AbortController();
+    refreshAbortRef.current = controller;
     try {
       const core = await api.refreshCore(controller.signal);
       setData((current) => {
         if (!current) return current;
         const freshTaskIds = new Set(core.recentTasks.map((task) => task.id));
+        // Fresh page (newest 100) wins on overlapping ids, so status updates
+        // propagate; the tail is preserved but bounded. Items that fall out
+        // of the newest page keep their last-seen status until reload — the
+        // open task sheet has its own 4s poll for live status (see below).
+        // Server-side deletions are likewise visible only after reload.
+        const recentTasks = [
+          ...core.recentTasks,
+          ...current.recentTasks.filter((task) => !freshTaskIds.has(task.id)),
+        ].slice(0, MAX_HISTORY_ITEMS);
         return {
           ...current,
           user: core.user,
-          recentTasks: [
-            ...core.recentTasks,
-            ...current.recentTasks.filter((task) => !freshTaskIds.has(task.id)),
-          ],
+          recentTasks,
         };
       });
       setSelectedTask((current) => {
@@ -375,7 +386,6 @@ function App() {
         console.warn("Mini App core refresh failed", error);
       }
     }
-    return () => controller.abort();
   }, [api]);
 
   const refreshReferrals = useCallback(async () => {
