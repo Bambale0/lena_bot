@@ -667,6 +667,43 @@ async def test_handle_broadcast() -> None:
     assert "Выбери аудиторию" in text
 
 
+@pytest.mark.asyncio
+async def test_cb_broadcast_send_starts_delivery_in_background() -> None:
+    call = make_callback(data="adm:broadcast:send")
+    status_msg = AsyncMock()
+    call.message.answer = AsyncMock(side_effect=[status_msg, AsyncMock()])
+    state = AsyncMock()
+    state.get_data = AsyncMock(
+        return_value={
+            "broadcast_source_chat_id": 10,
+            "broadcast_source_message_id": 20,
+            "broadcast_segment": "all",
+        }
+    )
+    session = AsyncMock()
+    created_tasks: list[tuple[object, str | None]] = []
+
+    def capture_task(coro, *, name: str):
+        created_tasks.append((coro, name))
+        coro.close()
+
+    with (
+        patch("bot.handlers.admin.safe_answer_callback", AsyncMock()) as answer_callback,
+        patch("bot.handlers.admin.get_recipient_ids", AsyncMock(return_value=[101, 202])) as recipients,
+        patch("bot.handlers.admin.deliver_broadcast", AsyncMock()) as deliver,
+        patch("bot.handlers.admin._start_background_broadcast", MagicMock(side_effect=capture_task)) as start_task,
+    ):
+        await admin.cb_broadcast_send(call, state, session)
+
+    answer_callback.assert_awaited_once_with(call)
+    recipients.assert_awaited_once_with(session, "all")
+    state.clear.assert_awaited_once()
+    assert call.message.answer.await_count == 2
+    start_task.assert_called_once()
+    assert created_tasks[0][1] == "broadcast:all:2"
+    deliver.assert_not_awaited()
+
+
 # ── handle_credits_tg_id ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

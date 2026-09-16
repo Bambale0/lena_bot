@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import html
 import io
@@ -35,6 +36,7 @@ from bot.services import admin_ai_service
 from bot.services.broadcasts import SEGMENT_LABELS, deliver_broadcast, get_recipient_ids
 from bot.services.maintenance_mode import is_maintenance_mode, set_maintenance_mode
 from bot.states import AdminStates
+from bot.utils.telegram_ui import safe_answer_callback
 from core.broadcast_scheduler import schedule_broadcast_job
 from core.model_pricing import pricing_variant_key
 from db import repository as repo
@@ -52,6 +54,7 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin")
 router.message.filter(IsAdmin())
 router.callback_query.filter(IsAdmin())
+_background_broadcast_tasks: set[asyncio.Task[None]] = set()
 
 
 def _fmt_price(price: float) -> str:
@@ -923,6 +926,55 @@ async def _show_broadcast_preview(target: Message, state: FSMContext) -> None:
         "Если всё ок — подтверждай.",
         reply_markup=_broadcast_preview_kb(scheduled=scheduled),
     )
+
+
+async def _deliver_broadcast_and_report(
+    *,
+    bot: Bot,
+    tg_ids: list[int],
+    source_chat_id: int,
+    source_message_id: int,
+    segment: str,
+    status_msg: Message,
+) -> None:
+    try:
+        sent, failed, errors = await deliver_broadcast(
+            bot=bot,
+            tg_ids=tg_ids,
+            source_chat_id=source_chat_id,
+            source_message_id=source_message_id,
+            status_msg=status_msg,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Broadcast delivery task failed: segment=%s recipients=%s",
+            segment,
+            len(tg_ids),
+        )
+        try:
+            await status_msg.edit_text(
+                "❌ Рассылка остановилась из-за ошибки. Подробности записаны в лог.",
+                reply_markup=admin_menu_kb(),
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to update failed broadcast status message", exc_info=True)
+        return
+
+    report = (
+        "✅ Рассылка завершена\n"
+        f"Сегмент: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
+        f"Доставлено: {sent} · Ошибок: {failed}"
+    )
+    if errors:
+        report += "\n\nПервые ошибки:\n" + "\n".join(f"• {item}" for item in errors)
+
+    await status_msg.edit_text(report, reply_markup=admin_menu_kb())
+
+
+def _start_background_broadcast(coro, *, name: str) -> None:
+    task = asyncio.create_task(coro, name=name)
+    _background_broadcast_tasks.add(task)
+    task.add_done_callback(_background_broadcast_tasks.discard)
 
 
 # ─── Статистика ───────────────────────────────────────────────────────────────
@@ -2119,6 +2171,7 @@ async def handle_broadcast_datetime(message: Message, state: FSMContext) -> None
 
 @router.callback_query(AdminFSM.confirm_broadcast, F.data == "adm:broadcast:send")
 async def cb_broadcast_send(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    await safe_answer_callback(call)
     data = await state.get_data()
     source_chat_id = data.get("broadcast_source_chat_id")
     source_message_id = data.get("broadcast_source_message_id")
@@ -2128,7 +2181,6 @@ async def cb_broadcast_send(call: CallbackQuery, state: FSMContext, session: Asy
     if not source_chat_id or not source_message_id:
         await state.clear()
         await call.message.answer("❌ Не удалось запустить рассылку. Попробуй заново.", reply_markup=admin_menu_kb())  # type: ignore[union-attr]
-        await call.answer()
         return
 
     if scheduled_for_iso:
@@ -2147,7 +2199,6 @@ async def cb_broadcast_send(call: CallbackQuery, state: FSMContext, session: Asy
             f"Время: <b>{_format_broadcast_datetime(datetime.fromisoformat(str(scheduled_for_iso)))}</b>",
             reply_markup=admin_menu_kb(),
         )
-        await call.answer()
         return
 
     tg_ids = await get_recipient_ids(session, segment)
@@ -2156,21 +2207,19 @@ async def cb_broadcast_send(call: CallbackQuery, state: FSMContext, session: Asy
         f"📢 Отправляю {len(tg_ids)} пользователям..."
     )
 
-    sent, failed, errors = await deliver_broadcast(
-        bot=call.bot,
-        tg_ids=tg_ids,
-        source_chat_id=int(source_chat_id),
-        source_message_id=int(source_message_id),
-        status_msg=status_msg,
+    _start_background_broadcast(
+        _deliver_broadcast_and_report(
+            bot=call.bot,
+            tg_ids=tg_ids,
+            source_chat_id=int(source_chat_id),
+            source_message_id=int(source_message_id),
+            segment=segment,
+            status_msg=status_msg,
+        ),
+        name=f"broadcast:{segment}:{len(tg_ids)}",
     )
 
-    report = (
-        "✅ Рассылка завершена\n"
-        f"Сегмент: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
-        f"Доставлено: {sent} · Ошибок: {failed}"
+    await call.message.answer(  # type: ignore[union-attr]
+        "✅ Рассылка запущена в фоне. Статус обновлю в сообщении выше.",
+        reply_markup=admin_menu_kb(),
     )
-    if errors:
-        report += "\n\nПервые ошибки:\n" + "\n".join(f"• {item}" for item in errors)
-
-    await status_msg.edit_text(report, reply_markup=admin_menu_kb())
-    await call.answer()
