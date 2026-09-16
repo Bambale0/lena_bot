@@ -1,66 +1,88 @@
-# Execution ledger — history pagination hardening (follow-up to 54507df)
+# Execution ledger — video to prompt integration
 
-Baseline: c2eb7ac (main, clean tree). Target of prior review: 54507df.
-Scope approved by user: Fix everything (H+M+L).
+Baseline: commit `31a91c6`; working tree had no tracked changes at task start.
+Date: 2026-09-16.
 
 ## Current state
-- `GET /api/v1/history` supports `limit`+`offset`; repo orders
-  `desc(created_at), desc(id)`; mini-app `getHistory()` pages to completion.
-- `docs/miniapp_api.md` updated; `docs/openapi.*` stale (no `offset`).
-- `GET /api/web/history` has `limit` only, no `offset` (site parity gap).
-- `/me/feed` capped at `le=1000`, client fetches 500 (intentional heavy-card cap).
-- Telegram bot history capped at 10/message (intended UX cap, undocumented).
-- No composite index for `(user_id, created_at DESC, id DESC)`.
-- `_reconcile_user_active_generations` runs on every `/history` page.
-- `getHistory()` has no page ceiling and no zero-new-ids break; one failed
-  page rejects the whole bootstrap history to `[]`.
-- `refreshCore` returns an abort cleanup nobody consumes (dead code).
-- `.gitignore` has blanket `*happyfox*` / `*happy-fox*` globs that would hide
-  future source files (verified via `git check-ignore -v`).
-- Surface test only asserts substrings; no behavioral pagination tests.
+- Photo to prompt exists in `api/photo_prompt_service.py`, `/api/v1/photo-prompt`,
+  `/api/web/photo-prompt`, text bot flow, and Mini App/Web services UI.
+- Photo to prompt is free and has no `ModelCost` billing row.
+- Model costs are database-backed through `model_costs`, seeded in `db/seed.py`,
+  and editable through `/admin -> Стоимость моделей`.
+- Comet config already exists in `core.config.settings` through
+  `COMET_API_KEY`, `COMET_BASE_URL`, assistant model fields, and related
+  photo-prompt fallback wiring.
+- Video to prompt is implemented through Comet/Qwen3.8-Max for web, Mini App,
+  and the text bot. Uploaded source videos use unique temporary public files
+  and are removed after the synchronous provider response.
+- `docs/agents/AGENT_CHANGELOG.md` is registered but missing from the repo.
+
+## Intended outcome
+- Add a user-facing "Видео -> промпт" feature beside "Фото -> промпт".
+- Default function cost is 3 credits, controlled by the existing admin model
+  cost editor via a `ModelCost` row.
+- All applicable surfaces are covered:
+  site/web: services UI and web route;
+  mini_app: `/api/v1/video-prompt` and services UI;
+  telegram_bot: text bot upload flow from the same prompt tools area.
 
 ## Acceptance criteria
-1. H1: bounded paging loop (page ceiling + zero-new-ids break).
-2. H2: partial history preserved on mid-stream page failure (error logged).
-3. M1: reconcile provider polling only for `offset == 0`.
-4. M2: composite index in model + guarded Alembic migration 033.
-5. M3: `docs/openapi.json` + `docs/openapi.md` regenerated.
-6. M4: site parity — `offset` on `api/web/history.py`; explicit documented
-   exceptions for `/me/feed` cap and Telegram 10-item cap.
-7. M5: behavioral tests (statement shape, stable order, offset pass-through,
-   reconcile gating, 422 on bad limit, web offset).
-8. L1/L2/L3/L4: bounded merge + abort-ref fix, template-literal + exported
-   constants, narrowed `.gitignore`.
-9. `py_compile` + focused `pytest` green; `tsc --noEmit` green (if available).
+1. Provider service sends video URL to Comet/Qwen3.8-Max and extracts text.
+2. Backend validates file kind/size before provider call.
+3. Backend spends the configured credits before provider call and refunds once
+   on provider failure.
+4. Seed creates `llm.video-prompt` at 3 credits and admin model editor can see it.
+5. Web/Mini App UI exposes the feature next to photo prompt.
+6. Text bot exposes the feature next to photo prompt and returns the ready prompt.
+7. Focused tests cover service payload, endpoint validation/billing/refund, seed,
+   and bot/UI wiring where practical.
 
-## No-hardcode / control-plane
-- `HISTORY_PAGE_SIZE` / `MAX_HISTORY_PAGES` / `MAX_HISTORY_ITEMS` stay
-  client-side fetch tuning constants, not business rules. No new env vars.
-- No prices, tariffs, prompts, routing, or permissions changed.
+## No-hardcode / control plane
+- `llm.video-prompt` default cost is seeded as 3 credits.
+- Runtime cost is read from `model_costs`, so admins can update it without code.
+- Provider credentials stay in existing settings; no secrets are added.
 
 ## Observability
-- Per-page history failure logs via `console.warn` with page offset; partial
-  results preserved. Reconcile path unchanged apart from gating.
+- Provider success logs provider/model metadata only.
+- Provider failure logs user id and error without file body or secrets.
+- Credit spend/refund operations are recorded in `credit_ledger` with a short
+  source identifier that fits the database column.
 
 ## Test seams
-- `tests/test_history_pagination.py` uses `AsyncMock` session + statement
-  capture (no DB needed, following `test_repository_feed.py` pattern) plus
-  direct handler invocation and `httpx.ASGITransport` client tests.
+- Service tests monkeypatch `httpx.AsyncClient`.
+- Route tests monkeypatch provider call, repository cost/spend/refund methods,
+  and public file saving.
+- Seed test inspects `DEFAULT_MODEL_COSTS`.
+- Frontend surface test checks API client and services UI strings.
 
 ## Steps
-1. [x] Preflight audit + skill search (code-reviewer agent doc applied).
-2. [x] Frontend `api.ts` hardening (H1/H2/L3).
-3. [x] `App.tsx` merge cap + abort fix (L1/L2).
-4. [x] Backend reconcile gating (M1) + web offset (M4-site).
-5. [x] Model index + migration 033 (M2).
-6. [x] `.gitignore` narrowing (L4) + doc comments (M4 exceptions).
-7. [x] Regenerate OpenAPI (M3) — surgical patch; full regen abandoned
-   (committed file has 49 paths vs live 175; full regen would be a 14k-line
-   unrelated diff, so only /api/v1/history + /api/web/history +
-   /api/v1/me/feed entries were synced via build_markdown on the 51-path file).
-8. [x] Tests: update surface asserts + new behavioral file (M5).
-9. [x] Verify: py_compile OK; 7 new + 49 related + 84 extended green;
-   tsc --noEmit exit 0; test_webapp_routes 12 failures proven pre-existing
-   via clean-HEAD worktree (12 failed / 78 passed both before and after).
-10. [ ] Final report with per-contour parity table.
+1. [x] Preflight: tool repos updated; relevant skills/instructions read.
+2. [x] Repository/photo-prompt/admin-cost audit.
+3. [x] Added tests for service payload, file validation, billing/refund,
+   temporary-file cleanup, seed/admin wiring, menus, and frontend surfaces.
+4. [x] Implemented backend service, routes, billing, refund, and seed.
+5. [x] Implemented text bot flow; Bot API download limit is 20 MB, while web
+   and Mini App retain the 100 MB product limit.
+6. [x] Implemented Web/Mini App UI in the current TS app and legacy/V4 apps.
+7. [x] Verification: 14 focused tests passed; Python compilation passed;
+   frontend typecheck/build passed; focused Ruff checks passed. The broader
+   touched-module run exposed 15 pre-existing failures unrelated to this diff.
+8. [x] Open-code-review attempted; external LLM configuration was missing.
+   Delegate review then covered 23/23 reviewable files and prompted fixes for
+   temporary-file retention, unpaid storage, file-signature validation,
+   Telegram's 20 MB download limit, and blocking filesystem I/O.
+9. [x] Parity verified for `site`, `mini_app`, and `telegram_bot`.
 
+## Final verification and follow-ups
+- No migration is required: startup seed inserts the missing `ModelCost` row.
+- No live Comet request was made because no acceptance-test credential/video
+  was provided. The provider-specific `video_url` contract remains the main
+  rollout risk and should be smoke-tested before production enablement.
+- `docs/agents/AGENT_CHANGELOG.md` remains registered but absent.
+- Repository-wide tests are not green at baseline; unrelated failures remain
+  in older menu/feed/model/video normalization expectations.
+- The exact maintained backend PR gate plus the new tests passed locally:
+  204 tests. CI was updated to include the new service, bot handler, public-file
+  helper, and focused tests in its Ruff/pytest gates.
+- Local Playwright could not launch Chromium because the host lacks
+  `libatk-1.0.so.0`; GitHub Actions remains the authoritative E2E check.

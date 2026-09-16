@@ -68,6 +68,7 @@ DEFAULT_MODEL_COSTS = [
     {"model_key": "veo3_fast",                 "display_name": "🎬 Veo 3 Fast",            "gen_type": GenerationType.video, "credits": 40},
     {"model_key": "veo3",                      "display_name": "🎬 Veo 3",                 "gen_type": GenerationType.video, "credits": 55},
     {"model_key": "veo3_lite",                 "display_name": "🎬 Veo 3 Lite",            "gen_type": GenerationType.video, "credits": 28},
+    {"model_key": "llm.video-prompt",          "display_name": "🎬 Видео → промпт",        "gen_type": GenerationType.video, "credits": 3},
     # ── GPT Image 2 ─────────────────────────────────────────────────────────
     {"model_key": "gpt-image-2-text-to-image",   "display_name": "🤖 GPT Image 2",                 "gen_type": GenerationType.image, "credits": 4},
     {"model_key": "gpt-image-2-image-to-image", "display_name": "🤖 GPT Image 2 Edit",                 "gen_type": GenerationType.image, "credits": 4},

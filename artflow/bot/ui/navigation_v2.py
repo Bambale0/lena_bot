@@ -17,7 +17,11 @@ def render_create_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRend
         InlineKeyboardButton(
             text="📸 " + ("Промпт по фото" if lang == "ru" else "Prompt from photo"),
             callback_data="img:photo2prompt",
-        )
+        ),
+        InlineKeyboardButton(
+            text="🎬 " + ("Промпт по видео" if lang == "ru" else "Prompt from video"),
+            callback_data="vid:video2prompt",
+        ),
     )
     builder.row(
         InlineKeyboardButton(text="🎵 " + ("Музыка" if lang == "ru" else "Music"), callback_data="menu:music"),
@@ -35,6 +39,8 @@ def render_create_hub(lang: str = "ru", *, is_admin: bool = False) -> ScreenRend
             "С нуля по описанию, редактирование фото, замена деталей, стили, карточки товаров и работа с несколькими референсами.\n\n"
             "📸 <b>Промпт по фото</b>\n"
             "Загрузи готовое изображение — APIX разберёт сцену, стиль, свет и подготовит промпт для новой генерации.\n\n"
+            "🎬 <b>Промпт по видео</b>\n"
+            "Загрузи ролик — APIX разберёт движение, камеру, свет и подготовит промпт для похожего видео.\n\n"
             "🎬 <b>Видео</b>\n"
             "Текст в видео, оживление фото, видео по референсам, движение камеры, персонажи и генерация со звуком.\n\n"
             "🎵 <b>Музыка</b>\n"

@@ -76,12 +76,14 @@ def test_v2_create_hub_preserves_all_creation_entrypoints_and_explains_them():
         "menu:image",
         "menu:video",
         "img:photo2prompt",
+        "vid:video2prompt",
         "menu:music",
         "menu:assistant",
         "menu:main",
     ]
     assert "карточки товаров" in screen.text
     assert "Промпт по фото" in screen.text
+    assert "Промпт по видео" in screen.text
     assert "оживление фото" in screen.text
     assert "только задумка" in screen.text
 
@@ -112,6 +114,7 @@ def test_image_entry_keeps_photo_prompt_visible():
         "img_v2:refs",
         "img_menu:advanced",
         "img:photo2prompt",
+        "vid:video2prompt",
         "menu:create",
     ]
 

@@ -21,6 +21,7 @@ from api.miniapp_routes import (
     _reconcile_user_active_generations,
     miniapp_improve_prompt,
     miniapp_photo_prompt,
+    miniapp_video_prompt,
 )
 from api.miniapp_routes import (
     create_image_generation as miniapp_create_image_generation,
@@ -492,6 +493,17 @@ async def photo_prompt(
     if auth_error := _auth_required(user):
         return auth_error
     return await _call_miniapp(miniapp_photo_prompt, file=file, user=user)
+
+
+@router.post("/video-prompt")
+async def video_prompt(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_video_prompt, file=file, session=session, user=user)
 
 
 @router.post("/prompt/improve")

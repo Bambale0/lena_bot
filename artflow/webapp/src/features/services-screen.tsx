@@ -15,7 +15,7 @@ import {
 } from "@/features/pinterest-service-runner";
 import { t } from "@/lib/i18n";
 import { readTelegramInitData } from "@/lib/telegram";
-import type { AppTab, AssistantMessage, PhotoPromptResult } from "@/lib/types";
+import type { AppTab, AssistantMessage, PhotoPromptResult, VideoPromptResult } from "@/lib/types";
 import { formatKisses } from "@/lib/utils";
 
 interface ServicesScreenProps {
@@ -23,9 +23,13 @@ interface ServicesScreenProps {
   assistantBusy: boolean;
   photoPromptBusy: boolean;
   photoPromptResult: PhotoPromptResult | null;
+  videoPromptBusy: boolean;
+  videoPromptResult: VideoPromptResult | null;
   onAssistantSend: (message: string) => void;
   onPhotoPrompt: (file: File) => void;
+  onVideoPrompt: (file: File) => void;
   onUsePrompt: (prompt: string) => void;
+  onUseVideoPrompt: (prompt: string) => void;
   onNavigate: (tab: AppTab) => void;
 }
 
@@ -74,17 +78,23 @@ function ServicesScreen({
   assistantBusy,
   photoPromptBusy,
   photoPromptResult,
+  videoPromptBusy,
+  videoPromptResult,
   onAssistantSend,
   onPhotoPrompt,
+  onVideoPrompt,
   onUsePrompt,
+  onUseVideoPrompt,
   onNavigate,
 }: ServicesScreenProps) {
   const copy = t("ru").services;
   const [message, setMessage] = useState("");
   const [selectedFileName, setSelectedFileName] = useState("");
+  const [selectedVideoFileName, setSelectedVideoFileName] = useState("");
   const [pinterestService, setPinterestService] = useState<PinterestServiceInfo | null>(null);
   const [pinterestLoading, setPinterestLoading] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -263,6 +273,59 @@ function ServicesScreen({
               <details className="apix-help">
                 <summary>Об обработке файла</summary>
                 <p className="pb-2">Изображение отправляется multipart на backend; HEIC/AVIF убраны из выбора, потому что backend их не принимает.</p>
+              </details>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-2 text-primary"><Film className="size-4" /><CardTitle>Промпт по видео</CardTitle></div>
+            </CardHeader>
+            <CardContent className="grid gap-2">
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/mp4,video/quicktime,video/webm"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  setSelectedVideoFileName(file.name);
+                  onVideoPrompt(file);
+                  event.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="apix-focus-ring flex min-h-24 items-center justify-center gap-3 rounded-xl border border-dashed border-primary/35 bg-primary/6 px-3 py-3 text-left"
+                onClick={() => videoInputRef.current?.click()}
+              >
+                <Film className="size-6 shrink-0 text-primary" />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold">{selectedVideoFileName || "Выбрать видео"}</span>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground">MP4, MOV, WebM · стоимость по тарифу</span>
+                </span>
+              </button>
+              {videoPromptBusy ? (
+                <div className="flex items-center justify-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                  <span className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Анализирую видео…
+                </div>
+              ) : null}
+              {videoPromptResult?.prompt ? (
+                <div className="grid gap-2 rounded-xl border border-border bg-background/35 p-2.5">
+                  <Textarea value={videoPromptResult.prompt} readOnly className="min-h-28" />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-[10px] text-muted-foreground">
+                      {videoPromptResult.model_hint || "Видео → промпт"}
+                      {typeof videoPromptResult.credits_spent === "number" ? ` · ${formatKisses(videoPromptResult.credits_spent)}` : ""}
+                    </p>
+                    <Button size="sm" onClick={() => onUseVideoPrompt(videoPromptResult.prompt)}><Sparkles /> {copy.use}</Button>
+                  </div>
+                </div>
+              ) : null}
+              <details className="apix-help">
+                <summary>Об обработке видео</summary>
+                <p className="pb-2">Видео отправляется на backend, цена списывается из баланса, а при ошибке анализа кредиты возвращаются автоматически.</p>
               </details>
             </CardContent>
           </Card>

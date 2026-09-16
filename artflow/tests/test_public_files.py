@@ -111,3 +111,21 @@ def test_public_url_is_available_accepts_existing_local_upload(tmp_path, monkeyp
     (tmp_path / "ok.jpg").write_bytes(JPEG)
 
     assert public_files.public_url_is_available("https://example.test/static/upload/ok.jpg") is True
+
+
+def test_unique_public_file_can_be_deleted_without_touching_external_urls(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
+    _configure_upload_urls(monkeypatch)
+
+    url = public_files.save_public_file(
+        b"\x00\x00\x00\x18ftypmp42payload",
+        "video/mp4",
+        subdir="video-prompt",
+        unique=True,
+    )
+    path = public_files.local_upload_path_from_url(url)
+
+    assert path is not None and path.exists()
+    assert public_files.delete_public_file(url) is True
+    assert not path.exists()
+    assert public_files.delete_public_file("https://cdn.test/external.mp4") is False

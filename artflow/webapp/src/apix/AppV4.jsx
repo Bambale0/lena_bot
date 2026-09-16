@@ -10,6 +10,7 @@ import {
   setupTelegramChrome,
   tgUser,
   uploadReference,
+  videoPrompt,
 } from "./api.js";
 import { demoFeed, demoImageModels, demoPlans, demoPrompts, demoUser, demoVideoModels } from "./demoData.js";
 
@@ -205,13 +206,15 @@ function Create({ imageModels, videoModels, selectedPrompt, onResult, onToast })
   const [reference, setReference] = useState("");
   const [uploadingReference, setUploadingReference] = useState(false);
   const [buildingPhotoPrompt, setBuildingPhotoPrompt] = useState(false);
+  const [buildingVideoPrompt, setBuildingVideoPrompt] = useState(false);
   const [improvingPrompt, setImprovingPrompt] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const fileInput = useRef(null);
   const photoPromptInput = useRef(null);
+  const videoPromptInput = useRef(null);
   const models = mode === "image" ? imageModels : videoModels;
   const currentModel = models.find((item) => modelKey(item) === model) || models[0] || null;
-  const busy = uploadingReference || buildingPhotoPrompt || improvingPrompt || submitting;
+  const busy = uploadingReference || buildingPhotoPrompt || buildingVideoPrompt || improvingPrompt || submitting;
   useEffect(() => { if (!model && models[0]) setModel(modelKey(models[0])); }, [models, model]);
   useEffect(() => { if (selectedPrompt) setPrompt(selectedPrompt); }, [selectedPrompt]);
 
@@ -249,6 +252,18 @@ function Create({ imageModels, videoModels, selectedPrompt, onResult, onToast })
     } catch (error) { onToast(error.message || "Не удалось получить промпт по фото"); }
     finally { setBuildingPhotoPrompt(false); event.target.value = ""; }
   }
+  async function handleVideoPrompt(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setBuildingVideoPrompt(true);
+    try {
+      const response = await videoPrompt(file);
+      setPrompt(response.prompt || "");
+      setMode("video");
+      notify("success");
+    } catch (error) { onToast(error.message || "Не удалось получить промпт по видео"); }
+    finally { setBuildingVideoPrompt(false); event.target.value = ""; }
+  }
   async function improve() {
     if (!prompt.trim()) return;
     setImprovingPrompt(true);
@@ -283,7 +298,7 @@ function Create({ imageModels, videoModels, selectedPrompt, onResult, onToast })
         <label><span>{mode === "image" ? "Формат" : "Длина"}</span>{mode === "image" ? <select value={ratio} onChange={(e) => setRatio(e.target.value)}>{["9:16", "1:1", "4:5", "16:9", "3:4"].map((item) => <option key={item}>{item}</option>)}</select> : <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>{[5, 8, 10].map((item) => <option key={item} value={item}>{item} сек</option>)}</select>}</label>
       </div>
       <div className="v4Reference"><button type="button" onClick={() => fileInput.current?.click()} disabled={busy}>{uploadingReference ? "Загружаю…" : "+ Референс"}</button><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="URL референса" /><input hidden ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleUpload} /></div>
-      <div className="v4CreateActions"><button type="button" onClick={() => photoPromptInput.current?.click()} disabled={busy}>{buildingPhotoPrompt ? "Анализирую…" : "Промпт по фото"}</button><button type="button" onClick={improve} disabled={busy}>{improvingPrompt ? "Улучшаю…" : "Улучшить"}</button><button className="v4Primary" type="button" onClick={submit} disabled={busy}>{submitting ? "Запускаю…" : `Создать · ${modelCost(currentModel) || "?"}◆`}</button><input hidden ref={photoPromptInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handlePhotoPrompt} /></div>
+      <div className="v4CreateActions"><button type="button" onClick={() => photoPromptInput.current?.click()} disabled={busy}>{buildingPhotoPrompt ? "Анализирую…" : "Промпт по фото"}</button><button type="button" onClick={() => videoPromptInput.current?.click()} disabled={busy}>{buildingVideoPrompt ? "Анализирую…" : "Промпт по видео"}</button><button type="button" onClick={improve} disabled={busy}>{improvingPrompt ? "Улучшаю…" : "Улучшить"}</button><button className="v4Primary" type="button" onClick={submit} disabled={busy}>{submitting ? "Запускаю…" : `Создать · ${modelCost(currentModel) || "?"}◆`}</button><input hidden ref={photoPromptInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handlePhotoPrompt} /><input hidden ref={videoPromptInput} type="file" accept="video/mp4,video/quicktime,video/webm" onChange={handleVideoPrompt} /></div>
     </section>
   );
 }

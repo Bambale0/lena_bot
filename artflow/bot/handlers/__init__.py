@@ -62,6 +62,7 @@ from . import repeat_callback_guard as _repeat_callback_guard
 from . import repeat_reference_marketplace as _repeat_reference_marketplace  # noqa: F401
 from . import repeat_references as _repeat_references  # noqa: F401
 from . import repeat_safe as _repeat_safe
+from . import video_prompt as _video_prompt
 
 install_image_launch_snapshot(_legacy_image_gen)
 install_image_reference_prompt_flow(_legacy_image_gen)
@@ -73,6 +74,7 @@ _image_router.include_router(_repeat_callback_guard.router)
 _image_router.include_router(_repeat_safe.router)
 _image_router.include_router(_image_models_first.router)
 _image_router.include_router(_image_wizard_v2.router)
+_image_router.include_router(_video_prompt.router)
 _image_router.include_router(_photo_prompt.router)
 _image_router.include_router(_legacy_image_gen.router)
 _legacy_image_gen.router = _image_router

@@ -109,6 +109,28 @@ async function photoPromptApi(file) {
   return data.prompt || "";
 }
 
+async function videoPromptApi(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+
+  const res = await fetch(`${API_BASE}/video-prompt`, {
+    method: "POST",
+    headers: { "X-Telegram-Init-Data": initData() },
+    body: fd,
+  });
+
+  if (!res.ok) {
+    let detail = `Video prompt failed: ${res.status}`;
+    try {
+      const data = await res.json();
+      detail = data.detail || detail;
+    } catch {}
+    throw new Error(detail);
+  }
+
+  return res.json();
+}
+
 async function api(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -3419,10 +3441,13 @@ function PhotoPromptTool({ setScreen, generatedPhotoPrompt, setGeneratedPhotoPro
 function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice, target = "studio" }) {
   const [photoPromptLoading, setPhotoPromptLoading] = useState(false);
   const [photoPromptResult, setPhotoPromptResult] = useState("");
+  const [videoPromptLoading, setVideoPromptLoading] = useState(false);
+  const [videoPromptResult, setVideoPromptResult] = useState(null);
   const [source, setSource] = useState("catalog");
   const [sourceItems, setSourceItems] = useState([]);
   const [sourceLoading, setSourceLoading] = useState(false);
   const photoPromptInputRef = useRef(null);
+  const videoPromptInputRef = useRef(null);
   const filtered = source === "catalog" ? (prompts || []) : sourceItems;
   const targetLabel = target === "midjourney" ? "В MJ" : "В студию";
 
@@ -3462,6 +3487,29 @@ function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice, target = 
     if (!photoPromptResult) return;
     try {
       await navigator.clipboard.writeText(photoPromptResult);
+    } catch {}
+  }
+
+  async function handlePromptVideoFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setVideoPromptLoading(true);
+    try {
+      const result = await videoPromptApi(file);
+      setVideoPromptResult(result);
+    } catch (err) {
+      setVideoPromptResult({ prompt: "Ошибка анализа видео: " + (err?.message || err) });
+    } finally {
+      setVideoPromptLoading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function copyVideoPrompt() {
+    if (!videoPromptResult?.prompt) return;
+    try {
+      await navigator.clipboard.writeText(videoPromptResult.prompt);
     } catch {}
   }
 
@@ -3544,6 +3592,43 @@ function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice, target = 
             <div className="generatedPromptActions">
               <button onClick={copyPhotoPrompt}>📋 Скопировать</button>
               <button onClick={() => onPromptUse ? onPromptUse({ title: "Промпт по фото", prompt_text: photoPromptResult }) : setScreen("studio")}>✨ {targetLabel}</button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="photoPromptTool">
+        <div>
+          <h2>🎬 Промпт по видео</h2>
+          <p>Загрузи MP4, MOV или WebM до 100 МБ — я разберу сцену, движение, камеру, свет и стиль.</p>
+        </div>
+
+        <button
+          className="photoPromptUpload"
+          onClick={() => videoPromptInputRef.current?.click()}
+          disabled={videoPromptLoading}
+        >
+          {videoPromptLoading ? "Анализирую видео..." : "Загрузить видео · стоимость по тарифу"}
+        </button>
+
+        <input
+          ref={videoPromptInputRef}
+          type="file"
+          accept="video/mp4,video/quicktime,video/webm"
+          hidden
+          onChange={handlePromptVideoFile}
+        />
+
+        {videoPromptResult?.prompt && (
+          <div className="generatedPromptCard">
+            <div className="generatedPromptTop">
+              <b>Готовый prompt</b>
+              {videoPromptResult.credits_spent != null && <span>{videoPromptResult.credits_spent} 💋</span>}
+            </div>
+            <p>{videoPromptResult.prompt}</p>
+            <div className="generatedPromptActions">
+              <button onClick={copyVideoPrompt}>📋 Скопировать</button>
+              <button onClick={() => onPromptUse ? onPromptUse({ title: "Промпт по видео", prompt_text: videoPromptResult.prompt }) : setScreen("studio")}>✨ {targetLabel}</button>
             </div>
           </div>
         )}
