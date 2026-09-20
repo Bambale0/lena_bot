@@ -1366,6 +1366,41 @@ async def test_gen_share_labels_video_posts() -> None:
     assert "Фото добавлено" not in text
 
 
+
+@pytest.mark.asyncio
+async def test_gen_share_allows_video_derived_from_other_feed_post() -> None:
+    call = SimpleNamespace(
+        data="gen:share:78",
+        answer=AsyncMock(),
+        message=SimpleNamespace(answer=AsyncMock()),
+    )
+    session_obj = AsyncMock()
+    existing = SimpleNamespace(
+        id=78,
+        user_id=42,
+        gen_type=GenerationType.video,
+        source_feed_gen_id=12,
+    )
+    shared = SimpleNamespace(id=78, gen_type=GenerationType.video)
+    repo_stub = SimpleNamespace(
+        get_generation_by_id=AsyncMock(return_value=existing),
+        share_to_feed=AsyncMock(return_value=shared),
+    )
+    bot = AsyncMock()
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="TestBot"))
+
+    with patch("bot.handlers.image_gen.repo", new=repo_stub):
+        await image_gen.cb_gen_share(
+            call,
+            session_obj,
+            SimpleNamespace(id=42, referral_code="REF"),
+            bot,
+        )
+
+    repo_stub.share_to_feed.assert_awaited_once_with(session_obj, 78, 42)
+    assert "Видео добавлено в ленту" in call.message.answer.await_args.args[0]
+
+
 @pytest.mark.asyncio
 async def test_reprompt_image_restores_session_and_clears_feed_source() -> None:
     call = SimpleNamespace(
