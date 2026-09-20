@@ -1119,7 +1119,8 @@ async def test_webapp_share_allows_feed_derived_video_without_exposing_prompt(cl
 
     assert response.status_code == 200
     assert response.json()["is_public_feed"] is True
-    share_to_feed.assert_awaited_once_with(77, 1)
+    share_to_feed.assert_awaited_once()
+    assert share_to_feed.await_args.args[1:] == (77, 1)
 
 
 @pytest.mark.asyncio
