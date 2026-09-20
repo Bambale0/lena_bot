@@ -1557,7 +1557,10 @@ async def share_to_feed(session: AsyncSession, gen_id: int, user_id: int) -> Gen
             Generation.user_id == user_id,
             Generation.status == GenerationStatus.done,
             Generation.result_url.is_not(None),
-            _own_or_empty_feed_source_clause(user_id),
+            or_(
+                Generation.gen_type == GenerationType.video,
+                _own_or_empty_feed_source_clause(user_id),
+            ),
         )
         .values(
             is_public_feed=True,
