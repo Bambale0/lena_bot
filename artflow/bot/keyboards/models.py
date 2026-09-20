@@ -1104,11 +1104,12 @@ def after_generation_kb(
     if copy_button:
         builder.row(copy_button)
     publish_buttons: list[InlineKeyboardButton] = []
+    library_allowed = allow_publish if allow_library is None else allow_library
     if allow_publish:
         publish_buttons.append(
             InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}")
         )
-    if allow_library if allow_library is not None else allow_publish:
+    if library_allowed:
         publish_buttons.append(
             InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}")
         )
