@@ -411,6 +411,24 @@ def test_after_generation_keyboard_can_hide_copy_and_publish_actions() -> None:
     assert "📚 В библиотеку" not in texts
 
 
+def test_after_generation_video_can_publish_without_exposing_source_prompt() -> None:
+    buttons = flatten_buttons(
+        after_generation_kb(
+            123,
+            "video",
+            prompt="private feed prompt",
+            allow_publish=True,
+            allow_library=False,
+            allow_copy_prompt=False,
+        )
+    )
+    by_text = {button.text: button.callback_data for button in buttons}
+    assert by_text["📤 В ленту"] == "gen:share:123"
+    assert "📚 В библиотеку" not in by_text
+    assert "📋 Скопировать промпт" not in by_text
+    assert "📋 Показать промпт" not in by_text
+
+
 def test_help_text_contains_support_contact() -> None:
     text = _help_text("ru")
     assert "@LeLu88" in text

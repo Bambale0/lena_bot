@@ -86,3 +86,45 @@ Date: 2026-09-16.
   helper, and focused tests in its Ruff/pytest gates.
 - Local Playwright could not launch Chromium because the host lacks
   `libatk-1.0.so.0`; GitHub Actions remains the authoritative E2E check.
+
+---
+
+# Execution ledger — video result publishing to feed
+
+Baseline: commit `cad3c5b8`.
+Date: 2026-09-20.
+
+## Current state
+- Public feed already renders both image and video cards.
+- Modern web/Mini App feed publish endpoint already allows publishing own ready image/video media while keeping remix prompts hidden.
+- Text-bot video completion UI coupled feed publication to prompt/library visibility, so feed-derived videos lost the `📤 В ленту` action.
+- Repository `share_to_feed` also rejected all feed derivatives, so adding the button alone would fail.
+
+## Intended outcome
+- Every completed own video can be added to the public feed.
+- A video derived from another feed post may be published as new media.
+- The source post's prompt remains private and cannot be copied or saved to the user's prompt library through this flow.
+
+## Acceptance criteria
+1. Completed video result keyboard includes `📤 В ленту`.
+2. Feed-derived video keeps `📤 В ленту` but hides copy-prompt and library actions.
+3. Bot callback publishes the user's own video and returns the feed deep link.
+4. Repository allows video derivatives while retaining the source guard for images.
+5. Legacy Mini App `/generations/{id}/share` follows the same video rule.
+6. Feed rendering remains unchanged and supports video.
+7. Focused regression tests and CI pass before merge.
+
+## No-hardcode / security
+- No model/provider-specific whitelist was added; the rule is based on `GenerationType.video`.
+- Ownership, done status, and result URL checks remain enforced server-side.
+- Prompt/library protections remain unchanged for hidden source prompts.
+
+## Steps
+1. [x] Audited bot result keyboard, KIE/webhook completion, share callback, repository guard, feed renderer, and web/Mini App publish paths.
+2. [x] Split feed publish permission from prompt-library/copy permission in result keyboard.
+3. [x] Enabled video derivative publication in bot and repository.
+4. [x] Added legacy Mini App parity for video `/share`.
+5. [x] Added focused regressions for keyboard, bot callback, repository SQL guard, and Mini App route.
+6. [x] PR #153 CI: APIX backend-quality, frontend build + Playwright Mini App smoke, Feed Security Contracts, Provider Contract Compliance, Pinterest Backend Contract, and Photo Prompt Integration all passed on the implementation SHA.
+7. [ ] Merge / production autodeploy / production smoke.
+

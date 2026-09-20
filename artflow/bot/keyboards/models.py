@@ -1089,6 +1089,7 @@ def after_generation_kb(
     *,
     prompt: str | None = None,
     allow_publish: bool = True,
+    allow_library: bool | None = None,
     allow_copy_prompt: bool = True,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -1102,11 +1103,18 @@ def after_generation_kb(
     copy_button = _prompt_copy_button(gen_id, prompt) if allow_copy_prompt else None
     if copy_button:
         builder.row(copy_button)
+    publish_buttons: list[InlineKeyboardButton] = []
+    library_allowed = allow_publish if allow_library is None else allow_library
     if allow_publish:
-        builder.row(
-            InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}"),
-            InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}"),
+        publish_buttons.append(
+            InlineKeyboardButton(text="📤 В ленту", callback_data=f"gen:share:{gen_id}")
         )
+    if library_allowed:
+        publish_buttons.append(
+            InlineKeyboardButton(text="📚 В библиотеку", callback_data=f"gen:library:{gen_id}")
+        )
+    if publish_buttons:
+        builder.row(*publish_buttons)
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 

@@ -1701,7 +1701,8 @@ async def kie_webhook(
                         gen.id,
                         "video",
                         prompt=prompt_menu_preview,
-                        allow_publish=publish_actions_allowed,
+                        allow_publish=True,
+                        allow_library=prompt_actions_allowed,
                         allow_copy_prompt=prompt_actions_allowed,
                     )
                     try:
