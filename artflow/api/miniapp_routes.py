@@ -2724,7 +2724,8 @@ async def share_generation(
     existing = await repo.get_generation_by_id(session, gen_id)
     if not existing or existing.user_id != user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    if _generation_prompt_hidden(existing):
+    gen_type = getattr(getattr(existing, "gen_type", None), "value", getattr(existing, "gen_type", None))
+    if _generation_prompt_hidden(existing) and gen_type != GenerationType.video.value:
         raise HTTPException(status_code=403, detail="Cannot publish a feed remix")
 
     gen = await repo.share_to_feed(session, gen_id, user.id)
