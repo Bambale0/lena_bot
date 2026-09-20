@@ -1531,7 +1531,8 @@ async def _launch_video_generation_from_state(
             reply_markup=after_generation_kb(
                 gen_id,
                 "video",
-                allow_publish=not bool(source_feed_gen_id),
+                allow_publish=True,
+                allow_library=not bool(source_feed_gen_id),
                 allow_copy_prompt=not bool(source_feed_gen_id),
             ),
         )
@@ -2041,7 +2042,8 @@ async def cb_regen_video(
             reply_markup=after_generation_kb(
                 gen_id,
                 "video",
-                allow_publish=not bool(source_feed_gen_id),
+                allow_publish=True,
+                allow_library=not bool(source_feed_gen_id),
                 allow_copy_prompt=not bool(source_feed_gen_id),
             ),
         )
