@@ -125,5 +125,6 @@ Date: 2026-09-20.
 3. [x] Enabled video derivative publication in bot and repository.
 4. [x] Added legacy Mini App parity for video `/share`.
 5. [x] Added focused regressions for keyboard, bot callback, repository SQL guard, and Mini App route.
-6. [ ] CI / review / merge / production smoke.
+6. [x] PR #153 CI: APIX backend-quality, frontend build + Playwright Mini App smoke, Feed Security Contracts, Provider Contract Compliance, Pinterest Backend Contract, and Photo Prompt Integration all passed on the implementation SHA.
+7. [ ] Merge / production autodeploy / production smoke.
 
