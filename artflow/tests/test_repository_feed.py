@@ -32,7 +32,7 @@ async def test_increment_feed_share_updates_only_public_posts(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_share_to_feed_blocks_feed_derivatives(monkeypatch) -> None:
+async def test_share_to_feed_allows_video_derivatives_but_keeps_source_guard_for_images(monkeypatch) -> None:
     session = AsyncMock()
     result = MagicMock()
     result.scalar_one_or_none.return_value = None
@@ -45,6 +45,7 @@ async def test_share_to_feed_blocks_feed_derivatives(monkeypatch) -> None:
     assert shared is None
     statement = session.execute.await_args.args[0]
     compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "gen_type = 'video'" in compiled
     assert "source_feed_gen_id IS NULL" in compiled
     assert "source_feed_gen_id IN" in compiled
     assert "user_id = 7" in compiled
