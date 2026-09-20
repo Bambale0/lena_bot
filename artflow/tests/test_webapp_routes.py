@@ -1085,13 +1085,12 @@ async def test_webapp_publish_generation_returns_feed_link(client, monkeypatch) 
 @pytest.mark.parametrize(
     ("path", "blocked_repo_method"),
     [
-        ("/api/v1/generations/77/share", "share_to_feed"),
         ("/api/v1/generations/77/share-library", "share_to_library"),
         ("/api/v1/generations/77/publish", "share_to_feed"),
     ],
 )
-async def test_webapp_publish_actions_reject_feed_derivatives(client, monkeypatch, path, blocked_repo_method) -> None:
-    generation = SimpleNamespace(id=77, user_id=1, source_feed_gen_id=12)
+async def test_webapp_prompt_publish_actions_reject_feed_derivatives(client, monkeypatch, path, blocked_repo_method) -> None:
+    generation = SimpleNamespace(id=77, user_id=1, gen_type=GenerationType.image, source_feed_gen_id=12)
     blocked = AsyncMock()
     monkeypatch.setattr("api.miniapp_routes.repo.get_generation_by_id", AsyncMock(return_value=generation))
     monkeypatch.setattr(f"api.miniapp_routes.repo.{blocked_repo_method}", blocked)
@@ -1100,6 +1099,27 @@ async def test_webapp_publish_actions_reject_feed_derivatives(client, monkeypatc
 
     assert response.status_code == 403
     blocked.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webapp_share_allows_feed_derived_video_without_exposing_prompt(client, monkeypatch) -> None:
+    generation = SimpleNamespace(
+        id=77,
+        user_id=1,
+        gen_type=GenerationType.video,
+        source_feed_gen_id=12,
+    )
+    shared = SimpleNamespace(id=77, is_public_feed=True)
+    share_to_feed = AsyncMock(return_value=shared)
+    monkeypatch.setattr("api.miniapp_routes.repo.get_generation_by_id", AsyncMock(return_value=generation))
+    monkeypatch.setattr("api.miniapp_routes.repo.share_to_feed", share_to_feed)
+    monkeypatch.setattr("api.miniapp_routes.settings.WEB_PUBLIC_URL", "https://apixbotai.com")
+
+    response = await client.post("/api/v1/generations/77/share")
+
+    assert response.status_code == 200
+    assert response.json()["is_public_feed"] is True
+    share_to_feed.assert_awaited_once_with(77, 1)
 
 
 @pytest.mark.asyncio
