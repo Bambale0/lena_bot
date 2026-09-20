@@ -471,6 +471,24 @@ async def _generation_prompt_actions_allowed(
     return bool(source and getattr(source, "user_id", None) == getattr(db_user, "id", None))
 
 
+async def _generation_feed_publish_allowed(
+    *,
+    session: AsyncSession,
+    gen,
+    db_user: User,
+) -> bool:
+    if not gen or getattr(gen, "user_id", None) != getattr(db_user, "id", None):
+        return False
+    gen_type = getattr(gen, "gen_type", None)
+    if getattr(gen_type, "value", gen_type) == GenerationType.video.value:
+        return True
+    return await _generation_prompt_actions_allowed(
+        session=session,
+        gen=gen,
+        db_user=db_user,
+    )
+
+
 async def _session_reference_url(
     bot: Bot,
     image_session: ImageSession,
@@ -3188,8 +3206,8 @@ async def cb_gen_share(call: CallbackQuery, session: AsyncSession, db_user: User
 
     gen_id = int(call.data.split(":")[-1])
     existing = await repo.get_generation_by_id(session, gen_id)
-    if not await _generation_prompt_actions_allowed(session=session, gen=existing, db_user=db_user):
-        await safe_answer_callback(call, "❌ Нельзя опубликовать результат из ленты")
+    if not await _generation_feed_publish_allowed(session=session, gen=existing, db_user=db_user):
+        await safe_answer_callback(call, "❌ Нельзя опубликовать этот результат")
         return
 
     gen = await repo.share_to_feed(session, gen_id, db_user.id)
