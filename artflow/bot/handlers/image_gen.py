@@ -938,8 +938,12 @@ async def _launch_session_generation(
         )
     except Exception as e:
         logger.error("Session image generation error: %s", e)
-        if await repo.fail_generation(session, gen.id, str(e)):
-            await repo.add_credits(session, db_user.id, credits)
+        _, refunded = await repo.fail_generation_and_refund(
+            session,
+            gen.id,
+            str(e),
+            refund_note="bot_image_gen",
+        )
         await status_msg.edit_text(
             telegram_image_error_text(e),
             reply_markup=image_session_kb(parent_generation_id, allow_publish=not bool(source_feed_gen_id)),
@@ -958,8 +962,12 @@ async def _launch_session_generation(
         result_urls = _filter_reference_echoes(result_urls, reference_url)
         if not result_urls:
             err = "Provider returned reference image instead of generated result"
-            if await repo.fail_generation(session, gen.id, err):
-                await repo.add_credits(session, db_user.id, credits)
+            _, refunded = await repo.fail_generation_and_refund(
+                session,
+                gen.id,
+                err,
+                refund_note="bot_image_reference_echo",
+            )
             await status_msg.edit_text(
                 "❌ Генератор вернул референс вместо нового результата. 💋 возвращены.",
                 reply_markup=image_session_kb(parent_generation_id, allow_publish=publish_actions_allowed),
