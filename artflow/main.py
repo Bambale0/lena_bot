@@ -347,6 +347,11 @@ def _should_notify_generation_in_bot(gen: Generation | None) -> bool:
     return bool(gen) and not is_web_task_id(getattr(gen, "task_id", None))
 
 
+def _refund_notice_line(refunded: float) -> str:
+    """Claim a refund only when the refund really happened."""
+    return "\nКредиты возвращены." if refunded > 0 else ""
+
+
 def _prompt_menu_preview_for_generation(gen: Generation, prompt: str | None) -> str | None:
     return None if _is_repeat_generation(gen) else prompt
 
@@ -449,13 +454,18 @@ async def _mark_midjourney_failed(
     error_text: str,
     *,
     state_ctx=None,
-) -> None:
-    if await repo.fail_generation(session, gen.id, error_text):
-        await repo.add_credits(session, gen.user_id, gen.credits_spent)
+) -> tuple[bool, float]:
+    failed, refunded = await repo.fail_generation_and_refund(
+        session,
+        gen.id,
+        error_text,
+        refund_note="midjourney_webhook",
+    )
     if state_ctx is not None:
         data = await state_ctx.get_data()
         await _delete_midjourney_status_message(user_tg_id, data.get("mj_status_message_id"))
         await state_ctx.clear()
+    return failed, refunded
 
 
 async def _finish_midjourney_image_generation(
@@ -954,24 +964,34 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
 
         if not task_result.is_success:
             err = task_result.fail_reason or payload.get("description") or "Midjourney task failed"
-            await _mark_midjourney_failed(session, gen, user.tg_id, err, state_ctx=state_ctx)
+            failed, refunded = await _mark_midjourney_failed(
+                session, gen, user.tg_id, err, state_ctx=state_ctx
+            )
+            if not failed:
+                logger.info("Midjourney failure callback ignored for final generation=%s", gen.id)
+                return {"ok": True}
             if bot and _should_notify_generation_in_bot(gen):
                 await bot.send_message(
                     user.tg_id,
-                    f"❌ Ошибка Midjourney: <code>{_sanitize_provider_error(err)[:500]}</code>\n💋 возвращены.",
+                    f"❌ Ошибка Midjourney: <code>{_sanitize_provider_error(err)[:500]}</code>"
+                    + ("\n💋 возвращены." if refunded > 0 else ""),
                     reply_markup=main_menu_kb(),
                 )
             return {"ok": True}
 
         if gen.model in _MJ_IMAGE_MODELS:
             if not task_result.image_url:
-                await _mark_midjourney_failed(
+                failed, refunded = await _mark_midjourney_failed(
                     session, gen, user.tg_id, "Midjourney callback success but no imageUrl", state_ctx=state_ctx
                 )
+                if not failed:
+                    logger.info("Midjourney empty-image callback ignored for final generation=%s", gen.id)
+                    return {"ok": True}
                 if bot and _should_notify_generation_in_bot(gen):
                     await bot.send_message(
                         user.tg_id,
-                        "❌ Midjourney вернул успех, но без изображения. 💋 возвращены.",
+                        "❌ Midjourney вернул успех, но без изображения."
+                        + (" 💋 возвращены." if refunded > 0 else ""),
                         reply_markup=main_menu_kb(),
                     )
                 return {"ok": True}
@@ -994,13 +1014,17 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                 or task_result.image_url
             )
             if not resolved_video_url:
-                await _mark_midjourney_failed(
+                failed, refunded = await _mark_midjourney_failed(
                     session, gen, user.tg_id, "Midjourney callback success but no videoUrl", state_ctx=state_ctx
                 )
+                if not failed:
+                    logger.info("Midjourney empty-video callback ignored for final generation=%s", gen.id)
+                    return {"ok": True}
                 if bot and _should_notify_generation_in_bot(gen):
                     await bot.send_message(
                         user.tg_id,
-                        "❌ Midjourney вернул успех, но без видео. 💋 возвращены.",
+                        "❌ Midjourney вернул успех, но без видео."
+                        + (" 💋 возвращены." if refunded > 0 else ""),
                         reply_markup=main_menu_kb(),
                     )
                 return {"ok": True}
@@ -1516,13 +1540,20 @@ async def kie_webhook(
                 return {"ok": True}
             err = extract_error(payload)
             user_err = _sanitize_provider_error(err)
-            if await repo.fail_generation(session, gen.id, err):
-                await repo.add_credits(session, gen.user_id, gen.credits_spent)
+            failed, refunded = await repo.fail_generation_and_refund(
+                session,
+                gen.id,
+                err,
+                refund_note=f"kie_webhook:{user_err}"[:160],
+            )
+            if not failed:
+                logger.info("KIE failure callback ignored for final generation=%s", gen.id)
+                return {"ok": True}
             if bot and _should_notify_generation_in_bot(gen):
                 try:
                     await bot.send_message(
                         user.tg_id,
-                        f"❌ Генерация не удалась.\nКредиты возвращены.\n\n<code>{user_err[:500]}</code>",
+                        f"❌ Генерация не удалась.{_refund_notice_line(refunded)}\n\n<code>{user_err[:500]}</code>",
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
@@ -1541,11 +1572,22 @@ async def kie_webhook(
         if not urls:
             err = "Provider callback success but no result urls"
             user_err = "Результат готов, но ссылка на файл не пришла"
-            if await repo.fail_generation(session, gen.id, err):
-                await repo.add_credits(session, gen.user_id, gen.credits_spent)
+            failed, refunded = await repo.fail_generation_and_refund(
+                session,
+                gen.id,
+                err,
+                refund_note="kie_webhook:no_result_urls",
+            )
+            if not failed:
+                logger.info("KIE empty-result callback ignored for final generation=%s", gen.id)
+                return {"ok": True}
             if bot and _should_notify_generation_in_bot(gen):
                 try:
-                    await bot.send_message(user.tg_id, f"❌ {user_err}. Кредиты возвращены.", reply_markup=back_to_menu_kb())
+                    await bot.send_message(
+                        user.tg_id,
+                        f"❌ {user_err}." + (" Кредиты возвращены." if refunded > 0 else ""),
+                        reply_markup=back_to_menu_kb(),
+                    )
                 except Exception as e:
                     logger.warning("Failed to notify empty KIE result user=%s: %s", user.tg_id, e)
             return {"ok": True}
@@ -1568,11 +1610,22 @@ async def kie_webhook(
         if not result_urls:
             err = "Provider returned reference image instead of generated result"
             user_err = "Генератор вернул референс вместо нового результата"
-            if await repo.fail_generation(session, gen.id, err):
-                await repo.add_credits(session, gen.user_id, gen.credits_spent)
+            failed, refunded = await repo.fail_generation_and_refund(
+                session,
+                gen.id,
+                err,
+                refund_note="kie_webhook:reference_echo",
+            )
+            if not failed:
+                logger.info("KIE reference-echo callback ignored for final generation=%s", gen.id)
+                return {"ok": True}
             if bot and _should_notify_generation_in_bot(gen):
                 try:
-                    await bot.send_message(user.tg_id, f"❌ {user_err}. Кредиты возвращены.", reply_markup=back_to_menu_kb())
+                    await bot.send_message(
+                        user.tg_id,
+                        f"❌ {user_err}." + (" Кредиты возвращены." if refunded > 0 else ""),
+                        reply_markup=back_to_menu_kb(),
+                    )
                 except Exception as e:
                     logger.warning("Failed to notify reference-echo user=%s: %s", user.tg_id, e)
             return {"ok": True}
@@ -2018,17 +2071,22 @@ async def kie_music_webhook(
         err = extracted_error or msg or f"Music generation failed: {status}"
         user_err = _sanitize_provider_error(err, fallback="Ошибка при генерации музыки")
         logger.warning("KIE music failed task_id=%s status=%s: %s", task_id, status, err)
+        refunded = 0.0
         if generation_id:
             async with AsyncSessionLocal() as session:
                 gen = await repo.get_generation_by_id(session, generation_id)
                 if gen:
-                    if await repo.fail_generation(session, gen.id, err):
-                        await repo.add_credits(session, gen.user_id, gen.credits_spent)
+                    _, refunded = await repo.fail_generation_and_refund(
+                        session,
+                        gen.id,
+                        err,
+                        refund_note="kie_music_webhook",
+                    )
         if tg_id and bot:
             try:
                 await bot.send_message(
                     tg_id,
-                    f"❌ Ошибка генерации музыки:\n{user_err}",
+                    f"❌ Ошибка генерации музыки:\n{user_err}" + _refund_notice_line(refunded),
                     reply_markup=back_to_menu_kb(),
                 )
             except Exception as e:

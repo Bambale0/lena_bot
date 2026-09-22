@@ -41,6 +41,7 @@ from db.models import (
     WebAuthCode,
     WithdrawalStatus,
 )
+from db.repeat_lookup import parse_input_params
 
 logger = logging.getLogger(__name__)
 
@@ -1220,6 +1221,82 @@ async def fail_generation(
     await session.commit()
     await _publish_generation_update(gen)
     return updated
+
+
+async def fail_generation_and_refund(
+    session: AsyncSession,
+    gen_id: int,
+    error: str,
+    *,
+    entry_type: str = "generation_refund",
+    refund_note: str | None = None,
+) -> tuple[bool, float]:
+    """Fail a pending/processing generation and return its credits in one commit.
+
+    Only the first caller wins the ``pending/processing -> failed`` transition,
+    so a retried provider callback or a parallel reconcile poll cannot refund
+    twice. The refund marker is merged into ``input_params`` and the ledger row
+    references the generation, so a refund can be verified from either side.
+
+    Returns ``(failed, refunded_credits)``. ``failed`` is False when the
+    generation is missing or already final; ``refunded_credits`` is 0 when the
+    transition lost the race or when nothing was charged.
+    """
+    result = await session.execute(
+        select(Generation).where(Generation.id == gen_id).with_for_update()
+    )
+    generation = result.scalar_one_or_none()
+    if generation is None:
+        return False, 0.0
+    status = getattr(generation.status, "value", generation.status)
+    if status not in (GenerationStatus.pending.value, GenerationStatus.processing.value):
+        return False, 0.0
+
+    credits = float(generation.credits_spent or 0.0)
+    params = parse_input_params(generation.input_params)
+    params["refund_applied"] = credits > 0
+    if refund_note:
+        params["refund_note"] = refund_note[:160]
+    generation.input_params = json.dumps(params, ensure_ascii=False)
+    generation.status = GenerationStatus.failed
+    generation.error_msg = error
+    generation.finished_at = datetime.now(timezone.utc)
+    await session.flush()
+
+    refunded = 0.0
+    if credits > 0:
+        balance_result = await session.execute(
+            update(User)
+            .where(User.id == generation.user_id)
+            .values(credits=User.credits + credits)
+            .returning(User.credits)
+        )
+        balance_after = balance_result.scalar_one_or_none()
+        if balance_after is not None:
+            await _insert_credit_ledger(
+                session,
+                user_id=generation.user_id,
+                delta=credits,
+                balance_after=balance_after,
+                entry_type=entry_type,
+                source_type="generation",
+                source_id=str(gen_id),
+                note=refund_note,
+            )
+            refunded = credits
+
+    await session.commit()
+    logger.info(
+        "Generation failed with refund: gen=%s user=%s refunded=%s entry_type=%s note=%s",
+        gen_id,
+        generation.user_id,
+        refunded,
+        entry_type,
+        refund_note or "-",
+    )
+    await _publish_generation_update(generation)
+    return True, refunded
+
 
 async def get_generation_by_id(session: AsyncSession, gen_id: int) -> Generation | None:
     result = await session.execute(select(Generation).where(Generation.id == gen_id))

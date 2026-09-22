@@ -1221,21 +1221,18 @@ async def test_webapp_generation_poll_refunds_stale_unfinished_task(client, monk
         }
     )
     get_generation_by_id = AsyncMock(side_effect=[pending, failed])
-    fail_generation = AsyncMock(return_value=True)
-    add_credits = AsyncMock()
+    fail_generation_and_refund = AsyncMock(return_value=(True, 4.0))
     monkeypatch.setattr("api.miniapp_routes.repo.get_generation_by_id", get_generation_by_id)
     monkeypatch.setattr("api.miniapp_routes.image_service.poll_kieai_result_urls", AsyncMock(return_value=None))
-    monkeypatch.setattr("api.miniapp_routes.repo.fail_generation", fail_generation)
-    monkeypatch.setattr("api.miniapp_routes.repo.add_credits", add_credits)
+    monkeypatch.setattr("api.miniapp_routes.repo.fail_generation_and_refund", fail_generation_and_refund)
 
     response = await client.get("/api/v1/generations/77")
 
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
-    fail_generation.assert_awaited_once()
-    assert fail_generation.await_args.args[1:] == (77, "Generation timed out before completion")
-    add_credits.assert_awaited_once()
-    assert add_credits.await_args.args[1:] == (1, 4)
+    fail_generation_and_refund.assert_awaited_once()
+    assert fail_generation_and_refund.await_args.args[1:] == (77, "Generation timed out before completion")
+    assert fail_generation_and_refund.await_args.kwargs == {"refund_note": "reconcile:timeout"}
 
 
 def test_normalize_public_urls_rejects_private_hosts() -> None:

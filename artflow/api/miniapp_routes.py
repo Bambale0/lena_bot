@@ -479,9 +479,12 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 'Marking stale generation without task_id as failed: gen=%s model=%s age=%s',
                 gen.id, gen.model, age,
             )
-            if await repo.fail_generation(session, gen.id, 'Generation lost task id before completion'):
-                if gen.credits_spent:
-                    await repo.add_credits(session, gen.user_id, gen.credits_spent)
+            await repo.fail_generation_and_refund(
+                session,
+                gen.id,
+                'Generation lost task id before completion',
+                refund_note='reconcile:lost_task_id',
+            )
             return await repo.get_generation_by_id(session, gen.id)
         return gen
 
@@ -504,9 +507,12 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             return gen
     except Exception as exc:
         logger.warning('Reconcile failed generation gen=%s task=%s: %s', gen.id, task_id, exc)
-        if await repo.fail_generation(session, gen.id, str(exc)):
-            if gen.credits_spent:
-                await repo.add_credits(session, gen.user_id, gen.credits_spent)
+        await repo.fail_generation_and_refund(
+            session,
+            gen.id,
+            str(exc),
+            refund_note='reconcile:poll_error',
+        )
         return await repo.get_generation_by_id(session, gen.id)
 
     if result_url:
@@ -520,9 +526,12 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             'Marking stale generation with unfinished task as failed: gen=%s model=%s task=%s age=%s',
             gen.id, gen.model, stored_task_id, age,
         )
-        if await repo.fail_generation(session, gen.id, 'Generation timed out before completion'):
-            if gen.credits_spent:
-                await repo.add_credits(session, gen.user_id, gen.credits_spent)
+        await repo.fail_generation_and_refund(
+            session,
+            gen.id,
+            'Generation timed out before completion',
+            refund_note='reconcile:timeout',
+        )
         return await repo.get_generation_by_id(session, gen.id)
 
     return gen

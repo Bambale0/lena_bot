@@ -77,10 +77,14 @@ async def _safe_delete_message(message) -> None:
         return
 
 
-async def _fail_generation_and_refund(gen_id: int, user_id: int, credits: float | int, error: str) -> None:
+async def _fail_generation_and_refund(gen_id: int, error: str) -> tuple[bool, float]:
     async with AsyncSessionLocal() as session:
-        if await repo.fail_generation(session, gen_id, error):
-            await repo.add_credits(session, user_id, credits)
+        return await repo.fail_generation_and_refund(
+            session,
+            gen_id,
+            error,
+            refund_note="bot_midjourney_poll",
+        )
 
 
 async def _finish_initial_mj_image(
@@ -132,7 +136,7 @@ async def _finish_initial_mj_image(
         )
 
     async def on_failure(err: str) -> None:
-        await _fail_generation_and_refund(gen_id, user_id, credits, err)
+        await _fail_generation_and_refund(gen_id, err)
         try:
             await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
         except Exception:
@@ -181,7 +185,7 @@ async def _finish_initial_mj_video(
         )
 
     async def on_failure(err: str) -> None:
-        await _fail_generation_and_refund(gen_id, user_id, credits, err)
+        await _fail_generation_and_refund(gen_id, err)
         try:
             await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
         except Exception:
@@ -444,8 +448,12 @@ async def handle_imagine_prompt(
         )
     except Exception as e:
         logger.error("MJ imagine submit error: %s", e)
-        if await repo.fail_generation(session, gen.id, str(e)):
-            await repo.add_credits(session, db_user.id, credits)
+        await repo.fail_generation_and_refund(
+            session,
+            gen.id,
+            str(e),
+            refund_note="bot_mj_imagine",
+        )
         await status_msg.edit_text("❌ Ошибка при отправке запроса. 💋 возвращены.", reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -736,8 +744,12 @@ async def cb_blend_submit(
     try:
         task_id = await mj.blend(images)
     except Exception as e:
-        if await repo.fail_generation(session, gen.id, str(e)):
-            await repo.add_credits(session, db_user.id, credits)
+        await repo.fail_generation_and_refund(
+            session,
+            gen.id,
+            str(e),
+            refund_note="bot_mj_blend",
+        )
         await status_msg.edit_text(f"❌ Ошибка: {e}", reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -823,8 +835,12 @@ async def handle_describe_photo(
     try:
         task_id = await mj.describe(base64=b64)
     except Exception as e:
-        if await repo.fail_generation(session, gen.id, str(e)):
-            await repo.add_credits(session, db_user.id, credits)
+        await repo.fail_generation_and_refund(
+            session,
+            gen.id,
+            str(e),
+            refund_note="bot_mj_describe",
+        )
         await status_msg.edit_text(f"❌ Ошибка: {e}", reply_markup=main_menu_kb())
         await state.clear()
         return
@@ -948,8 +964,12 @@ async def _submit_mj_video(
     try:
         task_id = await mj.submit_video(image=image_url, motion=motion, prompt=prompt)
     except Exception as e:
-        if await repo.fail_generation(session, gen.id, str(e)):
-            await repo.add_credits(session, db_user.id, credits)
+        await repo.fail_generation_and_refund(
+            session,
+            gen.id,
+            str(e),
+            refund_note="bot_mj_video",
+        )
         await status_msg.edit_text(f"❌ Ошибка: {e}", reply_markup=main_menu_kb())
         await state.clear()
         return

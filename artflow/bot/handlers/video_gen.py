@@ -1492,8 +1492,12 @@ async def _launch_video_generation_from_state(
     except Exception as e:
         logger.error("Video generation error: %s", e)
         await session.rollback()
-        if await repo.fail_generation(session, gen_id, str(e)):
-            await repo.add_credits(session, user_id, credits)
+        await repo.fail_generation_and_refund(
+            session,
+            gen_id,
+            str(e),
+            refund_note="bot_video_gen",
+        )
         await status_msg.edit_text(
             "❌ Ошибка запуска генерации. 💋 возвращены.\n\n"
             "Попробуй другую модель или повтори через минуту.",
@@ -1543,8 +1547,12 @@ async def _launch_video_generation_from_state(
             current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
             if current_status in {"done", "failed"}:
                 return
-            if await repo.fail_generation(bg_session, gen_id, err):
-                await repo.add_credits(bg_session, user_id, credits)
+            _, refunded = await repo.fail_generation_and_refund(
+                bg_session,
+                gen_id,
+                err,
+                refund_note="bot_video_poll",
+            )
         await status_msg.edit_text(f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
 
     if getattr(result, "uses_webhook", False) or result.provider == "kieai":
@@ -2004,8 +2012,12 @@ async def cb_regen_video(
     except Exception as exc:
         logger.error("Video regeneration error: %s", exc)
         await session.rollback()
-        if await repo.fail_generation(session, gen_id, str(exc)):
-            await repo.add_credits(session, user_id, credits)
+        await repo.fail_generation_and_refund(
+            session,
+            gen_id,
+            str(exc),
+            refund_note="bot_video_repeat",
+        )
         await status_msg.edit_text(
             "❌ Ошибка запуска повтора. 💋 возвращены.\n\nПопробуй другую модель или повтори через минуту.",
             reply_markup=main_menu_kb(),
@@ -2054,8 +2066,12 @@ async def cb_regen_video(
             current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
             if current_status in {"done", "failed"}:
                 return
-            if await repo.fail_generation(bg_session, gen_id, err):
-                await repo.add_credits(bg_session, user_id, credits)
+            _, refunded = await repo.fail_generation_and_refund(
+                bg_session,
+                gen_id,
+                err,
+                refund_note="bot_video_repeat_poll",
+            )
         await status_msg.edit_text(f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
 
     if getattr(result, "uses_webhook", False) or result.provider == "kieai":
