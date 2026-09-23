@@ -233,6 +233,7 @@ async def open_model_composer_for_selection(
     session: AsyncSession,
     model_key: str,
     forced_mode: str | None = None,
+    db_user: User | None = None,
 ) -> bool:
     quality = _default_quality_for_model(model_key)
     model_cost = await repo.resolve_image_model_cost(session, model_key, quality=quality)
@@ -240,12 +241,11 @@ async def open_model_composer_for_selection(
         await call.answer("Модель временно недоступна", show_alert=True)
         return False
 
-    db_user = await repo.get_user_by_tg_id(session, call.from_user.id)
     effective_credits = (
         await repo.effective_image_generation_credits(
             session, db_user.id, model_key, model_cost.credits
         )
-        if db_user
+        if db_user is not None
         else float(model_cost.credits or 0)
     )
 
