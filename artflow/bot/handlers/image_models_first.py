@@ -25,8 +25,14 @@ def _model_list_text(balance: float) -> str:
     )
 
 
-def _model_list_kb(model_costs: list, *, back_text: str, back_callback: str) -> InlineKeyboardMarkup:
-    markup = image_models_kb(model_costs)
+def _model_list_kb(
+    model_costs: list,
+    *,
+    back_text: str,
+    back_callback: str,
+    unlimited_model_keys: set[str] | None = None,
+) -> InlineKeyboardMarkup:
+    markup = image_models_kb(model_costs, unlimited_model_keys=unlimited_model_keys)
     rows = [list(row) for row in markup.inline_keyboard]
     if rows:
         rows[-1] = [InlineKeyboardButton(text=back_text, callback_data=back_callback)]
@@ -69,6 +75,7 @@ async def open_image_models_first(
     await state.clear()
     await state.set_state(ImageGenFSM.model_select)
     model_costs = await _public_image_model_costs(session)
+    unlimited_model_keys = await repo.get_user_unlimited_image_model_keys(session, db_user.id)
 
     await safe_edit_message(
         call.message,
@@ -77,6 +84,7 @@ async def open_image_models_first(
             model_costs,
             back_text="🏠 Главное меню",
             back_callback="menu:main",
+            unlimited_model_keys=unlimited_model_keys,
         ),
     )
     await safe_answer_callback(call)
@@ -90,6 +98,7 @@ async def reopen_image_model_picker(
     db_user: User,
 ) -> None:
     model_costs = await _public_image_model_costs(session)
+    unlimited_model_keys = await repo.get_user_unlimited_image_model_keys(session, db_user.id)
     current_state = await state.get_state()
     back_callback = "img_v2:back" if current_state == ImageGenFSM.prompt_input.state else "menu:image"
     back_text = "← К задаче" if back_callback == "img_v2:back" else "← Назад"
@@ -101,6 +110,7 @@ async def reopen_image_model_picker(
             model_costs,
             back_text=back_text,
             back_callback=back_callback,
+            unlimited_model_keys=unlimited_model_keys,
         ),
     )
     await safe_answer_callback(call)
