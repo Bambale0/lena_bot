@@ -847,9 +847,11 @@ def _unlimited_image_models_kb(
             status = "◐"
         else:
             status = "⬜"
-        builder.button(
-            text=f"{status} {model.display_name}",
-            callback_data=f"adm:unlim:toggle:{model.id}:{page}",
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{status} {model.display_name}",
+                callback_data=f"adm:unlim:toggle:{model.id}:{page}",
+            )
         )
 
     if pages > 1:
@@ -865,7 +867,6 @@ def _unlimited_image_models_kb(
         InlineKeyboardButton(text="👥 Другие ID", callback_data="adm:unlimited_images"),
         InlineKeyboardButton(text="✅ Готово", callback_data="adm:back"),
     )
-    builder.adjust(1)
     return builder.as_markup()
 
 
