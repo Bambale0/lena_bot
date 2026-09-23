@@ -614,6 +614,26 @@ async def add_referral_balance(session: AsyncSession, user_id: int, amount_rub: 
     return result.scalar_one()
 
 
+async def get_base_image_model_costs(session: AsyncSession) -> list[ModelCost]:
+    result = await session.execute(
+        select(ModelCost)
+        .where(
+            ModelCost.gen_type == GenerationType.image,
+            ModelCost.is_active.is_(True),
+            ~ModelCost.model_key.contains("__"),
+        )
+        .order_by(ModelCost.display_name, ModelCost.model_key)
+    )
+    return list(result.scalars().all())
+
+
+async def get_model_cost_by_id(session: AsyncSession, model_id: int) -> ModelCost | None:
+    result = await session.execute(
+        select(ModelCost).where(ModelCost.id == model_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_user_image_model_entitlements(
     session: AsyncSession,
     user_id: int,
