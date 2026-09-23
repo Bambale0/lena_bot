@@ -114,6 +114,12 @@ jobs:
             tests/test_payment_webhooks.py \
             tests/test_miniapp_feed_webkit_stability.py \
             tests/test_repository_feed.py \
+            tests/test_midjourney.py \
+            tests/test_image_model_unlimited.py \
+            tests/test_image_model_unlimited_schema.py \
+            tests/test_admin_image_unlimited.py \
+            tests/test_image_gen_references.py::test_launch_session_generation_unlimited_records_zero_credits \
+            tests/test_webapp_routes.py::test_generate_image_unlimited_allows_zero_balance_and_records_zero_charge \
             tests/test_provider_contract_catalog.py \
             tests/test_public_files.py \
             tests/test_seedance25_repeat_keyboard.py \

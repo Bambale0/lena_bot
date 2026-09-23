@@ -10,7 +10,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from inspect import isawaitable
 from urllib.parse import urlparse
 
-from sqlalchemy import Date, cast, desc, func, or_, select, update
+from sqlalchemy import Date, cast, delete, desc, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -38,6 +38,7 @@ from db.models import (
     Transaction,
     TransactionStatus,
     User,
+    UserImageModelUnlimited,
     WebAuthCode,
     WithdrawalStatus,
 )
@@ -109,6 +110,13 @@ async def credit_feed_remix_payout(
     )
     await session.commit()
     return amount_rub
+
+
+@dataclass(frozen=True)
+class ImageGenerationCharge:
+    allowed: bool
+    charged_credits: float
+    unlimited: bool
 
 
 @dataclass(frozen=True)
@@ -2526,6 +2534,183 @@ async def get_model_cost(session: AsyncSession, model_key: str) -> ModelCost | N
         select(ModelCost).where(ModelCost.model_key == model_key)
     )
     return result.scalar_one_or_none()
+
+
+async def get_model_cost_by_id(session: AsyncSession, model_cost_id: int) -> ModelCost | None:
+    result = await session.execute(
+        select(ModelCost).where(ModelCost.id == model_cost_id)
+    )
+    return result.scalar_one_or_none()
+
+
+def _image_unlimited_model_key(model_key: str) -> str:
+    return str(model_key or "").split("__", 1)[0]
+
+
+async def has_unlimited_image_model(
+    session: AsyncSession,
+    user_id: int,
+    model_key: str,
+) -> bool:
+    normalized = _image_unlimited_model_key(model_key)
+    if not normalized:
+        return False
+    result = await session.execute(
+        select(UserImageModelUnlimited.id)
+        .where(
+            UserImageModelUnlimited.user_id == user_id,
+            UserImageModelUnlimited.model_key == normalized,
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def get_user_unlimited_image_model_keys(
+    session: AsyncSession,
+    user_id: int,
+) -> set[str]:
+    result = await session.execute(
+        select(UserImageModelUnlimited.model_key).where(
+            UserImageModelUnlimited.user_id == user_id
+        )
+    )
+    return {str(value) for value in result.scalars().all()}
+
+
+async def get_user_unlimited_image_model_ids(
+    session: AsyncSession,
+    user_id: int,
+) -> set[int]:
+    result = await session.execute(
+        select(ModelCost.id)
+        .join(
+            UserImageModelUnlimited,
+            UserImageModelUnlimited.model_key == ModelCost.model_key,
+        )
+        .where(
+            UserImageModelUnlimited.user_id == user_id,
+            ModelCost.gen_type == GenerationType.image,
+            ModelCost.is_active.is_(True),
+        )
+    )
+    return {int(value) for value in result.scalars().all()}
+
+
+async def set_user_image_model_unlimited(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    model_cost_id: int,
+    enabled: bool,
+    admin_tg_id: int | None = None,
+) -> bool:
+    model_cost = await get_model_cost_by_id(session, model_cost_id)
+    if not model_cost:
+        raise ValueError("Image model not found")
+    gen_type = getattr(model_cost.gen_type, "value", model_cost.gen_type)
+    if gen_type != GenerationType.image.value:
+        raise ValueError("Only image models can be unlimited")
+
+    model_key = _image_unlimited_model_key(model_cost.model_key)
+    if enabled:
+        existing = await session.execute(
+            select(UserImageModelUnlimited).where(
+                UserImageModelUnlimited.user_id == user_id,
+                UserImageModelUnlimited.model_key == model_key,
+            )
+        )
+        if existing.scalar_one_or_none() is None:
+            session.add(
+                UserImageModelUnlimited(
+                    user_id=user_id,
+                    model_key=model_key,
+                    created_by_admin_tg_id=admin_tg_id,
+                )
+            )
+            await session.commit()
+        logger.info(
+            "Image model unlimited enabled user=%s model=%s admin_tg_id=%s",
+            user_id,
+            model_key,
+            admin_tg_id,
+        )
+        return True
+
+    await session.execute(
+        delete(UserImageModelUnlimited).where(
+            UserImageModelUnlimited.user_id == user_id,
+            UserImageModelUnlimited.model_key == model_key,
+        )
+    )
+    await session.commit()
+    logger.info(
+        "Image model unlimited disabled user=%s model=%s admin_tg_id=%s",
+        user_id,
+        model_key,
+        admin_tg_id,
+    )
+    return False
+
+
+async def clear_user_image_model_unlimited(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    admin_tg_id: int | None = None,
+) -> int:
+    result = await session.execute(
+        delete(UserImageModelUnlimited)
+        .where(UserImageModelUnlimited.user_id == user_id)
+        .returning(UserImageModelUnlimited.id)
+    )
+    removed = len(result.scalars().all())
+    await session.commit()
+    logger.info(
+        "Image model unlimited cleared user=%s removed=%s admin_tg_id=%s",
+        user_id,
+        removed,
+        admin_tg_id,
+    )
+    return removed
+
+
+async def charge_image_generation(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    model_key: str,
+    amount: float,
+    source_type: str | None = None,
+    source_id: str | None = None,
+    note: str | None = None,
+) -> ImageGenerationCharge:
+    if await has_unlimited_image_model(session, user_id, model_key):
+        logger.info(
+            "Image generation unlimited charge bypass user=%s model=%s nominal_credits=%s",
+            user_id,
+            _image_unlimited_model_key(model_key),
+            amount,
+        )
+        return ImageGenerationCharge(allowed=True, charged_credits=0.0, unlimited=True)
+
+    charged = float(amount or 0)
+    if charged <= 0:
+        return ImageGenerationCharge(allowed=True, charged_credits=0.0, unlimited=False)
+
+    allowed = await spend_credits(
+        session,
+        user_id,
+        charged,
+        source_type=source_type,
+        source_id=source_id,
+        note=note,
+    )
+    return ImageGenerationCharge(
+        allowed=bool(allowed),
+        charged_credits=charged if allowed else 0.0,
+        unlimited=False,
+    )
 
 
 async def get_first_active_model_cost(session: AsyncSession, keys: list[str]) -> ModelCost | None:

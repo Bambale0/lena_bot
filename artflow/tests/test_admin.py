@@ -30,6 +30,58 @@ def test_admin_menu_has_ai_admin_buttons() -> None:
     assert "admin_ai_help" in callbacks
 
 
+def test_admin_menu_has_image_unlimited_button() -> None:
+    markup = admin.admin_menu_kb()
+    callbacks = {
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    }
+
+    assert "adm:image_unlimited" in callbacks
+
+
+@pytest.mark.asyncio
+async def test_handle_image_unlimited_user_id_resolves_telegram_id(monkeypatch) -> None:
+    msg = make_message(text="123456789")
+    msg.answer = AsyncMock()
+    state = AsyncMock()
+    session = AsyncMock()
+    user = SimpleNamespace(id=42, tg_id=123456789, username="tester", full_name="Test User")
+    costs = [
+        SimpleNamespace(
+            id=11,
+            model_key="nano-banana-2",
+            display_name="Nano Banana 2",
+            gen_type=GenerationType.image,
+            is_active=True,
+        )
+    ]
+    repo_stub = SimpleNamespace(
+        get_user_by_tg_id=AsyncMock(return_value=user),
+        get_user_by_id=AsyncMock(),
+        get_all_model_costs=AsyncMock(return_value=costs),
+        get_user_unlimited_image_model_ids=AsyncMock(return_value=set()),
+    )
+    monkeypatch.setattr(admin, "repo", repo_stub)
+
+    await admin.handle_image_unlimited_user_id(msg, state, session)
+
+    repo_stub.get_user_by_tg_id.assert_awaited_once_with(session, 123456789)
+    repo_stub.get_user_by_id.assert_not_awaited()
+    state.update_data.assert_awaited_with(image_unlimited_user_id=42)
+    state.set_state.assert_awaited_with(admin.AdminFSM.manage_image_unlimited)
+    markup = msg.answer.await_args.kwargs["reply_markup"]
+    callbacks = {
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    }
+    assert "adm:iu:toggle:11" in callbacks
+
+
 @pytest.mark.asyncio
 async def test_handle_admin_ai_request_requires_confirmation(monkeypatch) -> None:
     msg = make_message(text="начисли 50 бананов пользователю 123456789")

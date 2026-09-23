@@ -2046,18 +2046,22 @@ async def create_image_generation(
             raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
         if body.model == "midjourney-imagine" and not user_prompt:
             raise HTTPException(status_code=422, detail="Prompt is required")
-        if user.credits < model_cost.credits:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}")
         await _reconcile_user_active_generations(session, user.id)
         active = await repo.count_user_active_generations(session, user.id)
         if active >= MAX_CONCURRENT:
             raise HTTPException(status_code=429, detail="Too many concurrent generations")
-        ok = await repo.spend_credits(session, user.id, model_cost.credits)
-        if not ok:
+        charge = await repo.charge_image_generation(
+            session,
+            user_id=user.id,
+            model_key=body.model,
+            amount=model_cost.credits,
+        )
+        if not charge.allowed:
             raise HTTPException(status_code=402, detail="Failed to spend credits")
+        charged_credits = charge.charged_credits
         gen_prompt = user_prompt or f"blend:{len(all_refs)}"
         image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None, reference_urls=all_refs)
-        gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, model_cost.credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial, input_params=prompt_meta)
+        gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, charged_credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial, input_params=prompt_meta)
         try:
             if body.model == "midjourney-imagine":
                 task_id = await midjourney_service.imagine(user_prompt, reference_url=all_refs[0] if all_refs else None)
@@ -2066,8 +2070,8 @@ async def create_image_generation(
                 task_id = await midjourney_service.blend(blend_images, dimensions=MJDimensions(_MJ_BLEND_DIMENSIONS.get(normalized_ratio or "1:1", "SQUARE")))
         except Exception as exc:
             logger.error("miniapp Midjourney image error user=%s model=%s: %s", user.id, body.model, exc)
-            if await repo.fail_generation(session, gen.id, str(exc)):
-                await repo.add_credits(session, user.id, model_cost.credits)
+            if await repo.fail_generation(session, gen.id, str(exc)) and charged_credits > 0:
+                await repo.add_credits(session, user.id, charged_credits)
             raise HTTPException(status_code=502, detail="Generation service error")
         await repo.update_generation_task(session, gen.id, task_id_for_surface(task_id, surface))
         await repo.update_image_session_last_prompt(session, image_session.id, gen_prompt)
@@ -2075,7 +2079,7 @@ async def create_image_generation(
             session,
             prompt_id=getattr(prompt_source, "id", None),
             user_id=user.id,
-            credits_spent=model_cost.credits,
+            credits_spent=charged_credits,
         )
         await session.refresh(gen)
         return _gen_out(gen)
@@ -2103,20 +2107,23 @@ async def create_image_generation(
         raise HTTPException(status_code=422, detail="Unsupported count for selected model")
     has_ref = bool(all_refs)
 
-    if user.credits < model_cost.credits:
-        raise HTTPException(
-            status_code=402,
-            detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}",
-        )
-
     await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-    ok = await repo.spend_credits(session, user.id, model_cost.credits)
-    if not ok:
-        raise HTTPException(status_code=402, detail="Failed to spend credits")
+    charge = await repo.charge_image_generation(
+        session,
+        user_id=user.id,
+        model_key=body.model,
+        amount=model_cost.credits,
+    )
+    if not charge.allowed:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}",
+        )
+    charged_credits = charge.charged_credits
 
     # Determine mode from reference presence
     image_session = await repo.create_image_session(
@@ -2135,7 +2142,7 @@ async def create_image_generation(
 
     gen = await repo.create_generation(
         session, user.id, body.model, GenerationType.image,
-        user_prompt, model_cost.credits,
+        user_prompt, charged_credits,
         image_session_id=image_session.id,
         action_type=ImageGenerationAction.initial,
         input_params=prompt_meta,
@@ -2159,8 +2166,8 @@ async def create_image_generation(
         )
     except Exception as exc:
         logger.error("miniapp image gen error user=%s: %s", user.id, exc)
-        if await repo.fail_generation(session, gen.id, str(exc)):
-            await repo.add_credits(session, user.id, model_cost.credits)
+        if await repo.fail_generation(session, gen.id, str(exc)) and charged_credits > 0:
+            await repo.add_credits(session, user.id, charged_credits)
         raise HTTPException(status_code=502, detail=image_generation_user_error(exc))
 
     if not getattr(result, "is_async", True):
@@ -2178,7 +2185,7 @@ async def create_image_generation(
         session,
         prompt_id=getattr(prompt_source, "id", None),
         user_id=user.id,
-        credits_spent=model_cost.credits,
+        credits_spent=charged_credits,
     )
 
     await session.refresh(gen)
@@ -2828,18 +2835,29 @@ async def remix_feed_post(
             refs = video_refs
             motion_value = body.grok_mode if body.grok_mode in {"low", "high"} else "low"
 
-        total_credits = model_cost.credits
-        if user.credits < total_credits:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
-
+        nominal_credits = float(model_cost.credits)
         await _reconcile_user_active_generations(session, user.id)
         active = await repo.count_user_active_generations(session, user.id)
         if active >= MAX_CONCURRENT:
             raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-        ok = await repo.spend_credits(session, user.id, total_credits)
-        if not ok:
-            raise HTTPException(status_code=402, detail="Failed to spend credits")
+        if gen_type == "image":
+            charge = await repo.charge_image_generation(
+                session,
+                user_id=user.id,
+                model_key=body.model,
+                amount=nominal_credits,
+            )
+            if not charge.allowed:
+                raise HTTPException(status_code=402, detail=f"Insufficient credits: need {nominal_credits}")
+            total_credits = charge.charged_credits
+        else:
+            total_credits = nominal_credits
+            if user.credits < total_credits:
+                raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
+            ok = await repo.spend_credits(session, user.id, total_credits)
+            if not ok:
+                raise HTTPException(status_code=402, detail="Failed to spend credits")
 
         image_session_id: int | None = None
         if gen_type == "image":
@@ -2958,27 +2976,38 @@ async def remix_feed_post(
     if not model_cost:
         raise HTTPException(status_code=422, detail="Model not available")
 
-    total_credits = (
+    nominal_credits = (
         _video_total_credits(
             normalized_video["duration"],
             model_cost.credits,
             is_per_second=_is_per_second_video_model(VIDEO_CAPS.get(body.model, {})),
         )
         if gen_type == "video"
-        else model_cost.credits
+        else float(model_cost.credits)
     )
-
-    if user.credits < total_credits:
-        raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
 
     await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-    ok = await repo.spend_credits(session, user.id, total_credits)
-    if not ok:
-        raise HTTPException(status_code=402, detail="Failed to spend credits")
+    if gen_type == "image":
+        charge = await repo.charge_image_generation(
+            session,
+            user_id=user.id,
+            model_key=body.model,
+            amount=nominal_credits,
+        )
+        if not charge.allowed:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {nominal_credits}")
+        total_credits = charge.charged_credits
+    else:
+        total_credits = nominal_credits
+        if user.credits < total_credits:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
+        ok = await repo.spend_credits(session, user.id, total_credits)
+        if not ok:
+            raise HTTPException(status_code=402, detail="Failed to spend credits")
 
     image_session_id: int | None = None
     if gen_type == "image":
