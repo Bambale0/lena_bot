@@ -42,6 +42,7 @@ from core.model_pricing import pricing_variant_key
 from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
+    GenerationType,
     PricePlan,
     PromoCode,
     PromoRewardType,
@@ -78,6 +79,8 @@ class AdminFSM(StatesGroup):
     # Credits management
     await_credits_tg_id = State()
     await_credits_amount = State()
+    # Per-user unlimited image models
+    await_unlimited_image_tg_ids = State()
     # Ban
     await_ban_tg_id = State()
     # Broadcast
@@ -99,6 +102,7 @@ def admin_menu_kb():
     builder.button(text="🎟 Промокоды", callback_data="adm:promos")
     builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
+    builder.button(text="♾️ Безлимит фото", callback_data="adm:unlimited_images")
     builder.button(text="💰 Начислить кредиты", callback_data="adm:add_credits")
     builder.button(text="🚫 Бан / Разбан", callback_data="adm:ban")
     builder.button(text="🗂 Промпты (модерация)", callback_data="adm:prompts")
@@ -801,6 +805,122 @@ def _credits_done_kb():
     builder.button(text="← Админ-панель", callback_data="adm:back")
     builder.adjust(1)
     return builder.as_markup()
+
+
+UNLIMITED_IMAGE_MODELS_PAGE_SIZE = 8
+UNLIMITED_IMAGE_USERS_MAX = 50
+
+
+def _unlimited_image_model_costs(costs) -> list:
+    return [
+        model
+        for model in costs
+        if getattr(model.gen_type, "value", model.gen_type) == GenerationType.image.value
+        and "__" not in model.model_key
+        and "::" not in model.model_key
+    ]
+
+
+def _unlimited_image_models_kb(
+    costs,
+    *,
+    page: int,
+    selected_user_ids: list[int],
+    entitlements: dict[int, set[str]],
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    pages = max(1, (len(costs) + UNLIMITED_IMAGE_MODELS_PAGE_SIZE - 1) // UNLIMITED_IMAGE_MODELS_PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    start = page * UNLIMITED_IMAGE_MODELS_PAGE_SIZE
+    chunk = costs[start:start + UNLIMITED_IMAGE_MODELS_PAGE_SIZE]
+    selected_count = len(selected_user_ids)
+
+    for model in chunk:
+        enabled_count = sum(
+            1
+            for user_id in selected_user_ids
+            if model.model_key in entitlements.get(user_id, set())
+        )
+        if enabled_count == selected_count and selected_count:
+            status = "✅"
+        elif enabled_count:
+            status = "◐"
+        else:
+            status = "⬜"
+        builder.button(
+            text=f"{status} {model.display_name}",
+            callback_data=f"adm:unlim:toggle:{model.id}:{page}",
+        )
+
+    if pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="←", callback_data=f"adm:unlim:page:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="adm:noop"))
+        if page + 1 < pages:
+            nav.append(InlineKeyboardButton(text="→", callback_data=f"adm:unlim:page:{page + 1}"))
+        builder.row(*nav)
+
+    builder.row(
+        InlineKeyboardButton(text="👥 Другие ID", callback_data="adm:unlimited_images"),
+        InlineKeyboardButton(text="✅ Готово", callback_data="adm:back"),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def _unlimited_image_models_text(*, tg_ids: list[int], missing_tg_ids: list[int] | None = None) -> str:
+    ids = ", ".join(str(tg_id) for tg_id in tg_ids)
+    text = (
+        "♾️ <b>Безлимит на фото-модели</b>\n\n"
+        f"Пользователи: <code>{html.escape(ids)}</code>\n\n"
+        "✅ — включено у всех выбранных\n"
+        "◐ — включено только у части\n"
+        "⬜ — выключено у всех\n\n"
+        "Нажатие на модель переключает безлимит сразу для всех выбранных ID. "
+        "Безлимит отменяет только списание кредитов; лимит параллельных генераций сохраняется."
+    )
+    if missing_tg_ids:
+        missing = ", ".join(str(tg_id) for tg_id in missing_tg_ids)
+        text += f"\n\n⚠️ Не найдены: <code>{html.escape(missing)}</code>"
+    return text
+
+
+async def _render_unlimited_image_models(
+    target,
+    *,
+    state: FSMContext,
+    session: AsyncSession,
+    page: int = 0,
+    edit: bool = False,
+) -> None:
+    data = await state.get_data()
+    user_ids = [int(value) for value in data.get("unlimited_image_user_ids", [])]
+    tg_ids = [int(value) for value in data.get("unlimited_image_tg_ids", [])]
+    missing_tg_ids = [int(value) for value in data.get("unlimited_image_missing_tg_ids", [])]
+    if not user_ids:
+        await state.set_state(AdminFSM.await_unlimited_image_tg_ids)
+        await target.answer("Сначала введи Telegram ID пользователя.")
+        return
+
+    costs = _unlimited_image_model_costs(await repo.get_all_model_costs(session))
+    entitlements = await repo.get_unlimited_image_model_keys_for_users(session, user_ids)
+    text = _unlimited_image_models_text(tg_ids=tg_ids, missing_tg_ids=missing_tg_ids)
+    markup = _unlimited_image_models_kb(
+        costs,
+        page=page,
+        selected_user_ids=user_ids,
+        entitlements=entitlements,
+    )
+    if edit:
+        try:
+            await target.edit_text(text, reply_markup=markup)
+            return
+        except TelegramBadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                return
+            raise
+    await target.answer(text, reply_markup=markup)
 
 
 def _promo_admin_help_text() -> str:
@@ -1978,6 +2098,124 @@ async def handle_model_display_name(message: Message, session: AsyncSession, sta
         f"✅ Название <code>{model_key}</code> обновлено: <b>{new_name}</b>",
         reply_markup=_models_done_kb(),
     )
+
+
+# ─── Безлимит фото ───────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "adm:unlimited_images")
+async def cb_unlimited_images(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await state.set_state(AdminFSM.await_unlimited_image_tg_ids)
+    await call.message.answer(
+        "♾️ <b>Безлимит на фото-модели</b>\n\n"
+        "Введи Telegram ID одного или нескольких пользователей. "
+        f"Можно через пробел, запятую или с новой строки — до {UNLIMITED_IMAGE_USERS_MAX} ID."
+    )
+    await call.answer()
+
+
+@router.message(AdminFSM.await_unlimited_image_tg_ids)
+async def handle_unlimited_image_tg_ids(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    raw_ids = re.findall(r"\d+", message.text or "")
+    tg_ids = list(dict.fromkeys(int(value) for value in raw_ids if int(value) > 0))
+    if not tg_ids:
+        await message.answer("Введи хотя бы один числовой Telegram ID.")
+        return
+    if len(tg_ids) > UNLIMITED_IMAGE_USERS_MAX:
+        await message.answer(f"За один раз можно выбрать не больше {UNLIMITED_IMAGE_USERS_MAX} пользователей.")
+        return
+
+    user_ids: list[int] = []
+    found_tg_ids: list[int] = []
+    missing_tg_ids: list[int] = []
+    for tg_id in tg_ids:
+        user = await repo.get_user_by_tg_id(session, tg_id)
+        if user is None:
+            missing_tg_ids.append(tg_id)
+            continue
+        user_ids.append(int(user.id))
+        found_tg_ids.append(tg_id)
+
+    if not user_ids:
+        await message.answer("Не нашёл ни одного из этих пользователей в APIX. Проверь Telegram ID.")
+        return
+
+    await state.update_data(
+        unlimited_image_user_ids=user_ids,
+        unlimited_image_tg_ids=found_tg_ids,
+        unlimited_image_missing_tg_ids=missing_tg_ids,
+    )
+    await state.set_state(None)
+    await _render_unlimited_image_models(
+        message,
+        state=state,
+        session=session,
+    )
+
+
+@router.callback_query(F.data.startswith("adm:unlim:page:"))
+async def cb_unlimited_images_page(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    page = int(call.data.rsplit(":", 1)[-1])
+    await _render_unlimited_image_models(
+        call.message,
+        state=state,
+        session=session,
+        page=page,
+        edit=True,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:unlim:toggle:"))
+async def cb_unlimited_image_model_toggle(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    _, _, _, model_cost_id_raw, page_raw = call.data.split(":", 4)
+    model_cost = await repo.get_model_cost_by_id(session, int(model_cost_id_raw))
+    if (
+        model_cost is None
+        or getattr(model_cost.gen_type, "value", model_cost.gen_type) != GenerationType.image.value
+        or "__" in model_cost.model_key
+        or "::" in model_cost.model_key
+        or not getattr(model_cost, "is_active", True)
+    ):
+        await call.answer("Фото-модель недоступна", show_alert=True)
+        return
+
+    data = await state.get_data()
+    user_ids = [int(value) for value in data.get("unlimited_image_user_ids", [])]
+    if not user_ids:
+        await call.answer("Сначала выбери пользователей", show_alert=True)
+        return
+
+    current = await repo.get_unlimited_image_model_keys_for_users(session, user_ids)
+    enabled_for_all = all(model_cost.model_key in current.get(user_id, set()) for user_id in user_ids)
+    enabled = not enabled_for_all
+    await repo.set_image_models_unlimited_for_users(
+        session,
+        user_ids=user_ids,
+        model_key=model_cost.model_key,
+        enabled=enabled,
+        admin_tg_id=call.from_user.id,
+    )
+    await _render_unlimited_image_models(
+        call.message,
+        state=state,
+        session=session,
+        page=int(page_raw),
+        edit=True,
+    )
+    await call.answer("♾️ Безлимит включён" if enabled else "Обычная тарификация включена")
 
 
 # ─── Кредиты ─────────────────────────────────────────────────────────────────
