@@ -397,6 +397,35 @@ class ModelCost(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class UserImageModelUnlimited(Base):
+    """Админское право на бесплатные генерации конкретной image-моделью."""
+
+    __tablename__ = "user_image_model_unlimited"
+    __table_args__ = (
+        UniqueConstraint("user_id", "model_key", name="uq_user_image_model_unlimited"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    model_key: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("model_costs.model_key", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_by_admin_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
 # ── Marketplace промптов ───────────────────────────────────────────────────────
 
 class PromptCategory(str, enum.Enum):
