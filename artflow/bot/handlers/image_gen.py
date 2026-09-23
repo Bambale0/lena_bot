@@ -1139,9 +1139,12 @@ async def _show_nana_banano_flow(
         await call.answer("Модель недоступна", show_alert=True)
         return False
 
-    if db_user.credits < model_cost.credits:
+    effective_credits = await repo.effective_image_generation_credits(
+        session, db_user.id, model_key, model_cost.credits
+    )
+    if db_user.credits < effective_credits:
         await call.answer(
-            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋! Нужно {effective_credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         return False
@@ -1157,7 +1160,7 @@ async def _show_nana_banano_flow(
         image_model=model_key,
         mode=mode,
         image_mode=mode,
-        credits=model_cost.credits,
+        credits=effective_credits,
         aspect_ratio=None,
         image_aspect_ratio=None,
         count=1,
@@ -1214,9 +1217,12 @@ async def _start_image_model_flow(
         await call.answer("Модель недоступна", show_alert=True)
         return
 
-    if db_user.credits < model_cost.credits:
+    effective_credits = await repo.effective_image_generation_credits(
+        session, db_user.id, model_key, model_cost.credits
+    )
+    if db_user.credits < effective_credits:
         await call.answer(
-            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋! Нужно {effective_credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         return
@@ -1247,7 +1253,11 @@ async def cb_image_menu(
             quality=image_session.quality,
         )
         await _sync_state_with_image_session(state, image_session)
-        await state.update_data(credits=model_cost.credits if model_cost else 1)
+        configured_credits = model_cost.credits if model_cost else 1
+        effective_credits = await repo.effective_image_generation_credits(
+            session, db_user.id, image_session.model, configured_credits
+        )
+        await state.update_data(credits=effective_credits)
         screen = await render_screen(
             screen="image_active",
             session=session,
