@@ -56,7 +56,14 @@ async def render_screen(
 
     if screen == "image_advanced":
         model_costs = payload.get("model_costs") or await repo.get_all_model_costs(session)
-        return render_image_advanced_menu(public_model_items(model_costs))
+        unlimited_model_keys = (
+            payload.get("unlimited_model_keys")
+            or await repo.get_user_unlimited_image_model_keys(session, db_user.id)
+        )
+        return render_image_advanced_menu(
+            public_model_items(model_costs),
+            unlimited_model_keys=set(unlimited_model_keys),
+        )
 
     if screen == "music":
         music_cost = payload.get("music_cost")
