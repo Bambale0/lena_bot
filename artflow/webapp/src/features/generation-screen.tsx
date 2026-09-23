@@ -172,7 +172,8 @@ function GenerationScreen({
   const missingVideo = (draft.mode === "video" || kind === "motion") && !draft.videoUrl;
   const missingPrompt = !draft.prompt.trim() && !draft.promptId;
   const maxPromptLength = promptMaxLength(kind, selectedModel?.key);
-  const insufficientCredits = estimate > Number(user.credits || 0);
+  const unlimited = kind === "image" && Boolean(selectedModel?.is_unlimited);
+  const insufficientCredits = !unlimited && estimate > Number(user.credits || 0);
   const mediaUploading = referenceUploading || videoUploading;
   const invalidSeed = Boolean(
     selectedModel?.has_seed &&
@@ -528,7 +529,7 @@ function GenerationScreen({
             <div className="apix-launch-row flex items-center justify-between gap-2">
               <div>
                 <p className="text-[10px] text-muted-foreground">Стоимость</p>
-                <p className="text-lg font-bold leading-none">{formatCredits(estimate)} кр.</p>
+                <p className="text-lg font-bold leading-none">{unlimited ? "♾️ Безлимит" : `${formatCredits(estimate)} кр.`}</p>
                 {selectedModel?.is_per_second ? <p className="mt-1 text-[10px] text-muted-foreground">{formatCredits(selectedModel.credits_per_sec ?? selectedModel.credits)} кр./сек</p> : null}
                 {taskCount > 1 ? <p className="mt-1 text-[10px] text-muted-foreground">{taskCount} задачи подряд</p> : null}
               </div>
