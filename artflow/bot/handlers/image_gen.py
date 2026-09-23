@@ -878,7 +878,7 @@ async def _launch_session_generation(
         image_session.model,
         quality=normalized_quality,
     )
-    credits = model_cost.credits if model_cost else 1
+    nominal_credits = float(model_cost.credits if model_cost else 1)
 
     model = _safe_image_model(image_session.model)
     if model is None:
@@ -904,10 +904,16 @@ async def _launch_session_generation(
         )
         return False
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
+    charge = await repo.charge_image_generation(
+        session,
+        user_id=db_user.id,
+        model_key=image_session.model,
+        amount=nominal_credits,
+    )
+    if not charge.allowed:
         await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         return False
+    charged_credits = charge.charged_credits
 
     gen = await repo.create_generation(
         session,
@@ -915,7 +921,7 @@ async def _launch_session_generation(
         image_session.model,
         GenerationType.image,
         prompt,
-        credits,
+        charged_credits,
         image_session_id=image_session.id,
         parent_generation_id=parent_generation_id,
         action_type=action_type,
@@ -955,7 +961,7 @@ async def _launch_session_generation(
     prompt_for_menu = prompt if prompt_actions_allowed else None
     await repo.update_generation_task(session, gen.id, result.task_id or "")
     await _sync_state_with_image_session(state, image_session)
-    await state.update_data(credits=credits, source_feed_gen_id=source_feed_gen_id)
+    await state.update_data(credits=nominal_credits, source_feed_gen_id=source_feed_gen_id)
 
     if not getattr(result, "is_async", True):
         result_urls = _direct_image_result_urls(result)
