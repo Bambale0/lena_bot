@@ -621,6 +621,7 @@ async def get_base_image_model_costs(session: AsyncSession) -> list[ModelCost]:
             ModelCost.gen_type == GenerationType.image,
             ModelCost.is_active.is_(True),
             ~ModelCost.model_key.contains("__"),
+            ~ModelCost.model_key.contains("::"),
         )
         .order_by(ModelCost.display_name, ModelCost.model_key)
     )
@@ -705,7 +706,12 @@ async def set_user_image_model_unlimited(
         select(ModelCost).where(ModelCost.model_key == normalized)
     )
     model = model_result.scalar_one_or_none()
-    if not model or model.gen_type != GenerationType.image or "__" in normalized:
+    if (
+        not model
+        or model.gen_type != GenerationType.image
+        or "__" in normalized
+        or "::" in normalized
+    ):
         raise ValueError("Only base image models can be unlimited")
 
     existing_result = await session.execute(
