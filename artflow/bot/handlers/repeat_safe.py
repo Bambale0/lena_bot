@@ -241,7 +241,13 @@ async def _prepare_repeat(
     if not model_cost:
         await safe_answer_callback(call, "Модель исходной генерации сейчас недоступна.", show_alert=True)
         return
-    cost = 0.0 if _is_admin(db_user) else float(model_cost.credits or 0)
+    cost = (
+        0.0
+        if _is_admin(db_user)
+        else await repo.effective_image_generation_credits(
+            session, db_user.id, model_key, model_cost.credits
+        )
+    )
     public_id = str(payload.get("public_task_id") or raw_task_id or generation.id)
     confirm_key = f"repeat-{generation.id}-{db_user.id}-{secrets.token_urlsafe(8)}"
     is_pinterest = snapshot.get("flow") == "pinterest"
