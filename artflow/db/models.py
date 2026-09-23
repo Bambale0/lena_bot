@@ -411,7 +411,6 @@ class UserImageModelEntitlement(Base):
         Integer,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     model_key: Mapped[str] = mapped_column(String(64), nullable=False)
     is_unlimited: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="true")
