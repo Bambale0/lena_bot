@@ -423,11 +423,17 @@ async def handle_imagine_prompt(
     base64_array = [reference_b64] if reference_b64 else None
     submitted_prompt = f"{reference_url} {prompt}".strip() if reference_url else prompt
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
+    charge = await repo.charge_image_generation(
+        session,
+        user_id=db_user.id,
+        model_key=_MJ_IMAGINE_MODEL,
+        amount=credits,
+    )
+    if not charge.allowed:
         await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
         return
+    credits = charge.charged_credits
 
     gen = await repo.create_generation(
         session, db_user.id, _MJ_IMAGINE_MODEL, GenerationType.image, prompt, credits
@@ -501,16 +507,16 @@ async def cb_mj_action(
     model_cost = await repo.get_model_cost(session, _MJ_ACTION_MODEL)
     credits = model_cost.credits if model_cost else 3
 
-    if db_user.credits < credits:
-        await call.answer(
-            f"Недостаточно 💋 ({credits})", show_alert=True
-        )
-        return
-
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
+    charge = await repo.charge_image_generation(
+        session,
+        user_id=db_user.id,
+        model_key=_MJ_ACTION_MODEL,
+        amount=credits,
+    )
+    if not charge.allowed:
         await call.answer("Недостаточно 💋", show_alert=True)
         return
+    credits = charge.charged_credits
 
     label = (btn_data.get("emoji", "") + btn_data.get("label", "")).strip()
     await call.answer(f"⏳ Выполняю: {label}")
@@ -519,7 +525,8 @@ async def cb_mj_action(
     try:
         new_task_id = await mj.action(task_id, custom_id)
     except Exception as e:
-        await repo.add_credits(session, db_user.id, credits)
+        if credits > 0:
+            await repo.add_credits(session, db_user.id, credits)
         await call.message.answer(  # type: ignore[union-attr]
             f"❌ Ошибка: {e}", reply_markup=main_menu_kb()
         )
@@ -726,10 +733,16 @@ async def cb_blend_submit(
         await call.answer("Нужно минимум 2 изображения", show_alert=True)
         return
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
+    charge = await repo.charge_image_generation(
+        session,
+        user_id=db_user.id,
+        model_key=_MJ_BLEND_MODEL,
+        amount=credits,
+    )
+    if not charge.allowed:
         await call.answer("Недостаточно 💋", show_alert=True)
         return
+    credits = charge.charged_credits
 
     await state.set_state(MidjourneyFSM.blend_generating)
     status_msg = await call.message.answer(  # type: ignore[union-attr]
@@ -815,11 +828,17 @@ async def handle_describe_photo(
     data = await state.get_data()
     credits: int = data.get("describe_credits", 5)
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
+    charge = await repo.charge_image_generation(
+        session,
+        user_id=db_user.id,
+        model_key=_MJ_DESCRIBE_MODEL,
+        amount=credits,
+    )
+    if not charge.allowed:
         await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
         return
+    credits = charge.charged_credits
 
     photo: PhotoSize = message.photo[-1]  # type: ignore[index]
     file = await bot.get_file(photo.file_id)
