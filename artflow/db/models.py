@@ -397,6 +397,33 @@ class ModelCost(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class UserImageModelEntitlement(Base):
+    """Per-user unlimited access to a specific image generation model."""
+
+    __tablename__ = "user_image_model_entitlements"
+    __table_args__ = (
+        UniqueConstraint("user_id", "model_key", name="uq_user_image_model_entitlements_user_model"),
+        Index("ix_user_image_model_entitlements_user_active", "user_id", "is_unlimited"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    model_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_unlimited: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="true")
+    granted_by_tg_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 # ── Marketplace промптов ───────────────────────────────────────────────────────
 
 class PromptCategory(str, enum.Enum):
