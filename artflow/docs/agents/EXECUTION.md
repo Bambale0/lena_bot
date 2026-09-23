@@ -128,3 +128,69 @@ Date: 2026-09-20.
 6. [x] PR #153 CI: APIX backend-quality, frontend build + Playwright Mini App smoke, Feed Security Contracts, Provider Contract Compliance, Pinterest Backend Contract, and Photo Prompt Integration all passed on the implementation SHA.
 7. [ ] Merge / production autodeploy / production smoke.
 
+---
+
+# Execution ledger — per-user unlimited image models
+
+Baseline: commit `9773b96e`.
+Date: 2026-09-23.
+
+## Current state
+- Image model prices are database-backed through `model_costs` and editable in Telegram `/admin`.
+- Image charging existed independently in text-bot image sessions, Midjourney image flows, and Mini App/Web image/remix handlers.
+- Early balance checks existed before the final spend in several text-bot image flows.
+- Generation failure/refund logic uses `Generation.credits_spent`, so unlimited generations must persist zero charged credits to avoid phantom refunds.
+- Video, music and analysis tools have separate billing paths and are out of scope.
+
+## Intended outcome
+- Admin can enter a Telegram ID or internal user ID and toggle unlimited access for selected active image models.
+- Entitled users can generate with the selected image models even with zero balance.
+- Unlimited applies only to the selected image model roots, including their pricing-quality variants.
+- All other models and media types retain normal billing.
+
+## Data model and control plane
+- New table `user_image_model_unlimited` with unique `(user_id, model_key)`.
+- Foreign keys use cascade semantics; admin actor and creation timestamp are recorded.
+- Admin callbacks use numeric `model_cost_id` to stay under Telegram callback limits, while persistence stores normalized base `model_key`.
+- Only active `GenerationType.image` base rows are selectable in the admin keyboard.
+- No user IDs or model allowlists are hardcoded.
+
+## Billing contract
+- `charge_image_generation()` is the shared image-only charge boundary.
+- Entitled generation: `allowed=True`, `charged_credits=0`, no credit ledger spend.
+- Regular generation: existing atomic `spend_credits()` path is preserved.
+- Every migrated generation path writes the actual charged amount into `Generation.credits_spent`.
+- Existing failure/refund paths therefore refund zero for unlimited work.
+- Video/music billing is unchanged.
+
+## Surfaces
+- `telegram_bot`: image session, default/advanced image wizard, Nano Banana flows, Midjourney image/imagine/action/blend/describe.
+- `mini_app` and `site/web`: primary image generation and image remix/feed-repeat paths share `miniapp_routes` billing.
+- Admin: Telegram `/admin -> ♾ Фото-безлимит`.
+
+## Observability
+- Entitlement enable/disable/clear logs include user id, normalized model key and admin Telegram id.
+- Unlimited billing bypass logs user id, model key and nominal credits without secrets or prompt/media content.
+
+## Verification evidence so far
+- TDD schema RED: `UserImageModelUnlimited` missing test failed before implementation.
+- Schema test GREEN after model/migration implementation.
+- Admin selector RED: missing `bot.keyboards.admin_unlimited` failed before implementation.
+- Admin selector GREEN: 2/2.
+- Python compile succeeded for all touched Python modules.
+- Focused integration run: 35/35 passed, covering Midjourney, admin entry/FSM, repository charge contract, selector contract, schema contract, and zero-credit generation record.
+- A broader local `test_image_gen_references.py` run has one pre-existing unrelated signature mismatch (`cb_image_model` test omits current `db_user` argument); the new unlimited node itself passes.
+- Local isolated repository tests can hit a pre-existing circular-import collection issue; exact-head GitHub CI remains the authoritative full gate.
+
+## Steps
+1. [x] Preflight: repository instructions, local project skills, tool repos and billing/admin architecture audited.
+2. [x] Implementation plan written before production changes.
+3. [x] RED/GREEN tests for schema and admin selector.
+4. [x] Schema, migration and repository entitlement/charge helpers implemented.
+5. [x] Telegram admin control plane implemented.
+6. [x] Text-bot image billing and early balance checks migrated.
+7. [x] Mini App/Web primary image and remix billing migrated.
+8. [x] Focused tests added to the maintained PR CI gate.
+9. [ ] Diff review and exact-head CI.
+10. [ ] Merge, Alembic production upgrade, autodeploy, health and log smoke.
+
