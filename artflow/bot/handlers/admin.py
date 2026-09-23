@@ -31,6 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.filters.admin import IsAdmin
+from bot.keyboards.admin_unlimited import image_unlimited_models_kb
 from bot.keyboards.models import model_cost_display_text
 from bot.services import admin_ai_service
 from bot.services.broadcasts import SEGMENT_LABELS, deliver_broadcast, get_recipient_ids
@@ -78,6 +79,9 @@ class AdminFSM(StatesGroup):
     # Credits management
     await_credits_tg_id = State()
     await_credits_amount = State()
+    # Per-user image model unlimited access
+    await_image_unlimited_user_id = State()
+    manage_image_unlimited = State()
     # Ban
     await_ban_tg_id = State()
     # Broadcast
@@ -99,6 +103,7 @@ def admin_menu_kb():
     builder.button(text="🎟 Промокоды", callback_data="adm:promos")
     builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
+    builder.button(text="♾ Фото-безлимит", callback_data="adm:image_unlimited")
     builder.button(text="💰 Начислить кредиты", callback_data="adm:add_credits")
     builder.button(text="🚫 Бан / Разбан", callback_data="adm:ban")
     builder.button(text="🗂 Промпты (модерация)", callback_data="adm:prompts")
@@ -1978,6 +1983,171 @@ async def handle_model_display_name(message: Message, session: AsyncSession, sta
         f"✅ Название <code>{model_key}</code> обновлено: <b>{new_name}</b>",
         reply_markup=_models_done_kb(),
     )
+
+
+# ─── Фото-безлимит ───────────────────────────────────────────────────────────
+
+async def _resolve_image_unlimited_user(session: AsyncSession, raw_id: str) -> User | None:
+    try:
+        numeric_id = int((raw_id or "").strip())
+    except ValueError:
+        return None
+    user = await repo.get_user_by_tg_id(session, numeric_id)
+    if user:
+        return user
+    return await repo.get_user_by_id(session, numeric_id)
+
+
+def _image_unlimited_user_text(user: User, enabled_count: int) -> str:
+    username = f"@{user.username}" if user.username else "без username"
+    return (
+        "♾ <b>Фото-безлимит</b>\n\n"
+        f"Пользователь: <b>{html.escape(user.full_name or username)}</b> ({html.escape(username)})\n"
+        f"Telegram ID: <code>{user.tg_id}</code>\n"
+        f"Внутренний ID: <code>{user.id}</code>\n"
+        f"Безлимитных моделей: <b>{enabled_count}</b>\n\n"
+        "Нажимай на модели ниже, чтобы включать или выключать безлимит. "
+        "Безлимит действует только на генерацию изображений этой моделью."
+    )
+
+
+async def _render_image_unlimited_user(
+    holder: Message,
+    *,
+    session: AsyncSession,
+    user: User,
+    edit: bool,
+) -> None:
+    costs = await repo.get_all_model_costs(session)
+    enabled_ids = await repo.get_user_unlimited_image_model_ids(session, user.id)
+    markup = image_unlimited_models_kb(costs, enabled_model_ids=enabled_ids)
+    text = _image_unlimited_user_text(user, len(enabled_ids))
+    if edit:
+        await _edit_or_answer(holder, text, reply_markup=markup)
+    else:
+        await holder.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data == "adm:image_unlimited")
+async def cb_image_unlimited(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await state.set_state(AdminFSM.await_image_unlimited_user_id)
+    await call.message.answer(
+        "♾ <b>Фото-безлимит</b>\n\n"
+        "Введи Telegram ID или внутренний ID пользователя.\n"
+        "После этого выберешь модели, которые будут для него бесплатными."
+    )
+    await call.answer()
+
+
+@router.message(AdminFSM.await_image_unlimited_user_id)
+async def handle_image_unlimited_user_id(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    raw_id = (message.text or "").strip()
+    user = await _resolve_image_unlimited_user(session, raw_id)
+    if not user:
+        await message.answer("❌ Пользователь с таким ID не найден. Попробуй ещё раз.")
+        return
+
+    await state.update_data(image_unlimited_user_id=user.id)
+    await state.set_state(AdminFSM.manage_image_unlimited)
+    await _render_image_unlimited_user(
+        message,
+        session=session,
+        user=user,
+        edit=False,
+    )
+
+
+@router.callback_query(F.data == "adm:iu:other")
+async def cb_image_unlimited_other(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(image_unlimited_user_id=None)
+    await state.set_state(AdminFSM.await_image_unlimited_user_id)
+    await call.message.answer("Введи Telegram ID или внутренний ID другого пользователя:")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:iu:toggle:"))
+async def cb_image_unlimited_toggle(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    data = await state.get_data()
+    target_user_id = data.get("image_unlimited_user_id")
+    if not target_user_id:
+        await safe_answer_callback(call, "Сначала выбери пользователя")
+        await state.set_state(AdminFSM.await_image_unlimited_user_id)
+        return
+
+    try:
+        model_cost_id = int(str(call.data).rsplit(":", 1)[1])
+    except (TypeError, ValueError):
+        await safe_answer_callback(call, "Некорректная модель")
+        return
+
+    user = await repo.get_user_by_id(session, int(target_user_id))
+    if not user:
+        await safe_answer_callback(call, "Пользователь не найден")
+        await state.clear()
+        return
+
+    enabled_ids = await repo.get_user_unlimited_image_model_ids(session, user.id)
+    enable = model_cost_id not in enabled_ids
+    try:
+        await repo.set_user_image_model_unlimited(
+            session,
+            user_id=user.id,
+            model_cost_id=model_cost_id,
+            enabled=enable,
+            admin_tg_id=getattr(call.from_user, "id", None),
+        )
+    except ValueError as exc:
+        await safe_answer_callback(call, str(exc))
+        return
+
+    await _render_image_unlimited_user(
+        call.message,
+        session=session,
+        user=user,
+        edit=True,
+    )
+    await safe_answer_callback(call, "Безлимит включён" if enable else "Безлимит выключен")
+
+
+@router.callback_query(F.data == "adm:iu:clear")
+async def cb_image_unlimited_clear(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    data = await state.get_data()
+    target_user_id = data.get("image_unlimited_user_id")
+    if not target_user_id:
+        await safe_answer_callback(call, "Сначала выбери пользователя")
+        return
+
+    user = await repo.get_user_by_id(session, int(target_user_id))
+    if not user:
+        await safe_answer_callback(call, "Пользователь не найден")
+        await state.clear()
+        return
+
+    removed = await repo.clear_user_image_model_unlimited(
+        session,
+        user.id,
+        admin_tg_id=getattr(call.from_user, "id", None),
+    )
+    await _render_image_unlimited_user(
+        call.message,
+        session=session,
+        user=user,
+        edit=True,
+    )
+    await safe_answer_callback(call, f"Снято моделей: {removed}")
 
 
 # ─── Кредиты ─────────────────────────────────────────────────────────────────
