@@ -1073,6 +1073,60 @@ async def test_handle_session_prompt_promotes_stale_text_mode_from_stored_refs()
 
 
 @pytest.mark.asyncio
+async def test_launch_session_generation_unlimited_model_skips_credit_spend() -> None:
+    source_message = AsyncMock()
+    status_msg = AsyncMock()
+    source_message.answer = AsyncMock(return_value=status_msg)
+    state = AsyncMock()
+    session = AsyncMock()
+    db_user = SimpleNamespace(id=42)
+    image_session = SimpleNamespace(
+        id=7,
+        model="nano-banana-2",
+        mode="text",
+        aspect_ratio="1:1",
+        quality="basic",
+        count=1,
+        reference_file_id=None,
+        reference_file_ids=None,
+    )
+    generation = SimpleNamespace(id=99)
+    repo_stub = SimpleNamespace(
+        resolve_image_model_cost=AsyncMock(return_value=SimpleNamespace(credits=4)),
+        effective_image_generation_credits=AsyncMock(return_value=0.0),
+        count_user_active_generations=AsyncMock(return_value=0),
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=generation),
+        update_image_session_last_prompt=AsyncMock(),
+        update_generation_task=AsyncMock(),
+    )
+    generate_image = AsyncMock(return_value=SimpleNamespace(task_id="task_unlimited", is_async=True))
+
+    with (
+        patch("bot.handlers.image_gen.repo", new=repo_stub),
+        patch("bot.handlers.image_gen.image_service.generate_image", generate_image),
+    ):
+        ok = await image_gen._launch_session_generation(
+            source_message=source_message,
+            state=state,
+            session=session,
+            db_user=db_user,
+            image_session=image_session,
+            prompt="portrait",
+            action_type=image_gen.ImageGenerationAction.initial,
+            reference_url=None,
+            parent_generation_id=None,
+            launching_text="launching",
+            queued_text="queued",
+        )
+
+    assert ok is True
+    repo_stub.spend_credits.assert_not_awaited()
+    assert repo_stub.create_generation.await_args.args[5] == 0.0
+    assert state.update_data.await_args.kwargs["credits"] == 0.0
+
+
+@pytest.mark.asyncio
 async def test_launch_session_generation_allows_dual_mode_model_without_reference() -> None:
     source_message = AsyncMock()
     status_msg = AsyncMock()
