@@ -47,10 +47,23 @@ def stub_image_quality_prices(monkeypatch) -> None:
 
 @pytest.fixture
 async def client():
+    async def listed_image_credits(_session, _user_id, _model_key, listed_credits):
+        return float(listed_credits)
+
     app.dependency_overrides[get_session] = fake_session
     app.dependency_overrides[get_miniapp_user] = fake_user
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+    with (
+        patch(
+            "api.miniapp_routes.repo.effective_image_generation_credits",
+            AsyncMock(side_effect=listed_image_credits),
+        ),
+        patch(
+            "api.miniapp_routes.repo.get_user_unlimited_image_model_keys",
+            AsyncMock(return_value=set()),
+        ),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            yield ac
     app.dependency_overrides.clear()
 
 
