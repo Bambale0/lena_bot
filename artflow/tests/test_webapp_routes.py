@@ -1509,6 +1509,75 @@ async def test_generate_image_spends_selected_quality_price(client, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_generate_image_unlimited_allows_zero_balance_and_records_zero_charge(client, monkeypatch) -> None:
+    async def zero_balance_user():
+        return SimpleNamespace(
+            id=1,
+            tg_id=111,
+            username="tester",
+            full_name="Test User",
+            photo_url=None,
+            credits=0,
+            referral_code="REF",
+            referral_balance=0.0,
+            is_banned=False,
+        )
+
+    app.dependency_overrides[get_miniapp_user] = zero_balance_user
+    charge_image_generation = AsyncMock(
+        return_value=SimpleNamespace(allowed=True, charged_credits=0.0, unlimited=True)
+    )
+    spend_credits = AsyncMock(return_value=False)
+    captured = {}
+
+    async def fake_create_generation(_session, _user_id, model, gen_type, prompt_text, credits_spent, **_kwargs):
+        captured["credits_spent"] = credits_spent
+        return SimpleNamespace(
+            id=505,
+            model=model,
+            gen_type=gen_type,
+            prompt=prompt_text,
+            status=GenerationStatus.processing,
+            result_url=None,
+            result_urls=None,
+            credits_spent=credits_spent,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+        )
+
+    monkeypatch.setattr("api.miniapp_routes.repo.resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=5)))
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.charge_image_generation", charge_image_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend_credits)
+    monkeypatch.setattr("api.miniapp_routes.repo.create_image_session", AsyncMock(return_value=SimpleNamespace(id=81)))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes.repo.update_image_session_last_prompt", AsyncMock())
+    monkeypatch.setattr(
+        "api.miniapp_routes.image_service.generate_image",
+        AsyncMock(return_value=SimpleNamespace(task_id="img_task_unlimited")),
+    )
+
+    response = await client.post(
+        "/api/v1/generate/image",
+        json={
+            "model": "nano-banana-pro",
+            "prompt": "free portrait",
+            "quality": "2K",
+        },
+    )
+
+    assert response.status_code == 202
+    charge_image_generation.assert_awaited_once()
+    assert charge_image_generation.await_args.kwargs["user_id"] == 1
+    assert charge_image_generation.await_args.kwargs["model_key"] == "nano-banana-pro"
+    assert charge_image_generation.await_args.kwargs["amount"] == 5
+    spend_credits.assert_not_awaited()
+    assert captured["credits_spent"] == 0.0
+    assert response.json()["credits_spent"] == 0.0
+
+@pytest.mark.asyncio
 async def test_generate_image_rejects_too_many_refs_for_single_ref_model(client, monkeypatch) -> None:
     monkeypatch.setattr("api.miniapp_routes.repo.resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4)))
 
