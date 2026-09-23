@@ -27,6 +27,7 @@ async def test_feed_use_reference_launches_as_repeat_with_source_parent() -> Non
          patch("bot.handlers.marketplace._default_quality_for_model", return_value="basic"), \
          patch("bot.handlers.marketplace._default_count_for_model", return_value=1), \
          patch("bot.handlers.marketplace.repo.resolve_image_model_cost", AsyncMock(return_value=model_cost)), \
+         patch("bot.handlers.marketplace.repo.effective_image_generation_credits", AsyncMock(return_value=2)), \
          patch("bot.handlers.marketplace.repo.create_image_session", AsyncMock(return_value=image_session)), \
          patch("bot.handlers.image_gen._launch_session_generation", AsyncMock(return_value=True)) as launch:
         await marketplace.fsm_prompt_use_reference(message, AsyncMock(), db_user, state, AsyncMock())
