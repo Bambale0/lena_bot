@@ -3363,6 +3363,11 @@ class AdminCreditsRequest(BaseModel):
     note: str | None = None
 
 
+class AdminImageEntitlementRequest(BaseModel):
+    model_key: str = Field(..., min_length=1, max_length=64)
+    unlimited: bool
+
+
 class AdminBanRequest(BaseModel):
     banned: bool
 
@@ -3608,6 +3613,67 @@ async def admin_user_detail(
             }
             for item in withdrawals
         ],
+    }
+
+
+@router.get("/admin/users/{user_id}/image-entitlements")
+async def admin_user_image_entitlements(
+    user_id: int,
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _admin_guard(user)
+    target = await repo.get_user_by_id(session, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    models = await repo.get_base_image_model_costs(session)
+    entitlements = await repo.get_user_image_model_entitlements(session, user_id)
+    enabled = {item.model_key for item in entitlements}
+    return {
+        "user": {
+            "id": int(target.id),
+            "tg_id": int(target.tg_id),
+            "username": target.username,
+            "full_name": target.full_name,
+        },
+        "models": [
+            {
+                "id": int(item.id),
+                "key": item.model_key,
+                "display_name": item.display_name,
+                "unlimited": item.model_key in enabled,
+            }
+            for item in models
+        ],
+    }
+
+
+@router.put("/admin/users/{user_id}/image-entitlements")
+async def admin_set_user_image_entitlement(
+    user_id: int,
+    body: AdminImageEntitlementRequest,
+    user: User = Depends(get_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _admin_guard(user)
+    target = await repo.get_user_by_id(session, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        await repo.set_user_image_model_unlimited(
+            session,
+            user_id=user_id,
+            model_key=body.model_key,
+            enabled=body.unlimited,
+            created_by_tg_id=int(getattr(user, "tg_id", 0) or 0) or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "model_key": body.model_key,
+        "unlimited": body.unlimited,
     }
 
 
