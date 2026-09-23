@@ -327,7 +327,10 @@ async def cb_speed(call: CallbackQuery, state: FSMContext, session: AsyncSession
     speed_val = call.data.split(":")[1]  # type: ignore[union-attr]
 
     model_cost = await repo.get_model_cost(session, _MJ_IMAGINE_MODEL)
-    credits = model_cost.credits if model_cost else 10
+    configured_credits = model_cost.credits if model_cost else 10
+    credits = await repo.effective_image_generation_credits(
+        session, db_user.id, _MJ_IMAGINE_MODEL, configured_credits
+    )
 
     if db_user.credits < credits:
         await call.answer(
@@ -423,7 +426,7 @@ async def handle_imagine_prompt(
     base64_array = [reference_b64] if reference_b64 else None
     submitted_prompt = f"{reference_url} {prompt}".strip() if reference_url else prompt
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
+    ok = True if credits <= 0 else await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
@@ -499,7 +502,10 @@ async def cb_mj_action(
     custom_id = btn_data["custom_id"]
 
     model_cost = await repo.get_model_cost(session, _MJ_ACTION_MODEL)
-    credits = model_cost.credits if model_cost else 3
+    configured_credits = model_cost.credits if model_cost else 3
+    credits = await repo.effective_image_generation_credits(
+        session, db_user.id, _MJ_ACTION_MODEL, configured_credits
+    )
 
     if db_user.credits < credits:
         await call.answer(
@@ -507,7 +513,7 @@ async def cb_mj_action(
         )
         return
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
+    ok = True if credits <= 0 else await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await call.answer("Недостаточно 💋", show_alert=True)
         return
@@ -519,7 +525,8 @@ async def cb_mj_action(
     try:
         new_task_id = await mj.action(task_id, custom_id)
     except Exception as e:
-        await repo.add_credits(session, db_user.id, credits)
+        if credits > 0:
+            await repo.add_credits(session, db_user.id, credits)
         await call.message.answer(  # type: ignore[union-attr]
             f"❌ Ошибка: {e}", reply_markup=main_menu_kb()
         )
@@ -660,7 +667,10 @@ async def _submit_modal(
 @router.callback_query(F.data == "mj:blend")
 async def cb_blend_start(call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User) -> None:
     model_cost = await repo.get_model_cost(session, _MJ_BLEND_MODEL)
-    credits = model_cost.credits if model_cost else 12
+    configured_credits = model_cost.credits if model_cost else 12
+    credits = await repo.effective_image_generation_credits(
+        session, db_user.id, _MJ_BLEND_MODEL, configured_credits
+    )
 
     if db_user.credits < credits:
         await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
@@ -726,7 +736,7 @@ async def cb_blend_submit(
         await call.answer("Нужно минимум 2 изображения", show_alert=True)
         return
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
+    ok = True if credits <= 0 else await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await call.answer("Недостаточно 💋", show_alert=True)
         return
@@ -782,7 +792,10 @@ async def cb_blend_add(call: CallbackQuery) -> None:
 @router.callback_query(F.data == "mj:describe")
 async def cb_describe_start(call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User) -> None:
     model_cost = await repo.get_model_cost(session, _MJ_DESCRIBE_MODEL)
-    credits = model_cost.credits if model_cost else 5
+    configured_credits = model_cost.credits if model_cost else 5
+    credits = await repo.effective_image_generation_credits(
+        session, db_user.id, _MJ_DESCRIBE_MODEL, configured_credits
+    )
 
     if db_user.credits < credits:
         await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
@@ -815,7 +828,7 @@ async def handle_describe_photo(
     data = await state.get_data()
     credits: int = data.get("describe_credits", 5)
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
+    ok = True if credits <= 0 else await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
