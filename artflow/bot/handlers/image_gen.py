@@ -1139,7 +1139,10 @@ async def _show_nana_banano_flow(
         await call.answer("Модель недоступна", show_alert=True)
         return False
 
-    if db_user.credits < model_cost.credits:
+    if (
+        db_user.credits < model_cost.credits
+        and not await repo.has_unlimited_image_model(session, db_user.id, model_key)
+    ):
         await call.answer(
             f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
@@ -1214,7 +1217,10 @@ async def _start_image_model_flow(
         await call.answer("Модель недоступна", show_alert=True)
         return
 
-    if db_user.credits < model_cost.credits:
+    if (
+        db_user.credits < model_cost.credits
+        and not await repo.has_unlimited_image_model(session, db_user.id, model_key)
+    ):
         await call.answer(
             f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
             show_alert=True,
