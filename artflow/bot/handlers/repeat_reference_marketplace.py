@@ -352,9 +352,15 @@ async def _run(
     if not model_cost:
         await call.answer("Модель недоступна", show_alert=True)
         return
-    if db_user.credits < model_cost.credits:
+    charged_credits = await repo.effective_image_generation_credits(
+        session,
+        db_user.id,
+        model_key,
+        model_cost.credits,
+    )
+    if db_user.credits < charged_credits:
         await call.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋. Нужно {charged_credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         return
@@ -406,7 +412,7 @@ async def _run(
         session,
         prompt.id,
         db_user.id,
-        credits_spent=model_cost.credits,
+        credits_spent=charged_credits,
     )
     image_session = await repo.create_image_session(
         session=session,
