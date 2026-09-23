@@ -88,7 +88,7 @@ async def test_cb_speed_insufficient_credits() -> None:
     call.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_cost = SimpleNamespace(credits=10, display_name="MJ Standard")
-    with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
+    with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost), has_unlimited_image_model=AsyncMock(return_value=False))):
         await midjourney.cb_speed(call, AsyncMock(), AsyncMock(), mock_db_user)
     call.answer.assert_awaited_once()
     # answer("text", show_alert=True) → keyword arg
@@ -170,7 +170,7 @@ async def test_handle_imagine_prompt_success(_close_background_tasks) -> None:
     mock_gen = SimpleNamespace(id=100, task_id=None)
 
     with patch("bot.handlers.midjourney.repo", AsyncMock(
-        spend_credits=AsyncMock(return_value=True),
+        charge_image_generation=AsyncMock(return_value=SimpleNamespace(allowed=True, charged_credits=10, unlimited=False)),
         create_generation=AsyncMock(return_value=mock_gen),
         update_generation_task=AsyncMock(),
     )):
@@ -256,7 +256,7 @@ async def test_handle_imagine_prompt_prepends_reference_url() -> None:
     imagine_mock = AsyncMock(return_value="task_abc_123")
 
     with patch("bot.handlers.midjourney.repo", AsyncMock(
-        spend_credits=AsyncMock(return_value=True),
+        charge_image_generation=AsyncMock(return_value=SimpleNamespace(allowed=True, charged_credits=10, unlimited=False)),
         create_generation=AsyncMock(return_value=mock_gen),
         update_generation_task=AsyncMock(),
     )):
@@ -275,7 +275,7 @@ async def test_handle_imagine_prompt_insufficient_credits() -> None:
     msg.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_state = _fake_state(credits=10)
-    with patch("bot.handlers.midjourney.repo", AsyncMock(spend_credits=AsyncMock(return_value=False))):
+    with patch("bot.handlers.midjourney.repo", AsyncMock(charge_image_generation=AsyncMock(return_value=SimpleNamespace(allowed=False, charged_credits=0, unlimited=False)))):
         await midjourney.handle_imagine_prompt(msg, mock_state, AsyncMock(), mock_db_user, AsyncMock())
     msg.answer.assert_awaited_once()
     assert "недостаточно" in msg.answer.call_args[0][0].lower()
@@ -300,7 +300,7 @@ async def test_cb_blend_start_insufficient_credits() -> None:
     call.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_cost = SimpleNamespace(credits=15, display_name="MJ Blend")
-    with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
+    with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost), has_unlimited_image_model=AsyncMock(return_value=False))):
         await midjourney.cb_blend_start(call, AsyncMock(), AsyncMock(), mock_db_user)
     call.answer.assert_awaited_once()
     # answer("text", show_alert=True) → keyword arg
@@ -331,7 +331,7 @@ async def test_cb_blend_submit_stores_status_message_for_webhook_completion() ->
 
     with (
         patch("bot.handlers.midjourney.repo", AsyncMock(
-            spend_credits=AsyncMock(return_value=True),
+            charge_image_generation=AsyncMock(return_value=SimpleNamespace(allowed=True, charged_credits=12, unlimited=False)),
             create_generation=AsyncMock(return_value=mock_gen),
             update_generation_task=AsyncMock(),
         )),
@@ -378,7 +378,7 @@ async def test_cb_describe_start_success() -> None:
     call.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     mock_cost = SimpleNamespace(credits=5, display_name="MJ Describe")
-    with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost))):
+    with patch("bot.handlers.midjourney.repo", AsyncMock(get_model_cost=AsyncMock(return_value=mock_cost), has_unlimited_image_model=AsyncMock(return_value=False))):
         await midjourney.cb_describe_start(call, AsyncMock(), AsyncMock(), mock_db_user)
     assert "Describe" in call.message.edit_text.call_args[0][0]
 
