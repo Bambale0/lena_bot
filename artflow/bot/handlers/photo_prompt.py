@@ -515,9 +515,15 @@ async def cb_generate_selected_model(
     if model_cost is None:
         await call.answer("Модель временно недоступна", show_alert=True)
         return
-    if db_user.credits < model_cost.credits:
+    credits = await repo.effective_image_generation_credits(
+        session,
+        db_user.id,
+        model_key,
+        model_cost.credits,
+    )
+    if db_user.credits < credits:
         await call.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits:g}, у тебя {db_user.credits:g}.",
+            f"Недостаточно 💋. Нужно {credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         return
