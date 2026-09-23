@@ -1386,7 +1386,6 @@ async def _launch_video_generation_from_state(
     parent_generation_id: int | None = None,
     hidden_feed_prompt: bool = False,
 ) -> bool:
-    user_id = db_user.id
     data = await state.get_data()
     model_key: str = data["model_key"]
     duration: int = data.get("duration", 5)
@@ -1873,7 +1872,6 @@ async def cb_regen_video(
     db_user: User,
     bot: Bot,
 ) -> None:
-    user_id = db_user.id
     gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
     prev = await repo.get_generation_by_id(session, gen_id)
     if not prev or prev.user_id != db_user.id or not prev.prompt:
