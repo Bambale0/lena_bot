@@ -878,7 +878,13 @@ async def _launch_session_generation(
         image_session.model,
         quality=normalized_quality,
     )
-    credits = model_cost.credits if model_cost else 1
+    listed_credits = model_cost.credits if model_cost else 1
+    credits = await repo.effective_image_generation_credits(
+        session,
+        db_user.id,
+        image_session.model,
+        listed_credits,
+    )
 
     model = _safe_image_model(image_session.model)
     if model is None:
@@ -904,10 +910,11 @@ async def _launch_session_generation(
         )
         return False
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
-        await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
-        return False
+    if credits > 0:
+        ok = await repo.spend_credits(session, db_user.id, credits)
+        if not ok:
+            await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
+            return False
 
     gen = await repo.create_generation(
         session,
