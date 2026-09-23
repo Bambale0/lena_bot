@@ -1216,6 +1216,7 @@ class ModelInfo(BaseModel):
     has_seed: bool = False
     video_input_prices: dict[str, float] = Field(default_factory=dict)
     price_table: dict[str, dict[int, float]] = Field(default_factory=dict)
+    is_unlimited: bool = False
 
 
 class GenerationOut(BaseModel):
@@ -1851,6 +1852,7 @@ async def list_image_models(
 ) -> list[ModelInfo]:
     """All active image models with costs and capabilities."""
     model_costs = await repo.get_all_model_costs(session)
+    unlimited_keys = await repo.get_user_unlimited_image_model_keys(session, user.id)
     image_keys = {m.value for m in ImageModel} | _MJ_STUDIO_IMAGE_MODELS
     result = []
     for mc in model_costs:
@@ -1858,11 +1860,14 @@ async def list_image_models(
             continue
         caps: dict[str, Any] = IMAGE_CAPS.get(mc.model_key, _MJ_IMAGE_CAPS.get(mc.model_key, {}))
         quality_raw = caps.get("quality_options", [])
+        unlimited = mc.model_key in unlimited_keys
         quality_prices = await _resolve_image_quality_prices(session, mc.model_key, quality_raw, float(mc.credits))
+        if unlimited:
+            quality_prices = {key: 0.0 for key in quality_prices}
         result.append(ModelInfo(
             key=mc.model_key,
             display_name=_friendly_model_name(mc.model_key, mc.display_name),
-            credits=mc.credits,
+            credits=0.0 if unlimited else mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
             aspect_ratio_modes=caps.get("aspect_ratio_modes", caps.get("modes", ["text"])),
@@ -1872,6 +1877,7 @@ async def list_image_models(
             counts=caps.get("counts", [1]),
             has_quality=bool(caps.get("has_quality")),
             max_refs=int(caps.get("max_refs", 1) or 1),
+            is_unlimited=unlimited,
         ))
     order = {key: idx for idx, key in enumerate(_IMAGE_MODEL_ORDER)}
     return sorted(result, key=lambda item: (order.get(item.key, 10_000), item.display_name.lower()))
@@ -2046,18 +2052,25 @@ async def create_image_generation(
             raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
         if body.model == "midjourney-imagine" and not user_prompt:
             raise HTTPException(status_code=422, detail="Prompt is required")
-        if user.credits < model_cost.credits:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}")
+        charged_credits = await repo.effective_image_generation_credits(
+            session,
+            user.id,
+            body.model,
+            model_cost.credits,
+        )
+        if user.credits < charged_credits:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {charged_credits}, have {user.credits}")
         await _reconcile_user_active_generations(session, user.id)
         active = await repo.count_user_active_generations(session, user.id)
         if active >= MAX_CONCURRENT:
             raise HTTPException(status_code=429, detail="Too many concurrent generations")
-        ok = await repo.spend_credits(session, user.id, model_cost.credits)
-        if not ok:
-            raise HTTPException(status_code=402, detail="Failed to spend credits")
+        if charged_credits > 0:
+            ok = await repo.spend_credits(session, user.id, charged_credits)
+            if not ok:
+                raise HTTPException(status_code=402, detail="Failed to spend credits")
         gen_prompt = user_prompt or f"blend:{len(all_refs)}"
         image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None, reference_urls=all_refs)
-        gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, model_cost.credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial, input_params=prompt_meta)
+        gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, charged_credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial, input_params=prompt_meta)
         try:
             if body.model == "midjourney-imagine":
                 task_id = await midjourney_service.imagine(user_prompt, reference_url=all_refs[0] if all_refs else None)
@@ -2066,8 +2079,12 @@ async def create_image_generation(
                 task_id = await midjourney_service.blend(blend_images, dimensions=MJDimensions(_MJ_BLEND_DIMENSIONS.get(normalized_ratio or "1:1", "SQUARE")))
         except Exception as exc:
             logger.error("miniapp Midjourney image error user=%s model=%s: %s", user.id, body.model, exc)
-            if await repo.fail_generation(session, gen.id, str(exc)):
-                await repo.add_credits(session, user.id, model_cost.credits)
+            await repo.fail_generation_and_refund(
+                session,
+                gen.id,
+                str(exc),
+                refund_note="miniapp_midjourney_image",
+            )
             raise HTTPException(status_code=502, detail="Generation service error")
         await repo.update_generation_task(session, gen.id, task_id_for_surface(task_id, surface))
         await repo.update_image_session_last_prompt(session, image_session.id, gen_prompt)
@@ -2075,7 +2092,7 @@ async def create_image_generation(
             session,
             prompt_id=getattr(prompt_source, "id", None),
             user_id=user.id,
-            credits_spent=model_cost.credits,
+            credits_spent=charged_credits,
         )
         await session.refresh(gen)
         return _gen_out(gen)
@@ -2103,10 +2120,16 @@ async def create_image_generation(
         raise HTTPException(status_code=422, detail="Unsupported count for selected model")
     has_ref = bool(all_refs)
 
-    if user.credits < model_cost.credits:
+    charged_credits = await repo.effective_image_generation_credits(
+        session,
+        user.id,
+        body.model,
+        model_cost.credits,
+    )
+    if user.credits < charged_credits:
         raise HTTPException(
             status_code=402,
-            detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}",
+            detail=f"Insufficient credits: need {charged_credits}, have {user.credits}",
         )
 
     await _reconcile_user_active_generations(session, user.id)
@@ -2114,9 +2137,10 @@ async def create_image_generation(
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-    ok = await repo.spend_credits(session, user.id, model_cost.credits)
-    if not ok:
-        raise HTTPException(status_code=402, detail="Failed to spend credits")
+    if charged_credits > 0:
+        ok = await repo.spend_credits(session, user.id, charged_credits)
+        if not ok:
+            raise HTTPException(status_code=402, detail="Failed to spend credits")
 
     # Determine mode from reference presence
     image_session = await repo.create_image_session(
@@ -2135,7 +2159,7 @@ async def create_image_generation(
 
     gen = await repo.create_generation(
         session, user.id, body.model, GenerationType.image,
-        user_prompt, model_cost.credits,
+        user_prompt, charged_credits,
         image_session_id=image_session.id,
         action_type=ImageGenerationAction.initial,
         input_params=prompt_meta,
@@ -2159,8 +2183,12 @@ async def create_image_generation(
         )
     except Exception as exc:
         logger.error("miniapp image gen error user=%s: %s", user.id, exc)
-        if await repo.fail_generation(session, gen.id, str(exc)):
-            await repo.add_credits(session, user.id, model_cost.credits)
+        await repo.fail_generation_and_refund(
+            session,
+            gen.id,
+            str(exc),
+            refund_note="miniapp_image_gen",
+        )
         raise HTTPException(status_code=502, detail=image_generation_user_error(exc))
 
     if not getattr(result, "is_async", True):
@@ -2178,7 +2206,7 @@ async def create_image_generation(
         session,
         prompt_id=getattr(prompt_source, "id", None),
         user_id=user.id,
-        credits_spent=model_cost.credits,
+        credits_spent=charged_credits,
     )
 
     await session.refresh(gen)
