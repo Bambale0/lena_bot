@@ -1235,6 +1235,7 @@ async def _start_image_model_flow(
         session,
         model_key,
         forced_mode=forced_mode,
+        db_user=db_user,
     )
 
 
@@ -1591,7 +1592,13 @@ async def cb_image_model(
 
     from bot.handlers.image_wizard_v2 import open_model_composer_for_selection
 
-    await open_model_composer_for_selection(call, state, session, model_key)
+    await open_model_composer_for_selection(
+        call,
+        state,
+        session,
+        model_key,
+        db_user=db_user,
+    )
     return
 
 
@@ -1895,6 +1902,7 @@ async def cb_image_reference_skip(
         session,
         model_key,
         forced_mode="text",
+        db_user=db_user,
     )
     await call.answer()
 
