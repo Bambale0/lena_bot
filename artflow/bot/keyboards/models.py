@@ -625,7 +625,11 @@ def _sorted_models(model_costs: list[ModelCost], allowed_keys: list[str]) -> lis
 
 # ── Image keyboards ───────────────────────────────────────────────────────────
 
-def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
+def image_models_kb(
+    model_costs: list[ModelCost],
+    *,
+    unlimited_model_keys: set[str] | None = None,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     visible = [
         mc
@@ -639,8 +643,10 @@ def image_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
         [mc for mc in visible if mc.model_key not in {item.model_key for item in ordered}],
         key=lambda mc: mc.display_name.lower(),
     )
+    unlimited_model_keys = unlimited_model_keys or set()
     for mc in ordered + remaining:
-        label = f"{mc.display_name} · {model_cost_display_text(mc, model_costs=model_costs)}"
+        price_text = "♾️ Безлимит" if mc.model_key in unlimited_model_keys else model_cost_display_text(mc, model_costs=model_costs)
+        label = f"{mc.display_name} · {price_text}"
         builder.row(
             InlineKeyboardButton(
                 text=label,
