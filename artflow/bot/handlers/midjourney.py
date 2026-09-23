@@ -60,7 +60,11 @@ _MJ_ACTION_MODEL = "midjourney-action"
 
 
 def _mj_price_tag(credits: float | int | None) -> str:
-    return f" · {float(credits):g} 💋" if credits is not None else ""
+    if credits is None:
+        return ""
+    if float(credits) == 0:
+        return " · ♾️"
+    return f" · {float(credits):g} 💋"
 
 
 def _button_state(buttons: list[MJButton]) -> list[dict[str, str]]:
@@ -230,7 +234,7 @@ async def _finish_initial_mj_describe(
         )
 
     async def on_failure(err: str) -> None:
-        await _fail_generation_and_refund(gen_id, user_id, credits, err)
+        await _fail_generation_and_refund(gen_id, err)
         try:
             await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
         except Exception:
@@ -242,7 +246,7 @@ async def _finish_initial_mj_describe(
     )
 
 
-async def _mj_menu_prices(session: AsyncSession) -> tuple[dict[str, str], str]:
+async def _mj_menu_prices(session: AsyncSession, user_id: int) -> tuple[dict[str, str], str]:
     mapping = {
         "imagine": _MJ_IMAGINE_MODEL,
         "blend": _MJ_BLEND_MODEL,
@@ -252,9 +256,20 @@ async def _mj_menu_prices(session: AsyncSession) -> tuple[dict[str, str], str]:
     prices: dict[str, str] = {}
     for key, model_key in mapping.items():
         model_cost = await repo.get_model_cost(session, model_key)
-        prices[key] = _mj_price_tag(model_cost.credits if model_cost else None)
+        listed_credits = model_cost.credits if model_cost else None
+        if listed_credits is not None and model_key != _MJ_VIDEO_MODEL:
+            listed_credits = await repo.effective_image_generation_credits(
+                session, user_id, model_key, listed_credits
+            )
+        prices[key] = _mj_price_tag(listed_credits)
     action_cost = await repo.get_model_cost(session, _MJ_ACTION_MODEL)
-    action_price = _mj_price_tag(action_cost.credits if action_cost else 3)
+    action_credits = await repo.effective_image_generation_credits(
+        session,
+        user_id,
+        _MJ_ACTION_MODEL,
+        action_cost.credits if action_cost else 3,
+    )
+    action_price = _mj_price_tag(action_credits)
     return prices, action_price
 
 
@@ -263,12 +278,17 @@ async def _mj_menu_prices(session: AsyncSession) -> tuple[dict[str, str], str]:
 # ═══════════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.in_({"menu:mj", "midjourney"}))
-async def cb_mj_menu(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+async def cb_mj_menu(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
     if not _ensure_admin_access(call.from_user.id):
         await call.answer("Раздел временно доступен только администраторам", show_alert=True)
         return
     await state.clear()
-    prices, action_price = await _mj_menu_prices(session)
+    prices, action_price = await _mj_menu_prices(session, db_user.id)
     await call.message.edit_text(  # type: ignore[union-attr]
         "🖌️ <b>Midjourney</b>\n\n"
         "Мощнейший AI для генерации изображений и видео. Что умеет:\n\n"
@@ -327,7 +347,12 @@ async def cb_speed(call: CallbackQuery, state: FSMContext, session: AsyncSession
     speed_val = call.data.split(":")[1]  # type: ignore[union-attr]
 
     model_cost = await repo.get_model_cost(session, _MJ_IMAGINE_MODEL)
-    credits = model_cost.credits if model_cost else 10
+    credits = await repo.effective_image_generation_credits(
+        session,
+        db_user.id,
+        _MJ_IMAGINE_MODEL,
+        model_cost.credits if model_cost else 10,
+    )
 
     if db_user.credits < credits:
         await call.answer(
@@ -423,11 +448,12 @@ async def handle_imagine_prompt(
     base64_array = [reference_b64] if reference_b64 else None
     submitted_prompt = f"{reference_url} {prompt}".strip() if reference_url else prompt
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
-        await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
-        await state.clear()
-        return
+    if credits > 0:
+        ok = await repo.spend_credits(session, db_user.id, credits)
+        if not ok:
+            await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
+            await state.clear()
+            return
 
     gen = await repo.create_generation(
         session, db_user.id, _MJ_IMAGINE_MODEL, GenerationType.image, prompt, credits
@@ -499,7 +525,12 @@ async def cb_mj_action(
     custom_id = btn_data["custom_id"]
 
     model_cost = await repo.get_model_cost(session, _MJ_ACTION_MODEL)
-    credits = model_cost.credits if model_cost else 3
+    credits = await repo.effective_image_generation_credits(
+        session,
+        db_user.id,
+        _MJ_ACTION_MODEL,
+        model_cost.credits if model_cost else 3,
+    )
 
     if db_user.credits < credits:
         await call.answer(
@@ -507,10 +538,11 @@ async def cb_mj_action(
         )
         return
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
-        await call.answer("Недостаточно 💋", show_alert=True)
-        return
+    if credits > 0:
+        ok = await repo.spend_credits(session, db_user.id, credits)
+        if not ok:
+            await call.answer("Недостаточно 💋", show_alert=True)
+            return
 
     label = (btn_data.get("emoji", "") + btn_data.get("label", "")).strip()
     await call.answer(f"⏳ Выполняю: {label}")
@@ -519,7 +551,8 @@ async def cb_mj_action(
     try:
         new_task_id = await mj.action(task_id, custom_id)
     except Exception as e:
-        await repo.add_credits(session, db_user.id, credits)
+        if credits > 0:
+            await repo.add_credits(session, db_user.id, credits)
         await call.message.answer(  # type: ignore[union-attr]
             f"❌ Ошибка: {e}", reply_markup=main_menu_kb()
         )
@@ -571,7 +604,8 @@ async def cb_mj_action(
             )
             return
 
-        await repo.add_credits(session, db_user.id, credits)
+        if credits > 0:
+            await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
             f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb()
         )
@@ -660,7 +694,12 @@ async def _submit_modal(
 @router.callback_query(F.data == "mj:blend")
 async def cb_blend_start(call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User) -> None:
     model_cost = await repo.get_model_cost(session, _MJ_BLEND_MODEL)
-    credits = model_cost.credits if model_cost else 12
+    credits = await repo.effective_image_generation_credits(
+        session,
+        db_user.id,
+        _MJ_BLEND_MODEL,
+        model_cost.credits if model_cost else 12,
+    )
 
     if db_user.credits < credits:
         await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
@@ -726,10 +765,11 @@ async def cb_blend_submit(
         await call.answer("Нужно минимум 2 изображения", show_alert=True)
         return
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
-        await call.answer("Недостаточно 💋", show_alert=True)
-        return
+    if credits > 0:
+        ok = await repo.spend_credits(session, db_user.id, credits)
+        if not ok:
+            await call.answer("Недостаточно 💋", show_alert=True)
+            return
 
     await state.set_state(MidjourneyFSM.blend_generating)
     status_msg = await call.message.answer(  # type: ignore[union-attr]
@@ -782,7 +822,12 @@ async def cb_blend_add(call: CallbackQuery) -> None:
 @router.callback_query(F.data == "mj:describe")
 async def cb_describe_start(call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User) -> None:
     model_cost = await repo.get_model_cost(session, _MJ_DESCRIBE_MODEL)
-    credits = model_cost.credits if model_cost else 5
+    credits = await repo.effective_image_generation_credits(
+        session,
+        db_user.id,
+        _MJ_DESCRIBE_MODEL,
+        model_cost.credits if model_cost else 5,
+    )
 
     if db_user.credits < credits:
         await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
@@ -815,11 +860,12 @@ async def handle_describe_photo(
     data = await state.get_data()
     credits: int = data.get("describe_credits", 5)
 
-    ok = await repo.spend_credits(session, db_user.id, credits)
-    if not ok:
-        await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
-        await state.clear()
-        return
+    if credits > 0:
+        ok = await repo.spend_credits(session, db_user.id, credits)
+        if not ok:
+            await message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
+            await state.clear()
+            return
 
     photo: PhotoSize = message.photo[-1]  # type: ignore[index]
     file = await bot.get_file(photo.file_id)
