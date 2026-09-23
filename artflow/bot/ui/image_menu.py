@@ -74,7 +74,11 @@ def render_image_scenarios(
     return ScreenRender(text=text, reply_markup=_image_start_kb(show_continue=show_continue))
 
 
-def render_image_advanced_menu(model_costs: list[ModelCost]) -> ScreenRender:
+def render_image_advanced_menu(
+    model_costs: list[ModelCost],
+    *,
+    unlimited_model_keys: set[str] | None = None,
+) -> ScreenRender:
     text = (
         "🧠 <b>Экспертный выбор модели</b>\n\n"
         "Выбирай конкретную нейросеть только когда это действительно важно. "
@@ -85,7 +89,10 @@ def render_image_advanced_menu(model_costs: list[ModelCost]) -> ScreenRender:
         "⚡ <b>Grok</b> и 🟣 <b>Qwen</b> — быстрые альтернативные варианты.\n\n"
         "Цена указана на кнопке. После выбора откроются только поддерживаемые настройки."
     )
-    return ScreenRender(text=text, reply_markup=image_models_kb(model_costs))
+    return ScreenRender(
+        text=text,
+        reply_markup=image_models_kb(model_costs, unlimited_model_keys=unlimited_model_keys),
+    )
 
 
 def render_active_image_session(
