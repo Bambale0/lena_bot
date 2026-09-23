@@ -38,6 +38,7 @@ from db.models import (
     Transaction,
     TransactionStatus,
     User,
+    UserImageModelEntitlement,
     WebAuthCode,
     WithdrawalStatus,
 )
@@ -2526,6 +2527,119 @@ async def get_model_cost(session: AsyncSession, model_key: str) -> ModelCost | N
         select(ModelCost).where(ModelCost.model_key == model_key)
     )
     return result.scalar_one_or_none()
+
+
+async def get_model_cost_by_id(session: AsyncSession, model_cost_id: int) -> ModelCost | None:
+    result = await session.execute(select(ModelCost).where(ModelCost.id == model_cost_id))
+    return result.scalar_one_or_none()
+
+
+async def get_user_unlimited_image_model_keys(
+    session: AsyncSession,
+    user_id: int,
+) -> set[str]:
+    result = await session.execute(
+        select(UserImageModelEntitlement.model_key).where(
+            UserImageModelEntitlement.user_id == user_id,
+            UserImageModelEntitlement.is_unlimited.is_(True),
+        )
+    )
+    return {str(model_key) for model_key in result.scalars().all()}
+
+
+async def get_unlimited_image_model_keys_for_users(
+    session: AsyncSession,
+    user_ids: list[int] | tuple[int, ...],
+) -> dict[int, set[str]]:
+    normalized_ids = list(dict.fromkeys(int(user_id) for user_id in user_ids))
+    if not normalized_ids:
+        return {}
+    result = await session.execute(
+        select(
+            UserImageModelEntitlement.user_id,
+            UserImageModelEntitlement.model_key,
+        ).where(
+            UserImageModelEntitlement.user_id.in_(normalized_ids),
+            UserImageModelEntitlement.is_unlimited.is_(True),
+        )
+    )
+    mapping: dict[int, set[str]] = {user_id: set() for user_id in normalized_ids}
+    for user_id, model_key in result.all():
+        mapping.setdefault(int(user_id), set()).add(str(model_key))
+    return mapping
+
+
+async def is_image_model_unlimited(
+    session: AsyncSession,
+    user_id: int,
+    model_key: str,
+) -> bool:
+    result = await session.execute(
+        select(UserImageModelEntitlement.id).where(
+            UserImageModelEntitlement.user_id == user_id,
+            UserImageModelEntitlement.model_key == model_key,
+            UserImageModelEntitlement.is_unlimited.is_(True),
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def effective_image_generation_credits(
+    session: AsyncSession,
+    user_id: int,
+    model_key: str,
+    listed_credits: float | int,
+) -> float:
+    if await is_image_model_unlimited(session, user_id, model_key):
+        return 0.0
+    return float(listed_credits)
+
+
+async def set_image_models_unlimited_for_users(
+    session: AsyncSession,
+    *,
+    user_ids: list[int] | tuple[int, ...],
+    model_key: str,
+    enabled: bool,
+    admin_tg_id: int | None,
+) -> int:
+    normalized_ids = list(dict.fromkeys(int(user_id) for user_id in user_ids))
+    if not normalized_ids:
+        return 0
+
+    result = await session.execute(
+        select(UserImageModelEntitlement).where(
+            UserImageModelEntitlement.user_id.in_(normalized_ids),
+            UserImageModelEntitlement.model_key == model_key,
+        )
+    )
+    existing = {row.user_id: row for row in result.scalars().all()}
+    now = datetime.now(timezone.utc)
+    for user_id in normalized_ids:
+        entitlement = existing.get(user_id)
+        if entitlement is None:
+            session.add(
+                UserImageModelEntitlement(
+                    user_id=user_id,
+                    model_key=model_key,
+                    is_unlimited=enabled,
+                    granted_by_tg_id=admin_tg_id,
+                    updated_at=now,
+                )
+            )
+        else:
+            entitlement.is_unlimited = enabled
+            entitlement.granted_by_tg_id = admin_tg_id
+            entitlement.updated_at = now
+
+    await session.commit()
+    logger.info(
+        "Unlimited image model access updated model=%s enabled=%s users=%s",
+        model_key,
+        enabled,
+        len(normalized_ids),
+    )
+    return len(normalized_ids)
 
 
 async def get_first_active_model_cost(session: AsyncSession, keys: list[str]) -> ModelCost | None:
