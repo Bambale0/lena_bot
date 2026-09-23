@@ -1093,6 +1093,7 @@ async def test_launch_session_generation_allows_dual_mode_model_without_referenc
     generation = SimpleNamespace(id=99)
     repo_stub = SimpleNamespace(
         resolve_image_model_cost=AsyncMock(return_value=SimpleNamespace(credits=4)),
+        effective_image_generation_credits=AsyncMock(return_value=4.0),
         count_user_active_generations=AsyncMock(return_value=0),
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=generation),
@@ -1154,6 +1155,7 @@ async def test_launch_session_generation_clears_self_feed_source() -> None:
     repo_stub = SimpleNamespace(
         get_generation_by_id=AsyncMock(return_value=SimpleNamespace(id=77, user_id=42)),
         resolve_image_model_cost=AsyncMock(return_value=SimpleNamespace(credits=4)),
+        effective_image_generation_credits=AsyncMock(return_value=4.0),
         count_user_active_generations=AsyncMock(return_value=0),
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=generation),
@@ -1210,6 +1212,7 @@ async def test_launch_session_generation_hides_prompt_but_keeps_publish_for_repe
     generation = SimpleNamespace(id=99)
     repo_stub = SimpleNamespace(
         resolve_image_model_cost=AsyncMock(return_value=SimpleNamespace(credits=4)),
+        effective_image_generation_credits=AsyncMock(return_value=4.0),
         count_user_active_generations=AsyncMock(return_value=0),
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=generation),
