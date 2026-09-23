@@ -192,9 +192,12 @@ async def _prepare_default_flow(
     if model_cost is None:
         await call.answer("Модель временно недоступна", show_alert=True)
         return False
-    if db_user.credits < model_cost.credits:
+    effective_credits = await repo.effective_image_generation_credits(
+        session, db_user.id, _DEFAULT_MODEL, model_cost.credits
+    )
+    if db_user.credits < effective_credits:
         await call.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits:g}, у тебя {db_user.credits:g}.",
+            f"Недостаточно 💋. Нужно {effective_credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         return False
@@ -206,7 +209,7 @@ async def _prepare_default_flow(
         image_model=_DEFAULT_MODEL,
         mode=mode,
         image_mode=mode,
-        credits=model_cost.credits,
+        credits=effective_credits,
         aspect_ratio=_DEFAULT_ASPECT_RATIO,
         image_aspect_ratio=_DEFAULT_ASPECT_RATIO,
         count=1,
@@ -237,6 +240,15 @@ async def open_model_composer_for_selection(
         await call.answer("Модель временно недоступна", show_alert=True)
         return False
 
+    db_user = await repo.get_user_by_tg_id(session, call.from_user.id)
+    effective_credits = (
+        await repo.effective_image_generation_credits(
+            session, db_user.id, model_key, model_cost.credits
+        )
+        if db_user
+        else float(model_cost.credits or 0)
+    )
+
     data = await state.get_data()
     caps = IMAGE_CAPS.get(model_key, {})
     modes = list(caps.get("modes") or ["text"])
@@ -252,7 +264,7 @@ async def open_model_composer_for_selection(
         "image_model": model_key,
         "mode": mode,
         "image_mode": mode,
-        "credits": model_cost.credits,
+        "credits": effective_credits,
         "aspect_ratio": aspect_ratio,
         "image_aspect_ratio": aspect_ratio,
         "count": 1,
