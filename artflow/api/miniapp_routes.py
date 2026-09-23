@@ -3074,7 +3074,7 @@ async def remix_feed_post(
     except Exception as exc:
         logger.error("feed remix error user=%s gen=%s: %s", user.id, gen_id, exc)
         await session.rollback()
-        if await repo.fail_generation(session, failed_generation_id, str(exc)):
+        if await repo.fail_generation(session, failed_generation_id, str(exc)) and total_credits > 0:
             await repo.add_credits(session, failed_user_id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
