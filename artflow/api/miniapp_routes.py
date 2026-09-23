@@ -2840,7 +2840,16 @@ async def remix_feed_post(
             refs = video_refs
             motion_value = body.grok_mode if body.grok_mode in {"low", "high"} else "low"
 
-        total_credits = model_cost.credits
+        total_credits = (
+            await repo.effective_image_generation_credits(
+                session,
+                user.id,
+                body.model,
+                model_cost.credits,
+            )
+            if gen_type == "image"
+            else float(model_cost.credits or 0)
+        )
         if user.credits < total_credits:
             raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
 
@@ -2849,7 +2858,7 @@ async def remix_feed_post(
         if active >= MAX_CONCURRENT:
             raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-        ok = await repo.spend_credits(session, user.id, total_credits)
+        ok = True if total_credits <= 0 else await repo.spend_credits(session, user.id, total_credits)
         if not ok:
             raise HTTPException(status_code=402, detail="Failed to spend credits")
 
@@ -2899,7 +2908,7 @@ async def remix_feed_post(
                 )
         except Exception as exc:
             logger.error("feed Midjourney remix error user=%s gen=%s model=%s: %s", user.id, gen_id, body.model, exc)
-            if await repo.fail_generation(session, gen.id, str(exc)):
+            if await repo.fail_generation(session, gen.id, str(exc)) and total_credits > 0:
                 await repo.add_credits(session, user.id, total_credits)
             raise HTTPException(status_code=502, detail="Generation service error")
 
@@ -2977,7 +2986,12 @@ async def remix_feed_post(
             is_per_second=_is_per_second_video_model(VIDEO_CAPS.get(body.model, {})),
         )
         if gen_type == "video"
-        else model_cost.credits
+        else await repo.effective_image_generation_credits(
+            session,
+            user.id,
+            body.model,
+            model_cost.credits,
+        )
     )
 
     if user.credits < total_credits:
@@ -2988,7 +3002,7 @@ async def remix_feed_post(
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-    ok = await repo.spend_credits(session, user.id, total_credits)
+    ok = True if total_credits <= 0 else await repo.spend_credits(session, user.id, total_credits)
     if not ok:
         raise HTTPException(status_code=402, detail="Failed to spend credits")
 
