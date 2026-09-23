@@ -1216,6 +1216,7 @@ class ModelInfo(BaseModel):
     has_seed: bool = False
     video_input_prices: dict[str, float] = Field(default_factory=dict)
     price_table: dict[str, dict[int, float]] = Field(default_factory=dict)
+    is_unlimited: bool = False
 
 
 class GenerationOut(BaseModel):
@@ -1851,6 +1852,8 @@ async def list_image_models(
 ) -> list[ModelInfo]:
     """All active image models with costs and capabilities."""
     model_costs = await repo.get_all_model_costs(session)
+    entitlements = await repo.get_user_image_model_entitlements(session, user.id)
+    unlimited_keys = {item.model_key for item in entitlements}
     image_keys = {m.value for m in ImageModel} | _MJ_STUDIO_IMAGE_MODELS
     result = []
     for mc in model_costs:
@@ -1858,11 +1861,14 @@ async def list_image_models(
             continue
         caps: dict[str, Any] = IMAGE_CAPS.get(mc.model_key, _MJ_IMAGE_CAPS.get(mc.model_key, {}))
         quality_raw = caps.get("quality_options", [])
+        unlimited = mc.model_key in unlimited_keys
         quality_prices = await _resolve_image_quality_prices(session, mc.model_key, quality_raw, float(mc.credits))
+        if unlimited:
+            quality_prices = {key: 0.0 for key in quality_prices}
         result.append(ModelInfo(
             key=mc.model_key,
             display_name=_friendly_model_name(mc.model_key, mc.display_name),
-            credits=mc.credits,
+            credits=0.0 if unlimited else mc.credits,
             modes=caps.get("modes", ["text"]),
             aspect_ratios=caps.get("aspect_ratios", []),
             aspect_ratio_modes=caps.get("aspect_ratio_modes", caps.get("modes", ["text"])),
@@ -1872,6 +1878,7 @@ async def list_image_models(
             counts=caps.get("counts", [1]),
             has_quality=bool(caps.get("has_quality")),
             max_refs=int(caps.get("max_refs", 1) or 1),
+            is_unlimited=unlimited,
         ))
     order = {key: idx for idx, key in enumerate(_IMAGE_MODEL_ORDER)}
     return sorted(result, key=lambda item: (order.get(item.key, 10_000), item.display_name.lower()))
