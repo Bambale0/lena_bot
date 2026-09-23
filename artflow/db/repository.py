@@ -10,7 +10,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from inspect import isawaitable
 from urllib.parse import urlparse
 
-from sqlalchemy import Date, cast, desc, func, or_, select, update
+from sqlalchemy import Date, cast, delete, desc, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -38,6 +38,7 @@ from db.models import (
     Transaction,
     TransactionStatus,
     User,
+    UserModelEntitlement,
     WebAuthCode,
     WithdrawalStatus,
 )
@@ -611,6 +612,117 @@ async def add_referral_balance(session: AsyncSession, user_id: int, amount_rub: 
     )
     await session.commit()
     return result.scalar_one()
+
+
+async def get_user_image_model_entitlements(
+    session: AsyncSession,
+    user_id: int,
+) -> list[UserModelEntitlement]:
+    result = await session.execute(
+        select(UserModelEntitlement)
+        .where(
+            UserModelEntitlement.user_id == user_id,
+            UserModelEntitlement.is_unlimited.is_(True),
+        )
+        .order_by(UserModelEntitlement.model_key)
+    )
+    return list(result.scalars().all())
+
+
+async def is_user_image_model_unlimited(
+    session: AsyncSession,
+    user_id: int,
+    model_key: str,
+) -> bool:
+    normalized = (model_key or "").strip()
+    if not normalized:
+        return False
+    result = await session.execute(
+        select(UserModelEntitlement.id)
+        .where(
+            UserModelEntitlement.user_id == user_id,
+            UserModelEntitlement.model_key == normalized,
+            UserModelEntitlement.is_unlimited.is_(True),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def effective_image_generation_credits(
+    session: AsyncSession,
+    user_id: int,
+    model_key: str,
+    configured_credits: float | int,
+) -> float:
+    credits = float(configured_credits or 0)
+    if credits <= 0:
+        return 0.0
+    if await is_user_image_model_unlimited(session, user_id, model_key):
+        logger.info(
+            "Unlimited image model applied user=%s model=%s configured_credits=%s",
+            user_id,
+            model_key,
+            credits,
+        )
+        return 0.0
+    return credits
+
+
+async def set_user_image_model_unlimited(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    model_key: str,
+    enabled: bool,
+    created_by_tg_id: int | None = None,
+) -> bool:
+    normalized = (model_key or "").strip()
+    if not normalized:
+        raise ValueError("Model key is required")
+
+    model_result = await session.execute(
+        select(ModelCost).where(ModelCost.model_key == normalized)
+    )
+    model = model_result.scalar_one_or_none()
+    if not model or model.gen_type != GenerationType.image or "__" in normalized:
+        raise ValueError("Only base image models can be unlimited")
+
+    existing_result = await session.execute(
+        select(UserModelEntitlement).where(
+            UserModelEntitlement.user_id == user_id,
+            UserModelEntitlement.model_key == normalized,
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+
+    if enabled:
+        if existing:
+            existing.is_unlimited = True
+            existing.created_by_tg_id = created_by_tg_id
+        else:
+            session.add(
+                UserModelEntitlement(
+                    user_id=user_id,
+                    model_key=normalized,
+                    is_unlimited=True,
+                    created_by_tg_id=created_by_tg_id,
+                )
+            )
+    elif existing:
+        await session.execute(
+            delete(UserModelEntitlement).where(UserModelEntitlement.id == existing.id)
+        )
+
+    await session.commit()
+    logger.info(
+        "Image model unlimited changed user=%s model=%s enabled=%s admin_tg_id=%s",
+        user_id,
+        normalized,
+        enabled,
+        created_by_tg_id,
+    )
+    return enabled
 
 
 async def spend_credits(
