@@ -128,3 +128,60 @@ Date: 2026-09-20.
 6. [x] PR #153 CI: APIX backend-quality, frontend build + Playwright Mini App smoke, Feed Security Contracts, Provider Contract Compliance, Pinterest Backend Contract, and Photo Prompt Integration all passed on the implementation SHA.
 7. [ ] Merge / production autodeploy / production smoke.
 
+---
+
+# Execution ledger — per-user unlimited image models
+
+Baseline: commit `9773b96e`.
+Date: 2026-09-23.
+
+## Current state
+- Image pricing is global through `model_costs`; there is no per-user model entitlement.
+- Telegram admin can already resolve users by Telegram ID and edit global model costs.
+- Telegram image generations share `_launch_session_generation`; Mini App and site share `create_image_generation`.
+- Midjourney image generation has a separate billing path.
+- Generation failures refund `Generation.credits_spent`, so an unlimited launch must persist an actual charge of `0`; merely skipping the debit while recording the normal price would create false refunds.
+
+## Intended outcome
+- Admin can enter one or multiple Telegram IDs and toggle unlimited access for selected active image models.
+- Unlimited applies only to the selected user/model pairs.
+- Eligible image generations cost the user 0 credits on Telegram bot, Mini App, and site.
+- Video, music, concurrency limits, moderation, and provider execution rules are unchanged.
+- User-facing image model metadata marks entitled models as unlimited instead of presenting a misleading paid price.
+
+## Acceptance criteria
+1. Database stores auditable per-user/per-image-model entitlements with a unique user/model pair.
+2. Admin UI resolves Telegram IDs, displays active image models, shows none/partial/all state, and can enable/disable a model for the selected users.
+3. Base model selection covers its quality pricing variants without granting other image models.
+4. Unlimited image generation skips the credit debit and persists `credits_spent=0`.
+5. Failure/refund paths never credit an unlimited user for credits they did not spend.
+6. Non-entitled users and all non-image generation keep existing billing behavior.
+7. Mini App/site model metadata exposes `is_unlimited` and effective zero price; current frontend displays `♾️ Безлимит`.
+8. Migration, focused backend/admin/billing tests, frontend typecheck/build, CI, and deploy smoke pass.
+
+## No-hardcode / control plane
+- Entitlements are database-backed and managed from the authenticated Telegram admin panel.
+- No Telegram IDs or model allowlists are hardcoded in source.
+- Admin selects active image models from the existing `model_costs` registry.
+
+## Observability / audit
+- Entitlement rows retain enabled state, granting admin Telegram ID, and timestamps.
+- Runtime generation keeps the normal generation record but stores the actual billed credits (0 for unlimited).
+- Zero-credit launches do not create fake spend ledger entries.
+
+## Test seams
+- Repository tests cover effective charge and entitlement mutation/query behavior.
+- Admin handler tests cover multi-ID resolution and model toggles.
+- Telegram image generation regression checks no debit + zero `credits_spent`.
+- Mini App route tests cover zero-charge generation and unlimited model metadata.
+- Frontend build/typecheck validates `ModelInfo.is_unlimited` UI handling.
+
+## Steps
+1. [x] Audited instructions, pricing, admin, image billing/refund paths, current migration head, and user-facing model metadata.
+2. [ ] Add entitlement model + Alembic migration + repository API.
+3. [ ] Add Telegram admin multi-user/model control.
+4. [ ] Apply effective image charge consistently to Telegram, Mini App/site, and Midjourney image paths.
+5. [ ] Expose unlimited metadata and user-facing label.
+6. [ ] Add focused regressions and review diff.
+7. [ ] PR CI / merge / production autodeploy / smoke.
+
