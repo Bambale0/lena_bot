@@ -23,7 +23,8 @@ def test_image_entry_opens_model_list_instead_of_resuming_active_session() -> No
 
     assert 'F.data == "menu:image"' in source
     assert "ImageGenFSM.model_select" in source
-    assert "image_models_kb(model_costs)" in source
+    assert "image_models_kb(model_costs, unlimited_model_keys=unlimited_model_keys)" in source
+    assert "get_user_unlimited_image_model_keys" in source
     assert "Шаг 1. Выбери модель" in source
     assert 'back_callback="menu:main"' in source
     assert "get_active_image_session" not in source
