@@ -192,7 +192,10 @@ async def _prepare_default_flow(
     if model_cost is None:
         await call.answer("Модель временно недоступна", show_alert=True)
         return False
-    if db_user.credits < model_cost.credits:
+    if (
+        db_user.credits < model_cost.credits
+        and not await repo.has_unlimited_image_model(session, db_user.id, _DEFAULT_MODEL)
+    ):
         await call.answer(
             f"Недостаточно 💋. Нужно {model_cost.credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
