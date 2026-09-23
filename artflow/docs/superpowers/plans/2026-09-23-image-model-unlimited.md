@@ -4,7 +4,7 @@
 
 **Goal:** Let admins grant selected users unlimited image generation on selected image models without affecting video/music billing or other users.
 
-**Architecture:** Add a normalized PostgreSQL entitlement table joining `users` to `model_costs`. Centralize image-generation charging in repository helpers that resolve unlimited entitlement and return the actual charged amount. Admin control lives in the Telegram `/admin` panel: enter Telegram/internal user ID, then toggle active image models. All image-generation surfaces reuse the same charge helper so bot, Mini App, and web behave consistently.
+**Architecture:** Add a normalized PostgreSQL entitlement table keyed by `user_id + base model_key`, with a foreign key to `model_costs.model_key`. Centralize image-generation charging in repository helpers that resolve unlimited entitlement and return the actual charged amount. Admin control lives in the Telegram `/admin` panel: enter Telegram/internal user ID, then toggle active image models. All image-generation surfaces reuse the same charge helper so bot, Mini App, and web behave consistently.
 
 **Tech Stack:** Python 3, FastAPI, aiogram, SQLAlchemy async, PostgreSQL, Alembic, pytest.
 
@@ -37,7 +37,7 @@
 
 - [ ] **Step 1: Write failing repository tests** for unlimited charge = 0, normal charge = model price, image-only validation, toggle/list/clear behavior.
 - [ ] **Step 2: Run focused tests and confirm RED** because the model/helpers do not exist.
-- [ ] **Step 3: Add schema + Alembic migration** with unique `(user_id, model_cost_id)`, FKs with cascade, admin actor and timestamp.
+- [ ] **Step 3: Add schema + Alembic migration** with unique `(user_id, model_key)`, FKs with cascade, admin actor and timestamp.
 - [ ] **Step 4: Implement minimal repository helpers** and safe structured logging.
 - [ ] **Step 5: Run focused tests and confirm GREEN**.
 
