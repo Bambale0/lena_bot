@@ -68,6 +68,7 @@ export interface ModelInfo {
   video_input_prices?: Record<string, number>;
   price_table?: Record<string, Record<string, number>>;
   available_in_studio?: boolean;
+  is_unlimited?: boolean;
 }
 
 export interface GenerationTask {
