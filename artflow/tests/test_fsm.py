@@ -273,6 +273,7 @@ async def test_admin_fsm_states_exist() -> None:
         'new_price_credits', 'new_price_rub',
         'edit_model_display_name', 'edit_model_key', 'edit_model_credits',
         'await_credits_tg_id', 'await_credits_amount',
+        'await_image_unlimited_user_id', 'manage_image_unlimited',
         'await_ban_tg_id',
         'await_broadcast_text',
     ]
