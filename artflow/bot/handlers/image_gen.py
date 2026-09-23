@@ -1140,9 +1140,15 @@ async def _show_nana_banano_flow(
         await call.answer("Модель недоступна", show_alert=True)
         return False
 
-    if db_user.credits < model_cost.credits:
+    credits = await repo.effective_image_generation_credits(
+        session,
+        db_user.id,
+        model_key,
+        model_cost.credits,
+    )
+    if db_user.credits < credits:
         await call.answer(
-            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋! Нужно {credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         return False
@@ -1158,7 +1164,7 @@ async def _show_nana_banano_flow(
         image_model=model_key,
         mode=mode,
         image_mode=mode,
-        credits=model_cost.credits,
+        credits=credits,
         aspect_ratio=None,
         image_aspect_ratio=None,
         count=1,
@@ -1215,9 +1221,15 @@ async def _start_image_model_flow(
         await call.answer("Модель недоступна", show_alert=True)
         return
 
-    if db_user.credits < model_cost.credits:
+    credits = await repo.effective_image_generation_credits(
+        session,
+        db_user.id,
+        model_key,
+        model_cost.credits,
+    )
+    if db_user.credits < credits:
         await call.answer(
-            f"Недостаточно 💋! Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋! Нужно {credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         return
@@ -1228,6 +1240,7 @@ async def _start_image_model_flow(
         call,
         state,
         session,
+        db_user,
         model_key,
         forced_mode=forced_mode,
     )
@@ -1248,7 +1261,14 @@ async def cb_image_menu(
             quality=image_session.quality,
         )
         await _sync_state_with_image_session(state, image_session)
-        await state.update_data(credits=model_cost.credits if model_cost else 1)
+        listed_credits = model_cost.credits if model_cost else 1
+        credits = await repo.effective_image_generation_credits(
+            session,
+            db_user.id,
+            image_session.model,
+            listed_credits,
+        )
+        await state.update_data(credits=credits)
         screen = await render_screen(
             screen="image_active",
             session=session,
@@ -1582,7 +1602,7 @@ async def cb_image_model(
 
     from bot.handlers.image_wizard_v2 import open_model_composer_for_selection
 
-    await open_model_composer_for_selection(call, state, session, model_key)
+    await open_model_composer_for_selection(call, state, session, db_user, model_key)
     return
 
 
@@ -1884,6 +1904,7 @@ async def cb_image_reference_skip(
         call,
         state,
         session,
+        db_user,
         model_key,
         forced_mode="text",
     )
