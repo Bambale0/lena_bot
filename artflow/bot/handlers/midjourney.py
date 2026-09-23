@@ -329,7 +329,10 @@ async def cb_speed(call: CallbackQuery, state: FSMContext, session: AsyncSession
     model_cost = await repo.get_model_cost(session, _MJ_IMAGINE_MODEL)
     credits = model_cost.credits if model_cost else 10
 
-    if db_user.credits < credits:
+    if (
+        db_user.credits < credits
+        and not await repo.has_unlimited_image_model(session, db_user.id, _MJ_IMAGINE_MODEL)
+    ):
         await call.answer(
             f"Недостаточно 💋! Нужно {credits}, у тебя {db_user.credits}.",
             show_alert=True,
@@ -669,7 +672,10 @@ async def cb_blend_start(call: CallbackQuery, state: FSMContext, session: AsyncS
     model_cost = await repo.get_model_cost(session, _MJ_BLEND_MODEL)
     credits = model_cost.credits if model_cost else 12
 
-    if db_user.credits < credits:
+    if (
+        db_user.credits < credits
+        and not await repo.has_unlimited_image_model(session, db_user.id, _MJ_BLEND_MODEL)
+    ):
         await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
         return
 
@@ -797,7 +803,10 @@ async def cb_describe_start(call: CallbackQuery, state: FSMContext, session: Asy
     model_cost = await repo.get_model_cost(session, _MJ_DESCRIBE_MODEL)
     credits = model_cost.credits if model_cost else 5
 
-    if db_user.credits < credits:
+    if (
+        db_user.credits < credits
+        and not await repo.has_unlimited_image_model(session, db_user.id, _MJ_DESCRIBE_MODEL)
+    ):
         await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
         return
 
