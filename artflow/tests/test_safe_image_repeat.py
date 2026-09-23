@@ -123,6 +123,8 @@ async def test_old_and_new_repeat_callbacks_open_confirmation_without_launch(cal
 
     with patch.object(repeat_safe, "get_repeat_task_by_any_id", AsyncMock(return_value=generation)), patch.object(
         repeat_safe.repo, "resolve_image_model_cost", AsyncMock(return_value=cost)
+    ), patch.object(
+        repeat_safe.repo, "effective_image_generation_credits", AsyncMock(return_value=2.5)
     ), patch.object(repeat_safe, "_is_admin", return_value=False), patch.object(
         repeat_safe.image_gen, "_launch_session_generation", AsyncMock()
     ) as launch:
