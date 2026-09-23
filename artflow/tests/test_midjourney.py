@@ -62,7 +62,12 @@ async def test_cb_mj_menu_shows_submenu() -> None:
         patch("bot.handlers.midjourney.repo", repo_mock),
         patch("bot.handlers.midjourney._ensure_admin_access", return_value=True),
     ):
-        await midjourney.cb_mj_menu(call, AsyncMock(), AsyncMock())
+        await midjourney.cb_mj_menu(
+            call,
+            AsyncMock(),
+            AsyncMock(),
+            SimpleNamespace(id=42, credits=500),
+        )
     call.message.edit_text.assert_awaited_once()
     args = call.message.edit_text.call_args
     assert "Midjourney" in args[0][0]
