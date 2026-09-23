@@ -171,6 +171,10 @@ async def test_run_feed_repeat_passes_all_reference_urls() -> None:
         AsyncMock(return_value=SimpleNamespace(credits=2)),
     ), patch.object(
         repeat_reference_marketplace.repo,
+        "effective_image_generation_credits",
+        AsyncMock(return_value=2),
+    ), patch.object(
+        repeat_reference_marketplace.repo,
         "create_image_session",
         AsyncMock(return_value=image_session),
     ) as create_session, patch.object(
