@@ -2835,18 +2835,29 @@ async def remix_feed_post(
             refs = video_refs
             motion_value = body.grok_mode if body.grok_mode in {"low", "high"} else "low"
 
-        total_credits = model_cost.credits
-        if user.credits < total_credits:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
-
+        nominal_credits = float(model_cost.credits)
         await _reconcile_user_active_generations(session, user.id)
         active = await repo.count_user_active_generations(session, user.id)
         if active >= MAX_CONCURRENT:
             raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-        ok = await repo.spend_credits(session, user.id, total_credits)
-        if not ok:
-            raise HTTPException(status_code=402, detail="Failed to spend credits")
+        if gen_type == "image":
+            charge = await repo.charge_image_generation(
+                session,
+                user_id=user.id,
+                model_key=body.model,
+                amount=nominal_credits,
+            )
+            if not charge.allowed:
+                raise HTTPException(status_code=402, detail=f"Insufficient credits: need {nominal_credits}")
+            total_credits = charge.charged_credits
+        else:
+            total_credits = nominal_credits
+            if user.credits < total_credits:
+                raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
+            ok = await repo.spend_credits(session, user.id, total_credits)
+            if not ok:
+                raise HTTPException(status_code=402, detail="Failed to spend credits")
 
         image_session_id: int | None = None
         if gen_type == "image":
@@ -2965,27 +2976,38 @@ async def remix_feed_post(
     if not model_cost:
         raise HTTPException(status_code=422, detail="Model not available")
 
-    total_credits = (
+    nominal_credits = (
         _video_total_credits(
             normalized_video["duration"],
             model_cost.credits,
             is_per_second=_is_per_second_video_model(VIDEO_CAPS.get(body.model, {})),
         )
         if gen_type == "video"
-        else model_cost.credits
+        else float(model_cost.credits)
     )
-
-    if user.credits < total_credits:
-        raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
 
     await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
-    ok = await repo.spend_credits(session, user.id, total_credits)
-    if not ok:
-        raise HTTPException(status_code=402, detail="Failed to spend credits")
+    if gen_type == "image":
+        charge = await repo.charge_image_generation(
+            session,
+            user_id=user.id,
+            model_key=body.model,
+            amount=nominal_credits,
+        )
+        if not charge.allowed:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {nominal_credits}")
+        total_credits = charge.charged_credits
+    else:
+        total_credits = nominal_credits
+        if user.credits < total_credits:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
+        ok = await repo.spend_credits(session, user.id, total_credits)
+        if not ok:
+            raise HTTPException(status_code=402, detail="Failed to spend credits")
 
     image_session_id: int | None = None
     if gen_type == "image":
