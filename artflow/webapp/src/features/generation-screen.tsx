@@ -267,7 +267,7 @@ function GenerationScreen({
               Модель
               <Select value={selectedModel?.key || ""} onChange={(event) => syncSelectedModel(event.target.value)}>
                 {availableModels.map((model) => (
-                  <option key={model.key} value={model.key}>{model.display_name} · {formatCredits(model.credits)} кр.</option>
+                  <option key={model.key} value={model.key}>{model.display_name} · {model.is_unlimited ? "♾️ Безлимит" : `${formatCredits(model.credits)} кр.`}</option>
                 ))}
               </Select>
             </label>
@@ -528,7 +528,7 @@ function GenerationScreen({
             <div className="apix-launch-row flex items-center justify-between gap-2">
               <div>
                 <p className="text-[10px] text-muted-foreground">Стоимость</p>
-                <p className="text-lg font-bold leading-none">{formatCredits(estimate)} кр.</p>
+                <p className="text-lg font-bold leading-none">{selectedModel?.is_unlimited && kind === "image" ? "♾️ Безлимит" : `${formatCredits(estimate)} кр.`}</p>
                 {selectedModel?.is_per_second ? <p className="mt-1 text-[10px] text-muted-foreground">{formatCredits(selectedModel.credits_per_sec ?? selectedModel.credits)} кр./сек</p> : null}
                 {taskCount > 1 ? <p className="mt-1 text-[10px] text-muted-foreground">{taskCount} задачи подряд</p> : null}
               </div>

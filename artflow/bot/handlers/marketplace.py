@@ -248,9 +248,12 @@ async def _launch_prompt_generation(
     if not model_cost:
         await call.answer("Модель для этого промпта недоступна", show_alert=True)
         return
-    if db_user.credits < model_cost.credits:
+    effective_credits = await repo.effective_image_generation_credits(
+        session, db_user.id, model_key, model_cost.credits
+    )
+    if db_user.credits < effective_credits:
         await call.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋. Нужно {effective_credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         return
@@ -259,7 +262,7 @@ async def _launch_prompt_generation(
         session,
         prompt.id,
         db_user.id,
-        credits_spent=model_cost.credits,
+        credits_spent=effective_credits,
     )
 
     prompt_preview_url = ensure_public_image_url(prompt.preview_url)
@@ -509,15 +512,18 @@ async def cb_prompt_skip_ref(
         await call.answer("Модель недоступна", show_alert=True)
         await state.clear()
         return
-    if db_user.credits < model_cost.credits:
+    effective_credits = await repo.effective_image_generation_credits(
+        session, db_user.id, model_key, model_cost.credits
+    )
+    if db_user.credits < effective_credits:
         await call.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋. Нужно {effective_credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         await state.clear()
         return
 
-    prompt, rewards = await use_prompt(session, prompt.id, db_user.id, credits_spent=model_cost.credits)
+    prompt, rewards = await use_prompt(session, prompt.id, db_user.id, credits_spent=effective_credits)
     image_session = await repo.create_image_session(
         session=session,
         user_id=db_user.id,
@@ -592,9 +598,12 @@ async def fsm_prompt_use_reference(
             await message.answer("Модель недоступна.", reply_markup=back_to_menu_kb())
             await state.clear()
             return
-        if db_user.credits < model_cost.credits:
+        effective_credits = await repo.effective_image_generation_credits(
+            session, db_user.id, model_key, model_cost.credits
+        )
+        if db_user.credits < effective_credits:
             await message.answer(
-                f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+                f"Недостаточно 💋. Нужно {effective_credits:g}, у тебя {db_user.credits:g}.",
                 reply_markup=back_to_menu_kb(),
             )
             await state.clear()
@@ -654,15 +663,18 @@ async def fsm_prompt_use_reference(
         await message.answer("Модель недоступна.", reply_markup=back_to_menu_kb())
         await state.clear()
         return
-    if db_user.credits < model_cost.credits:
+    effective_credits = await repo.effective_image_generation_credits(
+        session, db_user.id, effective_model, model_cost.credits
+    )
+    if db_user.credits < effective_credits:
         await message.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋. Нужно {effective_credits:g}, у тебя {db_user.credits:g}.",
             reply_markup=back_to_menu_kb(),
         )
         await state.clear()
         return
 
-    prompt, rewards = await use_prompt(session, prompt.id, db_user.id, credits_spent=model_cost.credits)
+    prompt, rewards = await use_prompt(session, prompt.id, db_user.id, credits_spent=effective_credits)
     image_session = await repo.create_image_session(
         session=session,
         user_id=db_user.id,

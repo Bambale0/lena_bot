@@ -250,6 +250,11 @@ async def test_miniapp_model_catalog_exposes_both_vip_models_with_exact_names(mo
         SimpleNamespace(model_key="gpt-image-2-vip", display_name="🤖 ГПТ 2 ВИП", credits=5),
     ]
     monkeypatch.setattr(miniapp_routes.repo, "get_all_model_costs", AsyncMock(return_value=costs))
+    monkeypatch.setattr(
+        miniapp_routes.repo,
+        "get_user_image_model_entitlements",
+        AsyncMock(return_value=[]),
+    )
     monkeypatch.setattr(miniapp_routes, "_resolve_image_quality_prices", AsyncMock(return_value={}))
 
     payload = await miniapp_routes.list_image_models(AsyncMock(), SimpleNamespace(id=1))

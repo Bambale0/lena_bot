@@ -397,6 +397,29 @@ class ModelCost(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class UserModelEntitlement(Base):
+    """Персональный доступ пользователя к модели без списания кредитов."""
+
+    __tablename__ = "user_model_entitlements"
+    __table_args__ = (
+        UniqueConstraint("user_id", "model_key", name="uq_user_model_entitlement_user_model"),
+        Index("ix_user_model_entitlements_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    model_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_unlimited: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by_tg_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(lazy="noload")
+
+
 # ── Marketplace промптов ───────────────────────────────────────────────────────
 
 class PromptCategory(str, enum.Enum):

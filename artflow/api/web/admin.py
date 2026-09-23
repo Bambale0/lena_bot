@@ -50,6 +50,11 @@ class AdminModelCostUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
+class AdminImageEntitlementRequest(BaseModel):
+    model_key: str = Field(..., min_length=1, max_length=64)
+    unlimited: bool
+
+
 class AdminPricePlanUpdateRequest(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=128)
     credits: float | None = Field(default=None, gt=0, le=1_000_000)
@@ -483,6 +488,63 @@ async def admin_users(
         for item, generations_count, credits_spent, last_generation_at, paid_rub in result.all()
     ]
     return ok({"total": total, "limit": limit, "offset": offset, "items": items})
+
+
+@router.get("/admin/users/{user_id}/image-entitlements")
+async def admin_user_image_entitlements(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+) -> dict:
+    if admin_error := _admin_error(user):
+        return admin_error
+    target = await repo.get_user_by_id(session, user_id)
+    if not target:
+        return error_response(404, "User not found")
+    models = await repo.get_base_image_model_costs(session)
+    entitlements = await repo.get_user_image_model_entitlements(session, user_id)
+    enabled = {item.model_key for item in entitlements}
+    return ok({
+        "user": _user_mini(target),
+        "models": [
+            {
+                "id": item.id,
+                "key": item.model_key,
+                "display_name": item.display_name,
+                "unlimited": item.model_key in enabled,
+            }
+            for item in models
+        ],
+    })
+
+
+@router.put("/admin/users/{user_id}/image-entitlements")
+async def admin_set_user_image_entitlement(
+    user_id: int,
+    body: AdminImageEntitlementRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+) -> dict:
+    if admin_error := _admin_error(user):
+        return admin_error
+    target = await repo.get_user_by_id(session, user_id)
+    if not target:
+        return error_response(404, "User not found")
+    try:
+        await repo.set_user_image_model_unlimited(
+            session,
+            user_id=user_id,
+            model_key=body.model_key,
+            enabled=body.unlimited,
+            created_by_tg_id=int(getattr(user, "tg_id", 0) or 0) or None,
+        )
+    except ValueError as exc:
+        return error_response(422, str(exc))
+    return ok({
+        "user_id": user_id,
+        "model_key": body.model_key,
+        "unlimited": body.unlimited,
+    })
 
 
 @router.post("/admin/users/{user_id}/credits")

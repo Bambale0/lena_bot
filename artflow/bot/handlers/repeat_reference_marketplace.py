@@ -352,9 +352,12 @@ async def _run(
     if not model_cost:
         await call.answer("Модель недоступна", show_alert=True)
         return
-    if db_user.credits < model_cost.credits:
+    effective_credits = await repo.effective_image_generation_credits(
+        session, db_user.id, model_key, model_cost.credits
+    )
+    if db_user.credits < effective_credits:
         await call.answer(
-            f"Недостаточно 💋. Нужно {model_cost.credits}, у тебя {db_user.credits}.",
+            f"Недостаточно 💋. Нужно {effective_credits:g}, у тебя {db_user.credits:g}.",
             show_alert=True,
         )
         return

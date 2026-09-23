@@ -75,9 +75,10 @@ async def test_nana_banano_text_asks_photo_before_prompt() -> None:
     call = SimpleNamespace(message=SimpleNamespace(), answer=AsyncMock())
     state = AsyncMock()
     state.get_data = AsyncMock(return_value={})
-    db_user = SimpleNamespace(credits=100)
+    db_user = SimpleNamespace(id=42, credits=100)
     repo_stub = SimpleNamespace(
         resolve_image_model_cost=AsyncMock(return_value=SimpleNamespace(credits=1)),
+        effective_image_generation_credits=AsyncMock(return_value=1),
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:

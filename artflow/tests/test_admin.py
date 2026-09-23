@@ -798,3 +798,80 @@ async def test_cb_referrals_all_with_items() -> None:
     assert "@kid" in out
     assert "@leader" in out
     assert "700₽" in out
+
+# ── per-user unlimited image models ───────────────────────────────────────────
+
+def test_admin_menu_has_unlimited_image_models_button() -> None:
+    buttons = [button for row in admin.admin_menu_kb().inline_keyboard for button in row]
+    callbacks = {button.callback_data for button in buttons}
+    assert "adm:unlimited_images" in callbacks
+
+
+@pytest.mark.asyncio
+async def test_unlimited_images_start_requests_telegram_id() -> None:
+    call = make_callback(data="adm:unlimited_images")
+    call.message.edit_text = AsyncMock()
+    state = AsyncMock()
+
+    await admin.cb_unlimited_images_start(call, state)
+
+    state.set_state.assert_awaited_with(admin.AdminFSM.await_unlimited_tg_id)
+    text = call.message.edit_text.await_args.args[0]
+    assert "Telegram ID" in text
+
+
+@pytest.mark.asyncio
+async def test_unlimited_images_user_lookup_shows_image_models() -> None:
+    message = make_message(text="123456789")
+    state = AsyncMock()
+    target = SimpleNamespace(id=42, tg_id=123456789, username="creator", full_name="Creator")
+    models = [
+        SimpleNamespace(id=1, model_key="nano-banana-2", display_name="Nano Banana 2"),
+        SimpleNamespace(id=2, model_key="gpt-image-2-text-to-image", display_name="GPT Image 2"),
+    ]
+    entitlement = SimpleNamespace(model_key="nano-banana-2")
+    repo_stub = SimpleNamespace(
+        get_user_by_tg_id=AsyncMock(return_value=target),
+        get_base_image_model_costs=AsyncMock(return_value=models),
+        get_user_image_model_entitlements=AsyncMock(return_value=[entitlement]),
+    )
+
+    with patch("bot.handlers.admin.repo", new=repo_stub):
+        await admin.handle_unlimited_tg_id(message, AsyncMock(), state)
+
+    state.clear.assert_awaited_once()
+    markup = message.answer.await_args.kwargs["reply_markup"]
+    labels = [button.text for row in markup.inline_keyboard for button in row]
+    assert any("♾️ Nano Banana 2" in label for label in labels)
+    assert any("▫️ GPT Image 2" in label for label in labels)
+
+
+@pytest.mark.asyncio
+async def test_toggle_unlimited_image_model_updates_entitlement() -> None:
+    call = make_callback(data="adm:ulim:42:7")
+    call.from_user = SimpleNamespace(id=1001)
+    target = SimpleNamespace(id=42, tg_id=123456789, username="creator", full_name="Creator")
+    model = SimpleNamespace(id=7, model_key="nano-banana-2", display_name="Nano Banana 2")
+    session = AsyncMock()
+    repo_stub = SimpleNamespace(
+        get_user_by_id=AsyncMock(return_value=target),
+        get_model_cost_by_id=AsyncMock(return_value=model),
+        get_user_image_model_entitlements=AsyncMock(return_value=[]),
+        set_user_image_model_unlimited=AsyncMock(return_value=True),
+    )
+
+    with (
+        patch("bot.handlers.admin.repo", new=repo_stub),
+        patch("bot.handlers.admin._render_unlimited_image_models", AsyncMock()) as render,
+    ):
+        await admin.cb_toggle_unlimited_image_model(call, session)
+
+    repo_stub.set_user_image_model_unlimited.assert_awaited_once_with(
+        session,
+        user_id=42,
+        model_key="nano-banana-2",
+        enabled=True,
+        created_by_tg_id=1001,
+    )
+    render.assert_awaited_once_with(call.message, session=session, target=target)
+

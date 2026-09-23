@@ -45,6 +45,22 @@ def stub_image_quality_prices(monkeypatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def stub_image_entitlements(monkeypatch):
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_user_image_model_entitlements",
+        AsyncMock(return_value=[]),
+    )
+
+    async def configured_image_credits(_session, _user_id, _model_key, configured_credits):
+        return float(configured_credits or 0)
+
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.effective_image_generation_credits",
+        configured_image_credits,
+    )
+
+
 @pytest.fixture
 async def client():
     app.dependency_overrides[get_session] = fake_session
@@ -661,6 +677,89 @@ async def test_webapp_image_models_allow_fractional_credits(client, monkeypatch)
 
     assert response.status_code == 200
     assert response.json()[0]["credits"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_webapp_image_models_expose_unlimited_effective_price(client, monkeypatch) -> None:
+    stub_image_quality_prices(monkeypatch)
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_all_model_costs",
+        AsyncMock(return_value=[
+            SimpleNamespace(
+                model_key="nano-banana-2",
+                display_name="Nano Banana 2",
+                credits=4,
+            ),
+        ]),
+    )
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_user_image_model_entitlements",
+        AsyncMock(return_value=[SimpleNamespace(model_key="nano-banana-2")]),
+    )
+
+    response = await client.get("/api/v1/models/image")
+
+    assert response.status_code == 200
+    payload = response.json()[0]
+    assert payload["credits"] == 0
+    assert payload["is_unlimited"] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_image_unlimited_skips_spend_and_records_zero(client, monkeypatch) -> None:
+    spend_credits = AsyncMock(return_value=True)
+    captured_credits: list[float] = []
+
+    async def fake_create_generation(_session, _user_id, model, gen_type, prompt, credits_spent, **_kwargs):
+        captured_credits.append(float(credits_spent))
+        return SimpleNamespace(
+            id=901,
+            model=model,
+            gen_type=gen_type,
+            prompt=prompt,
+            status=GenerationStatus.processing,
+            result_url=None,
+            result_urls=None,
+            credits_spent=credits_spent,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+            source_feed_gen_id=None,
+        )
+
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.resolve_image_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=5)),
+    )
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.effective_image_generation_credits",
+        AsyncMock(return_value=0.0),
+    )
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend_credits)
+    monkeypatch.setattr("api.miniapp_routes.repo.create_image_session", AsyncMock(return_value=SimpleNamespace(id=90)))
+    monkeypatch.setattr("api.miniapp_routes.repo.create_generation", fake_create_generation)
+    monkeypatch.setattr("api.miniapp_routes.repo.update_generation_task", AsyncMock())
+    monkeypatch.setattr("api.miniapp_routes.repo.update_image_session_last_prompt", AsyncMock())
+    monkeypatch.setattr(
+        "api.miniapp_routes.image_service.generate_image",
+        AsyncMock(return_value=SimpleNamespace(task_id="unlimited-image-task", is_async=True)),
+    )
+
+    response = await client.post(
+        "/api/v1/generate/image",
+        json={
+            "model": "nano-banana-2",
+            "prompt": "studio portrait",
+            "aspect_ratio": "1:1",
+            "quality": "basic",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["credits_spent"] == 0
+    assert captured_credits == [0.0]
+    spend_credits.assert_not_awaited()
 
 
 @pytest.mark.asyncio
