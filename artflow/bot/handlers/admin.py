@@ -78,6 +78,8 @@ class AdminFSM(StatesGroup):
     # Credits management
     await_credits_tg_id = State()
     await_credits_amount = State()
+    # Per-user unlimited image models
+    await_unlimited_tg_id = State()
     # Ban
     await_ban_tg_id = State()
     # Broadcast
@@ -99,6 +101,7 @@ def admin_menu_kb():
     builder.button(text="🎟 Промокоды", callback_data="adm:promos")
     builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
+    builder.button(text="♾️ Безлимит фото", callback_data="adm:unlimited_images")
     builder.button(text="💰 Начислить кредиты", callback_data="adm:add_credits")
     builder.button(text="🚫 Бан / Разбан", callback_data="adm:ban")
     builder.button(text="🗂 Промпты (модерация)", callback_data="adm:prompts")
@@ -1476,6 +1479,129 @@ async def handle_price_label(message: Message, session: AsyncSession, state: FSM
         f"✅ Название тарифа <code>{plan_key}</code> обновлено: <b>{new_label}</b>",
         reply_markup=_price_done_kb(),
     )
+
+
+# ─── Персональный безлимит изображений ────────────────────────────────────────
+
+def _unlimited_image_models_kb(
+    user_id: int,
+    models: list,
+    enabled_keys: set[str],
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for model in models:
+        enabled = model.model_key in enabled_keys
+        marker = "♾️" if enabled else "▫️"
+        builder.button(
+            text=f"{marker} {model.display_name}",
+            callback_data=f"adm:ulim:{user_id}:{model.id}",
+        )
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(text="👤 Другой ID", callback_data="adm:unlimited_images"),
+        InlineKeyboardButton(text="← Админ-панель", callback_data="adm:back"),
+    )
+    return builder.as_markup()
+
+
+async def _render_unlimited_image_models(
+    holder: Message,
+    *,
+    session: AsyncSession,
+    target: User,
+) -> None:
+    models = await repo.get_base_image_model_costs(session)
+    entitlements = await repo.get_user_image_model_entitlements(session, target.id)
+    enabled_keys = {item.model_key for item in entitlements}
+    label = _user_label(target)
+    await holder.edit_text(
+        "♾️ <b>Безлимит на изображения</b>\n\n"
+        f"Пользователь: {label}\n"
+        f"Telegram ID: <code>{target.tg_id}</code>\n\n"
+        "Нажми на модель, чтобы включить или выключить безлимит. "
+        "♾️ — включено, ▫️ — обычная тарификация.",
+        reply_markup=_unlimited_image_models_kb(target.id, models, enabled_keys),
+    )
+
+
+@router.callback_query(F.data == "adm:unlimited_images")
+async def cb_unlimited_images_start(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(AdminFSM.await_unlimited_tg_id)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        "♾️ <b>Безлимит на изображения</b>\n\n"
+        "Отправь Telegram ID пользователя, которому нужно настроить бесплатные модели.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="← Назад", callback_data="adm:back")]]
+        ),
+    )
+    await call.answer()
+
+
+@router.message(AdminFSM.await_unlimited_tg_id, F.text)
+async def handle_unlimited_tg_id(
+    message: Message,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("Нужен числовой Telegram ID. Например: <code>123456789</code>")
+        return
+    target = await repo.get_user_by_tg_id(session, int(raw))
+    if not target:
+        await message.answer("Пользователь с таким Telegram ID не найден. Проверь ID и отправь ещё раз.")
+        return
+
+    await state.clear()
+    models = await repo.get_base_image_model_costs(session)
+    entitlements = await repo.get_user_image_model_entitlements(session, target.id)
+    enabled_keys = {item.model_key for item in entitlements}
+    await message.answer(
+        "♾️ <b>Безлимит на изображения</b>\n\n"
+        f"Пользователь: {_user_label(target)}\n"
+        f"Telegram ID: <code>{target.tg_id}</code>\n\n"
+        "Нажми на модель, чтобы включить или выключить безлимит. "
+        "♾️ — включено, ▫️ — обычная тарификация.",
+        reply_markup=_unlimited_image_models_kb(target.id, models, enabled_keys),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:ulim:"))
+async def cb_toggle_unlimited_image_model(
+    call: CallbackQuery,
+    session: AsyncSession,
+) -> None:
+    try:
+        _, _, raw_user_id, raw_model_id = (call.data or "").split(":", 3)
+        user_id = int(raw_user_id)
+        model_id = int(raw_model_id)
+    except (TypeError, ValueError):
+        await call.answer("Некорректные данные", show_alert=True)
+        return
+
+    target = await repo.get_user_by_id(session, user_id)
+    model = await repo.get_model_cost_by_id(session, model_id)
+    if not target or not model:
+        await call.answer("Пользователь или модель не найдены", show_alert=True)
+        return
+
+    entitlements = await repo.get_user_image_model_entitlements(session, user_id)
+    enabled_keys = {item.model_key for item in entitlements}
+    enable = model.model_key not in enabled_keys
+    try:
+        await repo.set_user_image_model_unlimited(
+            session,
+            user_id=user_id,
+            model_key=model.model_key,
+            enabled=enable,
+            created_by_tg_id=call.from_user.id,
+        )
+    except ValueError as exc:
+        await call.answer(str(exc), show_alert=True)
+        return
+
+    await _render_unlimited_image_models(call.message, session=session, target=target)  # type: ignore[arg-type]
+    await call.answer("Безлимит включён" if enable else "Безлимит выключен")
 
 
 # ─── Стоимость моделей ────────────────────────────────────────────────────────
