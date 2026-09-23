@@ -82,9 +82,23 @@ jobs:
             tests/test_video_gen.py \
             tests/test_video_prompt_service.py \
             tests/test_video_prompt_surface.py \
+            tests/test_unlimited_image_models.py \
             tests/test_webapp_routes.py \
             tests/test_kie_model_specs.py \
             tests/test_miniapp_feed_webkit_stability.py
+
+      - name: Compile unlimited image entitlement modules
+        run: |
+          python -m py_compile \
+            api/miniapp_routes.py \
+            bot/handlers/admin.py \
+            bot/handlers/image_gen.py \
+            bot/handlers/image_models_first.py \
+            bot/handlers/midjourney.py \
+            bot/keyboards/models.py \
+            db/models.py \
+            db/repository.py \
+            tests/test_unlimited_image_models.py
 
       - name: Provider contract inventory
         run: python scripts/check_provider_contracts_ci.py
@@ -121,7 +135,8 @@ jobs:
             tests/test_kie_model_specs.py \
             tests/test_runtime_reliability.py \
             tests/test_video_prompt_service.py \
-            tests/test_video_prompt_surface.py
+            tests/test_video_prompt_surface.py \
+            tests/test_unlimited_image_models.py
 
   webapp:
     runs-on: ubuntu-latest
