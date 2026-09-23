@@ -128,3 +128,47 @@ Date: 2026-09-20.
 6. [x] PR #153 CI: APIX backend-quality, frontend build + Playwright Mini App smoke, Feed Security Contracts, Provider Contract Compliance, Pinterest Backend Contract, and Photo Prompt Integration all passed on the implementation SHA.
 7. [ ] Merge / production autodeploy / production smoke.
 
+---
+
+# Execution ledger — per-user unlimited image models
+
+Baseline: commit `9773b96e`.
+Date: 2026-09-23.
+
+## Current state
+- Image model prices are database-backed in `model_costs` and editable through the Telegram admin panel and web admin API.
+- User balances are stored on `users.credits`; all generation charges must flow through repository credit helpers.
+- Text-bot image generation, Mini App/site image generation, and Midjourney image flows have separate charge entry points.
+- There is no existing per-user model entitlement table or unlimited billing override.
+
+## Intended outcome
+- Admin enters a target Telegram ID and selects one or more image models.
+- Selected models become unlimited only for that user: effective generation cost is 0, no credits are deducted, and generated records store `credits_spent=0`.
+- All non-selected models keep the configured price.
+- Video and music billing are unchanged.
+- The rule applies consistently to Telegram bot, Mini App, and site image generation paths.
+
+## Acceptance criteria
+1. Persist per-user unlimited image-model entitlements in the database with a unique user/model constraint.
+2. Admin can enable/disable an entitlement by Telegram ID and image model from the Telegram admin panel.
+3. Admin APIs can list/update the same entitlements for web control-plane parity.
+4. Entitled image generations bypass balance checks and credit deduction.
+5. `Generation.credits_spent` is 0 for entitled runs, preventing accidental refunds/royalties from paid amounts that were never charged.
+6. Repeat/remix paths use the same entitlement rule.
+7. Non-image generations and non-entitled users retain existing billing.
+8. Migration, repository tests, admin tests, bot tests, web/Mini App tests, CI and production smoke pass before completion.
+
+## No-hardcode / observability
+- Entitlements are database-backed; no user IDs or model IDs are hardcoded.
+- Admin selects only base `GenerationType.image` model keys; quality variants inherit the entitlement through the base generation model key.
+- Repository logs entitlement changes and unlimited billing decisions without secrets.
+
+## Steps
+1. [x] Read repository instructions and backend-integration skill; audited model pricing, admin control plane, user model, charge paths and migration head.
+2. [ ] Add entitlement model + Alembic migration.
+3. [ ] Add repository entitlement and effective-credit helpers.
+4. [ ] Add Telegram admin management flow and admin API parity.
+5. [ ] Apply effective image credits across bot, Mini App/site and Midjourney image flows.
+6. [ ] Add regressions and run focused checks.
+7. [ ] Review, CI, merge, autodeploy and production smoke.
+
