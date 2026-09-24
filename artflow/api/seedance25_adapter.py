@@ -123,6 +123,7 @@ def validate_reference_video_metadata(
     width: int | None,
     height: int | None,
     duration_seconds: float | None,
+    min_duration_seconds: float = MIN_REFERENCE_VIDEO_SECONDS,
 ) -> str | None:
     try:
         w = int(width or 0)
@@ -131,10 +132,11 @@ def validate_reference_video_metadata(
     except (TypeError, ValueError):
         return "Seedance 2.5 could not read reference video metadata"
 
-    if duration < MIN_REFERENCE_VIDEO_SECONDS or duration > MAX_REFERENCE_VIDEO_SECONDS:
+    min_duration = max(float(min_duration_seconds), MIN_REFERENCE_VIDEO_SECONDS)
+    if duration < min_duration or duration > MAX_REFERENCE_VIDEO_SECONDS:
         return (
             "Seedance 2.5 reference video duration must be between "
-            f"{MIN_REFERENCE_VIDEO_SECONDS:g} and {MAX_REFERENCE_VIDEO_SECONDS:g} seconds"
+            f"{min_duration:g} and {MAX_REFERENCE_VIDEO_SECONDS:g} seconds"
         )
     if w < MIN_REFERENCE_VIDEO_WIDTH or w > MAX_REFERENCE_VIDEO_WIDTH:
         return (
@@ -158,6 +160,26 @@ def validate_reference_video_metadata(
             f"{MIN_REFERENCE_VIDEO_ASPECT:g} and {MAX_REFERENCE_VIDEO_ASPECT:g}"
         )
     return None
+
+
+_VIDEO_EDIT_PROMPT_MARKERS = (
+    "замени",
+    "заменить",
+    "поменяй",
+    "подмени",
+    "отредактируй",
+    "редактируй",
+    "replace ",
+    "replace the ",
+    "swap ",
+    "edit the video",
+    "edit video",
+)
+
+
+def is_explicit_video_edit_prompt(prompt: str) -> bool:
+    normalized = " ".join(str(prompt or "").casefold().split())
+    return any(marker in normalized for marker in _VIDEO_EDIT_PROMPT_MARKERS)
 
 
 def route_for_inputs(*, images: list[str], videos: list[str], audios: list[str]) -> str:
