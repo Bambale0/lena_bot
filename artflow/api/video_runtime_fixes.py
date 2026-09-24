@@ -9,6 +9,8 @@ import logging
 from typing import Any
 
 from api import seedance25_adapter as seedance25
+from api.media_gateway import MediaKind, probe_local_media
+from api.public_files import local_upload_path_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,20 @@ def _clean_prompt(prompt: Any, *, model_name: str) -> str:
     return value
 
 
+async def _validate_seedance_reference_video_url(url: str) -> None:
+    local_path = local_upload_path_from_url(url)
+    if local_path is None:
+        return
+    probe = await probe_local_media(local_path, MediaKind.VIDEO)
+    error = seedance25.validate_reference_video_metadata(
+        width=probe.width,
+        height=probe.height,
+        duration_seconds=probe.duration_seconds,
+    )
+    if error:
+        raise ValueError(error)
+
+
 async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, ...], kwargs: dict[str, Any]):
     clean_prompt = _clean_prompt(prompt, model_name="Seedance 2.5")
     image_url = _arg(args, kwargs, "image_url", 0)
@@ -83,6 +99,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
     ])
     prepared_videos: list[str] = []
     for raw_video_ref in raw_video_refs[: seedance25.MAX_REFERENCE_VIDEOS]:
+        await _validate_seedance_reference_video_url(raw_video_ref)
         prepared_video = await video_service._prepare_reference_video_url(raw_video_ref)
         if prepared_video and prepared_video not in prepared_videos:
             prepared_videos.append(prepared_video)
