@@ -6,6 +6,7 @@ surface while legacy service code is migrated incrementally.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from api import seedance25_adapter as seedance25
@@ -62,6 +63,35 @@ def _clean_prompt(prompt: Any, *, model_name: str) -> str:
     if not value:
         raise ValueError(f"{model_name} prompt is required")
     return value
+
+
+async def seedance25_edit_billing_duration(
+    prompt: str,
+    reference_video_url: str | list[str] | None,
+) -> int | None:
+    refs = seedance25._dedupe(reference_video_url)
+    if not refs or not seedance25.is_explicit_video_edit_prompt(prompt):
+        return None
+    if len(refs) != 1:
+        raise ValueError("Seedance 2.5 video editing requires exactly one reference video")
+
+    local_path = local_upload_path_from_url(refs[0])
+    if local_path is None:
+        # External URLs cannot be probed safely without fetching arbitrary media.
+        # Reserve the documented maximum so billing cannot undercharge a
+        # provider-managed edit whose output follows the input video's length.
+        return seedance25.AUTO_DURATION_BILLING_SECONDS
+
+    probe = await probe_local_media(local_path, MediaKind.VIDEO)
+    error = seedance25.validate_reference_video_metadata(
+        width=probe.width,
+        height=probe.height,
+        duration_seconds=probe.duration_seconds,
+        min_duration_seconds=4.0,
+    )
+    if error:
+        raise ValueError(error)
+    return max(4, min(30, int(math.ceil(float(probe.duration_seconds or 0)))))
 
 
 async def _validate_seedance_reference_video_url(
