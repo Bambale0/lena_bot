@@ -96,6 +96,7 @@ jobs:
             tests/test_minimax_h3_runtime_guards.py \
             tests/test_minimax_h3_uploads.py \
             tests/test_seedance25_auto_multimodal.py \
+            tests/test_seedance25_provider_payload.py \
             tests/test_seedance25_uploads.py \
             tests/test_seedance25_site_surface.py \
             tests/test_suno_source_audio.py \
@@ -120,8 +121,10 @@ jobs:
             tests/test_minimax_h3_runtime_guards.py \
             tests/test_minimax_h3_uploads.py \
             tests/test_seedance25_auto_multimodal.py \
+            tests/test_seedance25_provider_payload.py \
             tests/test_seedance25_uploads.py \
             tests/test_seedance25_site_surface.py \
+            tests/test_video_service.py::test_ensure_video_reference_aspect_url_can_upscale_provider_small_image \
             tests/test_seedance25_admin_model_visibility.py \
             tests/test_suno_source_audio.py \
             tests/test_video_runtime_fixes.py \
