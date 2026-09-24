@@ -118,7 +118,7 @@ function renderPanel(): HTMLElement {
     </div>
     <label class="grid min-w-0 gap-1 text-xs font-medium">
       Видео · до ${MAX_VIDEOS}
-      <input data-seedance25="videoFiles" type="file" accept="video/mp4,video/quicktime,video/x-matroska,.mp4,.mov,.mkv" multiple class="w-full text-xs" />
+      <input data-seedance25="videoFiles" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple class="w-full text-xs" />
     </label>
     <label class="grid min-w-0 gap-1 text-xs font-medium">
       Аудио · до ${MAX_AUDIOS}
