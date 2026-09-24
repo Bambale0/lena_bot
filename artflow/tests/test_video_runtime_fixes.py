@@ -91,6 +91,40 @@ async def test_seedance_runtime_forwards_video_references_to_kie(monkeypatch):
     ]
 
 @pytest.mark.asyncio
+async def test_seedance_runtime_normalizes_explicit_video_edit_request(monkeypatch):
+    install_video_runtime_fixes()
+    calls = []
+
+    async def create_task(payload, callback_url=None):
+        calls.append(payload)
+        return {"code": 200, "data": {"taskId": "seedance-edit-task"}}
+
+    async def prepare_images(value):
+        return value
+
+    async def prepare_video(value):
+        return value
+
+    monkeypatch.setattr(video_service.kieai_client, "create_task", create_task)
+    monkeypatch.setattr(video_service, "_prepare_video_reference_urls", prepare_images)
+    monkeypatch.setattr(video_service, "_prepare_reference_video_url", prepare_video)
+
+    await video_service.generate_video(
+        video_service.VideoModel(seedance25_adapter.MODEL_KEY),
+        "Замени людей на видео на людей с загруженных фото и сохрани движения",
+        image_url=["https://example.test/a.jpg", "https://example.test/b.jpg"],
+        reference_video_url=["https://example.test/source.mp4"],
+        duration=30,
+        aspect_ratio="9:16",
+        resolution="480p",
+    )
+
+    provider_input = calls[0]["input"]
+    assert provider_input["reference_video_urls"] == ["https://example.test/source.mp4"]
+    assert provider_input["aspect_ratio"] == "adaptive"
+    assert provider_input["duration"] == -1
+
+@pytest.mark.asyncio
 async def test_seedance_runtime_multimodal_prompt_is_not_lost(monkeypatch):
     install_video_runtime_fixes()
     calls = []
