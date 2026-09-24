@@ -30,6 +30,8 @@ from api.video_prompt_limits import (
     validate_video_prompt,
     video_prompt_max_chars,
 )
+from api.seedance25_adapter import MODEL_KEY as SEEDANCE25_MODEL_KEY
+from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_service import VideoModel
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
@@ -1408,6 +1410,33 @@ async def _launch_video_generation_from_state(
 
     grok_mode: str = data.get("grok_mode", "normal")
     image_url = await _video_reference_image_url(bot, data)
+
+    if model_key == SEEDANCE25_MODEL_KEY:
+        try:
+            edit_billing_duration = await seedance25_edit_billing_duration(
+                prompt,
+                data.get("reference_video_url"),
+            )
+        except ValueError as exc:
+            await source_message.answer(
+                f"❌ {escape(str(exc))}",
+                reply_markup=main_menu_kb(),
+            )
+            return False
+        if edit_billing_duration is not None:
+            duration = edit_billing_duration
+            aspect_ratio = "adaptive"
+            await state.update_data(
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                seedance_video_edit=True,
+            )
+            data = {
+                **data,
+                "duration": duration,
+                "aspect_ratio": aspect_ratio,
+                "seedance_video_edit": True,
+            }
 
     has_gemini_omni_video_input = _has_gemini_omni_video_input(model_key, data)
     model_cost = await _resolve_video_model_cost(
