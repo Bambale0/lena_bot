@@ -91,6 +91,35 @@ async def test_seedance_runtime_forwards_video_references_to_kie(monkeypatch):
     ]
 
 @pytest.mark.asyncio
+async def test_seedance_edit_billing_uses_reference_video_duration(monkeypatch):
+    from api import video_runtime_fixes as runtime
+
+    monkeypatch.setattr(runtime, "local_upload_path_from_url", lambda _url: SimpleNamespace())
+    monkeypatch.setattr(
+        runtime,
+        "probe_local_media",
+        AsyncMock(return_value=SimpleNamespace(width=720, height=1280, duration_seconds=28.8)),
+    )
+
+    duration = await runtime.seedance25_edit_billing_duration(
+        "Замени людей на видео и сохрани движения",
+        ["https://example.test/source.mp4"],
+    )
+
+    assert duration == 29
+
+
+@pytest.mark.asyncio
+async def test_seedance_edit_billing_rejects_multiple_source_videos() -> None:
+    from api import video_runtime_fixes as runtime
+
+    with pytest.raises(ValueError, match="one reference video"):
+        await runtime.seedance25_edit_billing_duration(
+            "Replace the people in the video",
+            ["https://example.test/a.mp4", "https://example.test/b.mp4"],
+        )
+
+@pytest.mark.asyncio
 async def test_seedance_runtime_normalizes_explicit_video_edit_request(monkeypatch):
     install_video_runtime_fixes()
     calls = []
