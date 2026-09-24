@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 ENHANCER = ROOT / "webapp" / "src" / "lib" / "seedance25-miniapp-enhancer.ts"
 MINIAPP_ROUTES = ROOT / "api" / "miniapp_routes.py"
