@@ -64,7 +64,11 @@ def _clean_prompt(prompt: Any, *, model_name: str) -> str:
     return value
 
 
-async def _validate_seedance_reference_video_url(url: str) -> None:
+async def _validate_seedance_reference_video_url(
+    url: str,
+    *,
+    video_edit: bool = False,
+) -> None:
     local_path = local_upload_path_from_url(url)
     if local_path is None:
         return
@@ -73,6 +77,7 @@ async def _validate_seedance_reference_video_url(url: str) -> None:
         width=probe.width,
         height=probe.height,
         duration_seconds=probe.duration_seconds,
+        min_duration_seconds=4.0 if video_edit else seedance25.MIN_REFERENCE_VIDEO_SECONDS,
     )
     if error:
         raise ValueError(error)
@@ -97,9 +102,17 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         *seedance25._list(kwargs.get("reference_video_url")),
         *extra_video_refs,
     ])
+    video_edit = bool(raw_video_refs) and seedance25.is_explicit_video_edit_prompt(clean_prompt)
+    if video_edit:
+        # KIE/Seedance 2.5 identifies edit mode from the prompt. In that mode
+        # the provider requires output ratio/duration to follow the selected
+        # input video: aspect_ratio=adaptive and duration=-1.
+        aspect_ratio = "adaptive"
+        duration = seedance25.DURATION_AUTO
+
     prepared_videos: list[str] = []
     for raw_video_ref in raw_video_refs[: seedance25.MAX_REFERENCE_VIDEOS]:
-        await _validate_seedance_reference_video_url(raw_video_ref)
+        await _validate_seedance_reference_video_url(raw_video_ref, video_edit=video_edit)
         prepared_video = await video_service._prepare_reference_video_url(raw_video_ref)
         if prepared_video and prepared_video not in prepared_videos:
             prepared_videos.append(prepared_video)
@@ -153,7 +166,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         raise RuntimeError(f"KIE.AI video: empty taskId for {seedance25.MODEL_KEY}: {response!r}")
     logger.info(
         "KIE.AI Seedance 2.5 task route=%s images=%d videos=%d audios=%d task=%s",
-        route,
+        "video_edit" if video_edit else route,
         len(prepared_images),
         len(prepared_videos),
         len(prepared_audio_refs),
