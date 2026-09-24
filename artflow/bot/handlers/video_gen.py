@@ -24,13 +24,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import polling, video_service
 from api.public_files import mirror_telegram_file
+from api.seedance25_adapter import MODEL_KEY as SEEDANCE25_MODEL_KEY
 from api.video_prompt_limits import (
     append_telegram_seedance_prompt_chunk,
     seedance_prompt_max_chars,
     validate_video_prompt,
     video_prompt_max_chars,
 )
-from api.seedance25_adapter import MODEL_KEY as SEEDANCE25_MODEL_KEY
 from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_service import VideoModel
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
