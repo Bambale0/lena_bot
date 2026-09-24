@@ -13,7 +13,7 @@ def test_seedance25_upload_accepts_image_video_and_audio_families() -> None:
         30 * 1024 * 1024,
         None,
     )
-    assert uploads._kind_and_limit(_file("ref.mkv", "video/x-matroska")) == (
+    assert uploads._kind_and_limit(_file("ref.mp4", "video/mp4")) == (
         "video",
         50 * 1024 * 1024,
         None,
