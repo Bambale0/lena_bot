@@ -219,14 +219,14 @@ The transport path was correct. The failures came from two separate gaps:
 - Runtime validates local video refs before KIE upload.
 - Provider-safe limits enforced from live provider behavior: duration 2–30s for references, 4–30s for explicit edit source video, width 300–6000, pixel count 407696–8295044, aspect ratio 0.4–2.5.
 - Explicit video-edit prompts with one reference video use KIE-required `aspect_ratio=adaptive` and provider `duration=-1`.
-- Billing for a local edit source is calculated from the probed source duration before credits are spent; multiple edit-source videos are rejected before charge to avoid ambiguous billing.
+- Billing for a local edit source is calculated from the probed source duration before credits are spent; multiple edit-source videos and unprobeable external edit URLs are rejected before charge to avoid ambiguous/incorrect billing.
 - Small local image refs can be safely upscaled without cropping to Seedance's minimum provider dimensions/pixel count.
 - Mini App file picker no longer advertises MKV for Seedance reference video.
 
 ## Verification
 - TDD confirmed the old upload path lacked metadata validation and accepted MKV.
 - TDD confirmed the old edit request sent `9:16` instead of `adaptive`.
-- Focused Seedance/video suite: 42/42 passed.
+- Focused Seedance/video suite: 43/43 passed.
 - Python compile passed for touched backend/bot modules.
 - Ruff passed for touched provider/runtime/bot/test files and import ordering in Mini App routes.
 - Provider Contract workflow now explicitly gates the new video-ref payload test and small-image upscaling regression.
