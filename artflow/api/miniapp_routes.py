@@ -61,12 +61,12 @@ from api.public_files import (
 )
 from api.seedance25_adapter import MODEL_KEY as SEEDANCE25_MODEL_KEY
 from api.video_prompt_limits import validate_video_prompt, video_prompt_max_chars
-from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_prompt_service import (
     VIDEO_PROMPT_MODEL_KEY,
     generate_prompt_from_video_url,
     is_supported_video_prompt_video,
 )
+from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_service import VideoModel
 from bot.keyboards.models import (
     _IMAGE_MODEL_ORDER,
