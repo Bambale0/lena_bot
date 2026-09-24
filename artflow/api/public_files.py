@@ -326,6 +326,8 @@ def ensure_video_reference_aspect_url(
     min_ratio: float = 1 / 2.5,
     max_ratio: float = 2.5,
     max_side: int = 2048,
+    min_width: int | None = None,
+    min_pixels: int | None = None,
 ) -> str | None:
     """
     Return a local video-reference image URL whose aspect ratio provider APIs accept.
@@ -345,7 +347,10 @@ def ensure_video_reference_aspect_url(
         return image_url
 
     digest = hashlib.sha256(
-        f"{path.name}:{stat.st_mtime_ns}:{min_ratio:.4f}:{max_ratio:.4f}:{max_side}".encode()
+        (
+            f"{path.name}:{stat.st_mtime_ns}:{min_ratio:.4f}:{max_ratio:.4f}:"
+            f"{max_side}:{min_width or 0}:{min_pixels or 0}"
+        ).encode()
     ).hexdigest()[:16]
     fitted_path = path.with_name(f"{path.stem}_video_ref_{max_side}_{digest}.jpg")
     if fitted_path.exists() and fitted_path.is_file():
@@ -368,8 +373,10 @@ def ensure_video_reference_aspect_url(
                 return image_url
             ratio = width / height
             needs_ratio_fit = ratio < min_ratio or ratio > max_ratio
-            needs_resize = max(width, height) > max_side
-            if not needs_ratio_fit and not needs_resize:
+            needs_downsize = max(width, height) > max_side
+            needs_min_width = min_width is not None and width < min_width
+            needs_min_pixels = min_pixels is not None and width * height < min_pixels
+            if not any((needs_ratio_fit, needs_downsize, needs_min_width, needs_min_pixels)):
                 return image_url
 
             target_width = width
@@ -379,7 +386,19 @@ def ensure_video_reference_aspect_url(
             elif ratio > max_ratio:
                 target_height = int(round(width / max_ratio))
 
-            scale = min(1.0, max_side / max(target_width, target_height))
+            min_scale = 1.0
+            if min_width is not None and target_width < min_width:
+                min_scale = max(min_scale, min_width / target_width)
+            if min_pixels is not None and target_width * target_height < min_pixels:
+                min_scale = max(
+                    min_scale,
+                    (min_pixels / (target_width * target_height)) ** 0.5,
+                )
+            max_scale = max_side / max(target_width, target_height)
+            scale = min(min_scale, max_scale)
+            if needs_downsize:
+                scale = min(scale, max_scale)
+
             canvas_size = (
                 max(1, int(round(target_width * scale))),
                 max(1, int(round(target_height * scale))),
