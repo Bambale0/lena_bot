@@ -194,3 +194,45 @@ Date: 2026-09-23.
 9. [ ] Diff review and exact-head CI.
 10. [ ] Merge, Alembic production upgrade, autodeploy, health and log smoke.
 
+---
+
+# Execution ledger — Seedance 2.5 video-reference transport and preflight
+
+Baseline: commit `b83aac15`.
+Date: 2026-09-24.
+
+## Production evidence
+- Video references are not being lost. Production runtime recorded Seedance requests with `videos=1`, and KIE task records contain `reference_video_urls` after APIX uploads them to KIE storage.
+- Successful example: generation `49967`, KIE task `ea78d8083b86fc88ea153bee7d26b899`, one image + one MOV video reference, provider state `success`.
+- Failed edit example: generation `50328`, KIE task `9b51ee472ce0e0a8d14a334d426d40d2`; KIE received all three image refs plus the MP4 video ref, classified the prompt as video editing, and required `aspect_ratio=adaptive` plus `duration=-1`.
+- Failed media examples showed missing local preflight: videos longer than 30 seconds and low-pixel media reached the provider before being rejected.
+
+## Root cause
+The transport path was correct. The failures came from two separate gaps:
+1. Seedance 2.5 reference videos were accepted without provider-specific media validation.
+2. Prompts explicitly asking to replace/edit people in the supplied video were still sent with manually selected output ratio/duration, while KIE's edit scenario requires adaptive ratio and automatic duration.
+
+## Fix
+- Preserve and regression-test `reference_video_urls` in the final KIE payload.
+- Web uploads accept MP4/MOV video refs and ffprobe them before persistence.
+- Telegram validates its video metadata before mirroring.
+- Runtime validates local video refs before KIE upload.
+- Provider-safe limits enforced from live provider behavior: duration 2–30s for references, 4–30s for explicit edit source video, width 300–6000, pixel count 407696–8295044, aspect ratio 0.4–2.5.
+- Explicit video-edit prompts with one reference video use KIE-required `aspect_ratio=adaptive` and provider `duration=-1`.
+- Billing for a local edit source is calculated from the probed source duration before credits are spent; multiple edit-source videos and unprobeable external edit URLs are rejected before charge to avoid ambiguous/incorrect billing.
+- Small local image refs can be safely upscaled without cropping to Seedance's minimum provider dimensions/pixel count.
+- Mini App file picker no longer advertises MKV for Seedance reference video.
+
+## Verification
+- TDD confirmed the old upload path lacked metadata validation and accepted MKV.
+- TDD confirmed the old edit request sent `9:16` instead of `adaptive`.
+- Focused Seedance/video suite: 43/43 passed.
+- Python compile passed for touched backend/bot modules.
+- Ruff passed for touched provider/runtime/bot/test files and import ordering in Mini App routes.
+- Provider Contract workflow now explicitly gates the new video-ref payload test and small-image upscaling regression.
+
+## Pending delivery
+1. [ ] PR review and exact-head CI.
+2. [ ] Merge to main.
+3. [ ] Production autodeploy and health/log smoke.
+

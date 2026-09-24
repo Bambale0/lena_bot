@@ -14,6 +14,7 @@ from api.seedance25_adapter import (
     MAX_REFERENCE_VIDEOS,
     MODEL_KEY,
     route_for_inputs,
+    validate_reference_video_metadata,
 )
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
@@ -216,7 +217,18 @@ async def add_seedance25_video(message: Message, state: FSMContext, bot: Bot) ->
     if len(refs) >= MAX_REFERENCE_VIDEOS:
         await message.answer(f"Лимит видео — {MAX_REFERENCE_VIDEOS}.", reply_markup=_kb_for_data(data))
         return
-    url = await mirror_telegram_file(bot, message.video.file_id, is_video=True)  # type: ignore[union-attr]
+
+    video = message.video
+    validation_error = validate_reference_video_metadata(
+        width=getattr(video, "width", None),
+        height=getattr(video, "height", None),
+        duration_seconds=getattr(video, "duration", None),
+    )
+    if validation_error:
+        await message.answer(f"❌ {validation_error}", reply_markup=_kb_for_data(data))
+        return
+
+    url = await mirror_telegram_file(bot, video.file_id, is_video=True)  # type: ignore[union-attr]
     if url not in refs:
         refs.append(url)
     await state.update_data(reference_video_url=refs)

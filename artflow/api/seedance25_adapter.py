@@ -32,6 +32,15 @@ MAX_REFERENCE_IMAGES = 30
 MAX_REFERENCE_VIDEOS = 10
 MAX_REFERENCE_AUDIOS = 10
 
+MIN_REFERENCE_VIDEO_SECONDS = 2.0
+MAX_REFERENCE_VIDEO_SECONDS = 30.0
+MIN_REFERENCE_VIDEO_WIDTH = 300
+MAX_REFERENCE_VIDEO_WIDTH = 6000
+MIN_REFERENCE_VIDEO_PIXELS = 407_696
+MAX_REFERENCE_VIDEO_PIXELS = 8_295_044
+MIN_REFERENCE_VIDEO_ASPECT = 0.4
+MAX_REFERENCE_VIDEO_ASPECT = 2.5
+
 logger = logging.getLogger(__name__)
 
 VIDEO_CAPS: dict[str, Any] = {
@@ -107,6 +116,70 @@ def _duration(value: Any) -> int:
     except (TypeError, ValueError):
         duration = 5
     return max(4, min(30, duration))
+
+
+def validate_reference_video_metadata(
+    *,
+    width: int | None,
+    height: int | None,
+    duration_seconds: float | None,
+    min_duration_seconds: float = MIN_REFERENCE_VIDEO_SECONDS,
+) -> str | None:
+    try:
+        w = int(width or 0)
+        h = int(height or 0)
+        duration = float(duration_seconds or 0)
+    except (TypeError, ValueError):
+        return "Seedance 2.5 could not read reference video metadata"
+
+    min_duration = max(float(min_duration_seconds), MIN_REFERENCE_VIDEO_SECONDS)
+    if duration < min_duration or duration > MAX_REFERENCE_VIDEO_SECONDS:
+        return (
+            "Seedance 2.5 reference video duration must be between "
+            f"{min_duration:g} and {MAX_REFERENCE_VIDEO_SECONDS:g} seconds"
+        )
+    if w < MIN_REFERENCE_VIDEO_WIDTH or w > MAX_REFERENCE_VIDEO_WIDTH:
+        return (
+            "Seedance 2.5 reference video width must be between "
+            f"{MIN_REFERENCE_VIDEO_WIDTH} and {MAX_REFERENCE_VIDEO_WIDTH} px"
+        )
+    if h <= 0:
+        return "Seedance 2.5 reference video height is invalid"
+
+    pixels = w * h
+    if pixels < MIN_REFERENCE_VIDEO_PIXELS or pixels > MAX_REFERENCE_VIDEO_PIXELS:
+        return (
+            "Seedance 2.5 reference video pixel count must be between "
+            f"{MIN_REFERENCE_VIDEO_PIXELS} and {MAX_REFERENCE_VIDEO_PIXELS}"
+        )
+
+    ratio = w / h
+    if ratio < MIN_REFERENCE_VIDEO_ASPECT or ratio > MAX_REFERENCE_VIDEO_ASPECT:
+        return (
+            "Seedance 2.5 reference video aspect ratio must be between "
+            f"{MIN_REFERENCE_VIDEO_ASPECT:g} and {MAX_REFERENCE_VIDEO_ASPECT:g}"
+        )
+    return None
+
+
+_VIDEO_EDIT_PROMPT_MARKERS = (
+    "замени",
+    "заменить",
+    "поменяй",
+    "подмени",
+    "отредактируй",
+    "редактируй",
+    "replace ",
+    "replace the ",
+    "swap ",
+    "edit the video",
+    "edit video",
+)
+
+
+def is_explicit_video_edit_prompt(prompt: str) -> bool:
+    normalized = " ".join(str(prompt or "").casefold().split())
+    return any(marker in normalized for marker in _VIDEO_EDIT_PROMPT_MARKERS)
 
 
 def route_for_inputs(*, images: list[str], videos: list[str], audios: list[str]) -> str:

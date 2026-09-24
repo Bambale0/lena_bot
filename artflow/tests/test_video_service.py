@@ -129,3 +129,24 @@ async def test_generate_video_skips_comet_fallback_for_kie_validation_error(monk
             aspect_ratio="16:9",
             resolution="720p",
         )
+
+
+def test_ensure_video_reference_aspect_url_can_upscale_provider_small_image(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
+    source_path = tmp_path / "small.jpg"
+    Image.new("RGB", (256, 600), "white").save(source_path, format="JPEG")
+    source_url = public_files.public_upload_url(source_path.name)
+
+    fitted_url = public_files.ensure_video_reference_aspect_url(
+        source_url,
+        min_width=300,
+        min_pixels=407_696,
+    )
+
+    fitted_path = public_files.local_upload_path_from_url(fitted_url)
+    assert fitted_path is not None
+    with Image.open(fitted_path) as image:
+        assert image.width >= 300
+        assert image.width * image.height >= 407_696
+        assert image.width / image.height >= 0.4
+

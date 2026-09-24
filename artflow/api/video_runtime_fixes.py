@@ -6,9 +6,12 @@ surface while legacy service code is migrated incrementally.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from api import seedance25_adapter as seedance25
+from api.media_gateway import MediaKind, probe_local_media
+from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,54 @@ def _clean_prompt(prompt: Any, *, model_name: str) -> str:
     return value
 
 
+async def seedance25_edit_billing_duration(
+    prompt: str,
+    reference_video_url: str | list[str] | None,
+) -> int | None:
+    refs = seedance25._dedupe(reference_video_url)
+    if not refs or not seedance25.is_explicit_video_edit_prompt(prompt):
+        return None
+    if len(refs) != 1:
+        raise ValueError("Seedance 2.5 video editing requires exactly one reference video")
+
+    local_path = local_upload_path_from_url(refs[0])
+    if local_path is None:
+        raise ValueError(
+            "Seedance 2.5: для редактирования видео загрузи исходный ролик файлом, "
+            "чтобы проверить его длительность и размер до списания"
+        )
+
+    probe = await probe_local_media(local_path, MediaKind.VIDEO)
+    error = seedance25.validate_reference_video_metadata(
+        width=probe.width,
+        height=probe.height,
+        duration_seconds=probe.duration_seconds,
+        min_duration_seconds=4.0,
+    )
+    if error:
+        raise ValueError(error)
+    return max(4, min(30, int(math.ceil(float(probe.duration_seconds or 0)))))
+
+
+async def _validate_seedance_reference_video_url(
+    url: str,
+    *,
+    video_edit: bool = False,
+) -> None:
+    local_path = local_upload_path_from_url(url)
+    if local_path is None:
+        return
+    probe = await probe_local_media(local_path, MediaKind.VIDEO)
+    error = seedance25.validate_reference_video_metadata(
+        width=probe.width,
+        height=probe.height,
+        duration_seconds=probe.duration_seconds,
+        min_duration_seconds=4.0 if video_edit else seedance25.MIN_REFERENCE_VIDEO_SECONDS,
+    )
+    if error:
+        raise ValueError(error)
+
+
 async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, ...], kwargs: dict[str, Any]):
     clean_prompt = _clean_prompt(prompt, model_name="Seedance 2.5")
     image_url = _arg(args, kwargs, "image_url", 0)
@@ -75,14 +126,35 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
     if "duration" in control_options:
         duration = control_options["duration"]
 
-    prepared_images = seedance25._dedupe(await video_service._prepare_video_reference_urls(image_url))
+    raw_image_refs = seedance25._dedupe(image_url)
+    fitted_image_refs = [
+        ensure_video_reference_aspect_url(
+            ref,
+            min_width=seedance25.MIN_REFERENCE_VIDEO_WIDTH,
+            min_pixels=seedance25.MIN_REFERENCE_VIDEO_PIXELS,
+        )
+        or ref
+        for ref in raw_image_refs
+    ]
+    prepared_images = seedance25._dedupe(
+        await video_service._prepare_video_reference_urls(fitted_image_refs)
+    )
 
     raw_video_refs = seedance25._dedupe([
         *seedance25._list(kwargs.get("reference_video_url")),
         *extra_video_refs,
     ])
+    video_edit = bool(raw_video_refs) and seedance25.is_explicit_video_edit_prompt(clean_prompt)
+    if video_edit:
+        # KIE/Seedance 2.5 identifies edit mode from the prompt. In that mode
+        # the provider requires output ratio/duration to follow the selected
+        # input video: aspect_ratio=adaptive and duration=-1.
+        aspect_ratio = "adaptive"
+        duration = seedance25.DURATION_AUTO
+
     prepared_videos: list[str] = []
     for raw_video_ref in raw_video_refs[: seedance25.MAX_REFERENCE_VIDEOS]:
+        await _validate_seedance_reference_video_url(raw_video_ref, video_edit=video_edit)
         prepared_video = await video_service._prepare_reference_video_url(raw_video_ref)
         if prepared_video and prepared_video not in prepared_videos:
             prepared_videos.append(prepared_video)
@@ -136,7 +208,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         raise RuntimeError(f"KIE.AI video: empty taskId for {seedance25.MODEL_KEY}: {response!r}")
     logger.info(
         "KIE.AI Seedance 2.5 task route=%s images=%d videos=%d audios=%d task=%s",
-        route,
+        "video_edit" if video_edit else route,
         len(prepared_images),
         len(prepared_videos),
         len(prepared_audio_refs),
