@@ -10,7 +10,7 @@ from typing import Any
 
 from api import seedance25_adapter as seedance25
 from api.media_gateway import MediaKind, probe_local_media
-from api.public_files import local_upload_path_from_url
+from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,19 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
     if "duration" in control_options:
         duration = control_options["duration"]
 
-    prepared_images = seedance25._dedupe(await video_service._prepare_video_reference_urls(image_url))
+    raw_image_refs = seedance25._dedupe(image_url)
+    fitted_image_refs = [
+        ensure_video_reference_aspect_url(
+            ref,
+            min_width=seedance25.MIN_REFERENCE_VIDEO_WIDTH,
+            min_pixels=seedance25.MIN_REFERENCE_VIDEO_PIXELS,
+        )
+        or ref
+        for ref in raw_image_refs
+    ]
+    prepared_images = seedance25._dedupe(
+        await video_service._prepare_video_reference_urls(fitted_image_refs)
+    )
 
     raw_video_refs = seedance25._dedupe([
         *seedance25._list(kwargs.get("reference_video_url")),
