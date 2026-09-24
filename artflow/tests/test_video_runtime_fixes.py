@@ -111,6 +111,19 @@ async def test_seedance_edit_billing_uses_reference_video_duration(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_seedance_edit_billing_rejects_external_url_before_charge(monkeypatch) -> None:
+    from api import video_runtime_fixes as runtime
+
+    monkeypatch.setattr(runtime, "local_upload_path_from_url", lambda _url: None)
+
+    with pytest.raises(ValueError, match="загрузи исходный ролик файлом"):
+        await runtime.seedance25_edit_billing_duration(
+            "Замени человека на видео",
+            ["https://external.example/source.mp4"],
+        )
+
+
+@pytest.mark.asyncio
 async def test_seedance_edit_billing_rejects_multiple_source_videos() -> None:
     from api import video_runtime_fixes as runtime
 
