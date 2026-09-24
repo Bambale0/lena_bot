@@ -59,7 +59,9 @@ from api.public_files import (
     public_url_is_available,
     save_public_file,
 )
+from api.seedance25_adapter import MODEL_KEY as SEEDANCE25_MODEL_KEY
 from api.video_prompt_limits import validate_video_prompt, video_prompt_max_chars
+from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_prompt_service import (
     VIDEO_PROMPT_MODEL_KEY,
     generate_prompt_from_video_url,
@@ -2292,6 +2294,20 @@ async def create_video_generation(
         seed=body.seed,
         grok_mode=body.grok_mode,
     )
+    if body.model == SEEDANCE25_MODEL_KEY:
+        try:
+            edit_billing_duration = await seedance25_edit_billing_duration(
+                user_prompt,
+                normalized["reference_video_url"],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if edit_billing_duration is not None:
+            normalized["duration"] = edit_billing_duration
+            normalized["billing_duration"] = edit_billing_duration
+            normalized["provider_duration"] = -1
+            normalized["aspect_ratio"] = "adaptive"
+
     has_gemini_omni_video_input = body.model == GEMINI_OMNI_VIDEO_MODEL and bool(normalized["reference_video_url"])
     model_cost = await repo.resolve_video_model_cost(
         session,
