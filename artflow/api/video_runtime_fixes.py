@@ -77,10 +77,10 @@ async def seedance25_edit_billing_duration(
 
     local_path = local_upload_path_from_url(refs[0])
     if local_path is None:
-        # External URLs cannot be probed safely without fetching arbitrary media.
-        # Reserve the documented maximum so billing cannot undercharge a
-        # provider-managed edit whose output follows the input video's length.
-        return seedance25.AUTO_DURATION_BILLING_SECONDS
+        raise ValueError(
+            "Seedance 2.5: для редактирования видео загрузи исходный ролик файлом, "
+            "чтобы проверить его длительность и размер до списания"
+        )
 
     probe = await probe_local_media(local_path, MediaKind.VIDEO)
     error = seedance25.validate_reference_video_metadata(
