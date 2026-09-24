@@ -26,3 +26,6 @@ def test_seedance25_patch_still_routes_from_real_media() -> None:
     assert 'body.image_url = images[0] || null' in frontend
     assert 'body.reference_urls = images.slice(1)' in frontend
     assert 'body.audio_ids = [...audioRefs, ...tokens]' in frontend
+    assert 'body.video_url = videoRefs[0] || null' in frontend
+    assert 'videoRefs.slice(1).map((url) => token("video_ref", url))' in frontend
+    assert '.mkv' not in frontend
