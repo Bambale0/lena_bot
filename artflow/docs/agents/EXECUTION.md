@@ -420,3 +420,20 @@ Date: 2026-09-25. Baseline: `541dd6e59c48df1d2af1b910aa4dfcd443264616`.
 ### Observability and risks
 - Record generation/task/model and provider state/error without payloads or credentials. Refund only on terminal KIE failure and timeout after a valid nonterminal response. Poll errors and malformed/ambiguous responses remain active for later retry. Scheduler runs in the single-worker FastAPI container; it must be deployed to become active.
 - No migration or admin change. Interval/minimum age are validated operational settings in `.env.example`; existing price and model configuration is unchanged. Site and Mini App read the same backend status; the text bot receives a webhook notification when one arrives, while scheduler recovery currently updates shared DB state without a proactive bot message. Existing user-owned `nginx.conf` changes were left untouched.
+
+## Follow-up — retire APIX-hosted HappyFox reverse proxy
+
+Date: 2026-09-25. Baseline: `c84a9515208991df5fce52934558c8a7f4c859e3`.
+
+### Outcome and current state
+- HappyFox has moved to its own server. Remove the obsolete reverse proxy from APIX so the APIX Nginx container no longer depends on the Fox Docker network or presents the HappyFox TLS/webhook relay.
+- `nginx.conf` had a `happyfox_backend` upstream, a `/happyfox/telegram/webhook` relay, `api.happy-fox.online` HTTP/TLS hosts, and HappyFox-backed paths under `tanyapp.chillcreative.ru` and `alena.xn--e1aikcel5c5a.online`. `docker-compose.yml` attaches Nginx to the external `foxgen_backend` network, which is also needed for the separate `banano-miniapp` frontend. No application DB/schema or auth change is involved.
+- Two pre-existing uncommitted IP edits in `nginx.conf` and an untracked Nginx backup are present. Backups were copied outside the repository before editing. Scope of Tanya/Alena host removal is being confirmed because those hostnames differ from the HappyFox domain.
+
+### Acceptance and verification plan
+1. [x] Remove HappyFox proxy paths, host blocks, and upstream while preserving the separate Banano frontend and its required Compose network. The Tanya/Alena virtual hosts remain, but no longer route APIs/webhooks to HappyFox.
+2. [x] Move the untracked Nginx backup out of the workspace; ensure only intended project changes appear in source control.
+3. [x] `docker compose config --quiet`, `docker compose exec -T nginx nginx -t`, `git diff --check`, and a scan for stale HappyFox upstream/domain/relay references passed. Diff review confirms other virtual hosts and Banano frontend routes remain. Production certificates, DNS, and containers were not deleted.
+
+### Risks and rollout
+- Removing the relay stops HappyFox traffic on the APIX host; user reports HappyFox has moved and no longer needs it. Keep unrelated model `HappyHorse` and Banano frontend routes intact. Because Banano still uses the `foxgen_backend` Docker network, that external network remains in Compose. Production config changes take effect only after deployment/reload; no prices, admin settings, or migrations.
