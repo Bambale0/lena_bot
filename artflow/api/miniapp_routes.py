@@ -2314,7 +2314,8 @@ async def create_video_generation(
             normalized["provider_duration"] = -1
             normalized["aspect_ratio"] = "adaptive"
 
-    from api.genjutsu_adapter import MODEL_KEYS as GENJUTSU_MODEL_KEYS, resolve_source_duration_seconds
+    from api.genjutsu_adapter import MODEL_KEYS as GENJUTSU_MODEL_KEYS
+    from api.genjutsu_adapter import resolve_source_duration_seconds
 
     if body.model in GENJUTSU_MODEL_KEYS:
         try:
