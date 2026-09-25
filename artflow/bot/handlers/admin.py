@@ -30,6 +30,18 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.genjutsu_pricing import (
+    DEFAULT_RESOLUTION as GENJUTSU_DEFAULT_RESOLUTION,
+)
+from api.genjutsu_pricing import (
+    DISPLAY_NAMES as GENJUTSU_DISPLAY_NAMES,
+)
+from api.genjutsu_pricing import (
+    MOTION_MODEL as GENJUTSU_MOTION_MODEL,
+)
+from api.genjutsu_pricing import (
+    OBJECT_MODEL as GENJUTSU_OBJECT_MODEL,
+)
 from bot.filters.admin import IsAdmin
 from bot.keyboards.admin_unlimited import image_unlimited_models_kb
 from bot.keyboards.models import model_cost_display_text
@@ -37,12 +49,6 @@ from bot.services import admin_ai_service
 from bot.services.broadcasts import SEGMENT_LABELS, deliver_broadcast, get_recipient_ids
 from bot.services.maintenance_mode import is_maintenance_mode, set_maintenance_mode
 from bot.states import AdminStates
-from api.genjutsu_pricing import (
-    DEFAULT_RESOLUTION as GENJUTSU_DEFAULT_RESOLUTION,
-    DISPLAY_NAMES as GENJUTSU_DISPLAY_NAMES,
-    MOTION_MODEL as GENJUTSU_MOTION_MODEL,
-    OBJECT_MODEL as GENJUTSU_OBJECT_MODEL,
-)
 from bot.utils.telegram_ui import safe_answer_callback
 from core.broadcast_scheduler import schedule_broadcast_job
 from core.model_pricing import pricing_variant_key
