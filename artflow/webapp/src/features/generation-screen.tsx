@@ -166,10 +166,10 @@ function GenerationScreen({
   const maxRefs = Math.max(1, Number(selectedModel?.max_refs || 1));
   const maxAudioIds = Math.max(0, Number(selectedModel?.max_audio_ids || 0));
   const maxCharacterIds = Math.max(0, Number(selectedModel?.max_character_ids || 0));
-  const refsRequired = kind === "motion" || Boolean(selectedModel && !modelSupports(selectedModel, "text") && modelSupports(selectedModel, "image"));
+  const refsRequired = kind === "motion" || Boolean(selectedModel?.requires_reference_images) || Boolean(selectedModel && !modelSupports(selectedModel, "text") && modelSupports(selectedModel, "image"));
   const missingReference = refsRequired && draft.referenceUrls.length === 0;
   const tooManyRefs = draft.referenceUrls.length > maxRefs;
-  const missingVideo = (draft.mode === "video" || kind === "motion") && !draft.videoUrl;
+  const missingVideo = (Boolean(selectedModel?.requires_video_input) || draft.mode === "video" || kind === "motion") && !draft.videoUrl;
   const missingPrompt = !draft.prompt.trim() && !draft.promptId;
   const maxPromptLength = promptMaxLength(kind, selectedModel?.key);
   const insufficientCredits = estimate > Number(user.credits || 0);
@@ -430,7 +430,7 @@ function GenerationScreen({
               </>
             ) : (
               <>
-                {durations.length ? (() => {
+                {!selectedModel?.duration_from_source && durations.length ? (() => {
                   const durationIndex = Math.max(0, durations.indexOf(draft.duration));
                   const selectedDuration = durations[durationIndex] ?? draft.duration;
                   return (
@@ -472,6 +472,12 @@ function GenerationScreen({
                     </div>
                   );
                 })() : null}
+
+                {selectedModel?.duration_from_source ? (
+                  <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    Длительность и итоговая стоимость определятся по загруженному исходному видео (до 30 секунд).
+                  </div>
+                ) : null}
 
                 {resolutions.length ? (
                   <LabeledChips label="Разрешение">
