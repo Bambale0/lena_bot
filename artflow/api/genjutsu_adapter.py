@@ -50,6 +50,13 @@ VIDEO_CAPS: dict[str, Any] = {
 logger = logging.getLogger(__name__)
 
 
+def is_genjutsu_configured() -> bool:
+    """Return whether server-side Higgsfield credentials are usable."""
+    value = str(settings.HIGGSFIELD_CREDENTIALS or "").strip()
+    key_id, sep, key_secret = value.partition(":")
+    return bool(sep and key_id.strip() and key_secret.strip())
+
+
 def _install_enum_value(enum_cls: Any, name: str, value: str) -> Any:
     if value in getattr(enum_cls, "_value2member_map_", {}):
         return enum_cls(value)
@@ -423,6 +430,15 @@ def install_genjutsu_miniapp(routes: Any) -> None:
     _install_miniapp_normalizer(routes)
     _install_miniapp_reconciler(routes)
 
+    if not is_genjutsu_configured():
+        logger.info("Genjutsu user surfaces disabled: HIGGSFIELD_CREDENTIALS not configured")
+        for model_key in MODEL_KEYS:
+            routes.VIDEO_CAPS.pop(model_key, None)
+        order = getattr(routes, "_VIDEO_MODEL_ORDER", None)
+        if isinstance(order, list):
+            order[:] = [item for item in order if item not in MODEL_KEYS]
+        return
+
     for model_key in MODEL_KEYS:
         routes.VIDEO_CAPS[model_key] = dict(VIDEO_CAPS)
         friendly = getattr(routes, "_FRIENDLY_MODEL_NAMES", None)
@@ -440,6 +456,22 @@ def install_genjutsu_keyboard_support() -> None:
     try:
         from bot.keyboards import models as keyboard_models
     except Exception:
+        return
+
+    if not is_genjutsu_configured():
+        logger.info("Genjutsu Telegram surface disabled: HIGGSFIELD_CREDENTIALS not configured")
+        for model_key in MODEL_KEYS:
+            keyboard_models.VIDEO_CAPS.pop(model_key, None)
+            keyboard_models.VIDEO_MODEL_DESC.pop(model_key, None)
+        order = getattr(keyboard_models, "_VIDEO_MODEL_ORDER", None)
+        if isinstance(order, list):
+            order[:] = [item for item in order if item not in MODEL_KEYS]
+        groups = getattr(keyboard_models, "_VIDEO_GROUPS", None)
+        if isinstance(groups, list):
+            groups[:] = [item for item in groups if item[0] != "genjutsu"]
+        titles = getattr(keyboard_models, "VIDEO_GROUP_TITLES", None)
+        if isinstance(titles, dict):
+            titles.pop("genjutsu", None)
         return
 
     for model_key in MODEL_KEYS:
