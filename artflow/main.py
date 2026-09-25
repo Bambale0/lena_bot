@@ -103,6 +103,7 @@ from core.broadcast_scheduler import run_broadcast_scheduler
 from core.config import settings
 from core.db_backup_scheduler import run_database_backup_scheduler
 from core.logger import setup_logging
+from core.music_reconcile_scheduler import run_music_reconcile_scheduler
 from db import repository as repo
 from db.models import (
     Generation,
@@ -656,11 +657,14 @@ dp: Dispatcher | None = None
 redis_client: aioredis.Redis | None = None
 broadcast_scheduler_task: asyncio.Task | None = None
 broadcast_scheduler_stop: asyncio.Event | None = None
+music_reconcile_task: asyncio.Task | None = None
+music_reconcile_stop: asyncio.Event | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global bot, dp, redis_client, broadcast_scheduler_task, broadcast_scheduler_stop
+    global music_reconcile_task, music_reconcile_stop
     setup_logging()
 
     # Redis
@@ -716,6 +720,8 @@ async def lifespan(app: FastAPI):
     broadcast_scheduler_task = asyncio.create_task(run_broadcast_scheduler(broadcast_scheduler_stop, bot))
     db_backup_scheduler_stop = asyncio.Event()
     db_backup_scheduler_task = asyncio.create_task(run_database_backup_scheduler(db_backup_scheduler_stop, bot))
+    music_reconcile_stop = asyncio.Event()
+    music_reconcile_task = asyncio.create_task(run_music_reconcile_scheduler(music_reconcile_stop))
 
     yield
 
@@ -724,6 +730,8 @@ async def lifespan(app: FastAPI):
         broadcast_scheduler_stop.set()
     if db_backup_scheduler_stop is not None:
         db_backup_scheduler_stop.set()
+    if music_reconcile_stop is not None:
+        music_reconcile_stop.set()
     if broadcast_scheduler_task is not None:
         try:
             await broadcast_scheduler_task
@@ -734,6 +742,11 @@ async def lifespan(app: FastAPI):
             await db_backup_scheduler_task
         except Exception:
             logger.exception("DB backup scheduler shutdown failed")
+    if music_reconcile_task is not None:
+        try:
+            await music_reconcile_task
+        except Exception:
+            logger.exception("Music reconcile scheduler shutdown failed")
     await close_client()
     await redis_client.aclose()
     logger.info("Shutdown complete")

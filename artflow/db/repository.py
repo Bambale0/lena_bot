@@ -1251,7 +1251,10 @@ async def fail_generation_and_refund(
     transition lost the race or when nothing was charged.
     """
     result = await session.execute(
-        select(Generation).where(Generation.id == gen_id).with_for_update()
+        select(Generation)
+        .where(Generation.id == gen_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     generation = result.scalar_one_or_none()
     if generation is None:

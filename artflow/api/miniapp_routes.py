@@ -25,10 +25,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Date, String, cast, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import image_service, midjourney_service, video_service
+from api import image_service, kieai_client, midjourney_service, suno_full_service, video_service
 from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
 from api.image_errors import image_generation_user_error
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
+from api.kie_webhook import extract_error, extract_status
 from api.midjourney_service import MJDimensions, MJVideoMotion
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_telegram_login_data
 from api.music_service import (
@@ -42,6 +43,7 @@ from api.music_service import (
     check_suno_voice_available,
     create_suno_voice_generation_task,
     create_suno_voice_validation_task,
+    extract_music_urls,
     extract_suno_provider_voice_id,
     extract_suno_validate_phrase,
     extract_suno_voice_error,
@@ -465,6 +467,53 @@ def _improve_music_prompt(prompt: str) -> str:
     return prompt
 
 
+async def _reconcile_music_generation_status(session: AsyncSession, gen, task_id: str, age: timedelta):
+    try:
+        payload = await kieai_client.get_task_status(task_id)
+        code = payload.get("code")
+        if code is not None and str(code) not in {"0", "200"}:
+            logger.warning("Suno reconcile status unavailable gen=%s task=%s code=%s", gen.id, task_id, code)
+            return gen
+        state = extract_status(payload)
+        if state in {"success", "succeeded", "complete", "completed", "done"}:
+            music_payload = await suno_full_service.get_music_task(task_id)
+            result_urls = extract_music_urls(music_payload)
+        else:
+            result_urls = []
+    except Exception as exc:
+        logger.warning("Suno reconcile poll error gen=%s task=%s: %s", gen.id, task_id, exc)
+        return gen
+
+    if state in {"fail", "failed", "error", "cancel", "cancelled"}:
+        reason = extract_error(payload)
+        logger.warning(
+            "Suno reconcile provider failure gen=%s model=%s task=%s state=%s reason=%s",
+            gen.id, gen.model, task_id, state, reason,
+        )
+        await repo.fail_generation_and_refund(
+            session, gen.id, reason, refund_note="reconcile:music_provider_failure",
+        )
+        return await repo.get_generation_by_id(session, gen.id)
+    if result_urls:
+        finished = await repo.finish_generation(session, gen.id, result_urls[0], result_urls=result_urls)
+        if finished:
+            logger.info("Suno reconcile completed gen=%s task=%s tracks=%s", gen.id, task_id, len(result_urls))
+        return await repo.get_generation_by_id(session, gen.id)
+    if state in {"success", "succeeded", "complete", "completed", "done"}:
+        logger.warning("Suno reconcile completed without audio gen=%s task=%s", gen.id, task_id)
+        return gen
+    if state not in {"submitted", "submit", "queued", "queueing", "pending", "processing", "running", "generating", "in_progress"}:
+        logger.warning("Suno reconcile unknown state gen=%s task=%s state=%s", gen.id, task_id, state)
+        return gen
+    if age >= STALE_GENERATION_TIMEOUT:
+        logger.warning("Suno reconcile timed out gen=%s task=%s age=%s", gen.id, task_id, age)
+        await repo.fail_generation_and_refund(
+            session, gen.id, "Generation timed out before completion", refund_note="reconcile:timeout",
+        )
+        return await repo.get_generation_by_id(session, gen.id)
+    return gen
+
+
 async def _reconcile_generation_status(session: AsyncSession, gen):
     if not gen or gen.status not in {GenerationStatus.pending, GenerationStatus.processing}:
         return gen
@@ -489,6 +538,9 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             )
             return await repo.get_generation_by_id(session, gen.id)
         return gen
+
+    if gen.gen_type == GenerationType.music and str(gen.model).startswith("suno/"):
+        return await _reconcile_music_generation_status(session, gen, task_id, age)
 
     try:
         result_urls: list[str] | None = None
