@@ -2845,5 +2845,9 @@ async def set_model_resolution_cost(
         .returning(ModelCost.id)
     )
     updated_ids = list(result.scalars().all())
+    expected = len(set(keys))
+    if len(updated_ids) != expected:
+        await session.rollback()
+        return 0
     await session.commit()
     return len(updated_ids)
