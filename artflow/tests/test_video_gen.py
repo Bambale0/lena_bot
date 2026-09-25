@@ -1,6 +1,7 @@
 """Тесты хендлеров video_gen — покрытие видео-флоу."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -937,6 +938,47 @@ async def test_handle_video_prompt_preserves_fractional_credit_price() -> None:
         await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
 
     assert spend_credits.await_args.args[1:] == (42, 3.6)
+
+
+@pytest.mark.asyncio
+async def test_handle_video_prompt_polls_on_provider_budget() -> None:
+    """Провайдер задачи уходит в poll_until_done, чтобы Genjutsu получил свой таймаут."""
+    msg = make_message(text="animate this scene")
+    msg.answer = AsyncMock()
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru", username="test", full_name="Test", is_banned=False)
+    mock_state = _fake_state(
+        model_key="kling-3.0/video", duration=5,
+        aspect_ratio="16:9", resolution="1080p",
+        mode="text", credits=10, grok_mode="normal",
+    )
+    mock_cost = _make_video_model_cost("kling-3.0/video", 10, "Kling 3.0")
+    mock_gen = SimpleNamespace(id=103, task_id=None, model="kling-3.0/video")
+    poll_until_done = AsyncMock()
+
+    with patch("bot.handlers.video_gen.repo", AsyncMock(
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )):
+        with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            generate_video=AsyncMock(
+                return_value=SimpleNamespace(task_id="hf-task-1", provider="higgsfield"),
+            ),
+            get_poll_fn=MagicMock(return_value=MagicMock()),
+        )):
+            with patch("bot.handlers.video_gen.polling", new=SimpleNamespace(
+                poll_until_done=poll_until_done,
+            )):
+                await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
+                await asyncio.sleep(0.05)
+
+    assert poll_until_done.await_args.args[0] == "hf-task-1"
+    assert poll_until_done.await_args.kwargs["provider"] == "higgsfield"
 
 
 def test_video_state_resolution_normalizes_kling_motion_aliases() -> None:
