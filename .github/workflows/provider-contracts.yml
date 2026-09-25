@@ -32,6 +32,12 @@ jobs:
       - name: Compile provider contract modules
         run: |
           python -m compileall -q \
+            api/genjutsu_adapter.py \
+            api/genjutsu_pricing.py \
+            api/higgsfield_client.py \
+            api/genjutsu_adapter.py \
+            api/genjutsu_pricing.py \
+            api/higgsfield_client.py \
             api/minimax_h3_adapter.py \
             api/minimax_h3_pricing.py \
             api/minimax_h3_product_surface.py \
@@ -92,6 +98,7 @@ jobs:
             scripts/check_provider_contracts_ci.py \
             scripts/check_provider_product_readiness.py \
             scripts/run_provider_live_smoke.py \
+            tests/test_genjutsu_integration.py \
             tests/test_minimax_h3_adapter.py \
             tests/test_minimax_h3_runtime_guards.py \
             tests/test_minimax_h3_uploads.py \
@@ -117,6 +124,7 @@ jobs:
       - name: Provider contract tests
         run: |
           pytest -q \
+            tests/test_genjutsu_integration.py \
             tests/test_minimax_h3_adapter.py \
             tests/test_minimax_h3_runtime_guards.py \
             tests/test_minimax_h3_uploads.py \

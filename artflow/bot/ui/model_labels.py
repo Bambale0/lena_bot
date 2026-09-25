@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-
 _MODEL_LABELS: dict[str, str] = {
     "seedream/5-pro-text-to-image": "🔥 HOT · Seedream 5 Pro",
     "seedream/5-pro-image-to-image": "🔥 HOT · Seedream 5 Pro",
@@ -59,6 +58,8 @@ _MODEL_LABELS: dict[str, str] = {
     "midjourney-blend": "🖼 Midjourney Blend",
     "midjourney-describe": "🔍 Midjourney Describe",
     "midjourney-video": "🎞 Midjourney Video",
+    "higgsfield/genjutsu/motion-transfer": "🥷 Genjutsu · Перенос движения",
+    "higgsfield/genjutsu/object-swap": "🥷 Genjutsu · Замена объекта",
 }
 
 _CANONICAL_MODEL_KEYS: dict[str, str] = {

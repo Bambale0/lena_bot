@@ -169,6 +169,7 @@ artflow/
 | HappyHorse T2V / I2V | aivideoapi.ai | 25–30 |
 | Veo 3 / Fast / Lite | CometAPI | 35–70 |
 | Midjourney Video | CometAPI | 15 |
+| Genjutsu Motion Transfer / Object Swap | Higgsfield | за секунду, настраивается в /admin |
 
 ---
 
@@ -212,6 +213,7 @@ artflow/
     ├── POST /webhook/cryptobot       → подтверждение оплаты CryptoBot
     ├── POST /webhook/tbank           → подтверждение оплаты Т-Банк
     ├── POST /webhook/kie             → callback завершённой генерации KIE.AI
+    ├── Higgsfield Genjutsu           → authenticated polling/reconciliation by request_id
     ├── GET  /                        → standalone web-сайт из landing/
     ├── GET  /api/web/*               → Web API сайта (Telegram login / dev-token)
     ├── GET  /api/webapp/*            → WebApp API (auth via initData)
@@ -339,6 +341,7 @@ COMET_API_KEY=...
 KIE_AI_KEY=...
 AIVIDEOAPI_KEY=...
 KIE_WEBHOOK_SECRET=...
+HIGGSFIELD_CREDENTIALS=KEY_ID:KEY_SECRET
 
 # Платежи
 TBANK_TERMINAL_KEY=...

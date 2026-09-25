@@ -22,6 +22,12 @@ apply_provider_spec_overrides()
 from api import image_service as _image_service
 from api import kieai_client as _kieai_client
 from api.grok15_adapter import install_grok15_adapter
+from api.genjutsu_adapter import (
+    install_genjutsu_keyboard_support,
+    install_genjutsu_miniapp,
+    install_genjutsu_provider_support,
+)
+from api.genjutsu_pricing import install_genjutsu_seed_rows
 from api.minimax_h3_adapter import (
     install_minimax_h3_keyboard_support,
     install_minimax_h3_miniapp,
@@ -50,6 +56,9 @@ from bot.services.safe_repeat_ui import install_safe_repeat_keyboard_support
 from db import repository as _repeat_repository
 
 install_grok15_adapter(_kieai_client)
+install_genjutsu_seed_rows()
+install_genjutsu_provider_support()
+install_genjutsu_keyboard_support()
 install_seedance25_seed_rows()
 install_seedance25_provider_support()
 install_seedance25_keyboard_support()
@@ -97,6 +106,7 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         install_miniapp_prompt_privacy(module)
         install_pinterest_service_router(module.router)
         install_video_request_compat(module)
+        install_genjutsu_miniapp(module)
         install_seedance25_miniapp(module)
         install_minimax_h3_miniapp(module)
         install_minimax_h3_product_surface(module)

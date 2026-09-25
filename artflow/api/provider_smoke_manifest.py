@@ -66,6 +66,8 @@ def _base_case(contract_id: str) -> dict[str, Any]:
         "video.veo3": {"prompt": "A paper boat on a calm stream", "aspect_ratio": "16:9"},
         "video.veo3.fast": {"prompt": "A paper boat on a calm stream", "aspect_ratio": "16:9"},
         "video.veo3.lite": {"prompt": "A paper boat on a calm stream", "aspect_ratio": "16:9"},
+        "video.genjutsu.motion": {"prompt": "Transfer the movement to the reference character", "video_url": VIDEO_URL, "image_urls": [IMAGE_URL], "resolution": "480p"},
+        "video.genjutsu.object": {"prompt": "Replace the main object with the reference object", "video_url": VIDEO_URL, "image_urls": [IMAGE_URL], "resolution": "480p"},
     }
     if contract_id in primary_video:
         return primary_video[contract_id]

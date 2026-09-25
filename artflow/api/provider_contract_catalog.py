@@ -148,6 +148,8 @@ VIDEO_CONTRACTS = (
     _c("video.veo3", "kie", "veo3", ("text", "first_last"), ("https://docs.kie.ai/veo3-api/generate-veo-3-video",), _VIDEO_BACKEND, ("tests/test_provider_spec_p0.py", "tests/test_veo_capabilities.py"), smoke="video.veo3", **_VIDEO_SURFACES),
     _c("video.veo3.fast", "kie", "veo3_fast", ("text", "first_last", "reference"), ("https://docs.kie.ai/veo3-api/generate-veo-3-video",), _VIDEO_BACKEND, ("tests/test_provider_spec_p0.py", "tests/test_veo_capabilities.py"), smoke="video.veo3.fast", **_VIDEO_SURFACES),
     _c("video.veo3.lite", "kie", "veo3_lite", ("text", "first_last", "reference"), ("https://docs.kie.ai/veo3-api/generate-veo-3-video",), _VIDEO_BACKEND, ("tests/test_provider_spec_p0.py", "tests/test_veo_capabilities.py"), smoke="video.veo3.lite", **_VIDEO_SURFACES),
+    _c("video.genjutsu.motion", "higgsfield", "higgsfield/genjutsu/motion-transfer", ("reference_images", "source_video"), ("https://open.higgsfield.ai/models/higgsfield/genjutsu/motion-transfer/v1.0/playground",), ("api.genjutsu_adapter:create_motion_transfer",), ("tests/test_genjutsu_integration.py",), smoke="video.genjutsu.motion", notes="Provider endpoint version is config-backed; source duration is measured server-side before billing.", **_VIDEO_SURFACES),
+    _c("video.genjutsu.object", "higgsfield", "higgsfield/genjutsu/object-swap", ("reference_images", "source_video"), ("https://open.higgsfield.ai/models/workflows/genjutsu/object-swap/playground",), ("api.genjutsu_adapter:create_object_swap",), ("tests/test_genjutsu_integration.py",), smoke="video.genjutsu.object", notes="Object Swap endpoint remains config-backed because Higgsfield docs have published inconsistent path spelling.", **_VIDEO_SURFACES),
 )
 
 

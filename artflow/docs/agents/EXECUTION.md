@@ -236,3 +236,70 @@ The transport path was correct. The failures came from two separate gaps:
 2. [ ] Merge to main.
 3. [ ] Production autodeploy and health/log smoke.
 
+
+
+---
+
+# Execution ledger — Higgsfield Genjutsu integration
+
+Baseline: commit `5399541afeeb530eafded3f2e353518870d5c6e4`.
+Date: 2026-09-25.
+Branch: `feat/genjutsu-integration`.
+
+## Current state / audit
+- APIX video generation is capability-driven: runtime `VideoModel`, `VIDEO_CAPS`, DB-backed `model_costs`, Telegram FSM, Mini App/Web model metadata, provider contract catalog, operation registry, smoke manifest and reconciliation.
+- Local APIX uploads are stored under the public upload surface and can be probed with ffprobe through `api.media_gateway`.
+- Provider results can be mirrored into APIX storage with SSRF-safe `public_files.mirror_url`.
+- No Higgsfield/Genjutsu provider code existed at baseline.
+
+## Verified provider contract
+- Motion Transfer endpoint: `higgsfield/genjutsu/motion-transfer/v1.0`.
+- Inputs: `prompt`, `video_url`, `image_urls`, `resolution`.
+- API-safe surface implemented: source video 1–30 seconds, up to 8 image references, 480p/720p.
+- Higgsfield V2 auth: `Authorization: Key KEY_ID:KEY_SECRET`.
+- Async lifecycle uses `request_id` and authenticated `GET /requests/{request_id}/status`.
+- Object Swap endpoint remains config-backed because current Higgsfield pages have published inconsistent `higgsfield` / `higgsfiled` spelling.
+
+## Intended outcome
+- Add Motion Transfer and Object Swap as first-class video models.
+- Keep source video + reference images intact on Telegram, Mini App and site/web.
+- Measure source-video duration server-side before spend; client duration is UX-only.
+- Keep prices editable through existing `model_costs` admin control plane.
+- Persist completed provider video to APIX storage rather than treating Higgsfield CDN as canonical.
+- Do not trust unsigned provider webhook payloads; use authenticated polling/reconciliation.
+
+## Acceptance criteria
+1. Both models appear in text bot and shared Web/Mini App model metadata.
+2. Both require one source video and at least one reference image; max 8 refs.
+3. Source duration is verified from APIX-owned upload and limited to 1–30 seconds.
+4. Resolution supports 480p/720p and price is resolved by DB-backed per-second variants.
+5. Provider create returns `request_id`; terminal statuses and failures map into normal APIX finish/refund paths.
+6. Completed videos are mirrored to `provider-results`.
+7. Provider catalog, operation registry and smoke manifest remain structurally complete.
+8. Relevant backend tests, provider contract checks, frontend build and CI pass before merge.
+
+## No-hardcode / control plane
+- Credential, base URL, retry policy and both endpoint paths are environment settings.
+- Default pricing rows are seeds only; runtime pricing remains `ModelCost` and admin-editable.
+- No secrets are committed or logged.
+
+## Observability / failure semantics
+- Submit log: model, request_id, reference count, resolution.
+- Retry log: method/path/attempt/backoff; credentials and media payloads are excluded.
+- Reconciliation is idempotent through existing generation terminal-state checks/refund helpers.
+- `failed`, `nsfw`, `canceled/cancelled`, auth/credit/validation errors are terminal failures and use normal refund semantics.
+- Missed callbacks are irrelevant to correctness because completion is reconciled through authenticated status polling.
+
+## Progress evidence
+1. [x] Repository instructions and relevant backend/Mini App/frontend/release skills reviewed.
+2. [x] Official Genjutsu and Higgsfield V2 SDK contracts verified.
+3. [x] Dedicated Higgsfield HTTP client and Genjutsu provider adapter added.
+4. [x] Dynamic video models, capability metadata, DB pricing seeds and canonical labels added.
+5. [x] Mini App/Web validation and authoritative source-duration billing added.
+6. [x] Telegram reference-images → source-video workflow added.
+7. [x] Provider catalog, operation registry and smoke templates added.
+8. [x] Focused regression run: 68/68 passed after correcting one test-only variant-key assumption.
+9. [x] Release audit found production has no `HIGGSFIELD_CREDENTIALS`; added a credential feature gate so Genjutsu is hidden from user surfaces until server credentials are configured.
+10. [x] Re-verified current official provider pages: Motion Transfer publishes `higgsfield/genjutsu/motion-transfer/v1.0`; Object Swap currently publishes `higgsfiled/genjutsu/object-swap/v1.0`. Both remain env-configurable.
+11. [ ] Exact-head provider/backend/frontend/E2E CI after rollout-safety fixes.
+12. [ ] Merge/autodeploy, production credential configuration and paid-provider smoke.

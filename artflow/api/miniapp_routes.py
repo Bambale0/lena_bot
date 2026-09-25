@@ -1213,6 +1213,9 @@ class ModelInfo(BaseModel):
     motion_controls: list[str] = []
     mode_options: list[str] = []
     supports_video_input: bool = False
+    requires_video_input: bool = False
+    requires_reference_images: bool = False
+    duration_from_source: bool = False
     max_audio_ids: int = 0
     max_character_ids: int = 0
     has_seed: bool = False
@@ -1256,7 +1259,7 @@ class VideoGenRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=30000)
     prompt_id: int | None = None
     mode: str = "text"                    # "text" | "image" | "video"
-    duration: int = Field(default=5, ge=2, le=30)
+    duration: int = Field(default=5, ge=1, le=30)
     aspect_ratio: str | None = None
     resolution: str | None = None
     image_url: str | None = None
@@ -1913,6 +1916,9 @@ async def list_video_models(
             mode_options=caps.get("mode_options", []),
             max_refs=int(caps.get("max_refs", 1) or 1),
             supports_video_input=bool(caps.get("supports_video_input")),
+            requires_video_input=bool(caps.get("requires_video_input")),
+            requires_reference_images=bool(caps.get("requires_reference_images")),
+            duration_from_source=bool(caps.get("duration_from_source")),
             max_audio_ids=int(caps.get("max_audio_ids", 0) or 0),
             max_character_ids=int(caps.get("max_character_ids", 0) or 0),
             has_seed=bool(caps.get("has_seed")),
@@ -2307,6 +2313,18 @@ async def create_video_generation(
             normalized["billing_duration"] = edit_billing_duration
             normalized["provider_duration"] = -1
             normalized["aspect_ratio"] = "adaptive"
+
+    from api.genjutsu_adapter import MODEL_KEYS as GENJUTSU_MODEL_KEYS
+    from api.genjutsu_adapter import resolve_source_duration_seconds
+
+    if body.model in GENJUTSU_MODEL_KEYS:
+        try:
+            normalized["duration"] = await resolve_source_duration_seconds(
+                normalized["reference_video_url"]
+            )
+            normalized["billing_duration"] = normalized["duration"]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     has_gemini_omni_video_input = body.model == GEMINI_OMNI_VIDEO_MODEL and bool(normalized["reference_video_url"])
     model_cost = await repo.resolve_video_model_cost(

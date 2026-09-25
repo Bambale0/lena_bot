@@ -49,6 +49,18 @@ class Settings(BaseSettings):
     # kie.ai
     KIE_AI_KEY: str = ""
 
+    # Higgsfield / Genjutsu
+    HIGGSFIELD_CREDENTIALS: str = ""  # KEY_ID:KEY_SECRET
+    HIGGSFIELD_BASE_URL: str = "https://api.higgsfield.ai"
+    HIGGSFIELD_TIMEOUT_SECONDS: float = 120.0
+    HIGGSFIELD_MAX_RETRIES: int = 3
+    HIGGSFIELD_RETRY_BACKOFF_SECONDS: float = 1.0
+    HIGGSFIELD_RETRY_MAX_BACKOFF_SECONDS: float = 30.0
+    HIGGSFIELD_GENJUTSU_MOTION_ENDPOINT: str = "higgsfield/genjutsu/motion-transfer/v1.0"
+    # Kept configurable because Higgsfield's current Object Swap docs have shipped
+    # both higgsfield/... and a historical higgsfiled/... spelling.
+    HIGGSFIELD_GENJUTSU_OBJECT_ENDPOINT: str = "higgsfiled/genjutsu/object-swap/v1.0"
+
     # KIE.AI callbacks
     KIE_WEBHOOK_PATH: str = "/webhook/kie"
     KIE_WEBHOOK_SECRET: str = ""
