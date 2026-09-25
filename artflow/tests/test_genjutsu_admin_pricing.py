@@ -170,3 +170,44 @@ async def test_repository_resolution_price_update_is_atomic_and_syncs_base() -> 
         pricing_variant_key(MOTION_MODEL, resolution="480p"),
     }
     assert compiled.params["credits"] == 22.0
+
+
+@pytest.mark.asyncio
+async def test_handle_genjutsu_price_rejects_non_finite_value(monkeypatch) -> None:
+    message = make_message(text="nan")
+    message.answer = AsyncMock()
+    state = AsyncMock()
+    state.get_data = AsyncMock(
+        return_value={
+            "genjutsu_model_key": MOTION_MODEL,
+            "genjutsu_resolution": "480p",
+        }
+    )
+    set_price = AsyncMock()
+    monkeypatch.setattr(admin.repo, "set_model_resolution_cost", set_price)
+
+    await admin.handle_genjutsu_price(message, AsyncMock(), state)
+
+    set_price.assert_not_awaited()
+    state.clear.assert_not_awaited()
+    assert "от 0 до 1 000 000" in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_repository_resolution_price_update_rolls_back_if_rows_are_missing() -> None:
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [11]
+    session.execute = AsyncMock(return_value=result)
+
+    updated = await repo.set_model_resolution_cost(
+        session,
+        MOTION_MODEL,
+        "480p",
+        22.0,
+        sync_base=True,
+    )
+
+    assert updated == 0
+    session.rollback.assert_awaited_once()
+    session.commit.assert_not_awaited()
