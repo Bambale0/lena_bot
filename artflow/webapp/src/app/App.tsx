@@ -106,6 +106,36 @@ function uniqueStrings(items: string[]): string[] {
   return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
 }
 
+async function readVideoDurationSeconds(file: File): Promise<number | null> {
+  if (!file.type.startsWith("video/")) return null;
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    return await new Promise<number | null>((resolve) => {
+      const video = document.createElement("video");
+      let settled = false;
+      const finish = (value: number | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      const timer = window.setTimeout(() => finish(null), 5000);
+      video.preload = "metadata";
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timer);
+        const seconds = Number(video.duration);
+        finish(Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : null);
+      };
+      video.onerror = () => {
+        window.clearTimeout(timer);
+        finish(null);
+      };
+      video.src = objectUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function mergeFeedPage(current: FeedItem[], incoming: FeedItem[]): FeedItem[] {
   const incomingById = new Map(incoming.map((item) => [item.id, item]));
   const currentIds = new Set(current.map((item) => item.id));
@@ -224,18 +254,30 @@ function App() {
     if (!api || videoUploadingKind) return;
     setVideoUploadingKind(kind);
     try {
-      const result = await api.uploadMedia(file);
+      const [result, detectedDuration] = await Promise.all([
+        api.uploadMedia(file),
+        readVideoDurationSeconds(file),
+      ]);
       if (!result.url) throw new Error("Backend не вернул ссылку на видео");
-      patchDraft(kind, (current) => ({ ...current, videoUrl: result.url }));
+      patchDraft(kind, (current) => {
+        const modelList = kind === "image" ? data?.imageModels : data?.videoModels;
+        const selected = modelList?.find((model) => model.key === current.model);
+        const sourceDuration = selected?.duration_from_source && detectedDuration != null
+          ? Math.max(1, Math.min(30, detectedDuration))
+          : current.duration;
+        return { ...current, videoUrl: result.url, duration: sourceDuration };
+      });
       notifyHaptic("success");
-      toast.success("Видео загружено");
+      toast.success(
+        detectedDuration != null ? `Видео загружено · ${detectedDuration} сек` : "Видео загружено",
+      );
     } catch (error) {
       notifyHaptic("error");
       toast.error(error instanceof Error ? error.message : "Не удалось загрузить видео");
     } finally {
       setVideoUploadingKind(null);
     }
-  }, [api, patchDraft, videoUploadingKind]);
+  }, [api, data?.imageModels, data?.videoModels, patchDraft, videoUploadingKind]);
 
   const applyPreparedTrend = useCallback((prepared: PreparedTrend) => {
     const settings = prepared.settings || {};
