@@ -175,6 +175,44 @@ async def create_genjutsu_task(
     return request_id
 
 
+async def create_motion_transfer(
+    *,
+    prompt: str,
+    video_url: str,
+    image_urls: list[str],
+    resolution: str = "480p",
+):
+    from api.video_service import VideoResult
+
+    request_id = await create_genjutsu_task(
+        model_key=MOTION_MODEL,
+        prompt=prompt,
+        image_urls=image_urls,
+        video_url=video_url,
+        resolution=resolution,
+    )
+    return VideoResult(task_id=request_id, provider="higgsfield", uses_webhook=False)
+
+
+async def create_object_swap(
+    *,
+    prompt: str,
+    video_url: str,
+    image_urls: list[str],
+    resolution: str = "480p",
+):
+    from api.video_service import VideoResult
+
+    request_id = await create_genjutsu_task(
+        model_key=OBJECT_MODEL,
+        prompt=prompt,
+        image_urls=image_urls,
+        video_url=video_url,
+        resolution=resolution,
+    )
+    return VideoResult(task_id=request_id, provider="higgsfield", uses_webhook=False)
+
+
 async def poll_genjutsu_video(request_id: str) -> str | None:
     url = await higgsfield_client.poll_video_status(request_id)
     if not url:
