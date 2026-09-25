@@ -114,6 +114,20 @@ async def test_handle_genjutsu_price_updates_resolution_and_default_base(monkeyp
     )
     set_price = AsyncMock(return_value=2)
     monkeypatch.setattr(admin.repo, "set_model_resolution_cost", set_price)
+    monkeypatch.setattr(
+        admin.repo,
+        "get_all_model_costs",
+        AsyncMock(
+            return_value=[
+                _cost(MOTION_MODEL, 21.5, DISPLAY_NAMES[MOTION_MODEL]),
+                _cost(pricing_variant_key(MOTION_MODEL, resolution="480p"), 21.5),
+                _cost(pricing_variant_key(MOTION_MODEL, resolution="720p"), 35),
+                _cost(OBJECT_MODEL, 18, DISPLAY_NAMES[OBJECT_MODEL]),
+                _cost(pricing_variant_key(OBJECT_MODEL, resolution="480p"), 18),
+                _cost(pricing_variant_key(OBJECT_MODEL, resolution="720p"), 39),
+            ]
+        ),
+    )
 
     await admin.handle_genjutsu_price(message, AsyncMock(), state)
 
