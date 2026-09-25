@@ -356,5 +356,5 @@ Branch: `feat/genjutsu-admin-pricing`.
 1. [x] Added dedicated admin pricing regression coverage.
 2. [x] Added atomic repository helper for resolution tariff updates.
 3. [x] Ruff and Python compilation passed for touched Python files.
-4. [x] Focused tests passed: 6/6.
+4. [x] Focused tests passed: 8/8, including non-finite input rejection and rollback on incomplete tariff rows.
 5. [ ] Exact-head CI / review / merge / production smoke.
