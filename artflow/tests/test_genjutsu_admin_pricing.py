@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 
@@ -118,7 +118,7 @@ async def test_handle_genjutsu_price_updates_resolution_and_default_base(monkeyp
     await admin.handle_genjutsu_price(message, AsyncMock(), state)
 
     set_price.assert_awaited_once_with(
-        pytest.ANY,
+        ANY,
         MOTION_MODEL,
         "480p",
         21.5,
