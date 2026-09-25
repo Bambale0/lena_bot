@@ -3599,8 +3599,8 @@ function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice, target = 
 
       <section className="photoPromptTool">
         <div>
-          <h2>🎬 Промпт по видео</h2>
-          <p>Загрузи MP4, MOV или WebM до 100 МБ — я разберу сцену, движение, камеру, свет и стиль.</p>
+          <h2>🎬 Видео → промпт</h2>
+          <p>Отправь видео — я сделаю подробный промпт для похожего ролика.</p>
         </div>
 
         <button
@@ -3608,7 +3608,7 @@ function Prompts({ prompts, loading, setScreen, onPromptUse, onNotice, target = 
           onClick={() => videoPromptInputRef.current?.click()}
           disabled={videoPromptLoading}
         >
-          {videoPromptLoading ? "Анализирую видео..." : "Загрузить видео · стоимость по тарифу"}
+          {videoPromptLoading ? "Анализирую видео..." : "Выбрать видео"}
         </button>
 
         <input
