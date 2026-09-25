@@ -37,6 +37,12 @@ from bot.services import admin_ai_service
 from bot.services.broadcasts import SEGMENT_LABELS, deliver_broadcast, get_recipient_ids
 from bot.services.maintenance_mode import is_maintenance_mode, set_maintenance_mode
 from bot.states import AdminStates
+from api.genjutsu_pricing import (
+    DEFAULT_RESOLUTION as GENJUTSU_DEFAULT_RESOLUTION,
+    DISPLAY_NAMES as GENJUTSU_DISPLAY_NAMES,
+    MOTION_MODEL as GENJUTSU_MOTION_MODEL,
+    OBJECT_MODEL as GENJUTSU_OBJECT_MODEL,
+)
 from bot.utils.telegram_ui import safe_answer_callback
 from core.broadcast_scheduler import schedule_broadcast_job
 from core.model_pricing import pricing_variant_key
@@ -76,6 +82,7 @@ class AdminFSM(StatesGroup):
     edit_model_key = State()
     edit_model_credits = State()
     edit_nexus_model_credits = State()
+    edit_genjutsu_credits = State()
     # Credits management
     await_credits_tg_id = State()
     await_credits_amount = State()
@@ -102,6 +109,7 @@ def admin_menu_kb():
     builder.button(text="💳 Прайс-лист", callback_data="adm:price")
     builder.button(text="🎟 Промокоды", callback_data="adm:promos")
     builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
+    builder.button(text="🥷 Genjutsu цены", callback_data="adm:genjutsu_prices")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
     builder.button(text="♾ Фото-безлимит", callback_data="adm:image_unlimited")
     builder.button(text="💰 Начислить кредиты", callback_data="adm:add_credits")
@@ -1492,6 +1500,12 @@ _MODEL_NAME_CALLBACK = "adm:mcn:"
 _NEXUS_MODEL_CALLBACK = "adm:nx:"
 _NEXUS_PRICE_CALLBACK = "adm:nxp:"
 _NEXUS_QUALITY_PRICE_CALLBACK = "adm:nxq:"
+_GENJUTSU_PRICE_CALLBACK = "adm:gjp:"
+_GENJUTSU_RESOLUTIONS = ("480p", "720p")
+_GENJUTSU_ADMIN_MODELS = {
+    "motion": GENJUTSU_MOTION_MODEL,
+    "object": GENJUTSU_OBJECT_MODEL,
+}
 
 # tiers: (provider/app quality key, admin-facing label, sync base fallback)
 _NEXUS_ADMIN_GROUPS: dict[str, dict[str, object]] = {
@@ -1521,6 +1535,42 @@ _NEXUS_ADMIN_GROUPS: dict[str, dict[str, object]] = {
     },
     "gpt2_vip": {"label": "🤖 ГПТ 2 ВИП", "roots": ("gpt-image-2-vip",)},
 }
+
+
+def _genjutsu_mode_label(model_key: str) -> str:
+    display_name = GENJUTSU_DISPLAY_NAMES.get(model_key, model_key)
+    return display_name.split("·", 1)[-1].strip()
+
+
+def _genjutsu_resolution_cost(costs: list, model_key: str, resolution: str) -> float | None:
+    variant_key = pricing_variant_key(model_key, resolution=resolution)
+    by_key = {str(item.model_key): item for item in costs}
+    item = by_key.get(variant_key)
+    if item is None and resolution == GENJUTSU_DEFAULT_RESOLUTION:
+        item = by_key.get(model_key)
+    if item is None:
+        return None
+    try:
+        return float(item.credits)
+    except (TypeError, ValueError):
+        return None
+
+
+def _genjutsu_prices_kb(costs: list) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for slug, model_key in _GENJUTSU_ADMIN_MODELS.items():
+        mode_label = _genjutsu_mode_label(model_key)
+        for resolution in _GENJUTSU_RESOLUTIONS:
+            price = _genjutsu_resolution_cost(costs, model_key, resolution)
+            price_text = "нет цены" if price is None else f"{_fmt_price(price)} кр/сек"
+            builder.button(
+                text=f"{mode_label} · {resolution} — {price_text}",
+                callback_data=f"{_GENJUTSU_PRICE_CALLBACK}{slug}:{resolution}",
+            )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="⚙️ Все модели", callback_data="adm:models"))
+    builder.row(InlineKeyboardButton(text="← Админ-панель", callback_data="adm:back"))
+    return builder.as_markup()
 
 
 def _model_callback_key(data: str | None, *prefixes: str) -> str:
@@ -1712,6 +1762,91 @@ def _models_kb(costs: list, page: int) -> "InlineKeyboardMarkup":
     builder.row(*nav_row)
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="adm:back"))
     return builder.as_markup()
+
+
+@router.callback_query(F.data == "adm:genjutsu_prices")
+async def cb_genjutsu_prices(call: CallbackQuery, session: AsyncSession) -> None:
+    costs = await repo.get_all_model_costs(session)
+    await call.message.edit_text(  # type: ignore[union-attr]
+        "🥷 <b>Genjutsu — цены</b>\n\n"
+        "Стоимость задаётся в кредитах за секунду исходного видео. "
+        "480p и 720p управляются отдельно для каждого сценария.\n\n"
+        "Изменение применяется сразу во всех пользовательских контурах APIX.",
+        reply_markup=_genjutsu_prices_kb(costs),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith(_GENJUTSU_PRICE_CALLBACK))
+async def cb_genjutsu_price_edit(call: CallbackQuery, state: FSMContext) -> None:
+    payload = _model_callback_key(call.data, _GENJUTSU_PRICE_CALLBACK)
+    try:
+        slug, resolution = payload.split(":", 1)
+    except ValueError:
+        await call.answer("Некорректный тариф", show_alert=True)
+        return
+    model_key = _GENJUTSU_ADMIN_MODELS.get(slug)
+    if model_key is None or resolution not in _GENJUTSU_RESOLUTIONS:
+        await call.answer("Некорректный тариф", show_alert=True)
+        return
+
+    await state.set_state(AdminFSM.edit_genjutsu_credits)
+    await state.update_data(
+        genjutsu_model_key=model_key,
+        genjutsu_resolution=resolution,
+    )
+    await call.message.answer(  # type: ignore[union-attr]
+        f"Введи цену для <b>{_genjutsu_mode_label(model_key)}</b> · "
+        f"<b>{resolution}</b> в кредитах за секунду:\n\n"
+        "Например: <code>21.5</code>"
+    )
+    await call.answer()
+
+
+@router.message(AdminFSM.edit_genjutsu_credits)
+async def handle_genjutsu_price(
+    message: Message,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
+    raw = (message.text or "").strip().replace(",", ".")
+    try:
+        new_credits = float(raw)
+    except ValueError:
+        await message.answer("Введи число, например <code>21.5</code>")
+        return
+    if new_credits < 0:
+        await message.answer("Цена не может быть отрицательной.")
+        return
+
+    data = await state.get_data()
+    model_key = str(data.get("genjutsu_model_key") or "")
+    resolution = str(data.get("genjutsu_resolution") or "")
+    if model_key not in _GENJUTSU_ADMIN_MODELS.values() or resolution not in _GENJUTSU_RESOLUTIONS:
+        await state.clear()
+        await message.answer("❌ Тариф Genjutsu не найден.")
+        return
+
+    updated = await repo.set_model_resolution_cost(
+        session,
+        model_key,
+        resolution,
+        new_credits,
+        sync_base=resolution == GENJUTSU_DEFAULT_RESOLUTION,
+    )
+    await state.clear()
+    if not updated:
+        await message.answer(
+            "❌ Не удалось обновить тариф: строки стоимости не найдены. "
+            "Проверь seed/model_costs после деплоя."
+        )
+        return
+
+    await message.answer(
+        f"✅ <b>{_genjutsu_mode_label(model_key)}</b> · <b>{resolution}</b>: "
+        f"<b>{_fmt_price(new_credits)} кр/сек</b>",
+        reply_markup=_genjutsu_prices_kb(await repo.get_all_model_costs(session)),
+    )
 
 
 @router.callback_query(F.data == "adm:nexus_models")
