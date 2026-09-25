@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import ANY, AsyncMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -12,6 +12,7 @@ from api.genjutsu_pricing import (
 )
 from bot.handlers import admin
 from core.model_pricing import pricing_variant_key
+from db import repository as repo
 from db.models import GenerationType
 from tests.factories import make_callback, make_message
 
@@ -140,3 +141,32 @@ async def test_handle_genjutsu_price_updates_resolution_and_default_base(monkeyp
     )
     state.clear.assert_awaited_once()
     assert "21.5 кр/сек" in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_repository_resolution_price_update_is_atomic_and_syncs_base() -> None:
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [11, 12]
+    session.execute = AsyncMock(return_value=result)
+
+    updated = await repo.set_model_resolution_cost(
+        session,
+        MOTION_MODEL,
+        "480p",
+        22.0,
+        sync_base=True,
+    )
+
+    assert updated == 2
+    session.execute.assert_awaited_once()
+    session.commit.assert_awaited_once()
+
+    statement = session.execute.await_args.args[0]
+    compiled = statement.compile()
+    keys = compiled.params["model_key_1"]
+    assert set(keys) == {
+        MOTION_MODEL,
+        pricing_variant_key(MOTION_MODEL, resolution="480p"),
+    }
+    assert compiled.params["credits"] == 22.0
