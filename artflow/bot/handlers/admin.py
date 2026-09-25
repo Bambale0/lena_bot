@@ -10,6 +10,7 @@ import csv
 import html
 import io
 import logging
+import math
 import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -1821,8 +1822,8 @@ async def handle_genjutsu_price(
     except ValueError:
         await message.answer("Введи число, например <code>21.5</code>")
         return
-    if new_credits < 0:
-        await message.answer("Цена не может быть отрицательной.")
+    if not math.isfinite(new_credits) or not 0 <= new_credits <= 1_000_000:
+        await message.answer("Цена должна быть числом от 0 до 1 000 000 кр/сек.")
         return
 
     data = await state.get_data()
@@ -1848,6 +1849,14 @@ async def handle_genjutsu_price(
         )
         return
 
+    logger.info(
+        "Genjutsu price updated admin_tg_id=%s model_key=%s resolution=%s credits=%s rows=%s",
+        getattr(message.from_user, "id", None),
+        model_key,
+        resolution,
+        new_credits,
+        updated,
+    )
     await message.answer(
         f"✅ <b>{_genjutsu_mode_label(model_key)}</b> · <b>{resolution}</b>: "
         f"<b>{_fmt_price(new_credits)} кр/сек</b>",
