@@ -299,5 +299,7 @@ Branch: `feat/genjutsu-integration`.
 6. [x] Telegram reference-images → source-video workflow added.
 7. [x] Provider catalog, operation registry and smoke templates added.
 8. [x] Focused regression run: 68/68 passed after correcting one test-only variant-key assumption.
-9. [ ] Generated provider coverage artifacts, broader backend checks, Ruff, frontend build.
-10. [ ] PR review, exact-head CI, merge/autodeploy, production config and smoke.
+9. [x] Release audit found production has no `HIGGSFIELD_CREDENTIALS`; added a credential feature gate so Genjutsu is hidden from user surfaces until server credentials are configured.
+10. [x] Re-verified current official provider pages: Motion Transfer publishes `higgsfield/genjutsu/motion-transfer/v1.0`; Object Swap currently publishes `higgsfiled/genjutsu/object-swap/v1.0`. Both remain env-configurable.
+11. [ ] Exact-head provider/backend/frontend/E2E CI after rollout-safety fixes.
+12. [ ] Merge/autodeploy, production credential configuration and paid-provider smoke.
