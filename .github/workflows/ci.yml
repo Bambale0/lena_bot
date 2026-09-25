@@ -38,6 +38,9 @@ jobs:
         run: |
           ruff check \
             api/assistant_service.py \
+            api/genjutsu_adapter.py \
+            api/genjutsu_pricing.py \
+            api/higgsfield_client.py \
             api/advanced_video_service.py \
             api/image_service.py \
             api/kling_grok_service.py \
@@ -64,6 +67,7 @@ jobs:
             scripts/check_provider_contract_coverage.py \
             scripts/check_provider_contracts_ci.py \
             scripts/verify_seedance25_production.py \
+            tests/test_genjutsu_integration.py \
             tests/test_gemini_omni_telegram_media_flow.py \
             tests/test_kling_motion_visibility.py \
             tests/test_admin_main_menu.py \
@@ -99,6 +103,7 @@ jobs:
       - name: Pytest maintained PR gate
         run: |
           pytest -q \
+            tests/test_genjutsu_integration.py \
             tests/test_apix_legacy_concept_runtime.py \
             tests/test_apix_production_trends_surface.py \
             tests/test_gemini_omni_telegram_media_flow.py \
