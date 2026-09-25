@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from api import video_prompt_service
+from bot.utils.telegram_ui import split_text_chunks
 
 
 class _FakeResponse:
@@ -115,3 +117,24 @@ async def test_generate_prompt_from_video_url_uses_assistant_fallback_model(monk
 
     assert result.text == "fallback prompt"
     assert fake_client.calls[0][1]["json"]["model"] == "qwen3.8-max"
+
+
+def test_video_prompt_telegram_chunks_preserve_full_text() -> None:
+    prompt = ("Первый блок с деталями камеры и движения. " * 180) + "\n\n" + (
+        "Второй блок со светом, стилем и таймлайном. " * 180
+    )
+    clean = prompt.strip()
+
+    chunks = split_text_chunks(prompt, max_chars=3000)
+
+    assert len(chunks) > 1
+    assert "".join(chunks) == clean
+    assert all(0 < len(chunk) <= 3000 for chunk in chunks)
+
+    handler = Path("bot/handlers/video_prompt.py").read_text(encoding="utf-8")
+    assert "_MAX_PROMPT_MESSAGE_CHARS" not in handler
+    assert "сокращённая версия" not in handler
+    assert "split_text_chunks(prompt, max_chars=_MAX_PROMPT_CHUNK_CHARS)" in handler
+    assert "for result_message in _result_messages(prompt, credits=credits):" in handler
+    assert "await message.answer(result_message)" in handler
+    assert "Часть {index}/{total}" in handler

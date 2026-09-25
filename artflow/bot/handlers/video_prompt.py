@@ -16,7 +16,7 @@ from api.video_prompt_service import (
     is_supported_video_prompt_video,
 )
 from bot.states import VideoGenFSM
-from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message, split_text_chunks
 from db import repository as repo
 from db.models import User
 
@@ -30,7 +30,7 @@ _ALLOWED_VIDEO_MIME_TYPES = {
     "video/quicktime",
     "video/webm",
 }
-_MAX_PROMPT_MESSAGE_CHARS = 3200
+_MAX_PROMPT_CHUNK_CHARS = 3000
 
 
 def _cancel_kb() -> InlineKeyboardMarkup:
@@ -52,27 +52,27 @@ async def _video_prompt_cost(session: AsyncSession):
     return model_cost
 
 
-def _display_prompt(prompt: str) -> tuple[str, bool]:
-    clean = str(prompt or "").strip()
-    truncated = len(clean) > _MAX_PROMPT_MESSAGE_CHARS
-    if truncated:
-        clean = clean[:_MAX_PROMPT_MESSAGE_CHARS].rstrip() + "…"
-    return html.escape(clean), truncated
+def _result_messages(prompt: str, *, credits: float) -> list[str]:
+    chunks = split_text_chunks(prompt, max_chars=_MAX_PROMPT_CHUNK_CHARS)
+    total = len(chunks)
+    messages: list[str] = []
+    for index, chunk in enumerate(chunks, start=1):
+        if index == 1:
+            title = "🎬 <b>Видео → промпт готов</b>"
+        else:
+            title = "🎬 <b>Видео → промпт · продолжение</b>"
 
-
-def _result_text(prompt: str, *, credits: float) -> str:
-    escaped, truncated = _display_prompt(prompt)
-    truncated_note = (
-        "\n\n<i>Промпт очень длинный, поэтому здесь показана сокращённая версия.</i>"
-        if truncated
-        else ""
-    )
-    return (
-        "🎬 <b>Видео → промпт готов</b>\n\n"
-        f"<code>{escaped}</code>"
-        f"{truncated_note}\n\n"
-        f"Списано: <b>{credits:g} 💋</b>. Нажми на текст, чтобы выделить и скопировать."
-    )
+        part = f"\n\n<i>Часть {index}/{total}</i>" if total > 1 else ""
+        footer = (
+            f"\n\nСписано: <b>{credits:g} 💋</b>. "
+            "Нажми на текст, чтобы выделить и скопировать."
+            if index == total
+            else ""
+        )
+        messages.append(
+            f"{title}\n\n<code>{html.escape(chunk, quote=False)}</code>{part}{footer}"
+        )
+    return messages
 
 
 @router.callback_query(F.data == _VIDEO_PROMPT_CALLBACK)
@@ -186,7 +186,8 @@ async def _analyse_video(
 
     await state.clear()
     await wait_msg.delete()
-    await message.answer(_result_text(prompt, credits=credits))
+    for result_message in _result_messages(prompt, credits=credits):
+        await message.answer(result_message)
 
 
 @router.message(VideoGenFSM.video_to_prompt, F.video)
