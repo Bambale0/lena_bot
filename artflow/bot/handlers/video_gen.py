@@ -320,7 +320,7 @@ def _params_summary(data: dict) -> str:
         data.get("grok_mode"),
         f"референсы: {ref_count}" if data.get("mode") == "image" and ref_count else None,
         "видео-референс" if is_gemini_video_ref else None,
-        "исходное видео" if model_key in GENJUTSU_MODEL_KEYS and data.get("reference_video_url") else None,
+        "исходное видео" if data.get("model_key") in GENJUTSU_MODEL_KEYS and data.get("reference_video_url") else None,
         f"Audio ID: {len(data.get('audio_ids') or [])}" if data.get("audio_ids") else None,
         f"Character IDs: {len(data.get('character_ids') or [])}" if data.get("character_ids") else None,
         f"seed {data['seed']}" if data.get("seed") is not None else None,
