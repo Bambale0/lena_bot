@@ -23,6 +23,7 @@ from aiogram.types import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import polling, video_service
+from api.genjutsu_adapter import MODEL_KEYS as GENJUTSU_MODEL_KEYS
 from api.public_files import mirror_telegram_file
 from api.seedance25_adapter import MODEL_KEY as SEEDANCE25_MODEL_KEY
 from api.video_prompt_limits import (
@@ -187,6 +188,7 @@ _DEFAULT_DURATION: dict[str, int] = {
     VideoModel.HAPPYHORSE_T2V: 5,
     VideoModel.HAPPYHORSE_I2V: 5,
     GEMINI_OMNI_VIDEO_MODEL: 4,
+    **{model_key: 1 for model_key in GENJUTSU_MODEL_KEYS},
 }
 _DEFAULT_RATIO: dict[str, str] = {
     VideoModel.KLING_26_T2V: "16:9",
@@ -216,6 +218,7 @@ _DEFAULT_RES: dict[str, str] = {
     VideoModel.KLING_26_MOTION: "720p",
     VideoModel.KLING_30_MOTION: "1080p",
     GEMINI_OMNI_VIDEO_MODEL: "720p",
+    **{model_key: "480p" for model_key in GENJUTSU_MODEL_KEYS},
 }
 _MOTION_MODELS = {VideoModel.KLING_26_MOTION, VideoModel.KLING_30_MOTION}
 
@@ -317,6 +320,7 @@ def _params_summary(data: dict) -> str:
         data.get("grok_mode"),
         f"референсы: {ref_count}" if data.get("mode") == "image" and ref_count else None,
         "видео-референс" if is_gemini_video_ref else None,
+        "исходное видео" if model_key in GENJUTSU_MODEL_KEYS and data.get("reference_video_url") else None,
         f"Audio ID: {len(data.get('audio_ids') or [])}" if data.get("audio_ids") else None,
         f"Character IDs: {len(data.get('character_ids') or [])}" if data.get("character_ids") else None,
         f"seed {data['seed']}" if data.get("seed") is not None else None,
@@ -334,6 +338,8 @@ def _video_params_hint(model_key: str, data: dict) -> str:
             parts.append("Для видео-референса длительность задаёт модель автоматически; можно настроить формат, качество, Audio ID, Character IDs и seed.")
         else:
             parts.append("Можно добавить 1 Audio ID для голоса и до 3 Character IDs для персонажей.")
+    if model_key in GENJUTSU_MODEL_KEYS:
+        parts.append("Genjutsu использует все загруженные референсы и полный исходный ролик до 30 секунд.")
     if data.get("mode") == "image" and not _video_ref_count(data) and model_key == VideoModel.GROK_I2V:
         parts.append("Формат кадра появится после загрузки нужного количества референсов.")
     else:
@@ -935,8 +941,9 @@ async def handle_video_upload(
     motion_step: str | None = data.get("motion_step")
     model_key: str = data["model_key"]
     is_gemini_omni_video_mode = model_key == GEMINI_OMNI_VIDEO_MODEL and data.get("mode") == "video"
+    is_genjutsu_video_mode = model_key in GENJUTSU_MODEL_KEYS and data.get("genjutsu_step") == "video"
 
-    if motion_step != "video_url" and not is_gemini_omni_video_mode:
+    if motion_step != "video_url" and not is_gemini_omni_video_mode and not is_genjutsu_video_mode:
         await message.answer("Пожалуйста, загрузи видео только на шаге 2 управления камерой.", reply_markup=back_to_menu_kb())
         return
 
@@ -947,6 +954,13 @@ async def handle_video_upload(
     resolution = _normalize_resolution_for_state(model_key, stored_resolution)
     if resolution != stored_resolution:
         await state.update_data(resolution=resolution)
+
+    if is_genjutsu_video_mode and not (1 <= video_duration <= 30):
+        await message.answer(
+            "❌ Genjutsu принимает исходное видео длительностью от 1 до 30 секунд. Загрузи подходящий ролик.",
+            reply_markup=back_to_menu_kb(),
+        )
+        return
 
     if is_gemini_omni_video_mode and video_duration > 30:
         await message.answer(
@@ -964,7 +978,7 @@ async def handle_video_upload(
         has_video_input=is_gemini_omni_video_mode,
     )
     rate_or_flat = model_cost.credits if model_cost else int(data.get("credits", 8))
-    billable_duration = video_duration if motion_step == "video_url" else int(data.get("duration", 4))
+    billable_duration = video_duration if (motion_step == "video_url" or is_genjutsu_video_mode) else int(data.get("duration", 4))
     total_credits = _video_total_credits(model_key, billable_duration, rate_or_flat)
 
     if db_user.credits < total_credits:
@@ -991,6 +1005,24 @@ async def handle_video_upload(
 
     model_cost_obj = await repo.get_model_cost(session, model_key)
     display_name = model_cost_obj.display_name if model_cost_obj else model_key
+
+    if is_genjutsu_video_mode:
+        await state.update_data(
+            reference_video_url=video_url,
+            duration=video_duration,
+            credits=rate_or_flat,
+            genjutsu_step=None,
+        )
+        updated = await state.get_data()
+        await state.set_state(VideoGenFSM.params_select)
+        await message.answer(
+            f"✅ Исходное видео загружено: <b>{video_duration} сек</b>\n"
+            f"💋 Стоимость: <b>{_video_price_text(model_key, video_duration, rate_or_flat)}</b>\n\n"
+            f"⚙️ <b>Параметры</b> · {display_name}\n"
+            f"{_video_params_hint(model_key, updated)}",
+            reply_markup=_video_params_reply_markup(model_key, updated),
+        )
+        return
 
     if is_gemini_omni_video_mode:
         clip_end = min(video_duration, 10)
@@ -1097,6 +1129,17 @@ async def _after_video_ref_upload(
     display_name: str,
 ) -> None:
     updated = await state.get_data()
+
+    if model_key in GENJUTSU_MODEL_KEYS:
+        await state.update_data(genjutsu_step="video")
+        await state.set_state(VideoGenFSM.image_upload)
+        await message.answer(
+            f"✅ Референсы сохранены: <b>{_video_ref_count(updated)}</b>\n\n"
+            "🎞️ Теперь загрузи исходное видео длительностью от 1 до 30 секунд. "
+            "Genjutsu сохранит движение и тайминг ролика, применив твои референсы.",
+            reply_markup=back_to_menu_kb(),
+        )
+        return
 
     if _has_params(model_key):
         await state.set_state(VideoGenFSM.params_select)
