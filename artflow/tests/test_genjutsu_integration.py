@@ -38,6 +38,39 @@ def test_genjutsu_models_are_runtime_catalogued_and_publicly_named() -> None:
     assert get_operation_spec("video.genjutsu.object").poll_kind == PollKind.HIGGSFIELD
 
 
+def test_genjutsu_configuration_requires_key_pair(monkeypatch) -> None:
+    monkeypatch.setattr(genjutsu_adapter.settings, "HIGGSFIELD_CREDENTIALS", "")
+    assert genjutsu_adapter.is_genjutsu_configured() is False
+
+    monkeypatch.setattr(
+        genjutsu_adapter.settings,
+        "HIGGSFIELD_CREDENTIALS",
+        "key-id:key-secret",
+    )
+    assert genjutsu_adapter.is_genjutsu_configured() is True
+
+
+def test_genjutsu_miniapp_surface_is_hidden_without_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(genjutsu_adapter.settings, "HIGGSFIELD_CREDENTIALS", "")
+    monkeypatch.setattr(genjutsu_adapter, "install_genjutsu_provider_support", lambda: None)
+    monkeypatch.setattr(genjutsu_adapter, "_install_miniapp_normalizer", lambda _routes: None)
+    monkeypatch.setattr(genjutsu_adapter, "_install_miniapp_reconciler", lambda _routes: None)
+
+    class Routes:
+        VIDEO_CAPS = {
+            MOTION_MODEL: {"requires_video_input": True},
+            OBJECT_MODEL: {"requires_video_input": True},
+            "existing/model": {},
+        }
+        _VIDEO_MODEL_ORDER = [MOTION_MODEL, "existing/model", OBJECT_MODEL]
+
+    genjutsu_adapter.install_genjutsu_miniapp(Routes)
+
+    assert MOTION_MODEL not in Routes.VIDEO_CAPS
+    assert OBJECT_MODEL not in Routes.VIDEO_CAPS
+    assert Routes._VIDEO_MODEL_ORDER == ["existing/model"]
+
+
 def test_genjutsu_pricing_is_admin_backed_per_resolution() -> None:
     rows = genjutsu_model_cost_rows()
     keys = {row["model_key"] for row in rows}
