@@ -16,7 +16,7 @@ from api.video_prompt_service import (
     is_supported_video_prompt_video,
 )
 from bot.states import VideoGenFSM
-from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message, split_text_chunks
 from db import repository as repo
 from db.models import User
 
@@ -52,41 +52,8 @@ async def _video_prompt_cost(session: AsyncSession):
     return model_cost
 
 
-def _split_prompt_chunks(prompt: str, *, max_chars: int = _MAX_PROMPT_CHUNK_CHARS) -> list[str]:
-    clean = str(prompt or "").strip()
-    if not clean:
-        return [""]
-    if max_chars <= 0:
-        raise ValueError("max_chars must be positive")
-
-    chunks: list[str] = []
-    start = 0
-    total = len(clean)
-    while start < total:
-        remaining = total - start
-        if remaining <= max_chars:
-            chunks.append(clean[start:])
-            break
-
-        window = clean[start : start + max_chars + 1]
-        candidates = (
-            window.rfind("\n\n", 0, max_chars + 1),
-            window.rfind("\n", 0, max_chars + 1),
-            window.rfind(" ", 0, max_chars + 1),
-        )
-        cut = max(candidates)
-        if cut < max_chars // 2:
-            cut = max_chars
-        else:
-            cut += 1
-        chunks.append(clean[start : start + cut])
-        start += cut
-
-    return chunks
-
-
 def _result_messages(prompt: str, *, credits: float) -> list[str]:
-    chunks = _split_prompt_chunks(prompt)
+    chunks = split_text_chunks(prompt, max_chars=_MAX_PROMPT_CHUNK_CHARS)
     total = len(chunks)
     messages: list[str] = []
     for index, chunk in enumerate(chunks, start=1):
