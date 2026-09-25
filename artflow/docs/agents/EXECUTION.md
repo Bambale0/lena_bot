@@ -259,8 +259,11 @@ Branch: `feat/genjutsu-create-hub-entry`.
 ### Verification
 1. [x] Added create-hub contract coverage for the Genjutsu entry.
 2. [x] Added handler coverage for configured flow and admin preview fail-closed behavior.
-3. [x] Python compilation passed for all touched Python files on an isolated branch checkout.
-4. [ ] Exact-head CI / review / merge / production smoke.
+3. [x] Python compilation and focused Ruff checks passed for all touched Python files on an isolated branch checkout.
+4. [x] Focused regression tests passed locally: 3/3.
+5. [x] Exact-head PR CI passed: APIX CI/CD #941 and Provider Contract Compliance #882.
+6. [x] Diff review completed with no unresolved high-severity finding.
+7. [ ] Merge / production autodeploy / production smoke.
 
 
 
