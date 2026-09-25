@@ -90,9 +90,8 @@ async def cb_video_to_prompt(
     await safe_edit_message(
         call.message,
         "🎬 <b>Видео → промпт</b>\n\n"
-        "Отправь короткое видео MP4, MOV или WebM до 20 МБ. "
-        "Я разберу сцену, движение, камеру, свет и стиль, затем верну готовый промпт.\n\n"
-        f"Стоимость анализа: <b>{float(model_cost.credits):g} 💋</b>.",
+        "Отправь видео — я сделаю подробный промпт для похожего ролика.\n\n"
+        f"Стоимость: <b>{float(model_cost.credits):g} 💋</b>.",
         reply_markup=_cancel_kb(),
     )
     await safe_answer_callback(call)
