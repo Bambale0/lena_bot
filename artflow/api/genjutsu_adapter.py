@@ -393,9 +393,9 @@ def install_genjutsu_miniapp(routes: Any) -> None:
 
     order = getattr(routes, "_VIDEO_MODEL_ORDER", None)
     if isinstance(order, list):
-        for model_key in reversed(MODEL_KEYS):
+        for model_key in MODEL_KEYS:
             if model_key not in order:
-                order.insert(0, model_key)
+                order.append(model_key)
 
 
 def install_genjutsu_keyboard_support() -> None:
@@ -422,7 +422,7 @@ def install_genjutsu_keyboard_support() -> None:
     if isinstance(groups, list):
         group = next((item for item in groups if item[0] == "genjutsu"), None)
         if group is None:
-            groups.insert(0, ("genjutsu", list(MODEL_KEYS)))
+            groups.append(("genjutsu", list(MODEL_KEYS)))
         else:
             group[1][:] = list(MODEL_KEYS)
     if isinstance(titles, dict):
