@@ -60,7 +60,7 @@ def _result_messages(prompt: str, *, credits: float) -> list[str]:
         if index == 1:
             title = "🎬 <b>Видео → промпт готов</b>"
         else:
-            title = f"🎬 <b>Видео → промпт · продолжение</b>"
+            title = "🎬 <b>Видео → промпт · продолжение</b>"
 
         part = f"\n\n<i>Часть {index}/{total}</i>" if total > 1 else ""
         footer = (
