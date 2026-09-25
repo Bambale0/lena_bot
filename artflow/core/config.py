@@ -48,6 +48,8 @@ class Settings(BaseSettings):
 
     # kie.ai
     KIE_AI_KEY: str = ""
+    MUSIC_RECONCILE_INTERVAL_SECONDS: int = Field(default=300, ge=30, le=3600)
+    MUSIC_RECONCILE_MIN_AGE_SECONDS: int = Field(default=180, ge=60, le=3600)
 
     # Higgsfield / Genjutsu
     HIGGSFIELD_CREDENTIALS: str = ""  # KEY_ID:KEY_SECRET

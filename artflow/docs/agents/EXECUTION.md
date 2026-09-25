@@ -398,3 +398,25 @@ Baseline: `512e86f` (`feat(admin): manage Genjutsu prices (#163)`).
 4. [x] Full-suite comparison vs pristine HEAD worktree: failure sets identical except one order-dependent rate-limit test that failed in the pristine run and passed in the fixed tree (flake; all 43 remaining failures are pre-existing at HEAD, unrelated: image caps, veo, feed).
 5. [x] Production container rebuild/recreate + health + live Genjutsu budget verification.
 6. [ ] Commit/push (needs operator decision: push to `main` triggers CI autodeploy).
+
+## Follow-up — Suno music generation reconciliation
+
+Date: 2026-09-25. Baseline: `541dd6e59c48df1d2af1b910aa4dfcd443264616`.
+
+### Incident and outcome
+- Three Suno v5.5 music generations (#40721, #40719, #37933) remained active for 28–41 days after missed KIE webhooks. Operator polled KIE `jobs/recordInfo`, found terminal `fail` with `413 This audio matches an existing recording in our catalog`, and manually failed/refunded them (30 credits total).
+- Ensure active Suno music generations can finish or fail from authenticated KIE polling without a callback. Terminal failure must use the atomic, idempotent `fail_generation_and_refund`; nonterminal/provider transport errors must not be treated as content failures.
+
+### Current state and scope
+- `scripts/reconcile_stuck_generations.py` already scans active generations, but `api/miniapp_routes.py:_reconcile_generation_status` returns unchanged for music. User-triggered history reconciliation uses the same function. Webhook has separate Suno result parsing and refund handling.
+- `site`, `mini_app`, `telegram_bot`: all use the same generation record and webhook; no surface-specific text, price, or parameter change is intended. Check status behavior on all three.
+- No schema, migration, permission, or pricing changes. KIE credentials and finite retry policy already live in the existing client. Provider response fields are verified from current client/webhook code and the incident report.
+
+### Plan and verification
+1. [x] Red regression tests reproduced terminal failure and successful audio staying unprocessed; later tests cover in-progress, poll error, ambiguous response, and final-state no-op.
+2. [x] Music polling uses authenticated KIE status and Suno record-info, with an in-process periodic scan. Existing repo transitions handle completion and refunds; refund row refreshes under lock to honor concurrent webhooks.
+3. [x] Focused tests: 19 passed (`test_music_reconciliation.py`, `test_music_webhook.py`, `test_generation_refund.py`, web stale-task test). Ruff passed for new scheduler/config/main/repository/tests and import order in the touched API module; Python compilation and `git diff --check` passed. Open review checked provider ambiguity, transient errors, refund race, scheduler lifecycle, and shared surface state. CI exists but cannot verify an uncommitted working tree; the broader local `test_webapp_routes.py` run has 13 unrelated failures in feed, image caps, text, and pricing expectations. Full Ruff on `miniapp_routes.py` reports pre-existing `_anonymous_user` F821 at line 2027.
+
+### Observability and risks
+- Record generation/task/model and provider state/error without payloads or credentials. Refund only on terminal KIE failure and timeout after a valid nonterminal response. Poll errors and malformed/ambiguous responses remain active for later retry. Scheduler runs in the single-worker FastAPI container; it must be deployed to become active.
+- No migration or admin change. Interval/minimum age are validated operational settings in `.env.example`; existing price and model configuration is unchanged. Site and Mini App read the same backend status; the text bot receives a webhook notification when one arrives, while scheduler recovery currently updates shared DB state without a proactive bot message. Existing user-owned `nginx.conf` changes were left untouched.
