@@ -138,3 +138,13 @@ def test_video_prompt_telegram_chunks_preserve_full_text() -> None:
     assert "for result_message in _result_messages(prompt, credits=credits):" in handler
     assert "await message.answer(result_message)" in handler
     assert "Часть {index}/{total}" in handler
+
+
+def test_video_prompt_telegram_instruction_is_short_creator_copy() -> None:
+    handler = Path("bot/handlers/video_prompt.py").read_text(encoding="utf-8")
+
+    assert "Отправь видео — я сделаю подробный промпт для похожего ролика." in handler
+    assert "Стоимость: <b>{float(model_cost.credits):g} 💋</b>." in handler
+    assert "Отправь короткое видео MP4, MOV или WebM до 20 МБ." not in handler
+    assert "Я разберу сцену, движение, камеру, свет и стиль" not in handler
+    assert "Стоимость анализа:" not in handler
