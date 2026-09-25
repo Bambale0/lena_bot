@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from api import genjutsu_adapter, higgsfield_client, miniapp_routes
+from api import genjutsu_adapter, higgsfield_client, miniapp_routes, polling
 from api.genjutsu_pricing import (
     MOTION_MODEL,
     OBJECT_MODEL,
@@ -257,3 +259,76 @@ def test_user_surfaces_render_genjutsu_media_requirements() -> None:
     assert "!selectedModel?.duration_from_source && durations.length" in frontend
     assert "is_genjutsu_video_mode" in telegram
     assert "resolve_genjutsu_source_duration" in telegram
+
+
+def test_genjutsu_poll_budget_outlives_shared_video_poll(monkeypatch) -> None:
+    monkeypatch.setattr(polling.settings, "POLLING_INTERVAL", 3.0)
+    monkeypatch.setattr(polling.settings, "POLLING_TIMEOUT", 600)
+    monkeypatch.setattr(polling.settings, "HIGGSFIELD_POLL_INTERVAL_SECONDS", 5.0)
+    monkeypatch.setattr(polling.settings, "HIGGSFIELD_POLL_TIMEOUT_SECONDS", 1800)
+
+    assert polling.poll_budget("higgsfield") == (5.0, 1800)
+    assert polling.poll_budget("kieai") == (3.0, 600)
+    assert polling.poll_budget(None) == (3.0, 600)
+    assert polling.poll_budget("") == (3.0, 600)
+
+
+def test_genjutsu_stale_guard_outlives_provider_poll_budget(monkeypatch) -> None:
+    monkeypatch.setattr(polling.settings, "HIGGSFIELD_POLL_TIMEOUT_SECONDS", 1800)
+    monkeypatch.setattr(polling.settings, "HIGGSFIELD_STALE_TIMEOUT_SECONDS", 2400)
+
+    stale = genjutsu_adapter.genjutsu_stale_timeout(miniapp_routes)
+
+    assert stale >= miniapp_routes.STALE_GENERATION_TIMEOUT
+    assert stale > timedelta(seconds=1800)
+
+
+@pytest.mark.asyncio
+async def test_running_genjutsu_render_survives_shared_stale_guard(monkeypatch) -> None:
+    """Задача, которая ещё внутри окна провайдера, не должна возвращаться в failed."""
+    assert getattr(miniapp_routes, "_genjutsu_reconciler_installed", False) is True
+    monkeypatch.setattr(polling.settings, "HIGGSFIELD_STALE_TIMEOUT_SECONDS", 2400)
+    monkeypatch.setattr(genjutsu_adapter, "poll_genjutsu_video", AsyncMock(return_value=None))
+    fail_and_refund = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", fail_and_refund)
+
+    gen = SimpleNamespace(
+        id=777,
+        model=MOTION_MODEL,
+        status=miniapp_routes.GenerationStatus.processing,
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=25),
+        task_id="hf-long-render",
+        gen_type=miniapp_routes.GenerationType.video,
+    )
+
+    reconciled = await miniapp_routes._reconcile_generation_status(AsyncMock(), gen)
+
+    assert reconciled is gen
+    fail_and_refund.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_genjutsu_render_beyond_stale_guard_is_refunded(monkeypatch) -> None:
+    monkeypatch.setattr(polling.settings, "HIGGSFIELD_STALE_TIMEOUT_SECONDS", 2400)
+    monkeypatch.setattr(genjutsu_adapter, "poll_genjutsu_video", AsyncMock(return_value=None))
+    fail_and_refund = AsyncMock(return_value=(True, 240.0))
+    refreshed = SimpleNamespace(id=778, status=miniapp_routes.GenerationStatus.failed)
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", fail_and_refund)
+    monkeypatch.setattr(
+        miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=refreshed)
+    )
+
+    gen = SimpleNamespace(
+        id=778,
+        model=MOTION_MODEL,
+        status=miniapp_routes.GenerationStatus.processing,
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=45),
+        task_id="hf-stale-render",
+        gen_type=miniapp_routes.GenerationType.video,
+    )
+
+    reconciled = await miniapp_routes._reconcile_generation_status(AsyncMock(), gen)
+
+    assert reconciled is refreshed
+    fail_and_refund.assert_awaited_once()
+    assert fail_and_refund.await_args.kwargs["refund_note"] == "reconcile:higgsfield_timeout"

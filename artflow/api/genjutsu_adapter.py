@@ -369,6 +369,20 @@ def _install_miniapp_normalizer(routes: Any) -> None:
     routes._genjutsu_normalizer_installed = True
 
 
+def genjutsu_stale_timeout(routes: Any):
+    """Return the stale guard used for Genjutsu generations.
+
+    Long Genjutsu renders outlive the shared video poll budget, so the shared
+    stale guard must never refund a task that is still inside the provider
+    polling window.
+    """
+    generic = routes.STALE_GENERATION_TIMEOUT
+    configured = routes.timedelta(
+        seconds=max(60, int(settings.HIGGSFIELD_STALE_TIMEOUT_SECONDS))
+    )
+    return max(generic, configured)
+
+
 def _install_miniapp_reconciler(routes: Any) -> None:
     if getattr(routes, "_genjutsu_reconciler_installed", False):
         return
@@ -411,7 +425,7 @@ def _install_miniapp_reconciler(routes: Any) -> None:
 
         now = routes.datetime.now(routes.timezone.utc)
         created_at = gen.created_at or now
-        if now - created_at >= routes.STALE_GENERATION_TIMEOUT:
+        if now - created_at >= genjutsu_stale_timeout(routes):
             await routes.repo.fail_generation_and_refund(
                 session,
                 gen.id,

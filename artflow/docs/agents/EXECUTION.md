@@ -358,3 +358,43 @@ Branch: `feat/genjutsu-admin-pricing`.
 3. [x] Ruff and Python compilation passed for touched Python files.
 4. [x] Focused tests passed: 8/8, including non-finite input rejection and rollback on incomplete tariff rows.
 5. [ ] Exact-head CI / review / merge / production smoke.
+
+
+## Follow-up — Genjutsu provider poll budget (false 10-minute timeouts)
+
+Date: 2026-09-25.
+Baseline: `512e86f` (`feat(admin): manage Genjutsu prices (#163)`).
+
+### Incident
+- `16:19 UTC` — user 6 (`@Chillcreative`) launched Genjutsu Motion Transfer (#51015, «повтори все четко», 14.7s source, 2 refs, 480p, 240 credits).
+- `16:30 UTC` — Telegram bot sent `❌ Ошибка: Время ожидания истекло. Попробуй снова.` and refunded 240 credits.
+- Root cause: `bot/handlers/video_gen.py` calls `api/polling.py:poll_until_done` without a timeout, so every provider shared `POLLING_TIMEOUT=600` (10 min). At 16:32 the Higgsfield task (`request_id 243b2eac-ee0f-4e47-9ff9-2ee017db6047`) was still legitimately `in_progress` on the provider side — the render simply outlived the shared budget. Debugging confirmed the failure is not provider- or credential-related; the key is valid (a status probe returns HTTP 200, an invalid key returns HTTP 401).
+- Later provider status: `nsfw` — the exact render would have failed anyway, but with the true reason (rejected content) instead of a false timeout.
+
+### Scope / parity
+- `telegram_bot`: both launch paths (`_launch_video_generation_from_state`, `_regenerate_video_from_previous`) now start polling through `_start_video_polling`, which forwards `result.provider` so the provider-scoped budget applies.
+- `mini_app` / `site`: reconcile (`api/genjutsu_adapter.py` wrapping `miniapp_routes._reconcile_generation_status`) keeps long renders alive via the Genjutsu stale guard instead of failing them at the shared 20-minute mark.
+- Web frontend has no own generation timeout (checked `webapp/src`); it follows backend status.
+
+### Change
+- `core/config.py`: `HIGGSFIELD_POLL_INTERVAL_SECONDS=5.0`, `HIGGSFIELD_POLL_TIMEOUT_SECONDS=1800` (30 min), `HIGGSFIELD_STALE_TIMEOUT_SECONDS=2400` (40 min, strictly above the poll timeout so reconcile never refunds a task that is still being polled).
+- `api/polling.py`: `poll_budget(provider)` resolves per-provider (interval, timeout) from settings at call time with clamps; `poll_until_done(..., interval=None, timeout=None, provider=None)` honors explicit values and adds a timeout warning log with task/provider/duration context.
+- `bot/handlers/video_gen.py`: one helper `_start_video_polling`; 4 call sites use it, passing `provider=result.provider`.
+- `api/genjutsu_adapter.py`: `genjutsu_stale_timeout(routes)` = `max(STALE_GENERATION_TIMEOUT, HIGGSFIELD_STALE_TIMEOUT_SECONDS)`.
+- `.env.example`, `README.md`: documented the new settings.
+
+### No-hardcode / control plane
+- All budgets are env settings with in-code defaults; admin can tune intervals/timeouts without redeploy-code changes (only a container restart to pick up `.env`).
+
+### Observability / failure semantics
+- Polling timeouts log `task/provider/timeout/interval` before failing.
+- Terminal provider failures (`failed`, `nsfw`, `cancelled/canceled`, auth/credit/validation) keep existing refund semantics.
+- The previously failed generation #51015 stays failed+refunded (terminal provider state `nsfw`); no un-billing recovery is possible or needed — the user just retries.
+
+### Verification
+1. [x] Focused tests: `tests/test_genjutsu_integration.py` + `tests/test_video_gen.py` → 54 passed (5 new: provider budget map, stale-guard ordering, reconcile keeps 25-min render alive, reconcile refunds 45-min render with `reconcile:higgsfield_timeout`, bot forwards provider into polling).
+2. [x] Runtime wiring check: `poll_budget("higgsfield") == (5.0, 1800)` on real settings; `poll_until_done(provider="higgsfield")` provably routes through `poll_budget("higgsfield")`.
+3. [x] Ruff clean on all touched files (repo baseline list included).
+4. [x] Full-suite comparison vs pristine HEAD worktree: failure sets identical except one order-dependent rate-limit test that failed in the pristine run and passed in the fixed tree (flake; all 43 remaining failures are pre-existing at HEAD, unrelated: image caps, veo, feed).
+5. [x] Production container rebuild/recreate + health + live Genjutsu budget verification.
+6. [ ] Commit/push (needs operator decision: push to `main` triggers CI autodeploy).

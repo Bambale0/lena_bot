@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     HIGGSFIELD_MAX_RETRIES: int = 3
     HIGGSFIELD_RETRY_BACKOFF_SECONDS: float = 1.0
     HIGGSFIELD_RETRY_MAX_BACKOFF_SECONDS: float = 30.0
+    # Genjutsu renders regularly outlive the shared 600s video poll budget, so
+    # polling and the stale reconcile guard are provider-scoped. The stale guard
+    # must stay above the poll timeout, otherwise reconciliation refunds a task
+    # that is still inside the provider polling window.
+    HIGGSFIELD_POLL_INTERVAL_SECONDS: float = 5.0
+    HIGGSFIELD_POLL_TIMEOUT_SECONDS: int = 1800
+    HIGGSFIELD_STALE_TIMEOUT_SECONDS: int = 2400
     HIGGSFIELD_GENJUTSU_MOTION_ENDPOINT: str = "higgsfield/genjutsu/motion-transfer/v1.0"
     # Kept configurable because Higgsfield's current Object Swap docs have shipped
     # both higgsfield/... and a historical higgsfiled/... spelling.

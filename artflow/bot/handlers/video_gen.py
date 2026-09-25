@@ -114,6 +114,23 @@ def _kie_callback_url() -> str:
     return f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}{query}"
 
 
+def _start_video_polling(result, poll_fn, on_success, on_failure) -> None:
+    """Запустить фоновый polling задачи на бюджете конкретного провайдера.
+
+    Genjutsu/Higgsfield рендерится дольше общего видео-бюджета, поэтому таймаут
+    и интервал берутся из provider-aware настроек api.polling, а не из общих.
+    """
+    asyncio.create_task(
+        polling.poll_until_done(
+            result.task_id,
+            poll_fn,
+            on_success,
+            on_failure,
+            provider=result.provider,
+        )
+    )
+
+
 async def _send_video_with_fallback(
     bot: Bot,
     *,
@@ -1729,11 +1746,11 @@ async def _launch_video_generation_from_state(
             "Пришлю результат автоматически, как только видео будет готово."
         )
         if result.provider == "comet":
-            asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))
+            _start_video_polling(result, poll_fn, on_success, on_failure)
         await state.clear()
         return True
 
-    asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))
+    _start_video_polling(result, poll_fn, on_success, on_failure)
     await state.clear()
     return True
 
@@ -2247,9 +2264,9 @@ async def cb_regen_video(
             "Пришлю результат автоматически, как только видео будет готово."
         )
         if result.provider == "comet":
-            asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))
+            _start_video_polling(result, poll_fn, on_success, on_failure)
         await state.clear()
         return
 
-    asyncio.create_task(polling.poll_until_done(result.task_id, poll_fn, on_success, on_failure))
+    _start_video_polling(result, poll_fn, on_success, on_failure)
     await state.clear()
