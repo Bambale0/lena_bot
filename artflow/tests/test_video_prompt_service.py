@@ -5,9 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from bot.utils.telegram_ui import split_text_chunks
-
 from api import video_prompt_service
+from bot.utils.telegram_ui import split_text_chunks
 
 
 class _FakeResponse:
