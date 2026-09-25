@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     HIGGSFIELD_GENJUTSU_MOTION_ENDPOINT: str = "higgsfield/genjutsu/motion-transfer/v1.0"
     # Kept configurable because Higgsfield's current Object Swap docs have shipped
     # both higgsfield/... and a historical higgsfiled/... spelling.
-    HIGGSFIELD_GENJUTSU_OBJECT_ENDPOINT: str = "higgsfield/genjutsu/object-swap/v1.0"
+    HIGGSFIELD_GENJUTSU_OBJECT_ENDPOINT: str = "higgsfiled/genjutsu/object-swap/v1.0"
 
     # KIE.AI callbacks
     KIE_WEBHOOK_PATH: str = "/webhook/kie"
