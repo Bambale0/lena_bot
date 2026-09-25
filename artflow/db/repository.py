@@ -2818,3 +2818,32 @@ async def set_model_family_quality_costs(
     updated_ids = list(result.scalars().all())
     await session.commit()
     return len(updated_ids)
+
+
+async def set_model_resolution_cost(
+    session: AsyncSession,
+    model_root: str,
+    resolution: str,
+    credits: float,
+    *,
+    sync_base: bool = False,
+) -> int:
+    """Atomically update one resolution tariff and, optionally, its base fallback."""
+    root = str(model_root or "").strip()
+    resolution = str(resolution or "").strip()
+    if not root or not resolution:
+        return 0
+
+    keys = [pricing_variant_key(root, resolution=resolution)]
+    if sync_base:
+        keys.append(root)
+
+    result = await session.execute(
+        update(ModelCost)
+        .where(ModelCost.model_key.in_(keys))
+        .values(credits=credits)
+        .returning(ModelCost.id)
+    )
+    updated_ids = list(result.scalars().all())
+    await session.commit()
+    return len(updated_ids)
