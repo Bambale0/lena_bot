@@ -19,6 +19,39 @@ def is_benign_telegram_error(error: TelegramBadRequest) -> bool:
     return any(part in text for part in benign_parts)
 
 
+def split_text_chunks(text: str, *, max_chars: int = 3000) -> list[str]:
+    clean = str(text or "").strip()
+    if not clean:
+        return [""]
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
+
+    chunks: list[str] = []
+    start = 0
+    total = len(clean)
+    while start < total:
+        remaining = total - start
+        if remaining <= max_chars:
+            chunks.append(clean[start:])
+            break
+
+        window = clean[start : start + max_chars + 1]
+        candidates = (
+            window.rfind("\n\n", 0, max_chars + 1),
+            window.rfind("\n", 0, max_chars + 1),
+            window.rfind(" ", 0, max_chars + 1),
+        )
+        cut = max(candidates)
+        if cut < max_chars // 2:
+            cut = max_chars
+        else:
+            cut += 1
+        chunks.append(clean[start : start + cut])
+        start += cut
+
+    return chunks
+
+
 async def safe_edit_message(
     message: Message,
     text: str,
