@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-
 _MODEL_LABELS: dict[str, str] = {
     "seedream/5-pro-text-to-image": "🔥 HOT · Seedream 5 Pro",
     "seedream/5-pro-image-to-image": "🔥 HOT · Seedream 5 Pro",
