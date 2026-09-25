@@ -237,6 +237,33 @@ The transport path was correct. The failures came from two separate gaps:
 3. [ ] Production autodeploy and health/log smoke.
 
 
+## Follow-up — dedicated Genjutsu create-hub entry
+
+Date: 2026-09-25.
+Baseline: `664f6f92baf897d80be304502a54895a23f0bfd6`.
+Branch: `feat/genjutsu-create-hub-entry`.
+
+### User outcome
+- Telegram create hub gets a full-width `🥷 Genjutsu` shortcut in the location requested by the operator.
+- The shortcut opens a dedicated two-choice screen: Motion Transfer or Object Swap.
+- Choosing either configured model enters the existing Genjutsu reference → source video → params → prompt flow.
+- Regular users only see the entry when Higgsfield credentials are configured.
+- Admins can preview the screen before credentials exist, but launch buttons fail closed with a clear provider-not-configured alert.
+
+### Scope / parity
+- `telegram_bot`: updated because the request is specifically for this Telegram menu.
+- `mini_app`: no change; Genjutsu model flow already exists there.
+- `site/web`: no change; Genjutsu model flow already exists there.
+- This is a navigation shortcut, not a capability or pricing change.
+
+### Verification
+1. [x] Added create-hub contract coverage for the Genjutsu entry.
+2. [x] Added handler coverage for configured flow and admin preview fail-closed behavior.
+3. [x] Python compilation passed for all touched Python files on an isolated branch checkout.
+4. [ ] Exact-head CI / review / merge / production smoke.
+
+
+
 
 ---
 
