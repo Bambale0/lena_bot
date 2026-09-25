@@ -59,6 +59,8 @@ _MODEL_LABELS: dict[str, str] = {
     "midjourney-blend": "🖼 Midjourney Blend",
     "midjourney-describe": "🔍 Midjourney Describe",
     "midjourney-video": "🎞 Midjourney Video",
+    "higgsfield/genjutsu/motion-transfer": "🥷 Genjutsu · Перенос движения",
+    "higgsfield/genjutsu/object-swap": "🥷 Genjutsu · Замена объекта",
 }
 
 _CANONICAL_MODEL_KEYS: dict[str, str] = {
