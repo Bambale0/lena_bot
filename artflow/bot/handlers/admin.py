@@ -1803,7 +1803,7 @@ async def cb_genjutsu_price_edit(call: CallbackQuery, state: FSMContext) -> None
     )
     await call.message.answer(  # type: ignore[union-attr]
         f"Введи цену для <b>{_genjutsu_mode_label(model_key)}</b> · "
-        f"<b>{resolution}</b> в кредитах за секунду:\n\n"
+        f"<b>{resolution}</b> в <b>кр/сек</b>:\n\n"
         "Например: <code>21.5</code>"
     )
     await call.answer()
