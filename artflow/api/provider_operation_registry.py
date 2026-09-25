@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import (
     advanced_video_service,
     assistant_service,
+    genjutsu_adapter,
     image_service,
     kieai_client,
     kling_grok_service,
@@ -40,6 +41,7 @@ class PollKind(StrEnum):
     NONE = "none"
     KIE = "kie"
     VEO = "veo"
+    HIGGSFIELD = "higgsfield"
     MIDJOURNEY = "midjourney"
     SUNO_MUSIC = "suno_music"
     SUNO_LYRICS = "suno_lyrics"
@@ -148,6 +150,8 @@ _ADVANCED_EXECUTORS: dict[str, tuple[Callable[..., Awaitable[Any]], str | None, 
     "video.veo.extend": (video_service.extend_veo_video, "veo3_fast", PollKind.VEO),
     "video.veo.1080": (video_service.get_veo_1080p_url, "veo3_fast", PollKind.NONE),
     "video.veo.4k": (video_service.generate_video_4k, "veo3_fast", PollKind.VEO),
+    "video.genjutsu.motion": (genjutsu_adapter.create_motion_transfer, genjutsu_adapter.MOTION_MODEL, PollKind.HIGGSFIELD),
+    "video.genjutsu.object": (genjutsu_adapter.create_object_swap, genjutsu_adapter.OBJECT_MODEL, PollKind.HIGGSFIELD),
 }
 
 
@@ -353,6 +357,18 @@ async def resolve_operation_price(
     if not spec.billable:
         return 0
 
+    if spec.contract_id.startswith("video.genjutsu."):
+        duration = await genjutsu_adapter.resolve_source_duration_seconds(
+            str(params.get("video_url") or "")
+        )
+        return await get_video_price_for_model(
+            spec.price_alias or spec.model,
+            duration=duration,
+            resolution=str(params.get("resolution") or "480p"),
+            has_video_input=True,
+            session=session,
+        )
+
     if spec.contract_id.startswith("midjourney."):
         return await get_midjourney_price(spec.contract_id.split(".", 1)[1], session=session)
 
@@ -479,6 +495,12 @@ async def poll_operation(spec: OperationSpec, task_id: str) -> OperationStatus:
             data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
             error = str(data.get("failMsg") or data.get("msg") or "Provider task failed")
         return OperationStatus(state, _urls_from_any(payload), payload, error)
+    if spec.poll_kind == PollKind.HIGGSFIELD:
+        try:
+            url = await genjutsu_adapter.poll_genjutsu_video(task_id)
+        except Exception as exc:
+            return OperationStatus("failed", error=str(exc))
+        return OperationStatus("completed", (url,), url) if url else OperationStatus("processing")
     if spec.poll_kind == PollKind.VEO:
         url = await video_service.poll_veo_status(task_id)
         return OperationStatus("completed", (url,), url) if url else OperationStatus("processing")
