@@ -35,11 +35,11 @@ def split_text_chunks(text: str, *, max_chars: int = 3000) -> list[str]:
             chunks.append(clean[start:])
             break
 
-        window = clean[start : start + max_chars + 1]
+        window = clean[start : start + max_chars]
         candidates = (
-            window.rfind("\n\n", 0, max_chars + 1),
-            window.rfind("\n", 0, max_chars + 1),
-            window.rfind(" ", 0, max_chars + 1),
+            window.rfind("\n\n"),
+            window.rfind("\n"),
+            window.rfind(" "),
         )
         cut = max(candidates)
         if cut < max_chars // 2:
