@@ -62,6 +62,9 @@ export interface ModelInfo {
   is_per_second?: boolean;
   credits_per_sec?: number | null;
   supports_video_input?: boolean;
+  requires_video_input?: boolean;
+  requires_reference_images?: boolean;
+  duration_from_source?: boolean;
   max_audio_ids?: number;
   max_character_ids?: number;
   has_seed?: boolean;
