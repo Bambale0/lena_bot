@@ -333,3 +333,28 @@ Branch: `feat/genjutsu-integration`.
 10. [x] Re-verified current official provider pages: Motion Transfer publishes `higgsfield/genjutsu/motion-transfer/v1.0`; Object Swap currently publishes `higgsfiled/genjutsu/object-swap/v1.0`. Both remain env-configurable.
 11. [ ] Exact-head provider/backend/frontend/E2E CI after rollout-safety fixes.
 12. [ ] Merge/autodeploy, production credential configuration and paid-provider smoke.
+
+
+## Follow-up — Genjutsu admin pricing control
+
+Date: 2026-09-25.
+Branch: `feat/genjutsu-admin-pricing`.
+
+### User outcome
+- Telegram `/admin` gets a dedicated `🥷 Genjutsu цены` control.
+- Admin can edit Motion Transfer and Object Swap independently for 480p and 720p.
+- Values are credits per source-video second.
+- 480p updates its base fallback atomically with the explicit 480p variant.
+- Runtime source of truth remains `model_costs`; changes apply without redeploy across Telegram, Mini App and site/web.
+
+### Control plane / parity
+- Telegram admin: dedicated Genjutsu pricing screen.
+- Web admin: existing `/admin/pricing` / `/admin/model-costs/{id}` already exposes the same ModelCost rows; no parallel pricing store is introduced.
+- End-user Telegram / Mini App / web resolve prices from the same DB-backed video pricing keys.
+
+### Verification
+1. [x] Added dedicated admin pricing regression coverage.
+2. [x] Added atomic repository helper for resolution tariff updates.
+3. [x] Ruff and Python compilation passed for touched Python files.
+4. [x] Focused tests passed: 8/8, including non-finite input rejection and rollback on incomplete tariff rows.
+5. [ ] Exact-head CI / review / merge / production smoke.
