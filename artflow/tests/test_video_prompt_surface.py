@@ -58,3 +58,24 @@ def test_telegram_bot_exposes_video_prompt_and_uses_configured_billing() -> None
     assert 'entry_type="video_prompt_refund"' in handler
     assert "_video_prompt.router" in routers
     assert menus.count("vid:video2prompt") >= 3
+
+
+def test_telegram_video_prompt_splits_long_result_without_truncation() -> None:
+    from bot.handlers import video_prompt
+
+    prompt = ("Первый блок. " * 400) + "\n\n" + ("Второй блок. " * 400)
+    clean = prompt.strip()
+
+    chunks = video_prompt._split_prompt_chunks(prompt)
+
+    assert len(chunks) > 1
+    assert "".join(chunks) == clean
+    assert all(len(chunk) <= video_prompt._MAX_PROMPT_CHUNK_CHARS for chunk in chunks)
+
+    messages = video_prompt._result_messages(prompt, credits=3)
+    assert len(messages) == len(chunks)
+    assert "сокращённая версия" not in "\n".join(messages)
+    assert "…" not in "".join(chunks)
+    assert "Часть 1/" in messages[0]
+    assert f"Часть {len(messages)}/{len(messages)}" in messages[-1]
+    assert "Списано: <b>3 💋</b>" in messages[-1]
