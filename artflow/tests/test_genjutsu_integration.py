@@ -44,10 +44,10 @@ def test_genjutsu_pricing_is_admin_backed_per_resolution() -> None:
     keys = {row["model_key"] for row in rows}
     assert MOTION_MODEL in keys
     assert OBJECT_MODEL in keys
-    assert f"{MOTION_MODEL}::resolution=480p" in keys
-    assert f"{MOTION_MODEL}::resolution=720p" in keys
-    assert f"{OBJECT_MODEL}::resolution=480p" in keys
-    assert f"{OBJECT_MODEL}::resolution=720p" in keys
+    assert f"{MOTION_MODEL}__resolution=480p" in keys
+    assert f"{MOTION_MODEL}__resolution=720p" in keys
+    assert f"{OBJECT_MODEL}__resolution=480p" in keys
+    assert f"{OBJECT_MODEL}__resolution=720p" in keys
 
 
 def test_validate_inputs_requires_source_video_and_limits_refs() -> None:
