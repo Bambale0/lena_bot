@@ -21,6 +21,14 @@ def _is_admin_user(db_user: User) -> bool:
     return bool(getattr(db_user, "tg_id", None) in settings.ADMIN_IDS)
 
 
+def _show_genjutsu_entry(db_user: User) -> bool:
+    """Expose Genjutsu to users only when provider auth exists; admins may preview."""
+    raw = str(settings.HIGGSFIELD_CREDENTIALS or "").strip()
+    key_id, sep, key_secret = raw.partition(":")
+    configured = bool(sep and key_id.strip() and key_secret.strip())
+    return configured or _is_admin_user(db_user)
+
+
 def language_kb(current_lang: str) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -39,7 +47,11 @@ def language_kb(current_lang: str) -> InlineKeyboardBuilder:
 @router.callback_query(F.data == "menu:create")
 async def cb_create_hub(call: CallbackQuery, db_user: User) -> None:
     lang = db_user.language or "ru"
-    screen = render_create_hub(lang=lang, is_admin=_is_admin_user(db_user))
+    screen = render_create_hub(
+        lang=lang,
+        is_admin=_is_admin_user(db_user),
+        show_genjutsu=_show_genjutsu_entry(db_user),
+    )
     await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)  # type: ignore[arg-type]
     await safe_answer_callback(call)
 

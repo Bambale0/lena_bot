@@ -90,6 +90,13 @@ def test_v2_create_hub_preserves_all_creation_entrypoints_and_explains_them():
     admin_cb = callbacks(render_create_hub(lang="ru", is_admin=True).reply_markup)
     assert "menu:mj" in admin_cb
 
+    genjutsu_cb = callbacks(
+        render_create_hub(lang="ru", is_admin=False, show_genjutsu=True).reply_markup
+    )
+    assert "menu:genjutsu" in genjutsu_cb
+    genjutsu_screen = render_create_hub(lang="ru", is_admin=False, show_genjutsu=True)
+    assert "Genjutsu" in genjutsu_screen.text
+
 
 def test_v2_more_hub_preserves_secondary_features_and_explains_them():
     screen = render_more_hub(lang="ru", is_admin=False)

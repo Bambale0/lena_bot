@@ -24,7 +24,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import polling, video_service
 from api.genjutsu_adapter import (
+    DISPLAY_NAMES as GENJUTSU_DISPLAY_NAMES,
+)
+from api.genjutsu_adapter import (
     MODEL_KEYS as GENJUTSU_MODEL_KEYS,
+)
+from api.genjutsu_adapter import (
+    is_genjutsu_configured,
 )
 from api.genjutsu_adapter import (
     resolve_source_duration_seconds as resolve_genjutsu_source_duration,
@@ -44,6 +50,7 @@ from bot.keyboards.models import (
     VIDEO_CAPS,
     VIDEO_GROUP_TITLES,
     after_generation_kb,
+    model_cost_display_text,
     multi_ref_kb,
     video_mode_kb,
     video_model_groups_kb,
@@ -668,6 +675,70 @@ def _has_params(model_key: str) -> bool:
 
 
 # ── Model select ──────────────────────────────────────────────────────────────
+
+
+def _genjutsu_entry_markup(model_costs: list, *, configured: bool) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    by_key = {str(item.model_key): item for item in model_costs}
+    for model_key in GENJUTSU_MODEL_KEYS:
+        model_cost = by_key.get(model_key)
+        label = (
+            str(getattr(model_cost, "display_name", "") or GENJUTSU_DISPLAY_NAMES[model_key])
+        )
+        if model_cost is not None:
+            label += f" · {model_cost_display_text(model_cost, model_costs=model_costs)}"
+        rows.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=(
+                    f"vid_model:{model_key}"
+                    if configured and model_cost is not None
+                    else "genjutsu:unavailable"
+                ),
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="← Назад", callback_data="menu:create")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data == "menu:genjutsu")
+async def cb_genjutsu_menu(
+    call: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
+    await state.set_state(VideoGenFSM.model_select)
+    model_costs = await repo.get_all_model_costs(session)
+    configured = is_genjutsu_configured()
+    text = (
+        "🥷 <b>Genjutsu</b>\n\n"
+        "Выбери, что сделать с исходным роликом:\n\n"
+        "🎭 <b>Перенос движения</b> — сохраняет движение, камеру и тайминг видео, "
+        "но переносит их на персонажей или сцену из твоих референсов.\n\n"
+        "🔄 <b>Замена объекта</b> — меняет персонажа, одежду, товар или другой объект, "
+        "стараясь сохранить остальной ролик.\n\n"
+        "Дальше: референсы → исходное видео → качество → промпт → запуск."
+    )
+    if not configured:
+        text += (
+            "\n\n⚠️ <b>Предпросмотр для администратора.</b> "
+            "Higgsfield API ещё не подключён на сервере, поэтому запуск временно недоступен."
+        )
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        text,
+        reply_markup=_genjutsu_entry_markup(model_costs, configured=configured),
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data == "genjutsu:unavailable")
+async def cb_genjutsu_unavailable(call: CallbackQuery) -> None:
+    await call.answer(
+        "Genjutsu пока не подключён к Higgsfield API. Добавь серверный ключ — и запуск станет доступен.",
+        show_alert=True,
+    )
+
 
 @router.callback_query(F.data == "menu:video")
 async def cb_video_menu(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:

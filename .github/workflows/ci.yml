@@ -103,6 +103,9 @@ jobs:
       - name: Pytest maintained PR gate
         run: |
           pytest -q \
+            tests/test_main_menu_contract.py::test_v2_create_hub_preserves_all_creation_entrypoints_and_explains_them \
+            tests/test_video_gen.py::test_cb_genjutsu_menu_opens_dedicated_flow_when_configured \
+            tests/test_video_gen.py::test_cb_genjutsu_menu_admin_preview_blocks_launch_without_credentials \
             tests/test_genjutsu_integration.py \
             tests/test_apix_legacy_concept_runtime.py \
             tests/test_apix_production_trends_surface.py \

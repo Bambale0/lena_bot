@@ -39,7 +39,79 @@ def _fake_state(**initial: object):
     return state
 
 
-# ── menu:video ────────────────────────────────────────────────────────────────
+# ── menu:video / menu:genjutsu ───────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_cb_genjutsu_menu_opens_dedicated_flow_when_configured() -> None:
+    call = make_callback(data="menu:genjutsu")
+    call.answer = AsyncMock()
+    mock_state = _fake_state()
+    costs = [
+        _make_video_model_cost(
+            video_gen.GENJUTSU_MODEL_KEYS[0],
+            16,
+            "🥷 Genjutsu · Перенос движения",
+        ),
+        _make_video_model_cost(
+            video_gen.GENJUTSU_MODEL_KEYS[1],
+            16,
+            "🥷 Genjutsu · Замена объекта",
+        ),
+    ]
+    with patch(
+        "bot.handlers.video_gen.repo",
+        AsyncMock(get_all_model_costs=AsyncMock(return_value=costs)),
+    ):
+        with patch("bot.handlers.video_gen.is_genjutsu_configured", return_value=True):
+            with patch("bot.handlers.video_gen.safe_edit_message", AsyncMock()) as edit:
+                await video_gen.cb_genjutsu_menu(call, AsyncMock(), mock_state)
+
+    mock_state.set_state.assert_awaited_once_with(VideoGenFSM.model_select)
+    text = edit.await_args.args[1]
+    markup = edit.await_args.kwargs["reply_markup"]
+    callbacks = [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert "Перенос движения" in text
+    assert "Замена объекта" in text
+    assert callbacks == [
+        f"vid_model:{video_gen.GENJUTSU_MODEL_KEYS[0]}",
+        f"vid_model:{video_gen.GENJUTSU_MODEL_KEYS[1]}",
+        "menu:create",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cb_genjutsu_menu_admin_preview_blocks_launch_without_credentials() -> None:
+    call = make_callback(data="menu:genjutsu")
+    call.answer = AsyncMock()
+    mock_state = _fake_state()
+    costs = [
+        _make_video_model_cost(video_gen.GENJUTSU_MODEL_KEYS[0], 16),
+        _make_video_model_cost(video_gen.GENJUTSU_MODEL_KEYS[1], 16),
+    ]
+    with patch(
+        "bot.handlers.video_gen.repo",
+        AsyncMock(get_all_model_costs=AsyncMock(return_value=costs)),
+    ):
+        with patch("bot.handlers.video_gen.is_genjutsu_configured", return_value=False):
+            with patch("bot.handlers.video_gen.safe_edit_message", AsyncMock()) as edit:
+                await video_gen.cb_genjutsu_menu(call, AsyncMock(), mock_state)
+
+    text = edit.await_args.args[1]
+    markup = edit.await_args.kwargs["reply_markup"]
+    callbacks = [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert "Предпросмотр для администратора" in text
+    assert callbacks == ["genjutsu:unavailable", "genjutsu:unavailable", "menu:create"]
+
 
 @pytest.mark.asyncio
 async def test_cb_video_menu_opens_menu() -> None:
