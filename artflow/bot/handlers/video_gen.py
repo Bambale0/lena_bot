@@ -23,7 +23,10 @@ from aiogram.types import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import polling, video_service
-from api.genjutsu_adapter import MODEL_KEYS as GENJUTSU_MODEL_KEYS
+from api.genjutsu_adapter import (
+    MODEL_KEYS as GENJUTSU_MODEL_KEYS,
+    resolve_source_duration_seconds as resolve_genjutsu_source_duration,
+)
 from api.public_files import mirror_telegram_file
 from api.seedance25_adapter import MODEL_KEY as SEEDANCE25_MODEL_KEY
 from api.video_prompt_limits import (
@@ -1007,6 +1010,27 @@ async def handle_video_upload(
     display_name = model_cost_obj.display_name if model_cost_obj else model_key
 
     if is_genjutsu_video_mode:
+        try:
+            video_duration = await resolve_genjutsu_source_duration(video_url)
+        except ValueError as exc:
+            await message.answer(f"❌ {escape(str(exc))}", reply_markup=back_to_menu_kb())
+            return
+        model_cost = await _resolve_video_model_cost(
+            session,
+            model_key,
+            duration=video_duration,
+            resolution=resolution,
+            has_video_input=False,
+        )
+        rate_or_flat = model_cost.credits if model_cost else float(data.get("credits", 0))
+        total_credits = _video_total_credits(model_key, video_duration, rate_or_flat)
+        if db_user.credits < total_credits:
+            await message.answer(
+                f"❌ Недостаточно 💋! Нужно {_video_price_text(model_key, video_duration, rate_or_flat)}, "
+                f"на балансе {db_user.credits:g} 💋.",
+                reply_markup=back_to_menu_kb(),
+            )
+            return
         await state.update_data(
             reference_video_url=video_url,
             duration=video_duration,
