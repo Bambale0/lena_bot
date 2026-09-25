@@ -279,7 +279,7 @@ function ServicesScreen({
 
           <Card>
             <CardHeader className="pb-2">
-              <div className="flex items-center gap-2 text-primary"><Film className="size-4" /><CardTitle>Промпт по видео</CardTitle></div>
+              <div className="flex items-center gap-2 text-primary"><Film className="size-4" /><CardTitle>Видео → промпт</CardTitle></div>
             </CardHeader>
             <CardContent className="grid gap-2">
               <input
@@ -303,7 +303,7 @@ function ServicesScreen({
                 <Film className="size-6 shrink-0 text-primary" />
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold">{selectedVideoFileName || "Выбрать видео"}</span>
-                  <span className="mt-0.5 block text-[10px] text-muted-foreground">MP4, MOV, WebM · стоимость по тарифу</span>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground">Сделаю подробный промпт для похожего ролика</span>
                 </span>
               </button>
               {videoPromptBusy ? (

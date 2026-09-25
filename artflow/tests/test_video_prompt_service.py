@@ -148,3 +148,15 @@ def test_video_prompt_telegram_instruction_is_short_creator_copy() -> None:
     assert "Отправь короткое видео MP4, MOV или WebM до 20 МБ." not in handler
     assert "Я разберу сцену, движение, камеру, свет и стиль" not in handler
     assert "Стоимость анализа:" not in handler
+
+
+def test_video_prompt_frontend_copy_is_short_on_all_surfaces() -> None:
+    legacy = Path("webapp/src/main.jsx").read_text(encoding="utf-8")
+    services = Path("webapp/src/features/services-screen.tsx").read_text(encoding="utf-8")
+
+    assert "Отправь видео — я сделаю подробный промпт для похожего ролика." in legacy
+    assert "Загрузи MP4, MOV или WebM до 100 МБ" not in legacy
+    assert "я разберу сцену, движение, камеру, свет и стиль" not in legacy
+    assert "Видео → промпт" in services
+    assert "Сделаю подробный промпт для похожего ролика" in services
+    assert "MP4, MOV, WebM · стоимость по тарифу" not in services
