@@ -29,7 +29,6 @@ from core.trends import (
     trend_kind,
     trend_public_payload,
     trend_settings,
-    trend_user_fields,
 )
 from db import repository as repo
 from db.models import Generation, GenerationType, PromptCategory, User, UserPrompt
@@ -277,7 +276,6 @@ async def run_trend(
         session,
         user_id=user.id,
         idempotency_key=body.idempotency_key,
-        user_values=body.user_values,
     )
     if existing is not None:
         await session.refresh(user)
@@ -338,6 +336,7 @@ async def run_trend(
         settings_payload=settings_payload,
         asset_payload=asset,
         idempotency_key=body.idempotency_key,
+        user_values=body.user_values,
     )
     await session.refresh(user)
     return {"ok": True, "task": _task_payload(task), "credits": _credits_out(user.credits)}
