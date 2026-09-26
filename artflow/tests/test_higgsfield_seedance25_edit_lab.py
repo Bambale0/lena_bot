@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -90,6 +91,35 @@ def test_higgsfield_seedance25_edit_payload_validates_provider_limits() -> None:
             video_url="https://cdn.example/source.mp4",
             bitrate_mode="turbo",
         )
+
+
+@pytest.mark.asyncio
+async def test_higgsfield_seedance25_edit_submits_exact_endpoint(monkeypatch) -> None:
+    from api import higgsfield_seedance25_edit as edit
+
+    submit = AsyncMock(return_value="hf-seedance-task")
+    monkeypatch.setattr(edit.higgsfield_client, "submit", submit)
+
+    task_id = await edit.create_video_edit_task(
+        prompt="Replace the person with @Image1",
+        video_url="https://cdn.example/source.mp4",
+        image_urls=["https://cdn.example/person.jpg"],
+        resolution="720p",
+    )
+
+    assert task_id == "hf-seedance-task"
+    submit.assert_awaited_once_with(
+        edit.ENDPOINT,
+        {
+            "prompt": "Replace the person with @Image1",
+            "video_url": "https://cdn.example/source.mp4",
+            "image_urls": ["https://cdn.example/person.jpg"],
+            "resolution": "720p",
+            "bitrate_mode": "high",
+            "generate_audio": True,
+        },
+    )
+
 
 
 def test_admin_provider_lab_lists_higgsfield_seedance25_video_edit() -> None:
