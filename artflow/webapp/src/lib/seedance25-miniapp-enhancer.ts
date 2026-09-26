@@ -16,6 +16,7 @@ type Seedance25Options = {
   generateAudio: boolean;
   returnLastFrame: boolean;
   webSearch: boolean;
+  identityTransfer: boolean;
   videoFiles: File[];
   audioFiles: File[];
   videoRefs: string[];
@@ -34,6 +35,7 @@ const DEFAULT_OPTIONS: Seedance25Options = {
   generateAudio: true,
   returnLastFrame: false,
   webSearch: false,
+  identityTransfer: false,
   videoFiles: [],
   audioFiles: [],
   videoRefs: [],
@@ -161,6 +163,13 @@ function renderPanel(): HTMLElement {
         Return last frame
       </label>
     </div>
+    <label class="flex min-w-0 items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-2 py-2 text-xs font-medium">
+      <input data-seedance25="identityTransfer" type="checkbox" />
+      🎭 Замена персонажа · 1–3 фото одного человека + 1 исходное видео
+    </label>
+    <p class="text-[10px] text-muted-foreground">
+      В этом режиме фото задают внешность, а видео — только движение и сцену. Качество 480p / 720p выбирается в параметрах генерации.
+    </p>
     <label class="flex min-w-0 items-center gap-2 rounded-md border bg-background/60 px-2 py-2 text-xs font-medium">
       <input data-seedance25="webSearch" type="checkbox" />
       Web search grounding
@@ -173,6 +182,7 @@ function renderPanel(): HTMLElement {
   const generateAudio = panel.querySelector<HTMLInputElement>('[data-seedance25="generateAudio"]');
   const returnLastFrame = panel.querySelector<HTMLInputElement>('[data-seedance25="returnLastFrame"]');
   const webSearch = panel.querySelector<HTMLInputElement>('[data-seedance25="webSearch"]');
+  const identityTransfer = panel.querySelector<HTMLInputElement>('[data-seedance25="identityTransfer"]');
   const videoFiles = panel.querySelector<HTMLInputElement>('[data-seedance25="videoFiles"]');
   const audioFiles = panel.querySelector<HTMLInputElement>('[data-seedance25="audioFiles"]');
   const videoRefs = panel.querySelector<HTMLTextAreaElement>('[data-seedance25="videoRefs"]');
@@ -184,6 +194,7 @@ function renderPanel(): HTMLElement {
   if (generateAudio) generateAudio.checked = current.generateAudio;
   if (returnLastFrame) returnLastFrame.checked = current.returnLastFrame;
   if (webSearch) webSearch.checked = current.webSearch;
+  if (identityTransfer) identityTransfer.checked = current.identityTransfer;
   if (videoRefs) videoRefs.value = current.videoRefs.join("\n");
   if (audioRefs) audioRefs.value = current.audioRefs.join("\n");
 
@@ -195,6 +206,7 @@ function renderPanel(): HTMLElement {
       generateAudio: Boolean(generateAudio?.checked),
       returnLastFrame: Boolean(returnLastFrame?.checked),
       webSearch: Boolean(webSearch?.checked),
+      identityTransfer: Boolean(identityTransfer?.checked),
       videoFiles: Array.from(videoFiles?.files || []).slice(0, MAX_VIDEOS),
       audioFiles: Array.from(audioFiles?.files || []).slice(0, MAX_AUDIOS),
       videoRefs: splitLines(videoRefs?.value || "", MAX_VIDEOS),
@@ -267,11 +279,21 @@ function patchCreateVideo(): void {
       const videoRefs = unique([existingVideo, ...options.videoRefs, ...uploadedVideos]).slice(0, MAX_VIDEOS);
       body.video_url = videoRefs[0] || null;
 
+      if (options.identityTransfer) {
+        if (images.length < 1 || images.length > 3) {
+          throw new Error("Замена персонажа: загрузи 1–3 фото одного человека.");
+        }
+        if (videoRefs.length !== 1) {
+          throw new Error("Замена персонажа: нужен ровно один исходный видеоролик.");
+        }
+      }
+
       const audioIds = Array.isArray(body.audio_ids) ? body.audio_ids.map(String) : [];
       const audioRefs = unique([...audioIds, ...options.audioRefs, ...uploadedAudios]).slice(0, MAX_AUDIOS);
       const tokens = [
         token("output_format", options.outputFormat),
-        token("generate_audio", options.generateAudio),
+        token("generate_audio", options.identityTransfer ? false : options.generateAudio),
+        token("identity_transfer", options.identityTransfer),
         token("return_last_frame", options.returnLastFrame),
         token("web_search", options.webSearch),
         ...videoRefs.slice(1).map((url) => token("video_ref", url)),
