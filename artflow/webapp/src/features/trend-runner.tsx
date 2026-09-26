@@ -7,7 +7,7 @@ import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
-import type { GenerationTask, TrendItem } from "@/lib/types";
+import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
 import { notifyHaptic, readStartParam } from "@/lib/telegram";
 import { safeExternalUrl } from "@/lib/utils";
 
@@ -16,6 +16,18 @@ const API_BASE = "/api/v1";
 const RUNNER_ROOT_ID = "apix-trend-runner-root";
 const ACCEPTED_TREND_PHOTOS = "image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.webp,.heic,.heif,.avif";
 const MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS = 5;
+const TREND_USER_NUMBER_RE = /^-?\d+(?:[.,]\d+)?$/;
+
+function trendUserFieldValid(field: TrendUserField, value: string): boolean {
+  const clean = value.trim();
+  if (!clean) return field.required === false;
+  if (field.type === "number") return TREND_USER_NUMBER_RE.test(clean);
+  return clean.length <= Math.max(1, Math.min(160, field.max_length || 160));
+}
+
+function initialTrendUserValues(trend: TrendPublic): Record<string, string> {
+  return Object.fromEntries((trend.user_fields || []).slice(0, 6).map((field) => [field.key, ""]));
+}
 
 type RunnerPhase = "idle" | "uploading" | "generating" | "error";
 type TrendPublic = TrendItem & {
@@ -520,6 +532,8 @@ function TrendRunnerPortal() {
   const [phase, setPhase] = useState<RunnerPhase>("idle");
   const [error, setError] = useState("");
   const [localPreview, setLocalPreview] = useState("");
+  const [uploadedAsset, setUploadedAsset] = useState<TrendUploadResponse | null>(null);
+  const [userValues, setUserValues] = useState<Record<string, string>>({});
   const [selectedTask, setSelectedTask] = useState<GenerationTask | null>(null);
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
@@ -533,11 +547,16 @@ function TrendRunnerPortal() {
   const isVideoPreview = trend?.kind === "video" || /\.(mp4|webm|mov)(\?|$)/i.test(preview);
   const isPinterest = Boolean(trend && isPinterestServiceTrend(trend));
   const hint = trend?.user_photo_hint || "Загрузите одно чёткое фото. Остальные параметры тренда уже настроены администратором.";
+  const userFields = (trend?.user_fields || []).slice(0, 6);
+  const userFieldsReady = userFields.every((field) => trendUserFieldValid(field, userValues[field.key] || ""));
+  const personalized = userFields.length > 0;
 
   const resetRunner = useCallback(() => {
     setPhase("idle");
     setError("");
     setPinterestBusy(false);
+    setUploadedAsset(null);
+    setUserValues({});
     setLocalPreview((current) => {
       if (current) URL.revokeObjectURL(current);
       return "";
@@ -554,6 +573,7 @@ function TrendRunnerPortal() {
     try {
       const payload = await apiJson<TrendPublic>(`/trends/${trendId}`);
       resetRunner();
+      setUserValues(initialTrendUserValues(payload));
       setTrend(payload);
     } catch (loadError) {
       toast.error(loadError instanceof Error ? loadError.message : "Не удалось открыть тренд");
@@ -565,6 +585,7 @@ function TrendRunnerPortal() {
       const detail = (event as CustomEvent<TrendRunnerEventDetail>).detail || {};
       if (detail.trend) {
         resetRunner();
+        setUserValues(initialTrendUserValues(detail.trend));
         setTrend(detail.trend);
       } else if (detail.trendId) {
         void loadTrend(detail.trendId);
@@ -588,24 +609,18 @@ function TrendRunnerPortal() {
     });
   }, []);
 
-  const runPhoto = useCallback(async (file: File | undefined | null) => {
-    if (!trend || !file || genericBusy) return;
+  const startTrend = useCallback(async (assetId: string, values: Record<string, string>) => {
+    if (!trend || genericBusy) return;
     setError("");
-    setLocalPreview((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return URL.createObjectURL(file);
-    });
     try {
-      setPhase("uploading");
-      const form = new FormData();
-      form.append("file", file);
-      const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
-      if (!uploaded.asset_id) throw new Error("Backend не вернул asset_id");
-
       setPhase("generating");
       const result = await apiJson<TrendRunResponse>(`/trends/${trend.id}/run`, {
         method: "POST",
-        body: JSON.stringify({ asset_id: uploaded.asset_id, idempotency_key: buildIdempotencyKey(trend.id) }),
+        body: JSON.stringify({
+          asset_id: assetId,
+          idempotency_key: buildIdempotencyKey(trend.id),
+          user_values: values,
+        }),
       });
       if (!result.task?.id) throw new Error("Backend не вернул задачу");
       setSelectedTask(result.task);
@@ -622,6 +637,36 @@ function TrendRunnerPortal() {
       toast.error(message);
     }
   }, [genericBusy, resetRunner, trend]);
+
+  const runPhoto = useCallback(async (file: File | undefined | null) => {
+    if (!trend || !file || genericBusy) return;
+    setError("");
+    setUploadedAsset(null);
+    setLocalPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return URL.createObjectURL(file);
+    });
+    try {
+      setPhase("uploading");
+      const form = new FormData();
+      form.append("file", file);
+      const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
+      if (!uploaded.asset_id) throw new Error("Backend не вернул asset_id");
+      setUploadedAsset(uploaded);
+      if ((trend.user_fields || []).length) {
+        setPhase("idle");
+        toast.success("Фото готово");
+        return;
+      }
+      await startTrend(uploaded.asset_id, {});
+    } catch (runError) {
+      notifyHaptic("error");
+      const message = runError instanceof Error ? runError.message : "Не удалось загрузить фото";
+      setError(message);
+      setPhase("error");
+      toast.error(message);
+    }
+  }, [genericBusy, startTrend, trend]);
 
   const refreshTask = useCallback(async (task: GenerationTask) => {
     if (taskBusy) return;
@@ -677,15 +722,16 @@ function TrendRunnerPortal() {
     if (phase === "uploading") return "Загружаем фото…";
     if (phase === "generating") return "Запускаем генерацию…";
     if (phase === "error") return "Можно выбрать фото ещё раз";
+    if (personalized) return uploadedAsset ? "Заменить фото" : "Загрузить фото";
     return "Выберите фото — запуск начнётся автоматически";
-  }, [phase]);
+  }, [personalized, phase, uploadedAsset]);
 
   return (
     <>
       <Sheet
         open={Boolean(trend)}
         title={isPinterest ? "Повтори фото с Pinterest" : trend?.title || "Повторить тренд"}
-        description={isPinterest ? undefined : "Один снимок. Без настроек. Всё остальное применит backend."}
+        description={isPinterest ? undefined : personalized ? "Фото + разрешённые параметры. Скрытый сценарий остаётся на backend." : "Один снимок. Без настроек. Всё остальное применит backend."}
         onOpenChange={(open) => {
           if (!open) closeRunner();
         }}
@@ -723,6 +769,43 @@ function TrendRunnerPortal() {
                 <p>{hint}</p>
               </div>
 
+              {userFields.length ? (
+                <div className="grid gap-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Параметры тренда</p>
+                    <p className="text-[10px] text-muted-foreground">Можно изменить только эти поля. Скрытый промпт останется скрытым.</p>
+                  </div>
+                  {userFields.map((field) => {
+                    const value = userValues[field.key] || "";
+                    const valid = trendUserFieldValid(field, value);
+                    return (
+                      <label key={field.key} className="grid gap-1 text-[11px] font-medium">
+                        <span>{field.label}{field.required === false ? "" : " *"}</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type={field.type === "date" ? "date" : "text"}
+                            inputMode={field.type === "number" ? "decimal" : "text"}
+                            value={value}
+                            maxLength={field.type === "date" ? undefined : Math.max(1, Math.min(160, field.max_length || 160))}
+                            placeholder={field.placeholder || ""}
+                            aria-invalid={Boolean(value) && !valid}
+                            disabled={genericBusy}
+                            className="min-h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary/60"
+                            onChange={(event) => {
+                              let nextValue = event.target.value;
+                              if (field.type === "number") nextValue = nextValue.replace(/[^0-9.,-]/g, "").slice(0, 160);
+                              setUserValues((current) => ({ ...current, [field.key]: nextValue }));
+                            }}
+                          />
+                          {field.suffix ? <span className="text-xs text-muted-foreground">{field.suffix}</span> : null}
+                        </div>
+                        {value && !valid ? <small className="text-destructive">Проверь значение поля «{field.label}»</small> : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : null}
+
               {localPreview ? (
                 <div className="overflow-hidden rounded-xl border border-primary/30 bg-primary/10">
                   <img src={localPreview} alt="Ваше фото" className="max-h-56 w-full object-contain" />
@@ -743,9 +826,26 @@ function TrendRunnerPortal() {
               />
 
               <Button disabled={genericBusy} className="min-h-12 w-full" onClick={() => fileInputRef.current?.click()}>
-                {genericBusy ? <LoaderCircle className="animate-spin" /> : <ImagePlus />}
+                {phase === "uploading" ? <LoaderCircle className="animate-spin" /> : <ImagePlus />}
                 {phaseLabel}
               </Button>
+
+              {personalized ? (
+                <Button
+                  disabled={genericBusy || !uploadedAsset || !userFieldsReady}
+                  className="min-h-12 w-full"
+                  onClick={() => {
+                    if (uploadedAsset) void startTrend(uploadedAsset.asset_id, userValues);
+                  }}
+                >
+                  {phase === "generating" ? <LoaderCircle className="animate-spin" /> : null}
+                  {phase === "generating" ? "Генерирую…" : "Создать →"}
+                </Button>
+              ) : null}
+
+              {personalized && !userFieldsReady ? (
+                <p className="text-center text-[10px] text-muted-foreground">Заполни отмеченные поля, затем загрузи фото и нажми «Создать».</p>
+              ) : null}
 
               {error ? <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">{error}</div> : null}
 
