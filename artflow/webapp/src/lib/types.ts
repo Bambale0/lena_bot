@@ -116,6 +116,15 @@ export interface FeedItem {
   is_mine?: boolean;
 }
 
+export interface TrendUserField {
+  key: string;
+  label: string;
+  type: "text" | "number";
+  required?: boolean;
+  placeholder?: string;
+  max_length?: number;
+}
+
 export interface TrendItem {
   id: number;
   kind: "image" | "video";
@@ -127,6 +136,9 @@ export interface TrendItem {
   category_title?: string;
   category_emoji?: string;
   uses_count?: number;
+  min_references?: number;
+  max_references?: number;
+  user_fields?: TrendUserField[];
   settings?: Record<string, unknown>;
 }
 
