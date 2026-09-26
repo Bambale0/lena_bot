@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.trends import TREND_TAG, build_trend_tags, trend_public_payload, trend_user_fields
+from core.trends import build_trend_tags, trend_public_payload, trend_user_fields
 from db.models import PromptStatus
 
 
@@ -142,4 +142,18 @@ def test_admin_trend_form_can_configure_number_and_clothing_fields() -> None:
     assert '"Число"' in source
     assert '"Одежда"' in source
     assert "user_fields" in source
-    assert "/admin/trends/\${trend.id}/update" in source
+    assert "/admin/trends/${trend.id}/update" in source
+
+
+def test_explicit_empty_user_fields_disable_legacy_placeholder_inputs() -> None:
+    tags = build_trend_tags(
+        "image",
+        {
+            "category": "holidays",
+            "requires_reference": True,
+            "user_fields": [],
+        },
+    )
+    item = _prompt(prompt_text="Legacy {{Число}} placeholder", tags=tags)
+
+    assert trend_user_fields(item) == []
