@@ -9,7 +9,7 @@ from core.trends import build_trend_tags, trend_public_payload, trend_user_field
 from db.models import PromptStatus
 
 
-def _prompt(*, prompt_text: str, tags: list[str]):
+def _prompt(*, prompt_text: str, tags: list[str], trend_user_fields=None):
     return SimpleNamespace(
         id=7,
         author_id=1,
@@ -19,6 +19,7 @@ def _prompt(*, prompt_text: str, tags: list[str]):
         preview_url="https://cdn.example/preview.jpg",
         model="nano-banana-pro",
         tags=tags,
+        trend_user_fields=trend_user_fields,
         likes=0,
         uses_count=1,
         status=PromptStatus.approved,
@@ -132,7 +133,7 @@ def test_miniapp_trend_runner_exposes_personalization_fields_before_generation()
     assert "userValues" in source
     assert "trend.user_fields" in source
     assert "Параметры тренда" in source
-    assert "user_values: userValues" in source
+    assert "user_values: values" in source
 
 
 def test_admin_trend_form_can_configure_number_and_clothing_fields() -> None:
@@ -157,3 +158,27 @@ def test_explicit_empty_user_fields_disable_legacy_placeholder_inputs() -> None:
     item = _prompt(prompt_text="Legacy {{Число}} placeholder", tags=tags)
 
     assert trend_user_fields(item) == []
+
+
+def test_explicit_user_fields_survive_repository_tag_normalization() -> None:
+    from db.prompt_repository import _normalize_tags
+
+    explicit_fields = [
+        {"key": "Число", "label": "Число", "type": "number", "required": True, "max_length": 160},
+        {"key": "Одежда", "label": "Одежда", "type": "text", "required": True, "max_length": 160},
+    ]
+    persisted_tags = _normalize_tags(build_trend_tags(
+        "image",
+        {
+            "category": "holidays",
+            "requires_reference": True,
+            "user_fields": explicit_fields,
+        },
+    ))
+    item = _prompt(
+        prompt_text="Keep the scene",
+        tags=persisted_tags,
+        trend_user_fields=explicit_fields,
+    )
+
+    assert [field["key"] for field in trend_user_fields(item)] == ["Число", "Одежда"]
