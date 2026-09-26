@@ -533,7 +533,7 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
 
       <textarea className="min-h-32 rounded-lg border border-border bg-background p-3 text-xs" value={promptTemplate} onChange={(event) => setPromptTemplate(event.target.value)} placeholder="Скрытый канонический prompt — до 8000 символов" maxLength={8000} />
       <TrendFieldPicker fields={userFields} onChange={setUserFields} />
-      <p className="-mt-1 text-[10px] text-muted-foreground">Например, выбери «Число» и «Одежда». Можно использовать {{Число}} / {{Одежда}} в prompt, но это не обязательно: backend всё равно добавит выбранные значения как приоритетные изменения.</p>
+      <p className="-mt-1 text-[10px] text-muted-foreground">Например, выбери «Число» и «Одежда». Можно использовать <code>{"{{Число}}"}</code> / <code>{"{{Одежда}}"}</code> в prompt, но это не обязательно: backend всё равно добавит выбранные значения как приоритетные изменения.</p>
       <Button disabled={busy || uploading || loadingModels || !model} onClick={() => void submit()}>{busy ? "Публикую…" : category === "animals" ? "🦁 Опубликовать в «С животными»" : "Опубликовать тренд"}</Button>
     </Card>
   );
