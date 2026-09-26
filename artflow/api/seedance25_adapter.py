@@ -220,6 +220,8 @@ def _control_payload(raw_values: list[str]) -> tuple[list[str], list[str], dict[
             options["output_format"] = data
         elif key == "generate_audio":
             options["generate_audio"] = _bool(data, True)
+        elif key == "identity_transfer":
+            options["identity_transfer"] = _bool(data, False)
         elif key == "return_last_frame":
             options["return_last_frame"] = _bool(data, False)
         elif key == "web_search":
