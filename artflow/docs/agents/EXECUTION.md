@@ -474,3 +474,38 @@ Date: 2026-09-26. Baseline: `98d96bb`; local `main` is one commit ahead of `orig
 - Acceptance: the Russian/English home menu and legacy builder offer a top-up button that opens the existing top-up flow. The balance details screen remains accessible through its existing callback for other callers. No schema, auth, pricing, integration, or admin change; no new observability needed for a static navigation change.
 - Plan: (1) add/adjust contract assertions and observe red; (2) change both home builders and observe green; (3) run focused and required checks, review diff, commit and push the branch; (4) inspect CI for the exact commit and report status.
 - Progress: red tests confirmed the old callback/labels in all three builders. Updated active Russian/English home, legacy-compatible builder, and unused older builder to `menu:topup`. Focused menu and balance tests: 25 passed. Maintained CI pytest gate: 260 passed; maintained Ruff gate, provider inventory, Python compilation, webapp build, and `git diff --check` passed. The broader local pytest collection still has 42 failures outside the changed menu contract, largely stale tests; this repository's GitHub CI intentionally runs a maintained subset. Automated OCR review failed before any analysis with provider HTTP 402; manual diff review found no high-severity issue. No DB migration or config/admin change.
+
+
+## Follow-up — Higgsfield Seedance 2.5 Video Edit identity lab
+
+Date: 2026-09-26.
+Baseline: `8f3aa98d4f2b1a8397d4b87ac5d39a6d3b156b9e`.
+Branch: `feat/higgsfield-seedance25-edit-lab`.
+
+### Evidence / root cause
+- Production KIE Seedance 2.5 reference transport is intact: completed edit jobs persisted both image and video references, including #51012 with an explicit character/face replacement prompt.
+- Visual evidence from prior comparisons showed appearance traits transferring more reliably than facial identity. This is therefore not a missing-reference transport bug.
+- Mesh/noise/style transforms intended to evade provider safety detection are out of scope. The evaluation uses ordinary permitted reference media only.
+
+### Provider contract under evaluation
+- Higgsfield endpoint: `bytedance/seedance-2.5/video-edit`.
+- Required: `prompt`, `video_url`.
+- Optional published controls used by the lab: up to 30 `image_urls`, up to 10 `video_urls`, up to 10 `audio_urls`, `resolution` 480p/720p, `bitrate_mode` standard/high, `generate_audio`.
+- The lab reuses existing server-side Higgsfield Key auth and authenticated status polling.
+- No production model key, user pricing row, routing rule, or APIX billing path is changed.
+
+### Intended outcome
+- Add an admin-only Telegram lab entry under the existing Test Lab.
+- Default to 720p/high bitrate and an identity-preservation prompt.
+- Require one source video and at least one identity photo before a paid test.
+- Let admins upload separate identity images (front portrait first, then optional extra angles), plus optional extra video/audio references.
+- Provider result is polled through the existing Higgsfield budget and mirrored into APIX result storage.
+- APIX user credits are never charged by this lab; only Higgsfield provider balance is consumed.
+
+### TDD / verification
+1. [x] RED contract added to maintained CI.
+2. [x] Exact-head RED observed: 4 expected failures for missing adapter, missing selector entry and missing admin router.
+3. [x] Minimal provider payload adapter and admin lab flow implemented.
+4. [ ] Exact-head GREEN CI.
+5. [ ] Open code review.
+6. [ ] Merge/deploy only after green review; production Seedance routing remains unchanged.
