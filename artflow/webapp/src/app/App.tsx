@@ -504,7 +504,7 @@ function App() {
     setSubmitting(true);
     const createdTasks: GenerationTask[] = [];
     try {
-      const prompt = draft.prompt.trim() || "Использовать выбранный сценарий";
+      const prompt = draft.prompt.trim() || (draft.model.startsWith("higgsfield/genjutsu/") ? "" : "Использовать выбранный сценарий");
       for (let index = 0; index < taskCount; index += 1) {
         const task = kind === "image"
           ? await api.createImage({

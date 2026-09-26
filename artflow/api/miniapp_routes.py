@@ -1308,7 +1308,7 @@ class VideoGenRequest(BaseModel):
     model: str
     # Model-specific validation happens after prompt_id resolution. Keep the DTO
     # wide enough for Seedance 2.5, whose KIE contract accepts 30k characters.
-    prompt: str = Field(..., min_length=1, max_length=30000)
+    prompt: str = Field(..., max_length=30000)
     prompt_id: int | None = None
     mode: str = "text"                    # "text" | "image" | "video"
     duration: int = Field(default=5, ge=1, le=30)
@@ -2286,6 +2286,9 @@ async def create_video_generation(
         validate_video_prompt(body.model, user_prompt)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    from api.genjutsu_adapter import MODEL_KEYS as GENJUTSU_MODEL_KEYS
+    if not user_prompt.strip() and body.model not in GENJUTSU_MODEL_KEYS:
+        raise HTTPException(status_code=422, detail="Video prompt is required")
     if video_prompt_max_chars(body.model) is None and len(user_prompt) > 4000:
         # Preserve the historical contract for non-Seedance video models.
         raise HTTPException(status_code=422, detail="Video prompt must be at most 4000 characters for this model")

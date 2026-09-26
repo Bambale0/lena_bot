@@ -170,7 +170,7 @@ function GenerationScreen({
   const missingReference = refsRequired && draft.referenceUrls.length === 0;
   const tooManyRefs = draft.referenceUrls.length > maxRefs;
   const missingVideo = (Boolean(selectedModel?.requires_video_input) || draft.mode === "video" || kind === "motion") && !draft.videoUrl;
-  const missingPrompt = !draft.prompt.trim() && !draft.promptId;
+  const missingPrompt = !draft.prompt.trim() && !draft.promptId && !selectedModel?.key.startsWith("higgsfield/genjutsu/");
   const maxPromptLength = promptMaxLength(kind, selectedModel?.key);
   const insufficientCredits = estimate > Number(user.credits || 0);
   const mediaUploading = referenceUploading || videoUploading;

@@ -163,13 +163,12 @@ async def create_genjutsu_task(
         resolution=resolution,
     )
     payload = {
-        "prompt": str(prompt or "").strip(),
         "video_url": source_video,
         "image_urls": images,
         "resolution": selected_resolution,
     }
-    if not payload["prompt"]:
-        raise ValueError("Genjutsu prompt is required")
+    if clean_prompt := str(prompt or "").strip():
+        payload["prompt"] = clean_prompt
 
     request_id = await higgsfield_client.submit(_endpoint(model_key), payload)
     logger.info(
