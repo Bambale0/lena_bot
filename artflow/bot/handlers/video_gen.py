@@ -7,7 +7,7 @@ import logging
 import os
 import tempfile
 from html import escape
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import aiohttp
 from aiogram import Bot, F, Router
@@ -43,6 +43,7 @@ from api.genjutsu_adapter import (
 )
 from api.public_files import mirror_telegram_file
 from api.seedance25_adapter import MODEL_KEY as SEEDANCE25_MODEL_KEY
+from api.seedance25_identity import normalize_identity_number, normalize_identity_outfit
 from api.video_prompt_limits import (
     append_telegram_seedance_prompt_chunk,
     seedance_prompt_max_chars,
@@ -316,11 +317,15 @@ def _video_params_reply_markup(model_key: str, data: dict):
         data.get("duration"),
         data.get("aspect_ratio"),
         data.get("resolution"),
+        f"номер: {data['seedance_identity_number']}" if data.get("seedance_identity_number") else None,
+        f"одежда: {data['seedance_identity_outfit']}" if data.get("seedance_identity_outfit") else None,
         data.get("grok_mode"),
         selected_mode=data.get("mode"),
         ref_count=_video_ref_count(data),
         next_label=_video_params_next_label(data),
         identity_transfer=bool(data.get("seedance_identity_transfer")),
+        identity_number=str(data.get("seedance_identity_number") or ""),
+        identity_outfit=str(data.get("seedance_identity_outfit") or ""),
     )
 
 
@@ -1063,6 +1068,9 @@ async def cb_video_mode(
             mode="image",
             seedance_identity_transfer=True,
             seedance_identity_step="photos",
+            seedance_identity_number="",
+            seedance_identity_outfit="",
+            seedance_identity_edit_field=None,
             image_file_id=None,
             ref_file_ids=[],
             image_url=None,
@@ -1082,7 +1090,14 @@ async def cb_video_mode(
         await safe_answer_callback(call)
         return
 
-    await state.update_data(mode=mode, seedance_identity_transfer=False, seedance_identity_step=None)
+    await state.update_data(
+        mode=mode,
+        seedance_identity_transfer=False,
+        seedance_identity_step=None,
+        seedance_identity_number="",
+        seedance_identity_outfit="",
+        seedance_identity_edit_field=None,
+    )
     await _handle_mode(call, state, session, model_key, display_name, mode)
     await safe_answer_callback(call)
 
@@ -1474,6 +1489,83 @@ async def cb_vpar_mode(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer(mode)
 
 
+@router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_identity:"))
+async def cb_vpar_identity_override(call: CallbackQuery, state: FSMContext) -> None:
+    target = call.data.split(":")[1]  # type: ignore[union-attr]
+    data = await state.get_data()
+    if (
+        data.get("model_key") != SEEDANCE25_MODEL_KEY
+        or not data.get("seedance_identity_transfer")
+        or target not in {"number", "outfit"}
+    ):
+        await call.answer("Эта настройка доступна только в Seedance · Замена персонажа", show_alert=True)
+        return
+
+    await state.update_data(seedance_identity_edit_field=target)
+    await state.set_state(VideoGenFSM.seedance_identity_override_input)
+    if target == "number":
+        text = (
+            "🔢 <b>Номер / цифры</b>\n\n"
+            "Отправь номер, который должен появиться на одежде или в образе персонажа. "
+            "Например: <code>25</code> или <code>07</code>.\n\n"
+            "Чтобы очистить поле, отправь <code>-</code>."
+        )
+    else:
+        text = (
+            "🎽 <b>Одежда</b>\n\n"
+            "Опиши одежду, которую нужно перенести на персонажа. "
+            "Например: <code>чёрная кожаная куртка</code>.\n\n"
+            "Чтобы очистить поле, отправь <code>-</code>."
+        )
+    await safe_edit_message(call.message, text, reply_markup=back_to_menu_kb())  # type: ignore[arg-type]
+    await call.answer()
+
+
+@router.message(VideoGenFSM.seedance_identity_override_input, F.text)
+async def handle_seedance_identity_override(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    data = await state.get_data()
+    target = str(data.get("seedance_identity_edit_field") or "")
+    raw = (message.text or "").strip()
+    value = "" if raw == "-" else raw
+
+    try:
+        if target == "number":
+            normalized = normalize_identity_number(value)
+            await state.update_data(
+                seedance_identity_number=normalized,
+                seedance_identity_edit_field=None,
+            )
+            saved_text = "номер очищен" if not normalized else f"номер: {normalized}"
+        elif target == "outfit":
+            normalized = normalize_identity_outfit(value)
+            await state.update_data(
+                seedance_identity_outfit=normalized,
+                seedance_identity_edit_field=None,
+            )
+            saved_text = "одежда очищена" if not normalized else f"одежда: {normalized}"
+        else:
+            raise ValueError("Не удалось определить редактируемое поле")
+    except ValueError as exc:
+        await message.answer(f"❌ {escape(str(exc))}", reply_markup=back_to_menu_kb())
+        return
+
+    updated = await state.get_data()
+    model_key = updated["model_key"]
+    model_cost = await repo.get_model_cost(session, model_key)
+    display_name = model_cost.display_name if model_cost else model_key
+    await state.set_state(VideoGenFSM.params_select)
+    await message.answer(
+        f"✅ Сохранено: <b>{escape(saved_text)}</b>\n\n"
+        f"⚙️ <b>Параметры</b> · {display_name}\n"
+        f"{_video_params_hint(model_key, updated)}",
+        reply_markup=_video_params_reply_markup(model_key, updated),
+    )
+
+
 @router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_omni:"))
 async def cb_vpar_omni_extra(call: CallbackQuery, state: FSMContext) -> None:
     target = call.data.split(":")[1]  # type: ignore[union-attr]
@@ -1739,6 +1831,16 @@ async def _launch_video_generation_from_state(
             "__apix_seedance25:identity_transfer=true",
             "__apix_seedance25:generate_audio=false",
         ]
+        identity_number = normalize_identity_number(str(data.get("seedance_identity_number") or ""))
+        identity_outfit = normalize_identity_outfit(str(data.get("seedance_identity_outfit") or ""))
+        if identity_number:
+            identity_tokens.append(
+                "__apix_seedance25:identity_number=" + quote(identity_number, safe="")
+            )
+        if identity_outfit:
+            identity_tokens.append(
+                "__apix_seedance25:identity_outfit=" + quote(identity_outfit, safe="")
+            )
         audio_ids = [str(item) for item in (data.get("audio_ids") or []) if item]
         await state.update_data(audio_ids=list(dict.fromkeys([*audio_ids, *identity_tokens])))
         data = {
