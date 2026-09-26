@@ -11,6 +11,10 @@ from typing import Any
 
 from api import seedance25_adapter as seedance25
 from api.media_gateway import MediaKind, probe_local_media
+from api.seedance25_identity import (
+    build_identity_transfer_prompt,
+    validate_identity_transfer_refs,
+)
 from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
 
 logger = logging.getLogger(__name__)
@@ -68,9 +72,11 @@ def _clean_prompt(prompt: Any, *, model_name: str) -> str:
 async def seedance25_edit_billing_duration(
     prompt: str,
     reference_video_url: str | list[str] | None,
+    *,
+    force_edit: bool = False,
 ) -> int | None:
     refs = seedance25._dedupe(reference_video_url)
-    if not refs or not seedance25.is_explicit_video_edit_prompt(prompt):
+    if not refs or (not force_edit and not seedance25.is_explicit_video_edit_prompt(prompt)):
         return None
     if len(refs) != 1:
         raise ValueError("Seedance 2.5 video editing requires exactly one reference video")
@@ -114,7 +120,6 @@ async def _validate_seedance_reference_video_url(
 
 
 async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, ...], kwargs: dict[str, Any]):
-    clean_prompt = _clean_prompt(prompt, model_name="Seedance 2.5")
     image_url = _arg(args, kwargs, "image_url", 0)
     duration = _arg(args, kwargs, "duration", 4, 5)
     aspect_ratio = _arg(args, kwargs, "aspect_ratio", 5)
@@ -123,10 +128,26 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
     audio_refs, extra_video_refs, control_options = seedance25._control_payload(
         seedance25._list(kwargs.get("audio_ids"))
     )
+    identity_transfer = bool(control_options.get("identity_transfer"))
+    raw_user_prompt = str(prompt or "").strip()
     if "duration" in control_options:
         duration = control_options["duration"]
 
     raw_image_refs = seedance25._dedupe(image_url)
+    raw_video_refs = seedance25._dedupe([
+        *seedance25._list(kwargs.get("reference_video_url")),
+        *extra_video_refs,
+    ])
+
+    if identity_transfer:
+        validate_identity_transfer_refs(images=raw_image_refs, videos=raw_video_refs)
+        clean_prompt = build_identity_transfer_prompt(
+            raw_user_prompt,
+            image_count=len(raw_image_refs),
+        )
+    else:
+        clean_prompt = _clean_prompt(raw_user_prompt, model_name="Seedance 2.5")
+
     fitted_image_refs = [
         ensure_video_reference_aspect_url(
             ref,
@@ -140,15 +161,12 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         await video_service._prepare_video_reference_urls(fitted_image_refs)
     )
 
-    raw_video_refs = seedance25._dedupe([
-        *seedance25._list(kwargs.get("reference_video_url")),
-        *extra_video_refs,
-    ])
-    video_edit = bool(raw_video_refs) and seedance25.is_explicit_video_edit_prompt(clean_prompt)
+    video_edit = identity_transfer or (
+        bool(raw_video_refs) and seedance25.is_explicit_video_edit_prompt(clean_prompt)
+    )
     if video_edit:
-        # KIE/Seedance 2.5 identifies edit mode from the prompt. In that mode
-        # the provider requires output ratio/duration to follow the selected
-        # input video: aspect_ratio=adaptive and duration=-1.
+        # KIE/Seedance 2.5 video editing follows the source video's duration
+        # and frame geometry. Identity Transfer is always an edit operation.
         aspect_ratio = "adaptive"
         duration = seedance25.DURATION_AUTO
 
@@ -179,14 +197,14 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
             "aspect_ratio": aspect_ratio,
             "resolution": resolution,
             "return_last_frame": control_options.get("return_last_frame", kwargs.get("return_last_frame", False)),
-            "generate_audio": control_options.get("generate_audio", kwargs.get("generate_audio", True)),
+            "generate_audio": False if identity_transfer else control_options.get(
+                "generate_audio", kwargs.get("generate_audio", True)
+            ),
             "output_format": control_options.get("output_format", kwargs.get("output_format", "mp4")),
             "web_search": control_options.get("web_search", kwargs.get("web_search")),
             "nsfw_checker": kwargs.get("nsfw_checker"),
         }
     )
-    # The provider requires prompt inside input. The previous automatic routing
-    # wrapper accidentally discarded it, causing "Prompt is required in this scene".
     input_payload["prompt"] = clean_prompt
 
     response = await video_service.kieai_client.create_task(
@@ -208,7 +226,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         raise RuntimeError(f"KIE.AI video: empty taskId for {seedance25.MODEL_KEY}: {response!r}")
     logger.info(
         "KIE.AI Seedance 2.5 task route=%s images=%d videos=%d audios=%d task=%s",
-        "video_edit" if video_edit else route,
+        "identity_transfer" if identity_transfer else ("video_edit" if video_edit else route),
         len(prepared_images),
         len(prepared_videos),
         len(prepared_audio_refs),
@@ -219,7 +237,6 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         provider="kieai",
         uses_webhook=bool(kwargs.get("callback_url")),
     )
-
 
 async def _veo_generate(
     video_service: Any,
