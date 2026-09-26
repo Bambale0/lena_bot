@@ -4,10 +4,8 @@ from datetime import datetime
 from typing import Any
 
 from core.trend_user_fields import (
-    TrendUserFieldsError,
-    decode_trend_user_fields_tags,
-    encode_trend_user_fields_tag,
-    normalize_trend_user_fields,
+    legacy_trend_user_fields,
+    normalize_configured_trend_user_fields,
 )
 from db.models import PromptStatus, UserPrompt
 
@@ -66,10 +64,10 @@ def trend_category_payload(category: str) -> dict[str, str]:
 
 
 def trend_user_fields(prompt: UserPrompt) -> list[dict[str, Any]]:
-    configured, fields = decode_trend_user_fields_tags(getattr(prompt, "tags", None))
-    if configured:
-        return fields
-    return normalize_trend_user_fields([], prompt=str(getattr(prompt, "prompt_text", "") or ""))
+    stored = getattr(prompt, "trend_user_fields", None)
+    if stored is not None:
+        return normalize_configured_trend_user_fields(stored)
+    return legacy_trend_user_fields(str(getattr(prompt, "prompt_text", "") or ""))
 
 
 def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
@@ -130,11 +128,6 @@ def build_trend_tags(kind: str, settings: dict[str, Any] | None = None) -> list[
         tags.append(f"trend-resolution:{resolution}")
     if bool(settings.get("requires_reference")):
         tags.append("trend-requires-reference")
-    if "user_fields" in settings:
-        try:
-            tags.append(encode_trend_user_fields_tag(settings.get("user_fields")))
-        except TrendUserFieldsError as exc:
-            raise ValueError(str(exc)) from exc
     return list(dict.fromkeys(tags))
 
 
