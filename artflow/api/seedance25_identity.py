@@ -6,6 +6,8 @@ source video's actor as a competing identity reference.
 """
 from __future__ import annotations
 
+from api.video_prompt_limits import SEEDANCE_25_PROMPT_MAX_CHARS
+
 MAX_IDENTITY_IMAGES = 3
 
 
@@ -66,4 +68,6 @@ Do not redesign the scene or change unrelated subjects."""
     extra = str(user_prompt or "").strip()
     if extra:
         prompt += f"\n\nAdditional user instruction:\n{extra}"
+    if len(prompt) > SEEDANCE_25_PROMPT_MAX_CHARS:
+        raise ValueError("Seedance 2.5 Identity Transfer prompt must be at most 30,000 characters after reference-role instructions are added")
     return prompt
