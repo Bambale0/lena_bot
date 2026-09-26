@@ -544,3 +544,12 @@ Date: 2026-09-26. Baseline: `63d9334` (`main`, clean). Branch: `fix/landing-paym
 - Reuse audit: `/billing/payment-methods` returns provider keys only, so the landing fallback map is what decides the visible button text. The landing map already said `Карта` (no acquirer brand), so the original complaint was not reproducible there, but the wording did not match the requested `Карта | СБП`.
 - Steps: 1. [x] Changed the landing label map entry to `tbank: "Карта | СБП"`. 2. [x] Bumped the cache-busting query on all nine `landing/*.html` pages from `v=20260907_dual_prices` to `v=20260926_card_sbp_label`, otherwise returning visitors keep the cached script. 3. [x] Updated `tests/test_web_generation_parity.py` to assert the new cache-bust token and extended the CI-covered regression test to cover the landing source.
 - Verification: maintained CI pytest subset plus `test_web_generation_parity` — green. `node --check landing/js/prototype-premium.js` passed. Ruff clean; `git diff --check` clean.
+- Deployment: PR #171 merged to `main` (merge commit `827001086a71463617b62ab95679cd5ce1f5d3ee`).
+  - Production Autodeploy workflow ran and succeeded (run `36238352403`).
+  - Public live verification confirmed on `https://apixbotai.com/`:
+    - Cache-busting script tag served: `prototype-premium.js?v=20260926_card_sbp_label`.
+    - Landing JS label verified live: `tbank: "Карта | СБП"`.
+    - Mini App assets bundle verified live (`/assets/index-CRzVm_CW.js`): contains `Карта | СБП` and subtitle `Оплата в рублях`.
+    - API landing endpoint verified live (`/api/web/landing`): `[{'key': 'tbank', 'provider': 'tbank', 'label': 'Карта | СБП', 'status': 'enabled'}, ...]`.
+    - Health endpoint verified live: HTTP 200 (`https://apixbotai.com/api/v1/health`).
+
