@@ -302,7 +302,7 @@ def _model_selector_kb():
 async def _show_model_selector(message: Message) -> None:
     await safe_edit_message(
         message,
-        "🧪 <b>NexusAPI · Test Lab</b>\n\n"
+        "🧪 <b>Provider Test Lab</b>\n\n"
         "Выбери модель. Все тестовые контуры доступны только администраторам, не списывают APIX-кредиты "
         "и не меняют боевой provider routing.",
         reply_markup=_model_selector_kb(),
