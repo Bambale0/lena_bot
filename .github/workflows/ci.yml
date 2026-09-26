@@ -41,6 +41,7 @@ jobs:
             api/genjutsu_adapter.py \
             api/genjutsu_pricing.py \
             api/higgsfield_client.py \
+            api/higgsfield_seedance25_edit.py \
             api/advanced_video_service.py \
             api/image_service.py \
             api/kling_grok_service.py \
@@ -60,6 +61,7 @@ jobs:
             bot/handlers/gemini_omni_recovery.py \
             bot/handlers/gemini_omni_references.py \
             bot/handlers/nexus_test.py \
+            bot/handlers/higgsfield_seedance25_test.py \
             bot/handlers/nexus_seedance_test.py \
             bot/handlers/video_prompt.py \
             bot/handlers/video_gen.py \
@@ -68,6 +70,7 @@ jobs:
             scripts/check_provider_contracts_ci.py \
             scripts/verify_seedance25_production.py \
             tests/test_genjutsu_integration.py \
+            tests/test_higgsfield_seedance25_edit_lab.py \
             tests/test_genjutsu_admin_pricing.py \
             tests/test_gemini_omni_telegram_media_flow.py \
             tests/test_kling_motion_visibility.py \
@@ -104,6 +107,7 @@ jobs:
       - name: Pytest maintained PR gate
         run: |
           pytest -q \
+            tests/test_higgsfield_seedance25_edit_lab.py \
             tests/test_main_menu_contract.py::test_v2_create_hub_preserves_all_creation_entrypoints_and_explains_them \
             tests/test_video_gen.py::test_cb_genjutsu_menu_opens_dedicated_flow_when_configured \
             tests/test_video_gen.py::test_cb_genjutsu_menu_admin_preview_blocks_launch_without_credentials \

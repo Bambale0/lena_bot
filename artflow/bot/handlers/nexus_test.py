@@ -289,6 +289,12 @@ def _model_selector_kb():
         InlineKeyboardButton(text="🖼 Nano Banana Pro", callback_data="nxt:model:nano"),
         InlineKeyboardButton(text="🎬 Seedance 2.5", callback_data="nxt:model:seedance25"),
     )
+    builder.row(
+        InlineKeyboardButton(
+            text="🧬 Seedance 2.5 · Video Edit",
+            callback_data="nxt:model:hf-seedance25-edit",
+        )
+    )
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 
@@ -296,8 +302,8 @@ def _model_selector_kb():
 async def _show_model_selector(message: Message) -> None:
     await safe_edit_message(
         message,
-        "🧪 <b>NexusAPI · Test Lab</b>\n\n"
-        "Выбери модель. Оба контура доступны только администраторам, не списывают APIX-кредиты "
+        "🧪 <b>Provider Test Lab</b>\n\n"
+        "Выбери модель. Все тестовые контуры доступны только администраторам, не списывают APIX-кредиты "
         "и не меняют боевой provider routing.",
         reply_markup=_model_selector_kb(),
     )
