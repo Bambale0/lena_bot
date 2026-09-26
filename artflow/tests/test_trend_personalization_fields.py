@@ -91,19 +91,23 @@ def test_undeclared_user_value_is_rejected() -> None:
         render_trend_prompt("Keep composition", fields, {"Одежда": "костюм", "provider": "other"})
 
 
-def test_trend_tags_roundtrip_personalization_without_exposing_prompt() -> None:
+def test_public_personalization_schema_is_first_class_and_does_not_expose_prompt() -> None:
     tags = build_trend_tags(
         "image",
         {
             "category": "holidays",
             "requires_reference": True,
-            "user_fields": [
-                {"key": "Число", "label": "Число"},
-                {"key": "Одежда", "label": "Одежда"},
-            ],
         },
     )
-    item = _prompt(prompt_text="SECRET {{Число}}", tags=tags)
+    stored_fields = [
+        {"key": "Число", "label": "Число", "type": "number", "required": True, "max_length": 160},
+        {"key": "Одежда", "label": "Одежда", "type": "text", "required": True, "max_length": 160},
+    ]
+    item = _prompt(
+        prompt_text="SECRET {{Число}}",
+        tags=tags,
+        trend_user_fields=stored_fields,
+    )
 
     fields = trend_user_fields(item)
     assert [field["key"] for field in fields] == ["Число", "Одежда"]
@@ -155,7 +159,11 @@ def test_explicit_empty_user_fields_disable_legacy_placeholder_inputs() -> None:
             "user_fields": [],
         },
     )
-    item = _prompt(prompt_text="Legacy {{Число}} placeholder", tags=tags)
+    item = _prompt(
+        prompt_text="Legacy {{Число}} placeholder",
+        tags=tags,
+        trend_user_fields=[],
+    )
 
     assert trend_user_fields(item) == []
 
@@ -182,3 +190,15 @@ def test_explicit_user_fields_survive_repository_tag_normalization() -> None:
     )
 
     assert [field["key"] for field in trend_user_fields(item)] == ["Число", "Одежда"]
+
+
+def test_personalization_schema_has_dedicated_nullable_db_column_and_migration() -> None:
+    models = Path("db/models.py").read_text(encoding="utf-8")
+    migration = Path("db/migrations/versions/035_trend_user_fields.py").read_text(encoding="utf-8")
+    trends = Path("core/trends.py").read_text(encoding="utf-8")
+
+    assert "trend_user_fields: Mapped[list[dict[str, Any]] | None]" in models
+    assert 'revision = "035_trend_user_fields"' in migration
+    assert 'down_revision = "034_user_image_model_unlimited"' in migration
+    assert 'sa.Column("trend_user_fields", sa.JSON(), nullable=True)' in migration
+    assert "TREND_USER_FIELDS_TAG_PREFIX" not in trends
