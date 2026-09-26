@@ -48,7 +48,7 @@ def test_identity_prompt_uses_extra_images_only_as_same_person_evidence() -> Non
     assert "@Image2" in prompt
     assert "@Image3" in prompt
     assert "primary identity" in prompt
-    assert "same woman" in prompt
+    assert "same person" in prompt
     assert "head turns" in prompt
     assert "@Image4" not in prompt
 
