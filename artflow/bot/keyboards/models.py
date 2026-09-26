@@ -949,6 +949,13 @@ def video_mode_kb(model_key: str) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(text="🎞️ Видео → Видео", callback_data=f"vid_mode:video:{model_key}"),
         )
+    if model_key == "bytedance/seedance-2-5":
+        builder.row(
+            InlineKeyboardButton(
+                text="🎭 Замена персонажа",
+                callback_data=f"vid_mode:identity:{model_key}",
+            )
+        )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
     return builder.as_markup()
 
@@ -972,6 +979,7 @@ def video_params_kb(
     selected_mode: str | None = None,
     ref_count: int | None = None,
     next_label: str = "▶️ Далее: Промпт",
+    identity_transfer: bool = False,
 ) -> InlineKeyboardMarkup:
     caps = VIDEO_CAPS.get(model_key, {})
     builder = InlineKeyboardBuilder()
@@ -979,7 +987,7 @@ def video_params_kb(
     duration_options = caps.get("duration_options", [])
     if model_key == GEMINI_OMNI_VIDEO_MODEL and selected_mode == "video":
         duration_options = []
-    if duration_options:
+    if duration_options and not identity_transfer:
         dur_buttons = [
             InlineKeyboardButton(
                 text=f"{'✅ ' if dur == d else ''}{d} сек",
@@ -991,7 +999,7 @@ def video_params_kb(
             builder.row(*dur_buttons[i:i+4])
 
     aspect_ratios = video_aspect_ratios(model_key, selected_mode=selected_mode, ref_count=ref_count)
-    if aspect_ratios:
+    if aspect_ratios and not identity_transfer:
         ratio_buttons = [
             InlineKeyboardButton(
                 text=f"{'✅ ' if ratio == r else ''}{r}",
