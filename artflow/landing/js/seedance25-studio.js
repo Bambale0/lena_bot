@@ -95,6 +95,10 @@
         <label><span>Output</span><select data-s25-output><option value="mp4">mp4</option><option value="mov">mov</option></select></label>
       </div>
       <div class="composer-row">
+        <label class="check-line"><input data-s25-identity-transfer type="checkbox" /><span>🎭 Замена персонажа</span></label>
+        <small>1–3 фото одного человека задают внешность; 1 исходное видео задаёт только движение и сцену. Качество 480p / 720p выбирается выше.</small>
+      </div>
+      <div class="composer-row">
         <label class="check-line"><input data-s25-auto-duration type="checkbox" /><span>Auto duration</span></label>
         <label class="check-line"><input data-s25-generate-audio type="checkbox" checked /><span>Generate audio</span></label>
       </div>
@@ -184,16 +188,27 @@
     body.image_url = allImages[0] || null;
     body.reference_urls = allImages.slice(1);
 
+    const identityTransfer = Boolean(panel?.querySelector("[data-s25-identity-transfer]")?.checked);
     const primaryVideo = String(body.video_url || "").trim();
     const allVideos = unique([primaryVideo, ...videoUrls, ...uploadedVideos]).slice(0, 10);
     body.video_url = allVideos[0] || null;
+
+    if (identityTransfer) {
+      if (allImages.length < 1 || allImages.length > 3) {
+        throw new Error("Замена персонажа: загрузите 1–3 фото одного человека.");
+      }
+      if (allVideos.length !== 1) {
+        throw new Error("Замена персонажа: нужен ровно один исходный видеоролик.");
+      }
+    }
 
     const existingAudio = Array.isArray(body.audio_ids) ? body.audio_ids.map(String) : [];
     const allAudios = unique([...existingAudio, ...audioUrls, ...uploadedAudios]).slice(0, 10);
 
     const controls = [
       token("output_format", panel?.querySelector("[data-s25-output]")?.value === "mov" ? "mov" : "mp4"),
-      token("generate_audio", Boolean(panel?.querySelector("[data-s25-generate-audio]")?.checked)),
+      token("generate_audio", identityTransfer ? false : Boolean(panel?.querySelector("[data-s25-generate-audio]")?.checked)),
+      token("identity_transfer", identityTransfer),
       token("return_last_frame", Boolean(panel?.querySelector("[data-s25-return-frame]")?.checked)),
       token("web_search", Boolean(panel?.querySelector("[data-s25-web-search]")?.checked)),
       ...allVideos.slice(1).map((ref) => token("video_ref", ref)),
