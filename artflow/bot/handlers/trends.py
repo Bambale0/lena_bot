@@ -194,13 +194,25 @@ async def use_trend(call: CallbackQuery, session: AsyncSession, state: FSMContex
     if not is_trend_prompt(prompt) or not prompt.is_public or getattr(prompt.status, "value", prompt.status) != "approved":
         await call.answer("Тренд уже скрыт", show_alert=True)
         return
-    if trend_kind(prompt) == "video":
+    settings_payload = trend_settings(prompt)
+    needs_custom_runner = bool(
+        settings_payload.get("user_fields")
+        or int(settings_payload.get("max_references") or 1) > 1
+        or int(settings_payload.get("min_references") or 1) > 1
+    )
+    if trend_kind(prompt) == "video" or needs_custom_runner:
         url = f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?trend={prompt.id}"
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="🎬 Открыть видео-тренд", web_app=WebAppInfo(url=url)))
+        builder.row(InlineKeyboardButton(text="✨ Настроить и повторить", web_app=WebAppInfo(url=url)))
         builder.row(InlineKeyboardButton(text="🔥 Другие тренды", callback_data="menu:trends"))
+        details: list[str] = []
+        if settings_payload.get("user_fields"):
+            details.append("можно изменить детали шаблона")
+        if int(settings_payload.get("max_references") or 1) > 1:
+            details.append("можно добавить несколько референсов")
+        suffix = " — " + ", ".join(details) if details else ""
         await call.message.answer(
-            "🎬 Настройки видео-тренда готовы. Открой приложение, добавь исходное фото при необходимости и запусти генерацию.",
+            f"🔥 Открой тренд в приложении{suffix}. Скрытый prompt и настройки модели останутся на backend.",
             reply_markup=builder.as_markup(),
         )
         await safe_answer_callback(call)
