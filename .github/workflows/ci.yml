@@ -55,6 +55,9 @@ jobs:
             api/provider_contract_catalog.py \
             api/provider_spec_overrides.py \
             api/public_files.py \
+            api/seedance25_adapter.py \
+            api/seedance25_identity.py \
+            api/video_runtime_fixes.py \
             api/suno_full_service.py \
             api/video_prompt_service.py \
             api/video_service.py \
@@ -85,6 +88,7 @@ jobs:
             tests/test_photo_prompt_service.py \
             tests/test_public_files.py \
             tests/test_provider_contract_catalog.py \
+            tests/test_seedance25_identity_transfer.py \
             tests/test_seedance25_repeat_keyboard.py \
             tests/test_trend_animals_category.py \
             tests/test_video_gen.py \
@@ -135,6 +139,7 @@ jobs:
             tests/test_webapp_routes.py::test_generate_image_unlimited_allows_zero_balance_and_records_zero_charge \
             tests/test_provider_contract_catalog.py \
             tests/test_public_files.py \
+            tests/test_seedance25_identity_transfer.py \
             tests/test_seedance25_repeat_keyboard.py \
             tests/test_trend_animals_category.py \
             tests/test_kie_model_specs.py \

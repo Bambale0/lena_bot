@@ -25,7 +25,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Date, String, cast, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import image_service, kieai_client, midjourney_service, suno_full_service, video_service
+from api import (
+    image_service,
+    kieai_client,
+    midjourney_service,
+    seedance25_adapter,
+    suno_full_service,
+    video_service,
+)
 from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
 from api.image_errors import image_generation_user_error
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
@@ -2356,10 +2363,16 @@ async def create_video_generation(
         grok_mode=body.grok_mode,
     )
     if body.model == SEEDANCE25_MODEL_KEY:
+        identity_transfer = bool(
+            seedance25_adapter._control_payload(
+                [str(item) for item in (normalized.get("audio_ids") or [])]
+            )[2].get("identity_transfer")
+        )
         try:
             edit_billing_duration = await seedance25_edit_billing_duration(
                 user_prompt,
                 normalized["reference_video_url"],
+                force_edit=identity_transfer,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

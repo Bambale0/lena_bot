@@ -16,6 +16,8 @@ import logging
 from types import SimpleNamespace
 from typing import Any
 
+from api.seedance25_identity import validate_identity_transfer_refs
+
 MODEL_KEY = "bytedance/seedance-2-5"
 DISPLAY_NAME = "🌱 Seedance 2.5"
 
@@ -220,6 +222,8 @@ def _control_payload(raw_values: list[str]) -> tuple[list[str], list[str], dict[
             options["output_format"] = data
         elif key == "generate_audio":
             options["generate_audio"] = _bool(data, True)
+        elif key == "identity_transfer":
+            options["identity_transfer"] = _bool(data, False)
         elif key == "return_last_frame":
             options["return_last_frame"] = _bool(data, False)
         elif key == "web_search":
@@ -453,11 +457,26 @@ def _install_seedance25_miniapp_normalizer(routes: Any) -> None:
         if len(audio_refs) > MAX_REFERENCE_AUDIOS:
             raise routes.HTTPException(status_code=422, detail=f"Seedance 2.5 supports at most {MAX_REFERENCE_AUDIOS} reference audio files")
 
+        identity_transfer = bool(control_options.get("identity_transfer"))
+        if identity_transfer:
+            try:
+                validate_identity_transfer_refs(images=image_refs, videos=video_refs)
+            except ValueError as exc:
+                raise routes.HTTPException(status_code=422, detail=str(exc)) from exc
+
         route = route_for_inputs(images=image_refs, videos=video_refs, audios=audio_refs)
-        normalized_duration = _duration(control_options.get("duration", duration))
+        normalized_duration = (
+            DURATION_AUTO
+            if identity_transfer
+            else _duration(control_options.get("duration", duration))
+        )
         billing_duration = _billing_duration(normalized_duration)
         normalized_resolution = _choice(resolution, RESOLUTIONS, "720p")
-        normalized_aspect_ratio = _choice(aspect_ratio, ASPECT_RATIOS, "adaptive")
+        normalized_aspect_ratio = (
+            "adaptive"
+            if identity_transfer
+            else _choice(aspect_ratio, ASPECT_RATIOS, "adaptive")
+        )
 
         if route == "text":
             normalized_image: str | list[str] | None = None
