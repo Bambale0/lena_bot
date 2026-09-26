@@ -216,3 +216,10 @@ def test_identity_transfer_uses_source_duration_for_telegram_preflight() -> None
         motion_step=None,
         is_genjutsu_video_mode=False,
     ) == 23
+
+
+def test_identity_transfer_rejects_user_prompt_that_expands_past_provider_limit() -> None:
+    from api.seedance25_identity import build_identity_transfer_prompt
+
+    with pytest.raises(ValueError, match="30,000"):
+        build_identity_transfer_prompt("x" * 30_000, image_count=3)
