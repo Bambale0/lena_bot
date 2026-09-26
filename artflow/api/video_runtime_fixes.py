@@ -144,6 +144,8 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         clean_prompt = build_identity_transfer_prompt(
             raw_user_prompt,
             image_count=len(raw_image_refs),
+            number_text=str(control_options.get("identity_number") or ""),
+            outfit_text=str(control_options.get("identity_outfit") or ""),
         )
     else:
         clean_prompt = _clean_prompt(raw_user_prompt, model_name="Seedance 2.5")
