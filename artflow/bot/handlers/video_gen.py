@@ -27,6 +27,12 @@ from api.genjutsu_adapter import (
     DISPLAY_NAMES as GENJUTSU_DISPLAY_NAMES,
 )
 from api.genjutsu_adapter import (
+    MAX_DURATION_SECONDS as GENJUTSU_MAX_DURATION_SECONDS,
+)
+from api.genjutsu_adapter import (
+    MIN_DURATION_SECONDS as GENJUTSU_MIN_DURATION_SECONDS,
+)
+from api.genjutsu_adapter import (
     MODEL_KEYS as GENJUTSU_MODEL_KEYS,
 )
 from api.genjutsu_adapter import (
@@ -368,7 +374,10 @@ def _video_params_hint(model_key: str, data: dict) -> str:
         else:
             parts.append("Можно добавить 1 Audio ID для голоса и до 3 Character IDs для персонажей.")
     if model_key in GENJUTSU_MODEL_KEYS:
-        parts.append("Genjutsu использует все загруженные референсы и полный исходный ролик до 30 секунд.")
+        parts.append(
+            f"Genjutsu использует все загруженные референсы и полный исходный ролик "
+            f"от {GENJUTSU_MIN_DURATION_SECONDS} до {GENJUTSU_MAX_DURATION_SECONDS} секунд."
+        )
     if data.get("mode") == "image" and not _video_ref_count(data) and model_key == VideoModel.GROK_I2V:
         parts.append("Формат кадра появится после загрузки нужного количества референсов.")
     else:
@@ -1048,9 +1057,12 @@ async def handle_video_upload(
     if resolution != stored_resolution:
         await state.update_data(resolution=resolution)
 
-    if is_genjutsu_video_mode and not (1 <= video_duration <= 30):
+    if is_genjutsu_video_mode and not (
+        GENJUTSU_MIN_DURATION_SECONDS <= video_duration <= GENJUTSU_MAX_DURATION_SECONDS
+    ):
         await message.answer(
-            "❌ Genjutsu принимает исходное видео длительностью от 1 до 30 секунд. Загрузи подходящий ролик.",
+            f"❌ Genjutsu принимает исходное видео длительностью от {GENJUTSU_MIN_DURATION_SECONDS} "
+            f"до {GENJUTSU_MAX_DURATION_SECONDS} секунд. Загрузи подходящий ролик.",
             reply_markup=back_to_menu_kb(),
         )
         return
@@ -1249,7 +1261,8 @@ async def _after_video_ref_upload(
         await state.set_state(VideoGenFSM.image_upload)
         await message.answer(
             f"✅ Референсы сохранены: <b>{_video_ref_count(updated)}</b>\n\n"
-            "🎞️ Теперь загрузи исходное видео длительностью от 1 до 30 секунд. "
+            f"🎞️ Теперь загрузи исходное видео длительностью от {GENJUTSU_MIN_DURATION_SECONDS} "
+            f"до {GENJUTSU_MAX_DURATION_SECONDS} секунд. "
             "Genjutsu сохранит движение и тайминг ролика, применив твои референсы.",
             reply_markup=back_to_menu_kb(),
         )

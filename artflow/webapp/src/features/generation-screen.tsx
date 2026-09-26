@@ -475,7 +475,7 @@ function GenerationScreen({
 
                 {selectedModel?.duration_from_source ? (
                   <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                    Длительность и итоговая стоимость определятся по загруженному исходному видео (до 30 секунд).
+                    Длительность и итоговая стоимость определятся по загруженному исходному видео (от 4 до 30 секунд).
                   </div>
                 ) : null}
 

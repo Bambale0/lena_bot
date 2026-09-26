@@ -29,7 +29,7 @@ DISPLAY_NAMES = {
 }
 
 MAX_REFERENCE_IMAGES = 8
-MIN_DURATION_SECONDS = 1
+MIN_DURATION_SECONDS = 4
 MAX_DURATION_SECONDS = 30
 RESOLUTIONS = ["480p", "720p"]
 
@@ -492,7 +492,7 @@ def install_genjutsu_keyboard_support() -> None:
         keyboard_models.VIDEO_CAPS[model_key] = dict(VIDEO_CAPS)
         keyboard_models.VIDEO_MODEL_DESC[model_key] = (
             f"{DISPLAY_NAMES[model_key]} · исходное видео + до "
-            f"{MAX_REFERENCE_IMAGES} референсов · 1–30 сек · 480p/720p"
+            f"{MAX_REFERENCE_IMAGES} референсов · {MIN_DURATION_SECONDS}–{MAX_DURATION_SECONDS} сек · 480p/720p"
         )
 
     order = getattr(keyboard_models, "_VIDEO_MODEL_ORDER", None)
