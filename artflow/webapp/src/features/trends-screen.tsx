@@ -195,7 +195,7 @@ function TrendCard({
     try {
       await client.request<TrendItem>(`/admin/trends/${trend.id}/update`, {
         method: "POST",
-        body: JSON.stringify({ settings: { user_fields: userFields } }),
+        body: JSON.stringify({ user_fields: userFields }),
       });
       toast.success("Поля тренда сохранены");
       setEditingFields(false);
@@ -395,6 +395,7 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
           prompt_template: promptTemplate.trim(),
           preview_url: previewUrl,
           model,
+          user_fields: userFields,
           settings: {
             category,
             scenario: kind === "video" ? scenario : undefined,
@@ -403,7 +404,6 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
             quality: kind === "image" ? quality || undefined : undefined,
             resolution: kind === "video" ? resolution || undefined : undefined,
             requires_reference: kind === "image" || scenario === "image",
-            user_fields: userFields,
           },
         }),
       });
