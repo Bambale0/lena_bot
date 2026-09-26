@@ -279,6 +279,25 @@ def _has_gemini_omni_video_input(model_key: str, data: dict) -> bool:
     return model_key == GEMINI_OMNI_VIDEO_MODEL and bool(data.get("reference_video_url"))
 
 
+def _video_upload_billable_duration(
+    data: dict,
+    *,
+    video_duration: int,
+    motion_step: str | None,
+    is_genjutsu_video_mode: bool,
+) -> int:
+    if (
+        motion_step == "video_url"
+        or is_genjutsu_video_mode
+        or (
+            data.get("model_key") == SEEDANCE25_MODEL_KEY
+            and data.get("seedance_identity_transfer")
+        )
+    ):
+        return video_duration
+    return int(data.get("duration", 4))
+
+
 def _is_feed_video_use(data: dict) -> bool:
     return data.get("feed_use_gen_type") == "video" and data.get("feed_use_prompt") is not None
 
@@ -1136,7 +1155,12 @@ async def handle_video_upload(
         has_video_input=is_gemini_omni_video_mode,
     )
     rate_or_flat = model_cost.credits if model_cost else int(data.get("credits", 8))
-    billable_duration = video_duration if (motion_step == "video_url" or is_genjutsu_video_mode) else int(data.get("duration", 4))
+    billable_duration = _video_upload_billable_duration(
+        data,
+        video_duration=video_duration,
+        motion_step=motion_step,
+        is_genjutsu_video_mode=is_genjutsu_video_mode,
+    )
     total_credits = _video_total_credits(model_key, billable_duration, rate_or_flat)
 
     if db_user.credits < total_credits:
