@@ -20,6 +20,10 @@ from api.miniapp_routes import (
 from api.public_files import save_public_file
 from api.trend_assets import image_kind_from_upload, sign_uploaded_asset, verify_uploaded_asset
 from core.config import settings
+from core.trend_user_fields import (
+    TrendUserFieldsError,
+    normalize_configured_trend_user_fields,
+)
 from core.trends import (
     TREND_TAG,
     build_trend_tags,
@@ -57,6 +61,7 @@ class TrendCreateRequest(BaseModel):
     preview_url: str = Field(min_length=1, max_length=2048)
     model: str = Field(min_length=1, max_length=64)
     settings: dict[str, Any] = Field(default_factory=dict)
+    user_fields: list[dict[str, Any]] | None = Field(default=None, max_length=6)
 
 
 class TrendUpdateRequest(BaseModel):
@@ -66,6 +71,7 @@ class TrendUpdateRequest(BaseModel):
     preview_url: str | None = Field(default=None, min_length=1, max_length=2048)
     model: str | None = Field(default=None, min_length=1, max_length=64)
     settings: dict[str, Any] | None = None
+    user_fields: list[dict[str, Any]] | None = Field(default=None, max_length=6)
 
 
 class TrendRunRequest(BaseModel):
@@ -398,8 +404,19 @@ async def admin_create_trend(
     _require_admin(user)
     await _validated_model(session, body.model, body.kind)
     preview_url = _validate_preview_url(body.preview_url)
+    raw_user_fields = (
+        body.user_fields
+        if body.user_fields is not None
+        else body.settings.get("user_fields", [])
+    )
     try:
-        trend_tags = build_trend_tags(body.kind, body.settings)
+        configured_user_fields = normalize_configured_trend_user_fields(raw_user_fields)
+    except TrendUserFieldsError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    tag_settings = dict(body.settings)
+    tag_settings.pop("user_fields", None)
+    try:
+        trend_tags = build_trend_tags(body.kind, tag_settings)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     prompt = await create_prompt(
@@ -414,6 +431,8 @@ async def admin_create_trend(
         tags=trend_tags,
         is_public=True,
     )
+    prompt.trend_user_fields = configured_user_fields
+    await session.commit()
     approved = await approve_prompt(session, prompt.id)
     if approved is None:
         raise HTTPException(status_code=500, detail="Failed to publish trend")
@@ -443,9 +462,25 @@ async def admin_update_trend(
         prompt.prompt_text = body.prompt_template.strip()
     if body.preview_url is not None:
         prompt.preview_url = _validate_preview_url(body.preview_url)
+
+    settings_user_fields = (
+        body.settings.get("user_fields")
+        if body.settings is not None and "user_fields" in body.settings
+        else None
+    )
+    if body.user_fields is not None or settings_user_fields is not None:
+        raw_user_fields = body.user_fields if body.user_fields is not None else settings_user_fields
+        try:
+            prompt.trend_user_fields = normalize_configured_trend_user_fields(raw_user_fields)
+        except TrendUserFieldsError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     if body.settings is not None:
         merged_settings = trend_settings(prompt)
-        merged_settings.update(body.settings)
+        incoming_settings = dict(body.settings)
+        incoming_settings.pop("user_fields", None)
+        merged_settings.update(incoming_settings)
+        merged_settings.pop("user_fields", None)
         try:
             prompt.tags = build_trend_tags(kind, merged_settings)
         except ValueError as exc:
