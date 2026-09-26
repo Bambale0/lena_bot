@@ -27,6 +27,7 @@ from core.trends import (
     trend_admin_payload,
     trend_is_public,
     trend_kind,
+    render_trend_prompt,
     trend_public_payload,
     trend_settings,
 )
@@ -69,7 +70,9 @@ class TrendUpdateRequest(BaseModel):
 
 
 class TrendRunRequest(BaseModel):
-    asset_id: str = Field(min_length=20, max_length=4096)
+    asset_id: str | None = Field(default=None, min_length=20, max_length=4096)
+    asset_ids: list[str] = Field(default_factory=list, max_length=8)
+    user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
     idempotency_key: str = Field(min_length=8, max_length=128)
 
 
@@ -168,7 +171,8 @@ async def _patch_trend_snapshot(
     generation_id: int,
     trend: UserPrompt,
     settings_payload: dict[str, Any],
-    asset_payload: dict[str, Any],
+    asset_payloads: list[dict[str, Any]],
+    user_values: dict[str, str],
     idempotency_key: str,
 ) -> None:
     generation = await repo.get_generation_by_id(session, generation_id)
@@ -178,6 +182,7 @@ async def _patch_trend_snapshot(
         existing = json.loads(generation.input_params or "{}")
     except (TypeError, ValueError, json.JSONDecodeError):
         existing = {}
+    first_asset = asset_payloads[0] if asset_payloads else {}
     existing.update(
         {
             "source": "trend",
@@ -185,8 +190,11 @@ async def _patch_trend_snapshot(
             "trend_kind": trend_kind(trend),
             "trend_settings_version": int(settings_payload.get("settings_version") or 1),
             "trend_run_key": idempotency_key,
-            "user_asset_id": asset_payload.get("asset_id", ""),
-            "user_asset_url": asset_payload.get("url", ""),
+            "user_asset_id": first_asset.get("asset_id", ""),
+            "user_asset_url": first_asset.get("url", ""),
+            "user_asset_ids": [item.get("asset_id", "") for item in asset_payloads],
+            "user_asset_urls": [item.get("url", "") for item in asset_payloads],
+            "trend_user_values": dict(user_values),
             "resolved_settings": settings_payload,
         }
     )
@@ -283,10 +291,44 @@ async def run_trend(
     if not trend.model:
         raise HTTPException(status_code=409, detail="Trend has no configured model")
     await _validated_model(session, trend.model, kind)
-    asset = verify_uploaded_asset(body.asset_id, user_id=user.id, expected_kind="image")
-    asset["asset_id"] = body.asset_id
     settings_payload = trend_settings(trend)
-    asset_url = str(asset["url"])
+    submitted_ids = list(
+        dict.fromkeys(
+            [
+                str(item).strip()
+                for item in [body.asset_id, *body.asset_ids]
+                if str(item or "").strip()
+            ]
+        )
+    )
+    min_references = int(settings_payload.get("min_references") or 1)
+    max_references = int(settings_payload.get("max_references") or min_references)
+    if len(submitted_ids) < min_references:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Добавьте минимум {min_references} фото-референс(а)",
+        )
+    if len(submitted_ids) > max_references:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Для этого тренда можно добавить максимум {max_references} фото-референс(а)",
+        )
+
+    assets: list[dict[str, Any]] = []
+    for asset_id in submitted_ids:
+        asset = verify_uploaded_asset(asset_id, user_id=user.id, expected_kind="image")
+        asset["asset_id"] = asset_id
+        assets.append(asset)
+    asset_urls = [str(item["url"]) for item in assets]
+
+    # Validate all editable values before billing/provider submission. The
+    # rendered prompt itself stays server-side and is resolved again inside the
+    # canonical generation endpoint.
+    render_trend_prompt(
+        trend.prompt_text,
+        list(settings_payload.get("user_fields") or []),
+        body.user_values,
+    )
 
     if kind == "video":
         scenario = str(settings_payload.get("scenario") or "image").lower()
@@ -296,9 +338,10 @@ async def run_trend(
                 model=trend.model,
                 prompt="Использовать скрытый трендовый промпт",
                 prompt_id=trend.id,
+                trend_user_values=body.user_values,
                 mode=mode,
-                image_url=asset_url,
-                reference_urls=[],
+                image_url=asset_urls[0],
+                reference_urls=asset_urls[1:],
                 duration=_safe_int(settings_payload.get("duration"), 5),
                 aspect_ratio=settings_payload.get("ratio"),
                 resolution=settings_payload.get("resolution"),
@@ -313,11 +356,12 @@ async def run_trend(
                 model=trend.model,
                 prompt="Использовать скрытый трендовый промпт",
                 prompt_id=trend.id,
+                trend_user_values=body.user_values,
                 aspect_ratio=settings_payload.get("ratio"),
                 quality=str(settings_payload.get("quality") or "basic"),
                 count=max(1, min(6, _safe_int(settings_payload.get("count"), 1))),
-                reference_url=asset_url,
-                reference_urls=[asset_url],
+                reference_url=asset_urls[0],
+                reference_urls=asset_urls[1:],
             ),
             session=session,
             user=user,
@@ -329,7 +373,8 @@ async def run_trend(
         generation_id=task.id,
         trend=trend,
         settings_payload=settings_payload,
-        asset_payload=asset,
+        asset_payloads=assets,
+        user_values=body.user_values,
         idempotency_key=body.idempotency_key,
     )
     await session.refresh(user)
