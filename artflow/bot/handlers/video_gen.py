@@ -1502,7 +1502,8 @@ async def cb_vpar_next(
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         f"✅ <b>{display_name}</b> ({_video_price_text(data['model_key'], duration_val, rate_or_flat)})"
-        f" · <code>{summary}</code>\n\n✍️ Введи промпт:",
+        f" · <code>{summary}</code>\n\n✍️ Введи промпт"
+        + (" или отправь <code>-</code>, чтобы запустить без него:" if data['model_key'] in GENJUTSU_MODEL_KEYS else ":"),
         reply_markup=back_to_menu_kb(),
     )
     await call.answer()
@@ -1828,6 +1829,8 @@ async def handle_video_prompt(
         return
 
     # Motion Control: optional prompt step
+    if model_key in GENJUTSU_MODEL_KEYS and prompt == "-":
+        prompt = ""
     if motion_step == "prompt":
         prompt = prompt if prompt != "-" else ""
         await state.update_data(motion_prompt=prompt, motion_step="done")

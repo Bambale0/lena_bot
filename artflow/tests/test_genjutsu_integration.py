@@ -189,6 +189,24 @@ async def test_motion_transfer_sends_exact_provider_payload(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_object_swap_can_omit_prompt(monkeypatch) -> None:
+    submit = AsyncMock(return_value="hf-task-no-prompt")
+    monkeypatch.setattr(genjutsu_adapter.higgsfield_client, "submit", submit)
+
+    task_id = await genjutsu_adapter.create_genjutsu_task(
+        model_key=OBJECT_MODEL,
+        prompt=" ",
+        image_urls=["https://example.test/face.jpg"],
+        video_url="https://example.test/source.mp4",
+        resolution="480p",
+    )
+
+    assert task_id == "hf-task-no-prompt"
+    assert "prompt" not in submit.await_args.args[1]
+    assert miniapp_routes.VideoGenRequest(model=OBJECT_MODEL, prompt="").prompt == ""
+
+
+@pytest.mark.asyncio
 async def test_higgsfield_poll_maps_terminal_states(monkeypatch) -> None:
     monkeypatch.setattr(
         higgsfield_client,
