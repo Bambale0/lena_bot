@@ -301,6 +301,7 @@ def _video_params_reply_markup(model_key: str, data: dict):
         selected_mode=data.get("mode"),
         ref_count=_video_ref_count(data),
         next_label=_video_params_next_label(data),
+        identity_transfer=bool(data.get("seedance_identity_transfer")),
     )
 
 
@@ -364,6 +365,11 @@ def _params_summary(data: dict) -> str:
 
 
 def _video_params_hint(model_key: str, data: dict) -> str:
+    if model_key == SEEDANCE25_MODEL_KEY and data.get("seedance_identity_transfer"):
+        return (
+            "🎭 Фото задают внешность персонажа, исходное видео — только движение и сцену. "
+            "Выбери качество <b>480p</b> или <b>720p</b>, затем нажми <b>Далее</b>."
+        )
     parts = ["Нажимай кнопки ниже: ✅ показывает выбранные параметры."]
     if model_key == GEMINI_OMNI_VIDEO_MODEL:
         if data.get("mode") == "image":
@@ -404,6 +410,12 @@ def _video_ref_count(data: dict) -> int:
 
 def _video_max_refs(model_key: str) -> int:
     return int(VIDEO_CAPS.get(model_key, {}).get("max_refs", 1) or 1)
+
+
+def _video_max_refs_for_state(data: dict) -> int:
+    if data.get("model_key") == SEEDANCE25_MODEL_KEY and data.get("seedance_identity_transfer"):
+        return 3
+    return _video_max_refs(str(data.get("model_key") or ""))
 
 
 async def _video_reference_image_url(bot: Bot, data: dict) -> str | list[str] | None:
@@ -1025,9 +1037,33 @@ async def cb_video_mode(
         if mode != "image":
             await call.answer("Для повтора из ленты сначала загрузи своё фото.", show_alert=True)
             return
-    await state.update_data(mode=mode)
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
+    if model_key == SEEDANCE25_MODEL_KEY and mode == "identity":
+        await state.update_data(
+            mode="image",
+            seedance_identity_transfer=True,
+            seedance_identity_step="photos",
+            image_file_id=None,
+            ref_file_ids=[],
+            image_url=None,
+            reference_video_url=None,
+            audio_ids=[],
+            aspect_ratio="adaptive",
+        )
+        await state.set_state(VideoGenFSM.image_upload)
+        await safe_edit_message(
+            call.message,
+            f"🎭 <b>{display_name} · Замена персонажа</b>\n\n"
+            "Загрузи <b>1–3 фото одного человека</b>.\n"
+            "Лучше всего: анфас → 3/4 → дополнительный ракурс.\n\n"
+            "Первое фото будет главным якорем внешности, остальные помогут удержать лицо при поворотах.",
+            reply_markup=back_to_menu_kb(),
+        )
+        await safe_answer_callback(call)
+        return
+
+    await state.update_data(mode=mode, seedance_identity_transfer=False, seedance_identity_step=None)
     await _handle_mode(call, state, session, model_key, display_name, mode)
     await safe_answer_callback(call)
 
@@ -1044,8 +1080,18 @@ async def handle_video_upload(
     model_key: str = data["model_key"]
     is_gemini_omni_video_mode = model_key == GEMINI_OMNI_VIDEO_MODEL and data.get("mode") == "video"
     is_genjutsu_video_mode = model_key in GENJUTSU_MODEL_KEYS and data.get("genjutsu_step") == "video"
+    is_seedance_identity_video_mode = (
+        model_key == SEEDANCE25_MODEL_KEY
+        and data.get("seedance_identity_transfer")
+        and data.get("seedance_identity_step") == "video"
+    )
 
-    if motion_step != "video_url" and not is_gemini_omni_video_mode and not is_genjutsu_video_mode:
+    if (
+        motion_step != "video_url"
+        and not is_gemini_omni_video_mode
+        and not is_genjutsu_video_mode
+        and not is_seedance_identity_video_mode
+    ):
         await message.answer("Пожалуйста, загрузи видео только на шаге 2 управления камерой.", reply_markup=back_to_menu_kb())
         return
 
@@ -1070,6 +1116,13 @@ async def handle_video_upload(
     if is_gemini_omni_video_mode and video_duration > 30:
         await message.answer(
             "❌ Gemini Omni принимает видео-референс до 30 секунд. Загрузи более короткий фрагмент.",
+            reply_markup=back_to_menu_kb(),
+        )
+        return
+
+    if is_seedance_identity_video_mode and not (4 <= video_duration <= 30):
+        await message.answer(
+            "❌ Для замены персонажа Seedance 2.5 нужен исходный ролик от 4 до 30 секунд.",
             reply_markup=back_to_menu_kb(),
         )
         return
@@ -1110,6 +1163,23 @@ async def handle_video_upload(
 
     model_cost_obj = await repo.get_model_cost(session, model_key)
     display_name = model_cost_obj.display_name if model_cost_obj else model_key
+
+    if is_seedance_identity_video_mode:
+        await state.update_data(
+            reference_video_url=video_url,
+            duration=video_duration,
+            aspect_ratio="adaptive",
+            seedance_identity_step=None,
+        )
+        updated = await state.get_data()
+        await state.set_state(VideoGenFSM.params_select)
+        await message.answer(
+            f"✅ Исходное видео загружено: <b>{video_duration} сек</b>\n\n"
+            f"⚙️ <b>Качество</b> · {display_name}\n"
+            f"{_video_params_hint(model_key, updated)}",
+            reply_markup=_video_params_reply_markup(model_key, updated),
+        )
+        return
 
     if is_genjutsu_video_mode:
         try:
@@ -1223,7 +1293,7 @@ async def handle_image_upload(
 
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
-    max_refs = _video_max_refs(model_key)
+    max_refs = _video_max_refs_for_state(data)
 
     if max_refs > 1 and data.get("mode") == "image":
         existing = [str(item) for item in (data.get("ref_file_ids") or []) if item]
@@ -1256,6 +1326,17 @@ async def _after_video_ref_upload(
 ) -> None:
     updated = await state.get_data()
 
+    if model_key == SEEDANCE25_MODEL_KEY and updated.get("seedance_identity_transfer"):
+        await state.update_data(seedance_identity_step="video")
+        await state.set_state(VideoGenFSM.image_upload)
+        await message.answer(
+            f"✅ Фото внешности сохранены: <b>{_video_ref_count(updated)}</b>/3\n\n"
+            "🎞️ Теперь загрузи <b>исходное видео 4–30 сек</b>. "
+            "Seedance возьмёт из него движение, камеру, тайминг и сцену — не личность персонажа.",
+            reply_markup=back_to_menu_kb(),
+        )
+        return
+
     if model_key in GENJUTSU_MODEL_KEYS:
         await state.update_data(genjutsu_step="video")
         await state.set_state(VideoGenFSM.image_upload)
@@ -1283,7 +1364,7 @@ async def _after_video_ref_upload(
 @router.callback_query(VideoGenFSM.image_upload, F.data == "ref:add_more")
 async def cb_video_ref_add_more(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
-    max_refs = _video_max_refs(str(data.get("model_key") or ""))
+    max_refs = _video_max_refs_for_state(data)
     await call.answer(f"Отправь следующее фото ({_video_ref_count(data)}/{max_refs})")
 
 
@@ -1502,8 +1583,12 @@ async def cb_vpar_next(
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         f"✅ <b>{display_name}</b> ({_video_price_text(data['model_key'], duration_val, rate_or_flat)})"
-        f" · <code>{summary}</code>\n\n✍️ Введи промпт"
-        + (" или отправь <code>-</code>, чтобы запустить без него:" if data['model_key'] in GENJUTSU_MODEL_KEYS else ":"),
+        f" · <code>{summary}</code>\n\n✍️ Введи дополнительные пожелания"
+        + (
+            " или отправь <code>-</code>, чтобы запустить с оптимальным промптом:"
+            if data.get("seedance_identity_transfer") or data['model_key'] in GENJUTSU_MODEL_KEYS
+            else ":"
+        ),
         reply_markup=back_to_menu_kb(),
     )
     await call.answer()
@@ -1587,6 +1672,7 @@ async def _launch_video_generation_from_state(
             edit_billing_duration = await seedance25_edit_billing_duration(
                 prompt,
                 data.get("reference_video_url"),
+                force_edit=bool(data.get("seedance_identity_transfer")),
             )
         except ValueError as exc:
             await source_message.answer(
@@ -1623,6 +1709,18 @@ async def _launch_video_generation_from_state(
     else:
         rate_or_flat = model_cost.credits if model_cost else float(data.get("credits", 0))
         credits = float(_video_total_credits(model_key, duration, rate_or_flat))
+
+    if model_key == SEEDANCE25_MODEL_KEY and data.get("seedance_identity_transfer"):
+        identity_tokens = [
+            "__apix_seedance25:identity_transfer=true",
+            "__apix_seedance25:generate_audio=false",
+        ]
+        audio_ids = [str(item) for item in (data.get("audio_ids") or []) if item]
+        await state.update_data(audio_ids=list(dict.fromkeys([*audio_ids, *identity_tokens])))
+        data = {
+            **data,
+            "audio_ids": list(dict.fromkeys([*audio_ids, *identity_tokens])),
+        }
 
     input_params = _video_input_params_from_generation_state(
         model_key=model_key,
@@ -1829,7 +1927,7 @@ async def handle_video_prompt(
         return
 
     # Motion Control: optional prompt step
-    if model_key in GENJUTSU_MODEL_KEYS and prompt == "-":
+    if (model_key in GENJUTSU_MODEL_KEYS or data.get("seedance_identity_transfer")) and prompt == "-":
         prompt = ""
     if motion_step == "prompt":
         prompt = prompt if prompt != "-" else ""
