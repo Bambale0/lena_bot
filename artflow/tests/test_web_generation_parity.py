@@ -57,8 +57,8 @@ def test_public_site_billing_keeps_tribute_usd_provider_parity():
     assert '["tbank", "stars", "crypto", "tribute", "lava"].includes(provider)' in src
 
 
-def test_public_site_busts_cached_payment_runtime_after_tribute_fix():
-    expected = "prototype-premium.js?v=20260907_dual_prices"
+def test_public_site_busts_cached_payment_runtime_after_card_sbp_label():
+    expected = "prototype-premium.js?v=20260926_card_sbp_label"
     pages = sorted((ROOT / "landing").glob("*.html"))
     referenced = [path for path in pages if "prototype-premium.js?v=" in path.read_text()]
     assert referenced

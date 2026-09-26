@@ -167,9 +167,11 @@ def test_billing_api_label_advertises_rails_not_acquirer(monkeypatch) -> None:
 def test_payment_surfaces_do_not_render_acquirer_branding() -> None:
     balance_sheet = (ROOT / "webapp/src/components/balance-sheet.tsx").read_text(encoding="utf-8")
     legacy_site = (ROOT / "webapp/src/main.jsx").read_text(encoding="utf-8")
+    public_site = (ROOT / "landing/js/prototype-premium.js").read_text(encoding="utf-8")
 
     assert 'title: "Карта | СБП"' in balance_sheet
     assert "💳 Карта | СБП" in legacy_site
+    assert 'tbank: "Карта | СБП"' in public_site
 
-    for source in (balance_sheet, legacy_site):
+    for source in (balance_sheet, legacy_site, public_site):
         assert not any(brand in source.lower() for brand in ACQUIRER_BRANDS)
