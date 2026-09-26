@@ -30,10 +30,10 @@ from core.trends import (
     build_trend_tags,
     is_trend_prompt,
     trend_kind,
-    trend_settings,
+    trend_user_fields,
 )
 from db import repository as repo
-from db.models import GenerationType, PromptCategory, User, UserPrompt
+from db.models import PromptCategory, User, UserPrompt
 from db.prompt_repository import (
     approve_prompt,
     create_prompt,
@@ -194,13 +194,20 @@ async def use_trend(call: CallbackQuery, session: AsyncSession, state: FSMContex
     if not is_trend_prompt(prompt) or not prompt.is_public or getattr(prompt.status, "value", prompt.status) != "approved":
         await call.answer("Тренд уже скрыт", show_alert=True)
         return
-    if trend_kind(prompt) == "video":
+    user_fields = trend_user_fields(prompt)
+    if trend_kind(prompt) == "video" or user_fields:
         url = f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?trend={prompt.id}"
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="🎬 Открыть видео-тренд", web_app=WebAppInfo(url=url)))
+        label = "🎛 Настроить и повторить" if user_fields else "🎬 Открыть видео-тренд"
+        builder.row(InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url)))
         builder.row(InlineKeyboardButton(text="🔥 Другие тренды", callback_data="menu:trends"))
         await call.message.answer(
-            "🎬 Настройки видео-тренда готовы. Открой приложение, добавь исходное фото при необходимости и запусти генерацию.",
+            (
+                "🎛 Перед повтором можно изменить разрешённые параметры тренда "
+                "(например, число или одежду), не раскрывая скрытый prompt."
+                if user_fields
+                else "🎬 Настройки видео-тренда готовы. Открой приложение, добавь исходное фото при необходимости и запусти генерацию."
+            ),
             reply_markup=builder.as_markup(),
         )
         await safe_answer_callback(call)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     ARRAY,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -464,6 +466,9 @@ class UserPrompt(Base):
     preview_url: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(String(64))
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
+    # Explicit personalization schema for curated trends. NULL keeps legacy
+    # prompts eligible for {{Field}} auto-discovery; [] explicitly disables it.
+    trend_user_fields: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     likes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     status: Mapped[PromptStatus] = mapped_column(

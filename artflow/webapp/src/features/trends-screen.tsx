@@ -9,7 +9,7 @@ import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import { copyTrendLink, openTrendRunner } from "@/features/trend-runner";
 import { MiniAppApi } from "@/lib/api";
 import { readTelegramInitData } from "@/lib/telegram";
-import type { ModelInfo, TrendItem } from "@/lib/types";
+import type { ModelInfo, TrendItem, TrendUserField } from "@/lib/types";
 import { cn, safeExternalUrl } from "@/lib/utils";
 
 interface TrendsScreenProps {
@@ -45,6 +45,100 @@ const filters = [
   { value: "video" as const, label: "Видео", icon: Film },
 ];
 
+const TEMPLATE_FIELD_PRESETS = ["Возраст", "Имя", "Надпись", "Дата", "Число", "Одежда"] as const;
+const NUMBER_FIELD_HINTS = ["возраст", "число", "цифр", "количество", "номер", "рост", "вес", "лет", "год", "свеч"];
+const DATE_FIELD_HINTS = ["дата", "date", "день рождения", "birthday"];
+
+function trendFieldFromLabel(label: string): TrendUserField {
+  const clean = label.replace(/[{}]/g, "").trim().slice(0, 48);
+  const normalized = clean.toLowerCase();
+  const type: TrendUserField["type"] = DATE_FIELD_HINTS.some((hint) => normalized.includes(hint))
+    ? "date"
+    : NUMBER_FIELD_HINTS.some((hint) => normalized.includes(hint))
+      ? "number"
+      : "text";
+  return { key: clean, label: clean, type, required: true, max_length: 160 };
+}
+
+function TrendFieldPicker({
+  fields,
+  onChange,
+}: {
+  fields: TrendUserField[];
+  onChange: (fields: TrendUserField[]) => void;
+}) {
+  const [customField, setCustomField] = useState("");
+
+  const addField = (label: string) => {
+    const field = trendFieldFromLabel(label);
+    if (!field.key || fields.length >= 6 || fields.some((item) => item.key.toLowerCase() === field.key.toLowerCase())) return;
+    onChange([...fields, field]);
+    setCustomField("");
+  };
+
+  return (
+    <div className="grid gap-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
+      <div>
+        <p className="text-xs font-semibold text-foreground">Поля для пользователя</p>
+        <p className="text-[10px] text-muted-foreground">При повторе человек сможет менять только эти значения. Скрытый prompt не показывается.</p>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {TEMPLATE_FIELD_PRESETS.map((preset) => {
+          const active = fields.some((field) => field.key.toLowerCase() === preset.toLowerCase());
+          return (
+            <Button
+              key={preset}
+              type="button"
+              size="sm"
+              variant="outline"
+              className="min-h-8 px-2 text-[10px]"
+              disabled={active || fields.length >= 6}
+              onClick={() => addField(preset)}
+            >
+              ＋ {preset}
+            </Button>
+          );
+        })}
+      </div>
+      <div className="grid grid-cols-[1fr_auto] gap-2">
+        <input
+          value={customField}
+          maxLength={48}
+          className="min-h-9 min-w-0 rounded-lg border border-border bg-background px-3 text-xs"
+          placeholder="Другое поле, например: Цвет волос"
+          onChange={(event) => setCustomField(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              addField(customField);
+            }
+          }}
+        />
+        <Button type="button" size="sm" variant="outline" disabled={!customField.trim() || fields.length >= 6} onClick={() => addField(customField)}>
+          Добавить
+        </Button>
+      </div>
+      {fields.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {fields.map((field) => (
+            <span key={field.key} className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[10px] font-semibold">
+              {field.label}
+              <button
+                type="button"
+                className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                aria-label={`Удалить поле ${field.label}`}
+                onClick={() => onChange(fields.filter((item) => item.key !== field.key))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : <p className="text-[10px] text-muted-foreground">Если менять ничего не нужно — оставь блок пустым.</p>}
+    </div>
+  );
+}
+
 function normalizeModels(value: unknown): ModelInfo[] {
   if (Array.isArray(value)) return value as ModelInfo[];
   if (value && typeof value === "object") {
@@ -71,9 +165,47 @@ function TrendPreview({ item }: { item: Pick<TrendItem, "kind" | "preview_url" |
   return <img src={media} alt={item.title || "Trend"} loading="lazy" className="max-h-[420px] w-full rounded-xl bg-black object-contain" />;
 }
 
-function TrendCard({ trend, index }: { trend: TrendItem; index: number }) {
+function TrendCard({
+  trend,
+  index,
+  isAdmin,
+  client,
+  onUpdated,
+}: {
+  trend: TrendItem;
+  index: number;
+  isAdmin: boolean;
+  client: MiniAppApi;
+  onUpdated: () => void;
+}) {
   const media = safeExternalUrl(trend.preview_url);
   const isVideo = trend.kind === "video";
+  const [editingFields, setEditingFields] = useState(false);
+  const [userFields, setUserFields] = useState<TrendUserField[]>([]);
+  const [savingFields, setSavingFields] = useState(false);
+
+  const openFields = () => {
+    setUserFields((trend.user_fields || []).map((field) => trendFieldFromLabel(field.label || field.key)).slice(0, 6));
+    setEditingFields(true);
+  };
+
+  const saveFields = async () => {
+    if (savingFields) return;
+    setSavingFields(true);
+    try {
+      await client.request<TrendItem>(`/admin/trends/${trend.id}/update`, {
+        method: "POST",
+        body: JSON.stringify({ user_fields: userFields }),
+      });
+      toast.success("Поля тренда сохранены");
+      setEditingFields(false);
+      onUpdated();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось сохранить поля");
+    } finally {
+      setSavingFields(false);
+    }
+  };
   return (
     <Card className="overflow-hidden shadow-none">
       <button
@@ -123,12 +255,39 @@ function TrendCard({ trend, index }: { trend: TrendItem; index: number }) {
             <Link2 className="size-3.5" />
           </Button>
         </div>
+        {isAdmin ? (
+          <Button variant="outline" className="min-h-8 text-[10px]" onClick={() => editingFields ? setEditingFields(false) : openFields()}>
+            {editingFields ? "Закрыть настройку полей" : "⚙ Поля при повторе"}
+          </Button>
+        ) : null}
+        {isAdmin && editingFields ? (
+          <div className="grid gap-2">
+            <TrendFieldPicker fields={userFields} onChange={setUserFields} />
+            <Button className="min-h-9 text-xs" disabled={savingFields} onClick={() => void saveFields()}>
+              {savingFields ? "Сохраняю…" : "Сохранить поля"}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </Card>
   );
 }
 
-function TrendGroup({ title, emoji, items }: { title: string; emoji: string; items: TrendItem[] }) {
+function TrendGroup({
+  title,
+  emoji,
+  items,
+  isAdmin,
+  client,
+  onUpdated,
+}: {
+  title: string;
+  emoji: string;
+  items: TrendItem[];
+  isAdmin: boolean;
+  client: MiniAppApi;
+  onUpdated: () => void;
+}) {
   if (!items.length) return null;
   return (
     <section className="grid gap-2">
@@ -137,7 +296,9 @@ function TrendGroup({ title, emoji, items }: { title: string; emoji: string; ite
         <Badge variant="outline">{items.length}</Badge>
       </div>
       <div className="apix-media-grid">
-        {items.map((trend, index) => <TrendCard key={trend.id} trend={trend} index={index} />)}
+        {items.map((trend, index) => (
+          <TrendCard key={trend.id} trend={trend} index={index} isAdmin={isAdmin} client={client} onUpdated={onUpdated} />
+        ))}
       </div>
     </section>
   );
@@ -157,6 +318,7 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
   const [ratio, setRatio] = useState("");
   const [quality, setQuality] = useState("");
   const [resolution, setResolution] = useState("");
+  const [userFields, setUserFields] = useState<TrendUserField[]>([]);
   const [imageModels, setImageModels] = useState<ModelInfo[]>([]);
   const [videoModels, setVideoModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -233,6 +395,7 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
           prompt_template: promptTemplate.trim(),
           preview_url: previewUrl,
           model,
+          user_fields: userFields,
           settings: {
             category,
             scenario: kind === "video" ? scenario : undefined,
@@ -249,6 +412,7 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       setPromptTemplate("");
       setPreviewUrl("");
       setCategory("animals");
+      setUserFields([]);
       toast.success(category === "animals" ? "Тренд добавлен в «С животными»" : "Тренд опубликован");
       setOpen(false);
       onCreated();
@@ -368,6 +532,8 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       {previewUrl ? <TrendPreview item={{ kind, preview_url: previewUrl, title }} /> : null}
 
       <textarea className="min-h-32 rounded-lg border border-border bg-background p-3 text-xs" value={promptTemplate} onChange={(event) => setPromptTemplate(event.target.value)} placeholder="Скрытый канонический prompt — до 8000 символов" maxLength={8000} />
+      <TrendFieldPicker fields={userFields} onChange={setUserFields} />
+      <p className="-mt-1 text-[10px] text-muted-foreground">Например, выбери «Число» и «Одежда». Можно использовать <code>{"{{Число}}"}</code> / <code>{"{{Одежда}}"}</code> в prompt, но это не обязательно: backend всё равно добавит выбранные значения как приоритетные изменения.</p>
       <Button disabled={busy || uploading || loadingModels || !model} onClick={() => void submit()}>{busy ? "Публикую…" : category === "animals" ? "🦁 Опубликовать в «С животными»" : "Опубликовать тренд"}</Button>
     </Card>
   );
@@ -469,12 +635,18 @@ function TrendsScreen({
               title={category.label}
               emoji={category.emoji}
               items={filtered.filter((item) => (item.category || "featured") === category.value)}
+              isAdmin={isAdmin}
+              client={client}
+              onUpdated={onRefresh}
             />
           ))}
           <TrendGroup
             title="Другие"
             emoji="✨"
             items={filtered.filter((item) => !TREND_CATEGORIES.some((category) => category.value === (item.category || "featured")))}
+            isAdmin={isAdmin}
+            client={client}
+            onUpdated={onRefresh}
           />
         </div>
       ) : (

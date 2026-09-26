@@ -3,6 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from core.trend_user_fields import (
+    legacy_trend_user_fields,
+    normalize_configured_trend_user_fields,
+)
 from db.models import PromptStatus, UserPrompt
 
 TREND_TAG = "trend"
@@ -59,6 +63,13 @@ def trend_category_payload(category: str) -> dict[str, str]:
     return {"key": key, "title": meta["title"], "emoji": meta["emoji"]}
 
 
+def trend_user_fields(prompt: UserPrompt) -> list[dict[str, Any]]:
+    stored = getattr(prompt, "trend_user_fields", None)
+    if stored is not None:
+        return normalize_configured_trend_user_fields(stored)
+    return legacy_trend_user_fields(str(getattr(prompt, "prompt_text", "") or ""))
+
+
 def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
     """Structured resolver for legacy tag-backed trends.
 
@@ -89,6 +100,7 @@ def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
         "kind": kind,
         "category": trend_category(prompt),
         "settings_version": 1,
+        "user_fields": trend_user_fields(prompt),
     }
 
 
@@ -140,6 +152,7 @@ def trend_public_payload(prompt: UserPrompt) -> dict[str, Any]:
         "title": prompt.title,
         "description": prompt.description,
         "user_photo_hint": "Загрузите одно чёткое фото. Остальные настройки тренда уже сохранены.",
+        "user_fields": trend_user_fields(prompt),
         "preview_url": prompt.preview_url,
         "status": "active" if trend_is_public(prompt) else "inactive",
         "uses_count": int(prompt.uses_count or 0),

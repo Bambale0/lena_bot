@@ -100,7 +100,8 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
-from core.trends import is_trend_prompt, trend_kind
+from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
+from core.trends import is_trend_prompt, trend_kind, trend_user_fields
 from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
@@ -1309,6 +1310,7 @@ class ImageGenRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=6)
     reference_url: str | None = None
     reference_urls: list[str] = []
+    trend_user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
 
 
 class VideoGenRequest(BaseModel):
@@ -1330,6 +1332,7 @@ class VideoGenRequest(BaseModel):
     character_ids: list[str] = []
     seed: int | None = None
     grok_mode: str = "normal"
+    trend_user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
 
 
 class FeedRemixRequest(BaseModel):
@@ -2094,10 +2097,24 @@ async def create_image_generation(
                 raise HTTPException(status_code=422, detail="Selected trend is not an image trend")
             if prompt_source.model and body.model != prompt_source.model:
                 raise HTTPException(status_code=422, detail="Trend must use its configured model")
+            try:
+                user_prompt = render_trend_prompt(
+                    prompt_source.prompt_text,
+                    trend_user_fields(prompt_source),
+                    body.trend_user_values,
+                )
+            except TrendUserFieldsError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        elif body.trend_user_values:
+            raise HTTPException(status_code=422, detail="Personalization values are only supported for trends")
+
+    if body.prompt_id is None and body.trend_user_values:
+        raise HTTPException(status_code=422, detail="Personalization values require a trend")
 
     prompt_meta = {
         "prompt_id": getattr(prompt_source, "id", None),
         "hidden_prompt": bool(is_trend_prompt(prompt_source)),
+        "trend_user_values": dict(body.trend_user_values) if is_trend_prompt(prompt_source) else {},
     }
 
     if body.model in _MJ_STUDIO_IMAGE_MODELS:
@@ -2288,6 +2305,16 @@ async def create_video_generation(
                 raise HTTPException(status_code=422, detail="Selected trend is not a video trend")
             if prompt_source.model and body.model != prompt_source.model:
                 raise HTTPException(status_code=422, detail="Trend must use its configured model")
+            try:
+                user_prompt = render_trend_prompt(
+                    prompt_source.prompt_text,
+                    trend_user_fields(prompt_source),
+                    body.trend_user_values,
+                )
+            except TrendUserFieldsError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        elif body.trend_user_values:
+            raise HTTPException(status_code=422, detail="Personalization values are only supported for trends")
 
     try:
         validate_video_prompt(body.model, user_prompt)
@@ -2300,9 +2327,13 @@ async def create_video_generation(
         # Preserve the historical contract for non-Seedance video models.
         raise HTTPException(status_code=422, detail="Video prompt must be at most 4000 characters for this model")
 
+    if body.prompt_id is None and body.trend_user_values:
+        raise HTTPException(status_code=422, detail="Personalization values require a trend")
+
     prompt_meta = {
         "prompt_id": getattr(prompt_source, "id", None),
         "hidden_prompt": bool(is_trend_prompt(prompt_source)),
+        "trend_user_values": dict(body.trend_user_values) if is_trend_prompt(prompt_source) else {},
     }
 
     if body.model in _MJ_VIDEO_MODELS:

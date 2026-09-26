@@ -606,3 +606,46 @@ Branch: `feat/seedance25-identity-transfer`.
 - TDD RED: commit `aaf5a6252ce9465c31c6190e3be1baddaf39cf95` added a regression test and CI failed exactly because the expanded prompt did not raise.
 - Fix: `build_identity_transfer_prompt` now validates the fully expanded provider prompt against the existing Seedance 2.5 hard limit and raises before provider submission instead of sending an invalid payload.
 - The feature uses project skills `systematic-debugging`, `test-driven-development`, `requesting-code-review`, `verification-before-completion`, and `finishing-a-development-branch`; external scan also applied WondelAI clean-code/testing principles and Anthropic webapp-testing guidance. No relevant implementation skill was found in `Bambale0/claw`.
+
+
+---
+
+# Execution ledger — Personalized trend repeat fields
+
+Date: 2026-09-26.
+Baseline at implementation start: `3a174db2de8b774203bc7b6732c6f535c1cb7bfb`.
+Branch: `feat/trend-personalization-fields`.
+PR: #175.
+
+## User outcome
+- Trend authors can declare up to six safe user-editable values for repeat runs.
+- Initial presets include `Возраст`, `Имя`, `Надпись`, `Дата`, `Число`, and `Одежда`; admins may add a custom short label.
+- The repeat sheet shows only those declared values plus the user's reference photo. The canonical prompt remains server-owned and hidden.
+- Values are validated server-side, substituted into matching `{{Field}}` tokens when present, and also appended as explicit priority overrides so existing trends can add fields without rewriting their whole hidden prompt.
+- Numeric fields reject non-numeric input; undeclared keys are rejected; explicit empty field configuration disables legacy placeholder auto-discovery.
+- Telegram delegates a personalized trend to the same Mini App repeat sheet instead of exposing or duplicating prompt logic.
+
+## Tanyapi reuse audit
+- Inspected the live tanyapi worktrees before implementation:
+  - `/root/ksu-personalized-trend-fields`, commit `ab808e5` (`feat(trends): add personalized template fields`);
+  - `/root/ksu-trend-edit-fields`, commit `42f0e6150b50` (`fix(trends): edit fields on existing templates`).
+- Reused the product contract, not copied provider/business implementation: public schema + private prompt, admin-configured fields, server-side rendering/validation, and editable existing templates.
+
+## TDD / review findings
+- Existing branch work first stored the field schema inside `UserPrompt.tags`. Review found this is unsafe in APIX because `db.prompt_repository._normalize_tags` lowercases and truncates each tag to 32 characters.
+- Regression RED observed at exact commit `4b19d542e81be7c4677e7ecc6cd8efd1229396f7`: CI failed `test_explicit_user_fields_survive_repository_tag_normalization` after the encoded schema was lowercased/truncated.
+- Fix: explicit trend field configuration is now a first-class nullable JSON column `user_prompts.trend_user_fields` (migration `035_trend_user_fields`).
+  - `NULL` preserves legacy `{{Field}}` auto-discovery for old prompts;
+  - `[]` explicitly disables personalization;
+  - a populated list stores the normalized admin schema without tag normalization/truncation.
+- Trend create/update APIs accept `user_fields` explicitly; a compatibility read from legacy `settings.user_fields` is retained during the transition.
+- The run API only accepts `user_values`; the browser never receives or submits the hidden prompt.
+
+## Surfaces
+- Mini App: personalized repeat fields are shown before launch; upload no longer auto-runs when fields are configured.
+- Trend admin in Mini App: fields can be configured on new trends and changed on existing cards via `⚙ Поля при повторе`.
+- Telegram: personalized image/video trends open the canonical Mini App editor.
+- Marketing landing has no independent trend runner, so there is no duplicate personalization implementation there.
+
+## Skills
+Applied project skills: `systematic-debugging`, `test-driven-development`, `requesting-code-review`, `verification-before-completion`, `finishing-a-development-branch`.
