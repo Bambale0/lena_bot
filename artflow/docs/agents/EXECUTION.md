@@ -553,3 +553,49 @@ Date: 2026-09-26. Baseline: `63d9334` (`main`, clean). Branch: `fix/landing-paym
     - API landing endpoint verified live (`/api/web/landing`): `[{'key': 'tbank', 'provider': 'tbank', 'label': 'Карта | СБП', 'status': 'enabled'}, ...]`.
     - Health endpoint verified live: HTTP 200 (`https://apixbotai.com/api/v1/health`).
 
+
+---
+
+# Execution ledger — Seedance 2.5 Identity Transfer preset
+
+Date: 2026-09-26.
+Baseline: `0b8170e61da7b113692e94a39018ace541c72d3b`.
+Branch: `feat/seedance25-identity-transfer`.
+
+## Production evidence before implementation
+- KIE Seedance 2.5 receives both image and video references correctly; transport was already proven in production.
+- A controlled one-image/one-video edit using an unstructured replacement prompt mostly transferred appearance traits such as hair color but did not preserve facial identity well enough.
+- Re-running the same media with explicit role separation materially improved the result in operator review: `@Image1` as the identity/appearance authority and `@Video1` only for motion, camera, timing, lighting and scene.
+- A second A/B run with three photos of the same person was rated successful by the operator. `@Image1` remained the primary identity anchor while `@Image2` and `@Image3` supported head-angle consistency.
+- No adversarial mesh/noise/safety-evasion technique is part of this feature.
+
+## Intended outcome
+- Add a first-class Seedance 2.5 preset named `Замена персонажа` without creating a fake provider model.
+- Keep the normal Seedance 2.5 multimodal product unchanged.
+- Identity preset accepts 1–3 photos of the same person and exactly one source video.
+- Backend, not user-written prompt wording, assigns reference roles deterministically:
+  - `@Image1`: primary identity anchor;
+  - `@Image2..3`: same-person identity support;
+  - `@Video1`: motion/performance/camera/timing/background/lighting only.
+- Identity mode always uses source-video edit semantics: adaptive frame geometry, automatic provider duration, audio generation off.
+- User can choose `480p` or `720p`; the selected resolution is preserved through pricing and the KIE payload.
+
+## Surfaces
+- `telegram_bot`: dedicated `🎭 Замена персонажа` mode inside Seedance 2.5, 1–3 photo collection, source-video step, then 480p/720p choice.
+- `mini_app`: Seedance panel exposes the identity preset and validates 1–3 photos + exactly one source video before request.
+- `site/web`: Seedance Studio exposes the same preset and validation.
+- All three surfaces use the same backend provider contract and control token.
+
+## Test / safety contract
+- RED was observed at exact test commit `5c0180b91e46086722f2bda10bc636ce9026e327`: 12/12 new identity tests failed before implementation.
+- GREEN focused run after implementation: 72/72 Seedance/video tests passed.
+- Ruff passed for the touched Seedance runtime/adapter, Telegram video handler and new identity test.
+- Python compileall passed for `api` and `bot`.
+- Mini App TypeScript typecheck and production Vite build passed.
+- A broader legacy keyboard/UI test file still has pre-existing assertions unrelated to this diff; these are not introduced by Identity Transfer.
+
+## Control plane / product constraints
+- Pricing remains database-backed by the existing Seedance resolution variants; no new hardcoded mutable price is introduced.
+- The role prompt is a provider-specific technical contract required for deterministic multimodal semantics, not mutable marketing copy.
+- The preset does not promise exact biometric identity preservation; UI copy describes reference roles and recommended input quality.
+- No customer media or paid provider job is used by automated tests.
