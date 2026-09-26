@@ -99,6 +99,11 @@
         <small>1–3 фото одного человека задают внешность; 1 исходное видео задаёт только движение и сцену. Качество 480p / 720p выбирается выше.</small>
       </div>
       <div class="composer-row">
+        <label><span>🔢 Номер / цифры</span><input data-s25-identity-number type="text" inputmode="numeric" maxlength="12" placeholder="Например: 25" /></label>
+        <label><span>🎽 Одежда</span><input data-s25-identity-outfit type="text" maxlength="160" placeholder="Например: чёрная кожаная куртка" /></label>
+      </div>
+      <small>Для «Замены персонажа» эти поля необязательны и меняют только видимый номер/одежду, сохраняя лицо по фото-референсам.</small>
+      <div class="composer-row">
         <label class="check-line"><input data-s25-auto-duration type="checkbox" /><span>Auto duration</span></label>
         <label class="check-line"><input data-s25-generate-audio type="checkbox" checked /><span>Generate audio</span></label>
       </div>
@@ -209,6 +214,12 @@
       token("output_format", panel?.querySelector("[data-s25-output]")?.value === "mov" ? "mov" : "mp4"),
       token("generate_audio", identityTransfer ? false : Boolean(panel?.querySelector("[data-s25-generate-audio]")?.checked)),
       token("identity_transfer", identityTransfer),
+      ...(identityTransfer && String(panel?.querySelector("[data-s25-identity-number]")?.value || "").trim()
+        ? [token("identity_number", encodeURIComponent(String(panel?.querySelector("[data-s25-identity-number]")?.value || "").trim().slice(0, 12)))]
+        : []),
+      ...(identityTransfer && String(panel?.querySelector("[data-s25-identity-outfit]")?.value || "").trim()
+        ? [token("identity_outfit", encodeURIComponent(String(panel?.querySelector("[data-s25-identity-outfit]")?.value || "").trim().slice(0, 160)))]
+        : []),
       token("return_last_frame", Boolean(panel?.querySelector("[data-s25-return-frame]")?.checked)),
       token("web_search", Boolean(panel?.querySelector("[data-s25-web-search]")?.checked)),
       ...allVideos.slice(1).map((ref) => token("video_ref", ref)),
