@@ -4,6 +4,12 @@ from datetime import datetime
 from typing import Any
 
 from db.models import PromptStatus, UserPrompt
+from core.trend_user_fields import (
+    TrendUserFieldsError,
+    decode_trend_user_fields_tags,
+    encode_trend_user_fields_tag,
+    normalize_trend_user_fields,
+)
 
 TREND_TAG = "trend"
 TREND_VIDEO_TAG = "trend-video"
@@ -59,6 +65,13 @@ def trend_category_payload(category: str) -> dict[str, str]:
     return {"key": key, "title": meta["title"], "emoji": meta["emoji"]}
 
 
+def trend_user_fields(prompt: UserPrompt) -> list[dict[str, Any]]:
+    configured, fields = decode_trend_user_fields_tags(getattr(prompt, "tags", None))
+    if configured:
+        return fields
+    return normalize_trend_user_fields([], prompt=str(getattr(prompt, "prompt_text", "") or ""))
+
+
 def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
     """Structured resolver for legacy tag-backed trends.
 
@@ -89,6 +102,7 @@ def trend_settings(prompt: UserPrompt) -> dict[str, Any]:
         "kind": kind,
         "category": trend_category(prompt),
         "settings_version": 1,
+        "user_fields": trend_user_fields(prompt),
     }
 
 
@@ -116,6 +130,11 @@ def build_trend_tags(kind: str, settings: dict[str, Any] | None = None) -> list[
         tags.append(f"trend-resolution:{resolution}")
     if bool(settings.get("requires_reference")):
         tags.append("trend-requires-reference")
+    if "user_fields" in settings:
+        try:
+            tags.append(encode_trend_user_fields_tag(settings.get("user_fields")))
+        except TrendUserFieldsError as exc:
+            raise ValueError(str(exc)) from exc
     return list(dict.fromkeys(tags))
 
 
@@ -140,6 +159,7 @@ def trend_public_payload(prompt: UserPrompt) -> dict[str, Any]:
         "title": prompt.title,
         "description": prompt.description,
         "user_photo_hint": "Загрузите одно чёткое фото. Остальные настройки тренда уже сохранены.",
+        "user_fields": trend_user_fields(prompt),
         "preview_url": prompt.preview_url,
         "status": "active" if trend_is_public(prompt) else "inactive",
         "uses_count": int(prompt.uses_count or 0),
