@@ -31,15 +31,15 @@ def build_identity_transfer_prompt(user_prompt: str, *, image_count: int) -> str
     if image_count == 1:
         identity_intro = (
             "@Image1 is the sole authoritative identity and appearance reference "
-            "for the main woman."
+            "for the main person."
         )
         image_roles = "Use @Image1 as the identity anchor in every visible frame and angle."
         represented_by = "@Image1"
     else:
         extras = " and ".join(f"@Image{index}" for index in range(2, image_count + 1))
         identity_intro = (
-            "@Image1 is the primary identity and appearance reference for the main woman. "
-            f"{extras} are additional identity references for the same woman and must only "
+            "@Image1 is the primary identity and appearance reference for the main person. "
+            f"{extras} are additional identity references for the same person and must only "
             "reinforce the same identity across different head angles."
         )
         image_roles = (
@@ -53,13 +53,13 @@ def build_identity_transfer_prompt(user_prompt: str, *, image_count: int) -> str
 
 @Video1 is only the reference for motion, body movement, performance, camera movement, framing, timing, background, lighting and scene continuity.
 
-Replace only the main woman in @Video1 with the woman represented by {represented_by}.
+Replace only the main person in @Video1 with the person represented by {represented_by}.
 
 Preserve the same facial identity throughout the whole video: facial shape, eye shape and color, nose, lips, jawline, skin tone, age, hairline, hair color, hairstyle and recognizability.
 
 {image_roles}
 
-Do not inherit, preserve, average, morph or blend the original woman's facial identity from @Video1 with the identity from the image references.
+Do not inherit, preserve, average, morph or blend the original person's facial identity from @Video1 with the identity from the image references.
 Preserve all motion, pose, performance, camera work, framing, timing, environment, lighting and unrelated people from @Video1.
 Do not redesign the scene or change unrelated subjects."""
 
