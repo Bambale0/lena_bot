@@ -599,3 +599,10 @@ Branch: `feat/seedance25-identity-transfer`.
 - The role prompt is a provider-specific technical contract required for deterministic multimodal semantics, not mutable marketing copy.
 - The preset does not promise exact biometric identity preservation; UI copy describes reference roles and recommended input quality.
 - No customer media or paid provider job is used by automated tests.
+
+
+## Review follow-up
+- Open review found one provider-boundary edge case: the public Seedance 2.5 input allows a 30,000-character user prompt, but Identity Transfer prepends deterministic role instructions. Without a second check, the final provider prompt could exceed KIE's 30,000-character contract.
+- TDD RED: commit `aaf5a6252ce9465c31c6190e3be1baddaf39cf95` added a regression test and CI failed exactly because the expanded prompt did not raise.
+- Fix: `build_identity_transfer_prompt` now validates the fully expanded provider prompt against the existing Seedance 2.5 hard limit and raises before provider submission instead of sending an invalid payload.
+- The feature uses project skills `systematic-debugging`, `test-driven-development`, `requesting-code-review`, `verification-before-completion`, and `finishing-a-development-branch`; external scan also applied WondelAI clean-code/testing principles and Anthropic webapp-testing guidance. No relevant implementation skill was found in `Bambale0/claw`.
