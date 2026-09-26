@@ -1,12 +1,33 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from bot.handlers import payment
-from bot.keyboards.payment import plan_payment_methods_kb, topup_kb
+from bot.i18n import t
+from bot.keyboards.payment import plan_payment_methods_kb, rub_methods_kb, topup_kb
+
+ROOT = Path(__file__).resolve().parents[1]
+
+# The RUB acquirer is an implementation detail. Users read its brand name on the
+# payment button as "only this bank is accepted", so the copy advertises the rails.
+# The bare "tbank" token is a provider key in code, not user-visible branding.
+ACQUIRER_BRANDS = ("t-bank", "т-банк", "тбанк", "тинькофф")
+
+
+def _texts(markup) -> list[str]:
+    return [button.text for row in markup.inline_keyboard for button in row]
+
+
+def _enable_rub_only(monkeypatch) -> None:
+    monkeypatch.setattr("bot.keyboards.payment.settings.TBANK_TERMINAL_KEY", "terminal", raising=False)
+    monkeypatch.setattr("bot.keyboards.payment.settings.TBANK_PASSWORD", "password", raising=False)
+    monkeypatch.setattr("bot.keyboards.payment.settings.TRIBUTE_API_KEY", "", raising=False)
+    monkeypatch.setattr("bot.keyboards.payment.settings.CRYPTOBOT_TOKEN", "", raising=False)
+    monkeypatch.setattr("bot.keyboards.payment.settings.LAVA_API_KEY", "", raising=False)
 
 
 def _callbacks(markup) -> list[str | None]:
@@ -103,3 +124,52 @@ async def test_legacy_usd_callback_routes_to_tribute_not_lava(monkeypatch) -> No
     await payment.cb_topup_usd(call, AsyncMock(), db_user)
 
     tribute_handler.assert_awaited_once()
+
+
+def test_rub_payment_buttons_offer_card_and_sbp_without_acquirer_branding(monkeypatch) -> None:
+    plan = SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999")
+    _enable_rub_only(monkeypatch)
+
+    russian = _texts(plan_payment_methods_kb(plan, lang="ru")) + _texts(rub_methods_kb(lang="ru"))
+    english = _texts(plan_payment_methods_kb(plan, lang="en")) + _texts(rub_methods_kb(lang="en"))
+
+    assert "💳 Карта | СБП" in russian
+    assert "💳 Card | SBP" in english
+    for text in russian + english:
+        assert not any(brand in text.lower() for brand in ACQUIRER_BRANDS), text
+
+
+def test_topup_rub_copy_does_not_name_the_acquirer() -> None:
+    assert t("topup_rub", "ru") == "💳 Карта | СБП"
+    assert t("topup_rub", "en") == "💳 Card | SBP"
+
+    for lang in ("ru", "en"):
+        title = t("topup_tbank_title", lang)
+        assert "СБП" in title or "SBP" in title
+        assert not any(brand in title.lower() for brand in ACQUIRER_BRANDS), title
+
+
+def test_billing_api_label_advertises_rails_not_acquirer(monkeypatch) -> None:
+    from api.web import billing
+
+    monkeypatch.setattr(billing.settings, "TBANK_TERMINAL_KEY", "terminal", raising=False)
+    monkeypatch.setattr(billing.settings, "TBANK_PASSWORD", "password", raising=False)
+    monkeypatch.setattr(billing.settings, "CRYPTOBOT_TOKEN", "", raising=False)
+    monkeypatch.setattr(billing.settings, "TRIBUTE_API_KEY", "", raising=False)
+    monkeypatch.setattr(billing.settings, "LAVA_API_KEY", "", raising=False)
+
+    methods = billing.enabled_payment_methods()
+
+    assert [item["key"] for item in methods] == ["tbank"]
+    assert [item["label"] for item in methods] == ["Карта | СБП"]
+
+
+def test_payment_surfaces_do_not_render_acquirer_branding() -> None:
+    balance_sheet = (ROOT / "webapp/src/components/balance-sheet.tsx").read_text(encoding="utf-8")
+    legacy_site = (ROOT / "webapp/src/main.jsx").read_text(encoding="utf-8")
+
+    assert 'title: "Карта | СБП"' in balance_sheet
+    assert "💳 Карта | СБП" in legacy_site
+
+    for source in (balance_sheet, legacy_site):
+        assert not any(brand in source.lower() for brand in ACQUIRER_BRANDS)

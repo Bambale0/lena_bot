@@ -83,7 +83,7 @@ def _promo_success_text(result: repo.PromoRedeemResult) -> str:
         return (
             "✅ <b>Промокод активирован</b>\n\n"
             f"Скидка: <b>{value}</b>\n"
-            "Она применится к следующей оплате T-Bank, CryptoBot или USD."
+            "Она применится к следующей оплате картой, CryptoBot или USD."
         )
     return (
         "✅ <b>Промокод активирован</b>\n\n"
@@ -503,7 +503,7 @@ async def cb_topup_rub(
         await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
 
     await call.message.edit_text(  # type: ignore[union-attr]
-        ((f"💳 <b>T-Bank</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(pay_amount)} ₽</b>" if lang == "ru" else f"💳 <b>T-Bank</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(pay_amount)} ₽</b>") + discount_text),
+        ((f"💳 <b>Карта | СБП</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(pay_amount)} ₽</b>" if lang == "ru" else f"💳 <b>Card | SBP</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(pay_amount)} ₽</b>") + discount_text),
         reply_markup=payment_link_kb(
             "💳 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
             payment.payment_url,

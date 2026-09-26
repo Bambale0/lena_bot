@@ -50,14 +50,14 @@ _RU = {
 
     # Пополнение
     "topup_title": "💳 <b>Пополнение баланса</b>\n\nВыбери способ:",
-    "topup_rub": "💳 Рубли (T-Bank)",
+    "topup_rub": "💳 Карта | СБП",
     "topup_crypto": "🪙 Криптовалюта (USDT)",
     "topup_stars": "⭐ Telegram Stars",
     "topup_select_plan": "Выбери тариф:",
     "topup_stars_title": "⭐ <b>Оплата Telegram Stars</b>",
     "topup_stars_desc": "Тариф: {label}\nСтоимость: <b>{stars} ⭐</b>\n\nНажми кнопку ниже для оплаты.",
     "topup_success": "✅ Оплата подтверждена!\nЗачислено: <b>+{credits} 💋</b>\nБаланс: <b>{balance} 💋</b>",
-    "topup_tbank_title": "🏦 <b>Оплата через Т-Банк</b>",
+    "topup_tbank_title": "🏦 <b>Оплата картой или через СБП</b>",
     "topup_tbank_desc": "Тариф: {label}\nСумма: <b>{amount} ₽</b>\n\nОткрой ссылку для оплаты картой или через СБП.\n<i>После успешной оплаты 💋 зачислятся автоматически.</i>",
     "topup_crypto_title": "🪙 <b>Оплата криптой</b>",
     "topup_crypto_desc": "Тариф: {label}\nСумма: <b>{amount} USDT</b>\n\nНажми кнопку для оплаты в CryptoBot.\n<i>После оплаты 💋 зачислятся автоматически.</i>",
@@ -272,14 +272,14 @@ _EN = {
 
     # Top-up
     "topup_title": "💳 <b>Top Up Balance</b>\n\nChoose a payment method:",
-    "topup_rub": "💳 Rubles (T-Bank)",
+    "topup_rub": "💳 Card | SBP",
     "topup_crypto": "🪙 Crypto (USDT)",
     "topup_stars": "⭐ Telegram Stars",
     "topup_select_plan": "Choose a plan:",
     "topup_stars_title": "⭐ <b>Pay with Telegram Stars</b>",
     "topup_stars_desc": "Plan: {label}\nCost: <b>{stars} ⭐</b>\n\nTap the button below to pay.",
     "topup_success": "✅ Payment confirmed!\nAdded: <b>+{credits} 💋</b>\nBalance: <b>{balance} 💋</b>",
-    "topup_tbank_title": "🏦 <b>Pay via T-Bank</b>",
+    "topup_tbank_title": "🏦 <b>Pay by card or SBP</b>",
     "topup_tbank_desc": "Plan: {label}\nAmount: <b>{amount} ₽</b>\n\nOpen the link to pay by card or SBP.\n<i>will be added automatically after successful payment.</i>",
     "topup_crypto_title": "🪙 <b>Pay with Crypto</b>",
     "topup_crypto_desc": "Plan: {label}\nAmount: <b>{amount} USDT</b>\n\nTap the button to pay via CryptoBot.\n<i>will be added automatically after payment.</i>",
