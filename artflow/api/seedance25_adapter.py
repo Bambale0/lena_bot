@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
+from urllib.parse import unquote
 from typing import Any
 
 from api.seedance25_identity import validate_identity_transfer_refs
@@ -224,6 +225,10 @@ def _control_payload(raw_values: list[str]) -> tuple[list[str], list[str], dict[
             options["generate_audio"] = _bool(data, True)
         elif key == "identity_transfer":
             options["identity_transfer"] = _bool(data, False)
+        elif key == "identity_number":
+            options["identity_number"] = unquote(data)
+        elif key == "identity_outfit":
+            options["identity_outfit"] = unquote(data)
         elif key == "return_last_frame":
             options["return_last_frame"] = _bool(data, False)
         elif key == "web_search":
