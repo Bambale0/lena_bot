@@ -14,9 +14,14 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
+from urllib.parse import unquote
 from typing import Any
 
-from api.seedance25_identity import validate_identity_transfer_refs
+from api.seedance25_identity import (
+    normalize_identity_number,
+    normalize_identity_outfit,
+    validate_identity_transfer_refs,
+)
 
 MODEL_KEY = "bytedance/seedance-2-5"
 DISPLAY_NAME = "🌱 Seedance 2.5"
@@ -224,6 +229,10 @@ def _control_payload(raw_values: list[str]) -> tuple[list[str], list[str], dict[
             options["generate_audio"] = _bool(data, True)
         elif key == "identity_transfer":
             options["identity_transfer"] = _bool(data, False)
+        elif key == "identity_number":
+            options["identity_number"] = unquote(data)
+        elif key == "identity_outfit":
+            options["identity_outfit"] = unquote(data)
         elif key == "return_last_frame":
             options["return_last_frame"] = _bool(data, False)
         elif key == "web_search":
@@ -461,6 +470,8 @@ def _install_seedance25_miniapp_normalizer(routes: Any) -> None:
         if identity_transfer:
             try:
                 validate_identity_transfer_refs(images=image_refs, videos=video_refs)
+                normalize_identity_number(str(control_options.get("identity_number") or ""))
+                normalize_identity_outfit(str(control_options.get("identity_outfit") or ""))
             except ValueError as exc:
                 raise routes.HTTPException(status_code=422, detail=str(exc)) from exc
 

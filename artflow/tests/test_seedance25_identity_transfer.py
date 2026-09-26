@@ -143,6 +143,8 @@ async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_r
         audio_ids=[
             "__apix_seedance25:identity_transfer=true",
             "__apix_seedance25:generate_audio=false",
+            "__apix_seedance25:identity_number=25",
+            "__apix_seedance25:identity_outfit=black%20leather%20jacket",
         ],
     )
 
@@ -161,6 +163,8 @@ async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_r
     assert "@Image2" in provider_input["prompt"]
     assert "@Image3" in provider_input["prompt"]
     assert "@Video1" in provider_input["prompt"]
+    assert "Number / digits: 25" in provider_input["prompt"]
+    assert "Clothing / outfit: black leather jacket" in provider_input["prompt"]
     assert "keep the source outfit" in provider_input["prompt"]
 
 
@@ -223,3 +227,61 @@ def test_identity_transfer_rejects_user_prompt_that_expands_past_provider_limit(
 
     with pytest.raises(ValueError, match="30,000"):
         build_identity_transfer_prompt("x" * 30_000, image_count=3)
+
+
+def test_identity_prompt_supports_structured_number_and_outfit_overrides() -> None:
+    from api.seedance25_identity import build_identity_transfer_prompt
+
+    prompt = build_identity_transfer_prompt(
+        "",
+        image_count=3,
+        number_text="25",
+        outfit_text="чёрная кожаная куртка",
+    )
+
+    assert "Number / digits: 25" in prompt
+    assert "Clothing / outfit: чёрная кожаная куртка" in prompt
+    assert "priority appearance changes" in prompt
+    assert "@Image1" in prompt and "@Video1" in prompt
+
+
+def test_identity_prompt_rejects_invalid_structured_overrides() -> None:
+    from api.seedance25_identity import build_identity_transfer_prompt
+
+    with pytest.raises(ValueError, match="number"):
+        build_identity_transfer_prompt("", image_count=1, number_text="twenty five")
+
+    with pytest.raises(ValueError, match="outfit"):
+        build_identity_transfer_prompt("", image_count=1, outfit_text="x" * 161)
+
+
+def test_identity_override_control_tokens_are_typed_options() -> None:
+    _audios, _videos, options = seedance25_adapter._control_payload(
+        [
+            "__apix_seedance25:identity_transfer=true",
+            "__apix_seedance25:identity_number=25",
+            "__apix_seedance25:identity_outfit=black%20leather%20jacket",
+        ]
+    )
+
+    assert options["identity_number"] == "25"
+    assert options["identity_outfit"] == "black leather jacket"
+
+
+def test_seedance_identity_surfaces_expose_number_and_clothing_fields() -> None:
+    mini = Path("webapp/src/lib/seedance25-miniapp-enhancer.ts").read_text(encoding="utf-8")
+    site = Path("landing/js/seedance25-studio.js").read_text(encoding="utf-8")
+    bot = Path("bot/keyboards/models.py").read_text(encoding="utf-8")
+
+    assert 'data-seedance25="identityNumber"' in mini
+    assert 'data-seedance25="identityOutfit"' in mini
+    assert 'token("identity_number"' in mini
+    assert 'token("identity_outfit"' in mini
+
+    assert "data-s25-identity-number" in site
+    assert "data-s25-identity-outfit" in site
+    assert 'token("identity_number"' in site
+    assert 'token("identity_outfit"' in site
+
+    assert "🎽 Одежда" in bot
+    assert "🔢 Номер" in bot

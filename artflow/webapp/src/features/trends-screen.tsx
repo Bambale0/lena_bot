@@ -9,7 +9,7 @@ import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import { copyTrendLink, openTrendRunner } from "@/features/trend-runner";
 import { MiniAppApi } from "@/lib/api";
 import { readTelegramInitData } from "@/lib/telegram";
-import type { ModelInfo, TrendItem } from "@/lib/types";
+import type { ModelInfo, TrendItem, TrendUserField } from "@/lib/types";
 import { cn, safeExternalUrl } from "@/lib/utils";
 
 interface TrendsScreenProps {
@@ -44,6 +44,34 @@ const filters = [
   { value: "image" as const, label: "Фото", icon: ImageIcon },
   { value: "video" as const, label: "Видео", icon: Film },
 ];
+
+const TREND_FIELD_PRESETS = ["Номер", "Одежда", "Имя", "Возраст", "Надпись"] as const;
+
+function trendFieldFromLabel(label: string): TrendUserField {
+  const clean = label.trim().slice(0, 64);
+  const normalized = clean.toLocaleLowerCase("ru-RU");
+  const preset: Record<string, Partial<TrendUserField> & { key: string }> = {
+    "номер": { key: "number", type: "number", placeholder: "Например: 25", max_length: 6 },
+    "одежда": { key: "outfit", type: "text", placeholder: "Например: чёрная кожаная куртка", max_length: 80 },
+    "имя": { key: "name", type: "text", placeholder: "Например: Анна", max_length: 80 },
+    "возраст": { key: "age", type: "number", placeholder: "Например: 30", max_length: 3 },
+    "надпись": { key: "caption", type: "text", placeholder: "Текст, который должен появиться", max_length: 120 },
+  };
+  const known = preset[normalized];
+  const fallbackKey = clean
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48) || `field_${Date.now().toString(36)}`;
+  return {
+    key: known?.key || fallbackKey,
+    label: clean,
+    type: (known?.type as "text" | "number" | undefined) || "text",
+    required: false,
+    placeholder: known?.placeholder || "",
+    max_length: known?.max_length || 160,
+  };
+}
 
 function normalizeModels(value: unknown): ModelInfo[] {
   if (Array.isArray(value)) return value as ModelInfo[];
@@ -157,6 +185,10 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
   const [ratio, setRatio] = useState("");
   const [quality, setQuality] = useState("");
   const [resolution, setResolution] = useState("");
+  const [minReferences, setMinReferences] = useState(1);
+  const [maxReferences, setMaxReferences] = useState(1);
+  const [userFields, setUserFields] = useState<TrendUserField[]>([]);
+  const [customFieldName, setCustomFieldName] = useState("");
   const [imageModels, setImageModels] = useState<ModelInfo[]>([]);
   const [videoModels, setVideoModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -169,6 +201,19 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
   const durationOptions = useMemo(() => modelDurations(selectedModel), [selectedModel]);
   const durationIndex = Math.max(0, durationOptions.indexOf(duration));
   const selectedDuration = durationOptions[durationIndex] ?? duration;
+  const referenceCapacity = Math.max(1, Math.min(8, Number(selectedModel?.max_refs || 8)));
+
+  const addUserField = (label: string) => {
+    const field = trendFieldFromLabel(label);
+    if (!field.label || userFields.length >= 6) return;
+    if (userFields.some((item) => item.key === field.key || item.label.toLocaleLowerCase("ru-RU") === field.label.toLocaleLowerCase("ru-RU"))) return;
+    setUserFields((current) => [...current, field]);
+    setCustomFieldName("");
+  };
+
+  const removeUserField = (key: string) => {
+    setUserFields((current) => current.filter((field) => field.key !== key));
+  };
 
   useEffect(() => {
     if (!open || imageModels.length || videoModels.length || loadingModels) return;
@@ -197,6 +242,11 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
     if (kind !== "video") return;
     if (!durationOptions.includes(duration)) setDuration(durationOptions[0] || 5);
   }, [duration, durationOptions, kind]);
+
+  useEffect(() => {
+    setMaxReferences((current) => Math.min(referenceCapacity, Math.max(1, current)));
+    setMinReferences((current) => Math.min(referenceCapacity, Math.max(1, current)));
+  }, [referenceCapacity]);
 
   async function uploadPreview(file: File) {
     if (uploading) return;
@@ -240,7 +290,10 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
             ratio: ratio || undefined,
             quality: kind === "image" ? quality || undefined : undefined,
             resolution: kind === "video" ? resolution || undefined : undefined,
-            requires_reference: kind === "image" || scenario === "image",
+            requires_reference: true,
+            min_references: Math.min(minReferences, maxReferences),
+            max_references: Math.max(minReferences, maxReferences),
+            user_fields: userFields,
           },
         }),
       });
@@ -249,6 +302,10 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       setPromptTemplate("");
       setPreviewUrl("");
       setCategory("animals");
+      setMinReferences(1);
+      setMaxReferences(1);
+      setUserFields([]);
+      setCustomFieldName("");
       toast.success(category === "animals" ? "Тренд добавлен в «С животными»" : "Тренд опубликован");
       setOpen(false);
       onCreated();
@@ -350,6 +407,111 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
         </div>
       )}
 
+      <div className="grid gap-2 rounded-xl border border-border bg-card/50 p-3">
+        <div>
+          <p className="text-xs font-semibold">Что пользователь сможет менять при повторе</p>
+          <p className="text-[10px] text-muted-foreground">
+            Значения остаются отдельными полями и безопасно добавляются к скрытому prompt на backend. Фото можно использовать как дополнительные референсы.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">
+            Минимум фото
+            <input
+              type="number"
+              min={1}
+              max={referenceCapacity}
+              value={minReferences}
+              className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs"
+              onChange={(event) => {
+                const value = Math.min(referenceCapacity, Math.max(1, Number(event.target.value || 1)));
+                setMinReferences(value);
+                setMaxReferences((current) => Math.max(current, value));
+              }}
+            />
+          </label>
+          <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">
+            Максимум фото
+            <input
+              type="number"
+              min={minReferences}
+              max={referenceCapacity}
+              value={maxReferences}
+              className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs"
+              onChange={(event) => setMaxReferences(
+                Math.min(referenceCapacity, Math.max(minReferences, Number(event.target.value || minReferences))),
+              )}
+            />
+          </label>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {TREND_FIELD_PRESETS.map((label) => {
+            const active = userFields.some((field) => field.label === label);
+            return (
+              <Button
+                key={label}
+                type="button"
+                size="sm"
+                variant={active ? "default" : "outline"}
+                disabled={!active && userFields.length >= 6}
+                onClick={() => {
+                  if (active) {
+                    const field = userFields.find((item) => item.label === label);
+                    if (field) removeUserField(field.key);
+                  } else {
+                    addUserField(label);
+                  }
+                }}
+              >
+                {active ? "✓ " : "+ "}{label}
+              </Button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-[1fr_auto] gap-2">
+          <input
+            value={customFieldName}
+            maxLength={64}
+            className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs"
+            placeholder="Другое поле, например: Цвет волос"
+            onChange={(event) => setCustomFieldName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addUserField(customFieldName);
+              }
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!customFieldName.trim() || userFields.length >= 6}
+            onClick={() => addUserField(customFieldName)}
+          >
+            Добавить
+          </Button>
+        </div>
+
+        {userFields.length ? (
+          <div className="grid gap-1.5">
+            {userFields.map((field) => (
+              <div key={field.key} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background/70 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium">{field.label}</p>
+                  <p className="text-[9px] text-muted-foreground">{`{{${field.key}}}`} · {field.type === "number" ? "число" : "текст"} · необязательно</p>
+                </div>
+                <Button type="button" variant="ghost" size="sm" onClick={() => removeUserField(field.key)}>Удалить</Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[10px] text-muted-foreground">Без полей пользователь меняет только фото-референсы.</p>
+        )}
+      </div>
+
       <Button variant="outline" disabled={uploading} onClick={() => fileRef.current?.click()}>
         <Upload className="size-4" />
         {uploading ? "Загружаю…" : previewUrl ? "Заменить preview" : "Загрузить preview"}
@@ -410,7 +572,7 @@ function TrendsScreen({
           </div>
           <details className="apix-help max-w-xl">
             <summary>Как повторить тренд</summary>
-            <p className="pb-2">Выберите шаблон, загрузите одно фото — upload и генерация запустятся автоматически. Модель, скрытый промпт и provider-параметры остаются на backend.</p>
+            <p className="pb-2">Выберите шаблон, добавьте нужные фото-референсы и заполните доступные поля — например номер или одежду. Модель, скрытый prompt и provider-параметры остаются на backend.</p>
           </details>
         </div>
         <Button variant="outline" size="icon" className="size-9 min-h-9" disabled={loading} onClick={onRefresh} aria-label="Обновить тренды">

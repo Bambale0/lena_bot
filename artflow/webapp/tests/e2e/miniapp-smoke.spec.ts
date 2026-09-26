@@ -74,6 +74,24 @@ const trends = [
     category_emoji: "🎬",
     uses_count: 5,
   },
+  {
+    id: 103,
+    kind: "video",
+    title: "Персональный образ",
+    description: "Меняем номер, одежду и референсы",
+    user_photo_hint: "Добавьте 1–3 фото",
+    preview_url: "https://example.test/custom-trend.mp4",
+    category: "style",
+    category_title: "Образы",
+    category_emoji: "💫",
+    min_references: 1,
+    max_references: 3,
+    user_fields: [
+      { key: "number", label: "Номер", type: "number", required: false, placeholder: "25", max_length: 6 },
+      { key: "outfit", label: "Одежда", type: "text", required: false, placeholder: "Красное платье", max_length: 80 },
+    ],
+    uses_count: 1,
+  },
 ];
 
 async function mockApi(page: import("@playwright/test").Page) {
@@ -85,6 +103,7 @@ async function mockApi(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: trends }));
   await page.route("**/api/v1/trends/101", (route) => route.fulfill({ json: trends[0] }));
+  await page.route("**/api/v1/trends/103", (route) => route.fulfill({ json: trends[2] }));
   await page.route("**/api/v1/trends/101/link", (route) => route.fulfill({ json: { link: "https://t.me/apix_bot?startapp=trend_101" } }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: plans }));
   await page.route("**/api/v1/referrals", (route) => route.fulfill({ json: {
@@ -215,4 +234,66 @@ test("one-photo trend runner uploads and runs without exposing generation contro
   expect(runPayload).not.toHaveProperty("prompt");
   expect(runPayload).not.toHaveProperty("ratio");
   expect(runPayload).not.toHaveProperty("duration");
+});
+
+
+test("customizable trend runner sends multiple references plus number and clothing", async ({ page }) => {
+  let uploadIndex = 0;
+  let runPayload: Record<string, unknown> | null = null;
+
+  await page.route("**/api/v1/trends/upload", async (route) => {
+    uploadIndex += 1;
+    await route.fulfill({
+      json: {
+        asset_id: `apixasset.custom.${uploadIndex}.signature`,
+        url: `https://example.test/custom-${uploadIndex}.jpg`,
+        kind: "image",
+        filename: `custom-${uploadIndex}.jpg`,
+      },
+    });
+  });
+  await page.route("**/api/v1/trends/103/run", async (route) => {
+    runPayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      json: {
+        ok: true,
+        credits: 90,
+        task: {
+          id: 9003,
+          task_id: "web:custom-trend",
+          model: "Seedance 2.5",
+          gen_type: "video",
+          prompt: "",
+          prompt_hidden: true,
+          status: "pending",
+          result_url: null,
+          result_urls: [],
+          credits_spent: 10,
+          created_at: new Date().toISOString(),
+        },
+      },
+    });
+  });
+
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("tab", { name: "Тренды" }).click();
+  await page.getByText("Персональный образ").first().click();
+
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Персональный образ/ });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Номер").fill("25");
+  await dialog.getByLabel("Одежда").fill("чёрная кожаная куртка");
+  await dialog.locator('input[type="file"][multiple]').setInputFiles([
+    { name: "front.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+    { name: "angle.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+  ]);
+  await dialog.getByRole("button", { name: "Создать →" }).click();
+
+  await expect(page.getByRole("dialog", { name: /Задача #9003/ })).toBeVisible();
+  expect(runPayload).toMatchObject({
+    asset_ids: ["apixasset.custom.1.signature", "apixasset.custom.2.signature"],
+    user_values: { number: "25", outfit: "чёрная кожаная куртка" },
+  });
+  expect(runPayload).not.toHaveProperty("prompt");
+  expect(runPayload).not.toHaveProperty("model");
 });

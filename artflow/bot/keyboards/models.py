@@ -980,6 +980,8 @@ def video_params_kb(
     ref_count: int | None = None,
     next_label: str = "▶️ Далее: Промпт",
     identity_transfer: bool = False,
+    identity_number: str | None = None,
+    identity_outfit: str | None = None,
 ) -> InlineKeyboardMarkup:
     caps = VIDEO_CAPS.get(model_key, {})
     builder = InlineKeyboardBuilder()
@@ -1041,6 +1043,17 @@ def video_params_kb(
         )
     if caps.get("has_seed"):
         builder.row(InlineKeyboardButton(text="🌱 Seed", callback_data="vpar_omni:seed"))
+
+    if identity_transfer:
+        number_label = f"🔢 Номер: {identity_number}" if identity_number else "🔢 Номер"
+        outfit_preview = str(identity_outfit or "").strip()
+        if len(outfit_preview) > 18:
+            outfit_preview = outfit_preview[:18] + "…"
+        outfit_label = f"🎽 Одежда: {outfit_preview}" if outfit_preview else "🎽 Одежда"
+        builder.row(
+            InlineKeyboardButton(text=number_label, callback_data="vpar_identity:number"),
+            InlineKeyboardButton(text=outfit_label, callback_data="vpar_identity:outfit"),
+        )
 
     builder.row(InlineKeyboardButton(text=next_label, callback_data="vpar_next"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="vpar_back"))

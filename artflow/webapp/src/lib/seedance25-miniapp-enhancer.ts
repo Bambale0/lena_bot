@@ -17,6 +17,8 @@ type Seedance25Options = {
   returnLastFrame: boolean;
   webSearch: boolean;
   identityTransfer: boolean;
+  identityNumber: string;
+  identityOutfit: string;
   videoFiles: File[];
   audioFiles: File[];
   videoRefs: string[];
@@ -36,6 +38,8 @@ const DEFAULT_OPTIONS: Seedance25Options = {
   returnLastFrame: false,
   webSearch: false,
   identityTransfer: false,
+  identityNumber: "",
+  identityOutfit: "",
   videoFiles: [],
   audioFiles: [],
   videoRefs: [],
@@ -170,6 +174,19 @@ function renderPanel(): HTMLElement {
     <p class="text-[10px] text-muted-foreground">
       В этом режиме фото задают внешность, а видео — только движение и сцену. Качество 480p / 720p выбирается в параметрах генерации.
     </p>
+    <div class="grid min-w-0 gap-2 sm:grid-cols-2">
+      <label class="grid min-w-0 gap-1 text-xs font-medium">
+        🔢 Номер / цифры
+        <input data-seedance25="identityNumber" inputmode="numeric" maxlength="12" class="w-full rounded-md border bg-background px-2 py-2 text-xs" placeholder="Например: 25" />
+      </label>
+      <label class="grid min-w-0 gap-1 text-xs font-medium">
+        🎽 Одежда
+        <input data-seedance25="identityOutfit" maxlength="160" class="w-full rounded-md border bg-background px-2 py-2 text-xs" placeholder="Например: чёрная кожаная куртка" />
+      </label>
+    </div>
+    <p class="text-[10px] text-muted-foreground">
+      Поля необязательны. Если заполнить их, Seedance изменит только номер/одежду персонажа, не отдавая лицу из исходного видео приоритет над фото.
+    </p>
     <label class="flex min-w-0 items-center gap-2 rounded-md border bg-background/60 px-2 py-2 text-xs font-medium">
       <input data-seedance25="webSearch" type="checkbox" />
       Web search grounding
@@ -183,6 +200,8 @@ function renderPanel(): HTMLElement {
   const returnLastFrame = panel.querySelector<HTMLInputElement>('[data-seedance25="returnLastFrame"]');
   const webSearch = panel.querySelector<HTMLInputElement>('[data-seedance25="webSearch"]');
   const identityTransfer = panel.querySelector<HTMLInputElement>('[data-seedance25="identityTransfer"]');
+  const identityNumber = panel.querySelector<HTMLInputElement>('[data-seedance25="identityNumber"]');
+  const identityOutfit = panel.querySelector<HTMLInputElement>('[data-seedance25="identityOutfit"]');
   const videoFiles = panel.querySelector<HTMLInputElement>('[data-seedance25="videoFiles"]');
   const audioFiles = panel.querySelector<HTMLInputElement>('[data-seedance25="audioFiles"]');
   const videoRefs = panel.querySelector<HTMLTextAreaElement>('[data-seedance25="videoRefs"]');
@@ -195,6 +214,8 @@ function renderPanel(): HTMLElement {
   if (returnLastFrame) returnLastFrame.checked = current.returnLastFrame;
   if (webSearch) webSearch.checked = current.webSearch;
   if (identityTransfer) identityTransfer.checked = current.identityTransfer;
+  if (identityNumber) identityNumber.value = current.identityNumber;
+  if (identityOutfit) identityOutfit.value = current.identityOutfit;
   if (videoRefs) videoRefs.value = current.videoRefs.join("\n");
   if (audioRefs) audioRefs.value = current.audioRefs.join("\n");
 
@@ -207,6 +228,8 @@ function renderPanel(): HTMLElement {
       returnLastFrame: Boolean(returnLastFrame?.checked),
       webSearch: Boolean(webSearch?.checked),
       identityTransfer: Boolean(identityTransfer?.checked),
+      identityNumber: (identityNumber?.value || "").trim().slice(0, 12),
+      identityOutfit: (identityOutfit?.value || "").trim().slice(0, 160),
       videoFiles: Array.from(videoFiles?.files || []).slice(0, MAX_VIDEOS),
       audioFiles: Array.from(audioFiles?.files || []).slice(0, MAX_AUDIOS),
       videoRefs: splitLines(videoRefs?.value || "", MAX_VIDEOS),
@@ -294,6 +317,12 @@ function patchCreateVideo(): void {
         token("output_format", options.outputFormat),
         token("generate_audio", options.identityTransfer ? false : options.generateAudio),
         token("identity_transfer", options.identityTransfer),
+        ...(options.identityTransfer && options.identityNumber
+          ? [token("identity_number", encodeURIComponent(options.identityNumber))]
+          : []),
+        ...(options.identityTransfer && options.identityOutfit
+          ? [token("identity_outfit", encodeURIComponent(options.identityOutfit))]
+          : []),
         token("return_last_frame", options.returnLastFrame),
         token("web_search", options.webSearch),
         ...videoRefs.slice(1).map((url) => token("video_ref", url)),
