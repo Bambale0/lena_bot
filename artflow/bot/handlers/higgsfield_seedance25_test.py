@@ -629,6 +629,7 @@ async def run(call: CallbackQuery, state: FSMContext) -> None:
         return
 
     await state.update_data(hf25_last_task_id=task_id)
+    result_markup = _dashboard_kb({**data, "hf25_last_task_id": task_id})
     await status_message.edit_text(
         "🧬 <b>Seedance 2.5 Video Edit</b>\n\n"
         f"✅ Task: <code>{html.escape(task_id)}</code>\n"
@@ -656,20 +657,18 @@ async def run(call: CallbackQuery, state: FSMContext) -> None:
             await call.message.answer(  # type: ignore[union-attr]
                 "✅ Результат готов:\n" + html.escape(url)
             )
-        fresh = await _data(state)
         await status_message.edit_text(
             "✅ <b>Seedance 2.5 Video Edit completed</b>\n\n"
             f"Task: <code>{html.escape(task_id)}</code>",
-            reply_markup=_dashboard_kb(fresh),
+            reply_markup=result_markup,
         )
 
     async def on_failure(error: str) -> None:
-        fresh = await _data(state)
         await status_message.edit_text(
             "❌ <b>Seedance 2.5 Video Edit failed</b>\n\n"
             f"Task: <code>{html.escape(task_id)}</code>\n"
             f"{html.escape(error)}",
-            reply_markup=_dashboard_kb(fresh),
+            reply_markup=result_markup,
         )
 
     asyncio.create_task(
