@@ -3,13 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from db.models import PromptStatus, UserPrompt
 from core.trend_user_fields import (
     TrendUserFieldsError,
     decode_trend_user_fields_tags,
     encode_trend_user_fields_tag,
     normalize_trend_user_fields,
 )
+from db.models import PromptStatus, UserPrompt
 
 TREND_TAG = "trend"
 TREND_VIDEO_TAG = "trend-video"
