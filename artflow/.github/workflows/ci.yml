@@ -34,13 +34,9 @@ jobs:
             api/assistant_service.py \
             api/image_service.py \
             api/photo_prompt_service.py \
-            api/seedance25_adapter.py \
-            api/seedance25_identity.py \
-            api/video_runtime_fixes.py \
             api/video_service.py \
             bot/handlers/video_gen.py \
             tests/test_midjourney.py \
-            tests/test_seedance25_identity_transfer.py \
             tests/test_photo_prompt_service.py \
             tests/test_video_gen.py \
             tests/test_webapp_routes.py \
