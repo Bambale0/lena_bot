@@ -123,7 +123,7 @@ async function readVideoDurationSeconds(file: File): Promise<number | null> {
       video.onloadedmetadata = () => {
         window.clearTimeout(timer);
         const seconds = Number(video.duration);
-        finish(Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : null);
+        finish(Number.isFinite(seconds) && seconds > 0 ? seconds : null);
       };
       video.onerror = () => {
         window.clearTimeout(timer);
@@ -254,22 +254,24 @@ function App() {
     if (!api || videoUploadingKind) return;
     setVideoUploadingKind(kind);
     try {
-      const [result, detectedDuration] = await Promise.all([
-        api.uploadMedia(file),
-        readVideoDurationSeconds(file),
-      ]);
+      const detectedDuration = await readVideoDurationSeconds(file);
+      const selectedDraft = kind === "image" ? imageDraft : kind === "video" ? videoDraft : motionDraft;
+      const modelList = kind === "image" ? data?.imageModels : data?.videoModels;
+      const selected = modelList?.find((model) => model.key === selectedDraft.model);
+      if (selected?.duration_from_source && detectedDuration != null && (detectedDuration < 4 || detectedDuration > 30)) {
+        throw new Error("Для Genjutsu загрузи видео длительностью от 4 до 30 секунд");
+      }
+      const result = await api.uploadMedia(file);
       if (!result.url) throw new Error("Backend не вернул ссылку на видео");
       patchDraft(kind, (current) => {
-        const modelList = kind === "image" ? data?.imageModels : data?.videoModels;
-        const selected = modelList?.find((model) => model.key === current.model);
         const sourceDuration = selected?.duration_from_source && detectedDuration != null
-          ? Math.max(1, Math.min(30, detectedDuration))
+          ? Math.ceil(detectedDuration)
           : current.duration;
         return { ...current, videoUrl: result.url, duration: sourceDuration };
       });
       notifyHaptic("success");
       toast.success(
-        detectedDuration != null ? `Видео загружено · ${detectedDuration} сек` : "Видео загружено",
+        detectedDuration != null ? `Видео загружено · ${Math.ceil(detectedDuration)} сек` : "Видео загружено",
       );
     } catch (error) {
       notifyHaptic("error");
@@ -277,7 +279,7 @@ function App() {
     } finally {
       setVideoUploadingKind(null);
     }
-  }, [api, data?.imageModels, data?.videoModels, patchDraft, videoUploadingKind]);
+  }, [api, data?.imageModels, data?.videoModels, imageDraft, videoDraft, motionDraft, patchDraft, videoUploadingKind]);
 
   const applyPreparedTrend = useCallback((prepared: PreparedTrend) => {
     const settings = prepared.settings || {};

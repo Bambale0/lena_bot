@@ -271,6 +271,29 @@ async def test_handle_video_upload_insufficient_credits() -> None:
 
 
 @pytest.mark.asyncio
+async def test_genjutsu_rejects_short_source_before_upload_or_billing() -> None:
+    msg = make_message(text="test")
+    msg.video = MagicMock()
+    msg.video.duration = 2
+    msg.video.file_id = "short_video"
+    msg.answer = AsyncMock()
+    state = _fake_state(
+        model_key=video_gen.GENJUTSU_MODEL_KEYS[0],
+        mode="image",
+        genjutsu_step="video",
+    )
+
+    with patch("bot.handlers.video_gen.mirror_telegram_file", AsyncMock()) as mirror:
+        await video_gen.handle_video_upload(
+            msg, state, AsyncMock(),
+            SimpleNamespace(id=42, credits=500, language="ru"), AsyncMock(),
+        )
+
+    assert "от 4 до 30 секунд" in msg.answer.await_args.args[0]
+    mirror.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_handle_video_upload_accepts_gemini_omni_video_mode() -> None:
     msg = make_message(text="test")
     msg.video = MagicMock()

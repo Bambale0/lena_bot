@@ -171,7 +171,7 @@ artflow/
 | HappyHorse T2V / I2V | aivideoapi.ai | 25–30 |
 | Veo 3 / Fast / Lite | CometAPI | 35–70 |
 | Midjourney Video | CometAPI | 15 |
-| Genjutsu Motion Transfer / Object Swap | Higgsfield | за секунду, настраивается в /admin |
+| Genjutsu Motion Transfer / Object Swap | Higgsfield | исходное видео 4–30 сек; за секунду, настраивается в /admin |
 
 ---
 

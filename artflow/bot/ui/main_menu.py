@@ -98,7 +98,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
         InlineKeyboardButton(text="📌 " + ("Pinterest" if lang == "ru" else "Pinterest"), callback_data="menu:pinterest"),
     )
     builder.row(
-        InlineKeyboardButton(text="💋 " + (f"Баланс · {context.balance}" if lang == "ru" else f"Balance · {context.balance}"), callback_data="menu:balance"),
+        InlineKeyboardButton(text="💳 " + ("Пополнить" if lang == "ru" else "Top up"), callback_data="menu:topup"),
         InlineKeyboardButton(text="☰ " + ("Ещё" if lang == "ru" else "More"), callback_data="menu:more"),
     )
     if context.is_admin:

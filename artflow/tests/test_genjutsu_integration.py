@@ -137,6 +137,27 @@ async def test_source_duration_rejects_unowned_external_url(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_source_duration_rejects_clip_under_four_seconds(monkeypatch) -> None:
+    from api import media_gateway
+
+    monkeypatch.setattr(
+        genjutsu_adapter,
+        "local_upload_path_from_url",
+        lambda _url: Path("/tmp/source.mp4"),
+    )
+    monkeypatch.setattr(
+        media_gateway,
+        "probe_local_media",
+        AsyncMock(return_value=MediaProbe(duration_seconds=3.99)),
+    )
+
+    with pytest.raises(ValueError, match="4-30 seconds"):
+        await genjutsu_adapter.resolve_source_duration_seconds(
+            "https://apix.example/static/upload/source.mp4"
+        )
+
+
+@pytest.mark.asyncio
 async def test_motion_transfer_sends_exact_provider_payload(monkeypatch) -> None:
     submit = AsyncMock(return_value="hf-task-1")
     monkeypatch.setattr(genjutsu_adapter.higgsfield_client, "submit", submit)

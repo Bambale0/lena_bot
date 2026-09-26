@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from bot.keyboards.main import get_main_menu_keyboard
 from bot.keyboards.main_menu import main_menu_kb
 from bot.ui.image_menu import render_image_advanced_menu, render_image_scenarios
 from bot.ui.main_menu import render_main_menu
@@ -19,7 +20,7 @@ def labels(markup):
     return [button.text for row in markup.inline_keyboard for button in row]
 
 
-def test_v2_main_menu_has_mini_app_and_six_primary_entrypoints():
+def test_v2_main_menu_has_mini_app_and_topup_entrypoint():
     ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
     screen = render_main_menu(ctx)
     markup = screen.reply_markup
@@ -31,7 +32,9 @@ def test_v2_main_menu_has_mini_app_and_six_primary_entrypoints():
         "menu:assistant",
         "menu:history",
         "menu:feed",
-        "menu:balance",
+        "menu:trends",
+        "menu:pinterest",
+        "menu:topup",
         "menu:more",
     ]
     assert labels(markup) == [
@@ -40,7 +43,9 @@ def test_v2_main_menu_has_mini_app_and_six_primary_entrypoints():
         "🤖 AI-ассистент",
         "📂 Мои работы",
         "🔥 Лента идей",
-        "💋 Баланс · 100",
+        "👑 Тренды",
+        "📌 Pinterest",
+        "💳 Пополнить",
         "☰ Ещё",
     ]
     assert "Создавай изображения" in screen.text
@@ -48,11 +53,28 @@ def test_v2_main_menu_has_mini_app_and_six_primary_entrypoints():
     assert "Приложение" in screen.text
 
 
-def test_legacy_builder_matches_v2_home_callbacks():
+def test_legacy_builder_opens_same_topup_flow():
     ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
-    assert callbacks(render_main_menu(ctx).reply_markup) == callbacks(
-        main_menu_kb(balance=100, has_active_image_session=False, is_admin=False)
-    )
+    active = callbacks(render_main_menu(ctx).reply_markup)
+    legacy = callbacks(main_menu_kb(balance=100, has_active_image_session=False, is_admin=False))
+    assert "menu:topup" in active
+    assert "menu:topup" in legacy
+    assert "menu:balance" not in active
+    assert "menu:balance" not in legacy
+
+
+def test_english_main_menu_opens_topup():
+    ctx = SimpleNamespace(balance=100, active_image_session=None, is_admin=False)
+    markup = render_main_menu(ctx, lang="en").reply_markup
+    assert "💳 Top up" in labels(markup)
+    assert "menu:topup" in callbacks(markup)
+
+
+def test_older_main_menu_builder_opens_topup():
+    markup = get_main_menu_keyboard(balance=100)
+    assert "💳 Пополнить" in labels(markup)
+    assert "menu:topup" in callbacks(markup)
+    assert "menu:balance" not in callbacks(markup)
 
 
 def test_v2_main_menu_keeps_secondary_features_off_home_screen():
@@ -64,7 +86,7 @@ def test_v2_main_menu_keeps_secondary_features_off_home_screen():
     assert "menu:prompts" not in cb
     assert "menu:referral" not in cb
     assert "menu:help" not in cb
-    assert "menu:topup" not in cb
+    assert "menu:balance" not in cb
     assert "menu:mj" not in cb
     assert "menu:settings" not in cb
 
@@ -147,7 +169,7 @@ def test_v2_main_menu_preserves_active_work_shortcuts():
     )
     screen = render_main_menu(ctx)
     cb = callbacks(screen.reply_markup)
-    assert cb[:2] == ["menu:image", "img_session:new"]
+    assert cb[:2] == ["img_session:continue", "img_session:new"]
     assert "menu:create" in cb
     assert "menu:history" in cb
     assert "активная серия" in screen.text
