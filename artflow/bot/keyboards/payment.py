@@ -62,7 +62,7 @@ def plan_payment_methods_kb(plan: PricePlan, lang: str = "ru") -> InlineKeyboard
     if settings.TBANK_TERMINAL_KEY and settings.TBANK_PASSWORD:
         builder.row(
             InlineKeyboardButton(
-                text="💳 T-Bank / СБП" if lang == "ru" else "💳 T-Bank / Card",
+                text="💳 Карта | СБП" if lang == "ru" else "💳 Card | SBP",
                 callback_data=f"topup:rub:{plan.key}",
             )
         )
@@ -88,7 +88,7 @@ def rub_methods_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     back_text = "← " + ("Назад" if lang == "ru" else "Back")
     builder.row(
         InlineKeyboardButton(
-            text="💳 " + ("Карта / СБП" if lang == "ru" else "Card / SBP"),
+            text="💳 " + ("Карта | СБП" if lang == "ru" else "Card | SBP"),
             callback_data="topup:tbank",
         )
     )
