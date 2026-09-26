@@ -30,11 +30,10 @@ from core.trends import (
     build_trend_tags,
     is_trend_prompt,
     trend_kind,
-    trend_settings,
     trend_user_fields,
 )
 from db import repository as repo
-from db.models import GenerationType, PromptCategory, User, UserPrompt
+from db.models import PromptCategory, User, UserPrompt
 from db.prompt_repository import (
     approve_prompt,
     create_prompt,
