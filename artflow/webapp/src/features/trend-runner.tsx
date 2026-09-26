@@ -515,6 +515,232 @@ function PinterestTrendFlow({
   );
 }
 
+function CustomizableTrendFlow({
+  trend,
+  onTask,
+  onBusyChange,
+}: {
+  trend: TrendPublic;
+  onTask: (task: GenerationTask) => void;
+  onBusyChange: (busy: boolean) => void;
+}) {
+  const fields = trend.user_fields || [];
+  const minReferences = Math.max(1, Number(trend.min_references || 1));
+  const maxReferences = Math.max(minReferences, Math.min(8, Number(trend.max_references || minReferences)));
+  const [references, setReferences] = useState<PinterestReference[]>([]);
+  const [userValues, setUserValues] = useState<Record<string, string>>(
+    () => Object.fromEntries(fields.map((field) => [field.key, ""])),
+  );
+  const [phase, setPhase] = useState<RunnerPhase>("idle");
+  const [error, setError] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const previewUrls = useRef<Set<string>>(new Set());
+  const busy = phase === "uploading" || phase === "generating";
+
+  useEffect(() => {
+    onBusyChange(busy);
+  }, [busy, onBusyChange]);
+
+  useEffect(() => () => {
+    previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrls.current.clear();
+    onBusyChange(false);
+  }, [onBusyChange]);
+
+  const fieldValid = (field: NonNullable<TrendPublic["user_fields"]>[number]) => {
+    const value = String(userValues[field.key] || "").trim();
+    if (field.required !== false && !value) return false;
+    if (value && field.type === "number" && !/^-?\d+(?:[.,]\d+)?$/.test(value)) return false;
+    return value.length <= Number(field.max_length || 160);
+  };
+  const refsReady = references.length >= minReferences && references.length <= maxReferences;
+  const fieldsReady = fields.every(fieldValid);
+  const ready = refsReady && fieldsReady && !busy;
+
+  const uploadFiles = async (files: File[]) => {
+    if (busy || !files.length) return;
+    const available = maxReferences - references.length;
+    if (files.length > available) {
+      const message = `Для этого тренда можно добавить максимум ${maxReferences} фото`;
+      setError(message);
+      setPhase("error");
+      toast.error(message);
+      return;
+    }
+    setError("");
+    setPhase("uploading");
+    const localPreviews = files.map((file) => URL.createObjectURL(file));
+    localPreviews.forEach((url) => previewUrls.current.add(url));
+    try {
+      const uploaded = await Promise.all(files.map(async (file, index) => {
+        const form = new FormData();
+        form.append("file", file);
+        const result = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
+        if (!result.asset_id) throw new Error("Backend не вернул asset_id");
+        return { ...result, preview: localPreviews[index] } as PinterestReference;
+      }));
+      setReferences((current) => [...current, ...uploaded]);
+      setPhase("idle");
+    } catch (uploadError) {
+      localPreviews.forEach((url) => {
+        URL.revokeObjectURL(url);
+        previewUrls.current.delete(url);
+      });
+      const message = uploadError instanceof Error ? uploadError.message : "Не удалось загрузить фото";
+      setError(message);
+      setPhase("error");
+      toast.error(message);
+    }
+  };
+
+  const removeReference = (index: number) => {
+    if (busy) return;
+    setReferences((current) => {
+      const item = current[index];
+      if (item?.preview) {
+        URL.revokeObjectURL(item.preview);
+        previewUrls.current.delete(item.preview);
+      }
+      return current.filter((_, currentIndex) => currentIndex !== index);
+    });
+    setError("");
+    setPhase("idle");
+  };
+
+  const generate = async () => {
+    if (!ready) return;
+    setError("");
+    setPhase("generating");
+    try {
+      const result = await apiJson<TrendRunResponse>(`/trends/${trend.id}/run`, {
+        method: "POST",
+        body: JSON.stringify({
+          asset_ids: references.map((item) => item.asset_id),
+          user_values: Object.fromEntries(
+            Object.entries(userValues).map(([key, value]) => [key, value.trim()]),
+          ),
+          idempotency_key: buildIdempotencyKey(trend.id),
+        }),
+      });
+      if (!result.task?.id) throw new Error("Backend не вернул задачу");
+      notifyHaptic("success");
+      toast.success("Тренд отправлен в генерацию");
+      onTask(result.task);
+    } catch (generateError) {
+      notifyHaptic("error");
+      const message = generateError instanceof Error ? generateError.message : "Не удалось запустить тренд";
+      setError(message);
+      setPhase("error");
+      toast.error(message);
+    }
+  };
+
+  return (
+    <div className="grid gap-3">
+      <div className="rounded-xl border border-border bg-card/60 p-3 text-xs text-muted-foreground">
+        <p className="font-semibold text-foreground">Настрой повтор под себя</p>
+        <p className="mt-1">
+          Добавь {minReferences === maxReferences ? minReferences : `${minReferences}–${maxReferences}`} фото.
+          {fields.length ? " Поля ниже изменят только указанные детали скрытого шаблона." : ""}
+        </p>
+      </div>
+
+      <div className="grid gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">Фото / референсы</span>
+          <span className="text-[10px] text-muted-foreground">{references.length}/{maxReferences}</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {references.map((item, index) => (
+            <div key={item.asset_id} className="relative size-20 overflow-hidden rounded-xl border border-border/60 bg-muted">
+              <img src={item.preview} alt={`Референс ${index + 1}`} className="size-full object-cover" />
+              {!busy ? (
+                <button
+                  type="button"
+                  aria-label={`Удалить референс ${index + 1}`}
+                  className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-background/90"
+                  onClick={() => removeReference(index)}
+                >
+                  <X className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ))}
+          {references.length < maxReferences ? (
+            <button
+              type="button"
+              disabled={busy}
+              className="flex size-20 items-center justify-center rounded-xl border border-dashed border-border/70 bg-secondary/25 text-muted-foreground hover:border-primary/50"
+              onClick={() => inputRef.current?.click()}
+              aria-label="Добавить фото-референсы"
+            >
+              {phase === "uploading" ? <LoaderCircle className="size-5 animate-spin" /> : <ImagePlus className="size-5" />}
+            </button>
+          ) : null}
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept={ACCEPTED_TREND_PHOTOS}
+          className="sr-only"
+          disabled={busy}
+          onChange={(event) => {
+            const files = Array.from(event.currentTarget.files || []);
+            event.currentTarget.value = "";
+            void uploadFiles(files);
+          }}
+        />
+        {!refsReady ? (
+          <p className="text-[10px] text-muted-foreground">
+            Нужно минимум {minReferences} фото. Можно прикрепить разные ракурсы нужного человека или объекта.
+          </p>
+        ) : null}
+      </div>
+
+      {fields.length ? (
+        <div className="grid gap-2">
+          {fields.map((field) => {
+            const value = userValues[field.key] || "";
+            const valid = fieldValid(field);
+            return (
+              <label key={field.key} className="grid gap-1 text-xs font-medium">
+                <span>{field.label}{field.required === false ? " · необязательно" : ""}</span>
+                <input
+                  type={field.type === "number" ? "text" : "text"}
+                  inputMode={field.type === "number" ? "decimal" : undefined}
+                  value={value}
+                  maxLength={Number(field.max_length || 160)}
+                  placeholder={field.placeholder || ""}
+                  disabled={busy}
+                  aria-invalid={Boolean(value) && !valid}
+                  className="min-h-11 rounded-xl border border-border bg-background px-3 text-base outline-none focus:border-primary/60"
+                  onChange={(event) => setUserValues((current) => ({
+                    ...current,
+                    [field.key]: event.target.value,
+                  }))}
+                />
+                {value && !valid ? (
+                  <span className="text-[10px] text-destructive">
+                    {field.type === "number" ? "Введите число." : "Проверьте значение."}
+                  </span>
+                ) : null}
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {error ? <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">{error}</div> : null}
+
+      <Button type="button" disabled={!ready} className="min-h-12 w-full" onClick={() => void generate()}>
+        {phase === "generating" ? <LoaderCircle className="size-4 animate-spin" /> : null}
+        {phase === "generating" ? "Генерирую…" : "Создать →"}
+      </Button>
+    </div>
+  );
+}
+
 function TrendRunnerPortal() {
   const [trend, setTrend] = useState<TrendPublic | null>(null);
   const [phase, setPhase] = useState<RunnerPhase>("idle");
@@ -524,20 +750,29 @@ function TrendRunnerPortal() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
   const [pinterestBusy, setPinterestBusy] = useState(false);
+  const [customBusy, setCustomBusy] = useState(false);
   const processedStart = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const genericBusy = phase === "uploading" || phase === "generating";
-  const busy = genericBusy || pinterestBusy;
+  const busy = genericBusy || pinterestBusy || customBusy;
   const preview = safeExternalUrl(trend?.preview_url || "");
   const isVideoPreview = trend?.kind === "video" || /\.(mp4|webm|mov)(\?|$)/i.test(preview);
   const isPinterest = Boolean(trend && isPinterestServiceTrend(trend));
+  const isCustomizable = Boolean(
+    trend
+      && !isPinterest
+      && ((trend.user_fields?.length || 0) > 0
+        || Number(trend.max_references || 1) > 1
+        || Number(trend.min_references || 1) > 1),
+  );
   const hint = trend?.user_photo_hint || "Загрузите одно чёткое фото. Остальные параметры тренда уже настроены администратором.";
 
   const resetRunner = useCallback(() => {
     setPhase("idle");
     setError("");
     setPinterestBusy(false);
+    setCustomBusy(false);
     setLocalPreview((current) => {
       if (current) URL.revokeObjectURL(current);
       return "";
@@ -700,6 +935,17 @@ function TrendRunnerPortal() {
                 setTaskOpen(true);
                 setTrend(null);
                 setPinterestBusy(false);
+              }}
+            />
+          ) : isCustomizable ? (
+            <CustomizableTrendFlow
+              trend={trend}
+              onBusyChange={setCustomBusy}
+              onTask={(task) => {
+                setSelectedTask(task);
+                setTaskOpen(true);
+                setTrend(null);
+                setCustomBusy(false);
               }}
             />
           ) : (
