@@ -201,3 +201,18 @@ def test_website_seedance_identity_preset_is_user_selectable() -> None:
     assert 'token("identity_transfer"' in source
     assert "1–3" in source
     assert "480p" in source and "720p" in source
+
+
+def test_identity_transfer_uses_source_duration_for_telegram_preflight() -> None:
+    from bot.handlers.video_gen import _video_upload_billable_duration
+
+    assert _video_upload_billable_duration(
+        {
+            "model_key": seedance25_adapter.MODEL_KEY,
+            "seedance_identity_transfer": True,
+            "duration": 5,
+        },
+        video_duration=23,
+        motion_step=None,
+        is_genjutsu_video_mode=False,
+    ) == 23
