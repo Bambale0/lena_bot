@@ -143,6 +143,8 @@ async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_r
         audio_ids=[
             "__apix_seedance25:identity_transfer=true",
             "__apix_seedance25:generate_audio=false",
+            "__apix_seedance25:identity_number=25",
+            "__apix_seedance25:identity_outfit=black%20leather%20jacket",
         ],
     )
 
@@ -161,6 +163,8 @@ async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_r
     assert "@Image2" in provider_input["prompt"]
     assert "@Image3" in provider_input["prompt"]
     assert "@Video1" in provider_input["prompt"]
+    assert "Number / digits: 25" in provider_input["prompt"]
+    assert "Clothing / outfit: black leather jacket" in provider_input["prompt"]
     assert "keep the source outfit" in provider_input["prompt"]
 
 
