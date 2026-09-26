@@ -29,6 +29,7 @@ from core.trends import (
     trend_kind,
     trend_public_payload,
     trend_settings,
+    trend_user_fields,
 )
 from db import repository as repo
 from db.models import Generation, GenerationType, PromptCategory, User, UserPrompt
@@ -71,6 +72,7 @@ class TrendUpdateRequest(BaseModel):
 class TrendRunRequest(BaseModel):
     asset_id: str = Field(min_length=20, max_length=4096)
     idempotency_key: str = Field(min_length=8, max_length=128)
+    user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
 
 
 class TrendUploadResponse(BaseModel):
@@ -170,6 +172,7 @@ async def _patch_trend_snapshot(
     settings_payload: dict[str, Any],
     asset_payload: dict[str, Any],
     idempotency_key: str,
+    user_values: dict[str, str] | None = None,
 ) -> None:
     generation = await repo.get_generation_by_id(session, generation_id)
     if not generation:
@@ -188,6 +191,7 @@ async def _patch_trend_snapshot(
             "user_asset_id": asset_payload.get("asset_id", ""),
             "user_asset_url": asset_payload.get("url", ""),
             "resolved_settings": settings_payload,
+            "trend_user_values": dict(user_values or {}),
         }
     )
     generation.input_params = json.dumps(existing, ensure_ascii=False, separators=(",", ":"))
@@ -273,6 +277,7 @@ async def run_trend(
         session,
         user_id=user.id,
         idempotency_key=body.idempotency_key,
+        user_values=body.user_values,
     )
     if existing is not None:
         await session.refresh(user)
@@ -302,6 +307,7 @@ async def run_trend(
                 duration=_safe_int(settings_payload.get("duration"), 5),
                 aspect_ratio=settings_payload.get("ratio"),
                 resolution=settings_payload.get("resolution"),
+                trend_user_values=body.user_values,
             ),
             session=session,
             user=user,
@@ -318,6 +324,7 @@ async def run_trend(
                 count=max(1, min(6, _safe_int(settings_payload.get("count"), 1))),
                 reference_url=asset_url,
                 reference_urls=[asset_url],
+                trend_user_values=body.user_values,
             ),
             session=session,
             user=user,
@@ -392,6 +399,10 @@ async def admin_create_trend(
     _require_admin(user)
     await _validated_model(session, body.model, body.kind)
     preview_url = _validate_preview_url(body.preview_url)
+    try:
+        trend_tags = build_trend_tags(body.kind, body.settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     prompt = await create_prompt(
         session,
         author_id=user.id,
@@ -401,7 +412,7 @@ async def admin_create_trend(
         prompt_text=body.prompt_template.strip(),
         preview_url=preview_url,
         model=body.model,
-        tags=build_trend_tags(body.kind, body.settings),
+        tags=trend_tags,
         is_public=True,
     )
     approved = await approve_prompt(session, prompt.id)
@@ -434,7 +445,12 @@ async def admin_update_trend(
     if body.preview_url is not None:
         prompt.preview_url = _validate_preview_url(body.preview_url)
     if body.settings is not None:
-        prompt.tags = build_trend_tags(kind, body.settings)
+        merged_settings = trend_settings(prompt)
+        merged_settings.update(body.settings)
+        try:
+            prompt.tags = build_trend_tags(kind, merged_settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     await session.refresh(prompt)
     return trend_admin_payload(prompt)
