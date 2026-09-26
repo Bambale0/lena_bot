@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -11,7 +9,6 @@ MAX_USER_FIELDS = 6
 MAX_FIELD_KEY_LENGTH = 48
 MAX_FIELD_LABEL_LENGTH = 64
 MAX_FIELD_VALUE_LENGTH = 160
-TREND_USER_FIELDS_TAG_PREFIX = "trend-user-fields:"
 
 _TEMPLATE_RE = re.compile(r"\{\{([^{}]+)\}\}")
 _NUMBER_RE = re.compile(r"^-?\d+(?:[\.,]\d+)?$")
@@ -92,7 +89,12 @@ def _template_keys(prompt: str) -> tuple[str, ...]:
     return tuple(keys)
 
 
-def _normalize_configured_fields(raw_fields: Any) -> list[dict[str, Any]]:
+def normalize_configured_trend_user_fields(raw_fields: Any) -> list[dict[str, Any]]:
+    """Validate an explicitly configured admin schema.
+
+    An explicit empty list is meaningful: it disables personalization even when
+    an old hidden prompt still contains legacy {{Field}} placeholders.
+    """
     if raw_fields in (None, ""):
         return []
     if not isinstance(raw_fields, list):
@@ -138,8 +140,8 @@ def _normalize_configured_fields(raw_fields: Any) -> list[dict[str, Any]]:
 
 
 def normalize_trend_user_fields(raw_fields: Any, *, prompt: str) -> list[dict[str, Any]]:
-    """Normalize admin-selected fields, falling back to legacy {{...}} tokens."""
-    fields = _normalize_configured_fields(raw_fields)
+    """Normalize configured fields or infer legacy {{...}} placeholders."""
+    fields = normalize_configured_trend_user_fields(raw_fields)
     if fields:
         return fields
     return [
@@ -154,28 +156,17 @@ def normalize_trend_user_fields(raw_fields: Any, *, prompt: str) -> list[dict[st
     ]
 
 
-def encode_trend_user_fields_tag(raw_fields: Any) -> str:
-    """Store configured fields inside the existing UserPrompt.tags array."""
-    fields = _normalize_configured_fields(raw_fields)
-    payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    encoded = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
-    return f"{TREND_USER_FIELDS_TAG_PREFIX}{encoded}"
-
-
-def decode_trend_user_fields_tags(tags: Any) -> tuple[bool, list[dict[str, Any]]]:
-    for raw_tag in tags or []:
-        tag = str(raw_tag or "")
-        if not tag.startswith(TREND_USER_FIELDS_TAG_PREFIX):
-            continue
-        encoded = tag[len(TREND_USER_FIELDS_TAG_PREFIX):]
-        try:
-            padding = "=" * (-len(encoded) % 4)
-            decoded = base64.urlsafe_b64decode(encoded + padding).decode("utf-8")
-            value = json.loads(decoded)
-            return True, _normalize_configured_fields(value)
-        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise TrendUserFieldsError("Поля тренда сохранены неверно") from exc
-    return False, []
+def legacy_trend_user_fields(prompt: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "key": key,
+            "label": key,
+            "type": infer_field_type(key),
+            "required": True,
+            "max_length": MAX_FIELD_VALUE_LENGTH,
+        }
+        for key in _template_keys(prompt)
+    ]
 
 
 def _field_specs(user_fields: list[dict[str, Any]]) -> tuple[TrendUserFieldSpec, ...]:
