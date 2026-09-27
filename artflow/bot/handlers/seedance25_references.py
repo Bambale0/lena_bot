@@ -16,6 +16,7 @@ from api.seedance25_adapter import (
     route_for_inputs,
     validate_reference_video_metadata,
 )
+from bot.keyboards.main_menu import back_to_menu_kb
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
@@ -133,6 +134,47 @@ async def choose_seedance25(
         return
 
     old = await state.get_data()
+    source_video_url = str(old.get("feed_source_video_url") or "").strip()
+    is_feed_video_repeat = (
+        old.get("feed_use_gen_type") == "video"
+        and old.get("feed_use_prompt") is not None
+        and bool(source_video_url)
+    )
+    if is_feed_video_repeat:
+        await state.set_state(VideoGenFSM.seedance_repeat_number)
+        await state.update_data(
+            model_key=MODEL_KEY,
+            credits=float(model_cost.credits),
+            duration=5,
+            aspect_ratio="adaptive",
+            resolution="720p",
+            mode="video",
+            image_url=None,
+            image_file_id=None,
+            ref_file_ids=[],
+            reference_video_url=[source_video_url],
+            audio_ids=[],
+            character_ids=[],
+            grok_mode=None,
+            seedance_repeat_edit=True,
+            seedance_repeat_number=None,
+            seedance_repeat_outfit=None,
+            seedance_repeat_display_name=DISPLAY_NAME,
+            feed_force_reference=False,
+            wizard_review_enabled=bool(old.get("wizard_review_enabled", True)),
+            wizard_scenario=old.get("wizard_scenario", "advanced"),
+        )
+        await safe_edit_message(
+            call.message,
+            f"🎬 <b>{DISPLAY_NAME} · изменить детали</b>\n\n"
+            "🔢 Какую <b>цифру или надпись</b> нужно поставить в ролике?\n"
+            "Например: <code>25</code>\n\n"
+            "Если менять не нужно — отправь <code>-</code>.",
+            reply_markup=back_to_menu_kb(),
+        )
+        await safe_answer_callback(call)
+        return
+
     await state.set_state(VideoGenFSM.seedance25_reference_upload)
     await state.update_data(
         model_key=MODEL_KEY,
