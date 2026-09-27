@@ -43,6 +43,7 @@ class GeminiOmniModelFilter(BaseFilter):
 def _media_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="✅ Готово", callback_data="omni_media:done"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="vid_nav:back"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 

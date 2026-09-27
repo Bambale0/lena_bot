@@ -423,6 +423,7 @@ async def cb_prompt_use(
         return
 
     model_costs = await repo.get_all_model_costs(session)
+    await state.clear()
     await state.set_state(PromptUseFSM.model_select)
     await state.update_data(use_prompt_id=prompt_id)
     await safe_edit_message(

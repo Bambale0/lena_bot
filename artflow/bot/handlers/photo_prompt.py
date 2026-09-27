@@ -246,11 +246,17 @@ async def cb_photo_to_prompt(
 ) -> None:
     active_session = await repo.get_active_image_session(session, db_user.id)
     previous_state = await state.get_state()
+    previous_data = await state.get_data()
+    # Reopening analysis must not build recursive snapshots.
+    if previous_state in {ImageGenFSM.photo_to_prompt.state, ImageGenFSM.photo_to_prompt_model.state}:
+        previous_state = previous_data.get("photo_prompt_previous_state")
+        previous_data = previous_data.get("photo_prompt_previous_data", {})
     await state.set_state(ImageGenFSM.photo_to_prompt)
     await state.update_data(
         generated_prompt=None,
         photo_prompt_source_file_id=None,
         photo_prompt_previous_state=previous_state,
+        photo_prompt_previous_data=previous_data,
         photo_prompt_active_session_id=getattr(active_session, "id", None),
         p2p_model_key=None,
         p2p_model_name=None,
@@ -352,10 +358,30 @@ async def cb_photo_prompt_model(
         db_user=db_user,
         extra={"model_costs": model_costs},
     )
+    screen.reply_markup.inline_keyboard[-1] = [InlineKeyboardButton(
+        text="← К результату анализа", callback_data="p2p:result")]
     await safe_edit_message(
         call.message,
         "🎨 <b>Выбери модель для генерации</b>\n\n" + screen.text.split("\n\n", 1)[-1],
         reply_markup=screen.reply_markup,
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(ImageGenFSM.photo_to_prompt_model, F.data == "p2p:result")
+async def back_to_photo_prompt_result(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User,
+) -> None:
+    data = await state.get_data()
+    active_session = await _resolve_active_session(session, db_user, data)
+    await state.set_state(ImageGenFSM.photo_to_prompt)
+    await safe_edit_message(
+        call.message,
+        _result_text(str(data.get("generated_prompt") or ""), active_session=active_session,
+                     selected_model_name=data.get("p2p_model_name")),
+        reply_markup=_result_keyboard(has_active_session=active_session is not None,
+                                      selected_model_key=data.get("p2p_model_key"),
+                                      selected_model_name=data.get("p2p_model_name")),
     )
     await safe_answer_callback(call)
 
@@ -552,7 +578,24 @@ async def cb_cancel_prompt(
     db_user: User,
 ) -> None:
     data = await state.get_data()
-    active_session = await _resolve_active_session(session, db_user, data)
+    previous_state = data.get("photo_prompt_previous_state")
+    previous_data = data.get("photo_prompt_previous_data")
+    if isinstance(previous_data, dict):
+        await state.set_data(previous_data)
+        await state.set_state(previous_state)
+        if previous_state == ImageGenFSM.prompt_input.state:
+            from bot.handlers.image_wizard_v2 import _composer_screen
+            screen = _composer_screen(previous_data)
+            await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)
+            await safe_answer_callback(call)
+            return
+        if previous_state is None:
+            from bot.handlers.settings import cb_create_hub
+            await cb_create_hub(call, db_user)
+            return
+    active_session = None
+    if previous_state == ImageGenFSM.session_active.state or previous_data is None:
+        active_session = await _resolve_active_session(session, db_user, data)
     if active_session is not None:
         from bot.handlers import image_gen as legacy_image_gen
 
@@ -564,7 +607,8 @@ async def cb_cancel_prompt(
             active_session,
         )
     else:
-        await state.clear()
-        screen = await render_screen(screen="image_entry", session=session, db_user=db_user)
-        await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)
+        from bot.handlers.image_models_first import open_image_models_first
+
+        await open_image_models_first(call, state, session, db_user)
+        return
     await safe_answer_callback(call)

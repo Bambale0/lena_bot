@@ -719,7 +719,7 @@ def _session_ratio_choices_kb(image_session: ImageSession) -> InlineKeyboardMark
     ]
     for i in range(0, len(buttons), 3):
         builder.row(*buttons[i:i + 3])
-    builder.row(InlineKeyboardButton(text="← К настройкам", callback_data=f"img_sset:back:{image_session.id}"))
+    builder.row(InlineKeyboardButton(text="← К настройкам", callback_data="img_session:settings"))
     return builder.as_markup()
 
 
@@ -732,7 +732,7 @@ def _session_quality_choices_kb(image_session: ImageSession) -> InlineKeyboardMa
                 callback_data=f"img_sset_quality:set:{image_session.id}:{quality}",
             )
         )
-    builder.row(InlineKeyboardButton(text="← К настройкам", callback_data=f"img_sset:back:{image_session.id}"))
+    builder.row(InlineKeyboardButton(text="← К настройкам", callback_data="img_session:settings"))
     return builder.as_markup()
 
 
@@ -746,7 +746,7 @@ def _session_count_choices_kb(image_session: ImageSession) -> InlineKeyboardMark
                 callback_data=f"img_sset_count:set:{image_session.id}:{count}",
             )
         )
-    builder.row(InlineKeyboardButton(text="← К настройкам", callback_data=f"img_sset:back:{image_session.id}"))
+    builder.row(InlineKeyboardButton(text="← К настройкам", callback_data="img_session:settings"))
     return builder.as_markup()
 
 
@@ -2650,7 +2650,6 @@ async def cb_image_session_repeat(
 
 @router.callback_query(F.data == "img_repeat:refs")
 async def cb_image_repeat_refs(call: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
     await call.answer(
         "Отправь фото сюда сообщением. Можно добавить несколько референсов до лимита модели.",
         show_alert=True,
@@ -3332,7 +3331,7 @@ async def _image_session_for_result_action(
         aspect_ratio=(
             "9:16"
             if "9:16" in _ratio_options_for_mode(
-                prev.model,
+                gen.model,
                 prev_session.mode if prev_session else "text",
             )
             else (prev_session.aspect_ratio if prev_session else None)

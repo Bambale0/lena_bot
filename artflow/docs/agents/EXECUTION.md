@@ -649,3 +649,10 @@ PR: #175.
 
 ## Skills
 Applied project skills: `systematic-debugging`, `test-driven-development`, `requesting-code-review`, `verification-before-completion`, `finishing-a-development-branch`.
+
+
+## 2026-09-27 — Telegram navigation repair
+
+Baseline `8a9bbae789617da0731fd11c82c2d37cbc4980ef`. Evidence, acceptance, affected surfaces, review, checks and rollout notes: [NAVIGATION_DEBUG_20260927.md](NAVIGATION_DEBUG_20260927.md).
+
+Explicit contextual video navigation and scenario selection; shared abandoned-FSM cleanup; image/photo/music return paths; task-owned Midjourney results and buttons. 196 focused checks pass; full suite 1370 pass / 42 pre-existing failures, same identities as pristine baseline. Changed Python files pass Ruff and compilation. Independent review blockers addressed. No schema/config/pricing changes. Production rollout verification will be appended after container startup.

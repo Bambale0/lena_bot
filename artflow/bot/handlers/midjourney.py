@@ -31,6 +31,7 @@ from api.public_files import mirror_telegram_file
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.midjourney import (
     mj_action_buttons_kb,
+    mj_action_callback,
     mj_blend_submit_kb,
     mj_bot_type_kb,
     mj_reference_upload_kb,
@@ -40,6 +41,7 @@ from bot.keyboards.midjourney import (
     mj_video_speed_kb,
 )
 from bot.states import MidjourneyFSM
+from bot.utils.midjourney_state import owns_midjourney_task
 from core.config import settings
 from db import repository as repo
 from db.models import GenerationType, User
@@ -115,15 +117,16 @@ async def _finish_initial_mj_image(
         if not finished:
             return
 
-        await state.update_data(
-            task_id=task_id,
-            buttons=_button_state(task_result.buttons),
-            mj_status_message_id=None,
-        )
-        await state.set_state(MidjourneyFSM.viewing_result)
+        if await owns_midjourney_task(state, task_id):
+            await state.update_data(
+                task_id=task_id,
+                buttons=_button_state(task_result.buttons),
+                mj_status_message_id=None,
+            )
+            await state.set_state(MidjourneyFSM.viewing_result)
         await _safe_delete_message(status_msg)
 
-        reply_markup = mj_action_buttons_kb(task_result.buttons) if task_result.buttons else main_menu_kb()
+        reply_markup = mj_action_buttons_kb(task_result.buttons, task_id=task_result.task_id) if task_result.buttons else main_menu_kb()
         await bot.send_photo(
             chat_id=chat_id,
             photo=URLInputFile(media_url, filename="image.jpg"),
@@ -141,7 +144,8 @@ async def _finish_initial_mj_image(
             await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
         except Exception:
             await bot.send_message(chat_id, f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
-        await state.clear()
+        if await owns_midjourney_task(state, task_id):
+            await state.clear()
 
     asyncio.create_task(
         polling.poll_until_done(task_id, mj.poll_mj_image, on_success, on_failure)
@@ -175,7 +179,8 @@ async def _finish_initial_mj_video(
         if not finished:
             return
 
-        await state.clear()
+        if await owns_midjourney_task(state, task_id):
+            await state.clear()
         await _safe_delete_message(status_msg)
         await bot.send_video(
             chat_id=chat_id,
@@ -190,7 +195,8 @@ async def _finish_initial_mj_video(
             await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
         except Exception:
             await bot.send_message(chat_id, f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
-        await state.clear()
+        if await owns_midjourney_task(state, task_id):
+            await state.clear()
 
     asyncio.create_task(
         polling.poll_until_done(task_id, mj.poll_mj_video, on_success, on_failure)
@@ -221,7 +227,8 @@ async def _finish_initial_mj_describe(
         if not finished:
             return
 
-        await state.clear()
+        if await owns_midjourney_task(state, task_id):
+            await state.clear()
         await _safe_delete_message(status_msg)
         await bot.send_message(
             chat_id=chat_id,
@@ -230,12 +237,13 @@ async def _finish_initial_mj_describe(
         )
 
     async def on_failure(err: str) -> None:
-        await _fail_generation_and_refund(gen_id, user_id, credits, err)
+        await _fail_generation_and_refund(gen_id, err)
         try:
             await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
         except Exception:
             await bot.send_message(chat_id, f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
-        await state.clear()
+        if await owns_midjourney_task(state, task_id):
+            await state.clear()
 
     asyncio.create_task(
         polling.poll_until_done(task_id, mj.poll_mj_image, on_success, on_failure)
@@ -293,6 +301,7 @@ async def cb_mj_menu(call: CallbackQuery, state: FSMContext, session: AsyncSessi
 
 @router.callback_query(F.data == "mj:imagine")
 async def cb_imagine_start(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
     await state.set_state(MidjourneyFSM.bot_type_select)
     await call.message.edit_text(  # type: ignore[union-attr]
         "🎨 <b>Imagine — выбор модели бота</b>\n\n"
@@ -469,7 +478,7 @@ async def handle_imagine_prompt(
 
     await repo.update_generation_task(session, gen.id, task_id)
 
-    await state.update_data(mj_status_message_id=status_msg.message_id)
+    await state.update_data(mj_status_message_id=status_msg.message_id, pending_mj_task_id=task_id)
     await _finish_initial_mj_image(
         task_id=task_id,
         gen_id=gen.id,
@@ -495,12 +504,13 @@ async def cb_mj_action(
     db_user: User,
     bot: Bot,
 ) -> None:
-    idx = int(call.data.split(":")[1])  # type: ignore[union-attr]
+    parts = (call.data or "").split(":")
+    idx = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else -1
     data = await state.get_data()
     task_id: str = data["task_id"]
     raw_buttons: list[dict] = data.get("buttons", [])
 
-    if idx >= len(raw_buttons):
+    if idx < 0 or idx >= len(raw_buttons) or call.data != mj_action_callback(idx, task_id):
         await call.answer("Кнопка недоступна", show_alert=True)
         return
 
@@ -540,17 +550,20 @@ async def cb_mj_action(
         f"⏳ Обрабатываю <b>{label}</b>..."
     )
 
+    await state.update_data(pending_mj_task_id=new_task_id)
+
     async def on_success(url: str) -> None:
         try:
             task_result = await mj.fetch_task(new_task_id)
         except Exception:
             task_result = MJTaskResult(task_id=new_task_id, status=MJTaskStatus.SUCCESS, image_url=url)
 
-        await state.update_data(
-            task_id=new_task_id,
-            buttons=[{"custom_id": b.custom_id, "label": b.label, "emoji": b.emoji} for b in task_result.buttons],
-        )
-        await state.set_state(MidjourneyFSM.viewing_result)
+        if await owns_midjourney_task(state, new_task_id):
+            await state.update_data(
+                task_id=new_task_id,
+                buttons=[{"custom_id": b.custom_id, "label": b.label, "emoji": b.emoji} for b in task_result.buttons],
+            )
+            await state.set_state(MidjourneyFSM.viewing_result)
 
         try:
             await status_msg.delete()
@@ -563,7 +576,7 @@ async def cb_mj_action(
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
             photo=URLInputFile(media_url, filename="image.jpg"),
             caption=caption,
-            reply_markup=mj_action_buttons_kb(task_result.buttons),
+            reply_markup=mj_action_buttons_kb(task_result.buttons, task_id=task_result.task_id),
         )
         await bot.send_document(
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
@@ -572,6 +585,8 @@ async def cb_mj_action(
 
     async def on_failure(err: str) -> None:
         if err == "__MODAL__":
+            if not await owns_midjourney_task(state, new_task_id):
+                return
             await state.update_data(modal_task_id=new_task_id)
             await state.set_state(MidjourneyFSM.waiting_modal_input)
             await status_msg.edit_text(
@@ -585,7 +600,8 @@ async def cb_mj_action(
         await status_msg.edit_text(
             f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb()
         )
-        await state.clear()
+        if await owns_midjourney_task(state, new_task_id):
+            await state.clear()
 
     asyncio.create_task(
         polling.poll_until_done(new_task_id, mj.poll_mj_image, on_success, on_failure)
@@ -625,17 +641,20 @@ async def _submit_modal(
         await state.clear()
         return
 
+    await state.update_data(pending_mj_task_id=new_task_id)
+
     async def on_success(url: str) -> None:
         try:
             task_result = await mj.fetch_task(new_task_id)
         except Exception:
             task_result = MJTaskResult(task_id=new_task_id, status=MJTaskStatus.SUCCESS, image_url=url)
 
-        await state.update_data(
-            task_id=new_task_id,
-            buttons=[{"custom_id": b.custom_id, "label": b.label, "emoji": b.emoji} for b in task_result.buttons],
-        )
-        await state.set_state(MidjourneyFSM.viewing_result)
+        if await owns_midjourney_task(state, new_task_id):
+            await state.update_data(
+                task_id=new_task_id,
+                buttons=[{"custom_id": b.custom_id, "label": b.label, "emoji": b.emoji} for b in task_result.buttons],
+            )
+            await state.set_state(MidjourneyFSM.viewing_result)
 
         try:
             await status_msg.delete()
@@ -647,7 +666,7 @@ async def _submit_modal(
             chat_id=message.chat.id,
             photo=URLInputFile(_modal_url, filename="image.jpg"),
             caption="✅ Modal готово!",
-            reply_markup=mj_action_buttons_kb(task_result.buttons),
+            reply_markup=mj_action_buttons_kb(task_result.buttons, task_id=task_result.task_id),
         )
         await bot.send_document(
             chat_id=message.chat.id,
@@ -656,7 +675,8 @@ async def _submit_modal(
 
     async def on_failure(err: str) -> None:
         await status_msg.edit_text(f"❌ Ошибка: {err}", reply_markup=main_menu_kb())
-        await state.clear()
+        if await owns_midjourney_task(state, new_task_id):
+            await state.clear()
 
     asyncio.create_task(
         polling.poll_until_done(new_task_id, mj.poll_mj_image, on_success, on_failure)
@@ -679,6 +699,7 @@ async def cb_blend_start(call: CallbackQuery, state: FSMContext, session: AsyncS
         await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
         return
 
+    await state.clear()
     await state.update_data(blend_images=[], blend_credits=credits)
     await state.set_state(MidjourneyFSM.blend_collecting)
     await call.message.edit_text(  # type: ignore[union-attr]
@@ -775,7 +796,7 @@ async def cb_blend_submit(
 
     await repo.update_generation_task(session, gen.id, task_id)
 
-    await state.update_data(mj_status_message_id=status_msg.message_id)
+    await state.update_data(mj_status_message_id=status_msg.message_id, pending_mj_task_id=task_id)
     await _finish_initial_mj_image(
         task_id=task_id,
         gen_id=gen.id,
@@ -810,6 +831,7 @@ async def cb_describe_start(call: CallbackQuery, state: FSMContext, session: Asy
         await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
         return
 
+    await state.clear()
     await state.update_data(describe_credits=credits)
     await state.set_state(MidjourneyFSM.describe_upload)
     await call.message.edit_text(  # type: ignore[union-attr]
@@ -875,7 +897,7 @@ async def handle_describe_photo(
 
     await repo.update_generation_task(session, gen.id, task_id)
 
-    await state.update_data(mj_status_message_id=status_msg.message_id)
+    await state.update_data(mj_status_message_id=status_msg.message_id, pending_mj_task_id=task_id)
     await _finish_initial_mj_describe(
         task_id=task_id,
         gen_id=gen.id,
@@ -901,6 +923,7 @@ async def cb_mj_video_start(call: CallbackQuery, state: FSMContext, session: Asy
         await call.answer(f"Недостаточно 💋 ({credits})", show_alert=True)
         return
 
+    await state.clear()
     await state.update_data(video_credits=credits)
     await state.set_state(MidjourneyFSM.video_upload)
     await call.message.edit_text(  # type: ignore[union-attr]
@@ -1004,7 +1027,7 @@ async def _submit_mj_video(
 
     await repo.update_generation_task(session, gen.id, task_id)
 
-    await state.update_data(mj_status_message_id=status_msg.message_id)
+    await state.update_data(mj_status_message_id=status_msg.message_id, pending_mj_task_id=task_id)
     await _finish_initial_mj_video(
         task_id=task_id,
         gen_id=gen.id,

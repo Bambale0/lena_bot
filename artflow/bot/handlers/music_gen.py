@@ -8,7 +8,7 @@ from api.suno_source_audio import create_source_audio_generation, upload_source_
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.states import MusicFSM
 from bot.ui.router import render_screen
-from bot.utils.telegram_ui import safe_answer_callback
+from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import GenerationType, User
 
@@ -77,7 +77,7 @@ async def music_menu(
     await safe_answer_callback(call)
 
 
-@router.callback_query(F.data.startswith("music:mode:"))
+@router.callback_query(MusicFSM.prompt_input, F.data.startswith("music:mode:"))
 async def music_mode(call: CallbackQuery, state: FSMContext) -> None:
     mode = call.data.split(":")[-1]  # type: ignore[union-attr]
     await state.set_state(MusicFSM.prompt_input)
@@ -85,7 +85,7 @@ async def music_mode(call: CallbackQuery, state: FSMContext) -> None:
     label = "без текста" if mode == "instrumental" else "с текстом"
     await call.message.answer(  # type: ignore[union-attr]
         f"🎵 Режим выбран: <b>{label}</b>\n\nТеперь напиши описание трека.\n\n🎧 Или пришли свой аудиофайл для обработки.",
-        reply_markup=back_to_menu_kb(),
+        reply_markup=back_to_menu_kb(back_cb="menu:music"),
     )
     await safe_answer_callback(call)
 
@@ -134,7 +134,8 @@ async def music_source_audio(msg: Message, state: FSMContext, bot: Bot):
     )
 
 
-@router.callback_query(F.data.startswith("music:source:"))
+@router.callback_query(MusicFSM.prompt_input, F.data.startswith("music:source:"))
+@router.callback_query(MusicFSM.source_prompt_input, F.data.startswith("music:source:"))
 async def music_source_action(call: CallbackQuery, state: FSMContext) -> None:
     operation = str(call.data or "").rsplit(":", 1)[-1]
     if operation not in {"cover", "extend", "add_vocals", "add_instrumental"}:
@@ -154,7 +155,16 @@ async def music_source_action(call: CallbackQuery, state: FSMContext) -> None:
         text = "🎤 Пришли одной строкой:\n<b>Название | Стиль | Текст/описание вокала</b>"
     else:
         text = "🎹 Пришли одной строкой:\n<b>Название | Стиль инструментала</b>"
-    await call.message.answer(text, reply_markup=back_to_menu_kb())  # type: ignore[union-attr]
+    await call.message.answer(text, reply_markup=back_to_menu_kb(back_cb="music:source_back"))  # type: ignore[union-attr]
+    await safe_answer_callback(call)
+
+
+@router.callback_query(MusicFSM.source_prompt_input, F.data == "music:source_back")
+async def back_to_source_actions(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(suno_source_operation=None)
+    await state.set_state(MusicFSM.prompt_input)
+    await safe_edit_message(call.message, "🎧 <b>Что сделать с загруженным аудио?</b>",
+                            reply_markup=_source_actions_kb())
     await safe_answer_callback(call)
 
 

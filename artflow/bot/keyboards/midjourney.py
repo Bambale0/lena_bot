@@ -40,14 +40,21 @@ def mj_speed_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def mj_action_buttons_kb(buttons: list[MJButton]) -> InlineKeyboardMarkup:
+def mj_action_callback(index: int, task_id: str) -> str:
+    from hashlib import sha256
+
+    token = sha256(task_id.encode()).hexdigest()[:16]
+    return f"mj_btn:{index}:{token}"
+
+
+def mj_action_buttons_kb(buttons: list[MJButton], *, task_id: str = "") -> InlineKeyboardMarkup:
     """
     Динамическая клавиатура из кнопок, вернувшихся в task result.
-    callback_data = mj_btn:{index}  (index → lookup в FSM state data)
+    callback_data binds the action index to its task, so old cards cannot act on a new result.
     """
     builder = InlineKeyboardBuilder()
     for i, btn in enumerate(buttons):
-        builder.button(text=btn.display or f"#{i}", callback_data=f"mj_btn:{i}")
+        builder.button(text=btn.display or f"#{i}", callback_data=mj_action_callback(i, task_id))
     builder.adjust(4)
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()

@@ -7,7 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.public_files import mirror_telegram_file
-from bot.keyboards.main_menu import back_to_menu_kb
+from bot.keyboards.video_navigation import video_back_kb as back_to_menu_kb
 from bot.services.video_reference_support import (
     SEEDANCE_VIDEO_REFERENCE_MODELS,
     video_reference_limits,
@@ -28,6 +28,7 @@ def _done_kb(count: int, max_refs: int):
     if count < max_refs:
         builder.row(InlineKeyboardButton(text="➕ Добавить ещё видео", callback_data="vid_vrefs:wait"))
     builder.row(InlineKeyboardButton(text="✅ Готово", callback_data="vid_vrefs:done"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="vid_nav:back"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 

@@ -921,7 +921,7 @@ def video_models_kb(
     ]
     for mc in ordered + remaining:
         builder.row(_model_button(mc, "vid_model", model_costs))
-    builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:main"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
     return builder.as_markup()
 
 
@@ -956,7 +956,7 @@ def video_mode_kb(model_key: str) -> InlineKeyboardMarkup:
                 callback_data=f"vid_mode:identity:{model_key}",
             )
         )
-    builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="vid_nav:models"))
     return builder.as_markup()
 
 
@@ -1074,6 +1074,7 @@ def multi_ref_kb(
     max_refs: int,
     *,
     allow_skip: bool = False,
+    back_cb: str | None = None,
 ) -> InlineKeyboardMarkup:
     """Shown after each reference upload when model supports multiple refs."""
     builder = InlineKeyboardBuilder()
@@ -1088,6 +1089,9 @@ def multi_ref_kb(
     ))
     if allow_skip and uploaded == 0:
         builder.row(InlineKeyboardButton(text="⏭ Без референса", callback_data="ref:skip"))
+    if back_cb:
+        builder.row(InlineKeyboardButton(text="← Назад", callback_data=back_cb))
+    builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 
 
