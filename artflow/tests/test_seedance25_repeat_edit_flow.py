@@ -96,5 +96,109 @@ def test_seedance_video_request_accepts_source_video_for_edit() -> None:
         video_url="https://example.test/source.mp4",
     )
 
-    assert normalized["reference_video_url"] == "https://example.test/source.mp4"
+    assert normalized["reference_video_url"] == ["https://example.test/source.mp4"]
     assert normalized["image_url"] is None
+
+
+
+@pytest.mark.asyncio
+async def test_seedance_feed_repeat_edit_uses_source_video_and_source_duration_before_charge(monkeypatch) -> None:
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from api import miniapp_routes as routes
+    from db.models import GenerationStatus, GenerationType
+
+    source = SimpleNamespace(
+        id=88,
+        model="bytedance/seedance-2-5",
+        gen_type=GenerationType.video,
+        prompt="Keep the source scene.",
+        result_url="https://example.test/static/upload/source.mp4",
+        result_urls=None,
+    )
+    user = SimpleNamespace(id=1, credits=1000)
+    session = AsyncMock()
+
+    edit_duration = AsyncMock(return_value=7)
+    video_generate = AsyncMock(
+        return_value=SimpleNamespace(task_id="seedance-edit-task", is_async=True)
+    )
+    created: dict[str, object] = {}
+
+    async def fake_create_generation(
+        _session,
+        _user_id,
+        model,
+        gen_type,
+        prompt,
+        credits_spent,
+        **kwargs,
+    ):
+        created["prompt"] = prompt
+        created["input_params"] = kwargs.get("input_params")
+        return SimpleNamespace(
+            id=901,
+            model=model,
+            gen_type=gen_type,
+            prompt=prompt,
+            status=GenerationStatus.processing,
+            result_url=None,
+            result_urls=None,
+            credits_spent=credits_spent,
+            created_at=datetime.now(timezone.utc),
+            is_public_feed=False,
+            is_prompt_library=False,
+            source_feed_gen_id=kwargs.get("source_feed_gen_id"),
+        )
+
+    monkeypatch.setattr(
+        routes.repo,
+        "get_public_feed_generation",
+        AsyncMock(return_value=source),
+    )
+    monkeypatch.setattr(
+        routes.repo,
+        "resolve_video_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=3)),
+    )
+    monkeypatch.setattr(
+        routes.repo,
+        "count_user_active_generations",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(routes.repo, "spend_credits", AsyncMock(return_value=True))
+    monkeypatch.setattr(routes.repo, "create_generation", fake_create_generation)
+    monkeypatch.setattr(routes.repo, "update_generation_task", AsyncMock())
+    monkeypatch.setattr(routes.repo, "increment_feed_share", AsyncMock())
+    monkeypatch.setattr(routes, "seedance25_edit_billing_duration", edit_duration)
+    monkeypatch.setattr(routes.video_service, "generate_video", video_generate)
+
+    body = routes.FeedRemixRequest(
+        model="bytedance/seedance-2-5",
+        duration=5,
+        aspect_ratio="adaptive",
+        resolution="720p",
+        video_url=source.result_url,
+        seedance_edit_number="25",
+        seedance_edit_outfit="чёрная куртка",
+    )
+
+    result = await routes.remix_feed_post(
+        88,
+        body,
+        session=session,
+        user=user,
+    )
+
+    edit_duration.assert_awaited_once()
+    assert result.prompt_hidden is True
+    assert "25" in str(created["prompt"])
+    assert "чёрная куртка" in str(created["prompt"])
+    params = created["input_params"]
+    assert isinstance(params, dict)
+    assert params["reference_video_url"] == [source.result_url]
+    assert params["image_url"] is None
+    assert params["duration"] == 7
+    assert video_generate.await_args.kwargs["reference_video_url"] == [source.result_url]
