@@ -202,3 +202,45 @@ async def test_seedance_feed_repeat_edit_uses_source_video_and_source_duration_b
     assert params["image_url"] is None
     assert params["duration"] == 7
     assert video_generate.await_args.kwargs["reference_video_url"] == [source.result_url]
+
+
+@pytest.mark.asyncio
+async def test_seedance_router_opens_repeat_edit_flow_for_feed_video(monkeypatch) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from bot.handlers import seedance25_references as refs
+    from bot.states import VideoGenFSM
+
+    call = SimpleNamespace(
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "feed_use_gen_type": "video",
+        "feed_use_prompt": "hidden source prompt",
+        "feed_source_video_url": "https://example.test/source.mp4",
+        "feed_force_reference": True,
+    })
+    model_cost = SimpleNamespace(credits=3, display_name="Seedance 2.5")
+    monkeypatch.setattr(
+        refs.repo,
+        "resolve_video_model_cost",
+        AsyncMock(return_value=model_cost),
+    )
+    monkeypatch.setattr(refs, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(refs, "safe_answer_callback", AsyncMock())
+
+    await refs.choose_seedance25(
+        call,
+        state,
+        session=AsyncMock(),
+        db_user=SimpleNamespace(credits=1000),
+    )
+
+    state.set_state.assert_awaited_once_with(VideoGenFSM.seedance_repeat_number)
+    update = state.update_data.await_args.kwargs
+    assert update["seedance_repeat_edit"] is True
+    assert update["reference_video_url"] == ["https://example.test/source.mp4"]
+    assert update["feed_force_reference"] is False
