@@ -492,7 +492,9 @@ async def test_editor_unsupported_real_media_gets_hint_in_every_state(state, mon
 
     raw_state = f"GenjutsuReplaceFSM:{step}"
     await state.set_state(raw_state)
-    await state.set_data({"seedance_content_edit": {}, "resolution": "720p", "gj_quoted_cost": 21})
+    await state.set_data(
+        {"seedance_content_edit": {}, "resolution": "720p", "gj_quoted_cost": 21, "duration": 7}
+    )
     answer = AsyncMock()
     monkeypatch.setattr(Message, "answer", answer)
     msg = Message(
