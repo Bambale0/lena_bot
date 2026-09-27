@@ -792,6 +792,7 @@ async def test_seedance_reparams_opens_content_override_editor() -> None:
         prompt="keep composition",
         task_id="task_prev",
         source_feed_gen_id=None,
+        result_url="https://cdn.test/generated-video.mp4",
         input_params={
             "duration": 5,
             "aspect_ratio": "adaptive",
@@ -817,6 +818,7 @@ async def test_seedance_reparams_opens_content_override_editor() -> None:
     updated = await mock_state.get_data()
     assert updated["seedance_repeat_editor"] is True
     assert updated["video_reuse_prompt"] == "keep composition"
+    assert updated["seedance_repeat_source_video_url"] == "https://cdn.test/generated-video.mp4"
     markup = edit_message.await_args.kwargs["reply_markup"]
     texts = {button.text for row in markup.inline_keyboard for button in row}
     assert "🔢 Число / цифры" in texts
@@ -824,21 +826,76 @@ async def test_seedance_reparams_opens_content_override_editor() -> None:
     assert "▶️ Запустить повтор" in texts
 
 
-def test_seedance_repeat_overrides_are_priority_append_only() -> None:
-    from core.seedance_repeat_overrides import render_seedance_repeat_overrides
+def test_seedance_repeat_prompt_assigns_source_video_and_clothing_reference_roles() -> None:
+    from core.seedance_repeat_overrides import build_seedance_repeat_prompt
 
-    rendered = render_seedance_repeat_overrides(
+    rendered = build_seedance_repeat_prompt(
         "Keep the original scene and movement.",
-        {
-            "seedance_repeat_number": "25",
-            "seedance_repeat_clothing": "чёрная кожаная куртка",
-        },
+        number="25",
+        clothing="чёрная кожаная куртка",
+        identity_image_count=0,
+        clothing_image_index=1,
     )
 
-    assert rendered.startswith("Keep the original scene and movement.")
-    assert "Число / цифры: 25" in rendered
-    assert "Одежда: чёрная кожаная куртка" in rendered
-    assert "приоритетные изменения" in rendered
+    assert "@Video1 is the authoritative source video" in rendered
+    assert "@Image1 is the clothing and outfit reference only" in rendered
+    assert 'exactly "25"' in rendered
+    assert "чёрная кожаная куртка" in rendered
+    assert "Do not copy the face" in rendered
+
+
+def test_seedance_repeat_prompt_keeps_identity_refs_before_clothing_ref() -> None:
+    from core.seedance_repeat_overrides import build_seedance_repeat_prompt
+
+    rendered = build_seedance_repeat_prompt(
+        "Keep her identity.",
+        number="",
+        clothing="",
+        identity_image_count=2,
+        clothing_image_index=3,
+    )
+
+    assert "@Image1 is the primary identity" in rendered
+    assert "@Image2" in rendered
+    assert "same person" in rendered
+    assert "@Image3 is the clothing and outfit reference only" in rendered
+    assert "Replace only the requested attributes" in rendered
+
+
+def test_seedance_repeat_reference_plan_reuses_identity_refs_and_appends_clothing() -> None:
+    from core.seedance_repeat_overrides import build_seedance_repeat_reference_plan
+
+    refs, identity_count, clothing_index, roles = build_seedance_repeat_reference_plan(
+        ["https://cdn.test/front.jpg", "https://cdn.test/side.jpg", "https://cdn.test/old-outfit.jpg"],
+        stored_roles=["identity_primary", "identity_support", "clothing"],
+        legacy_identity_transfer=False,
+        clothing_reference_url="https://cdn.test/new-outfit.jpg",
+    )
+
+    assert refs == [
+        "https://cdn.test/front.jpg",
+        "https://cdn.test/side.jpg",
+        "https://cdn.test/new-outfit.jpg",
+    ]
+    assert identity_count == 2
+    assert clothing_index == 3
+    assert roles == ["identity_primary", "identity_support", "clothing"]
+
+
+def test_seedance_repeat_reference_plan_recovers_legacy_identity_transfer() -> None:
+    from core.seedance_repeat_overrides import build_seedance_repeat_reference_plan
+
+    refs, identity_count, clothing_index, roles = build_seedance_repeat_reference_plan(
+        ["https://cdn.test/front.jpg", "https://cdn.test/side.jpg"],
+        stored_roles=None,
+        legacy_identity_transfer=True,
+        clothing_reference_url="https://cdn.test/jacket.jpg",
+    )
+
+    assert refs[-1] == "https://cdn.test/jacket.jpg"
+    assert identity_count == 2
+    assert clothing_index == 3
+    assert roles == ["identity_primary", "identity_support", "clothing"]
 
 
 @pytest.mark.asyncio
