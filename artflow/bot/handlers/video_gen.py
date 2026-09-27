@@ -976,32 +976,6 @@ async def cb_video_model(
     modes = caps.get("modes", ["text"])
     state_data = await state.get_data()
 
-    if model_key == SEEDANCE25_MODEL_KEY and _is_feed_video_use(state_data):
-        source_video_url = str(state_data.get("feed_source_video_url") or "").strip()
-        if not source_video_url:
-            await call.answer("Исходное видео для Seedance не найдено", show_alert=True)
-            return
-        await state.update_data(
-            mode="video",
-            reference_video_url=source_video_url,
-            seedance_repeat_edit=True,
-            seedance_repeat_number=None,
-            seedance_repeat_outfit=None,
-            seedance_repeat_display_name=model_cost.display_name,
-            feed_force_reference=False,
-        )
-        await state.set_state(VideoGenFSM.seedance_repeat_number)
-        await safe_edit_message(
-            call.message,  # type: ignore[arg-type]
-            f"🎬 <b>{model_cost.display_name} · изменить детали</b>\n\n"
-            "🔢 Какую <b>цифру или надпись</b> нужно поставить в ролике?\n"
-            "Например: <code>25</code>\n\n"
-            "Если менять не нужно — отправь <code>-</code>.",
-            reply_markup=back_to_menu_kb(),
-        )
-        await safe_answer_callback(call)
-        return
-
     force_feed_reference = bool(state_data.get("feed_force_reference") and "image" in modes)
 
     if force_feed_reference:
