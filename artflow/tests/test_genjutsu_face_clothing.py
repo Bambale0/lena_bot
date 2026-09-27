@@ -84,3 +84,66 @@ def test_genjutsu_menu_exposes_independent_face_clothing_flow():
     markup = _genjutsu_entry_markup([SimpleNamespace(model_key=s25.MODEL_KEY, credits=3, display_name='Seedance')], configured=False)
     assert any(b.text == '🎭 Замена лица / одежды' and b.callback_data == 'gjreplace:start'
         for row in markup.inline_keyboard for b in row)
+
+
+@pytest.mark.parametrize('images,roles', [
+    (['front', 'shirt'], ['identity_primary']),
+    (['front'], ['identity_unknown']),
+    (['a', 'b', 'c', 'd'], ['identity_primary', 'identity_support', 'identity_support', 'identity_support']),
+    (['same', 'same'], ['identity_primary', 'clothing']),
+])
+def test_restore_rejects_ambiguous_roles(images, roles):
+    from core.seedance_repeat_overrides import restore_seedance_reference_plan
+    with pytest.raises(ValueError):
+        restore_seedance_reference_plan(images, roles)
+
+
+def test_legacy_identity_generation_restores_image_order_without_role_metadata():
+    from core.seedance_repeat_overrides import restore_seedance_reference_plan
+    plan = restore_seedance_reference_plan(['front', 'side'], None, legacy_identity_transfer=True)
+    assert (plan.image_urls, plan.roles) == (('front', 'side'), ('identity_primary', 'identity_support'))
+
+
+def test_clothing_contract_does_not_copy_identity_motion_or_scene():
+    from core.seedance_repeat_overrides import build_seedance_content_edit_prompt, build_seedance_reference_plan
+    prompt = build_seedance_content_edit_prompt(build_seedance_reference_plan([], 'shirt'), {'number': '0025', 'clothing': 'red'})
+    assert 'must read exactly "0025"' in prompt
+    assert 'Preserve the main person\'s identity and face from @Video1' in prompt
+    assert 'Do not copy the face, body identity, person, pose, body motion, background, framing, camera or lighting from @Image1' in prompt
+    assert 'garment design, colors, materials, fit, visible logos and accessories' in prompt
+
+
+def test_final_prompt_limit_includes_technical_roles():
+    from api.video_prompt_limits import SEEDANCE_25_PROMPT_MAX_CHARS
+    with pytest.raises(ValueError, match='30,000'):
+        build_seedance_repeat_prompt('x' * (SEEDANCE_25_PROMPT_MAX_CHARS - 10), identity_image_count=1, clothing_image_index=2)
+
+
+@pytest.mark.asyncio
+async def test_provider_prompt_limit_is_enforced_after_role_instructions(provider, monkeypatch):
+    monkeypatch.setattr('api.video_prompt_limits.SEEDANCE_25_PROMPT_MAX_CHARS', 100)
+    with pytest.raises(ValueError):
+        await video_service.generate_video(video_service.VideoModel(s25.MODEL_KEY), 'edit',
+            reference_video_url='https://example.test/source.mp4', image_url=['shirt'],
+            seedance_reference_roles=['clothing'], seedance_content_edit={'clothing': 'red'})
+    provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['images', 'video'])
+async def test_reference_upload_loss_never_creates_task(provider, monkeypatch, failure):
+    if failure == 'images':
+        monkeypatch.setattr(video_service, '_prepare_video_reference_urls', AsyncMock(return_value=['one.jpg']))
+    else:
+        monkeypatch.setattr(video_service, '_prepare_reference_video_url', AsyncMock(return_value=None))
+    with pytest.raises(ValueError):
+        await video_service.generate_video(video_service.VideoModel(s25.MODEL_KEY), 'edit',
+            image_url=['face.jpg', 'shirt.jpg'], reference_video_url='https://example.test/source.mp4',
+            seedance_reference_roles=['identity_primary', 'clothing'], seedance_content_edit={'number': '25'})
+    provider.assert_not_awaited()
+
+
+def test_clothing_photo_without_text_explicitly_requests_outfit_replacement():
+    from core.seedance_repeat_overrides import build_seedance_content_edit_prompt, build_seedance_reference_plan
+    prompt = build_seedance_content_edit_prompt(build_seedance_reference_plan([], 'shirt'), {})
+    assert "Replace the main person's outfit using @Image1" in prompt

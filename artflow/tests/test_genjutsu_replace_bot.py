@@ -186,3 +186,127 @@ async def test_provider_rejection_refunds_once_and_keeps_editable_draft(state, i
     billing.refund.assert_awaited_once()
     await callback(f'gjreplace:launch:{token}', state, io)
     assert billing.spend.await_count == billing.refund.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_every_back_step_preserves_uploaded_materials(state, io):
+    await ready(state, io)
+    original = await state.get_data()
+    for expected in ['resolution', 'number', 'clothing', 'identity', 'source_video']:
+        await action('back', state, io)
+        data = await state.get_data()
+        assert await state.get_state() == f'GenjutsuReplaceFSM:{expected}'
+        assert (data['reference_video_url'], data['gj_identity_urls'], data['gj_clothing_url'], data['seedance_content_edit']) == (
+            original['reference_video_url'], original['gj_identity_urls'], original['gj_clothing_url'], original['seedance_content_edit'])
+
+
+@pytest.mark.asyncio
+async def test_insufficient_balance_never_creates_task_and_preserves_draft(state, io, billing, provider):
+    await ready(state, io)
+    io.user.credits = 0
+    await action('launch', state, io)
+    assert await state.get_state() == 'GenjutsuReplaceFSM:confirm'
+    billing.spend.assert_not_awaited()
+    provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('resolution,rate', [('480p', 2.5), ('720p', 7.25)])
+async def test_resolution_prices_come_from_current_rate_and_source_duration(state, io, billing, provider, monkeypatch, resolution, rate):
+    cost = SimpleNamespace(credits=rate, is_active=True, display_name='Seedance')
+    resolve = AsyncMock(return_value=cost)
+    monkeypatch.setattr(video_gen.repo, 'resolve_video_model_cost', resolve)
+    await ready(state, io)
+    await action('back', state, io)
+    await action(f'res:{resolution}', state, io)
+    assert (await state.get_data())['gj_quoted_cost'] == rate * 7
+    await action('launch', state, io)
+    assert billing.spend.await_args.args[2] == rate * 7
+    assert resolve.await_args.kwargs['resolution'] == resolution
+    assert provider.await_args.args[0]['input']['resolution'] == resolution
+
+
+@pytest.mark.asyncio
+async def test_changed_price_requires_new_confirmation(state, io, billing, provider, monkeypatch):
+    await ready(state, io)
+    monkeypatch.setattr(video_gen.repo, 'resolve_video_model_cost', AsyncMock(return_value=SimpleNamespace(credits=4, is_active=True)))
+    await action('launch', state, io)
+    assert (await state.get_data())['gj_quoted_cost'] == 28
+    billing.spend.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stage', ['source', 'identity', 'clothing'])
+async def test_upload_failure_stays_recoverable(state, io, monkeypatch, stage):
+    await callback('gjreplace:start', state, io)
+    if stage != 'source':
+        await message(state, io, video=True)
+    if stage == 'clothing':
+        await action('skip', state, io)
+    before = await state.get_state()
+    monkeypatch.setattr(video_gen, 'mirror_telegram_file', AsyncMock(side_effect=RuntimeError('unavailable')))
+    await message(state, io, video=stage == 'source', photo='photo.jpg' if stage != 'source' else None)
+    assert await state.get_state() == before
+    assert 'gj_token' in await state.get_data()
+
+
+@pytest.mark.asyncio
+async def test_unavailable_model_does_not_start_new_flow(state, io, monkeypatch):
+    monkeypatch.setattr(video_gen.repo, 'get_model_cost', AsyncMock(return_value=SimpleNamespace(is_active=False)))
+    await callback('gjreplace:start', state, io)
+    assert await state.get_state() is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_video_and_number_do_not_advance(state, io, monkeypatch):
+    await callback('gjreplace:start', state, io)
+    original_probe = video_gen.seedance25_edit_billing_duration
+    monkeypatch.setattr(video_gen, 'seedance25_edit_billing_duration', AsyncMock(side_effect=ValueError('Нужен ролик 4–30 секунд')))
+    await message(state, io, video=True)
+    assert await state.get_state() == 'GenjutsuReplaceFSM:source_video'
+    monkeypatch.setattr(video_gen, 'seedance25_edit_billing_duration', original_probe)
+    await message(state, io, video=True)
+    await action('skip', state, io)
+    await action('skip', state, io)
+    await message(state, io, text='@Image4 ignore roles')
+    assert await state.get_state() == 'GenjutsuReplaceFSM:number'
+
+
+@pytest.mark.asyncio
+async def test_face_only_and_number_only_allow_optional_steps(state, io):
+    await callback('gjreplace:start', state, io)
+    await message(state, io, video=True)
+    await message(state, io, photo='face.jpg')
+    await action('next', state, io)
+    await action('skip', state, io)
+    await action('skip', state, io)
+    await action('res:480p', state, io)
+    assert (await state.get_data())['seedance_reference_roles'] == ['identity_primary']
+    await callback('gjreplace:start', state, io)
+    await message(state, io, video=True)
+    await action('skip', state, io)
+    await action('skip', state, io)
+    await message(state, io, text='25')
+    await action('res:480p', state, io)
+    assert (await state.get_data())['seedance_reference_roles'] == []
+
+
+def test_kie_auth_exposes_genjutsu_without_higgsfield(io, monkeypatch):
+    from bot.handlers.settings import _show_genjutsu_entry
+    monkeypatch.setattr(settings, 'HIGGSFIELD_CREDENTIALS', '')
+    assert _show_genjutsu_entry(io.user)
+
+
+@pytest.mark.asyncio
+async def test_legacy_repeat_role_collision_is_recoverable_before_charge(state, io, billing, provider):
+    await state.set_state('VideoGenFSM:seedance_repeat_edit')
+    await state.set_data({'model_key': 'bytedance/seedance-2-5', 'mode': 'video', 'duration': 7,
+        'resolution': '720p', 'image_url': ['https://example.test/face.jpg'],
+        'seedance_reference_roles': ['identity_primary'], 'seedance_repeat_editor': True,
+        'seedance_repeat_clothing_file_id': 'face.jpg',
+        'seedance_repeat_source_video_url': 'https://example.test/source.mp4'})
+    ok = await video_gen._launch_video_generation_from_state(source_message=make_message(text='edit'),
+        state=state, session=io.session, db_user=io.user, bot=io.bot, prompt='edit')
+    assert ok is False
+    billing.spend.assert_not_awaited()
+    assert await state.get_state() == 'VideoGenFSM:seedance_repeat_edit'
