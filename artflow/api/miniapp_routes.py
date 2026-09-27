@@ -3143,6 +3143,24 @@ async def remix_feed_post(
             seed=body.seed,
             grok_mode=body.grok_mode,
         )
+        if seedance_edit_requested:
+            try:
+                edit_billing_duration = await seedance25_edit_billing_duration(
+                    effective_prompt,
+                    normalized_video["reference_video_url"],
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if edit_billing_duration is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Seedance repeat edit could not resolve source video duration",
+                )
+            normalized_video["duration"] = edit_billing_duration
+            normalized_video["billing_duration"] = edit_billing_duration
+            normalized_video["provider_duration"] = -1
+            normalized_video["aspect_ratio"] = "adaptive"
+
         has_gemini_omni_video_input = (
             body.model == GEMINI_OMNI_VIDEO_MODEL
             and bool(normalized_video["reference_video_url"])
