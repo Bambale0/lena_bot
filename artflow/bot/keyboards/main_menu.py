@@ -33,8 +33,10 @@ def main_menu_kb(
     return builder.as_markup()
 
 
-def back_to_menu_kb() -> InlineKeyboardMarkup:
+def back_to_menu_kb(*, back_cb: str | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    if back_cb:
+        builder.row(InlineKeyboardButton(text="← Назад", callback_data=back_cb))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 

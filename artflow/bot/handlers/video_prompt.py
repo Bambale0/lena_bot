@@ -85,6 +85,7 @@ async def cb_video_to_prompt(
     if model_cost is None:
         await call.answer("Цена функции не настроена", show_alert=True)
         return
+    await state.clear()
     await state.set_state(VideoGenFSM.video_to_prompt)
     await state.update_data(video_prompt_cost=float(model_cost.credits))
     await safe_edit_message(
@@ -239,5 +240,7 @@ async def handle_invalid_video_prompt_input(message: Message) -> None:
 @router.callback_query(F.data == "vid:cancel_prompt")
 async def cb_cancel_video_prompt(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await safe_edit_message(call.message, "❌ Видео → промпт отменён.")
+    await safe_edit_message(call.message, "❌ Видео → промпт отменён.", reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="← К созданию", callback_data="menu:create")],
+                         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")]]))
     await safe_answer_callback(call)

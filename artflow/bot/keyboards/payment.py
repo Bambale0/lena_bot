@@ -23,7 +23,6 @@ def _plan_list_price(plan: PricePlan) -> str:
 
 def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    back_text = "← " + ("Назад" if lang == "ru" else "Back")
 
     for plan in plans:
         builder.row(
@@ -47,7 +46,7 @@ def topup_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="🎟 Ввести промокод", callback_data="promo:enter"),
     )
-    builder.row(InlineKeyboardButton(text=back_text, callback_data="menu:balance"))
+    builder.row(InlineKeyboardButton(text="🏠 Главное меню" if lang == "ru" else "🏠 Home", callback_data="menu:main"))
     return builder.as_markup()
 
 

@@ -137,7 +137,7 @@ async def test_cb_video_group_shows_models() -> None:
         _make_video_model_cost("kling-2.6/text-to-video", 5),
     ]
     with patch("bot.handlers.video_gen.repo", AsyncMock(get_all_model_costs=AsyncMock(return_value=mock_costs))):
-        await video_gen.cb_video_group(call, AsyncMock())
+        await video_gen.cb_video_group(call, AsyncMock(), _fake_state())
     call.message.edit_text.assert_awaited_once()
 
 

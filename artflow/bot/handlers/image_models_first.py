@@ -93,6 +93,8 @@ async def reopen_image_model_picker(
     current_state = await state.get_state()
     back_callback = "img_v2:back" if current_state == ImageGenFSM.prompt_input.state else "menu:image"
     back_text = "← К задаче" if back_callback == "img_v2:back" else "← Назад"
+    if current_state == ImageGenFSM.image_upload.state:
+        back_callback, back_text = "img_models:back", "← К загрузке фото"
 
     await safe_edit_message(
         call.message,
@@ -103,4 +105,14 @@ async def reopen_image_model_picker(
             back_callback=back_callback,
         ),
     )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(ImageGenFSM.image_upload, F.data == "img_models:back")
+async def back_to_image_upload(call: CallbackQuery, state: FSMContext) -> None:
+    from bot.handlers.image_wizard_v2 import _quick_flow_kb
+
+    await safe_edit_message(call.message, "📎 <b>Добавь фото-референс</b>\n\n"
+                            "Отправь фото сюда. Текущая модель и загруженные материалы сохранены.",
+                            reply_markup=_quick_flow_kb(edit=True))
     await safe_answer_callback(call)

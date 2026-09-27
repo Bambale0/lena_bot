@@ -24,7 +24,7 @@ from api.minimax_h3_adapter import (
     PUBLIC_MODEL,
 )
 from api.public_files import mirror_telegram_file, save_public_file
-from bot.keyboards.main_menu import back_to_menu_kb
+from bot.keyboards.video_navigation import video_back_kb as back_to_menu_kb
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
@@ -59,6 +59,7 @@ def _collection_kb(*, allow_empty: bool = True) -> object:
     if allow_empty:
         builder.row(InlineKeyboardButton(text="➡️ Без референсов", callback_data="h3ref:none"))
     builder.row(InlineKeyboardButton(text="🗑 Очистить", callback_data="h3ref:clear"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="vid_nav:back"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 

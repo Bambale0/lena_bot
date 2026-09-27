@@ -13,8 +13,7 @@ from bot.ui.image_menu import render_image_scenarios
 from bot.ui.model_labels import model_display_name
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
-from db.models import ImageSession
-from db.models import User
+from db.models import ImageSession, User
 
 router = Router(name="image_wizard_v2")
 
@@ -325,7 +324,7 @@ async def explain_references(call: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.data == "img_v2:ratio")
+@router.callback_query(ImageGenFSM.prompt_input, F.data == "img_v2:ratio")
 async def choose_default_ratio(call: CallbackQuery, state: FSMContext) -> None:
     await safe_answer_callback(call)
     data = await state.get_data()
@@ -340,7 +339,7 @@ async def choose_default_ratio(call: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.data.startswith("img_v2:ratio:set:"))
+@router.callback_query(ImageGenFSM.prompt_input, F.data.startswith("img_v2:ratio:set:"))
 async def set_default_ratio(call: CallbackQuery, state: FSMContext) -> None:
     next_ratio = call.data.split(":", 3)[3]  # type: ignore[union-attr]
     data = await state.get_data()
@@ -361,7 +360,7 @@ async def set_default_ratio(call: CallbackQuery, state: FSMContext) -> None:
     await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)
 
 
-@router.callback_query(F.data == "img_v2:quality")
+@router.callback_query(ImageGenFSM.prompt_input, F.data == "img_v2:quality")
 async def choose_default_quality(call: CallbackQuery, state: FSMContext) -> None:
     await safe_answer_callback(call)
     data = await state.get_data()
@@ -377,7 +376,7 @@ async def choose_default_quality(call: CallbackQuery, state: FSMContext) -> None
     )
 
 
-@router.callback_query(F.data.startswith("img_v2:quality:set:"))
+@router.callback_query(ImageGenFSM.prompt_input, F.data.startswith("img_v2:quality:set:"))
 async def set_default_quality(call: CallbackQuery, state: FSMContext) -> None:
     next_quality = call.data.split(":", 3)[3]  # type: ignore[union-attr]
     data = await state.get_data()
@@ -471,9 +470,8 @@ async def start_edit_image(
     await safe_answer_callback(call)
 
 
-@router.callback_query(F.data == "img_v2:add_reference")
+@router.callback_query(ImageGenFSM.prompt_input, F.data == "img_v2:add_reference")
 async def add_reference(call: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
     await state.update_data(mode="image", image_mode="image")
     await state.set_state(ImageGenFSM.image_upload)
     await safe_edit_message(
@@ -493,18 +491,6 @@ async def image_home(
     session: AsyncSession,
     db_user: User,
 ) -> None:
-    from bot.ui.router import render_screen
+    from bot.handlers.image_models_first import open_image_models_first
 
-    await state.clear()
-    if not await _prepare_default_flow(
-        call=call,
-        state=state,
-        session=session,
-        db_user=db_user,
-        mode="text",
-    ):
-        return
-    await state.set_state(ImageGenFSM.prompt_input)
-    screen = await render_screen(screen="image_entry", session=session, db_user=db_user)
-    await safe_edit_message(call.message, screen.text, reply_markup=screen.reply_markup)
-    await safe_answer_callback(call)
+    await open_image_models_first(call, state, session, db_user)

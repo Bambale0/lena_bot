@@ -208,7 +208,8 @@ async def test_initial_mj_image_polling_sends_clickable_action_buttons(monkeypat
         buttons=[button],
     )
     bot = AsyncMock()
-    state = _fake_state()
+    state = _fake_state(pending_mj_task_id="task_buttons")
+    state.get_state = AsyncMock(return_value=MidjourneyFSM.generating.state)
     status_msg = AsyncMock()
 
     monkeypatch.setattr(midjourney.asyncio, "create_task", fake_create_task)

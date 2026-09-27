@@ -4,6 +4,8 @@ from aiogram import Dispatcher
 from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import SimpleEventIsolation
 
+from bot.middlewares.navigation import NavigationMiddleware
+
 
 def create_dispatcher(storage: BaseStorage) -> Dispatcher:
     """Serialize updates sharing an FSM key so media albums cannot lose state."""
@@ -15,4 +17,7 @@ def create_dispatcher(storage: BaseStorage) -> Dispatcher:
             events_isolation = isolation_factory()
     else:
         events_isolation = SimpleEventIsolation()
-    return Dispatcher(storage=storage, events_isolation=events_isolation)
+    dispatcher = Dispatcher(storage=storage, events_isolation=events_isolation)
+    dispatcher.callback_query.middleware(NavigationMiddleware())
+    dispatcher.message.middleware(NavigationMiddleware())
+    return dispatcher

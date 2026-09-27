@@ -9,8 +9,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers import video_gen as legacy
-from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.models import VIDEO_CAPS, model_cost_display_text, video_models_kb
+from bot.keyboards.video_navigation import video_back_kb as back_to_menu_kb
 from bot.states import VideoGenFSM
 from bot.ui.model_labels import model_display_name
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
@@ -57,6 +57,17 @@ SCENARIOS = {
         "group": "motion",
     },
 }
+
+
+def supports_scenario(model_key: str, mode: str) -> bool:
+    caps = VIDEO_CAPS.get(model_key, {})
+    if mode in caps.get("modes", []):
+        return True
+    # Automatic collectors advertise one public mode but accept several media kinds.
+    if caps.get("auto_route_by_inputs"):
+        return bool((mode == "image" and caps.get("max_refs"))
+                    or (mode == "video" and caps.get("supports_video_input")))
+    return False
 
 
 def _home_kb():
@@ -125,11 +136,13 @@ async def choose_video_scenario(call: CallbackQuery, state: FSMContext, session:
         await safe_answer_callback(call, "Подходящие модели временно недоступны", show_alert=True)
         return
 
+    await state.clear()
     await state.set_state(VideoGenFSM.model_select)
     await state.update_data(
         wizard_review_enabled=True,
         wizard_scenario=scenario_key,
         wizard_mode=scenario["mode"],
+        video_model_menu=f"vid_wizard:scenario:{scenario_key}",
     )
 
     builder = InlineKeyboardBuilder()
@@ -146,7 +159,7 @@ async def choose_video_scenario(call: CallbackQuery, state: FSMContext, session:
     builder.row(
         InlineKeyboardButton(
             text="🧠 Выбрать другую модель",
-            callback_data=f"vid_group:{scenario['group']}",
+            callback_data=f"vid_wizard:models:{scenario_key}",
         )
     )
     builder.row(InlineKeyboardButton(text="← К сценариям", callback_data="menu:video"))
@@ -166,8 +179,9 @@ async def choose_video_scenario(call: CallbackQuery, state: FSMContext, session:
 
 @router.callback_query(F.data == "vid_wizard:advanced")
 async def open_advanced_video_models(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
     await state.set_state(VideoGenFSM.model_select)
-    await state.update_data(wizard_review_enabled=True, wizard_scenario="advanced")
+    await state.update_data(wizard_review_enabled=True, wizard_scenario="advanced", video_model_menu="vid_wizard:advanced")
     costs = await repo.get_all_model_costs(session)
     await safe_edit_message(
         call.message,
@@ -176,6 +190,26 @@ async def open_advanced_video_models(call: CallbackQuery, state: FSMContext, ses
         "После выбора APIX всё равно покажет только поддерживаемые режимы и параметры.",
         reply_markup=video_models_kb(costs),
     )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data.startswith("vid_wizard:models:"))
+async def show_scenario_models(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    scenario_key = (call.data or "").rsplit(":", 1)[-1]
+    scenario = SCENARIOS.get(scenario_key)
+    if scenario is None:
+        await safe_answer_callback(call, "Сценарий не найден", show_alert=True)
+        return
+    costs = await repo.get_all_model_costs(session)
+    compatible = [item for item in costs if supports_scenario(item.model_key, scenario["mode"])]
+    await state.clear()
+    await state.set_state(VideoGenFSM.model_select)
+    await state.update_data(wizard_review_enabled=True, wizard_scenario=scenario_key,
+                            wizard_mode=scenario["mode"], video_model_menu=call.data)
+    markup = video_models_kb(compatible)
+    markup.inline_keyboard[-1] = [InlineKeyboardButton(
+        text="← Назад", callback_data=f"vid_wizard:scenario:{scenario_key}")]
+    await safe_edit_message(call.message, f"{scenario['title']}\n\nВыбери совместимую модель:", reply_markup=markup)
     await safe_answer_callback(call)
 
 
@@ -197,6 +231,12 @@ async def review_video_prompt(
         await message.answer("Опиши, что должно произойти в видео.", reply_markup=back_to_menu_kb())
         return
 
+    await show_video_review(message, state, session, db_user, prompt)
+
+
+async def show_video_review(message: Message, state: FSMContext, session: AsyncSession,
+                            db_user: User, prompt: str, *, edit: bool = False) -> None:
+    data = await state.get_data()
     model_key = str(data["model_key"])
     duration = int(data.get("duration") or 5)
     resolution = data.get("resolution")
@@ -212,7 +252,7 @@ async def review_video_prompt(
         return
 
     total = legacy._video_total_credits(model_key, duration, float(model_cost.credits))
-    await state.update_data(review_prompt=prompt, credits=float(model_cost.credits))
+    await state.update_data(review_prompt=prompt, credits=float(model_cost.credits), video_review_edit=None)
     await state.set_state(VideoGenFSM.review)
 
     mode_labels = {
@@ -231,7 +271,8 @@ async def review_video_prompt(
         materials = "фото + видео"
 
     public_name = model_display_name(model_key, model_cost.display_name)
-    await message.answer(
+    send = message.edit_text if edit else message.answer
+    await send(
         "✅ <b>Проверь задачу перед запуском</b>\n\n"
         f"🎯 Сценарий: <b>{mode_labels.get(data.get('mode'), data.get('mode') or 'видео')}</b>\n"
         f"🤖 Модель: <b>{escape(public_name)}</b>\n"
@@ -274,6 +315,7 @@ async def launch_reviewed_video(
 
 @router.callback_query(VideoGenFSM.review, F.data == "vid_review:prompt")
 async def edit_review_prompt(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(video_review_edit="prompt")
     await state.set_state(VideoGenFSM.prompt_input)
     await safe_edit_message(
         call.message,
@@ -285,6 +327,7 @@ async def edit_review_prompt(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(VideoGenFSM.review, F.data == "vid_review:params")
 async def edit_review_params(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(video_review_edit="params")
     data = await state.get_data()
     model_key = str(data.get("model_key") or "")
     await state.set_state(VideoGenFSM.params_select)

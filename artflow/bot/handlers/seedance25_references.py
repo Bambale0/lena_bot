@@ -46,6 +46,7 @@ def _kb(*, require_image_reference: bool = False) -> object:
     if not require_image_reference:
         builder.row(InlineKeyboardButton(text="➡️ Без референсов", callback_data="s25ref:none"))
     builder.row(InlineKeyboardButton(text="🗑 Очистить", callback_data="s25ref:clear"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="vid_nav:back"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 

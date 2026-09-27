@@ -16,7 +16,16 @@ from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from api.comet_client import close_client, get_client
-from bot.handlers import admin, balance, image_gen, marketplace, payment, start, video_gen
+from bot.handlers import (
+    admin,
+    balance,
+    image_gen,
+    marketplace,
+    payment,
+    stale_callbacks,
+    start,
+    video_gen,
+)
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
@@ -103,6 +112,7 @@ async def main() -> None:
     dp.include_router(admin.router)
     dp.include_router(marketplace.router)
     dp.include_router(marketplace.mod_router)
+    dp.include_router(stale_callbacks.router)
 
     await run_seed()
     await bot.delete_webhook(drop_pending_updates=True)

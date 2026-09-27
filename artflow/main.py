@@ -80,6 +80,7 @@ from bot.handlers import (
     music_gen,
     payment,
     pinterest_flow,
+    stale_callbacks,
     stars_payment,
     start,
     trends,
@@ -93,6 +94,7 @@ from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.states import MidjourneyFSM
 from bot.utils.dispatcher import create_dispatcher
+from bot.utils.midjourney_state import owns_midjourney_task
 from bot.utils.telegram_images import (
     send_image_group_to_chat,
     send_image_to_chat,
@@ -462,7 +464,7 @@ async def _mark_midjourney_failed(
         error_text,
         refund_note="midjourney_webhook",
     )
-    if state_ctx is not None:
+    if await owns_midjourney_task(state_ctx, gen.task_id):
         data = await state_ctx.get_data()
         await _delete_midjourney_status_message(user_tg_id, data.get("mj_status_message_id"))
         await state_ctx.clear()
@@ -476,7 +478,7 @@ async def _finish_midjourney_image_generation(
     *,
     state_ctx=None,
 ) -> None:
-    if state_ctx is not None:
+    if await owns_midjourney_task(state_ctx, task_result.task_id):
         data = await state_ctx.get_data()
         await _delete_midjourney_status_message(user_tg_id, data.get("mj_status_message_id"))
         await state_ctx.update_data(
@@ -487,7 +489,7 @@ async def _finish_midjourney_image_generation(
         await state_ctx.set_state(MidjourneyFSM.viewing_result)
 
     caption = "✅ Blend готово!" if gen.model == "midjourney-blend" else f"✅ Готово!\n\n<i>{gen.prompt[:200]}</i>"
-    reply_markup = mj_action_buttons_kb(task_result.buttons) if task_result.buttons else main_menu_kb()
+    reply_markup = mj_action_buttons_kb(task_result.buttons, task_id=task_result.task_id) if task_result.buttons else main_menu_kb()
     await bot.send_photo(  # type: ignore[union-attr]
         chat_id=user_tg_id,
         photo=URLInputFile(task_result.image_url, filename="image.jpg"),
@@ -507,7 +509,7 @@ async def _finish_midjourney_describe_generation(
     *,
     state_ctx=None,
 ) -> None:
-    if state_ctx is not None:
+    if await owns_midjourney_task(state_ctx, task_result.task_id):
         data = await state_ctx.get_data()
         await _delete_midjourney_status_message(user_tg_id, data.get("mj_status_message_id"))
         await state_ctx.clear()
@@ -527,7 +529,7 @@ async def _finish_midjourney_video_generation(
     *,
     state_ctx=None,
 ) -> None:
-    if state_ctx is not None:
+    if await owns_midjourney_task(state_ctx, task_result.task_id):
         data = await state_ctx.get_data()
         await _delete_midjourney_status_message(user_tg_id, data.get("mj_status_message_id"))
         await state_ctx.clear()
@@ -701,6 +703,7 @@ async def lifespan(app: FastAPI):
     dp.include_router(marketplace.mod_router)
     dp.include_router(settings_handler.router)
     dp.include_router(stars_payment.router)
+    dp.include_router(stale_callbacks.router)
 
     await run_seed()
 

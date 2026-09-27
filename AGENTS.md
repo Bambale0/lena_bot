@@ -50,3 +50,14 @@ Regression fixes should get regression tests when feasible. Do not mark work com
 
 ### Delivery
 Final engineering reports should state what changed; important files/components; skills/flows used; exact tests/checks and results; migrations/config/admin changes; risks/follow-ups; and PR/commit/deploy SHA when applicable.
+
+
+## Mandatory main delivery policy
+
+- Never push directly to `main`, force-push it, or bypass/disable its protection, including with administrator privileges.
+- Deliver changes from a feature/fix branch through a pull request targeting `main`.
+- Once the authorized change is review-ready, enable native GitHub auto-merge with `gh pr merge --auto --squash <PR>`. Do not use `--admin`. Draft or unauthorized work must not be queued for merge.
+- Required checks are `backend-quality`, `webapp`, `provider-contracts`, and `bot-navigation`, bound to GitHub Actions and requiring an up-to-date branch. Resolve review conversations before merging.
+- Production deploys automatically from the `main` push CI after quality, webapp, navigation and provider checks pass for that exact SHA. Do not replace this with a manual server checkout/build during ordinary delivery.
+- A delivery is verified only after the merge commit's Production Autodeploy job and public health check succeed. Report PR, merge SHA, and deploy result.
+- Full-suite legacy failures remain documented; never silently remove failing tests or weaken the maintained gate to obtain a green merge.

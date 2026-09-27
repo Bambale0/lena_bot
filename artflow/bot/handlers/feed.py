@@ -16,6 +16,7 @@ from aiogram.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.public_files import public_url_is_available
 from bot.keyboards.feed import empty_feed_kb, feed_card_kb
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.models import IMAGE_CAPS, video_models_kb
@@ -29,7 +30,6 @@ from bot.utils.telegram_images import (
     send_image_to_message,
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
-from api.public_files import public_url_is_available
 from db import repository as repo
 from db.models import GenerationType, User
 from db.repository import FeedGenerationCard
@@ -180,6 +180,7 @@ async def _show_feed_card(
                 # Persist the mirrored URL so it stays fixed
                 if session:
                     from sqlalchemy import update
+
                     from db.models import Generation
 
                     await session.execute(
@@ -410,6 +411,7 @@ async def cb_feed_use(
         return
 
     model_costs = await repo.get_all_model_costs(session)
+    await state.clear()
     if getattr(gen, "gen_type", None) == GenerationType.video:
         await state.set_state(VideoGenFSM.model_select)
         await state.update_data(
@@ -598,8 +600,9 @@ async def cb_feed_remix(
 
 @router.callback_query(F.data.startswith("feed:publish:"))
 async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_user: User, bot: Bot | None = None) -> None:
-    from api.public_files import mirror_url
     import json
+
+    from api.public_files import mirror_url
 
     generation_id = int(call.data.split(":")[-1])
     gen = await repo.get_generation_by_id(session, generation_id)

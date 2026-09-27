@@ -68,6 +68,7 @@ from bot.keyboards.models import (
     video_models_kb,
     video_params_kb,
 )
+from bot.keyboards.video_navigation import video_back_kb
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
@@ -371,6 +372,8 @@ def _is_video_reuse_prompt(data: dict) -> bool:
 
 
 def _video_params_next_label(data: dict) -> str:
+    if data.get("video_review_edit"):
+        return "✅ К проверке задачи"
     return "▶️ Запустить" if _is_feed_video_use(data) or _is_video_reuse_prompt(data) else "▶️ Далее: Промпт"
 
 
@@ -837,7 +840,9 @@ async def cb_genjutsu_menu(
     session: AsyncSession,
     state: FSMContext,
 ) -> None:
+    await state.clear()
     await state.set_state(VideoGenFSM.model_select)
+    await state.update_data(video_model_menu="menu:genjutsu")
     model_costs = await repo.get_all_model_costs(session)
     configured = is_genjutsu_configured()
     text = (
@@ -889,8 +894,11 @@ async def cb_video_menu(call: CallbackQuery, session: AsyncSession, state: FSMCo
 
 
 @router.callback_query(VideoGenFSM.model_select, F.data.startswith("vid_group:"))
-async def cb_video_group(call: CallbackQuery, session: AsyncSession) -> None:
+async def cb_video_group(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     group_key = call.data.split(":")[1]  # type: ignore[union-attr]
+    await state.clear()
+    await state.set_state(VideoGenFSM.model_select)
+    await state.update_data(video_model_menu=call.data, wizard_review_enabled=True, wizard_scenario="advanced")
     model_costs = await repo.get_all_model_costs(session)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
@@ -920,7 +928,7 @@ async def cb_gemini_omni_audio(call: CallbackQuery, state: FSMContext) -> None:
         "Этот шаг создаёт один ID, который потом можно вставить в параметры видео.\n"
         f"Голоса, с которых удобно начать: {voices_preview}\n"
         "Полный список лежит в документации KIE, сохранённой в <code>docs/kie/gemini-omni-audio.md</code>.",
-        reply_markup=back_to_menu_kb(),
+        reply_markup=video_back_kb(),
     )
     await safe_answer_callback(call)
 
@@ -936,7 +944,7 @@ async def handle_gemini_omni_audio(message: Message, state: FSMContext) -> None:
             example_dialogue=example or None,
         )
     except Exception as exc:
-        await message.answer(f"❌ Не удалось создать Audio ID: {escape(str(exc))}", reply_markup=back_to_menu_kb())
+        await message.answer(f"❌ Не удалось создать Audio ID: {escape(str(exc))}", reply_markup=video_back_kb())
         return
 
     await state.set_state(VideoGenFSM.model_select)
@@ -956,7 +964,7 @@ async def cb_gemini_omni_character(call: CallbackQuery, state: FSMContext) -> No
         call.message,  # type: ignore[arg-type]
         "🧍 <b>Gemini Omni Character ID</b>\n\n"
         "Загрузи одно фото персонажа. После фото я попрошу описание, имя и optional Audio ID.",
-        reply_markup=back_to_menu_kb(),
+        reply_markup=video_back_kb(),
     )
     await safe_answer_callback(call)
 
@@ -972,7 +980,7 @@ async def handle_gemini_omni_character_image(message: Message, state: FSMContext
         "Отправь строку в формате:\n"
         "<code>описание персонажа | имя | audio_id</code>\n\n"
         "Имя и Audio ID можно оставить пустыми.",
-        reply_markup=back_to_menu_kb(),
+        reply_markup=video_back_kb(),
     )
 
 
@@ -993,7 +1001,7 @@ async def handle_gemini_omni_character(message: Message, state: FSMContext) -> N
             character_name=name or None,
         )
     except Exception as exc:
-        await message.answer(f"❌ Не удалось создать Character ID: {escape(str(exc))}", reply_markup=back_to_menu_kb())
+        await message.answer(f"❌ Не удалось создать Character ID: {escape(str(exc))}", reply_markup=video_back_kb())
         return
 
     await state.set_state(VideoGenFSM.model_select)
@@ -1047,6 +1055,23 @@ async def cb_video_model(
     if force_feed_reference:
         await state.update_data(mode="image")
         await _handle_mode(call, state, session, model_key, model_cost.display_name, "image")
+    elif state_data.get("wizard_mode") in modes:
+        mode = state_data["wizard_mode"]
+        await state.update_data(mode=mode)
+        if mode == "video" and model_key == GEMINI_OMNI_VIDEO_MODEL:
+            from bot.handlers.gemini_omni_references import choose_gemini_omni_video_mode
+            await choose_gemini_omni_video_mode(call, state, session)
+            return
+        if mode == "video":
+            from bot.handlers.video_references import (
+                SEEDANCE_VIDEO_REFERENCE_MODELS,
+                choose_video_reference_mode,
+            )
+            if model_key in SEEDANCE_VIDEO_REFERENCE_MODELS:
+                mode_call = call.model_copy(update={"data": f"vid_mode:video:{model_key}"})
+                await choose_video_reference_mode(mode_call, state, session)
+                return
+        await _handle_mode(call, state, session, model_key, model_cost.display_name, mode)
     elif len(modes) == 1:
         await state.update_data(mode=modes[0])
         await _handle_mode(call, state, session, model_key, model_cost.display_name, modes[0])
@@ -1092,7 +1117,7 @@ async def _handle_mode(
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
             upload_text,
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
     elif mode == "video":
         await state.set_state(VideoGenFSM.image_upload)
@@ -1100,7 +1125,7 @@ async def _handle_mode(
             call.message,  # type: ignore[arg-type]
             f"✅ <b>{display_name}</b> · видео-референс\n\n"
             "🎞️ Загрузи исходное видео до 30 сек. Gemini Omni возьмёт фрагмент до 10 сек.",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
     elif mode == "motion":
         await state.set_state(VideoGenFSM.image_upload)
@@ -1110,7 +1135,7 @@ async def _handle_mode(
             f"✅ <b>{display_name}</b> · управление камерой\n\n"
             "👤 <b>Шаг 1/2:</b> Загрузи фото персонажа\n"
             "<i>(голова, плечи, торс; JPEG/PNG; ≤10 МБ)</i>",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
     else:
         await _go_to_params_or_prompt(call, state, model_key, display_name)
@@ -1150,7 +1175,7 @@ async def cb_video_mode(
             "Загрузи <b>1–3 фото одного человека</b>.\n"
             "Лучше всего: анфас → 3/4 → дополнительный ракурс.\n\n"
             "Первое фото будет главным якорем внешности, остальные помогут удержать лицо при поворотах.",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
         await safe_answer_callback(call)
         return
@@ -1184,7 +1209,7 @@ async def handle_video_upload(
         and not is_genjutsu_video_mode
         and not is_seedance_identity_video_mode
     ):
-        await message.answer("Пожалуйста, загрузи видео только на шаге 2 управления камерой.", reply_markup=back_to_menu_kb())
+        await message.answer("Пожалуйста, загрузи видео только на шаге 2 управления камерой.", reply_markup=video_back_kb())
         return
 
     video = message.video  # type: ignore[union-attr]
@@ -1201,21 +1226,21 @@ async def handle_video_upload(
         await message.answer(
             f"❌ Genjutsu принимает исходное видео длительностью от {GENJUTSU_MIN_DURATION_SECONDS} "
             f"до {GENJUTSU_MAX_DURATION_SECONDS} секунд. Загрузи подходящий ролик.",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
         return
 
     if is_gemini_omni_video_mode and video_duration > 30:
         await message.answer(
             "❌ Gemini Omni принимает видео-референс до 30 секунд. Загрузи более короткий фрагмент.",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
         return
 
     if is_seedance_identity_video_mode and not (4 <= video_duration <= 30):
         await message.answer(
             "❌ Для замены персонажа Seedance 2.5 нужен исходный ролик от 4 до 30 секунд.",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
         return
 
@@ -1241,7 +1266,7 @@ async def handle_video_upload(
             f"❌ Недостаточно 💋!\n"
             f"Видео: {_video_price_text(model_key, billable_duration, rate_or_flat)}\n"
             f"Баланс: {db_user.credits:g} 💋.",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
         return
 
@@ -1253,7 +1278,7 @@ async def handle_video_upload(
             await message.answer(
                 "❌ Это видео слишком большое для загрузки через Telegram Bot API, поэтому я не могу автоматически забрать его в обработку.\n\n"
                 "Что можно сделать: сожми ролик, укороти его или отправь файл меньшего размера.",
-                reply_markup=back_to_menu_kb(),
+                reply_markup=video_back_kb(),
             )
             return
         raise
@@ -1282,7 +1307,7 @@ async def handle_video_upload(
         try:
             video_duration = await resolve_genjutsu_source_duration(video_url)
         except ValueError as exc:
-            await message.answer(f"❌ {escape(str(exc))}", reply_markup=back_to_menu_kb())
+            await message.answer(f"❌ {escape(str(exc))}", reply_markup=video_back_kb())
             return
         model_cost = await _resolve_video_model_cost(
             session,
@@ -1297,7 +1322,7 @@ async def handle_video_upload(
             await message.answer(
                 f"❌ Недостаточно 💋! Нужно {_video_price_text(model_key, video_duration, rate_or_flat)}, "
                 f"на балансе {db_user.credits:g} 💋.",
-                reply_markup=back_to_menu_kb(),
+                reply_markup=video_back_kb(),
             )
             return
         await state.update_data(
@@ -1362,7 +1387,7 @@ async def handle_video_upload(
         f"✅ Видео загружено! (<b>{_video_price_text(model_key, video_duration, rate_or_flat)}</b>)\n\n"
         f"✅ <b>{display_name}</b>\n\n"
         "✍️ Введи промпт (или отправь <code>-</code> для пропуска):",
-        reply_markup=back_to_menu_kb(),
+        reply_markup=video_back_kb(),
     )
 
 
@@ -1383,7 +1408,7 @@ async def handle_image_upload(
             "✅ Фото загружено!\n\n"
             "🎬 <b>Шаг 2/2:</b> Загрузи референсное видео\n"
             "<i>(видеофайл MP4, макс. 30 сек — бот автоматически определит длину)</i>",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
         await state.set_state(VideoGenFSM.image_upload)
         return
@@ -1406,7 +1431,7 @@ async def handle_image_upload(
             f"✅ Фото {len(existing)}/{max_refs} загружено!"
             + (f"\nМожно добавить ещё (до {max_refs} фото)." if can_add_more else "\nДостигнут максимум.")
             + "\nКогда все референсы добавлены, нажми <b>Готово</b>.",
-            reply_markup=multi_ref_kb(len(existing), max_refs),
+            reply_markup=multi_ref_kb(len(existing), max_refs, back_cb="vid_nav:back"),
         )
         return
 
@@ -1430,7 +1455,7 @@ async def _after_video_ref_upload(
             f"✅ Фото внешности сохранены: <b>{_video_ref_count(updated)}</b>/3\n\n"
             "🎞️ Теперь загрузи <b>исходное видео 4–30 сек</b>. "
             "Seedance возьмёт из него движение, камеру, тайминг и сцену — не личность персонажа.",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
         return
 
@@ -1442,7 +1467,7 @@ async def _after_video_ref_upload(
             f"🎞️ Теперь загрузи исходное видео длительностью от {GENJUTSU_MIN_DURATION_SECONDS} "
             f"до {GENJUTSU_MAX_DURATION_SECONDS} секунд. "
             "Genjutsu сохранит движение и тайминг ролика, применив твои референсы.",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
         return
 
@@ -1455,7 +1480,7 @@ async def _after_video_ref_upload(
         )
     else:
         await state.set_state(VideoGenFSM.prompt_input)
-        await message.answer("✅ Фото загружено!\n\n✍️ Введи промпт:", reply_markup=back_to_menu_kb())
+        await message.answer("✅ Фото загружено!\n\n✍️ Введи промпт:", reply_markup=video_back_kb())
 
 
 @router.callback_query(VideoGenFSM.image_upload, F.data == "ref:add_more")
@@ -1499,12 +1524,25 @@ async def _go_to_params_or_prompt(
         await state.set_state(VideoGenFSM.prompt_input)
         await call.message.edit_text(  # type: ignore[union-attr]
             f"✅ <b>{display_name}</b>\n\n✍️ Введи промпт:",
-            reply_markup=back_to_menu_kb(),
+            reply_markup=video_back_kb(),
         )
+
+
+async def _accept_video_parameter(call: CallbackQuery, state: FSMContext) -> bool:
+    data = await state.get_data()
+    model_key = data.get("model_key")
+    if model_key:
+        markup = _video_params_reply_markup(model_key, data)
+        if any(button.callback_data == call.data for row in markup.inline_keyboard for button in row):
+            return True
+    await safe_answer_callback(call, "Этот параметр недоступен для текущей задачи.", show_alert=True)
+    return False
 
 
 @router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_dur:"))
 async def cb_vpar_dur(call: CallbackQuery, state: FSMContext) -> None:
+    if not await _accept_video_parameter(call, state):
+        return
     dur = int(call.data.split(":")[1])  # type: ignore[union-attr]
     await state.update_data(duration=dur)
     data = await state.get_data()
@@ -1516,6 +1554,8 @@ async def cb_vpar_dur(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_ratio:"))
 async def cb_vpar_ratio(call: CallbackQuery, state: FSMContext) -> None:
+    if not await _accept_video_parameter(call, state):
+        return
     ratio = call.data.removeprefix("vpar_ratio:")  # type: ignore[union-attr]
     await state.update_data(aspect_ratio=ratio)
     data = await state.get_data()
@@ -1527,6 +1567,8 @@ async def cb_vpar_ratio(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_res:"))
 async def cb_vpar_res(call: CallbackQuery, state: FSMContext) -> None:
+    if not await _accept_video_parameter(call, state):
+        return
     res = call.data.split(":")[1]  # type: ignore[union-attr]
     await state.update_data(resolution=res)
     data = await state.get_data()
@@ -1538,6 +1580,8 @@ async def cb_vpar_res(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_mode:"))
 async def cb_vpar_mode(call: CallbackQuery, state: FSMContext) -> None:
+    if not await _accept_video_parameter(call, state):
+        return
     mode = call.data.split(":")[1]  # type: ignore[union-attr]
     await state.update_data(grok_mode=mode)
     data = await state.get_data()
@@ -1577,7 +1621,7 @@ async def cb_vpar_omni_extra(call: CallbackQuery, state: FSMContext) -> None:
             "Отправь целое число от 0 до 2147483647. "
             "Чтобы сбросить seed, отправь <code>-</code>."
         )
-    await safe_edit_message(call.message, text, reply_markup=back_to_menu_kb())  # type: ignore[arg-type]
+    await safe_edit_message(call.message, text, reply_markup=video_back_kb())  # type: ignore[arg-type]
     await call.answer()
 
 
@@ -1608,7 +1652,7 @@ async def handle_omni_ids_input(message: Message, state: FSMContext, session: As
             await state.update_data(seed=value, omni_input_target=None)
             saved_text = "seed сброшен" if value is None else f"seed: {value}"
     except ValueError as exc:
-        await message.answer(f"❌ {escape(str(exc))}", reply_markup=back_to_menu_kb())
+        await message.answer(f"❌ {escape(str(exc))}", reply_markup=video_back_kb())
         return
 
     updated = await state.get_data()
@@ -1633,6 +1677,11 @@ async def cb_vpar_next(
     bot: Bot,
 ) -> None:
     data = await state.get_data()
+    if data.get("video_review_edit") and data.get("review_prompt"):
+        from bot.handlers.video_wizard import show_video_review
+        await show_video_review(call.message, state, session, db_user, data["review_prompt"], edit=True)
+        await safe_answer_callback(call)
+        return
     model_cost = await _resolve_video_model_cost(
         session,
         data["model_key"],
@@ -1686,7 +1735,7 @@ async def cb_vpar_next(
             if data.get("seedance_identity_transfer") or data['model_key'] in GENJUTSU_MODEL_KEYS
             else ":"
         ),
-        reply_markup=back_to_menu_kb(),
+        reply_markup=video_back_kb(),
     )
     await call.answer()
 
