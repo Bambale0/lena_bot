@@ -66,7 +66,6 @@ from bot.keyboards.models import (
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
-from core.seedance_repeat_overrides import render_seedance_repeat_overrides
 from core.gemini_omni import (
     GEMINI_OMNI_AUDIO_VOICES,
     GEMINI_OMNI_MAX_AUDIO_IDS,
@@ -76,6 +75,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_resolution,
     normalize_gemini_omni_seed,
 )
+from core.seedance_repeat_overrides import render_seedance_repeat_overrides
 from db import repository as repo
 from db.models import GenerationType, User
 from db.session import AsyncSessionLocal
@@ -1399,23 +1399,6 @@ async def _after_video_ref_upload(
         )
         return
 
-    if model_key == SEEDANCE25_MODEL_KEY:
-        await state.update_data(
-            seedance_repeat_editor=True,
-            seedance_repeat_display_name=display_name,
-            seedance_repeat_number="",
-            seedance_repeat_clothing="",
-        )
-        data = await state.get_data()
-        await state.set_state(VideoGenFSM.seedance_repeat_edit)
-        await safe_edit_message(
-            call.message,  # type: ignore[arg-type]
-            _seedance_repeat_edit_text(display_name, data),
-            reply_markup=_seedance_repeat_edit_kb(),
-        )
-        await safe_answer_callback(call)
-        return
-
     if _has_params(model_key):
         await state.set_state(VideoGenFSM.params_select)
         await message.answer(
@@ -2311,6 +2294,23 @@ async def cb_reparams_video(
             return
         await state.update_data(mode=upload_mode)
         await _handle_mode(call, state, session, model_key, display_name, upload_mode)
+        await safe_answer_callback(call)
+        return
+
+    if model_key == SEEDANCE25_MODEL_KEY:
+        await state.update_data(
+            seedance_repeat_editor=True,
+            seedance_repeat_display_name=display_name,
+            seedance_repeat_number="",
+            seedance_repeat_clothing="",
+        )
+        data = await state.get_data()
+        await state.set_state(VideoGenFSM.seedance_repeat_edit)
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            _seedance_repeat_edit_text(display_name, data),
+            reply_markup=_seedance_repeat_edit_kb(),
+        )
         await safe_answer_callback(call)
         return
 
