@@ -1,4 +1,5 @@
 """Source-first Genjutsu editor using the shared Seedance launch/billing path."""
+
 from __future__ import annotations
 
 import logging
@@ -39,9 +40,14 @@ class GenjutsuReplaceFSM(StatesGroup):
     launching = State()
 
 
-STEPS = [GenjutsuReplaceFSM.source_video, GenjutsuReplaceFSM.identity,
-         GenjutsuReplaceFSM.clothing, GenjutsuReplaceFSM.number,
-         GenjutsuReplaceFSM.resolution, GenjutsuReplaceFSM.confirm]
+STEPS = [
+    GenjutsuReplaceFSM.source_video,
+    GenjutsuReplaceFSM.identity,
+    GenjutsuReplaceFSM.clothing,
+    GenjutsuReplaceFSM.number,
+    GenjutsuReplaceFSM.resolution,
+    GenjutsuReplaceFSM.confirm,
+]
 
 
 async def _available(session: AsyncSession, resolution: str | None = None):
@@ -52,16 +58,23 @@ async def _available(session: AsyncSession, resolution: str | None = None):
         return None
     if resolution is None:
         return base
-    cost = await legacy._resolve_video_model_cost(session, MODEL_KEY, duration=None, resolution=resolution)
+    cost = await legacy._resolve_video_model_cost(
+        session, MODEL_KEY, duration=None, resolution=resolution
+    )
     return cost if cost and cost.is_active else None
 
 
 async def _plan(state: FSMContext):
     data = await state.get_data()
-    plan = build_seedance_reference_plan(data.get("gj_identity_urls", []), data.get("gj_clothing_url"))
+    plan = build_seedance_reference_plan(
+        data.get("gj_identity_urls", []), data.get("gj_clothing_url")
+    )
     edit = normalize_seedance_content_edit(data.get("seedance_content_edit") or {})
-    await state.update_data(image_url=list(plan.image_urls), seedance_reference_roles=list(plan.roles),
-                            seedance_content_edit=edit)
+    await state.update_data(
+        image_url=list(plan.image_urls),
+        seedance_reference_roles=list(plan.roles),
+        seedance_content_edit=edit,
+    )
     return plan, edit
 
 
@@ -71,7 +84,9 @@ async def _quote(state: FSMContext, session: AsyncSession) -> float:
     build_seedance_content_edit_prompt(plan, edit)  # Validate full technical prompt before charge.
     if data.get("resolution") not in RESOLUTIONS:
         raise ValueError("Выбери качество видео: 480p или 720p.")
-    duration = await legacy.seedance25_edit_billing_duration("", data.get("reference_video_url"), force_edit=True)
+    duration = await legacy.seedance25_edit_billing_duration(
+        "", data.get("reference_video_url"), force_edit=True
+    )
     if duration is None:
         raise ValueError("Сначала загрузи исходное видео.")
     cost = await _available(session, data["resolution"])
@@ -82,7 +97,9 @@ async def _quote(state: FSMContext, session: AsyncSession) -> float:
     return total
 
 
-async def _render(target: Message, state: FSMContext, *, edit: bool = False, notice: str = "") -> None:
+async def _render(
+    target: Message, state: FSMContext, *, edit: bool = False, notice: str = ""
+) -> None:
     data = await state.get_data()
     current = await state.get_state()
     token = secrets.token_hex(6)
@@ -114,7 +131,9 @@ async def _render(target: Message, state: FSMContext, *, edit: bool = False, not
     if current == GenjutsuReplaceFSM.clothing.state:
         photo, description = bool(data.get("gj_clothing_url")), bool(content.get("clothing"))
         if photo or description:
-            text += "\n\n✅ Сохранено: " + ("фото + текст" if photo and description else "фото" if photo else "текст")
+            text += "\n\n✅ Сохранено: " + (
+                "фото + текст" if photo and description else "фото" if photo else "текст"
+            )
             if description:
                 text += "\n" + escape(content["clothing"])
             button("Далее ➡️", "next")
@@ -130,15 +149,25 @@ async def _render(target: Message, state: FSMContext, *, edit: bool = False, not
             button(resolution, f"res:{resolution}")
     if current == GenjutsuReplaceFSM.confirm.state:
         has_photo, has_text = bool(data.get("gj_clothing_url")), bool(content.get("clothing"))
-        clothing = "фото + текст" if has_photo and has_text else "фото" if has_photo else "текст" if has_text else "без изменения"
-        text = ("✅ <b>Проверь замену</b> · 6/6\n\n"
-                f"Исходное видео: ✅ · {data['duration']} сек\n"
-                f"Фото лица: {len(data.get('gj_identity_urls') or [])}\n"
-                f"Одежда: {clothing}\n"
-                f"Число: {escape(content.get('number') or 'без изменения')}\n"
-                f"Качество: {data['resolution']}\n"
-                f"Стоимость: <b>{data['gj_quoted_cost']:g} ROX</b>\n\n"
-                "Бот сам распределит роли фото. Остальные детали исходного видео сохраняем.")
+        clothing = (
+            "фото + текст"
+            if has_photo and has_text
+            else "фото"
+            if has_photo
+            else "текст"
+            if has_text
+            else "без изменения"
+        )
+        text = (
+            "✅ <b>Проверь замену</b> · 6/6\n\n"
+            f"Исходное видео: ✅ · {data['duration']} сек\n"
+            f"Фото лица: {len(data.get('gj_identity_urls') or [])}\n"
+            f"Одежда: {clothing}\n"
+            f"Число: {escape(content.get('number') or 'без изменения')}\n"
+            f"Качество: {data['resolution']}\n"
+            f"Стоимость: <b>{data['gj_quoted_cost']:g} ROX</b>\n\n"
+            "Бот сам распределит роли фото. Остальные детали исходного видео сохраняем."
+        )
         button("▶️ Запустить", "launch")
     button("⬅️ Назад", "back")
     button("❌ Отмена", "cancel")
@@ -154,13 +183,24 @@ async def _render(target: Message, state: FSMContext, *, edit: bool = False, not
 @router.callback_query(F.data == "gjreplace:start")
 async def start(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     if not await _available(session):
-        await safe_answer_callback(call, "Seedance 2.5 сейчас недоступен. Попробуй позже.", show_alert=True)
+        await safe_answer_callback(
+            call, "Seedance 2.5 сейчас недоступен. Попробуй позже.", show_alert=True
+        )
         return
     await state.clear()
-    await state.set_data({"flow_id": FLOW_ID, "flow_version": 1, "model_key": MODEL_KEY,
-                          "mode": "video", "gj_identity_urls": [], "gj_clothing_url": None,
-                          "seedance_content_edit": {"number": "", "clothing": ""},
-                          "resolution": "720p", "audio_ids": []})
+    await state.set_data(
+        {
+            "flow_id": FLOW_ID,
+            "flow_version": 1,
+            "model_key": MODEL_KEY,
+            "mode": "video",
+            "gj_identity_urls": [],
+            "gj_clothing_url": None,
+            "seedance_content_edit": {"number": "", "clothing": ""},
+            "resolution": "720p",
+            "audio_ids": [],
+        }
+    )
     await state.set_state(GenjutsuReplaceFSM.source_video)
     await safe_answer_callback(call)
     await _render(call.message, state, edit=True)
@@ -184,7 +224,11 @@ async def source_video(message: Message, state: FSMContext, bot: Bot) -> None:
         return
     except Exception as exc:
         logger.warning("flow=%s upload=video error_type=%s", FLOW_ID, type(exc).__name__)
-        await _render(message, state, notice="Видео не удалось сохранить или прочитать. Пришли другой файл MP4, 4–30 секунд; при необходимости сожми его.")
+        await _render(
+            message,
+            state,
+            notice="Видео не удалось сохранить или прочитать. Пришли другой файл MP4, 4–30 секунд; при необходимости сожми его.",
+        )
         return
     await state.update_data(reference_video_url=url, duration=duration)
     await state.set_state(GenjutsuReplaceFSM.identity)
@@ -208,8 +252,10 @@ async def photo(message: Message, state: FSMContext, bot: Bot) -> None:
         url = await legacy.mirror_telegram_file(bot, message.photo[-1].file_id)
         if not url:
             raise ValueError("Не удалось сохранить фото. Пришли его ещё раз.")
-        plan = build_seedance_reference_plan(identities + ([url] if identity else []),
-                                            data.get("gj_clothing_url") if identity else url)
+        plan = build_seedance_reference_plan(
+            identities + ([url] if identity else []),
+            data.get("gj_clothing_url") if identity else url,
+        )
     except ValueError as exc:
         await _render(message, state, notice=str(exc))
         return
@@ -217,9 +263,11 @@ async def photo(message: Message, state: FSMContext, bot: Bot) -> None:
         logger.warning("flow=%s upload=image error_type=%s", FLOW_ID, type(exc).__name__)
         await _render(message, state, notice="Фото не удалось сохранить. Пришли его ещё раз.")
         return
-    await state.update_data(gj_identity_urls=list(plan.image_urls[:plan.identity_count]),
-                            gj_clothing_url=(plan.image_urls[-1] if plan.clothing_image_index else None),
-                            seedance_content_edit=content)
+    await state.update_data(
+        gj_identity_urls=list(plan.image_urls[: plan.identity_count]),
+        gj_clothing_url=(plan.image_urls[-1] if plan.clothing_image_index else None),
+        seedance_content_edit=content,
+    )
     await _render(message, state)
 
 
@@ -241,12 +289,20 @@ async def text_input(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data.startswith("gjreplace:"))
-async def navigate(call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot) -> None:
+async def navigate(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot
+) -> None:
     data = await state.get_data()
     action, _, token = str(call.data).removeprefix("gjreplace:").rpartition(":")
     current = await state.get_state()
-    if not token or not secrets.compare_digest(token, str(data.get("gj_token") or "")) or current not in {s.state for s in STEPS}:
-        await safe_answer_callback(call, "Эта кнопка устарела. Используй последнее сообщение.", show_alert=True)
+    if (
+        not token
+        or not secrets.compare_digest(token, str(data.get("gj_token") or ""))
+        or current not in {s.state for s in STEPS}
+    ):
+        await safe_answer_callback(
+            call, "Эта кнопка устарела. Используй последнее сообщение.", show_alert=True
+        )
         return
     if action == "cancel" or (action == "back" and current == STEPS[0].state):
         await legacy.cb_genjutsu_menu(call, session, state)
@@ -260,27 +316,50 @@ async def navigate(call: CallbackQuery, state: FSMContext, session: AsyncSession
             if total != data.get("gj_quoted_cost"):
                 await state.update_data(gj_quoted_cost=total)
                 await safe_answer_callback(call)
-                await _render(call.message, state, edit=True, notice="Стоимость изменилась. Проверь её перед запуском.")
+                await _render(
+                    call.message,
+                    state,
+                    edit=True,
+                    notice="Стоимость изменилась. Проверь её перед запуском.",
+                )
                 return
             if db_user.credits < total:
-                raise ValueError(f"Недостаточно ROX: нужно {total:g}. Пополни баланс и повтори запуск.")
+                raise ValueError(
+                    f"Недостаточно ROX: нужно {total:g}. Пополни баланс и повтори запуск."
+                )
         except ValueError as exc:
             await safe_answer_callback(call, str(exc), show_alert=True)
             return
         await safe_answer_callback(call, "Запускаю замену")
         saved = await state.get_data()
         await state.set_state(GenjutsuReplaceFSM.launching)
-        logger.info("flow=%s model=%s identity_refs=%d clothing_ref=%s number_override=%s source_video=%s resolution=%s",
-                    FLOW_ID, MODEL_KEY, len(saved.get("gj_identity_urls") or []), bool(saved.get("gj_clothing_url")),
-                    bool(saved["seedance_content_edit"].get("number")), bool(saved.get("reference_video_url")), saved["resolution"])
+        logger.info(
+            "flow=%s model=%s identity_refs=%d clothing_ref=%s number_override=%s source_video=%s resolution=%s",
+            FLOW_ID,
+            MODEL_KEY,
+            len(saved.get("gj_identity_urls") or []),
+            bool(saved.get("gj_clothing_url")),
+            bool(saved["seedance_content_edit"].get("number")),
+            bool(saved.get("reference_video_url")),
+            saved["resolution"],
+        )
         ok = await legacy._launch_video_generation_from_state(
-            source_message=call.message, state=state, session=session, db_user=db_user, bot=bot,
+            source_message=call.message,
+            state=state,
+            session=session,
+            db_user=db_user,
+            bot=bot,
             prompt="Замена лица / одежды / цифр с сохранением исходной сцены",
-            parent_generation_id=saved.get("parent_generation_id"))
+            parent_generation_id=saved.get("parent_generation_id"),
+        )
         if not ok:
             await state.set_data(saved)
             await state.set_state(GenjutsuReplaceFSM.confirm)
-            await _render(call.message, state, notice="Настройки сохранены. Можно исправить их или повторить запуск.")
+            await _render(
+                call.message,
+                state,
+                notice="Настройки сохранены. Можно исправить их или повторить запуск.",
+            )
         return
     index = next(i for i, step in enumerate(STEPS) if step.state == current)
     content = dict(data.get("seedance_content_edit") or {})
@@ -302,7 +381,11 @@ async def navigate(call: CallbackQuery, state: FSMContext, session: AsyncSession
             await safe_answer_callback(call, "Сначала загрузи видео.", show_alert=True)
             return
         await state.set_state(STEPS[index + 1])
-    elif action.startswith("res:") and current == GenjutsuReplaceFSM.resolution.state and action[4:] in RESOLUTIONS:
+    elif (
+        action.startswith("res:")
+        and current == GenjutsuReplaceFSM.resolution.state
+        and action[4:] in RESOLUTIONS
+    ):
         await state.update_data(resolution=action[4:])
         try:
             total = await _quote(state, session)
@@ -323,27 +406,47 @@ async def unsupported(message: Message, state: FSMContext) -> None:
     if await state.get_state() == GenjutsuReplaceFSM.launching.state:
         await message.answer("⏳ Задача запускается. Дождись подтверждения.")
     else:
-        await _render(message, state, notice="Используй кнопки текущего шага или пришли материал, который я запросил.")
+        await _render(
+            message,
+            state,
+            notice="Используй кнопки текущего шага или пришли материал, который я запросил.",
+        )
 
 
-async def restore_result(call: CallbackQuery, state: FSMContext, session: AsyncSession, prev) -> bool:
+async def restore_result(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession, prev
+) -> bool:
     """Restore exact original inputs for history/retry; never infer roles from images."""
     params = legacy._as_dict(getattr(prev, "input_params", None))
-    if params.get("flow_id") != FLOW_ID:
+    if params.get("flow_id") != FLOW_ID or str(prev.model) != MODEL_KEY:
         return False
     try:
-        plan = restore_seedance_reference_plan(legacy._url_list(params.get("image_url")), params.get("seedance_reference_roles"))
+        plan = restore_seedance_reference_plan(
+            legacy._url_list(params.get("image_url")), params.get("seedance_reference_roles")
+        )
         await state.clear()
-        await state.set_data({**params, "gj_identity_urls": list(plan.image_urls[:plan.identity_count]),
-                              "gj_clothing_url": plan.image_urls[-1] if plan.clothing_image_index else None,
-                              "parent_generation_id": prev.id, "audio_ids": [], "ref_file_ids": []})
+        await state.set_data(
+            {
+                **params,
+                "gj_identity_urls": list(plan.image_urls[: plan.identity_count]),
+                "gj_clothing_url": plan.image_urls[-1] if plan.clothing_image_index else None,
+                "parent_generation_id": prev.id,
+                "audio_ids": [],
+                "ref_file_ids": [],
+            }
+        )
         await state.set_state(GenjutsuReplaceFSM.resolution)
         total = await _quote(state, session)
     except ValueError as exc:
         await safe_answer_callback(call, str(exc), show_alert=True)
         if await state.get_state() == GenjutsuReplaceFSM.resolution.state:
             await state.set_state(GenjutsuReplaceFSM.source_video)
-            await _render(call.message, state, edit=True, notice="Пришли исходное видео заново. Остальные настройки сохранены.")
+            await _render(
+                call.message,
+                state,
+                edit=True,
+                notice="Пришли исходное видео заново. Остальные настройки сохранены.",
+            )
         return True
     await state.update_data(gj_quoted_cost=total)
     await state.set_state(GenjutsuReplaceFSM.confirm)

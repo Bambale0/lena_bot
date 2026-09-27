@@ -82,10 +82,10 @@ _legacy_image_gen.router = _image_router
 # Provider-specific automatic collectors must run before the generic mode picker.
 from . import gemini_omni_recovery as _gemini_omni_recovery
 from . import gemini_omni_references as _gemini_omni_references
+from . import genjutsu_replace as _genjutsu_replace
 from . import minimax_h3_references as _minimax_h3_references
 from . import seedance25_references as _seedance25_references
 from . import video_gen as _legacy_video_gen
-from . import genjutsu_replace as _genjutsu_replace
 from . import video_navigation as _video_navigation
 from . import video_references as _video_references
 from . import video_wizard as _video_wizard

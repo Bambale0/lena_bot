@@ -1,10 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-import re
-
-
 
 IDENTITY_PRIMARY = "identity_primary"
 IDENTITY_SUPPORT = "identity_support"
@@ -25,7 +23,8 @@ class SeedanceReferencePlan:
 
 
 def build_seedance_reference_plan(
-    identity_urls: Sequence[str], clothing_url: str | None = None,
+    identity_urls: Sequence[str],
+    clothing_url: str | None = None,
 ) -> SeedanceReferencePlan:
     identities = list(dict.fromkeys(str(url).strip() for url in identity_urls if str(url).strip()))
     if len(identities) > 3:
@@ -37,11 +36,16 @@ def build_seedance_reference_plan(
     roles = [IDENTITY_PRIMARY if i == 0 else IDENTITY_SUPPORT for i in range(len(identities))]
     if clothing:
         roles.append(CLOTHING)
-    return SeedanceReferencePlan(tuple(refs), len(identities), len(refs) if clothing else None, tuple(roles))
+    return SeedanceReferencePlan(
+        tuple(refs), len(identities), len(refs) if clothing else None, tuple(roles)
+    )
 
 
 def restore_seedance_reference_plan(
-    image_urls: Sequence[str], roles: Sequence[str] | None, *, legacy_identity_transfer: bool = False,
+    image_urls: Sequence[str],
+    roles: Sequence[str] | None,
+    *,
+    legacy_identity_transfer: bool = False,
 ) -> SeedanceReferencePlan:
     """Align roles before deduplication; never guess which image contains clothing."""
     refs = list(image_urls)
@@ -73,8 +77,11 @@ def build_seedance_repeat_reference_plan(
     if stored_roles:
         if len(stored_roles) != len(existing):
             raise ValueError("Не удалось восстановить роли фото. Добавь референсы заново.")
-        identities = [url for url, role in zip(existing, stored_roles, strict=True)
-                      if role in (IDENTITY_PRIMARY, IDENTITY_SUPPORT)]
+        identities = [
+            url
+            for url, role in zip(existing, stored_roles, strict=True)
+            if role in (IDENTITY_PRIMARY, IDENTITY_SUPPORT)
+        ]
     else:
         identities = existing if legacy_identity_transfer else []
     plan = build_seedance_reference_plan(identities, clothing_reference_url)
@@ -97,8 +104,13 @@ def build_seedance_content_edit_prompt(plan: SeedanceReferencePlan, edit: dict) 
     edit = normalize_seedance_content_edit(edit)
     if not plan.image_urls and not any(edit.values()):
         raise ValueError("Добавь фото лица, одежду или число для замены.")
-    return build_seedance_repeat_prompt("", number=edit["number"], clothing=edit["clothing"],
-        identity_image_count=plan.identity_count, clothing_image_index=plan.clothing_image_index)
+    return build_seedance_repeat_prompt(
+        "",
+        number=edit["number"],
+        clothing=edit["clothing"],
+        identity_image_count=plan.identity_count,
+        clothing_image_index=plan.clothing_image_index,
+    )
 
 
 def build_seedance_repeat_prompt(
@@ -130,50 +142,75 @@ def build_seedance_repeat_prompt(
 
     if identity_image_count > 0:
         if identity_image_count == 1:
-            parts.extend([
-                "@Image1 is the primary identity and appearance reference for the main person.",
-                "Use @Image1 only to preserve the same person's face, hair, age, skin tone and recognizability throughout the edit.",
-            ])
+            parts.extend(
+                [
+                    "@Image1 is the primary identity and appearance reference for the main person.",
+                    "Use @Image1 only to preserve the same person's face, hair, age, skin tone and recognizability throughout the edit.",
+                ]
+            )
         else:
             extras = " and ".join(f"@Image{index}" for index in range(2, identity_image_count + 1))
-            parts.extend([
-                "@Image1 is the primary identity and appearance reference for the main person.",
-                f"{extras} are additional identity references for the same person and must only reinforce the same identity across different angles.",
-                f"Use @Image1 as the main identity anchor and use {extras} only for identity consistency.",
-            ])
+            parts.extend(
+                [
+                    "@Image1 is the primary identity and appearance reference for the main person.",
+                    f"{extras} are additional identity references for the same person and must only reinforce the same identity across different angles.",
+                    f"Use @Image1 as the main identity anchor and use {extras} only for identity consistency.",
+                ]
+            )
     else:
-        parts.append("Preserve the main person's identity and face from @Video1 unless the user explicitly asks to change them.")
+        parts.append(
+            "Preserve the main person's identity and face from @Video1 unless the user explicitly asks to change them."
+        )
 
     if identity_image_count:
-        parts.append("Replace the main person's facial identity in @Video1 with the identity from @Image1. Do not blend or retain the original face. Preserve the source outfit unless clothing editing is requested.")
+        parts.append(
+            "Replace the main person's facial identity in @Video1 with the identity from @Image1. Do not blend or retain the original face. Preserve the source outfit unless clothing editing is requested."
+        )
 
     if clothing_image_index is not None:
-        parts.extend([
-            f"@Image{clothing_image_index} is the clothing and outfit reference only.",
-            f"Use @Image{clothing_image_index} only for garment design, colors, materials, fit, visible logos and accessories.",
-            f"Do not copy the face, body identity, person, pose, body motion, background, framing, camera or lighting from @Image{clothing_image_index}.",
-        ])
+        parts.extend(
+            [
+                f"@Image{clothing_image_index} is the clothing and outfit reference only.",
+                f"Use @Image{clothing_image_index} only for garment design, colors, materials, fit, visible logos and accessories.",
+                f"Do not copy the face, body identity, person, pose, body motion, background, framing, camera or lighting from @Image{clothing_image_index}.",
+            ]
+        )
 
-    parts.extend([
-        "",
-        "PRIORITY EDITS:",
-        "Replace only the requested attributes below. Preserve every unrelated detail from @Video1.",
-    ])
+    parts.extend(
+        [
+            "",
+            "PRIORITY EDITS:",
+            "Replace only the requested attributes below. Preserve every unrelated detail from @Video1.",
+        ]
+    )
     if number_text:
         parts.append(
             f'- The target number / digits must read exactly "{number_text}". '
             "Replace the corresponding existing number only; preserve placement and styling unless the user requested otherwise."
         )
+    if clothing_image_index is not None:
+        parts.append(
+            f"- Replace the main person's outfit using @Image{clothing_image_index}; preserve the source person and all unrelated scene details."
+        )
     if clothing_text:
         parts.append(f"- Change only the main person's clothing to: {clothing_text}.")
-    if not number_text and not clothing_text and clothing_image_index is None and not identity_image_count:
-        parts.append("- Keep the visual content unchanged; reproduce the source video as closely as possible.")
+    if (
+        not number_text
+        and not clothing_text
+        and clothing_image_index is None
+        and not identity_image_count
+    ):
+        parts.append(
+            "- Keep the visual content unchanged; reproduce the source video as closely as possible."
+        )
 
-    parts.extend([
-        "",
-        "Do not change unrelated people, objects, environment, motion, camera work, timing or composition.",
-        "Do not blend reference roles: identity images control identity only; a clothing image controls clothing only; @Video1 controls the source scene and motion.",
-    ])
+    parts.extend(
+        [
+            "",
+            "Do not change unrelated people, objects, environment, motion, camera work, timing or composition.",
+            "Do not blend reference roles: identity images control identity only; a clothing image controls clothing only; @Video1 controls the source scene and motion.",
+        ]
+    )
 
     prompt = "\n".join(part for part in parts if part is not None)
     from api.video_prompt_limits import SEEDANCE_25_PROMPT_MAX_CHARS

@@ -83,9 +83,9 @@ from core.gemini_omni import (
 )
 from core.seedance_repeat_overrides import (
     build_seedance_content_edit_prompt,
-    restore_seedance_reference_plan,
     build_seedance_repeat_prompt,
     build_seedance_repeat_reference_plan,
+    restore_seedance_reference_plan,
 )
 from db import repository as repo
 from db.models import GenerationType, User
@@ -863,7 +863,7 @@ async def cb_genjutsu_menu(
     )
     if not configured:
         text += (
-            "\n\n⚠️ <b>Предпросмотр для администратора.</b> "
+            "\n\n⚠️ <b>Часть инструментов недоступна.</b> "
             "Перенос движения и замена объекта через Higgsfield пока недоступны. "
             "Замена лица / одежды использует отдельное подключение Seedance 2.5."
         )
@@ -1862,16 +1862,16 @@ async def _launch_video_generation_from_state(
                 )
                 return False
 
-        existing_image_refs = _url_list(image_url)
-        planned_images, identity_count, clothing_index, reference_roles = (
-            build_seedance_repeat_reference_plan(
-                existing_image_refs,
-                stored_roles=data.get("seedance_reference_roles"),
-                legacy_identity_transfer=_seedance_repeat_has_legacy_identity(data),
-                clothing_reference_url=clothing_reference_url or None,
-            )
-        )
         try:
+            existing_image_refs = _url_list(image_url)
+            planned_images, identity_count, clothing_index, reference_roles = (
+                build_seedance_repeat_reference_plan(
+                    existing_image_refs,
+                    stored_roles=data.get("seedance_reference_roles"),
+                    legacy_identity_transfer=_seedance_repeat_has_legacy_identity(data),
+                    clothing_reference_url=clothing_reference_url or None,
+                )
+            )
             prompt = build_seedance_repeat_prompt(
                 prompt,
                 number=data.get("seedance_repeat_number"),
@@ -2304,6 +2304,7 @@ async def _restore_video_result_state(
             or ""
         ).strip() or None
 
+    await state.clear()
     await state.update_data(
         **repeat_data,
         credits=model_cost.credits,

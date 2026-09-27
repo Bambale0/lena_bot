@@ -12,11 +12,13 @@ from typing import Any
 from api import seedance25_adapter as seedance25
 from api.media_gateway import MediaKind, probe_local_media
 from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
-from core.seedance_repeat_overrides import build_seedance_content_edit_prompt, restore_seedance_reference_plan
-
 from api.seedance25_identity import (
     build_identity_transfer_prompt,
     validate_identity_transfer_refs,
+)
+from core.seedance_repeat_overrides import (
+    build_seedance_content_edit_prompt,
+    restore_seedance_reference_plan,
 )
 
 logger = logging.getLogger(__name__)

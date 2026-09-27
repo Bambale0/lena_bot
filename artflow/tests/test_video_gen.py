@@ -111,7 +111,7 @@ async def test_cb_genjutsu_menu_admin_preview_blocks_launch_without_credentials(
         for button in row
         if button.callback_data
     ]
-    assert "Предпросмотр для администратора" in text
+    assert "Часть инструментов недоступна" in text
     assert callbacks == ["genjutsu:unavailable", "genjutsu:unavailable", "gjreplace:start", "menu:create"]
 
 
