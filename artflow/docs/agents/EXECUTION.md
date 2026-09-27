@@ -656,3 +656,5 @@ Applied project skills: `systematic-debugging`, `test-driven-development`, `requ
 Baseline `8a9bbae789617da0731fd11c82c2d37cbc4980ef`. Evidence, acceptance, affected surfaces, review, checks and rollout notes: [NAVIGATION_DEBUG_20260927.md](NAVIGATION_DEBUG_20260927.md).
 
 Explicit contextual video navigation and scenario selection; shared abandoned-FSM cleanup; image/photo/music return paths; task-owned Midjourney results and buttons. 196 focused checks pass; full suite 1370 pass / 42 pre-existing failures, same identities as pristine baseline. Changed Python files pass Ruff and compilation. Independent review blockers addressed. No schema/config/pricing changes. Production rollout verification will be appended after container startup.
+
+Production verification: deployed code `24fabd0740d0fa9a2303a156a18b5f5dedff93e3`, image `sha256:956e56c02d5928dc3b19fae84022844b3d882582a2c0d72d99966b0842e92385`. Startup complete, /health 200, 31/31 Python hashes match reviewed source, zero restarts or startup error markers. Schema remains 035_trend_user_fields. Source/image backup retained at `/root/artflow-navigation-backup-20260927`; branch not pushed.
