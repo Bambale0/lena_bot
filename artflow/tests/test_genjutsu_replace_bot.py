@@ -10,6 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from bot.handlers import video_gen
 from core.config import settings
 from tests.factories import make_callback, make_message
+from tests.test_genjutsu_face_clothing import provider  # noqa: F401
 
 
 @pytest.fixture
@@ -21,6 +22,7 @@ def state():
 def io(monkeypatch):
     monkeypatch.setattr(settings, 'KIE_AI_KEY', 'test-key')
     cost = SimpleNamespace(model_key='bytedance/seedance-2-5', credits=3, is_active=True, display_name='Seedance 2.5')
+    monkeypatch.setattr(video_gen.repo, 'get_all_model_costs', AsyncMock(return_value=[cost]))
     monkeypatch.setattr(video_gen.repo, 'get_model_cost', AsyncMock(return_value=cost))
     monkeypatch.setattr(video_gen.repo, 'resolve_video_model_cost', AsyncMock(return_value=cost))
     monkeypatch.setattr(video_gen, 'mirror_telegram_file', AsyncMock(side_effect=lambda bot, file_id, **kw: f'https://example.test/{file_id}'))
@@ -106,3 +108,81 @@ async def test_old_confirmation_cannot_launch_a_new_draft(state, io, monkeypatch
     await callback(f'gjreplace:launch:{old}', state, io)
     launch.assert_not_awaited()
     assert await state.get_state() == 'GenjutsuReplaceFSM:source_video'
+
+
+async def ready(state, io):
+    await callback('gjreplace:start', state, io)
+    await message(state, io, video=True)
+    await message(state, io, photo='face.jpg')
+    await action('next', state, io)
+    await message(state, io, photo='shirt.jpg', caption='red jacket')
+    await action('next', state, io)
+    await message(state, io, text='25')
+    await action('res:720p', state, io)
+
+
+@pytest.fixture
+def billing(monkeypatch):
+    spend = AsyncMock(return_value=True)
+    create = AsyncMock(return_value=SimpleNamespace(id=42))
+    refund = AsyncMock(return_value=(None, True))
+    monkeypatch.setattr(video_gen.repo, 'spend_credits', spend)
+    monkeypatch.setattr(video_gen.repo, 'create_generation', create)
+    monkeypatch.setattr(video_gen.repo, 'update_generation_task', AsyncMock())
+    monkeypatch.setattr(video_gen.repo, 'fail_generation_and_refund', refund)
+    return SimpleNamespace(spend=spend, create=create, refund=refund)
+
+
+@pytest.mark.asyncio
+async def test_confirm_reaches_real_provider_and_persists_full_repeat_snapshot(state, io, billing, provider):
+    await ready(state, io)
+    token = (await state.get_data())['gj_token']
+    await action('launch', state, io)
+    params = billing.create.await_args.kwargs['input_params']
+    assert params['flow_id'] == 'genjutsu_face_clothing'
+    assert params['seedance_content_edit'] == {'number': '25', 'clothing': 'red jacket'}
+    assert params['seedance_reference_roles'] == ['identity_primary', 'clothing']
+    assert params['image_url'] == ['https://example.test/face.jpg', 'https://example.test/shirt.jpg']
+    assert params['reference_video_url'] == 'https://example.test/source.mp4'
+    assert billing.spend.await_args.args[2] == 21
+    payload = provider.await_args.args[0]['input']
+    assert payload['reference_video_urls'] == [params['reference_video_url']]
+    assert payload['reference_image_urls'] == params['image_url']
+    assert '@Image2 is the clothing' in payload['prompt']
+    assert 'must read exactly "25"' in payload['prompt']
+    await callback(f'gjreplace:launch:{token}', state, io)
+    assert billing.spend.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('prefix', ['regen', 'reparams', 'reprompt'])
+async def test_history_restores_exact_content_edit_before_charging(state, io, billing, provider, monkeypatch, prefix):
+    from db.models import GenerationType
+    await ready(state, io)
+    saved = await state.get_data()
+    snapshot = {k: v for k, v in saved.items() if not k.startswith('gj_')}
+    previous = SimpleNamespace(id=19, user_id=2, prompt='Замена лица', model=saved['model_key'],
+        gen_type=GenerationType.video, input_params=snapshot, result_url='https://example.test/result.mp4', task_id=None)
+    monkeypatch.setattr(video_gen.repo, 'get_generation_by_id', AsyncMock(return_value=previous))
+    monkeypatch.setattr(video_gen, '_video_repeat_params_for_generation', AsyncMock(return_value=snapshot))
+    await state.clear()
+    await callback(f'{prefix}:video:19', state, io)
+    data = await state.get_data()
+    assert await state.get_state() == 'GenjutsuReplaceFSM:confirm'
+    assert data['seedance_content_edit'] == {'number': '25', 'clothing': 'red jacket'}
+    assert data['gj_clothing_url'] == 'https://example.test/shirt.jpg'
+    assert data['reference_video_url'] == 'https://example.test/source.mp4'
+    billing.spend.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_rejection_refunds_once_and_keeps_editable_draft(state, io, billing, provider):
+    provider.side_effect = RuntimeError('provider rejected')
+    await ready(state, io)
+    token = (await state.get_data())['gj_token']
+    await action('launch', state, io)
+    assert await state.get_state() == 'GenjutsuReplaceFSM:confirm'
+    assert (await state.get_data())['seedance_content_edit']['number'] == '25'
+    billing.refund.assert_awaited_once()
+    await callback(f'gjreplace:launch:{token}', state, io)
+    assert billing.spend.await_count == billing.refund.await_count == 1
