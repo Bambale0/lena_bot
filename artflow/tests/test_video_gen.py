@@ -81,6 +81,7 @@ async def test_cb_genjutsu_menu_opens_dedicated_flow_when_configured() -> None:
     assert callbacks == [
         f"vid_model:{video_gen.GENJUTSU_MODEL_KEYS[0]}",
         f"vid_model:{video_gen.GENJUTSU_MODEL_KEYS[1]}",
+        "gjreplace:start",
         "menu:create",
     ]
 
@@ -110,8 +111,8 @@ async def test_cb_genjutsu_menu_admin_preview_blocks_launch_without_credentials(
         for button in row
         if button.callback_data
     ]
-    assert "Предпросмотр для администратора" in text
-    assert callbacks == ["genjutsu:unavailable", "genjutsu:unavailable", "menu:create"]
+    assert "Часть инструментов недоступна" in text
+    assert callbacks == ["genjutsu:unavailable", "genjutsu:unavailable", "gjreplace:start", "menu:create"]
 
 
 @pytest.mark.asyncio

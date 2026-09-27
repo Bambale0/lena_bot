@@ -82,8 +82,10 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
 )
 from core.seedance_repeat_overrides import (
+    build_seedance_content_edit_prompt,
     build_seedance_repeat_prompt,
     build_seedance_repeat_reference_plan,
+    restore_seedance_reference_plan,
 )
 from db import repository as repo
 from db.models import GenerationType, User
@@ -773,6 +775,9 @@ def _video_input_params_from_generation_state(
     }
     if model_key == SEEDANCE25_MODEL_KEY:
         params["seedance_reference_roles"] = data.get("seedance_reference_roles")
+        if data.get("flow_id") == "genjutsu_face_clothing":
+            params.update(flow_id=data["flow_id"], flow_version=1,
+                          seedance_content_edit=dict(data["seedance_content_edit"]))
     return params
 
 
@@ -830,6 +835,7 @@ def _genjutsu_entry_markup(model_costs: list, *, configured: bool) -> InlineKeyb
                 ),
             )
         ])
+    rows.append([InlineKeyboardButton(text="🎭 Замена лица / одежды", callback_data="gjreplace:start")])
     rows.append([InlineKeyboardButton(text="← Назад", callback_data="menu:create")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -852,12 +858,14 @@ async def cb_genjutsu_menu(
         "но переносит их на персонажей или сцену из твоих референсов.\n\n"
         "🔄 <b>Замена объекта</b> — меняет персонажа, одежду, товар или другой объект, "
         "стараясь сохранить остальной ролик.\n\n"
-        "Дальше: референсы → исходное видео → качество → промпт → запуск."
+        "🎭 <b>Замена лица / одежды</b> — измени лицо, наряд или цифры через Seedance 2.5. "
+        "Дальше: видео → лицо → одежда → цифры → качество → подтверждение."
     )
     if not configured:
         text += (
-            "\n\n⚠️ <b>Предпросмотр для администратора.</b> "
-            "Higgsfield API ещё не подключён на сервере, поэтому запуск временно недоступен."
+            "\n\n⚠️ <b>Часть инструментов недоступна.</b> "
+            "Перенос движения и замена объекта через Higgsfield пока недоступны. "
+            "Замена лица / одежды использует отдельное подключение Seedance 2.5."
         )
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
@@ -1813,6 +1821,23 @@ async def _launch_video_generation_from_state(
     grok_mode: str = data.get("grok_mode", "normal")
     image_url = await _video_reference_image_url(bot, data)
 
+    content_edit = model_key == SEEDANCE25_MODEL_KEY and data.get("flow_id") == "genjutsu_face_clothing"
+    seedance_kwargs = {}
+    if content_edit:
+        try:
+            plan = restore_seedance_reference_plan(_url_list(image_url), data.get("seedance_reference_roles"))
+            if len(_url_list(data.get("reference_video_url"))) != 1:
+                raise ValueError("Сначала загрузи исходное видео.")
+            build_seedance_content_edit_prompt(plan, data["seedance_content_edit"])
+        except ValueError as exc:
+            await source_message.answer(escape(str(exc)))
+            return False
+        image_url = list(plan.image_urls) or None
+        seedance_kwargs = {"seedance_reference_roles": list(plan.roles),
+                           "seedance_content_edit": dict(data["seedance_content_edit"])}
+        data = {**data, "seedance_identity_transfer": False,
+                "audio_ids": _seedance_repeat_without_identity_control(data.get("audio_ids"))}
+
     if model_key == SEEDANCE25_MODEL_KEY and data.get("seedance_repeat_editor"):
         source_video_url = str(
             data.get("seedance_repeat_source_video_url")
@@ -1837,16 +1862,16 @@ async def _launch_video_generation_from_state(
                 )
                 return False
 
-        existing_image_refs = _url_list(image_url)
-        planned_images, identity_count, clothing_index, reference_roles = (
-            build_seedance_repeat_reference_plan(
-                existing_image_refs,
-                stored_roles=data.get("seedance_reference_roles"),
-                legacy_identity_transfer=_seedance_repeat_has_legacy_identity(data),
-                clothing_reference_url=clothing_reference_url or None,
-            )
-        )
         try:
+            existing_image_refs = _url_list(image_url)
+            planned_images, identity_count, clothing_index, reference_roles = (
+                build_seedance_repeat_reference_plan(
+                    existing_image_refs,
+                    stored_roles=data.get("seedance_reference_roles"),
+                    legacy_identity_transfer=_seedance_repeat_has_legacy_identity(data),
+                    clothing_reference_url=clothing_reference_url or None,
+                )
+            )
             prompt = build_seedance_repeat_prompt(
                 prompt,
                 number=data.get("seedance_repeat_number"),
@@ -1868,6 +1893,7 @@ async def _launch_video_generation_from_state(
             reference_video_url=source_video_url,
             audio_ids=sanitized_audio_ids,
             seedance_reference_roles=reference_roles,
+            seedance_identity_transfer=False,
         )
         data = {
             **data,
@@ -1875,6 +1901,7 @@ async def _launch_video_generation_from_state(
             "reference_video_url": source_video_url,
             "audio_ids": sanitized_audio_ids,
             "seedance_reference_roles": reference_roles,
+            "seedance_identity_transfer": False,
         }
         image_url = planned_images or None
 
@@ -1884,7 +1911,7 @@ async def _launch_video_generation_from_state(
                 prompt,
                 data.get("reference_video_url"),
                 force_edit=bool(
-                    data.get("seedance_identity_transfer")
+                    content_edit or data.get("seedance_identity_transfer")
                     or data.get("seedance_repeat_editor")
                 ),
             )
@@ -1917,7 +1944,10 @@ async def _launch_video_generation_from_state(
         resolution=resolution,
         has_video_input=has_gemini_omni_video_input,
     )
-    motion_credits = data.get("motion_credits")
+    if content_edit and (not model_cost or not model_cost.is_active):
+        await source_message.answer("Seedance 2.5 сейчас недоступен. Попробуй позже.")
+        return False
+    motion_credits = None if content_edit else data.get("motion_credits")
     if motion_credits is not None:
         credits = float(motion_credits)
     else:
@@ -1935,6 +1965,10 @@ async def _launch_video_generation_from_state(
             **data,
             "audio_ids": list(dict.fromkeys([*audio_ids, *identity_tokens])),
         }
+
+    if content_edit and data.get("gj_quoted_cost") != credits:
+        await source_message.answer("Стоимость изменилась. Проверь новую цену перед запуском.")
+        return False
 
     input_params = _video_input_params_from_generation_state(
         model_key=model_key,
@@ -1999,9 +2033,13 @@ async def _launch_video_generation_from_state(
             video_end=data.get("video_clip_end"),
             seed=data.get("seed"),
             callback_url=_kie_callback_url(),
+            **seedance_kwargs,
         )
     except Exception as e:
-        logger.error("Video generation error: %s", e)
+        if content_edit:
+            logger.warning("flow=genjutsu_face_clothing provider_start_failed error_type=%s", type(e).__name__)
+        else:
+            logger.error("Video generation error: %s", e)
         await session.rollback()
         await repo.fail_generation_and_refund(
             session,
@@ -2010,8 +2048,8 @@ async def _launch_video_generation_from_state(
             refund_note="bot_video_gen",
         )
         await status_msg.edit_text(
-            "❌ Ошибка запуска генерации. 💋 возвращены.\n\n"
-            "Попробуй другую модель или повтори через минуту.",
+            ("❌ Seedance не принял задачу или временно недоступен. ROX возвращены. Попробуй другое видео или повтори позже."
+             if content_edit else "❌ Ошибка запуска генерации. 💋 возвращены.\n\nПопробуй другую модель или повтори через минуту."),
             reply_markup=main_menu_kb(),
         )
         await state.clear()
@@ -2266,6 +2304,7 @@ async def _restore_video_result_state(
             or ""
         ).strip() or None
 
+    await state.clear()
     await state.update_data(
         **repeat_data,
         credits=model_cost.credits,
@@ -2417,6 +2456,9 @@ async def cb_reprompt_video(
     prev = await _video_generation_for_result_action(call, session, db_user)
     if not prev:
         return
+    from bot.handlers.genjutsu_replace import restore_result
+    if await restore_result(call, state, session, prev):
+        return
 
     restored = await _restore_video_result_state(
         call=call,
@@ -2462,6 +2504,9 @@ async def cb_reparams_video(
 ) -> None:
     prev = await _video_generation_for_result_action(call, session, db_user)
     if not prev:
+        return
+    from bot.handlers.genjutsu_replace import restore_result
+    if await restore_result(call, state, session, prev):
         return
 
     source_feed_gen_id = getattr(prev, "source_feed_gen_id", None)
@@ -2542,6 +2587,10 @@ async def cb_regen_video(
     prev = await repo.get_generation_by_id(session, gen_id)
     if not prev or prev.user_id != db_user.id or not prev.prompt:
         await call.answer("Генерация не найдена", show_alert=True)
+        return
+
+    from bot.handlers.genjutsu_replace import restore_result
+    if await restore_result(call, state, session, prev):
         return
 
     model_key = str(prev.model)

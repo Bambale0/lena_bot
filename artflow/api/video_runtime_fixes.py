@@ -16,6 +16,10 @@ from api.seedance25_identity import (
     build_identity_transfer_prompt,
     validate_identity_transfer_refs,
 )
+from core.seedance_repeat_overrides import (
+    build_seedance_content_edit_prompt,
+    restore_seedance_reference_plan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +143,22 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         *extra_video_refs,
     ])
 
-    if identity_transfer:
+    content_edit = kwargs.get("seedance_content_edit")
+    role_plan = None
+    if content_edit is not None:
+        if not isinstance(content_edit, dict):
+            raise ValueError("Invalid Seedance content edit")
+        if len(raw_video_refs) != 1:
+            raise ValueError("Seedance content edit requires exactly one source video")
+        role_plan = restore_seedance_reference_plan(
+            seedance25._list(image_url), kwargs.get("seedance_reference_roles"),
+            legacy_identity_transfer=identity_transfer,
+        )
+        raw_image_refs = list(role_plan.image_urls)
+        # The typed role plan supersedes legacy tokens before identity wrapping.
+        identity_transfer = False
+        clean_prompt = build_seedance_content_edit_prompt(role_plan, content_edit)
+    elif identity_transfer:
         validate_identity_transfer_refs(images=raw_image_refs, videos=raw_video_refs)
         clean_prompt = build_identity_transfer_prompt(
             raw_user_prompt,
@@ -161,7 +180,10 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         await video_service._prepare_video_reference_urls(fitted_image_refs)
     )
 
-    video_edit = identity_transfer or (
+    if role_plan is not None and len(prepared_images) != len(role_plan.image_urls):
+        raise ValueError("Не удалось подготовить все фото без потери ролей. Загрузи референсы заново.")
+
+    video_edit = content_edit is not None or identity_transfer or (
         bool(raw_video_refs) and seedance25.is_explicit_video_edit_prompt(clean_prompt)
     )
     if video_edit:
@@ -176,6 +198,9 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         prepared_video = await video_service._prepare_reference_video_url(raw_video_ref)
         if prepared_video and prepared_video not in prepared_videos:
             prepared_videos.append(prepared_video)
+
+    if content_edit is not None and len(prepared_videos) != 1:
+        raise ValueError("Seedance content edit lost its source video during upload")
 
     prepared_audio_refs: list[str] = []
     for audio_ref in audio_refs[: seedance25.MAX_REFERENCE_AUDIOS]:
@@ -205,6 +230,8 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
             "nsfw_checker": kwargs.get("nsfw_checker"),
         }
     )
+    from api.video_prompt_limits import validate_video_prompt
+    validate_video_prompt(seedance25.MODEL_KEY, clean_prompt)
     input_payload["prompt"] = clean_prompt
 
     response = await video_service.kieai_client.create_task(

@@ -173,9 +173,11 @@ jobs:
           cache-dependency-path: artflow/requirements*.txt
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Genjutsu editor lint
+        run: ruff check bot/handlers/genjutsu_replace.py core/seedance_repeat_overrides.py tests/test_genjutsu_face_clothing.py tests/test_genjutsu_replace_bot.py
       - name: Navigation regressions
         run: |
-          pytest -q tests/test_navigation_flows.py tests/test_video_gen.py tests/test_video_wizard_v2.py tests/test_photo_prompt_bot_integration.py tests/test_image_wizard_v2.py tests/test_midjourney.py tests/test_plan_payment_method_choice.py tests/test_main_menu_contract.py tests/test_callback_coverage.py
+          pytest -q tests/test_genjutsu_face_clothing.py tests/test_genjutsu_replace_bot.py tests/test_seedance25_identity_transfer.py tests/test_seedance25_provider_payload.py tests/test_video_runtime_fixes.py tests/test_genjutsu_integration.py tests/test_navigation_flows.py tests/test_video_gen.py tests/test_video_wizard_v2.py tests/test_photo_prompt_bot_integration.py tests/test_image_wizard_v2.py tests/test_midjourney.py tests/test_plan_payment_method_choice.py tests/test_main_menu_contract.py tests/test_callback_coverage.py
 
   webapp:
     runs-on: ubuntu-latest
