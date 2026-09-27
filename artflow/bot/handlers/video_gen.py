@@ -66,6 +66,12 @@ from bot.keyboards.models import (
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.seedance_repeat_edit import (
+    MAX_NUMBER_VALUE_CHARS,
+    MAX_OUTFIT_VALUE_CHARS,
+    SeedanceRepeatEditError,
+    build_seedance_repeat_edit_prompt,
+)
 from core.gemini_omni import (
     GEMINI_OMNI_AUDIO_VOICES,
     GEMINI_OMNI_MAX_AUDIO_IDS,
@@ -969,6 +975,33 @@ async def cb_video_model(
     caps = VIDEO_CAPS.get(model_key, {})
     modes = caps.get("modes", ["text"])
     state_data = await state.get_data()
+
+    if model_key == SEEDANCE25_MODEL_KEY and _is_feed_video_use(state_data):
+        source_video_url = str(state_data.get("feed_source_video_url") or "").strip()
+        if not source_video_url:
+            await call.answer("Исходное видео для Seedance не найдено", show_alert=True)
+            return
+        await state.update_data(
+            mode="video",
+            reference_video_url=source_video_url,
+            seedance_repeat_edit=True,
+            seedance_repeat_number=None,
+            seedance_repeat_outfit=None,
+            seedance_repeat_display_name=model_cost.display_name,
+            feed_force_reference=False,
+        )
+        await state.set_state(VideoGenFSM.seedance_repeat_number)
+        await safe_edit_message(
+            call.message,  # type: ignore[arg-type]
+            f"🎬 <b>{model_cost.display_name} · изменить детали</b>\n\n"
+            "🔢 Какую <b>цифру или надпись</b> нужно поставить в ролике?\n"
+            "Например: <code>25</code>\n\n"
+            "Если менять не нужно — отправь <code>-</code>.",
+            reply_markup=back_to_menu_kb(),
+        )
+        await safe_answer_callback(call)
+        return
+
     force_feed_reference = bool(state_data.get("feed_force_reference") and "image" in modes)
 
     if force_feed_reference:
@@ -985,6 +1018,63 @@ async def cb_video_model(
             reply_markup=video_mode_kb(model_key),
         )
     await safe_answer_callback(call)
+
+
+def _seedance_repeat_value(raw: str | None, *, max_chars: int, label: str) -> str | None:
+    value = " ".join(str(raw or "").strip().split())
+    if value in {"-", "—"}:
+        return None
+    if len(value) > max_chars:
+        raise SeedanceRepeatEditError(
+            f"{label}: максимум {max_chars} символов"
+        )
+    return value or None
+
+
+@router.message(VideoGenFSM.seedance_repeat_number, F.text)
+async def seedance_repeat_number_input(message: Message, state: FSMContext) -> None:
+    try:
+        value = _seedance_repeat_value(
+            message.text,
+            max_chars=MAX_NUMBER_VALUE_CHARS,
+            label="Цифра / надпись",
+        )
+    except SeedanceRepeatEditError as exc:
+        await message.answer(f"❌ {escape(str(exc))}")
+        return
+    await state.update_data(seedance_repeat_number=value)
+    await state.set_state(VideoGenFSM.seedance_repeat_outfit)
+    await message.answer(
+        "👗 <b>Какую одежду нужно поставить?</b>\n\n"
+        "Например: <code>чёрная кожаная куртка</code>\n\n"
+        "Если одежду менять не нужно — отправь <code>-</code>.",
+        reply_markup=back_to_menu_kb(),
+    )
+
+
+@router.message(VideoGenFSM.seedance_repeat_outfit, F.text)
+async def seedance_repeat_outfit_input(message: Message, state: FSMContext) -> None:
+    try:
+        value = _seedance_repeat_value(
+            message.text,
+            max_chars=MAX_OUTFIT_VALUE_CHARS,
+            label="Одежда",
+        )
+    except SeedanceRepeatEditError as exc:
+        await message.answer(f"❌ {escape(str(exc))}")
+        return
+
+    await state.update_data(seedance_repeat_outfit=value)
+    data = await state.get_data()
+    model_key = str(data.get("model_key") or SEEDANCE25_MODEL_KEY)
+    display_name = str(data.get("seedance_repeat_display_name") or "Seedance 2.5")
+    await state.set_state(VideoGenFSM.params_select)
+    updated = await state.get_data()
+    await message.answer(
+        f"⚙️ <b>Параметры</b> · {escape(display_name)}\n"
+        f"{_video_params_hint(model_key, updated)}",
+        reply_markup=_video_params_reply_markup(model_key, updated),
+    )
 
 
 async def _handle_mode(
@@ -1575,6 +1665,17 @@ async def cb_vpar_next(
     rate_or_flat = float(model_cost.credits if model_cost else data.get("credits", 0))
     await state.update_data(credits=rate_or_flat)
     if _is_feed_video_use(data):
+        repeat_prompt = str(data["feed_use_prompt"])
+        if data.get("model_key") == SEEDANCE25_MODEL_KEY and data.get("seedance_repeat_edit"):
+            try:
+                repeat_prompt = build_seedance_repeat_edit_prompt(
+                    repeat_prompt,
+                    number_value=data.get("seedance_repeat_number"),
+                    outfit_value=data.get("seedance_repeat_outfit"),
+                )
+            except SeedanceRepeatEditError as exc:
+                await call.answer(str(exc), show_alert=True)
+                return
         await safe_answer_callback(call, "Запускаю повтор")
         await _launch_video_generation_from_state(
             source_message=call.message,  # type: ignore[arg-type]
@@ -1582,7 +1683,7 @@ async def cb_vpar_next(
             session=session,
             db_user=db_user,
             bot=bot,
-            prompt=str(data["feed_use_prompt"]),
+            prompt=repeat_prompt,
             source_feed_gen_id=data.get("source_feed_gen_id") or data.get("feed_use_gen_id"),
             hidden_feed_prompt=True,
         )
@@ -2078,6 +2179,11 @@ async def _restore_video_result_state(
         feed_use_prompt=None,
         feed_use_gen_id=None,
         feed_force_reference=None,
+        feed_source_video_url=None,
+        seedance_repeat_edit=None,
+        seedance_repeat_number=None,
+        seedance_repeat_outfit=None,
+        seedance_repeat_display_name=None,
     )
     restored = await state.get_data()
     return model_key, model_cost.display_name, restored
