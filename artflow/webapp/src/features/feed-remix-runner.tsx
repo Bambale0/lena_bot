@@ -14,6 +14,7 @@ const RUNNER_ROOT_ID = "apix-feed-remix-runner-root";
 const API_BASE = "/api/v1";
 const ACCEPTED_REFERENCE_IMAGES = "image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif";
 const ACCEPTED_REFERENCE_EXTENSIONS = ".jpg,.jpeg,.png,.webp,.heic,.heif,.avif";
+const SEEDANCE25_MODEL = "bytedance/seedance-2-5";
 
 type ModelBucket = "image" | "video";
 type RunnerPhase = "idle" | "uploading" | "generating" | "error";
@@ -152,6 +153,8 @@ function FeedRemixRunnerPortal() {
   const [resolution, setResolution] = useState("720p");
   const [grokMode, setGrokMode] = useState("normal");
   const [references, setReferences] = useState<string[]>([]);
+  const [seedanceEditNumber, setSeedanceEditNumber] = useState("");
+  const [seedanceEditOutfit, setSeedanceEditOutfit] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const allModels = useMemo(() => [...imageModels, ...videoModels], [imageModels, videoModels]);
@@ -160,6 +163,7 @@ function FeedRemixRunnerPortal() {
   const busy = phase === "uploading" || phase === "generating" || modelsLoading;
   const sourcePreview = safeExternalUrl(firstMedia(item || {}));
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
+  const seedanceRepeatEdit = sourceIsVideo && selectedModel?.key === SEEDANCE25_MODEL;
   const aspectRatios = modelAspectRatios(selectedModel);
   const durations = modelDurations(selectedModel);
   const durationIndex = Math.max(0, durations.indexOf(duration));
@@ -182,6 +186,8 @@ function FeedRemixRunnerPortal() {
     setDuration(5);
     setResolution("720p");
     setGrokMode("normal");
+    setSeedanceEditNumber("");
+    setSeedanceEditOutfit("");
   }, []);
 
   const cancelPending = useCallback((message = "Повтор отменён") => {
@@ -296,6 +302,8 @@ function FeedRemixRunnerPortal() {
           grok_mode: grokMode,
           quality,
           count,
+          seedance_edit_number: seedanceRepeatEdit ? seedanceEditNumber.trim() || null : null,
+          seedance_edit_outfit: seedanceRepeatEdit ? seedanceEditOutfit.trim() || null : null,
         }),
       });
       pendingRemix?.resolve(task);
@@ -310,7 +318,7 @@ function FeedRemixRunnerPortal() {
       setPhase("error");
       toast.error(message);
     }
-  }, [aspectRatio, bucket, busy, count, duration, grokMode, item, mode, quality, references, resetForm, resolution, selectedModel, sourceIsVideo, sourcePreview]);
+  }, [aspectRatio, bucket, busy, count, duration, grokMode, item, mode, quality, references, resetForm, resolution, seedanceEditNumber, seedanceEditOutfit, seedanceRepeatEdit, selectedModel, sourceIsVideo, sourcePreview]);
 
   const phaseLabel = useMemo(() => {
     if (phase === "uploading") return "Загружаем референсы…";
@@ -390,6 +398,42 @@ function FeedRemixRunnerPortal() {
               </div>
             ) : null}
           </div>
+
+          {seedanceRepeatEdit ? (
+            <div className="grid gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
+              <div>
+                <p className="font-semibold">Seedance · изменить детали</p>
+                <p className="text-xs text-muted-foreground">
+                  Исходный ролик останется основой. Укажите только то, что нужно заменить при повторе.
+                </p>
+              </div>
+              <label className="grid gap-1 text-xs font-semibold">
+                Цифра / надпись
+                <input
+                  className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm"
+                  value={seedanceEditNumber}
+                  maxLength={120}
+                  placeholder="Например: 25"
+                  disabled={busy}
+                  onChange={(event) => setSeedanceEditNumber(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold">
+                Одежда
+                <input
+                  className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm"
+                  value={seedanceEditOutfit}
+                  maxLength={600}
+                  placeholder="Например: чёрная кожаная куртка"
+                  disabled={busy}
+                  onChange={(event) => setSeedanceEditOutfit(event.target.value)}
+                />
+              </label>
+              <p className="text-[11px] text-muted-foreground">
+                Скрытый исходный промпт не показывается и не меняется в интерфейсе. Эти значения уходят в Seedance как приоритетные video-edit правки.
+              </p>
+            </div>
+          ) : null}
 
           <label className="grid gap-1 text-xs font-semibold">
             Модель
