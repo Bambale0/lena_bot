@@ -100,6 +100,13 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.seedance_repeat_edit import (
+    MAX_NUMBER_VALUE_CHARS,
+    MAX_OUTFIT_VALUE_CHARS,
+    SeedanceRepeatEditError,
+    build_seedance_repeat_edit_prompt,
+    has_seedance_repeat_edits,
+)
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
 from db import repository as repo
@@ -1353,6 +1360,8 @@ class FeedRemixRequest(BaseModel):
     grok_mode: str = "normal"
     quality: str = "basic"
     count: int = Field(default=1, ge=1, le=6)
+    seedance_edit_number: str | None = Field(default=None, max_length=MAX_NUMBER_VALUE_CHARS)
+    seedance_edit_outfit: str | None = Field(default=None, max_length=MAX_OUTFIT_VALUE_CHARS)
 
 
 
@@ -2925,8 +2934,60 @@ async def remix_feed_post(
     if not source:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
+    try:
+        seedance_edit_requested = has_seedance_repeat_edits(
+            number_value=body.seedance_edit_number,
+            outfit_value=body.seedance_edit_outfit,
+        )
+    except SeedanceRepeatEditError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if seedance_edit_requested and body.model != SEEDANCE25_MODEL_KEY:
+        raise HTTPException(
+            status_code=422,
+            detail="Seedance repeat edits are only supported by Seedance 2.5",
+        )
+
+    source_gen_type = getattr(
+        getattr(source, "gen_type", None),
+        "value",
+        getattr(source, "gen_type", None),
+    )
+    seedance_source_video_url: str | None = None
+    effective_prompt = str(source.prompt or "")
+    if seedance_edit_requested:
+        if source_gen_type != GenerationType.video.value:
+            raise HTTPException(
+                status_code=422,
+                detail="Seedance repeat edit requires a source video",
+            )
+        source_video_candidates = (
+            _normalize_public_urls(body.video_url)
+            or _generation_result_urls(source)
+        )
+        seedance_source_video_url = (
+            source_video_candidates[0] if source_video_candidates else None
+        )
+        if not seedance_source_video_url:
+            raise HTTPException(
+                status_code=422,
+                detail="Seedance repeat edit source video is unavailable",
+            )
+        try:
+            effective_prompt = build_seedance_repeat_edit_prompt(
+                effective_prompt,
+                number_value=body.seedance_edit_number,
+                outfit_value=body.seedance_edit_outfit,
+            )
+        except SeedanceRepeatEditError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     user_refs = _normalize_public_urls(body.image_url, *(body.reference_urls or []))
-    source_refs = _normalize_public_urls(body.source_image_url) or _generation_result_urls(source)
+    source_refs = (
+        _normalize_public_urls(body.source_image_url)
+        if seedance_edit_requested
+        else (_normalize_public_urls(body.source_image_url) or _generation_result_urls(source))
+    )
     repeat_refs = _normalize_public_urls(*(source_refs + user_refs))[:FEED_REMIX_MAX_REFS]
 
     if body.model in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS):
@@ -3074,7 +3135,7 @@ async def remix_feed_post(
             resolution=body.resolution,
             image_url=fallback_image_url,
             reference_urls=video_refs[1:],
-            video_url=body.video_url,
+            video_url=seedance_source_video_url if seedance_edit_requested else body.video_url,
             video_start=body.video_start,
             video_end=body.video_end,
             audio_ids=body.audio_ids,
@@ -3162,7 +3223,7 @@ async def remix_feed_post(
     gen_type_enum = GT.video if gen_type == "video" else GT.image
     gen = await repo.create_generation(
         session, user.id, body.model, gen_type_enum,
-        source.prompt, total_credits,
+        effective_prompt, total_credits,
         image_session_id=image_session_id,
         parent_generation_id=source.id if gen_type == "image" else None,
         action_type=ImageGenerationAction.remix if gen_type == "image" else None,
@@ -3176,7 +3237,7 @@ async def remix_feed_post(
         if gen_type == "video":
             result = await video_service.generate_video(
                 model,
-                source.prompt,
+                effective_prompt,
                 image_url=normalized_video["image_url"],
                 duration=normalized_video["duration"],
                 aspect_ratio=normalized_video["aspect_ratio"],
@@ -3193,7 +3254,7 @@ async def remix_feed_post(
         else:
             result = await image_service.generate_image(
                 img_model,
-                source.prompt,
+                effective_prompt,
                 image_url=normalized_image_url,
                 aspect_ratio=normalized_ratio,
                 n=body.count,
