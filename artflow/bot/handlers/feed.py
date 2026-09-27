@@ -418,6 +418,7 @@ async def cb_feed_use(
             feed_use_model=gen.model,
             feed_use_gen_type="video",
             source_feed_gen_id=gen_id,
+            feed_source_video_url=str(getattr(gen, "result_url", "") or "") or None,
             feed_force_reference=True,
         )
         await call.message.answer(  # type: ignore[union-attr]
