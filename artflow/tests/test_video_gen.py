@@ -780,6 +780,68 @@ async def test_reparams_video_restores_prompt_and_shows_launch_button() -> None:
 
 
 @pytest.mark.asyncio
+async def test_seedance_reparams_opens_content_override_editor() -> None:
+    call = make_callback(data="reparams:video:777")
+    mock_state = _fake_state()
+    mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
+    prev = SimpleNamespace(
+        id=777,
+        user_id=42,
+        model=video_gen.SEEDANCE25_MODEL_KEY,
+        gen_type=GenerationType.video,
+        prompt="keep composition",
+        task_id="task_prev",
+        source_feed_gen_id=None,
+        input_params={
+            "duration": 5,
+            "aspect_ratio": "adaptive",
+            "resolution": "720p",
+            "image_url": "https://cdn.test/ref.jpg",
+        },
+    )
+    mock_cost = _make_video_model_cost(video_gen.SEEDANCE25_MODEL_KEY, 90, "Seedance 2.5")
+
+    with (
+        patch("bot.handlers.video_gen.repo", AsyncMock(
+            get_generation_by_id=AsyncMock(return_value=prev),
+            resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        )),
+        patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            kieai_client=SimpleNamespace(get_task_status=AsyncMock(return_value={})),
+        )),
+        patch("bot.handlers.video_gen.safe_edit_message", AsyncMock()) as edit_message,
+    ):
+        await video_gen.cb_reparams_video(call, AsyncMock(), mock_state, mock_db_user, AsyncMock())
+
+    mock_state.set_state.assert_awaited_with(VideoGenFSM.seedance_repeat_edit)
+    updated = await mock_state.get_data()
+    assert updated["seedance_repeat_editor"] is True
+    assert updated["video_reuse_prompt"] == "keep composition"
+    markup = edit_message.await_args.kwargs["reply_markup"]
+    texts = {button.text for row in markup.inline_keyboard for button in row}
+    assert "🔢 Число / цифры" in texts
+    assert "👕 Одежда" in texts
+    assert "▶️ Запустить повтор" in texts
+
+
+def test_seedance_repeat_overrides_are_priority_append_only() -> None:
+    from core.seedance_repeat_overrides import render_seedance_repeat_overrides
+
+    rendered = render_seedance_repeat_overrides(
+        "Keep the original scene and movement.",
+        {
+            "seedance_repeat_number": "25",
+            "seedance_repeat_clothing": "чёрная кожаная куртка",
+        },
+    )
+
+    assert rendered.startswith("Keep the original scene and movement.")
+    assert "Число / цифры: 25" in rendered
+    assert "Одежда: чёрная кожаная куртка" in rendered
+    assert "приоритетные изменения" in rendered
+
+
+@pytest.mark.asyncio
 async def test_handle_video_prompt_keeps_reprompt_parent_generation() -> None:
     msg = make_message(text="new prompt")
     msg.answer = AsyncMock()
