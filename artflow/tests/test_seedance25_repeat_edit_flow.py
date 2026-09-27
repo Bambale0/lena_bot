@@ -80,3 +80,21 @@ def test_telegram_seedance_repeat_has_dedicated_edit_states_and_fields() -> None
     assert "seedance_repeat_number" in handler
     assert "seedance_repeat_outfit" in handler
     assert "feed_source_video_url" in feed
+
+
+def test_seedance_video_request_accepts_source_video_for_edit() -> None:
+    from api.miniapp_routes import _normalize_video_request
+
+    normalized = _normalize_video_request(
+        model_key="bytedance/seedance-2-5",
+        mode="video",
+        duration=5,
+        aspect_ratio="adaptive",
+        resolution="720p",
+        image_url=None,
+        reference_urls=[],
+        video_url="https://example.test/source.mp4",
+    )
+
+    assert normalized["reference_video_url"] == "https://example.test/source.mp4"
+    assert normalized["image_url"] is None
