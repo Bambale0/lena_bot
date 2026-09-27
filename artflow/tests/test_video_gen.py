@@ -899,6 +899,112 @@ def test_seedance_repeat_reference_plan_recovers_legacy_identity_transfer() -> N
 
 
 @pytest.mark.asyncio
+async def test_seedance_repeat_launch_sends_role_order_to_provider() -> None:
+    status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
+    source_message = make_message(text="repeat")
+    source_message.answer = AsyncMock(return_value=status_msg)
+    mock_session = AsyncMock()
+    mock_bot = AsyncMock()
+    mock_db_user = SimpleNamespace(
+        id=42,
+        credits=500,
+        language="ru",
+        username="test",
+        full_name="Test",
+        is_banned=False,
+    )
+    mock_state = _fake_state(
+        model_key=video_gen.SEEDANCE25_MODEL_KEY,
+        duration=5,
+        aspect_ratio="adaptive",
+        resolution="720p",
+        mode="image",
+        credits=10,
+        grok_mode="multimodal",
+        image_url=[
+            "https://cdn.test/front.jpg",
+            "https://cdn.test/side.jpg",
+        ],
+        reference_video_url=None,
+        audio_ids=[
+            "__apix_seedance25:identity_transfer=true",
+            "__apix_seedance25:generate_audio=false",
+        ],
+        seedance_repeat_editor=True,
+        seedance_repeat_source_video_url="https://cdn.test/generated-video.mp4",
+        seedance_repeat_number="25",
+        seedance_repeat_clothing="",
+        seedance_repeat_clothing_file_id="tg-clothing",
+        seedance_reference_roles=None,
+    )
+    mock_cost = _make_video_model_cost(video_gen.SEEDANCE25_MODEL_KEY, 10, "Seedance 2.5")
+    mock_gen = SimpleNamespace(id=999, task_id=None, model=video_gen.SEEDANCE25_MODEL_KEY)
+    repo_stub = AsyncMock(
+        resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        spend_credits=AsyncMock(return_value=True),
+        create_generation=AsyncMock(return_value=mock_gen),
+        update_generation_task=AsyncMock(),
+        get_generation_by_id=AsyncMock(return_value=None),
+        fail_generation=AsyncMock(),
+        add_credits=AsyncMock(),
+    )
+
+    with (
+        patch("bot.handlers.video_gen.repo", repo_stub),
+        patch(
+            "bot.handlers.video_gen.mirror_telegram_file",
+            AsyncMock(return_value="https://cdn.test/jacket.jpg"),
+        ),
+        patch(
+            "bot.handlers.video_gen.seedance25_edit_billing_duration",
+            AsyncMock(return_value=5),
+        ),
+        patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
+            generate_video=AsyncMock(
+                return_value=SimpleNamespace(
+                    task_id="task_repeat",
+                    provider="kieai",
+                    uses_webhook=True,
+                )
+            ),
+            get_poll_fn=MagicMock(),
+        )) as mock_video_service,
+    ):
+        ok = await video_gen._launch_video_generation_from_state(
+            source_message=source_message,
+            state=mock_state,
+            session=mock_session,
+            db_user=mock_db_user,
+            bot=mock_bot,
+            prompt="Keep the original person and scene.",
+            parent_generation_id=777,
+        )
+
+    assert ok is True
+    provider_prompt = mock_video_service.generate_video.await_args.args[1]
+    provider_kwargs = mock_video_service.generate_video.await_args.kwargs
+    assert "@Video1 is the authoritative source video" in provider_prompt
+    assert "@Image1 is the primary identity" in provider_prompt
+    assert "@Image2" in provider_prompt
+    assert "@Image3 is the clothing and outfit reference only" in provider_prompt
+    assert 'exactly "25"' in provider_prompt
+    assert provider_kwargs["image_url"] == [
+        "https://cdn.test/front.jpg",
+        "https://cdn.test/side.jpg",
+        "https://cdn.test/jacket.jpg",
+    ]
+    assert provider_kwargs["reference_video_url"] == "https://cdn.test/generated-video.mp4"
+    assert "__apix_seedance25:identity_transfer=true" not in provider_kwargs["audio_ids"]
+    input_params = repo_stub.create_generation.await_args.kwargs["input_params"]
+    assert input_params["reference_video_url"] == "https://cdn.test/generated-video.mp4"
+    assert input_params["seedance_reference_roles"] == [
+        "identity_primary",
+        "identity_support",
+        "clothing",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_handle_video_prompt_keeps_reprompt_parent_generation() -> None:
     msg = make_message(text="new prompt")
     msg.answer = AsyncMock()
