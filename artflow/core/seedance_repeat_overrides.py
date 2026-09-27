@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+import re
 
-from api.video_prompt_limits import SEEDANCE_25_PROMPT_MAX_CHARS
 
 
 IDENTITY_PRIMARY = "identity_primary"
@@ -15,13 +16,50 @@ def _clean(value: object, *, limit: int) -> str:
     return text[:limit] if text else ""
 
 
-def _dedupe_urls(values: Sequence[object] | None) -> list[str]:
-    result: list[str] = []
-    for value in values or []:
-        clean = str(value or "").strip()
-        if clean and clean not in result:
-            result.append(clean)
-    return result
+@dataclass(frozen=True)
+class SeedanceReferencePlan:
+    image_urls: tuple[str, ...]
+    identity_count: int
+    clothing_image_index: int | None
+    roles: tuple[str, ...]
+
+
+def build_seedance_reference_plan(
+    identity_urls: Sequence[str], clothing_url: str | None = None,
+) -> SeedanceReferencePlan:
+    identities = list(dict.fromkeys(str(url).strip() for url in identity_urls if str(url).strip()))
+    if len(identities) > 3:
+        raise ValueError("Можно загрузить не больше 3 фото одного человека.")
+    clothing = str(clothing_url or "").strip()
+    if clothing in identities:
+        raise ValueError("Для одежды используй отдельное фото, отличное от фото лица.")
+    refs = identities + ([clothing] if clothing else [])
+    roles = [IDENTITY_PRIMARY if i == 0 else IDENTITY_SUPPORT for i in range(len(identities))]
+    if clothing:
+        roles.append(CLOTHING)
+    return SeedanceReferencePlan(tuple(refs), len(identities), len(refs) if clothing else None, tuple(roles))
+
+
+def restore_seedance_reference_plan(
+    image_urls: Sequence[str], roles: Sequence[str] | None, *, legacy_identity_transfer: bool = False,
+) -> SeedanceReferencePlan:
+    """Align roles before deduplication; never guess which image contains clothing."""
+    refs = list(image_urls)
+    if roles is None and legacy_identity_transfer:
+        return build_seedance_reference_plan(refs)
+    if roles is None or len(roles) != len(refs):
+        raise ValueError("Не удалось восстановить роли фото. Добавь референсы заново.")
+    identities, clothing = [], None
+    for url, role in zip(refs, roles, strict=True):
+        if not str(url or "").strip():
+            raise ValueError("Не удалось восстановить фото. Загрузи его заново.")
+        if role in (IDENTITY_PRIMARY, IDENTITY_SUPPORT):
+            identities.append(url)
+        elif role == CLOTHING and clothing is None:
+            clothing = url
+        else:
+            raise ValueError("Некорректные роли референсов. Добавь фото заново.")
+    return build_seedance_reference_plan(identities, clothing)
 
 
 def build_seedance_repeat_reference_plan(
@@ -31,42 +69,36 @@ def build_seedance_repeat_reference_plan(
     legacy_identity_transfer: bool,
     clothing_reference_url: str | None,
 ) -> tuple[list[str], int, int | None, list[str]]:
-    """Build the ordered Seedance @ImageN plan for a content-edit repeat.
+    existing = [str(url or "").strip() for url in (existing_image_urls or [])]
+    if stored_roles:
+        if len(stored_roles) != len(existing):
+            raise ValueError("Не удалось восстановить роли фото. Добавь референсы заново.")
+        identities = [url for url, role in zip(existing, stored_roles, strict=True)
+                      if role in (IDENTITY_PRIMARY, IDENTITY_SUPPORT)]
+    else:
+        identities = existing if legacy_identity_transfer else []
+    plan = build_seedance_reference_plan(identities, clothing_reference_url)
+    return list(plan.image_urls), plan.identity_count, plan.clothing_image_index, list(plan.roles)
 
-    The generated video becomes @Video1 and is authoritative for the scene.
-    Only identity refs are intentionally carried from the previous generation;
-    old generic/style/clothing refs are dropped so they cannot compete with the
-    current source video. A new clothing ref is appended after identity refs.
-    """
-    existing = _dedupe_urls(existing_image_urls)
-    roles = [str(item or "").strip() for item in (stored_roles or [])]
 
-    identity_refs: list[str] = []
-    if roles:
-        for index, url in enumerate(existing):
-            role = roles[index] if index < len(roles) else ""
-            if role.startswith("identity"):
-                identity_refs.append(url)
-    elif legacy_identity_transfer:
-        identity_refs = existing[:3]
+def normalize_seedance_content_edit(value: dict) -> dict[str, str]:
+    number = str(value.get("number") or "").strip()
+    clothing = str(value.get("clothing") or "").strip()
+    if number and (len(number) > 80 or not re.fullmatch(r"[+-]?\d[\d .,:%/+\-]*", number)):
+        raise ValueError("В поле числа укажи только число или цифры (до 80 символов).")
+    if len(clothing) > 300:
+        raise ValueError("Описание одежды слишком длинное: сократи его до 300 символов.")
+    if re.search(r"@(image|video)\d+", clothing, re.I):
+        raise ValueError("Опиши одежду обычными словами — роли фото бот назначит сам.")
+    return {"number": number, "clothing": clothing}
 
-    planned_refs = list(identity_refs)
-    planned_roles = [
-        IDENTITY_PRIMARY if index == 0 else IDENTITY_SUPPORT
-        for index in range(len(identity_refs))
-    ]
 
-    clothing_url = str(clothing_reference_url or "").strip()
-    clothing_index: int | None = None
-    if clothing_url:
-        if clothing_url in planned_refs:
-            clothing_index = planned_refs.index(clothing_url) + 1
-        else:
-            planned_refs.append(clothing_url)
-            planned_roles.append(CLOTHING)
-            clothing_index = len(planned_refs)
-
-    return planned_refs, len(identity_refs), clothing_index, planned_roles
+def build_seedance_content_edit_prompt(plan: SeedanceReferencePlan, edit: dict) -> str:
+    edit = normalize_seedance_content_edit(edit)
+    if not plan.image_urls and not any(edit.values()):
+        raise ValueError("Добавь фото лица, одежду или число для замены.")
+    return build_seedance_repeat_prompt("", number=edit["number"], clothing=edit["clothing"],
+        identity_image_count=plan.identity_count, clothing_image_index=plan.clothing_image_index)
 
 
 def build_seedance_repeat_prompt(
@@ -82,6 +114,8 @@ def build_seedance_repeat_prompt(
     Reference numbering follows the provider payload order:
     @Image1..N are image refs and @Video1 is the generated source video.
     """
+    if not 0 <= identity_image_count <= 3:
+        raise ValueError("Expected zero to three identity references")
     number_text = _clean(number, limit=80)
     clothing_text = _clean(clothing, limit=300)
 
@@ -110,11 +144,14 @@ def build_seedance_repeat_prompt(
     else:
         parts.append("Preserve the main person's identity and face from @Video1 unless the user explicitly asks to change them.")
 
+    if identity_image_count:
+        parts.append("Replace the main person's facial identity in @Video1 with the identity from @Image1. Do not blend or retain the original face. Preserve the source outfit unless clothing editing is requested.")
+
     if clothing_image_index is not None:
         parts.extend([
             f"@Image{clothing_image_index} is the clothing and outfit reference only.",
             f"Use @Image{clothing_image_index} only for garment design, colors, materials, fit, visible logos and accessories.",
-            f"Do not copy the face, body identity, pose, background, framing, camera or lighting from @Image{clothing_image_index}.",
+            f"Do not copy the face, body identity, person, pose, body motion, background, framing, camera or lighting from @Image{clothing_image_index}.",
         ])
 
     parts.extend([
@@ -129,7 +166,7 @@ def build_seedance_repeat_prompt(
         )
     if clothing_text:
         parts.append(f"- Change only the main person's clothing to: {clothing_text}.")
-    if not number_text and not clothing_text and clothing_image_index is None:
+    if not number_text and not clothing_text and clothing_image_index is None and not identity_image_count:
         parts.append("- Keep the visual content unchanged; reproduce the source video as closely as possible.")
 
     parts.extend([
@@ -139,6 +176,8 @@ def build_seedance_repeat_prompt(
     ])
 
     prompt = "\n".join(part for part in parts if part is not None)
+    from api.video_prompt_limits import SEEDANCE_25_PROMPT_MAX_CHARS
+
     if len(prompt) > SEEDANCE_25_PROMPT_MAX_CHARS:
         raise ValueError(
             "Seedance 2.5 repeat prompt must be at most 30,000 characters after reference-role instructions are added"

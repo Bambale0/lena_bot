@@ -830,6 +830,7 @@ def _genjutsu_entry_markup(model_costs: list, *, configured: bool) -> InlineKeyb
                 ),
             )
         ])
+    rows.append([InlineKeyboardButton(text="🎭 Замена лица / одежды", callback_data="gjreplace:start")])
     rows.append([InlineKeyboardButton(text="← Назад", callback_data="menu:create")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

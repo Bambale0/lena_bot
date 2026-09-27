@@ -111,7 +111,7 @@ async def test_cb_genjutsu_menu_admin_preview_blocks_launch_without_credentials(
         if button.callback_data
     ]
     assert "Предпросмотр для администратора" in text
-    assert callbacks == ["genjutsu:unavailable", "genjutsu:unavailable", "menu:create"]
+    assert callbacks == ["genjutsu:unavailable", "genjutsu:unavailable", "gjreplace:start", "menu:create"]
 
 
 @pytest.mark.asyncio
