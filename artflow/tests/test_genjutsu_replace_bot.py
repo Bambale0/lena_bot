@@ -449,3 +449,60 @@ async def test_switch_to_ordinary_repeat_discards_face_editor_metadata(state, io
     data = await state.get_data()
     assert "seedance_content_edit" not in data
     assert "flow_id" not in data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw_state",
+    [None, "VideoGenFSM:prompt", "ImageGenFSM:prompt", "OtherFlow:waiting"],
+)
+async def test_editor_does_not_intercept_unrelated_real_messages(state, monkeypatch, raw_state):
+    from datetime import datetime
+
+    from aiogram.dispatcher.event.bases import UNHANDLED
+    from aiogram.types import Chat, Dice, Message
+
+    from bot.handlers import genjutsu_replace as editor
+
+    await state.set_state(raw_state)
+    answer = AsyncMock()
+    monkeypatch.setattr(Message, "answer", answer)
+    msg = Message(
+        message_id=1,
+        date=datetime.now(),
+        chat=Chat(id=2, type="private"),
+        dice=Dice(emoji="🎲", value=1),
+    )
+    result = await editor.router.propagate_event("message", msg, state=state, raw_state=raw_state)
+    assert result is UNHANDLED
+    answer.assert_not_awaited()
+    assert await state.get_state() == raw_state
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "step", ["source_video", "identity", "clothing", "number", "resolution", "confirm", "launching"]
+)
+async def test_editor_unsupported_real_media_gets_hint_in_every_state(state, monkeypatch, step):
+    from datetime import datetime
+
+    from aiogram.types import Chat, Dice, Message
+
+    from bot.handlers import genjutsu_replace as editor
+
+    raw_state = f"GenjutsuReplaceFSM:{step}"
+    await state.set_state(raw_state)
+    await state.set_data(
+        {"seedance_content_edit": {}, "resolution": "720p", "gj_quoted_cost": 21, "duration": 7}
+    )
+    answer = AsyncMock()
+    monkeypatch.setattr(Message, "answer", answer)
+    msg = Message(
+        message_id=1,
+        date=datetime.now(),
+        chat=Chat(id=2, type="private"),
+        dice=Dice(emoji="🎲", value=1),
+    )
+    await editor.router.propagate_event("message", msg, state=state, raw_state=raw_state)
+    answer.assert_awaited_once()
+    assert await state.get_state() == raw_state

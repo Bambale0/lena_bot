@@ -7,6 +7,7 @@ import secrets
 from html import escape
 
 from aiogram import Bot, F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -401,7 +402,7 @@ async def navigate(
     await _render(call.message, state, edit=True)
 
 
-@router.message(GenjutsuReplaceFSM)
+@router.message(StateFilter(GenjutsuReplaceFSM))
 async def unsupported(message: Message, state: FSMContext) -> None:
     if await state.get_state() == GenjutsuReplaceFSM.launching.state:
         await message.answer("⏳ Задача запускается. Дождись подтверждения.")
