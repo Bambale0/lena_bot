@@ -81,6 +81,7 @@ async def test_cb_genjutsu_menu_opens_dedicated_flow_when_configured() -> None:
     assert callbacks == [
         f"vid_model:{video_gen.GENJUTSU_MODEL_KEYS[0]}",
         f"vid_model:{video_gen.GENJUTSU_MODEL_KEYS[1]}",
+        "gjreplace:start",
         "menu:create",
     ]
 

@@ -26,7 +26,7 @@ def _show_genjutsu_entry(db_user: User) -> bool:
     raw = str(settings.HIGGSFIELD_CREDENTIALS or "").strip()
     key_id, sep, key_secret = raw.partition(":")
     configured = bool(sep and key_id.strip() and key_secret.strip())
-    return configured or _is_admin_user(db_user)
+    return configured or bool(settings.KIE_API_KEY) or _is_admin_user(db_user)
 
 
 def language_kb(current_lang: str) -> InlineKeyboardBuilder:

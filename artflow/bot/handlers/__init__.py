@@ -85,6 +85,7 @@ from . import gemini_omni_references as _gemini_omni_references
 from . import minimax_h3_references as _minimax_h3_references
 from . import seedance25_references as _seedance25_references
 from . import video_gen as _legacy_video_gen
+from . import genjutsu_replace as _genjutsu_replace
 from . import video_navigation as _video_navigation
 from . import video_references as _video_references
 from . import video_wizard as _video_wizard
@@ -94,6 +95,7 @@ install_minimax_h3_handler_presentation(_legacy_video_gen)
 install_veo_handler_presentation(_legacy_video_gen)
 
 _video_router = Router(name="video_v2")
+_video_router.include_router(_genjutsu_replace.router)
 _video_router.include_router(_video_navigation.router)
 _video_router.include_router(_gemini_omni_references.router)
 _video_router.include_router(_gemini_omni_recovery.router)
