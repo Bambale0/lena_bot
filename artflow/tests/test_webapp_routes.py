@@ -1139,6 +1139,22 @@ async def test_webapp_feed_link_uses_viewer_referral_for_public_posts(client, mo
 
 
 @pytest.mark.asyncio
+async def test_trend_share_link_uses_sharer_referral_and_bot_start(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "api.trends_routes._get_public_trend",
+        AsyncMock(return_value=SimpleNamespace(id=101)),
+    )
+    monkeypatch.setattr("api.trends_routes.settings.BOT_USERNAME", "@TestBot")
+
+    response = await client.get("/api/v1/trends/101/link")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["link"] == "https://t.me/TestBot?start=ref_REF__trend_101"
+    assert payload["start_param"] == "ref_REF__trend_101"
+
+
+@pytest.mark.asyncio
 async def test_webapp_feed_item_returns_public_post_without_auth(monkeypatch) -> None:
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_feed_generation_card",
