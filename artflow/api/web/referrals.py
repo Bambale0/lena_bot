@@ -8,6 +8,7 @@ from api.web.auth import web_referral_link
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import (
     ReferralChildCard,
+    ReferralCommissionCard,
     ReferralStatsCard,
     ReferralWithdrawalCard,
     ReferralWithdrawalRequest,
@@ -60,6 +61,7 @@ async def referrals(
     l1, l2, l3 = await repo.count_user_referrals(session, user.id)
     snapshot = await repo.get_user_referral_balance_snapshot(session, user.id)
     feed_reward = await repo.get_user_feed_remix_reward_rub(session, user.id)
+    commission_rows = await repo.get_referral_commission_ledger(session, user.id, limit=50)
     withdrawals = await repo.get_user_withdrawal_requests(session, user.id, limit=10)
 
     children: dict[str, list[dict]] = {}
@@ -98,6 +100,24 @@ async def referrals(
         },
         feed_remix_reward_rub=float(feed_reward or 0),
         children=children,
+        commission_ledger=[
+            ReferralCommissionCard(
+                id=row.entry.id,
+                transaction_id=row.entry.transaction_id,
+                payer_user_id=row.payer.id,
+                payer_username=row.payer.username,
+                payer_full_name=row.payer.full_name,
+                level=row.entry.level,
+                rate=float(row.entry.rate),
+                payment_amount_rub=float(row.entry.payment_amount_rub),
+                amount_rub=float(row.entry.amount_rub),
+                balance_after_rub=float(row.entry.balance_after_rub),
+                event_type=str(row.entry.event_type),
+                provider=str(getattr(row.transaction.provider, "value", row.transaction.provider)),
+                created_at=row.entry.created_at.isoformat(),
+            )
+            for row in commission_rows
+        ],
         withdrawals=[ReferralWithdrawalCard.from_withdrawal(item) for item in withdrawals],
     )
     return ok(payload.model_dump())
