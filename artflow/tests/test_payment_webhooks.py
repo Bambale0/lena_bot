@@ -368,7 +368,7 @@ async def test_tribute_digital_product_webhook_credits_mapped_purchase_atomicall
     confirm_and_add.assert_awaited_once_with(
         ANY, "digital:78901", note="Payment confirmed via tribute digital product",
     )
-    accrue.assert_awaited_once_with(ANY, user, 150.0, None)
+    accrue.assert_awaited_once_with(ANY, user, tx, None)
 
 
 @pytest.mark.asyncio
