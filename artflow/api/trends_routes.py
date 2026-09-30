@@ -14,11 +14,14 @@ from api.miniapp_routes import (
     GenerationOut,
     ImageGenRequest,
     VideoGenRequest,
+    _is_per_second_video_model,
+    _video_total_credits,
     create_image_generation,
     create_video_generation,
 )
 from api.public_files import save_public_file
 from api.trend_assets import image_kind_from_upload, sign_uploaded_asset, verify_uploaded_asset
+from bot.keyboards.models import VIDEO_CAPS
 from bot.utils.deep_links import build_start_payload
 from core.config import settings
 from core.trend_user_fields import (
@@ -154,6 +157,62 @@ def _task_payload(task: GenerationOut) -> dict[str, Any]:
     return payload
 
 
+async def _trend_quote_payload(
+    session: AsyncSession,
+    *,
+    trend: UserPrompt,
+    user: User,
+) -> dict[str, Any]:
+    kind = trend_kind(trend)
+    if not trend.model:
+        raise HTTPException(status_code=409, detail="Trend has no configured model")
+
+    await _validated_model(session, trend.model, kind)
+    settings_payload = trend_settings(trend)
+    unlimited = False
+
+    if kind == "video":
+        duration = max(1, _safe_int(settings_payload.get("duration"), 5))
+        resolution = settings_payload.get("resolution")
+        model_cost = await repo.resolve_video_model_cost(
+            session,
+            trend.model,
+            duration=duration,
+            resolution=resolution,
+        )
+        if not model_cost or not getattr(model_cost, "is_active", True):
+            raise HTTPException(status_code=422, detail="Model price is not available")
+        caps: dict[str, Any] = VIDEO_CAPS.get(trend.model, {})
+        price_credits = _video_total_credits(
+            duration,
+            model_cost.credits,
+            is_per_second=_is_per_second_video_model(caps),
+        )
+    else:
+        quality = str(settings_payload.get("quality") or "basic")
+        model_cost = await repo.resolve_image_model_cost(
+            session,
+            trend.model,
+            quality=quality,
+        )
+        if not model_cost or not getattr(model_cost, "is_active", True):
+            raise HTTPException(status_code=422, detail="Model price is not available")
+        unlimited = await repo.has_unlimited_image_model(session, user.id, trend.model)
+        price_credits = 0.0 if unlimited else float(model_cost.credits or 0)
+
+    price = _credits_out(price_credits)
+    balance = _credits_out(user.credits)
+    shortfall = _credits_out(max(0.0, price - balance))
+    return {
+        "trend_id": int(trend.id),
+        "price_credits": price,
+        "balance_credits": balance,
+        "shortfall_credits": shortfall,
+        "can_run": shortfall <= 0,
+        "unlimited": bool(unlimited),
+    }
+
+
 async def _find_idempotent_trend_run(
     session: AsyncSession,
     *,
@@ -226,6 +285,16 @@ async def get_trend(
 ) -> dict[str, Any]:
     del user
     return trend_public_payload(await _get_public_trend(session, trend_id))
+
+
+@router.get("/trends/{trend_id}/quote")
+async def get_trend_quote(
+    trend_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    trend = await _get_public_trend(session, trend_id)
+    return await _trend_quote_payload(session, trend=trend, user=user)
 
 
 @router.post("/trends/upload", response_model=TrendUploadResponse)
