@@ -171,17 +171,23 @@ test("services expose mobile-friendly Suno music panel", async ({ page }) => {
 });
 
 test("trend repeat shows price and opens inline topup without losing the runner", async ({ page }) => {
+  let availableCredits = 1;
   await page.unroute("**/api/v1/me");
-  await page.route("**/api/v1/me", (route) => route.fulfill({ json: { ...user, credits: 1 } }));
+  await page.route("**/api/v1/me", (route) => route.fulfill({ json: { ...user, credits: availableCredits } }));
   await page.unroute("**/api/v1/trends/101/quote");
   await page.route("**/api/v1/trends/101/quote", (route) => route.fulfill({ json: {
     trend_id: 101,
     price_credits: 20,
-    balance_credits: 1,
-    shortfall_credits: 19,
-    can_run: false,
+    balance_credits: availableCredits,
+    shortfall_credits: Math.max(0, 20 - availableCredits),
+    can_run: availableCredits >= 20,
     unlimited: false,
   } }));
+  await page.unroute("**/api/v1/topup/**");
+  await page.route("**/api/v1/topup/**", (route) => {
+    availableCredits = 26;
+    return route.fulfill({ json: { url: "https://example.test/pay" } });
+  });
 
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Тренды" }).click();
@@ -202,6 +208,14 @@ test("trend repeat shows price and opens inline topup without losing the runner"
   await expect(runner).toBeVisible();
   const recommended = page.getByRole("button", { name: /старт.*25/i });
   await expect(recommended).toHaveClass(/border-primary\/55/);
+
+  await page.getByRole("button", { name: /Оплатить через Карта \| СБП/i }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+
+  await expect(page.getByText("1. Пакет поцелуев")).not.toBeVisible();
+  await expect(runner).toBeVisible();
+  await expect(runner.getByText(/Баланс достаточный/)).toBeVisible();
+  await expect(runner.getByRole("button", { name: /Выберите фото/ })).toBeEnabled();
 });
 
 
