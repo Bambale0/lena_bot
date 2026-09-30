@@ -549,7 +549,7 @@ def _format_admin_stats(total_users: float, gens_today: float, revenue_today: fl
     return (
         "Статистика\n"
         f"Пользователей: {int(total_users)}\n"
-        f"Генераций сегодня: {int(gens_today)}\n"
+        f"Генераций сегодня (МСК): {int(gens_today)}\n"
         f"Выручка сегодня (МСК): {float(revenue_today):.2f}₽"
     )
 
