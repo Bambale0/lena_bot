@@ -705,3 +705,35 @@ Post-deploy routing incident (same delivery, 2026-09-27): the initial no-error s
 - Production acceptance must include dispatching unsupported real Message objects through the installed router with Telegram send mocked, in addition to role-builder and startup checks. No customer messages or paid generation are needed for this smoke.
 
 - Routing correction PR: [#181](https://github.com/Bambale0/lena_bot/pull/181). Final CI/deploy SHA, health, logs and installed-router dispatch evidence are recorded in that PR's delivery verification section after deployment. Final full suite: **1436 passed / 42 failures**, identical failing identities to the original baseline; 11 additional real-message regression cases. The maintained navigation selection now contains 306 cases.
+
+
+---
+
+# Execution ledger — Referral-aware trend sharing
+
+Date: 2026-09-30.
+Baseline: `388f67d3e04b79239bb73546d25d9917462a4717`.
+Branch: `feat/trend-share-referrals`.
+
+## User outcome
+- Every trend link created through the Trends share action carries the sharing user's referral code.
+- Shared links use the existing bot `/start` deep-link contract: `ref_<code>__trend_<id>`.
+- Opening the link therefore goes through the existing referral middleware before routing to the requested trend.
+- First-touch referral rules remain unchanged: an already-bound user is not reassigned to another referrer.
+
+## Reuse / architecture
+- Reused `bot.utils.deep_links.build_start_payload`; no second referral-link format was added.
+- Reused `AuthMiddleware` for registration / late binding and `start.py` for trend routing.
+- The Mini App/website Trends UI already obtains share URLs from `GET /api/v1/trends/{id}/link`, so the backend change covers every current Trends share button without duplicating frontend business logic.
+- Text Telegram Trends currently has no independent share-link control, so there is no conflicting second implementation.
+
+## TDD / verification
+- RED contract commit: `0bf6ba277bfdcac8b728e071c6ab5fd89287cc7f` adds the endpoint expectation for `?start=ref_REF__trend_101` before the route implementation commit.
+- Added referral middleware coverage for the composite `ref_REFCODE__trend_101` payload.
+- Webapp smoke / journey mocks were updated to the same canonical link shape.
+- Required PR CI and production autodeploy must pass before completion.
+
+## Surfaces
+- mini_app: trend share button uses the referral-aware backend link.
+- site/web: same Trends frontend/backend share contract where applicable.
+- telegram_bot: referral binding and trend target routing reuse existing `/start` handling; no separate Trends share button exists.
