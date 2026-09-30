@@ -14,6 +14,7 @@ from api.miniapp_routes import (
     GenerationOut,
     ImageGenRequest,
     VideoGenRequest,
+    _normalize_image_request,
     create_image_generation,
     create_video_generation,
 )
@@ -161,7 +162,12 @@ async def _trend_cost_credits(session: AsyncSession, trend: UserPrompt) -> float
             credits *= duration
         return round(credits, 6)
 
-    quality = str(settings_payload.get("quality") or "basic")
+    _ratio, quality = _normalize_image_request(
+        model_key=trend.model,
+        reference_urls=["trend-reference"],
+        aspect_ratio=settings_payload.get("ratio"),
+        quality=str(settings_payload.get("quality") or "basic"),
+    )
     model_cost = await repo.resolve_image_model_cost(session, trend.model, quality=quality)
     if not model_cost:
         model_cost = await repo.get_model_cost(session, trend.model)
