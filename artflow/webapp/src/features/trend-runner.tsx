@@ -908,7 +908,7 @@ function TrendRunnerPortal() {
                             maxLength={field.type === "date" ? undefined : Math.max(1, Math.min(160, field.max_length || 160))}
                             placeholder={field.placeholder || ""}
                             aria-invalid={Boolean(value) && !valid}
-                            disabled={genericBusy || !canRun}
+                            disabled={genericBusy}
                             className="min-h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary/60"
                             onChange={(event) => {
                               let nextValue = event.target.value;
@@ -951,14 +951,14 @@ function TrendRunnerPortal() {
 
               {personalized ? (
                 <Button
-                  disabled={genericBusy || !uploadedAsset || !userFieldsReady}
+                  disabled={genericBusy || !canRun || !uploadedAsset || !userFieldsReady}
                   className="min-h-12 w-full"
                   onClick={() => {
                     if (uploadedAsset) void startTrend(uploadedAsset.asset_id, userValues);
                   }}
                 >
                   {phase === "generating" ? <LoaderCircle className="animate-spin" /> : null}
-                  {phase === "generating" ? "Генерирую…" : "Создать →"}
+                  {phase === "generating" ? "Генерирую…" : quote ? `Создать · ${formatKisses(quote.price_credits)}` : "Создать →"}
                 </Button>
               ) : null}
 
