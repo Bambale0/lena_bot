@@ -4,7 +4,7 @@ import { CreditCard, Film, ImageIcon, ImagePlus, LoaderCircle, Plus, Ruler, Weig
 import { toast } from "sonner";
 
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
-import { BALANCE_UPDATED_EVENT, openBalanceForRequirement } from "@/lib/app-events";
+import { BALANCE_SHEET_STATE_EVENT, BALANCE_UPDATED_EVENT, openBalanceForRequirement, type BalanceSheetStateDetail } from "@/lib/app-events";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
@@ -561,6 +561,7 @@ function TrendRunnerPortal() {
   const [quote, setQuote] = useState<TrendQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState("");
+  const [balanceSheetOpen, setBalanceSheetOpen] = useState(false);
   const processedStart = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -639,6 +640,15 @@ function TrendRunnerPortal() {
     window.addEventListener(BALANCE_UPDATED_EVENT, onBalanceUpdated);
     return () => window.removeEventListener(BALANCE_UPDATED_EVENT, onBalanceUpdated);
   }, [loadQuote, trend]);
+
+  useEffect(() => {
+    const onBalanceSheetState = (event: Event) => {
+      const detail = (event as CustomEvent<BalanceSheetStateDetail>).detail;
+      setBalanceSheetOpen(Boolean(detail?.open));
+    };
+    window.addEventListener(BALANCE_SHEET_STATE_EVENT, onBalanceSheetState);
+    return () => window.removeEventListener(BALANCE_SHEET_STATE_EVENT, onBalanceSheetState);
+  }, []);
 
   useEffect(() => {
     const onOpen = (event: Event) => {
@@ -812,7 +822,7 @@ function TrendRunnerPortal() {
   return (
     <>
       <Sheet
-        open={Boolean(trend)}
+        open={Boolean(trend) && !balanceSheetOpen}
         title={isPinterest ? "Повтори фото с Pinterest" : trend?.title || "Повторить тренд"}
         description={isPinterest ? undefined : personalized ? "Фото + разрешённые параметры. Скрытый сценарий остаётся на backend." : "Один снимок. Без настроек. Всё остальное применит backend."}
         onOpenChange={(open) => {
