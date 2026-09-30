@@ -103,6 +103,32 @@ def test_seedance_25_frame_is_adaptive_and_does_not_mix_refs() -> None:
     assert "reference_images" not in payload
 
 
+def test_reference_mode_requires_at_least_one_reference() -> None:
+    with pytest.raises(SeedanceContractError, match="Reference mode"):
+        build_seedance_payload(
+            model="seedance-2.5",
+            mode="reference",
+            prompt="cinematic",
+            resolution="720p",
+            duration=5,
+            aspect_ratio="16:9",
+        )
+
+
+def test_seedance_20_provider_alias_uses_canonical_validation() -> None:
+    payload = normalize_seedance_request(
+        "seedance-2",
+        {
+            "prompt": "cinematic",
+            "duration": 15,
+            "resolution": "4k",
+            "aspect_ratio": "21:9",
+        },
+    )
+    assert payload["duration"] == 15
+    assert payload["resolution"] == "4k"
+
+
 def test_seedance_20_audio_requires_visual_reference() -> None:
     with pytest.raises(SeedanceContractError, match="фото или видео"):
         build_seedance_payload(
