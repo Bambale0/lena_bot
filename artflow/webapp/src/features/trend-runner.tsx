@@ -555,6 +555,7 @@ function TrendRunnerPortal() {
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentWaiting, setPaymentWaiting] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const processedStart = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -576,6 +577,7 @@ function TrendRunnerPortal() {
     setCheckoutBusy(false);
     setPaymentBusy(false);
     setPaymentWaiting(false);
+    setPaymentMethods([]);
     setUploadedAsset(null);
     setUserValues({});
     setLocalPreview((current) => {
@@ -646,6 +648,13 @@ function TrendRunnerPortal() {
   }, [refreshCheckout, trend?.id]);
 
   useEffect(() => {
+    if (!trend?.id) return;
+    void apiJson<string[]>("/payment-methods")
+      .then((methods) => setPaymentMethods(Array.isArray(methods) ? methods : []))
+      .catch(() => setPaymentMethods([]));
+  }, [trend?.id]);
+
+  useEffect(() => {
     if (!paymentWaiting || !trend?.id) return;
     let attempts = 0;
     const timer = window.setInterval(() => {
@@ -668,9 +677,14 @@ function TrendRunnerPortal() {
   const payInline = useCallback(async () => {
     const plan = checkout?.recommended_plan;
     if (!plan || paymentBusy) return;
+    const provider = paymentMethods.find((method) => ["tbank", "crypto", "tribute", "lava"].includes(method));
+    if (!provider) {
+      toast.error("Сейчас нет доступного способа оплаты");
+      return;
+    }
     setPaymentBusy(true);
     try {
-      const payment = await apiJson<Record<string, unknown>>("/topup/tbank", {
+      const payment = await apiJson<Record<string, unknown>>(`/topup/${provider}`, {
         method: "POST",
         body: JSON.stringify({ plan_key: plan.key }),
       });
@@ -684,7 +698,7 @@ function TrendRunnerPortal() {
     } finally {
       setPaymentBusy(false);
     }
-  }, [checkout?.recommended_plan, paymentBusy]);
+  }, [checkout?.recommended_plan, paymentBusy, paymentMethods]);
 
   useEffect(() => {
     const trendId = parseTrendStartParam();
@@ -879,7 +893,7 @@ function TrendRunnerPortal() {
                   <div className="mt-3 grid gap-1.5">
                     <Button
                       type="button"
-                      disabled={paymentBusy || paymentWaiting}
+                      disabled={paymentBusy || paymentWaiting || paymentMethods.length === 0}
                       className="min-h-11 w-full"
                       onClick={() => void payInline()}
                     >
