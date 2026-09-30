@@ -677,23 +677,44 @@ async def _reverse_referral_commissions(session, user: "User", transaction) -> N
     transaction_id = int(getattr(transaction, "id", 0) or 0)
     if not transaction_id:
         raise ValueError("Referral commission reversal requires a persisted transaction")
-    pairs = [
-        (1, user.referrer_id, settings.REFERRAL_COMMISSION_L1),
-        (2, user.referrer_l2_id, settings.REFERRAL_COMMISSION_L2),
-        (3, user.referrer_l3_id, settings.REFERRAL_COMMISSION_L3),
-    ]
-    for level, ref_id, pct in pairs:
-        if not ref_id or pct <= 0:
-            continue
-        commission = round(amount_rub * pct, 2)
+
+    original_entries = await repo.get_referral_commissions_for_transaction(
+        session,
+        transaction_id,
+        event_type="accrual",
+    )
+    if original_entries:
+        rows = [
+            (
+                int(entry.level),
+                int(entry.recipient_user_id),
+                float(entry.rate),
+                float(entry.payment_amount_rub),
+                abs(float(entry.amount_rub)),
+            )
+            for entry in original_entries
+        ]
+    else:
+        # Historical payments created before the exact ledger existed have no
+        # accrual rows to mirror. Preserve legacy refund behavior for those only.
+        rows = []
+        for level, ref_id, pct in (
+            (1, user.referrer_id, settings.REFERRAL_COMMISSION_L1),
+            (2, user.referrer_l2_id, settings.REFERRAL_COMMISSION_L2),
+            (3, user.referrer_l3_id, settings.REFERRAL_COMMISSION_L3),
+        ):
+            if ref_id and pct > 0:
+                rows.append((level, int(ref_id), float(pct), amount_rub, round(amount_rub * pct, 2)))
+
+    for level, ref_id, pct, original_payment_amount, commission in rows:
         entry = await repo.record_referral_commission(
             session,
             transaction_id=transaction_id,
             payer_user_id=user.id,
             recipient_user_id=ref_id,
             level=level,
-            rate=float(pct),
-            payment_amount_rub=amount_rub,
+            rate=pct,
+            payment_amount_rub=original_payment_amount,
             amount_rub=-commission,
             event_type="reversal",
         )
