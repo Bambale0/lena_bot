@@ -1076,6 +1076,7 @@ async def test_webapp_publish_generation_returns_feed_link(client, monkeypatch) 
 
     assert response.status_code == 200
     payload = response.json()
+    assert resolve_image_model_cost.await_args.kwargs["quality"] == "2K"
     assert payload["ok"] is True
     assert payload["link"].startswith("https://t.me/TestBot?start=")
     assert "ref_REF__feed_77" in payload["link"]
@@ -1143,12 +1144,13 @@ async def test_trend_checkout_quote_recommends_smallest_plan_covering_deficit(cl
     trend = SimpleNamespace(
         id=101,
         model="nano-banana-pro",
-        tags=["trend", "trend-quality:2K"],
+        tags=["trend", "trend-ratio:1:1", "trend-quality:4K"],
     )
     monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    resolve_image_model_cost = AsyncMock(return_value=SimpleNamespace(credits=1200))
     monkeypatch.setattr(
         "api.trends_routes.repo.resolve_image_model_cost",
-        AsyncMock(return_value=SimpleNamespace(credits=1200)),
+        resolve_image_model_cost,
     )
     monkeypatch.setattr(
         "api.trends_routes.repo.get_active_price_plans",
