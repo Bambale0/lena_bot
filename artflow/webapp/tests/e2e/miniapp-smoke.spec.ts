@@ -95,6 +95,7 @@ async function mockApi(page: import("@playwright/test").Page) {
   } }));
   await page.route("**/api/v1/trends/101/link", (route) => route.fulfill({ json: { link: "https://t.me/apix_bot?start=ref_REF123__trend_101" } }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: plans }));
+  await page.route("**/api/v1/payment-methods", (route) => route.fulfill({ json: ["tbank", "crypto", "tribute", "lava"] }));
   await page.route("**/api/v1/referrals", (route) => route.fulfill({ json: {
     referral_code: "REF123",
     referral_link: "https://t.me/apix_bot?start=REF123",
