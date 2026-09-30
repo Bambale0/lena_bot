@@ -1166,7 +1166,12 @@ async def test_trend_checkout_quote_recommends_smallest_plan_covering_deficit(cl
     assert payload["balance_credits"] == 1003
     assert payload["can_run"] is False
     assert payload["deficit_credits"] == 197
-    assert payload["recommended_plan"] == {\n        "key": "small",\n        "label": "300 credits",\n        "credits": 300,\n        "price_rub": 300,\n    }
+    assert payload["recommended_plan"] == {
+        "key": "small",
+        "label": "300 credits",
+        "credits": 300,
+        "price_rub": 300,
+    }
 
 
 @pytest.mark.asyncio
