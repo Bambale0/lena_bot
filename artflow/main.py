@@ -683,28 +683,29 @@ async def _reverse_referral_commissions(session, user: "User", transaction) -> N
         transaction_id,
         event_type="accrual",
     )
-    if original_entries:
-        rows = [
-            (
-                int(entry.level),
-                int(entry.recipient_user_id),
-                float(entry.rate),
-                float(entry.payment_amount_rub),
-                abs(float(entry.amount_rub)),
-            )
-            for entry in original_entries
-        ]
-    else:
-        # Historical payments created before the exact ledger existed have no
-        # accrual rows to mirror. Preserve legacy refund behavior for those only.
-        rows = []
-        for level, ref_id, pct in (
-            (1, user.referrer_id, settings.REFERRAL_COMMISSION_L1),
-            (2, user.referrer_l2_id, settings.REFERRAL_COMMISSION_L2),
-            (3, user.referrer_l3_id, settings.REFERRAL_COMMISSION_L3),
-        ):
-            if ref_id and pct > 0:
-                rows.append((level, int(ref_id), float(pct), amount_rub, round(amount_rub * pct, 2)))
+    if not original_entries:
+        # Never reconstruct a reversal from today's chain/rates. Missing rows can
+        # mean a legacy payment created before the ledger or a payment made while
+        # referral accrual was frozen. Auto-debiting either case would fabricate
+        # accounting data and can make referral_balance incorrect.
+        logger.warning(
+            "Referral commission reversal skipped without accrual ledger transaction_id=%s payer_user_id=%s amount=%.2f; manual reconciliation required for legacy/frozen payment",
+            transaction_id,
+            getattr(user, "id", None),
+            amount_rub,
+        )
+        return
+
+    rows = [
+        (
+            int(entry.level),
+            int(entry.recipient_user_id),
+            float(entry.rate),
+            float(entry.payment_amount_rub),
+            abs(float(entry.amount_rub)),
+        )
+        for entry in original_entries
+    ]
 
     for level, ref_id, pct, original_payment_amount, commission in rows:
         entry = await repo.record_referral_commission(
