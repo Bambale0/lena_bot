@@ -19,6 +19,7 @@ from api.miniapp_routes import (
 )
 from api.public_files import save_public_file
 from api.trend_assets import image_kind_from_upload, sign_uploaded_asset, verify_uploaded_asset
+from bot.utils.deep_links import build_start_payload
 from core.config import settings
 from core.trend_user_fields import (
     TrendUserFieldsError,
@@ -354,11 +355,15 @@ async def trend_link(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> dict[str, str]:
-    del user
     await _get_public_trend(session, trend_id)
+    share_payload = build_start_payload(
+        ref_code=str(getattr(user, "referral_code", "") or "").strip() or None,
+        target_kind="trend",
+        target_id=trend_id,
+    )
     username = str(getattr(settings, "BOT_USERNAME", "") or "").strip().lstrip("@")
-    link = f"https://t.me/{username}?startapp=trend_{trend_id}" if username else ""
-    return {"link": link, "start_param": f"trend_{trend_id}"}
+    link = f"https://t.me/{username}?start={share_payload}" if username and share_payload else ""
+    return {"link": link, "start_param": share_payload}
 
 
 @router.get("/admin/trends")
