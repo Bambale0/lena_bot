@@ -1156,6 +1156,7 @@ async def test_trend_quote_returns_runtime_image_price_and_shortfall(client, mon
     trend = SimpleNamespace(id=101, model="nano-banana-pro")
     resolve_cost = AsyncMock(return_value=SimpleNamespace(credits=12.5, is_active=True))
     monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    monkeypatch.setattr("api.trends_routes._validated_model", AsyncMock(return_value=SimpleNamespace()))
     monkeypatch.setattr("api.trends_routes.trend_kind", lambda _trend: "image")
     monkeypatch.setattr("api.trends_routes.trend_settings", lambda _trend: {"quality": "2K", "count": 1})
     monkeypatch.setattr("api.trends_routes.repo.resolve_image_model_cost", resolve_cost)
@@ -1194,6 +1195,7 @@ async def test_trend_quote_matches_per_second_video_billing(client, monkeypatch)
     trend = SimpleNamespace(id=202, model="bytedance/seedance-2-5")
     resolve_cost = AsyncMock(return_value=SimpleNamespace(credits=10, is_active=True))
     monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    monkeypatch.setattr("api.trends_routes._validated_model", AsyncMock(return_value=SimpleNamespace()))
     monkeypatch.setattr("api.trends_routes.trend_kind", lambda _trend: "video")
     monkeypatch.setattr(
         "api.trends_routes.trend_settings",
