@@ -602,8 +602,12 @@ def _supported_mime(kind: str, mime: str) -> bool:
     return False
 
 
-async def _message_bytes(message: Message, expected_kind: str) -> tuple[bytes, str] | None:
-    model_data = None
+async def _message_bytes(
+    message: Message,
+    expected_kind: str,
+    *,
+    max_bytes: int,
+) -> tuple[bytes, str] | None:
     media = None
     mime = ""
     file_size = 0
@@ -636,11 +640,22 @@ async def _message_bytes(message: Message, expected_kind: str) -> tuple[bytes, s
         )
         return None
 
-    state = message.bot
-    del state, model_data
+    if file_size and file_size > max_bytes:
+        await message.answer(
+            f"Файл превышает лимит Seedance для {expected_kind}: "
+            f"{max_bytes // (1024 * 1024)} MB."
+        )
+        return None
+
     tg_file = await message.bot.get_file(media.file_id)
     downloaded = await message.bot.download_file(tg_file.file_path)
     raw = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
+    if len(raw) > max_bytes:
+        await message.answer(
+            f"Файл превышает лимит Seedance для {expected_kind}: "
+            f"{max_bytes // (1024 * 1024)} MB."
+        )
+        return None
     if file_size and len(raw) != file_size:
         logger.info(
             "Neironych admin media size differs telegram=%s downloaded=%s",
@@ -658,14 +673,11 @@ async def _upload_message_media(
 ) -> str | None:
     data = await _data(state)
     model = str(data.get("neur_model") or "")
-    item = await _message_bytes(message, kind)
+    limit = _media_limits(model, kind)
+    item = await _message_bytes(message, kind, max_bytes=limit)
     if item is None:
         return None
     raw, mime = item
-    limit = _media_limits(model, kind)
-    if len(raw) > limit:
-        await message.answer(f"Файл превышает лимит Seedance для {kind}: {limit // (1024 * 1024)} MB.")
-        return None
 
     client = _client()
     try:
@@ -1052,6 +1064,7 @@ async def _download_and_send(
 
 async def _poll_and_deliver(
     bot: Bot,
+    state: FSMContext,
     *,
     chat_id: int,
     request_id: str,
@@ -1078,6 +1091,7 @@ async def _poll_and_deliver(
                     model=model,
                     billed_seconds=result.billed_seconds,
                 )
+                await state.update_data(neur_last_delivered_request_id=request_id)
                 return
             if result.failed:
                 await status_message.edit_text(
@@ -1217,6 +1231,7 @@ async def run(call: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     asyncio.create_task(
         _poll_and_deliver(
             bot,
+            state,
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
             request_id=request_id,
             model=model,
