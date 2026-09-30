@@ -51,7 +51,7 @@ def test_provider_test_model_selector_includes_neironych_seedance_20_and_25():
     assert "nxt:model:seedance25" in _callbacks(markup)
     assert "nxt:model:neur-s20" in _callbacks(markup)
     assert "nxt:model:neur-s25" in _callbacks(markup)
-    assert "🎬 Nexus · Seedance 2.5" in _labels(markup)
+    assert "🎬 Seedance 2.5" in _labels(markup)
     assert "🎬 Нейроныч · Seedance 2" in _labels(markup)
     assert "🎬 Нейроныч · Seedance 2.5" in _labels(markup)
 
