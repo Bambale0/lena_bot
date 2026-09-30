@@ -77,11 +77,16 @@ _ALWAYS_DROP_FIELDS = {
 }
 
 
+def canonical_seedance_model(model: str) -> str:
+    value = str(model or "").strip()
+    for canonical, aliases in SEEDANCE_MODEL_ALIASES.items():
+        if value in aliases:
+            return canonical
+    raise SeedanceContractError(f"Неподдерживаемая модель Seedance: {model}")
+
+
 def get_seedance_spec(model: str) -> SeedanceSpec:
-    try:
-        return _SPECS[str(model or "").strip()]
-    except KeyError as exc:
-        raise SeedanceContractError(f"Неподдерживаемая модель Seedance: {model}") from exc
+    return _SPECS[canonical_seedance_model(model)]
 
 
 def resolve_seedance_model(selected_model: str, available_models: list[str]) -> str | None:
@@ -196,6 +201,7 @@ def normalize_seedance_request(model: str, input_data: dict[str, Any]) -> dict[s
     """
 
     spec = get_seedance_spec(model)
+    model = spec.model
     payload = deepcopy(input_data)
     payload.pop("model", None)
 
@@ -388,6 +394,9 @@ def build_seedance_payload(
         payload["start_image"] = {"url": start_image_url}
         if end_image_url:
             payload["end_image"] = {"url": end_image_url}
+
+    if mode == "reference" and not (image_urls or video_urls or audio_urls):
+        raise SeedanceContractError("Reference mode требует хотя бы один фото, видео или аудио-референс.")
 
     if mode == "reference" and model == "seedance-2.5":
         payload["omni_reference_task_type"] = "reference"
