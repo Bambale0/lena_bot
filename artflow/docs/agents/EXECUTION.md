@@ -822,3 +822,61 @@ Branch: `feat/referral-commission-ledger`.
 - Tests require payment-linked accrual rows, idempotent duplicate suppression and transaction-linked reversal rows.
 - Existing payment webhook/provider paths were updated to pass the persisted transaction object rather than only an amount.
 - Required CI, code review, migration/deploy verification, public health and production log checks are release gates.
+
+
+---
+
+# Execution ledger — Neironych Seedance 2 / 2.5 admin lab
+
+Date: 2026-10-01.
+Baseline: production `f6125ae4e55ebb208b58cedb10d2edada5fd8401`.
+Branch: `feat/admin-neironych-seedance-lab`.
+
+## User outcome
+- APIX Telegram admin Provider Test Lab gets separate Neironych Seedance 2.0 and Seedance 2.5 entries.
+- The lab is isolated from customer billing/provider routing. APIX credits are never charged.
+- A paid provider request is created only after the admin explicitly presses the launch button.
+- Every new request keeps one idempotency key until parameters change or the admin explicitly requests a new key.
+
+## Provider contract verified live
+Public provider base: `https://api.xn--e1aikcel5c5a.online`.
+Verified endpoints/contract before implementation:
+- `GET /v1/models`;
+- `POST /v1/videos/generations` -> HTTP 202 + request_id;
+- `GET /v1/videos/{request_id}`;
+- authenticated `GET /v1/videos/{request_id}/content`;
+- `POST /v1/media/uploads` followed by a direct signed-storage PUT with no partner Authorization header.
+Live catalog exposed both `seedance-2.0` and `seedance-2.5`.
+Live public price parsing returned:
+- Seedance 2.0: 480p 6.80 ₽/s, 720p 14.11 ₽/s, 1080p 35.90 ₽/s;
+- Seedance 2.5: 480p 10.00 ₽/s, 720p 21.80 ₽/s, 1080p 55.13 ₽/s.
+Seedance 2.0 4k remains selectable per provider video contract but is shown as price-not-published when the price page has no 4k row.
+
+## Modes and limits
+- Text -> video.
+- Multi-reference image/video/audio.
+- First/last frame.
+- Seedance 2.5 video edit with source video and source-controlled duration/aspect.
+- Expert raw JSON overrides for future provider options, with trusted standard fields protected.
+- Seedance 2.0: 4–15 s, 480p/720p/1080p/4k, refs 9/3/3 and 12 total.
+- Seedance 2.5: 4–30 s, 480p/720p/1080p, refs 30/10/10 and 50 total, edit supported.
+- Prompt limit: 40,000 UTF-8 bytes.
+- Prompt reference integrity validates @Image N / @Video N / @Audio N before provider spend.
+
+## Security and recovery
+- Router is server-side admin filtered with `IsAdmin()`.
+- Partner key stays server-side in a gitignored `.env.neironych` overlay and is excluded from Docker build context.
+- Pre-signed storage PUT never receives the partner Bearer token.
+- Provider errors redact long tokens and URL query strings.
+- Telegram files are size/type checked before and after download.
+- Result content is downloaded through the authenticated API with bounded resumable range reads.
+- Background polling has a timeout; request_id remains in Redis-backed FSM so an admin can manually re-check after a process restart.
+- Status failures include provider `expired` as terminal.
+- No automatic paid generation is used as a deployment smoke test.
+
+## TDD / verification
+- RED contract commit: `52579bf026ee56489f5a735ca23ea6155f1996fd`.
+- Focused local gate: 18 tests passed; Ruff clean.
+- Read-only live smoke: provider model catalog resolves both Seedance versions and public price parser matches the current provider price page.
+- Docker Compose config validates with the optional secret overlay absent.
+- Required CI, code review, merge/autodeploy, production health/log and read-only provider-auth verification remain release gates.
