@@ -13,6 +13,7 @@ import httpx
 from core.neironych_seedance_contract import (
     SEEDANCE_MODELS,
     SeedanceContractError,
+    canonical_seedance_model,
     normalize_seedance_request,
 )
 
@@ -362,14 +363,16 @@ class NeironychSeedanceClient:
         payload: dict[str, Any],
         idempotency_key: str,
     ) -> str:
-        if model not in SEEDANCE_MODELS:
-            raise NeironychSeedanceError(f"Неподдерживаемая тестовая модель: {model}")
+        try:
+            canonical_model = canonical_seedance_model(model)
+        except SeedanceContractError as exc:
+            raise NeironychSeedanceError(str(exc)) from exc
         idem = str(idempotency_key or "").strip()
         if not 8 <= len(idem) <= 160:
             raise NeironychSeedanceError("Idempotency-Key должен содержать 8–160 символов")
 
         try:
-            body = normalize_seedance_request(model, payload)
+            body = normalize_seedance_request(canonical_model, payload)
         except SeedanceContractError as exc:
             raise NeironychSeedanceError(str(exc), status_code=422) from exc
         body["model"] = model
