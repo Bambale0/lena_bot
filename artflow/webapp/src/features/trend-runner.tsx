@@ -10,7 +10,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
 import { notifyHaptic, readStartParam } from "@/lib/telegram";
-import { formatKisses, safeExternalUrl } from "@/lib/utils";
+import { formatCredits, safeExternalUrl } from "@/lib/utils";
 
 const TREND_RUNNER_EVENT = "apix:open-trend-runner";
 const API_BASE = "/api/v1";
@@ -861,11 +861,11 @@ function TrendRunnerPortal() {
                 ) : quote ? (
                   <div className="grid gap-1.5">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-semibold">Повтор: {formatKisses(quote.price_credits)}</span>
-                      <span className="text-[11px] text-muted-foreground">Баланс: {formatKisses(quote.balance_credits)}</span>
+                      <span className="text-sm font-semibold">Повтор: {formatCredits(quote.price_credits)} 💋</span>
+                      <span className="text-[11px] text-muted-foreground">Баланс: {formatCredits(quote.balance_credits)} 💋</span>
                     </div>
                     {quote.shortfall_credits > 0 ? (
-                      <p className="text-xs font-medium text-primary">Не хватает: {formatKisses(quote.shortfall_credits)}</p>
+                      <p className="text-xs font-medium text-primary">Не хватает: {formatCredits(quote.shortfall_credits)} 💋</p>
                     ) : (
                       <p className="text-xs text-muted-foreground">{quote.unlimited ? "Для тебя этот повтор без списания." : "Баланс достаточный — можно запускать."}</p>
                     )}
@@ -958,7 +958,7 @@ function TrendRunnerPortal() {
                   }}
                 >
                   {phase === "generating" ? <LoaderCircle className="animate-spin" /> : null}
-                  {phase === "generating" ? "Генерирую…" : quote ? `Создать · ${formatKisses(quote.price_credits)}` : "Создать →"}
+                  {phase === "generating" ? "Генерирую…" : quote ? `Создать · ${formatCredits(quote.price_credits)} 💋` : "Создать →"}
                 </Button>
               ) : null}
 
