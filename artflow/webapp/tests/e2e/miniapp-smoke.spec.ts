@@ -85,6 +85,14 @@ async function mockApi(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: trends }));
   await page.route("**/api/v1/trends/101", (route) => route.fulfill({ json: trends[0] }));
+  await page.route("**/api/v1/trends/101/quote", (route) => route.fulfill({ json: {
+    trend_id: 101,
+    price_credits: 1.5,
+    balance_credits: 100,
+    shortfall_credits: 0,
+    can_run: true,
+    unlimited: false,
+  } }));
   await page.route("**/api/v1/trends/101/link", (route) => route.fulfill({ json: { link: "https://t.me/apix_bot?start=ref_REF123__trend_101" } }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: plans }));
   await page.route("**/api/v1/referrals", (route) => route.fulfill({ json: {
@@ -161,6 +169,37 @@ test("services expose mobile-friendly Suno music panel", async ({ page }) => {
   await expect(page.getByText("Музыка / Suno")).toBeVisible();
   await expect(page.getByPlaceholder("Текст песни или идея трека")).toBeVisible();
 });
+
+test("trend repeat shows price and opens inline topup without losing the runner", async ({ page }) => {
+  await page.unroute("**/api/v1/me");
+  await page.route("**/api/v1/me", (route) => route.fulfill({ json: { ...user, credits: 1 } }));
+  await page.unroute("**/api/v1/trends/101/quote");
+  await page.route("**/api/v1/trends/101/quote", (route) => route.fulfill({ json: {
+    trend_id: 101,
+    price_credits: 20,
+    balance_credits: 1,
+    shortfall_credits: 19,
+    can_run: false,
+    unlimited: false,
+  } }));
+
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("tab", { name: "Тренды" }).click();
+  await page.getByRole("button", { name: /Повторить/ }).first().click();
+
+  const runner = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
+  await expect(runner).toBeVisible();
+  await expect(runner.getByText(/Повтор:\s*20/)).toBeVisible();
+  await expect(runner.getByText(/Не хватает:\s*19/)).toBeVisible();
+
+  await runner.getByRole("button", { name: /Пополнить и повторить/ }).click();
+
+  await expect(page.getByText("1. Пакет поцелуев")).toBeVisible();
+  await expect(runner).toBeVisible();
+  const recommended = page.getByRole("button", { name: /старт.*25/i });
+  await expect(recommended).toHaveClass(/border-primary\/55/);
+});
+
 
 test("one-photo trend runner uploads and runs without exposing generation controls", async ({ page }) => {
   let runPayload: Record<string, unknown> | null = null;
