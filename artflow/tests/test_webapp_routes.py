@@ -1139,6 +1139,82 @@ async def test_webapp_feed_link_uses_viewer_referral_for_public_posts(client, mo
 
 
 @pytest.mark.asyncio
+async def test_trend_quote_returns_runtime_image_price_and_shortfall(client, monkeypatch) -> None:
+    async def low_balance_user():
+        return SimpleNamespace(
+            id=1,
+            tg_id=111,
+            username="tester",
+            full_name="Test User",
+            credits=5,
+            referral_code="REF",
+            referral_balance=0.0,
+            is_banned=False,
+        )
+
+    app.dependency_overrides[get_miniapp_user] = low_balance_user
+    trend = SimpleNamespace(id=101, model="nano-banana-pro")
+    resolve_cost = AsyncMock(return_value=SimpleNamespace(credits=12.5, is_active=True))
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    monkeypatch.setattr("api.trends_routes._validated_model", AsyncMock(return_value=SimpleNamespace()))
+    monkeypatch.setattr("api.trends_routes.trend_kind", lambda _trend: "image")
+    monkeypatch.setattr("api.trends_routes.trend_settings", lambda _trend: {"quality": "2K", "count": 1})
+    monkeypatch.setattr("api.trends_routes.repo.resolve_image_model_cost", resolve_cost)
+    monkeypatch.setattr("api.trends_routes.repo.has_unlimited_image_model", AsyncMock(return_value=False))
+
+    response = await client.get("/api/v1/trends/101/quote")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "trend_id": 101,
+        "price_credits": 12.5,
+        "balance_credits": 5.0,
+        "shortfall_credits": 7.5,
+        "can_run": False,
+        "unlimited": False,
+    }
+    resolve_cost.assert_awaited_once()
+    assert resolve_cost.await_args.kwargs["quality"] == "2K"
+
+
+@pytest.mark.asyncio
+async def test_trend_quote_matches_per_second_video_billing(client, monkeypatch) -> None:
+    async def video_user():
+        return SimpleNamespace(
+            id=1,
+            tg_id=111,
+            username="tester",
+            full_name="Test User",
+            credits=120,
+            referral_code="REF",
+            referral_balance=0.0,
+            is_banned=False,
+        )
+
+    app.dependency_overrides[get_miniapp_user] = video_user
+    trend = SimpleNamespace(id=202, model="bytedance/seedance-2-5")
+    resolve_cost = AsyncMock(return_value=SimpleNamespace(credits=10, is_active=True))
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    monkeypatch.setattr("api.trends_routes._validated_model", AsyncMock(return_value=SimpleNamespace()))
+    monkeypatch.setattr("api.trends_routes.trend_kind", lambda _trend: "video")
+    monkeypatch.setattr(
+        "api.trends_routes.trend_settings",
+        lambda _trend: {"duration": 5, "resolution": "720p"},
+    )
+    monkeypatch.setattr("api.trends_routes.repo.resolve_video_model_cost", resolve_cost)
+
+    response = await client.get("/api/v1/trends/202/quote")
+
+    assert response.status_code == 200
+    assert response.json()["price_credits"] == 50.0
+    assert response.json()["balance_credits"] == 120.0
+    assert response.json()["shortfall_credits"] == 0.0
+    assert response.json()["can_run"] is True
+    resolve_cost.assert_awaited_once()
+    assert resolve_cost.await_args.kwargs == {"duration": 5, "resolution": "720p"}
+
+
+@pytest.mark.asyncio
 async def test_trend_share_link_uses_sharer_referral_and_bot_start(client, monkeypatch) -> None:
     monkeypatch.setattr(
         "api.trends_routes._get_public_trend",

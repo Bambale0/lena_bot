@@ -31,6 +31,8 @@ interface BalanceSheetProps {
   plans: PaymentPlan[];
   availableProviders: string[];
   busy?: boolean;
+  requiredCredits?: number;
+  contextLabel?: string;
   onOpenChange: (open: boolean) => void;
   onPay: (provider: PaymentProvider, plan: PaymentPlan) => void;
 }
@@ -61,7 +63,17 @@ function methodAvailable(method: PaymentProvider, plans: PaymentPlan[]): boolean
   return plans.some((plan) => Number(plan.price_rub || 0) > 0);
 }
 
-function BalanceSheet({ open, user, plans, availableProviders, busy, onOpenChange, onPay }: BalanceSheetProps) {
+function BalanceSheet({
+  open,
+  user,
+  plans,
+  availableProviders,
+  busy,
+  requiredCredits = 0,
+  contextLabel,
+  onOpenChange,
+  onPay,
+}: BalanceSheetProps) {
   const copy = t(user.language);
   const [selectedPlanKey, setSelectedPlanKey] = useState("");
   const [method, setMethod] = useState<PaymentProvider>("tbank");
@@ -70,6 +82,19 @@ function BalanceSheet({ open, user, plans, availableProviders, busy, onOpenChang
     () => methods.filter((item) => availableProviders.includes(item.id) && methodAvailable(item.id, plans)),
     [availableProviders, plans],
   );
+
+  const shortfall = Math.max(0, Number(requiredCredits || 0) - Number(user.credits || 0));
+  const recommendedPlanKey = useMemo(() => {
+    if (!plans.length) return "";
+    if (shortfall <= 0) return plans[0]?.key || "";
+    const byCredits = [...plans].sort((left, right) => Number(left.credits || 0) - Number(right.credits || 0));
+    return (byCredits.find((plan) => Number(plan.credits || 0) >= shortfall) || byCredits[byCredits.length - 1])?.key || "";
+  }, [plans, shortfall]);
+
+  useEffect(() => {
+    if (!open || !recommendedPlanKey) return;
+    setSelectedPlanKey(recommendedPlanKey);
+  }, [open, recommendedPlanKey]);
 
   useEffect(() => {
     if (!availableMethods.some((item) => item.id === method)) setMethod(availableMethods[0]?.id || "tbank");
@@ -93,6 +118,26 @@ function BalanceSheet({ open, user, plans, availableProviders, busy, onOpenChang
       description={`${copy.settings.balance}: ${formatKisses(user.credits)}`}
     >
       <div className="grid gap-3">
+        {requiredCredits > 0 ? (
+          <section className="rounded-2xl border border-primary/35 bg-primary/10 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-primary">{contextLabel || "Повтор тренда"}</p>
+            <div className="mt-1 flex items-end justify-between gap-3">
+              <div>
+                <p className="text-xs text-muted-foreground">Нужно для запуска</p>
+                <p className="text-xl font-bold">{formatKisses(requiredCredits)}</p>
+              </div>
+              {shortfall > 0 ? (
+                <Badge variant="outline" className="border-primary/35 bg-background/70">Не хватает {formatKisses(shortfall)}</Badge>
+              ) : (
+                <Badge variant="outline" className="border-primary/35 bg-background/70">Баланс достаточный</Badge>
+              )}
+            </div>
+            {shortfall > 0 ? (
+              <p className="mt-2 text-[10px] text-muted-foreground">Подобрали минимальный пакет, которого хватит на этот повтор.</p>
+            ) : null}
+          </section>
+        ) : null}
+
         <section className="rounded-2xl border border-primary/25 bg-primary/8 p-3">
           <div className="flex items-center justify-between gap-3">
             <div>

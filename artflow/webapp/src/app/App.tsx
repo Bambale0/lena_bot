@@ -13,6 +13,7 @@ import { ServicesScreen } from "@/features/services-screen";
 import { SettingsScreen } from "@/features/settings-screen";
 import { TrendsScreen } from "@/features/trends-screen";
 import { ApiError, FEED_PAGE_SIZE, MAX_HISTORY_ITEMS, MiniAppApi } from "@/lib/api";
+import { BALANCE_UPDATED_EVENT, OPEN_BALANCE_EVENT, notifyBalanceSheetState, type BalanceRequirement } from "@/lib/app-events";
 import {
   configureTelegramWebApp,
   haptic,
@@ -157,6 +158,7 @@ function App() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
+  const [balanceRequirement, setBalanceRequirement] = useState<BalanceRequirement | null>(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [remixingId, setRemixingId] = useState<number | null>(null);
@@ -397,6 +399,34 @@ function App() {
     void initialize();
   }, [initialize]);
 
+  useEffect(() => {
+    const onOpenBalance = (event: Event) => {
+      const detail = (event as CustomEvent<BalanceRequirement>).detail;
+      const requiredCredits = Number(detail?.requiredCredits || 0);
+      if (!Number.isFinite(requiredCredits) || requiredCredits <= 0) return;
+      setBalanceRequirement({
+        requiredCredits,
+        contextLabel: detail?.contextLabel || "Повтор тренда",
+      });
+      setBalanceOpen(true);
+      notifyBalanceSheetState(true);
+    };
+    window.addEventListener(OPEN_BALANCE_EVENT, onOpenBalance);
+    return () => window.removeEventListener(OPEN_BALANCE_EVENT, onOpenBalance);
+  }, []);
+
+  const openBalance = useCallback(() => {
+    setBalanceRequirement(null);
+    setBalanceOpen(true);
+    notifyBalanceSheetState(true);
+  }, []);
+
+  const setBalanceSheetOpen = useCallback((open: boolean) => {
+    setBalanceOpen(open);
+    if (!open) setBalanceRequirement(null);
+    notifyBalanceSheetState(open);
+  }, []);
+
   const refreshCore = useCallback(async () => {
     if (!api || document.visibilityState !== "visible") return;
     // Abort the previous poll before starting a new one: the old code
@@ -406,6 +436,9 @@ function App() {
     refreshAbortRef.current = controller;
     try {
       const core = await api.refreshCore(controller.signal);
+      window.dispatchEvent(new CustomEvent(BALANCE_UPDATED_EVENT, {
+        detail: { credits: Number(core.user.credits || 0) },
+      }));
       setData((current) => {
         if (!current) return current;
         const freshTaskIds = new Set(core.recentTasks.map((task) => task.id));
@@ -434,6 +467,14 @@ function App() {
       }
     }
   }, [api]);
+
+  useEffect(() => {
+    if (!balanceOpen || !balanceRequirement || !data) return;
+    if (Number(data.user.credits || 0) < balanceRequirement.requiredCredits) return;
+    setBalanceSheetOpen(false);
+    notifyHaptic("success");
+    toast.success("Баланс пополнен — можно запускать повтор");
+  }, [balanceOpen, balanceRequirement, data, setBalanceSheetOpen]);
 
   const refreshReferrals = useCallback(async () => {
     if (!api || referralsLoading) return;
@@ -891,7 +932,7 @@ function App() {
         referralsLoading={referralsLoading}
         referralBusy={referralActionBusy}
         onOpenTask={openTask}
-        onBalanceOpen={() => setBalanceOpen(true)}
+        onBalanceOpen={openBalance}
         onRefreshReferrals={() => void refreshReferrals()}
         onReferralWithdraw={(amountRub, payoutDetails) => void createReferralWithdrawal(amountRub, payoutDetails)}
         onReferralExchange={(amountRub) => void exchangeReferralBalance(amountRub)}
@@ -901,11 +942,21 @@ function App() {
 
   return (
     <>
-      <AppShell activeTab={showFeed ? "feed" : activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={() => setBalanceOpen(true)}>
+      <AppShell activeTab={showFeed ? "feed" : activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={openBalance}>
         {screen}
       </AppShell>
       <TaskDetailSheet task={selectedTask} open={taskOpen} busy={taskBusy} onOpenChange={setTaskOpen} onRefresh={(task) => void refreshTask(task)} onShare={(task) => void toggleTaskShare(task)} onToggleLibrary={(task) => void toggleTaskLibrary(task)} />
-      <BalanceSheet open={balanceOpen} user={data.user} plans={data.paymentPlans} availableProviders={data.paymentMethods} busy={paymentBusy} onOpenChange={setBalanceOpen} onPay={(provider, plan) => void pay(provider, plan)} />
+      <BalanceSheet
+        open={balanceOpen}
+        user={data.user}
+        plans={data.paymentPlans}
+        availableProviders={data.paymentMethods}
+        busy={paymentBusy}
+        requiredCredits={balanceRequirement?.requiredCredits}
+        contextLabel={balanceRequirement?.contextLabel}
+        onOpenChange={setBalanceSheetOpen}
+        onPay={(provider, plan) => void pay(provider, plan)}
+      />
       <Toaster richColors position="top-center" closeButton />
     </>
   );

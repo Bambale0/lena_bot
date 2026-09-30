@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { Film, ImageIcon, ImagePlus, LoaderCircle, Plus, Ruler, Weight, X } from "lucide-react";
+import { CreditCard, Film, ImageIcon, ImagePlus, LoaderCircle, Plus, Ruler, Weight, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
+import { BALANCE_SHEET_STATE_EVENT, BALANCE_UPDATED_EVENT, openBalanceForRequirement, type BalanceSheetStateDetail } from "@/lib/app-events";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
 import { notifyHaptic, readStartParam } from "@/lib/telegram";
-import { safeExternalUrl } from "@/lib/utils";
+import { formatCredits, safeExternalUrl } from "@/lib/utils";
 
 const TREND_RUNNER_EVENT = "apix:open-trend-runner";
 const API_BASE = "/api/v1";
@@ -55,6 +56,15 @@ type TrendRunResponse = {
   credits?: number;
 };
 
+type TrendQuote = {
+  trend_id: number;
+  price_credits: number;
+  balance_credits: number;
+  shortfall_credits: number;
+  can_run: boolean;
+  unlimited: boolean;
+};
+
 type TrendRunnerEventDetail = {
   trend?: TrendPublic;
   trendId?: number;
@@ -84,6 +94,16 @@ function initDataHeader(): string {
   }
 }
 
+class TrendApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "TrendApiError";
+    this.status = status;
+  }
+}
+
 async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = init.body;
   const isForm = body instanceof FormData;
@@ -103,7 +123,7 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       // Keep fallback message.
     }
-    throw new Error(message);
+    throw new TrendApiError(response.status, message);
   }
   if (response.status === 204) return undefined as T;
   const payload = await response.json();
@@ -538,6 +558,10 @@ function TrendRunnerPortal() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
   const [pinterestBusy, setPinterestBusy] = useState(false);
+  const [quote, setQuote] = useState<TrendQuote | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState("");
+  const [balanceSheetOpen, setBalanceSheetOpen] = useState(false);
   const processedStart = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -555,6 +579,9 @@ function TrendRunnerPortal() {
     setPhase("idle");
     setError("");
     setPinterestBusy(false);
+    setQuote(null);
+    setQuoteLoading(false);
+    setQuoteError("");
     setUploadedAsset(null);
     setUserValues({});
     setLocalPreview((current) => {
@@ -579,6 +606,49 @@ function TrendRunnerPortal() {
       toast.error(loadError instanceof Error ? loadError.message : "Не удалось открыть тренд");
     }
   }, [resetRunner]);
+
+  const loadQuote = useCallback(async (trendId: number): Promise<TrendQuote | null> => {
+    setQuoteLoading(true);
+    setQuoteError("");
+    try {
+      const payload = await apiJson<TrendQuote>(`/trends/${trendId}/quote`);
+      setQuote(payload);
+      return payload;
+    } catch (quoteFailure) {
+      const message = quoteFailure instanceof Error ? quoteFailure.message : "Не удалось рассчитать стоимость";
+      setQuote(null);
+      setQuoteError(message);
+      return null;
+    } finally {
+      setQuoteLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!trend || isPinterestServiceTrend(trend)) {
+      setQuote(null);
+      setQuoteError("");
+      return;
+    }
+    void loadQuote(trend.id);
+  }, [loadQuote, trend]);
+
+  useEffect(() => {
+    const onBalanceUpdated = () => {
+      if (trend && !isPinterestServiceTrend(trend)) void loadQuote(trend.id);
+    };
+    window.addEventListener(BALANCE_UPDATED_EVENT, onBalanceUpdated);
+    return () => window.removeEventListener(BALANCE_UPDATED_EVENT, onBalanceUpdated);
+  }, [loadQuote, trend]);
+
+  useEffect(() => {
+    const onBalanceSheetState = (event: Event) => {
+      const detail = (event as CustomEvent<BalanceSheetStateDetail>).detail;
+      setBalanceSheetOpen(Boolean(detail?.open));
+    };
+    window.addEventListener(BALANCE_SHEET_STATE_EVENT, onBalanceSheetState);
+    return () => window.removeEventListener(BALANCE_SHEET_STATE_EVENT, onBalanceSheetState);
+  }, []);
 
   useEffect(() => {
     const onOpen = (event: Event) => {
@@ -630,13 +700,25 @@ function TrendRunnerPortal() {
       setTrend(null);
       resetRunner();
     } catch (runError) {
+      if (runError instanceof TrendApiError && runError.status === 402) {
+        const freshQuote = await loadQuote(trend.id);
+        setPhase("idle");
+        if (freshQuote && freshQuote.price_credits > 0) {
+          openBalanceForRequirement({
+            requiredCredits: freshQuote.price_credits,
+            contextLabel: `Повтор «${trend.title}»`,
+          });
+          setError("Баланс изменился. Пополни его — все параметры повтора сохранены.");
+          return;
+        }
+      }
       notifyHaptic("error");
       const message = runError instanceof Error ? runError.message : "Не удалось запустить тренд";
       setError(message);
       setPhase("error");
       toast.error(message);
     }
-  }, [genericBusy, resetRunner, trend]);
+  }, [genericBusy, loadQuote, resetRunner, trend]);
 
   const runPhoto = useCallback(async (file: File | undefined | null) => {
     if (!trend || !file || genericBusy) return;
@@ -718,6 +800,17 @@ function TrendRunnerPortal() {
     }
   }, [taskBusy]);
 
+  const quoteReady = Boolean(quote && !quoteLoading && !quoteError);
+  const canRun = Boolean(quoteReady && quote?.can_run);
+
+  const requestTopup = useCallback(() => {
+    if (!trend || !quote || quote.price_credits <= 0) return;
+    openBalanceForRequirement({
+      requiredCredits: quote.price_credits,
+      contextLabel: `Повтор «${trend.title}»`,
+    });
+  }, [quote, trend]);
+
   const phaseLabel = useMemo(() => {
     if (phase === "uploading") return "Загружаем фото…";
     if (phase === "generating") return "Запускаем генерацию…";
@@ -729,7 +822,7 @@ function TrendRunnerPortal() {
   return (
     <>
       <Sheet
-        open={Boolean(trend)}
+        open={Boolean(trend) && !balanceSheetOpen}
         title={isPinterest ? "Повтори фото с Pinterest" : trend?.title || "Повторить тренд"}
         description={isPinterest ? undefined : personalized ? "Фото + разрешённые параметры. Скрытый сценарий остаётся на backend." : "Один снимок. Без настроек. Всё остальное применит backend."}
         onOpenChange={(open) => {
@@ -768,6 +861,42 @@ function TrendRunnerPortal() {
                 {trend.description ? <p className="mb-2 text-foreground">{trend.description}</p> : null}
                 <p>{hint}</p>
               </div>
+
+              <div className="rounded-xl border border-primary/25 bg-primary/7 p-3">
+                {quoteLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <LoaderCircle className="size-4 animate-spin" />
+                    Считаем стоимость повтора…
+                  </div>
+                ) : quote ? (
+                  <div className="grid gap-1.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-semibold">Повтор: {formatCredits(quote.price_credits)} 💋</span>
+                      <span className="text-[11px] text-muted-foreground">Баланс: {formatCredits(quote.balance_credits)} 💋</span>
+                    </div>
+                    {quote.shortfall_credits > 0 ? (
+                      <p className="text-xs font-medium text-primary">Не хватает: {formatCredits(quote.shortfall_credits)} 💋</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">{quote.unlimited ? "Для тебя этот повтор без списания." : "Баланс достаточный — можно запускать."}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-destructive">{quoteError || "Стоимость пока недоступна"}</p>
+                    <Button variant="outline" size="sm" onClick={() => void loadQuote(trend.id)}>Повторить расчёт</Button>
+                  </div>
+                )}
+              </div>
+
+              {quote && !quote.can_run ? (
+                <div className="grid gap-1.5">
+                  <Button type="button" className="min-h-12 w-full" onClick={requestTopup}>
+                    <CreditCard className="size-4" />
+                    Пополнить и повторить
+                  </Button>
+                  <p className="text-center text-[10px] text-muted-foreground">Оплата откроется здесь же. После зачисления вернём к этому повтору — фото и параметры не потеряются.</p>
+                </div>
+              ) : null}
 
               {userFields.length ? (
                 <div className="grid gap-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
@@ -825,21 +954,21 @@ function TrendRunnerPortal() {
                 }}
               />
 
-              <Button disabled={genericBusy} className="min-h-12 w-full" onClick={() => fileInputRef.current?.click()}>
+              <Button disabled={genericBusy || !canRun} className="min-h-12 w-full" onClick={() => fileInputRef.current?.click()}>
                 {phase === "uploading" ? <LoaderCircle className="animate-spin" /> : <ImagePlus />}
                 {phaseLabel}
               </Button>
 
               {personalized ? (
                 <Button
-                  disabled={genericBusy || !uploadedAsset || !userFieldsReady}
+                  disabled={genericBusy || !canRun || !uploadedAsset || !userFieldsReady}
                   className="min-h-12 w-full"
                   onClick={() => {
                     if (uploadedAsset) void startTrend(uploadedAsset.asset_id, userValues);
                   }}
                 >
                   {phase === "generating" ? <LoaderCircle className="animate-spin" /> : null}
-                  {phase === "generating" ? "Генерирую…" : "Создать →"}
+                  {phase === "generating" ? "Генерирую…" : quote ? `Создать · ${formatCredits(quote.price_credits)} 💋` : "Создать →"}
                 </Button>
               ) : null}
 

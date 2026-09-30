@@ -78,7 +78,14 @@ def _caption(prompt: UserPrompt, *, index: int, total: int) -> str:
     )
 
 
-def _catalog_kb(prompt: UserPrompt, *, index: int, total: int, is_admin: bool):
+def _catalog_kb(
+    prompt: UserPrompt,
+    *,
+    index: int,
+    total: int,
+    is_admin: bool,
+    repeat_cost: float | None = None,
+):
     builder = InlineKeyboardBuilder()
     if total > 1:
         builder.row(
@@ -86,7 +93,10 @@ def _catalog_kb(prompt: UserPrompt, *, index: int, total: int, is_admin: bool):
             InlineKeyboardButton(text=f"{index + 1}/{total}", callback_data="trends:noop"),
             InlineKeyboardButton(text="▶️", callback_data=f"trends:nav:{(index + 1) % total}"),
         )
-    builder.row(InlineKeyboardButton(text="🔥 Повторить шаблон", callback_data=f"trends:use:{prompt.id}"))
+    repeat_label = "🔥 Повторить шаблон"
+    if repeat_cost is not None:
+        repeat_label = f"🔥 Повторить · {float(repeat_cost):g} 💋"
+    builder.row(InlineKeyboardButton(text=repeat_label, callback_data=f"trends:use:{prompt.id}"))
     if is_admin:
         builder.row(
             InlineKeyboardButton(text="➕ Фото-тренд", callback_data="trends:add:image"),
@@ -105,6 +115,40 @@ def _empty_kb(is_admin: bool):
             InlineKeyboardButton(text="🎬 Видео-тренд", callback_data="trends:add:video"),
         )
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
+    return builder.as_markup()
+
+
+async def _direct_image_repeat_cost(session: AsyncSession, prompt: UserPrompt) -> float | None:
+    if trend_kind(prompt) != "image" or trend_user_fields(prompt):
+        return None
+    from bot.handlers.marketplace import DEFAULT_PROMPT_MODEL, _default_quality_for_model
+
+    model_key = prompt.model or DEFAULT_PROMPT_MODEL
+    model_cost = await repo.resolve_image_model_cost(
+        session,
+        model_key,
+        quality=_default_quality_for_model(model_key),
+    )
+    if not model_cost:
+        return None
+    return float(model_cost.credits or 0)
+
+
+def _insufficient_repeat_text(prompt: UserPrompt, *, price: float, balance: float) -> str:
+    shortfall = max(0.0, float(price) - float(balance))
+    return (
+        f"🔥 <b>{html.escape(prompt.title)}</b>\n\n"
+        f"Повтор: <b>{float(price):g} 💋</b>\n"
+        f"Баланс: <b>{float(balance):g} 💋</b>\n"
+        f"Не хватает: <b>{shortfall:g} 💋</b>\n\n"
+        "Пополни баланс здесь же и вернись к тренду."
+    )
+
+
+def _insufficient_repeat_kb():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💳 Пополнить и повторить", callback_data="menu:topup"))
+    builder.row(InlineKeyboardButton(text="🔥 Вернуться к трендам", callback_data="menu:trends"))
     return builder.as_markup()
 
 
@@ -145,8 +189,15 @@ async def _show(
     else:
         idx = index % len(items)
     prompt = items[idx]
+    repeat_cost = await _direct_image_repeat_cost(session, prompt)
     caption = _caption(prompt, index=idx, total=len(items))
-    markup = _catalog_kb(prompt, index=idx, total=len(items), is_admin=_is_admin(user))
+    markup = _catalog_kb(
+        prompt,
+        index=idx,
+        total=len(items),
+        is_admin=_is_admin(user),
+        repeat_cost=repeat_cost,
+    )
     media = _media_source(prompt.preview_url)
     try:
         if trend_kind(prompt) == "video" and media:
@@ -209,6 +260,15 @@ async def use_trend(call: CallbackQuery, session: AsyncSession, state: FSMContex
                 else "🎬 Настройки видео-тренда готовы. Открой приложение, добавь исходное фото при необходимости и запусти генерацию."
             ),
             reply_markup=builder.as_markup(),
+        )
+        await safe_answer_callback(call)
+        return
+
+    repeat_cost = await _direct_image_repeat_cost(session, prompt)
+    if repeat_cost is not None and float(db_user.credits or 0) < repeat_cost:
+        await call.message.answer(
+            _insufficient_repeat_text(prompt, price=repeat_cost, balance=float(db_user.credits or 0)),
+            reply_markup=_insufficient_repeat_kb(),
         )
         await safe_answer_callback(call)
         return
