@@ -104,7 +104,7 @@ async def test_tribute_manual_reconcile_credits_atomically(monkeypatch) -> None:
     assert status == TransactionStatus.paid
     assert balance == 321.0
     atomic_confirm.assert_awaited_once_with(ANY, "tribute-order-77", note="Payment confirmed via tribute")
-    accrue.assert_awaited_once_with(ANY, ANY, tx, None)
+    accrue.assert_awaited_once_with(ANY, ANY, paid_tx, None)
 
 @pytest.mark.asyncio
 async def test_tribute_rejects_stars_only_shop_before_creating_order(monkeypatch) -> None:
