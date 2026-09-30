@@ -285,6 +285,7 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
     if (path === "/api/v1/history") return route.fulfill({ json: history });
     if (path === "/api/v1/me/feed" && method === "GET") return route.fulfill({ json: myFeed });
     if (path === "/api/v1/plans") return route.fulfill({ json: plans });
+    if (path === "/api/v1/payment-methods") return route.fulfill({ json: ["tbank"] });
     if (path === "/api/v1/referrals") return route.fulfill({ json: defaultReferrals });
     if (path === "/api/v1/music/voices") return route.fulfill({ json: [] });
 
