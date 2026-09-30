@@ -334,7 +334,7 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
       return route.fulfill({ json: { kind: trend.kind || "image", prompt_id: id, title: trend.title || `Тренд ${id}`, model: "nano-banana-2", settings: { ratio: "1:1", quality: "2K" } } });
     }
     const trendLinkMatch = path.match(/^\/api\/v1\/trends\/(\d+)\/link$/);
-    if (trendLinkMatch) return route.fulfill({ json: { link: `https://t.me/apix_ai_bot?startapp=trend_${trendLinkMatch[1]}` } });
+    if (trendLinkMatch) return route.fulfill({ json: { link: `https://t.me/apix_ai_bot?start=ref_JOURNEY__trend_${trendLinkMatch[1]}` } });
 
     if (path === "/api/v1/settings/language" && method === "POST") {
       captures.language = requestJson(route);
