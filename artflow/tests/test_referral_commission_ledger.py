@@ -66,9 +66,17 @@ async def test_duplicate_accrual_does_not_notify_or_change_balance_twice(monkeyp
 async def test_refund_records_negative_reversal_against_same_transaction(monkeypatch) -> None:
     payer = SimpleNamespace(id=77, referrer_id=10, referrer_l2_id=20, referrer_l3_id=None)
     tx = SimpleNamespace(id=900, amount_rub=500.0, external_id="ext-900", provider="tbank")
+    originals = [
+        SimpleNamespace(level=1, recipient_user_id=10, rate=0.40, payment_amount_rub=500.0, amount_rub=200.0),
+        SimpleNamespace(level=2, recipient_user_id=20, rate=0.07, payment_amount_rub=500.0, amount_rub=35.0),
+    ]
     record = AsyncMock(return_value=SimpleNamespace(id=1))
     monkeypatch.setattr(main.repo, "record_referral_commission", record)
-    monkeypatch.setattr(main.repo, "get_referral_commissions_for_transaction", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        main.repo,
+        "get_referral_commissions_for_transaction",
+        AsyncMock(return_value=originals),
+    )
 
     await main._reverse_referral_commissions(object(), payer, tx)
 
@@ -82,6 +90,23 @@ async def test_refund_records_negative_reversal_against_same_transaction(monkeyp
     assert first["payment_amount_rub"] == 500.0
     assert first["amount_rub"] == -200.0
     assert first["event_type"] == "reversal"
+
+
+@pytest.mark.asyncio
+async def test_refund_without_accrual_ledger_does_not_debit_current_chain(monkeypatch) -> None:
+    payer = SimpleNamespace(id=77, referrer_id=10, referrer_l2_id=20, referrer_l3_id=30)
+    tx = SimpleNamespace(id=902, amount_rub=500.0, external_id="ext-902", provider="tbank")
+    record = AsyncMock()
+    monkeypatch.setattr(main.repo, "record_referral_commission", record)
+    monkeypatch.setattr(
+        main.repo,
+        "get_referral_commissions_for_transaction",
+        AsyncMock(return_value=[]),
+    )
+
+    await main._reverse_referral_commissions(object(), payer, tx)
+
+    record.assert_not_awaited()
 
 
 @pytest.mark.asyncio
