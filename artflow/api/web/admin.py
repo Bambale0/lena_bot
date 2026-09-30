@@ -13,7 +13,7 @@ from api.web.billing import enabled_payment_methods
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import enum_value, iso_datetime
 from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
-from core.reporting_time import moscow_day_bounds_utc
+from core.reporting_time import REPORTING_TZ, moscow_day_bounds_utc
 from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
@@ -100,7 +100,7 @@ def _date_key(value: date | datetime | str) -> str:
 
 
 def _date_range(days: int) -> list[str]:
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(timezone.utc).astimezone(REPORTING_TZ).date()
     return [(today - timedelta(days=offset)).isoformat() for offset in range(days - 1, -1, -1)]
 
 
@@ -227,13 +227,15 @@ async def _count_by_enum(session: AsyncSession, model, column) -> dict[str, int]
 
 
 async def _daily_series(session: AsyncSession, column, table_model, *, days: int, value_expr=None, filters=()) -> list[dict]:
-    start = datetime.now(timezone.utc) - timedelta(days=days - 1)
-    day_expr = cast(column, Date)
+    now = datetime.now(timezone.utc)
+    today_start, today_end = moscow_day_bounds_utc(now)
+    start = today_start - timedelta(days=days - 1)
+    day_expr = cast(func.timezone("Europe/Moscow", column), Date)
     metric = value_expr if value_expr is not None else func.count()
     statement = (
         select(day_expr.label("day"), func.coalesce(metric, 0))
         .select_from(table_model)
-        .where(column >= start, *filters)
+        .where(column >= start, column < today_end, *filters)
         .group_by(day_expr)
         .order_by(day_expr)
     )
