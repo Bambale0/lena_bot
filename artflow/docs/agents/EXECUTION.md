@@ -770,3 +770,27 @@ Branch: `feat/trend-inline-checkout`.
 - mini_app: primary affected surface; full inline checkout UX added.
 - site/web: the Trends React surface shares this implementation where rendered.
 - telegram_bot: existing trend actions that hand off to the Mini App inherit this checkout; direct non-Mini-App trend launches keep existing billing behavior and are not given a duplicate payment implementation.
+
+
+---
+
+# Execution ledger — Moscow day for admin statistics
+
+Date: 2026-10-01.
+Baseline: `7fbe1605f59e00f8727836206f0ca35334190bf1`.
+Branch: `fix/admin-stats-msk-day`.
+
+## Incident evidence
+- Telegram admin "today" counters were based on the UTC calendar date.
+- At 00:02 MSK on 2026-10-01 the bot therefore still reported 2026-09-30 UTC revenue, which made operator and referral-day calculations disagree with the Moscow calendar day.
+- Production audit for referral user tg_id 645180669 showed the same ambiguity: UTC-day and Moscow-day referral sales produce materially different totals.
+
+## Fix
+- Added one shared `moscow_day_bounds_utc()` helper using `Europe/Moscow`.
+- Bot repository counters now query explicit UTC timestamps for the current Moscow day instead of casting timestamps to the UTC date.
+- Web admin overview uses the same Moscow-day bounds for new users, generations and revenue.
+- Telegram/admin-assistant labels explicitly say `сегодня (МСК)`.
+
+## Verification
+- Regression tests pin the 2026-10-01 Moscow day to the UTC interval 2026-09-30 21:00 — 2026-10-01 21:00.
+- Required CI, review, merge, deploy, public health and production log checks remain release gates.
