@@ -620,9 +620,17 @@ function TrendRunnerPortal() {
     if (!quiet) setCheckoutBusy(true);
     try {
       const quote = await apiJson<TrendCheckoutQuote>(`/trends/${trendId}/checkout`);
+      if (
+        typeof quote?.can_run !== "boolean"
+        || !Number.isFinite(Number(quote?.cost_credits))
+        || !Number.isFinite(Number(quote?.balance_credits))
+      ) {
+        throw new Error("Стоимость временно недоступна");
+      }
       setCheckout(quote);
       return quote;
     } catch (checkoutError) {
+      setCheckout(null);
       if (!quiet) {
         toast.error(checkoutError instanceof Error ? checkoutError.message : "Не удалось получить стоимость");
       }
