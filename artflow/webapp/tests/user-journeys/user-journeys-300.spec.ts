@@ -313,6 +313,20 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/trends" && method === "GET") return route.fulfill({ json: trends });
+    const trendCheckoutMatch = path.match(/^\/api\/v1\/trends\/(\d+)\/checkout$/);
+    if (trendCheckoutMatch && method === "GET") {
+      const balance = Number(user.credits || 100);
+      const cost = 1.5;
+      return route.fulfill({
+        json: {
+          cost_credits: cost,
+          balance_credits: balance,
+          can_run: balance >= cost,
+          deficit_credits: Math.max(0, cost - balance),
+          recommended_plan: null,
+        },
+      });
+    }
     const trendDetailMatch = path.match(/^\/api\/v1\/trends\/(\d+)$/);
     if (trendDetailMatch && method === "GET") {
       const id = Number(trendDetailMatch[1]);
