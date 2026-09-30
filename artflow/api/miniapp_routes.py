@@ -1447,6 +1447,22 @@ class ReferralChildOut(BaseModel):
     paid_rub: float
 
 
+class ReferralCommissionOut(BaseModel):
+    id: int
+    transaction_id: int
+    payer_user_id: int
+    payer_username: str | None
+    payer_full_name: str | None
+    level: int
+    rate: float
+    payment_amount_rub: float
+    amount_rub: float
+    balance_after_rub: float
+    event_type: str
+    provider: str
+    created_at: str
+
+
 class ReferralWithdrawalOut(BaseModel):
     id: int
     amount_rub: float
@@ -1471,6 +1487,7 @@ class ReferralStatsOut(BaseModel):
     balance: dict[str, float]
     feed_remix_reward_rub: float
     children: dict[str, list[ReferralChildOut]]
+    commission_ledger: list[ReferralCommissionOut]
     withdrawals: list[ReferralWithdrawalOut]
 
 
@@ -1636,6 +1653,7 @@ async def miniapp_referrals(
     l1, l2, l3 = await repo.count_user_referrals(session, user.id)
     snapshot = await repo.get_user_referral_balance_snapshot(session, user.id)
     feed_reward = await repo.get_user_feed_remix_reward_rub(session, user.id)
+    commission_rows = await repo.get_referral_commission_ledger(session, user.id, limit=50)
     withdrawals = await repo.get_user_withdrawal_requests(session, user.id, limit=10)
 
     children: dict[str, list[ReferralChildOut]] = {}
@@ -1674,6 +1692,24 @@ async def miniapp_referrals(
         },
         feed_remix_reward_rub=float(feed_reward or 0),
         children=children,
+        commission_ledger=[
+            ReferralCommissionOut(
+                id=row.entry.id,
+                transaction_id=row.entry.transaction_id,
+                payer_user_id=row.payer.id,
+                payer_username=row.payer.username,
+                payer_full_name=row.payer.full_name,
+                level=row.entry.level,
+                rate=float(row.entry.rate),
+                payment_amount_rub=float(row.entry.payment_amount_rub),
+                amount_rub=float(row.entry.amount_rub),
+                balance_after_rub=float(row.entry.balance_after_rub),
+                event_type=str(row.entry.event_type),
+                provider=str(getattr(row.transaction.provider, "value", row.transaction.provider)),
+                created_at=row.entry.created_at.isoformat(),
+            )
+            for row in commission_rows
+        ],
         withdrawals=[_withdrawal_out(item) for item in withdrawals],
     )
 
