@@ -1011,7 +1011,7 @@ async def cb_stats(call: CallbackQuery, session: AsyncSession) -> None:
     await call.message.edit_text(
         f"📊 <b>Статистика</b>\n\n"
         f"👤 Пользователей: <b>{total_users}</b>\n"
-        f"🎨 Генераций сегодня: <b>{gens_today}</b>\n"
+        f"🎨 Генераций сегодня (МСК): <b>{gens_today}</b>\n"
         f"💰 Выручка сегодня (МСК): <b>{revenue_today:.2f}₽</b>",
         reply_markup=builder.as_markup(),
     )
