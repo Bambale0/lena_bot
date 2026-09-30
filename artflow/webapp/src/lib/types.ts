@@ -166,6 +166,22 @@ export interface ReferralChild {
   paid_rub?: number;
 }
 
+export interface ReferralCommission {
+  id: number;
+  transaction_id: number;
+  payer_user_id: number;
+  payer_username?: string | null;
+  payer_full_name?: string | null;
+  level: number;
+  rate: number;
+  payment_amount_rub: number;
+  amount_rub: number;
+  balance_after_rub: number;
+  event_type: "accrual" | "reversal" | string;
+  provider: string;
+  created_at: string;
+}
+
 export interface ReferralWithdrawal {
   id: number;
   amount_rub: number;
@@ -194,6 +210,7 @@ export interface ReferralStats {
   };
   feed_remix_reward_rub?: number;
   children?: Record<string, ReferralChild[]>;
+  commission_ledger?: ReferralCommission[];
   withdrawals?: ReferralWithdrawal[];
 }
 
