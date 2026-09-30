@@ -97,5 +97,5 @@ async def test_successful_legacy_stars_payment_is_still_idempotent(monkeypatch) 
         "source_id": str(tx.id),
         "note": "Telegram Stars payment",
     }
-    accrue.assert_awaited_once_with(session, db_user, tx.amount_rub, bot)
+    accrue.assert_awaited_once_with(session, db_user, tx, bot)
     message.answer.assert_awaited_once()
