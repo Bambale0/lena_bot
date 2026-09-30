@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from html import escape
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -21,6 +23,7 @@ from db.repository import InsufficientReferralBalanceError
 
 logger = logging.getLogger(__name__)
 router = Router(name="balance")
+REFERRAL_TZ = ZoneInfo("Europe/Moscow")
 
 
 class WithdrawalFSM(StatesGroup):
@@ -35,11 +38,12 @@ class ExchangeFSM(StatesGroup):
 def referral_screen_kb(lang: str = "ru"):
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 " + ("Мои партнёры" if lang == "ru" else "My partners"), callback_data="referral:list")
+    builder.button(text="🧾 " + ("Начисления" if lang == "ru" else "Commission history"), callback_data="referral:commissions")
     builder.button(text="💸 " + ("Вывести деньги" if lang == "ru" else "Withdraw money"), callback_data="referral:withdraw")
     builder.button(text="💋 " + ("Купить поцелуи" if lang == "ru" else "Buy kisses"), callback_data="referral:exchange")
     builder.button(text="📄 " + ("Публичная оферта" if lang == "ru" else "Public offer"), callback_data="referral:offer")
     builder.button(text=t("btn_main_menu", lang), callback_data="menu:main")
-    builder.adjust(1, 2, 1, 1)
+    builder.adjust(2, 2, 1, 1)
     return builder.as_markup()
 
 
@@ -95,6 +99,32 @@ def _rub_to_kisses(amount_rub: float) -> float:
 def _exchange_rate_text() -> str:
     credits = _rub_to_kisses(100)
     return f"100₽ = {_format_credit_amount(credits)}💋"
+
+
+def _format_referral_commission_line(row, lang: str) -> str:
+    entry = row.entry
+    payer = row.payer
+    username = str(getattr(payer, "username", "") or "").strip()
+    full_name = str(getattr(payer, "full_name", "") or "").strip()
+    payer_label = f"@{escape(username)}" if username else escape(full_name or f"ID {getattr(payer, 'id', '—')}")
+    amount = float(getattr(entry, "amount_rub", 0) or 0)
+    payment = float(getattr(entry, "payment_amount_rub", 0) or 0)
+    rate_pct = float(getattr(entry, "rate", 0) or 0) * 100
+    level = int(getattr(entry, "level", 0) or 0)
+    tx_id = int(getattr(entry, "transaction_id", 0) or 0)
+    event_type = str(getattr(entry, "event_type", "") or "")
+    created_at = getattr(entry, "created_at", None)
+    try:
+        timestamp = created_at.astimezone(REFERRAL_TZ).strftime("%d.%m %H:%M") if created_at else "—"
+    except (AttributeError, ValueError):
+        timestamp = "—"
+    sign = "+" if amount > 0 else ""
+    action = "возврат" if lang == "ru" and (event_type == "reversal" or amount < 0) else "reversal" if event_type == "reversal" or amount < 0 else ""
+    suffix = f" · {action}" if action else ""
+    return (
+        f"• {timestamp} · L{level} {rate_pct:g}% · {payer_label}\n"
+        f"  {payment:.0f}₽ → <b>{sign}{amount:.2f}₽</b> · tx #{tx_id}{suffix}"
+    )
 
 
 def _format_referral_request_line(request) -> str:
@@ -201,6 +231,29 @@ async def cb_referral(call: CallbackQuery, db_user: User, bot: Bot, session: Asy
     )
     if withdrawal_lines:
         text += "\n\n💸 <b>" + ("Последние операции" if lang == "ru" else "Recent operations") + ":</b>\n" + "\n".join(withdrawal_lines)
+    await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data == "referral:commissions")
+async def cb_referral_commissions(call: CallbackQuery, db_user: User, session: AsyncSession) -> None:
+    lang = db_user.language or "ru"
+    rows = await repo.get_referral_commission_ledger(session, db_user.id, limit=20)
+    if rows:
+        title = "🧾 <b>Начисления по партнёрке</b>" if lang == "ru" else "🧾 <b>Partner commission history</b>"
+        hint = (
+            "Каждая строка привязана к конкретному платежу."
+            if lang == "ru"
+            else "Every row is linked to a specific payment."
+        )
+        text = title + "\n\n" + hint + "\n\n" + "\n".join(_format_referral_commission_line(row, lang) for row in rows)
+    else:
+        text = (
+            "🧾 <b>Начисления по партнёрке</b>\n\n"
+            "Пока записей нет. Новые комиссии будут появляться здесь с точной привязкой к платежу."
+            if lang == "ru"
+            else "🧾 <b>Partner commission history</b>\n\nNo entries yet. New commissions will appear here with an exact payment link."
+        )
     await safe_edit_message(call.message, text, reply_markup=referral_screen_kb(lang))  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
