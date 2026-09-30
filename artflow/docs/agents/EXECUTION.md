@@ -794,3 +794,31 @@ Branch: `fix/admin-stats-msk-day`.
 ## Verification
 - Regression tests pin the 2026-10-01 Moscow day to the UTC interval 2026-09-30 21:00 — 2026-10-01 21:00.
 - Required CI, review, merge, deploy, public health and production log checks remain release gates.
+
+
+---
+
+# Execution ledger — Referral commission accounting ledger
+
+Date: 2026-10-01.
+Baseline: production `485cf9264f023f94480094c2b993b7843ea2d50e`.
+Branch: `feat/referral-commission-ledger`.
+
+## User outcome
+- Every new referral commission is tied to the exact paid transaction, payer, recipient, referral level and applied rate.
+- Refund/reversal events are stored as separate negative ledger rows against the same transaction.
+- Duplicate webhook/reconcile delivery cannot mutate referral balance twice: the ledger unique key is the idempotency guard.
+- The partner cabinet shows the recent commission journal with payer, L1/L2/L3, payment amount, commission amount and transaction id.
+
+## Accounting contract
+- Source of truth table: `referral_commission_ledger`.
+- Unique key: `transaction_id + recipient_user_id + level + event_type`.
+- Each row stores `payer_user_id`, `rate`, `payment_amount_rub`, signed `amount_rub`, `balance_after_rub`, event type and timestamp.
+- Ledger insert and `users.referral_balance` mutation happen in one DB transaction.
+- Historical rows are not fabricated. The ledger starts recording exact events after deployment; older disputes remain reconstructable from paid transactions and withdrawal records.
+
+## TDD / verification
+- RED contract commit: `14bfe3f7685d1c0333df92fb452ad7281a52a333`.
+- Tests require payment-linked accrual rows, idempotent duplicate suppression and transaction-linked reversal rows.
+- Existing payment webhook/provider paths were updated to pass the persisted transaction object rather than only an amount.
+- Required CI, code review, migration/deploy verification, public health and production log checks are release gates.
