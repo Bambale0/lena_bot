@@ -290,6 +290,10 @@ def _model_selector_kb():
         InlineKeyboardButton(text="🎬 Seedance 2.5", callback_data="nxt:model:seedance25"),
     )
     builder.row(
+        InlineKeyboardButton(text="🎬 Нейроныч · Seedance 2", callback_data="nxt:model:neur-s20"),
+        InlineKeyboardButton(text="🎬 Нейроныч · Seedance 2.5", callback_data="nxt:model:neur-s25"),
+    )
+    builder.row(
         InlineKeyboardButton(
             text="🧬 Seedance 2.5 · Video Edit",
             callback_data="nxt:model:hf-seedance25-edit",
@@ -303,8 +307,9 @@ async def _show_model_selector(message: Message) -> None:
     await safe_edit_message(
         message,
         "🧪 <b>Provider Test Lab</b>\n\n"
-        "Выбери модель. Все тестовые контуры доступны только администраторам, не списывают APIX-кредиты "
-        "и не меняют боевой provider routing.",
+        "Выбери провайдера и модель. Все тестовые контуры доступны только администраторам, "
+        "не списывают APIX-кредиты и не меняют боевой provider routing. "
+        "Платные тесты расходуют только баланс выбранного внешнего API.",
         reply_markup=_model_selector_kb(),
     )
 
