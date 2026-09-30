@@ -1,6 +1,7 @@
 """Тесты хендлеров balance — пополнение, вывод, история, рефералы."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -64,6 +65,65 @@ async def test_cb_referral_shows_screen(db_user) -> None:
         await balance.cb_referral(call, db_user, mock_bot, AsyncMock())
     call.message.edit_text.assert_awaited_once()
     assert "Партнёрская программа" in call.message.edit_text.call_args[0][0]
+
+
+def test_referral_screen_has_commission_history_button() -> None:
+    markup = balance.referral_screen_kb("ru")
+    callbacks = [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert "referral:commissions" in callbacks
+
+
+@pytest.mark.asyncio
+async def test_cb_referral_commissions_shows_payment_linked_rows(db_user) -> None:
+    call = make_callback(data="referral:commissions")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    row = SimpleNamespace(
+        entry=SimpleNamespace(
+            transaction_id=501,
+            level=1,
+            rate=0.40,
+            payment_amount_rub=500.0,
+            amount_rub=200.0,
+            event_type="accrual",
+            created_at=datetime(2026, 10, 1, 9, 5, tzinfo=timezone.utc),
+        ),
+        payer=SimpleNamespace(id=15, username="child", full_name="Child User"),
+    )
+    with patch(
+        "bot.handlers.balance.repo",
+        AsyncMock(get_referral_commission_ledger=AsyncMock(return_value=[row])),
+    ):
+        await balance.cb_referral_commissions(call, db_user, AsyncMock())
+
+    call.message.edit_text.assert_awaited_once()
+    text = call.message.edit_text.call_args[0][0]
+    assert "Начисления по партнёрке" in text
+    assert "@child" in text
+    assert "L1 40%" in text
+    assert "500₽" in text
+    assert "+200.00₽" in text
+    assert "tx #501" in text
+
+
+@pytest.mark.asyncio
+async def test_cb_referral_commissions_empty_is_friendly(db_user) -> None:
+    call = make_callback(data="referral:commissions")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    with patch(
+        "bot.handlers.balance.repo",
+        AsyncMock(get_referral_commission_ledger=AsyncMock(return_value=[])),
+    ):
+        await balance.cb_referral_commissions(call, db_user, AsyncMock())
+
+    text = call.message.edit_text.call_args[0][0]
+    assert "Пока записей нет" in text
 
 
 @pytest.mark.asyncio

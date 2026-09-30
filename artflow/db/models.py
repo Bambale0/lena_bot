@@ -116,6 +116,11 @@ class User(Base):
     generations: Mapped[list[Generation]] = relationship(back_populates="user", lazy="noload")
     suno_voices: Mapped[list["SunoVoice"]] = relationship(back_populates="user", lazy="noload")
     transactions: Mapped[list[Transaction]] = relationship(back_populates="user", lazy="noload")
+    referral_commissions: Mapped[list["ReferralCommissionLedger"]] = relationship(
+        foreign_keys="ReferralCommissionLedger.recipient_user_id",
+        back_populates="recipient_user",
+        lazy="noload",
+    )
     withdrawal_requests: Mapped[list[ReferralWithdrawalRequest]] = relationship(back_populates="user", lazy="noload")
     feed_remix_payouts: Mapped[list["FeedRemixPayout"]] = relationship(foreign_keys="FeedRemixPayout.source_user_id", back_populates="source_user", lazy="noload")
 
@@ -330,6 +335,56 @@ class CreditLedgerEntry(Base):
     source_id: Mapped[str | None] = mapped_column(String(128), index=True)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class ReferralCommissionLedger(Base):
+    __tablename__ = "referral_commission_ledger"
+    __table_args__ = (
+        UniqueConstraint(
+            "transaction_id",
+            "recipient_user_id",
+            "level",
+            "event_type",
+            name="uq_referral_commission_tx_recipient_level_event",
+        ),
+        Index("ix_referral_commission_recipient_created", "recipient_user_id", "created_at"),
+        Index("ix_referral_commission_payer_created", "payer_user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    transaction_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("transactions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    payer_user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    recipient_user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    rate: Mapped[float] = mapped_column(Float, nullable=False)
+    payment_amount_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    amount_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    balance_after_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(16), nullable=False, default="accrual", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    transaction: Mapped[Transaction] = relationship(lazy="noload")
+    payer_user: Mapped[User] = relationship(foreign_keys=[payer_user_id], lazy="noload")
+    recipient_user: Mapped[User] = relationship(
+        foreign_keys=[recipient_user_id],
+        back_populates="referral_commissions",
+        lazy="noload",
+    )
 
 
 class ReferralWithdrawalRequest(Base):

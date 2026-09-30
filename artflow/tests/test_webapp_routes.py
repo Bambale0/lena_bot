@@ -430,6 +430,26 @@ async def test_webapp_referrals_returns_counts_balance_children_and_withdrawals(
     )
     monkeypatch.setattr("api.miniapp_routes.repo.get_user_feed_remix_reward_rub", AsyncMock(return_value=42.75))
     monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_referral_commission_ledger",
+        AsyncMock(return_value=[
+            SimpleNamespace(
+                entry=SimpleNamespace(
+                    id=71,
+                    transaction_id=501,
+                    level=1,
+                    rate=0.4,
+                    payment_amount_rub=500.0,
+                    amount_rub=200.0,
+                    balance_after_rub=1250.5,
+                    event_type="accrual",
+                    created_at=datetime(2026, 10, 1, 10, 0, tzinfo=timezone.utc),
+                ),
+                payer=SimpleNamespace(id=15, username="child", full_name="Child User"),
+                transaction=SimpleNamespace(provider=SimpleNamespace(value="tbank")),
+            ),
+        ]),
+    )
+    monkeypatch.setattr(
         "api.miniapp_routes.repo.get_user_withdrawal_requests",
         AsyncMock(return_value=[
             SimpleNamespace(
@@ -463,6 +483,11 @@ async def test_webapp_referrals_returns_counts_balance_children_and_withdrawals(
     assert data["balance"]["available_to_withdraw"] == 950.5
     assert data["feed_remix_reward_rub"] == 42.75
     assert data["children"]["l1"][0]["username"] == "child"
+    assert data["commission_ledger"][0]["transaction_id"] == 501
+    assert data["commission_ledger"][0]["payer_username"] == "child"
+    assert data["commission_ledger"][0]["level"] == 1
+    assert data["commission_ledger"][0]["payment_amount_rub"] == 500.0
+    assert data["commission_ledger"][0]["amount_rub"] == 200.0
     assert data["withdrawals"][0]["status"] == "pending"
 
 

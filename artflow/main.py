@@ -608,22 +608,49 @@ async def _set_bot_commands(bot: Bot, *, schedule_retry: bool = True) -> None:
         asyncio.create_task(_retry_set_bot_commands(bot, delay_seconds))
 
 
-async def _accrue_referral_commissions(session, user: "User", amount_rub: float, bot_instance: Bot | None = None) -> None:
-    """Начисляет реферальные комиссии с платежа по трём линиям."""
+async def _accrue_referral_commissions(session, user: "User", transaction, bot_instance: Bot | None = None) -> None:
+    """Начисляет реферальные комиссии и пишет неизменяемый журнал по платежу."""
+    amount_rub = float(getattr(transaction, "amount_rub", 0) or 0)
+    transaction_id = int(getattr(transaction, "id", 0) or 0)
+    if not transaction_id:
+        raise ValueError("Referral commission requires a persisted transaction")
     if settings.REFERRAL_FREEZE:
-        logger.warning("Referral freeze active: skip commission accrual for user_id=%s amount=%.2f", getattr(user, "id", None), amount_rub)
+        logger.warning(
+            "Referral freeze active: skip commission accrual for user_id=%s transaction_id=%s amount=%.2f",
+            getattr(user, "id", None),
+            transaction_id,
+            amount_rub,
+        )
         return
     active_bot = bot_instance or bot
     pairs = [
-        (user.referrer_id, settings.REFERRAL_COMMISSION_L1),
-        (user.referrer_l2_id, settings.REFERRAL_COMMISSION_L2),
-        (user.referrer_l3_id, settings.REFERRAL_COMMISSION_L3),
+        (1, user.referrer_id, settings.REFERRAL_COMMISSION_L1),
+        (2, user.referrer_l2_id, settings.REFERRAL_COMMISSION_L2),
+        (3, user.referrer_l3_id, settings.REFERRAL_COMMISSION_L3),
     ]
-    for ref_id, pct in pairs:
+    for level, ref_id, pct in pairs:
         if not ref_id or pct <= 0:
             continue
         commission = round(amount_rub * pct, 2)
-        await repo.add_referral_balance(session, ref_id, commission)
+        entry = await repo.record_referral_commission(
+            session,
+            transaction_id=transaction_id,
+            payer_user_id=user.id,
+            recipient_user_id=ref_id,
+            level=level,
+            rate=float(pct),
+            payment_amount_rub=amount_rub,
+            amount_rub=commission,
+            event_type="accrual",
+        )
+        if entry is None:
+            logger.info(
+                "Referral commission duplicate suppressed transaction_id=%s recipient_user_id=%s level=%s",
+                transaction_id,
+                ref_id,
+                level,
+            )
+            continue
         referrer = await repo.get_user_by_id(session, ref_id)
         if referrer and active_bot:
             try:
@@ -634,22 +661,80 @@ async def _accrue_referral_commissions(session, user: "User", amount_rub: float,
                 )
             except Exception:
                 pass
-        logger.info("Referral commission %.2f₽ -> user_id=%s (%.0f%%)", commission, ref_id, pct * 100)
+        logger.info(
+            "Referral commission %.2f₽ -> user_id=%s level=%s transaction_id=%s (%.0f%%)",
+            commission,
+            ref_id,
+            level,
+            transaction_id,
+            pct * 100,
+        )
 
 
-async def _reverse_referral_commissions(session, user: "User", amount_rub: float) -> None:
-    """Откатывает реферальные комиссии по возврату/реверсу платежа."""
-    pairs = [
-        (user.referrer_id, settings.REFERRAL_COMMISSION_L1),
-        (user.referrer_l2_id, settings.REFERRAL_COMMISSION_L2),
-        (user.referrer_l3_id, settings.REFERRAL_COMMISSION_L3),
+async def _reverse_referral_commissions(session, user: "User", transaction) -> None:
+    """Откатывает комиссию один раз и записывает реверс в тот же платёжный журнал."""
+    amount_rub = float(getattr(transaction, "amount_rub", 0) or 0)
+    transaction_id = int(getattr(transaction, "id", 0) or 0)
+    if not transaction_id:
+        raise ValueError("Referral commission reversal requires a persisted transaction")
+
+    original_entries = await repo.get_referral_commissions_for_transaction(
+        session,
+        transaction_id,
+        event_type="accrual",
+    )
+    if not original_entries:
+        # Never reconstruct a reversal from today's chain/rates. Missing rows can
+        # mean a legacy payment created before the ledger or a payment made while
+        # referral accrual was frozen. Auto-debiting either case would fabricate
+        # accounting data and can make referral_balance incorrect.
+        logger.warning(
+            "Referral commission reversal skipped without accrual ledger transaction_id=%s payer_user_id=%s amount=%.2f; manual reconciliation required for legacy/frozen payment",
+            transaction_id,
+            getattr(user, "id", None),
+            amount_rub,
+        )
+        return
+
+    rows = [
+        (
+            int(entry.level),
+            int(entry.recipient_user_id),
+            float(entry.rate),
+            float(entry.payment_amount_rub),
+            abs(float(entry.amount_rub)),
+        )
+        for entry in original_entries
     ]
-    for ref_id, pct in pairs:
-        if not ref_id or pct <= 0:
+
+    for level, ref_id, pct, original_payment_amount, commission in rows:
+        entry = await repo.record_referral_commission(
+            session,
+            transaction_id=transaction_id,
+            payer_user_id=user.id,
+            recipient_user_id=ref_id,
+            level=level,
+            rate=pct,
+            payment_amount_rub=original_payment_amount,
+            amount_rub=-commission,
+            event_type="reversal",
+        )
+        if entry is None:
+            logger.info(
+                "Referral commission reversal duplicate suppressed transaction_id=%s recipient_user_id=%s level=%s",
+                transaction_id,
+                ref_id,
+                level,
+            )
             continue
-        commission = round(amount_rub * pct, 2)
-        await repo.add_referral_balance(session, ref_id, -commission)
-        logger.info("Referral commission reversed %.2f₽ -> user_id=%s (%.0f%%)", commission, ref_id, pct * 100)
+        logger.info(
+            "Referral commission reversed %.2f₽ -> user_id=%s level=%s transaction_id=%s (%.0f%%)",
+            commission,
+            ref_id,
+            level,
+            transaction_id,
+            pct * 100,
+        )
 
 
 # ── Global instances ──────────────────────────────────────────────────────────
@@ -1080,7 +1165,7 @@ async def cryptobot_webhook(request: Request) -> dict:
             tx, new_balance = confirmed
             user = await repo.get_user_by_id(session, tx.user_id)
             if user:
-                await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
+                await _accrue_referral_commissions(session, user, tx, bot)
                 if bot:
                     try:
                         await bot.send_message(
@@ -1139,7 +1224,7 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
                 tx, new_balance = confirmed
                 user = await repo.get_user_by_id(session, tx.user_id)
                 if user:
-                    await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
+                    await _accrue_referral_commissions(session, user, tx, bot)
                     if bot:
                         try:
                             await bot.send_message(
@@ -1161,7 +1246,7 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
                 await repo.add_credits(session, tx.user_id, -tx.credits, entry_type="payment_refund", source_type="transaction", source_id=str(tx.id), note=f"Refund/reversal via {tx.provider}")
                 user = await repo.get_user_by_id(session, tx.user_id)
                 if user:
-                    await _reverse_referral_commissions(session, user, tx.amount_rub)
+                    await _reverse_referral_commissions(session, user, tx)
         else:
             logger.info("Unhandled T-Bank status acknowledged: payment_id=%s status=%s", external_id, status)
 
@@ -1248,7 +1333,7 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
             tx, new_balance = confirmed
             user = await repo.get_user_by_id(session, tx.user_id)
             if user:
-                await _accrue_referral_commissions(session, user, tx.amount_rub, bot)
+                await _accrue_referral_commissions(session, user, tx, bot)
                 if bot:
                     try:
                         await bot.send_message(
@@ -1328,7 +1413,7 @@ async def tribute_webhook(request: Request) -> dict:
                     )
                     user = await repo.get_user_by_id(session, refunded_tx.user_id)
                     if user:
-                        await _reverse_referral_commissions(session, user, refunded_tx.amount_rub)
+                        await _reverse_referral_commissions(session, user, refunded_tx)
                 return {"status": "ok"}
 
             telegram_user_id = tribute_webhook_telegram_user_id(data)
@@ -1395,7 +1480,7 @@ async def tribute_webhook(request: Request) -> dict:
             )
             if confirmed:
                 paid_tx, new_balance = confirmed
-                await _accrue_referral_commissions(session, user, paid_tx.amount_rub, bot)
+                await _accrue_referral_commissions(session, user, paid_tx, bot)
                 if bot:
                     try:
                         await bot.send_message(
@@ -1462,7 +1547,7 @@ async def tribute_webhook(request: Request) -> dict:
                 paid_tx, new_balance = confirmed
                 user = await repo.get_user_by_id(session, paid_tx.user_id)
                 if user:
-                    await _accrue_referral_commissions(session, user, paid_tx.amount_rub, bot)
+                    await _accrue_referral_commissions(session, user, paid_tx, bot)
                     if bot:
                         try:
                             await bot.send_message(
@@ -1496,7 +1581,7 @@ async def tribute_webhook(request: Request) -> dict:
                 )
                 user = await repo.get_user_by_id(session, refunded_tx.user_id)
                 if user:
-                    await _reverse_referral_commissions(session, user, refunded_tx.amount_rub)
+                    await _reverse_referral_commissions(session, user, refunded_tx)
             return {"status": "ok"}
 
     return {"status": "ok"}

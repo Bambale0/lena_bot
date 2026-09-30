@@ -11,6 +11,7 @@ from inspect import isawaitable
 from urllib.parse import urlparse
 
 from sqlalchemy import Date, cast, delete, desc, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -34,6 +35,7 @@ from db.models import (
     PromoCode,
     PromoRedemption,
     PromoRewardType,
+    ReferralCommissionLedger,
     ReferralWithdrawalRequest,
     SunoVoice,
     Transaction,
@@ -152,6 +154,13 @@ class ReferralChildStats:
     user: User
     generations_count: int
     paid_rub: float
+
+
+@dataclass(frozen=True)
+class ReferralCommissionView:
+    entry: ReferralCommissionLedger
+    payer: User
+    transaction: Transaction
 
 
 @dataclass(frozen=True)
@@ -609,6 +618,110 @@ async def add_credits(
     )
     await session.commit()
     return new_balance
+
+
+async def record_referral_commission(
+    session: AsyncSession,
+    *,
+    transaction_id: int,
+    payer_user_id: int,
+    recipient_user_id: int,
+    level: int,
+    rate: float,
+    payment_amount_rub: float,
+    amount_rub: float,
+    event_type: str,
+) -> ReferralCommissionLedger | None:
+    """Atomically write a referral commission event and mutate referral balance once.
+
+    The unique ledger key is the idempotency guard. Duplicate webhook/reconcile
+    delivery returns None and does not touch the balance.
+    """
+    if level not in {1, 2, 3}:
+        raise ValueError("Referral commission level must be 1..3")
+    if event_type not in {"accrual", "reversal"}:
+        raise ValueError("Unsupported referral commission event type")
+    if rate < 0 or rate > 1:
+        raise ValueError("Referral commission rate must be between 0 and 1")
+
+    statement = (
+        pg_insert(ReferralCommissionLedger)
+        .values(
+            transaction_id=int(transaction_id),
+            payer_user_id=int(payer_user_id),
+            recipient_user_id=int(recipient_user_id),
+            level=int(level),
+            rate=float(rate),
+            payment_amount_rub=float(payment_amount_rub),
+            amount_rub=float(amount_rub),
+            balance_after_rub=0.0,
+            event_type=event_type,
+        )
+        .on_conflict_do_nothing(
+            constraint="uq_referral_commission_tx_recipient_level_event"
+        )
+        .returning(ReferralCommissionLedger.id)
+    )
+    entry_id = (await session.execute(statement)).scalar_one_or_none()
+    if entry_id is None:
+        await session.rollback()
+        return None
+
+    balance_result = await session.execute(
+        update(User)
+        .where(User.id == recipient_user_id)
+        .values(referral_balance=User.referral_balance + float(amount_rub))
+        .returning(User.referral_balance)
+    )
+    new_balance = balance_result.scalar_one_or_none()
+    if new_balance is None:
+        await session.rollback()
+        raise ValueError("Referral commission recipient not found")
+
+    await session.execute(
+        update(ReferralCommissionLedger)
+        .where(ReferralCommissionLedger.id == entry_id)
+        .values(balance_after_rub=float(new_balance))
+    )
+    await session.commit()
+    return await session.get(ReferralCommissionLedger, int(entry_id))
+
+
+async def get_referral_commissions_for_transaction(
+    session: AsyncSession,
+    transaction_id: int,
+    *,
+    event_type: str = "accrual",
+) -> list[ReferralCommissionLedger]:
+    rows = await session.execute(
+        select(ReferralCommissionLedger)
+        .where(
+            ReferralCommissionLedger.transaction_id == int(transaction_id),
+            ReferralCommissionLedger.event_type == event_type,
+        )
+        .order_by(ReferralCommissionLedger.level, ReferralCommissionLedger.id)
+    )
+    return list(rows.scalars().all())
+
+
+async def get_referral_commission_ledger(
+    session: AsyncSession,
+    recipient_user_id: int,
+    *,
+    limit: int = 50,
+) -> list[ReferralCommissionView]:
+    rows = await session.execute(
+        select(ReferralCommissionLedger, User, Transaction)
+        .join(User, User.id == ReferralCommissionLedger.payer_user_id)
+        .join(Transaction, Transaction.id == ReferralCommissionLedger.transaction_id)
+        .where(ReferralCommissionLedger.recipient_user_id == recipient_user_id)
+        .order_by(desc(ReferralCommissionLedger.created_at), desc(ReferralCommissionLedger.id))
+        .limit(max(1, min(int(limit), 200)))
+    )
+    return [
+        ReferralCommissionView(entry=entry, payer=payer, transaction=transaction)
+        for entry, payer, transaction in rows.all()
+    ]
 
 
 async def add_referral_balance(session: AsyncSession, user_id: int, amount_rub: float) -> float:

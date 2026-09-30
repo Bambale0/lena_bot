@@ -314,7 +314,7 @@ async def test_tribute_refund_reverses_paid_credits_once(monkeypatch) -> None:
     assert response.status_code == 200
     add_credits.assert_awaited_once()
     assert add_credits.await_args.args[1:3] == (7, -100.0)
-    reverse_referrals.assert_awaited_once_with(ANY, ANY, 199.0)
+    reverse_referrals.assert_awaited_once_with(ANY, ANY, refunded_tx)
 
 
 @pytest.mark.asyncio
@@ -368,7 +368,7 @@ async def test_tribute_digital_product_webhook_credits_mapped_purchase_atomicall
     confirm_and_add.assert_awaited_once_with(
         ANY, "digital:78901", note="Payment confirmed via tribute digital product",
     )
-    accrue.assert_awaited_once_with(ANY, user, 150.0, None)
+    accrue.assert_awaited_once_with(ANY, user, paid_tx, None)
 
 
 @pytest.mark.asyncio
@@ -483,7 +483,7 @@ async def test_tribute_digital_product_refund_reverses_purchase_once(monkeypatch
         ANY, 7, -15.0, entry_type="payment_refund", source_type="transaction",
         source_id="91", note="Refund via tribute digital product",
     )
-    reverse.assert_awaited_once_with(ANY, ANY, 150.0)
+    reverse.assert_awaited_once_with(ANY, ANY, refunded_tx)
 
 
 @pytest.mark.asyncio

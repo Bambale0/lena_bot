@@ -132,7 +132,7 @@ async def on_successful_payment(
         return
     new_balance = await repo.add_credits(session, db_user.id, tx.credits, entry_type="payment_credit", source_type="transaction", source_id=str(tx.id), note="Telegram Stars payment")
     from main import _accrue_referral_commissions
-    await _accrue_referral_commissions(session, db_user, tx.amount_rub, bot)
+    await _accrue_referral_commissions(session, db_user, tx, bot)
     await message.answer(
         t("topup_success", lang, credits=tx.credits, balance=new_balance),
         reply_markup=back_to_menu_kb(),
