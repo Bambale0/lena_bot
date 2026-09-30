@@ -214,6 +214,39 @@ function ReferralCabinet({
         </Card>
 
         <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle>Начисления по партнёрке</CardTitle>
+              <Badge variant="outline">{referrals?.commission_ledger?.length || 0}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-1.5">
+            {referrals?.commission_ledger?.length ? referrals.commission_ledger.map((item) => {
+              const payer = item.payer_username ? `@${item.payer_username}` : item.payer_full_name || `ID ${item.payer_user_id}`;
+              const percent = Math.round(Number(item.rate || 0) * 10000) / 100;
+              const reversal = item.event_type === "reversal" || Number(item.amount_rub) < 0;
+              return (
+                <div key={item.id} className="rounded-xl border border-border bg-card/55 p-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate font-semibold">{payer}</span>
+                    <strong className={reversal ? "text-destructive" : "text-emerald-500"}>
+                      {reversal ? "" : "+"}{formatCredits(item.amount_rub)} ₽
+                    </strong>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+                    <span>L{item.level} · {percent}%</span>
+                    <span>платёж {formatCredits(item.payment_amount_rub)} ₽</span>
+                    <span>tx #{item.transaction_id}</span>
+                    <span>{formatRelativeDate(item.created_at)}</span>
+                  </div>
+                  {reversal ? <p className="mt-1 text-[10px] text-destructive">Возврат / реверс комиссии</p> : null}
+                </div>
+              );
+            }) : <p className="text-xs text-muted-foreground">Новые начисления будут появляться здесь с привязкой к конкретному платежу.</p>}
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader className="pb-2"><CardTitle>Приглашённые</CardTitle></CardHeader>
           <CardContent className="grid gap-2">
             {children.length ? children.map(([level, rows]) => (
