@@ -1139,6 +1139,37 @@ async def test_webapp_feed_link_uses_viewer_referral_for_public_posts(client, mo
 
 
 @pytest.mark.asyncio
+async def test_trend_checkout_quote_recommends_smallest_plan_covering_deficit(client, monkeypatch) -> None:
+    trend = SimpleNamespace(
+        id=101,
+        model="nano-banana-pro",
+        tags=["trend", "trend-quality:2K"],
+    )
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    monkeypatch.setattr(
+        "api.trends_routes.repo.resolve_image_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=12)),
+    )
+    monkeypatch.setattr(
+        "api.trends_routes.repo.get_active_price_plans",
+        AsyncMock(return_value=[
+            SimpleNamespace(key="small", label="10 credits", credits=10, price_rub=100),
+            SimpleNamespace(key="medium", label="20 credits", credits=20, price_rub=180),
+        ]),
+    )
+
+    response = await client.get("/api/v1/trends/101/checkout")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["cost_credits"] == 12
+    assert payload["balance_credits"] == 1003
+    assert payload["can_run"] is True
+    assert payload["deficit_credits"] == 0
+    assert payload["recommended_plan"] is None
+
+
+@pytest.mark.asyncio
 async def test_trend_share_link_uses_sharer_referral_and_bot_start(client, monkeypatch) -> None:
     monkeypatch.setattr(
         "api.trends_routes._get_public_trend",
