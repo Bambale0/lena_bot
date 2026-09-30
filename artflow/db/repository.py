@@ -687,6 +687,23 @@ async def record_referral_commission(
     return await session.get(ReferralCommissionLedger, int(entry_id))
 
 
+async def get_referral_commissions_for_transaction(
+    session: AsyncSession,
+    transaction_id: int,
+    *,
+    event_type: str = "accrual",
+) -> list[ReferralCommissionLedger]:
+    rows = await session.execute(
+        select(ReferralCommissionLedger)
+        .where(
+            ReferralCommissionLedger.transaction_id == int(transaction_id),
+            ReferralCommissionLedger.event_type == event_type,
+        )
+        .order_by(ReferralCommissionLedger.level, ReferralCommissionLedger.id)
+    )
+    return list(rows.scalars().all())
+
+
 async def get_referral_commission_ledger(
     session: AsyncSession,
     recipient_user_id: int,
