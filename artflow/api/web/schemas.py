@@ -468,6 +468,22 @@ class ReferralChildCard(BaseModel):
     paid_rub: float
 
 
+class ReferralCommissionCard(BaseModel):
+    id: int
+    transaction_id: int
+    payer_user_id: int
+    payer_username: str | None
+    payer_full_name: str | None
+    level: int
+    rate: float
+    payment_amount_rub: float
+    amount_rub: float
+    balance_after_rub: float
+    event_type: str
+    provider: str
+    created_at: str
+
+
 class ReferralWithdrawalCard(BaseModel):
     id: int
     amount_rub: float
@@ -509,6 +525,7 @@ class ReferralStatsCard(BaseModel):
     balance: dict[str, float]
     feed_remix_reward_rub: float
     children: dict[str, list[ReferralChildCard]]
+    commission_ledger: list[ReferralCommissionCard] = Field(default_factory=list)
     withdrawals: list[ReferralWithdrawalCard]
 
 
