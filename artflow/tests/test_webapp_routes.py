@@ -1076,7 +1076,6 @@ async def test_webapp_publish_generation_returns_feed_link(client, monkeypatch) 
 
     assert response.status_code == 200
     payload = response.json()
-    assert resolve_image_model_cost.await_args.kwargs["quality"] == "2K"
     assert payload["ok"] is True
     assert payload["link"].startswith("https://t.me/TestBot?start=")
     assert "ref_REF__feed_77" in payload["link"]
@@ -1164,6 +1163,7 @@ async def test_trend_checkout_quote_recommends_smallest_plan_covering_deficit(cl
 
     assert response.status_code == 200
     payload = response.json()
+    assert resolve_image_model_cost.await_args.kwargs["quality"] == "2K"
     assert payload["cost_credits"] == 1200
     assert payload["balance_credits"] == 1003
     assert payload["can_run"] is False
