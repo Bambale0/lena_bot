@@ -736,9 +736,9 @@ function TrendRunnerPortal() {
       const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
       if (!uploaded.asset_id) throw new Error("Backend не вернул asset_id");
       setUploadedAsset(uploaded);
-      if ((trend.user_fields || []).length) {
+      if ((trend.user_fields || []).length || (checkout && !checkout.can_run)) {
         setPhase("idle");
-        toast.success("Фото готово");
+        toast.success(checkout && !checkout.can_run ? "Фото готово — пополни баланс прямо здесь" : "Фото готово");
         return;
       }
       await startTrend(uploaded.asset_id, {});
@@ -749,7 +749,7 @@ function TrendRunnerPortal() {
       setPhase("error");
       toast.error(message);
     }
-  }, [genericBusy, startTrend, trend]);
+  }, [checkout, genericBusy, startTrend, trend]);
 
   const refreshTask = useCallback(async (task: GenerationTask) => {
     if (taskBusy) return;
