@@ -6,7 +6,6 @@ import json
 import logging
 import tempfile
 import uuid
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -659,7 +658,6 @@ async def _upload_message_media(
 ) -> str | None:
     data = await _data(state)
     model = str(data.get("neur_model") or "")
-    spec = get_seedance_spec(model)
     item = await _message_bytes(message, kind)
     if item is None:
         return None
