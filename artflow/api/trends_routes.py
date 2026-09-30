@@ -10,7 +10,6 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.miniapp_auth import get_miniapp_user
-from bot.utils.deep_links import build_start_payload
 from api.miniapp_routes import (
     GenerationOut,
     ImageGenRequest,
@@ -20,6 +19,7 @@ from api.miniapp_routes import (
 )
 from api.public_files import save_public_file
 from api.trend_assets import image_kind_from_upload, sign_uploaded_asset, verify_uploaded_asset
+from bot.utils.deep_links import build_start_payload
 from core.config import settings
 from core.trend_user_fields import (
     TrendUserFieldsError,
