@@ -13,7 +13,7 @@ import { ServicesScreen } from "@/features/services-screen";
 import { SettingsScreen } from "@/features/settings-screen";
 import { TrendsScreen } from "@/features/trends-screen";
 import { ApiError, FEED_PAGE_SIZE, MAX_HISTORY_ITEMS, MiniAppApi } from "@/lib/api";
-import { BALANCE_UPDATED_EVENT, OPEN_BALANCE_EVENT, type BalanceRequirement } from "@/lib/app-events";
+import { BALANCE_UPDATED_EVENT, OPEN_BALANCE_EVENT, notifyBalanceSheetState, type BalanceRequirement } from "@/lib/app-events";
 import {
   configureTelegramWebApp,
   haptic,
@@ -409,6 +409,7 @@ function App() {
         contextLabel: detail?.contextLabel || "Повтор тренда",
       });
       setBalanceOpen(true);
+      notifyBalanceSheetState(true);
     };
     window.addEventListener(OPEN_BALANCE_EVENT, onOpenBalance);
     return () => window.removeEventListener(OPEN_BALANCE_EVENT, onOpenBalance);
@@ -417,11 +418,13 @@ function App() {
   const openBalance = useCallback(() => {
     setBalanceRequirement(null);
     setBalanceOpen(true);
+    notifyBalanceSheetState(true);
   }, []);
 
   const setBalanceSheetOpen = useCallback((open: boolean) => {
     setBalanceOpen(open);
     if (!open) setBalanceRequirement(null);
+    notifyBalanceSheetState(open);
   }, []);
 
   const refreshCore = useCallback(async () => {
@@ -468,11 +471,10 @@ function App() {
   useEffect(() => {
     if (!balanceOpen || !balanceRequirement || !data) return;
     if (Number(data.user.credits || 0) < balanceRequirement.requiredCredits) return;
-    setBalanceOpen(false);
-    setBalanceRequirement(null);
+    setBalanceSheetOpen(false);
     notifyHaptic("success");
     toast.success("Баланс пополнен — можно запускать повтор");
-  }, [balanceOpen, balanceRequirement, data]);
+  }, [balanceOpen, balanceRequirement, data, setBalanceSheetOpen]);
 
   const refreshReferrals = useCallback(async () => {
     if (!api || referralsLoading) return;
