@@ -285,6 +285,7 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
     if (path === "/api/v1/history") return route.fulfill({ json: history });
     if (path === "/api/v1/me/feed" && method === "GET") return route.fulfill({ json: myFeed });
     if (path === "/api/v1/plans") return route.fulfill({ json: plans });
+    if (path === "/api/v1/payment-methods") return route.fulfill({ json: ["tbank"] });
     if (path === "/api/v1/referrals") return route.fulfill({ json: defaultReferrals });
     if (path === "/api/v1/music/voices") return route.fulfill({ json: [] });
 
@@ -313,6 +314,20 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/trends" && method === "GET") return route.fulfill({ json: trends });
+    const trendCheckoutMatch = path.match(/^\/api\/v1\/trends\/(\d+)\/checkout$/);
+    if (trendCheckoutMatch && method === "GET") {
+      const balance = Number(user.credits || 100);
+      const cost = 1.5;
+      return route.fulfill({
+        json: {
+          cost_credits: cost,
+          balance_credits: balance,
+          can_run: balance >= cost,
+          deficit_credits: Math.max(0, cost - balance),
+          recommended_plan: null,
+        },
+      });
+    }
     const trendDetailMatch = path.match(/^\/api\/v1\/trends\/(\d+)$/);
     if (trendDetailMatch && method === "GET") {
       const id = Number(trendDetailMatch[1]);

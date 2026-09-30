@@ -14,11 +14,13 @@ from api.miniapp_routes import (
     GenerationOut,
     ImageGenRequest,
     VideoGenRequest,
+    _normalize_image_request,
     create_image_generation,
     create_video_generation,
 )
 from api.public_files import save_public_file
 from api.trend_assets import image_kind_from_upload, sign_uploaded_asset, verify_uploaded_asset
+from bot.keyboards.models import VIDEO_CAPS
 from bot.utils.deep_links import build_start_payload
 from core.config import settings
 from core.trend_user_fields import (
@@ -138,6 +140,49 @@ async def _get_public_trend(session: AsyncSession, trend_id: int) -> UserPrompt:
     if not trend_is_public(prompt):
         raise HTTPException(status_code=404, detail="Trend not found")
     return prompt
+
+
+async def _trend_cost_credits(session: AsyncSession, trend: UserPrompt) -> float:
+    if not trend.model:
+        raise HTTPException(status_code=409, detail="Trend has no configured model")
+    kind = trend_kind(trend)
+    settings_payload = trend_settings(trend)
+    if kind == "video":
+        duration = max(1, _safe_int(settings_payload.get("duration"), 5))
+        model_cost = await repo.resolve_video_model_cost(
+            session,
+            trend.model,
+            duration=duration,
+            resolution=settings_payload.get("resolution"),
+        )
+        if not model_cost:
+            raise HTTPException(status_code=422, detail="Model not available")
+        credits = float(model_cost.credits)
+        if VIDEO_CAPS.get(trend.model, {}).get("billing_mode") == "per_second":
+            credits *= duration
+        return round(credits, 6)
+
+    _ratio, quality = _normalize_image_request(
+        model_key=trend.model,
+        reference_urls=["trend-reference"],
+        aspect_ratio=settings_payload.get("ratio"),
+        quality=str(settings_payload.get("quality") or "basic"),
+    )
+    model_cost = await repo.resolve_image_model_cost(session, trend.model, quality=quality)
+    if not model_cost:
+        model_cost = await repo.get_model_cost(session, trend.model)
+    if not model_cost or not getattr(model_cost, "is_active", True):
+        raise HTTPException(status_code=422, detail="Model not available")
+    return round(float(model_cost.credits), 6)
+
+
+def _recommended_checkout_plan(plans: list[Any], deficit: float) -> Any | None:
+    active = [plan for plan in plans if float(getattr(plan, "credits", 0) or 0) > 0]
+    if not active:
+        return None
+    enough = [plan for plan in active if float(plan.credits) >= deficit]
+    pool = enough or active
+    return min(pool, key=lambda plan: (float(plan.credits), float(getattr(plan, "price_rub", 0) or 0))) if enough else max(pool, key=lambda plan: float(plan.credits))
 
 
 def _safe_int(value: Any, fallback: int) -> int:
@@ -347,6 +392,35 @@ async def run_trend(
     )
     await session.refresh(user)
     return {"ok": True, "task": _task_payload(task), "credits": _credits_out(user.credits)}
+
+
+@router.get("/trends/{trend_id}/checkout")
+async def trend_checkout(
+    trend_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    trend = await _get_public_trend(session, trend_id)
+    cost = await _trend_cost_credits(session, trend)
+    balance = _credits_out(user.credits)
+    deficit = round(max(0.0, cost - balance), 6)
+    plan = None
+    if deficit > 0:
+        recommended = _recommended_checkout_plan(await repo.get_active_price_plans(session), deficit)
+        if recommended is not None:
+            plan = {
+                "key": str(recommended.key),
+                "label": str(recommended.label),
+                "credits": _credits_out(recommended.credits),
+                "price_rub": _credits_out(recommended.price_rub),
+            }
+    return {
+        "cost_credits": _credits_out(cost),
+        "balance_credits": balance,
+        "can_run": deficit <= 0,
+        "deficit_credits": _credits_out(deficit),
+        "recommended_plan": plan,
+    }
 
 
 @router.get("/trends/{trend_id}/link")

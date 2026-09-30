@@ -737,3 +737,36 @@ Branch: `feat/trend-share-referrals`.
 - mini_app: trend share button uses the referral-aware backend link.
 - site/web: same Trends frontend/backend share contract where applicable.
 - telegram_bot: referral binding and trend target routing reuse existing `/start` handling; no separate Trends share button exists.
+
+
+---
+
+# Execution ledger — Inline checkout in Trends
+
+Date: 2026-09-30.
+Baseline: `c8681137d857815341faf84fb287fce307045ca9`.
+Branch: `feat/trend-inline-checkout`.
+
+## User outcome
+- Trend Runner shows the repeat price before launch.
+- When the current balance is insufficient, the same Trend Runner surface offers the smallest active PricePlan that covers the deficit.
+- The user creates a T-Bank checkout without navigating to the separate Balance screen.
+- The runner keeps uploaded media and personalization state, polls the quote after checkout opens, and unlocks generation after the payment credit arrives.
+
+## Architecture / no-hardcode
+- New authenticated backend quote: `GET /api/v1/trends/{trend_id}/checkout`.
+- Cost derives from current ModelCost + trend settings; active top-up plans come from PricePlan rows.
+- No payment prices, credit packs, model prices, credentials, or provider endpoints are hardcoded.
+- Existing T-Bank transaction/webhook/crediting flow is reused; no parallel payment source of truth.
+
+## TDD / verification
+- RED contract commits: `92c6ef983625d8610ffd02c220c4c85a6c5df7e9` and `6c46f17331af03f850e199093ebd484842d7f3fa`.
+- GREEN backend implementation: `a90cbaf4edb387b520775d309fd6b75da3046584`.
+- Frontend inline checkout: `5674091e6761c1c2ae816d65d666d6259b94edc1`, follow-up state-preservation fix `aef1364d3ec720d736183b6a0fe2898b157535bf`.
+- CI exposed a malformed test assertion; corrected in `021a768f829c9192d506469113e032f9e9ef2857`.
+- Required PR checks, open code review, merge, production autodeploy, and health verification remain release gates.
+
+## Surface parity
+- mini_app: primary affected surface; full inline checkout UX added.
+- site/web: the Trends React surface shares this implementation where rendered.
+- telegram_bot: existing trend actions that hand off to the Mini App inherit this checkout; direct non-Mini-App trend launches keep existing billing behavior and are not given a duplicate payment implementation.

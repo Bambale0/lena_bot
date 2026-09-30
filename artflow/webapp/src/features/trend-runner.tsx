@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
-import { notifyHaptic, readStartParam } from "@/lib/telegram";
+import { notifyHaptic, openExternalUrl, readStartParam } from "@/lib/telegram";
 import { safeExternalUrl } from "@/lib/utils";
 
 const TREND_RUNNER_EVENT = "apix:open-trend-runner";
@@ -53,6 +53,19 @@ type TrendRunResponse = {
   ok?: boolean;
   task: GenerationTask;
   credits?: number;
+};
+
+type TrendCheckoutQuote = {
+  cost_credits: number;
+  balance_credits: number;
+  can_run: boolean;
+  deficit_credits: number;
+  recommended_plan?: {
+    key: string;
+    label: string;
+    credits: number;
+    price_rub: number;
+  } | null;
 };
 
 type TrendRunnerEventDetail = {
@@ -538,6 +551,11 @@ function TrendRunnerPortal() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
   const [pinterestBusy, setPinterestBusy] = useState(false);
+  const [checkout, setCheckout] = useState<TrendCheckoutQuote | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentWaiting, setPaymentWaiting] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const processedStart = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -555,6 +573,11 @@ function TrendRunnerPortal() {
     setPhase("idle");
     setError("");
     setPinterestBusy(false);
+    setCheckout(null);
+    setCheckoutBusy(false);
+    setPaymentBusy(false);
+    setPaymentWaiting(false);
+    setPaymentMethods([]);
     setUploadedAsset(null);
     setUserValues({});
     setLocalPreview((current) => {
@@ -594,6 +617,88 @@ function TrendRunnerPortal() {
     window.addEventListener(TREND_RUNNER_EVENT, onOpen);
     return () => window.removeEventListener(TREND_RUNNER_EVENT, onOpen);
   }, [loadTrend, resetRunner]);
+
+  const refreshCheckout = useCallback(async (trendId: number, quiet = false) => {
+    if (!quiet) setCheckoutBusy(true);
+    try {
+      const quote = await apiJson<TrendCheckoutQuote>(`/trends/${trendId}/checkout`);
+      if (
+        typeof quote?.can_run !== "boolean"
+        || !Number.isFinite(Number(quote?.cost_credits))
+        || !Number.isFinite(Number(quote?.balance_credits))
+      ) {
+        throw new Error("Стоимость временно недоступна");
+      }
+      setCheckout(quote);
+      return quote;
+    } catch (checkoutError) {
+      setCheckout(null);
+      if (!quiet) {
+        toast.error(checkoutError instanceof Error ? checkoutError.message : "Не удалось получить стоимость");
+      }
+      return null;
+    } finally {
+      if (!quiet) setCheckoutBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!trend?.id) return;
+    void refreshCheckout(trend.id);
+  }, [refreshCheckout, trend?.id]);
+
+  useEffect(() => {
+    if (!trend?.id) return;
+    void apiJson<string[]>("/payment-methods")
+      .then((methods) => setPaymentMethods(Array.isArray(methods) ? methods : []))
+      .catch(() => setPaymentMethods([]));
+  }, [trend?.id]);
+
+  useEffect(() => {
+    if (!paymentWaiting || !trend?.id) return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      void refreshCheckout(trend.id, true).then((quote) => {
+        if (quote?.can_run) {
+          window.clearInterval(timer);
+          setPaymentWaiting(false);
+          notifyHaptic("success");
+          toast.success("Оплата зачислена — можно запускать");
+        } else if (attempts >= 48) {
+          window.clearInterval(timer);
+          setPaymentWaiting(false);
+        }
+      });
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [paymentWaiting, refreshCheckout, trend?.id]);
+
+  const payInline = useCallback(async () => {
+    const plan = checkout?.recommended_plan;
+    if (!plan || paymentBusy) return;
+    const provider = paymentMethods.find((method) => ["tbank", "crypto", "tribute", "lava"].includes(method));
+    if (!provider) {
+      toast.error("Сейчас нет доступного способа оплаты");
+      return;
+    }
+    setPaymentBusy(true);
+    try {
+      const payment = await apiJson<Record<string, unknown>>(`/topup/${provider}`, {
+        method: "POST",
+        body: JSON.stringify({ plan_key: plan.key }),
+      });
+      const url = String(payment.pay_url || payment.invoice_url || payment.url || "");
+      if (!url) throw new Error("Платёжная ссылка не получена");
+      setPaymentWaiting(true);
+      openExternalUrl(url);
+      toast.success("Оплата открыта — после зачисления вернём тебя сюда");
+    } catch (paymentError) {
+      toast.error(paymentError instanceof Error ? paymentError.message : "Не удалось открыть оплату");
+    } finally {
+      setPaymentBusy(false);
+    }
+  }, [checkout?.recommended_plan, paymentBusy, paymentMethods]);
 
   useEffect(() => {
     const trendId = parseTrendStartParam();
@@ -653,9 +758,9 @@ function TrendRunnerPortal() {
       const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
       if (!uploaded.asset_id) throw new Error("Backend не вернул asset_id");
       setUploadedAsset(uploaded);
-      if ((trend.user_fields || []).length) {
+      if ((trend.user_fields || []).length || (checkout && !checkout.can_run)) {
         setPhase("idle");
-        toast.success("Фото готово");
+        toast.success(checkout && !checkout.can_run ? "Фото готово — пополни баланс прямо здесь" : "Фото готово");
         return;
       }
       await startTrend(uploaded.asset_id, {});
@@ -666,7 +771,7 @@ function TrendRunnerPortal() {
       setPhase("error");
       toast.error(message);
     }
-  }, [genericBusy, startTrend, trend]);
+  }, [checkout, genericBusy, startTrend, trend]);
 
   const refreshTask = useCallback(async (task: GenerationTask) => {
     if (taskBusy) return;
@@ -769,6 +874,41 @@ function TrendRunnerPortal() {
                 <p>{hint}</p>
               </div>
 
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Стоимость повтора</p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {checkoutBusy && !checkout ? "Считаем…" : `${checkout?.cost_credits ?? "—"} 💋`}
+                    </p>
+                  </div>
+                  {checkout ? (
+                    <div className="text-right text-[11px] text-muted-foreground">
+                      <p>Баланс: {checkout.balance_credits} 💋</p>
+                      {!checkout.can_run ? <p>Не хватает: {checkout.deficit_credits} 💋</p> : <p className="text-emerald-500">Можно запускать</p>}
+                    </div>
+                  ) : null}
+                </div>
+                {checkout && !checkout.can_run && checkout.recommended_plan ? (
+                  <div className="mt-3 grid gap-1.5">
+                    <Button
+                      type="button"
+                      disabled={paymentBusy || paymentWaiting || paymentMethods.length === 0}
+                      className="min-h-11 w-full"
+                      onClick={() => void payInline()}
+                    >
+                      {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                      {paymentWaiting
+                        ? "Ждём подтверждение оплаты…"
+                        : `Пополнить здесь · ${checkout.recommended_plan.price_rub} ₽`}
+                    </Button>
+                    <p className="text-center text-[10px] text-muted-foreground">
+                      +{checkout.recommended_plan.credits} 💋. Возвращаться в раздел «Баланс» не нужно.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+
               {userFields.length ? (
                 <div className="grid gap-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
                   <div>
@@ -830,16 +970,16 @@ function TrendRunnerPortal() {
                 {phaseLabel}
               </Button>
 
-              {personalized ? (
+              {uploadedAsset ? (
                 <Button
-                  disabled={genericBusy || !uploadedAsset || !userFieldsReady}
+                  disabled={genericBusy || !userFieldsReady || Boolean(checkout && !checkout.can_run)}
                   className="min-h-12 w-full"
                   onClick={() => {
                     if (uploadedAsset) void startTrend(uploadedAsset.asset_id, userValues);
                   }}
                 >
                   {phase === "generating" ? <LoaderCircle className="animate-spin" /> : null}
-                  {phase === "generating" ? "Генерирую…" : "Создать →"}
+                  {phase === "generating" ? "Генерирую…" : `Создать · ${checkout?.cost_credits ?? "—"} 💋`}
                 </Button>
               ) : null}
 
