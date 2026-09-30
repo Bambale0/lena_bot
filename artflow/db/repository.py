@@ -18,6 +18,7 @@ from sqlalchemy.orm import aliased
 from api.public_files import mirror_url, public_url_is_available
 from core.config import settings
 from core.model_pricing import image_pricing_keys, pricing_variant_key, video_pricing_keys
+from core.reporting_time import moscow_day_bounds_utc
 from db.models import (
     CreditLedgerEntry,
     FeedRemixPayout,
@@ -2026,11 +2027,14 @@ async def count_user_active_generations(session: AsyncSession, user_id: int) -> 
 
 
 async def count_generations_today(session: AsyncSession) -> float:
-    today = datetime.now(timezone.utc).date()
+    start_utc, end_utc = moscow_day_bounds_utc()
     result = await session.execute(
         select(func.count())
         .select_from(Generation)
-        .where(cast(Generation.created_at, Date) == today)
+        .where(
+            Generation.created_at >= start_utc,
+            Generation.created_at < end_utc,
+        )
     )
     return result.scalar_one()
 
@@ -2463,12 +2467,13 @@ async def set_withdrawal_status(
 
 
 async def get_revenue_today(session: AsyncSession) -> float:
-    today = datetime.now(timezone.utc).date()
+    start_utc, end_utc = moscow_day_bounds_utc()
     result = await session.execute(
         select(func.coalesce(func.sum(Transaction.amount_rub), 0))
         .where(
             Transaction.status == TransactionStatus.paid,
-            cast(Transaction.created_at, Date) == today,
+            Transaction.created_at >= start_utc,
+            Transaction.created_at < end_utc,
         )
     )
     return float(result.scalar_one())

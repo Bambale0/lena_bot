@@ -393,8 +393,8 @@ async def try_handle_admin_request(
         return AdminAssistantOutcome(
             "Статистика APIX:\n"
             f"• Пользователей: {int(users)}\n"
-            f"• Генераций сегодня: {int(gens_today)}\n"
-            f"• Выручка сегодня: {revenue:.2f}₽\n"
+            f"• Генераций сегодня (МСК): {int(gens_today)}\n"
+            f"• Выручка сегодня (МСК): {revenue:.2f}₽\n"
             f"• Промптов на модерации: {len(pending_prompts)}\n"
             f"• Заявок на вывод: {len(pending_withdrawals)}"
         )

@@ -549,8 +549,8 @@ def _format_admin_stats(total_users: float, gens_today: float, revenue_today: fl
     return (
         "Статистика\n"
         f"Пользователей: {int(total_users)}\n"
-        f"Генераций сегодня: {int(gens_today)}\n"
-        f"Выручка сегодня: {float(revenue_today):.2f}₽"
+        f"Генераций сегодня (МСК): {int(gens_today)}\n"
+        f"Выручка сегодня (МСК): {float(revenue_today):.2f}₽"
     )
 
 
@@ -1011,8 +1011,8 @@ async def cb_stats(call: CallbackQuery, session: AsyncSession) -> None:
     await call.message.edit_text(
         f"📊 <b>Статистика</b>\n\n"
         f"👤 Пользователей: <b>{total_users}</b>\n"
-        f"🎨 Генераций сегодня: <b>{gens_today}</b>\n"
-        f"💰 Выручка сегодня: <b>{revenue_today:.2f}₽</b>",
+        f"🎨 Генераций сегодня (МСК): <b>{gens_today}</b>\n"
+        f"💰 Выручка сегодня (МСК): <b>{revenue_today:.2f}₽</b>",
         reply_markup=builder.as_markup(),
     )
     await call.answer()
