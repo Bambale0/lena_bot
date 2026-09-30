@@ -286,8 +286,8 @@ def _current_params(data: dict[str, Any]) -> dict[str, Any]:
 def _model_selector_kb():
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="🖼 Nexus · Nano Banana Pro", callback_data="nxt:model:nano"),
-        InlineKeyboardButton(text="🎬 Nexus · Seedance 2.5", callback_data="nxt:model:seedance25"),
+        InlineKeyboardButton(text="🖼 Nano Banana Pro", callback_data="nxt:model:nano"),
+        InlineKeyboardButton(text="🎬 Seedance 2.5", callback_data="nxt:model:seedance25"),
     )
     builder.row(
         InlineKeyboardButton(text="🎬 Нейроныч · Seedance 2", callback_data="nxt:model:neur-s20"),
@@ -295,7 +295,7 @@ def _model_selector_kb():
     )
     builder.row(
         InlineKeyboardButton(
-            text="🧬 Higgsfield · Seedance 2.5 Video Edit",
+            text="🧬 Seedance 2.5 · Video Edit",
             callback_data="nxt:model:hf-seedance25-edit",
         )
     )
