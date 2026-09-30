@@ -107,7 +107,7 @@ async def _confirm_paid_transaction(session: AsyncSession, tx) -> float | None:
     user = await repo.get_user_by_id(session, tx.user_id)
     if user:
         from main import _accrue_referral_commissions
-        await _accrue_referral_commissions(session, user, tx.amount_rub, None)
+        await _accrue_referral_commissions(session, user, tx, None)
     return new_balance
 
 
@@ -170,7 +170,7 @@ async def _reconcile_transaction_status(
                 if user:
                     from main import _accrue_referral_commissions
 
-                    await _accrue_referral_commissions(session, user, paid_tx.amount_rub, None)
+                    await _accrue_referral_commissions(session, user, paid_tx, None)
             return TransactionStatus.paid, balance
         if status == "failed":
             await repo.set_transaction_status(session, tx.external_id, TransactionStatus.failed)
