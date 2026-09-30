@@ -1148,13 +1148,13 @@ async def test_trend_checkout_quote_recommends_smallest_plan_covering_deficit(cl
     monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
     monkeypatch.setattr(
         "api.trends_routes.repo.resolve_image_model_cost",
-        AsyncMock(return_value=SimpleNamespace(credits=12)),
+        AsyncMock(return_value=SimpleNamespace(credits=1200)),
     )
     monkeypatch.setattr(
         "api.trends_routes.repo.get_active_price_plans",
         AsyncMock(return_value=[
-            SimpleNamespace(key="small", label="10 credits", credits=10, price_rub=100),
-            SimpleNamespace(key="medium", label="20 credits", credits=20, price_rub=180),
+            SimpleNamespace(key="small", label="300 credits", credits=300, price_rub=300),
+            SimpleNamespace(key="medium", label="500 credits", credits=500, price_rub=500),
         ]),
     )
 
@@ -1162,11 +1162,11 @@ async def test_trend_checkout_quote_recommends_smallest_plan_covering_deficit(cl
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["cost_credits"] == 12
+    assert payload["cost_credits"] == 1200
     assert payload["balance_credits"] == 1003
-    assert payload["can_run"] is True
-    assert payload["deficit_credits"] == 0
-    assert payload["recommended_plan"] is None
+    assert payload["can_run"] is False
+    assert payload["deficit_credits"] == 197
+    assert payload["recommended_plan"] == {\n        "key": "small",\n        "label": "300 credits",\n        "credits": 300,\n        "price_rub": 300,\n    }
 
 
 @pytest.mark.asyncio
