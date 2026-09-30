@@ -206,7 +206,7 @@ test("trend repeat shows price and opens inline topup without losing the runner"
   await runner.getByRole("button", { name: /Пополнить и повторить/ }).click();
 
   await expect(page.getByText("1. Пакет поцелуев")).toBeVisible();
-  await expect(runner).toBeVisible();
+  await expect(runner).not.toBeVisible();
   const recommended = page.getByRole("button", { name: /старт.*25/i });
   await expect(recommended).toHaveClass(/border-primary\/55/);
 
