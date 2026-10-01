@@ -18,10 +18,136 @@ from api.seedance25_adapter import (
 )
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from core.config import settings
 from db import repository as repo
 from db.models import User
+from payments import tribute
 
 router = Router(name="seedance25_references")
+
+
+def _fmt_amount(value: float) -> str:
+    return f"{float(value):.2f}".rstrip("0").rstrip(".")
+
+
+def _recommended_checkout_plan(plans: list[object], deficit: float):
+    active = [
+        plan
+        for plan in plans
+        if bool(getattr(plan, "is_active", True))
+        and float(getattr(plan, "credits", 0) or 0) > 0
+        and float(getattr(plan, "price_rub", 0) or 0) > 0
+    ]
+    if not active:
+        return None
+    covering = [
+        plan
+        for plan in active
+        if float(getattr(plan, "credits", 0) or 0) >= float(deficit)
+    ]
+    if covering:
+        return min(
+            covering,
+            key=lambda plan: (
+                float(getattr(plan, "credits", 0) or 0),
+                float(getattr(plan, "price_rub", 0) or 0),
+                int(getattr(plan, "sort_order", 0) or 0),
+            ),
+        )
+    return max(
+        active,
+        key=lambda plan: (
+            float(getattr(plan, "credits", 0) or 0),
+            -float(getattr(plan, "price_rub", 0) or 0),
+        ),
+    )
+
+
+def _checkout_kb(plan) -> object:
+    builder = InlineKeyboardBuilder()
+    key = str(plan.key)
+    if settings.TBANK_TERMINAL_KEY and settings.TBANK_PASSWORD:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"💳 Карта | СБП · {_fmt_amount(plan.price_rub)} ₽",
+                callback_data=f"topup:rub:{key}",
+            )
+        )
+    if settings.TRIBUTE_API_KEY and tribute.digital_product_for_plan(key) is not None:
+        price = tribute.digital_product_price_text(key)
+        builder.row(
+            InlineKeyboardButton(
+                text=f"💵 USD{f' · {price}' if price else ''}",
+                callback_data=f"topup:tribute_plan:{key}",
+            )
+        )
+    if settings.CRYPTOBOT_TOKEN:
+        builder.row(
+            InlineKeyboardButton(
+                text="🪙 CryptoBot",
+                callback_data=f"topup:crypto_plan:{key}",
+            )
+        )
+    if settings.lava_is_enabled() and settings.lava_offer_id_for_plan(key):
+        builder.row(
+            InlineKeyboardButton(
+                text="💸 Lava",
+                callback_data=f"topup:lava_plan:{key}",
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Оплатил — продолжить",
+            callback_data="s25pay:continue",
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(text="← К моделям", callback_data="vid_nav:back"),
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"),
+    )
+    return builder.as_markup()
+
+
+async def _show_checkout(
+    call: CallbackQuery,
+    state: FSMContext,
+    *,
+    balance: float,
+    minimum: float,
+    plan,
+) -> None:
+    deficit = max(0.0, minimum - balance)
+    await state.update_data(
+        payment_return_callback="s25pay:continue",
+        payment_return_label="🎬 Продолжить Seedance 2.5",
+        payment_required_credits=minimum,
+        payment_context="seedance25",
+    )
+    if plan is None:
+        text = (
+            "💋 <b>Недостаточно для Seedance 2.5</b>\n\n"
+            f"Нужно для 5 сек: <b>{minimum:g} 💋</b>\n"
+            f"Баланс: <b>{balance:g} 💋</b>\n"
+            f"Не хватает: <b>{deficit:g} 💋</b>\n\n"
+            "Сейчас нет активного пакета пополнения. Открой баланс позже или вернись к моделям."
+        )
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="← К моделям", callback_data="vid_nav:back"))
+        builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
+        markup = builder.as_markup()
+    else:
+        text = (
+            "💋 <b>Не хватает баланса</b>\n\n"
+            f"Нужно для 5 сек: <b>{minimum:g} 💋</b>\n"
+            f"Баланс: <b>{balance:g} 💋</b>\n"
+            f"Не хватает: <b>{deficit:g} 💋</b>\n\n"
+            f"Подойдёт пакет: <b>{_fmt_amount(plan.credits)} 💋</b> "
+            f"за <b>{_fmt_amount(plan.price_rub)} ₽</b>.\n"
+            "Оплати прямо здесь и нажми «Оплатил — продолжить»."
+        )
+        markup = _checkout_kb(plan)
+    await safe_edit_message(call.message, text, reply_markup=markup)
+    await safe_answer_callback(call)
 
 
 def _as_list(value) -> list[str]:
@@ -108,31 +234,12 @@ async def _go_params(call: CallbackQuery, state: FSMContext) -> None:
     await safe_answer_callback(call)
 
 
-@router.callback_query(VideoGenFSM.model_select, F.data == f"vid_model:{MODEL_KEY}")
-async def choose_seedance25(
+async def _enter_seedance25_flow(
     call: CallbackQuery,
     state: FSMContext,
-    session: AsyncSession,
-    db_user: User,
+    *,
+    model_cost,
 ) -> None:
-    model_cost = await repo.resolve_video_model_cost(
-        session,
-        MODEL_KEY,
-        duration=5,
-        resolution="720p",
-    )
-    if not model_cost:
-        await safe_answer_callback(call, "Модель временно недоступна", show_alert=True)
-        return
-    minimum = float(model_cost.credits) * 5
-    if float(db_user.credits) < minimum:
-        await safe_answer_callback(
-            call,
-            f"Недостаточно 💋. Для 5 сек нужно минимум {minimum:g} 💋.",
-            show_alert=True,
-        )
-        return
-
     old = await state.get_data()
     await state.set_state(VideoGenFSM.seedance25_reference_upload)
     await state.update_data(
@@ -149,6 +256,10 @@ async def choose_seedance25(
         audio_ids=[],
         character_ids=[],
         grok_mode=None,
+        payment_return_callback=None,
+        payment_return_label=None,
+        payment_required_credits=None,
+        payment_context=None,
         wizard_review_enabled=bool(old.get("wizard_review_enabled", True)),
         wizard_scenario=old.get("wizard_scenario", "advanced"),
     )
@@ -159,6 +270,74 @@ async def choose_seedance25(
         reply_markup=_kb_for_data(updated),
     )
     await safe_answer_callback(call)
+
+
+async def _seedance25_cost(session: AsyncSession):
+    return await repo.resolve_video_model_cost(
+        session,
+        MODEL_KEY,
+        duration=5,
+        resolution="720p",
+    )
+
+
+@router.callback_query(VideoGenFSM.model_select, F.data == f"vid_model:{MODEL_KEY}")
+async def choose_seedance25(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    model_cost = await _seedance25_cost(session)
+    if not model_cost:
+        await safe_answer_callback(call, "Модель временно недоступна", show_alert=True)
+        return
+    minimum = float(model_cost.credits) * 5
+    balance = float(db_user.credits)
+    if balance < minimum:
+        plan = _recommended_checkout_plan(
+            await repo.get_active_price_plans(session),
+            minimum - balance,
+        )
+        await _show_checkout(
+            call,
+            state,
+            balance=balance,
+            minimum=minimum,
+            plan=plan,
+        )
+        return
+
+    await _enter_seedance25_flow(call, state, model_cost=model_cost)
+
+
+@router.callback_query(VideoGenFSM.model_select, F.data == "s25pay:continue")
+async def continue_seedance25_after_payment(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+) -> None:
+    model_cost = await _seedance25_cost(session)
+    if not model_cost:
+        await safe_answer_callback(call, "Модель временно недоступна", show_alert=True)
+        return
+    minimum = float(model_cost.credits) * 5
+    balance = float(db_user.credits)
+    if balance < minimum:
+        plan = _recommended_checkout_plan(
+            await repo.get_active_price_plans(session),
+            minimum - balance,
+        )
+        await _show_checkout(
+            call,
+            state,
+            balance=balance,
+            minimum=minimum,
+            plan=plan,
+        )
+        return
+    await _enter_seedance25_flow(call, state, model_cost=model_cost)
 
 
 @router.callback_query(VideoGenFSM.seedance25_reference_upload, F.data == "s25ref:none")
