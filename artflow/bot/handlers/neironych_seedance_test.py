@@ -819,6 +819,74 @@ async def _save_ref_message(message: Message, state: FSMContext, kind: str) -> N
     await _answer_dashboard(message, state)
 
 
+async def _dashboard_media_ref(
+    message: Message,
+    state: FSMContext,
+    kind: str,
+) -> None:
+    data = await _data(state)
+    mode = str(data.get("neur_mode") or "text")
+
+    if mode == "frame":
+        if kind != "image":
+            await message.answer(
+                "🎞 В режиме First / Last пришли изображение. "
+                "Для видео/аудио переключись в «Референсы»."
+            )
+            return
+        if not data.get("neur_start_image_url"):
+            await _save_frame(message, state, "neur_start_image_url")
+            return
+        if not data.get("neur_end_image_url"):
+            await _save_frame(message, state, "neur_end_image_url")
+            return
+        await message.answer(
+            "🎞 Start и End уже добавлены. Очисти нужный кадр кнопкой в панели, "
+            "если хочешь заменить его."
+        )
+        return
+
+    if mode == "text":
+        # Media dropped directly onto the dashboard means the admin wants a
+        # reference run. Do not silently ignore it or require one more button.
+        await _change_request(state, neur_mode="reference")
+
+    await _save_ref_message(message, state, kind)
+
+
+@router.message(NeironychSeedanceFSM.dashboard, F.photo)
+async def dashboard_photo_ref(message: Message, state: FSMContext) -> None:
+    await _dashboard_media_ref(message, state, "image")
+
+
+@router.message(NeironychSeedanceFSM.dashboard, F.video)
+async def dashboard_video_ref(message: Message, state: FSMContext) -> None:
+    await _dashboard_media_ref(message, state, "video")
+
+
+@router.message(NeironychSeedanceFSM.dashboard, F.audio | F.voice)
+async def dashboard_audio_ref(message: Message, state: FSMContext) -> None:
+    await _dashboard_media_ref(message, state, "audio")
+
+
+@router.message(NeironychSeedanceFSM.dashboard, F.document)
+async def dashboard_document_ref(message: Message, state: FSMContext) -> None:
+    document = message.document
+    mime = str(getattr(document, "mime_type", "") or "").lower()
+    if mime.startswith("image/"):
+        kind = "image"
+    elif mime.startswith("video/"):
+        kind = "video"
+    elif mime.startswith("audio/"):
+        kind = "audio"
+    else:
+        await message.answer(
+            "Не узнаю тип файла. Для референса пришли JPEG/PNG, MP4/MOV или WAV/MP3."
+        )
+        return
+    await _dashboard_media_ref(message, state, kind)
+
+
 @router.message(NeironychSeedanceFSM.awaiting_image_ref, F.photo | F.document | F.text)
 async def image_ref_save(message: Message, state: FSMContext) -> None:
     await _save_ref_message(message, state, "image")
