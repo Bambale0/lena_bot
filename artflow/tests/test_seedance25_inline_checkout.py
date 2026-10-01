@@ -68,7 +68,7 @@ async def test_insufficient_seedance_balance_opens_inline_checkout(monkeypatch) 
     monkeypatch.setattr(refs.settings, "TBANK_PASSWORD", "password")
     monkeypatch.setattr(refs.settings, "CRYPTOBOT_TOKEN", "")
     monkeypatch.setattr(refs.settings, "TRIBUTE_API_KEY", "")
-    monkeypatch.setattr(refs.settings, "lava_is_enabled", lambda: False)
+    monkeypatch.setattr(type(refs.settings), "lava_is_enabled", lambda self: False)
 
     await refs.choose_seedance25(call, state, session, user)
 
