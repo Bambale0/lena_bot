@@ -880,3 +880,33 @@ Seedance 2.0 4k remains selectable per provider video contract but is shown as p
 - Read-only live smoke: provider model catalog resolves both Seedance versions and public price parser matches the current provider price page.
 - Docker Compose config validates with the optional secret overlay absent.
 - Required CI, code review, merge/autodeploy, production health/log and read-only provider-auth verification remain release gates.
+
+
+---
+
+# Execution ledger — Seedance insufficient-balance inline checkout
+
+Date: 2026-10-01.
+Baseline: production `290cf6cea856e5ab19b265284a7d959ae31bb9aa`.
+Branch: `fix/seedance-inline-checkout`.
+
+## Problem
+The public Telegram video model picker blocked Seedance 2.5 with a Telegram alert:
+`Недостаточно 💋. Для 5 сек нужно минимум ...`.
+Telegram alerts only expose `OK`, so the user had no direct purchase path at the exact point where more credits were required.
+
+## Fix
+- Replace the blocking alert with an inline checkout card in the same message.
+- Card shows required credits for the 5-second minimum, current balance, exact deficit, and the smallest active PricePlan that covers the deficit.
+- Payment methods are inline buttons for the configured providers only (Card/SBP, Tribute USD, CryptoBot, Lava).
+- Existing payment creation/reconciliation code is reused; no duplicate crediting/payment logic is introduced.
+- The generation context is stored in FSM. Provider payment screens get a contextual return button.
+- After payment confirmation the user gets `Продолжить Seedance 2.5`, which rechecks the current DB balance and opens the normal Seedance reference/settings flow.
+- If balance is still short, the same checkout card is refreshed instead of showing the old one-button alert.
+- No plan prices or model prices are hardcoded.
+
+## TDD / verification
+- RED contract: `09d62292640c0bf78f4fe7bae6daa5835244fd2a`.
+- Focused verification: 43 tests passed across Seedance multimodal, inline checkout, payment method choice and payment webhooks.
+- Ruff clean for modified bot/payment surfaces.
+- Required PR CI, open code review, merge, autodeploy, production health/log checks remain release gates.
