@@ -910,3 +910,32 @@ Telegram alerts only expose `OK`, so the user had no direct purchase path at the
 - Focused verification: 43 tests passed across Seedance multimodal, inline checkout, payment method choice and payment webhooks.
 - Ruff clean for modified bot/payment surfaces.
 - Required PR CI, open code review, merge, autodeploy, production health/log checks remain release gates.
+
+
+---
+
+# Execution ledger — Neironych admin lab direct references
+
+Date: 2026-10-01.
+Baseline: production `290cf6cea856e5ab19b265284a7d959ae31bb9aa`.
+Branch: `fix/neironych-direct-reference-upload`.
+
+## Incident evidence
+- Production Redis showed the active Neironych admin session in `NeironychSeedanceFSM:dashboard`, mode `reference`, with all three reference arrays empty.
+- The lab only registered media handlers for `awaiting_image_ref`, `awaiting_video_ref` and `awaiting_audio_ref`.
+- Therefore media sent directly while looking at the reference dashboard had no matching handler and was silently ignored.
+- Provider upload itself is healthy: a read/write media-only smoke through `POST /v1/media/uploads` + signed PUT succeeded for Seedance 2.5. No paid generation was started.
+
+## Fix
+- The dashboard now directly accepts photo and video media.
+- Image/video/audio documents are routed by MIME type.
+- Dropping media in Text mode automatically switches the test to Reference mode instead of ignoring the file.
+- In First/Last Frame mode, dashboard images fill Start then End; incompatible video/audio receives an explicit explanation.
+- Existing per-type reference buttons still work; direct upload is an additional fast path.
+- Unsupported document types now receive a user-visible message instead of disappearing.
+
+## TDD / verification
+- RED: dashboard media tests failed because the dashboard handlers did not exist.
+- GREEN: all Neironych admin tests pass and Ruff is clean.
+- Live provider media upload smoke succeeded without starting a billed video generation.
+- Required CI, review, merge, autodeploy, production state/log checks remain release gates.
