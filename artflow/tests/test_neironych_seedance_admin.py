@@ -287,3 +287,81 @@ async def test_client_rejects_new_paid_request_with_short_idempotency_key() -> N
                 payload={"prompt": "x", "duration": 4, "resolution": "480p", "aspect_ratio": "16:9"},
                 idempotency_key="short",
             )
+
+
+@pytest.mark.asyncio
+async def test_dashboard_reference_mode_accepts_photo_without_extra_button(monkeypatch) -> None:
+    from bot.handlers import neironych_seedance_test as lab
+
+    message = SimpleNamespace(photo=[SimpleNamespace(file_id="photo-1")])
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "neur_model": "seedance-2.5",
+        "neur_mode": "reference",
+    })
+    save = AsyncMock()
+    monkeypatch.setattr(lab, "_save_ref_message", save)
+
+    await lab.dashboard_photo_ref(message, state)
+
+    save.assert_awaited_once_with(message, state, "image")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_reference_mode_accepts_video_without_extra_button(monkeypatch) -> None:
+    from bot.handlers import neironych_seedance_test as lab
+
+    message = SimpleNamespace(video=SimpleNamespace(file_id="video-1"))
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "neur_model": "seedance-2.5",
+        "neur_mode": "reference",
+    })
+    save = AsyncMock()
+    monkeypatch.setattr(lab, "_save_ref_message", save)
+
+    await lab.dashboard_video_ref(message, state)
+
+    save.assert_awaited_once_with(message, state, "video")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_reference_mode_routes_document_by_mime(monkeypatch) -> None:
+    from bot.handlers import neironych_seedance_test as lab
+
+    message = SimpleNamespace(
+        document=SimpleNamespace(file_id="doc-1", mime_type="image/png"),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "neur_model": "seedance-2.5",
+        "neur_mode": "reference",
+    })
+    save = AsyncMock()
+    monkeypatch.setattr(lab, "_save_ref_message", save)
+
+    await lab.dashboard_document_ref(message, state)
+
+    save.assert_awaited_once_with(message, state, "image")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_text_mode_auto_switches_to_reference_on_media(monkeypatch) -> None:
+    from bot.handlers import neironych_seedance_test as lab
+
+    message = SimpleNamespace(photo=[SimpleNamespace(file_id="photo-1")])
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "neur_model": "seedance-2.5",
+        "neur_mode": "text",
+    })
+    change = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(lab, "_change_request", change)
+    monkeypatch.setattr(lab, "_save_ref_message", save)
+
+    await lab.dashboard_photo_ref(message, state)
+
+    change.assert_awaited_once_with(state, neur_mode="reference")
+    save.assert_awaited_once_with(message, state, "image")
