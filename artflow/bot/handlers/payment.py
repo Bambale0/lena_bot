@@ -6,7 +6,7 @@ import logging
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
@@ -45,6 +45,43 @@ TBANK_FINAL_FAILURE_STATUSES = {
 
 def _fmt_amount(value: float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+async def _payment_return_context(
+    state: FSMContext | None,
+) -> tuple[str | None, str | None]:
+    if state is None:
+        return None, None
+    data = await state.get_data()
+    callback = str(data.get("payment_return_callback") or "").strip() or None
+    label = str(data.get("payment_return_label") or "").strip() or None
+    return callback, label
+
+
+def _payment_complete_kb(
+    return_callback: str | None,
+    return_label: str | None,
+    *,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    if not return_callback:
+        return back_to_menu_kb()
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=return_label or ("▶️ Продолжить" if lang == "ru" else "▶️ Continue"),
+                    callback_data=return_callback,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏠 Главное меню" if lang == "ru" else "🏠 Home",
+                    callback_data="menu:main",
+                )
+            ],
+        ]
+    )
 
 
 def _promo_discount_amount(price_rub: float, redemption) -> float:
@@ -263,7 +300,12 @@ async def cb_topup_tribute(call: CallbackQuery, session: AsyncSession, db_user: 
 
 
 @router.callback_query(F.data.startswith("topup:tribute_plan:"))
-async def cb_topup_tribute_plan(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+async def cb_topup_tribute_plan(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext | None = None,
+) -> None:
     lang = db_user.language or "ru"
     if not settings.TRIBUTE_API_KEY:
         await call.answer("Оплата в USD сейчас недоступна" if lang == "ru" else "USD payment is unavailable right now", show_alert=True)
@@ -282,6 +324,7 @@ async def cb_topup_tribute_plan(call: CallbackQuery, session: AsyncSession, db_u
         return
 
     price_text = tribute.digital_product_price_text(plan.key) or f"{_fmt_amount(plan.price_rub)} ₽"
+    return_callback, return_label = await _payment_return_context(state)
     await call.message.edit_text(  # type: ignore[union-attr]
         (
             f"💵 <b>USD</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{price_text}</b>\n\nПосле оплаты 💋 начислятся автоматически."
@@ -293,6 +336,8 @@ async def cb_topup_tribute_plan(call: CallbackQuery, session: AsyncSession, db_u
             product.payment_url,
             None,
             lang=lang,
+            back_callback=return_callback or "menu:topup",
+            back_text=return_label,
         ),
     )
     await call.answer()
@@ -318,7 +363,12 @@ async def cb_topup_lava(call: CallbackQuery, session: AsyncSession, db_user: Use
 
 
 @router.callback_query(F.data.startswith("topup:lava_plan:"))
-async def cb_topup_lava_plan(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+async def cb_topup_lava_plan(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext | None = None,
+) -> None:
     lang = db_user.language or "ru"
     plan_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
     plan = await repo.get_price_plan_by_key(session, plan_key)
@@ -342,6 +392,7 @@ async def cb_topup_lava_plan(call: CallbackQuery, session: AsyncSession, db_user
         external_id=invoice.invoice_id,
     )
 
+    return_callback, return_label = await _payment_return_context(state)
     await call.message.edit_text(  # type: ignore[union-attr]
         (f"💸 <b>Lava</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(plan.price_rub)} ₽</b>" if lang == "ru" else f"💸 <b>Lava</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(plan.price_rub)} ₽</b>"),
         reply_markup=payment_link_kb(
@@ -349,6 +400,8 @@ async def cb_topup_lava_plan(call: CallbackQuery, session: AsyncSession, db_user
             invoice.payment_url,
             invoice.invoice_id,
             lang=lang,
+            back_callback=return_callback or "menu:topup",
+            back_text=return_label,
         ),
     )
     await call.answer()
@@ -377,7 +430,12 @@ async def cb_topup_crypto_menu(call: CallbackQuery, session: AsyncSession, db_us
 
 
 @router.callback_query(F.data.startswith("topup:crypto_plan:"))
-async def cb_topup_crypto_plan(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
+async def cb_topup_crypto_plan(
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext | None = None,
+) -> None:
     lang = db_user.language or "ru"
     plan_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
     plan = await repo.get_price_plan_by_key(session, plan_key)
@@ -414,13 +472,20 @@ async def cb_topup_crypto_plan(call: CallbackQuery, session: AsyncSession, db_us
     if discount_redemption:
         await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
 
+    return_callback, return_label = await _payment_return_context(state)
     await call.message.edit_text(  # type: ignore[union-attr]
         (
             f"🪙 <b>CryptoBot</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(amount_usdt)} USDT</b>"
             if lang == "ru"
             else f"🪙 <b>CryptoBot</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(amount_usdt)} USDT</b>"
         ) + discount_text,
-        reply_markup=crypto_pay_kb(invoice.pay_url, str(invoice.invoice_id), lang=lang),
+        reply_markup=crypto_pay_kb(
+            invoice.pay_url,
+            str(invoice.invoice_id),
+            lang=lang,
+            back_callback=return_callback or "menu:topup",
+            back_text=return_label,
+        ),
     )
     await call.answer()
 
@@ -469,7 +534,10 @@ async def _apply_promo_text(message: Message, session: AsyncSession, db_user: Us
 
 @router.callback_query(F.data.startswith("topup:rub:"))
 async def cb_topup_rub(
-    call: CallbackQuery, session: AsyncSession, db_user: User
+    call: CallbackQuery,
+    session: AsyncSession,
+    db_user: User,
+    state: FSMContext | None = None,
 ) -> None:
     lang = db_user.language or "ru"
     plan_key = call.data.split(":")[2]  # type: ignore[union-attr]
@@ -502,6 +570,7 @@ async def cb_topup_rub(
     if discount_redemption:
         await repo.mark_promo_discount_consumed(session, discount_redemption.id, transaction_id=tx.id)
 
+    return_callback, return_label = await _payment_return_context(state)
     await call.message.edit_text(  # type: ignore[union-attr]
         ((f"💳 <b>Карта | СБП</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(pay_amount)} ₽</b>" if lang == "ru" else f"💳 <b>Card | SBP</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(pay_amount)} ₽</b>") + discount_text),
         reply_markup=payment_link_kb(
@@ -509,6 +578,8 @@ async def cb_topup_rub(
             payment.payment_url,
             payment.payment_id,
             lang=lang,
+            back_callback=return_callback or "menu:topup",
+            back_text=return_label,
         ),
     )
     await call.answer()
@@ -519,6 +590,7 @@ async def cb_check_payment_status(
     call: CallbackQuery,
     session: AsyncSession,
     db_user: User,
+    state: FSMContext | None = None,
 ) -> None:
     lang = db_user.language or "ru"
     external_id = call.data.split(":")[-1]
@@ -538,13 +610,18 @@ async def cb_check_payment_status(
         refreshed = await repo.get_transaction_by_external_id(session, external_id)
         credits = refreshed.credits if refreshed else tx.credits
         current_balance = balance if balance is not None else (await repo.get_user_by_id(session, db_user.id)).credits
+        return_callback, return_label = await _payment_return_context(state)
         await call.message.edit_text(  # type: ignore[union-attr]
             (
                 "✅ <b>Оплата подтверждена</b>\n\n"
                 + (f"Зачислено: <b>+{credits} 💋</b>\n" if lang == "ru" else f"Added: <b>+{credits} 💋</b>\n")
                 + (f"Баланс: <b>{current_balance} 💋</b>" if lang == "ru" else f"Balance: <b>{current_balance} 💋</b>")
             ),
-            reply_markup=back_to_menu_kb(),
+            reply_markup=_payment_complete_kb(
+                return_callback,
+                return_label,
+                lang=lang,
+            ),
         )
         await call.answer()
         return
