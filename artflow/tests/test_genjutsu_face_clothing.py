@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from api import neironych_seedance_runtime, video_service
 from api import seedance25_adapter as s25
+from api import video_service
 from core.seedance_repeat_overrides import (
     build_seedance_repeat_prompt,
     build_seedance_repeat_reference_plan,
@@ -72,11 +72,16 @@ def test_identity_only_edit_replaces_face_instead_of_keeping_content_unchanged()
 
 @pytest.fixture
 def provider(monkeypatch):
+    async def unchanged(value):
+        return value
+
+    monkeypatch.setattr(video_service, "_prepare_video_reference_urls", unchanged)
+    monkeypatch.setattr(video_service, "_prepare_reference_video_url", unchanged)
     monkeypatch.setattr(
         "api.video_runtime_fixes._validate_seedance_reference_video_url", AsyncMock()
     )
-    create = AsyncMock(return_value="edit-task")
-    monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", create)
+    create = AsyncMock(return_value={"code": 200, "data": {"taskId": "edit-task"}})
+    monkeypatch.setattr(video_service.kieai_client, "create_task", create)
     return create
 
 
@@ -100,19 +105,15 @@ async def test_content_edit_boundary_overrides_legacy_identity_token(provider, c
         seedance_reference_roles=roles,
         seedance_content_edit={"number": "25", "clothing": "red cotton"},
     )
-    request = provider.await_args.kwargs
-    assert request["product_model"] == s25.MODEL_KEY
-    assert request["video_urls"] == ["https://example.test/source.mp4"]
-    assert request["image_urls"] == images
-    assert f"@Image{count+1} is the clothing" in request["prompt"]
-    assert "@Video1 is the authoritative source video" in request["prompt"]
-    assert 'must read exactly "25"' in request["prompt"]
-    assert request["edit"] is True
-    assert (request["duration"], request["aspect_ratio"], request["resolution"]) == (
-        -1,
-        "adaptive",
-        "480p",
-    )
+    payload = provider.await_args.args[0]
+    inp = payload["input"]
+    assert payload["model"] == s25.MODEL_KEY
+    assert inp["reference_video_urls"] == ["https://example.test/source.mp4"]
+    assert inp["reference_image_urls"] == images
+    assert f"@Image{count+1} is the clothing" in inp["prompt"]
+    assert "@Video1 is the authoritative source video" in inp["prompt"]
+    assert 'must read exactly "25"' in inp["prompt"]
+    assert (inp["duration"], inp["aspect_ratio"], inp["resolution"]) == (-1, "adaptive", "480p")
 
 
 @pytest.mark.asyncio
@@ -216,26 +217,25 @@ async def test_provider_prompt_limit_is_enforced_after_role_instructions(provide
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["roles", "video"])
-async def test_invalid_edit_boundary_never_creates_provider_task(provider, failure):
-    kwargs = {
-        "model": video_service.VideoModel(s25.MODEL_KEY),
-        "prompt": "edit",
-        "image_url": ["face.jpg", "shirt.jpg"],
-        "reference_video_url": "https://example.test/source.mp4",
-        "seedance_reference_roles": ["identity_primary", "clothing"],
-        "seedance_content_edit": {"number": "25"},
-    }
-    if failure == "roles":
-        kwargs["seedance_reference_roles"] = ["identity_primary"]
+@pytest.mark.parametrize("failure", ["images", "video"])
+async def test_reference_upload_loss_never_creates_task(provider, monkeypatch, failure):
+    if failure == "images":
+        monkeypatch.setattr(
+            video_service, "_prepare_video_reference_urls", AsyncMock(return_value=["one.jpg"])
+        )
     else:
-        kwargs["reference_video_url"] = [
-            "https://example.test/a.mp4",
-            "https://example.test/b.mp4",
-        ]
-
+        monkeypatch.setattr(
+            video_service, "_prepare_reference_video_url", AsyncMock(return_value=None)
+        )
     with pytest.raises(ValueError):
-        await video_service.generate_video(**kwargs)
+        await video_service.generate_video(
+            video_service.VideoModel(s25.MODEL_KEY),
+            "edit",
+            image_url=["face.jpg", "shirt.jpg"],
+            reference_video_url="https://example.test/source.mp4",
+            seedance_reference_roles=["identity_primary", "clothing"],
+            seedance_content_edit={"number": "25"},
+        )
     provider.assert_not_awaited()
 
 
