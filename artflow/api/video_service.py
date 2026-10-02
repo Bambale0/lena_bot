@@ -285,12 +285,12 @@ async def generate_video(
     raw_image_url = image_url
     raw_reference_video_url = reference_video_url
 
-    try:
-        image_url = await _prepare_video_reference_urls(image_url)
-        last_frame_url = await _prepare_video_reference_url(last_frame_url)
-        reference_video_url = await _prepare_reference_video_url(reference_video_url)
+    image_url = await _prepare_video_reference_urls(image_url)
+    last_frame_url = await _prepare_video_reference_url(last_frame_url)
+    reference_video_url = await _prepare_reference_video_url(reference_video_url)
 
-        if model in _VEO_MODELS:
+    if model in _VEO_MODELS:
+        try:
             return await _veo_generate(
                 model,
                 prompt,
@@ -303,7 +303,10 @@ async def generate_video(
                 enable_fallback=enable_fallback,
                 enable_translation=enable_translation,
             )
+        except Exception as exc:
+            raise _exact_model_failure(model, exc) from exc
 
+    try:
         return await _kieai_generate(
             model,
             prompt,
@@ -328,7 +331,7 @@ async def generate_video(
             raise _exact_model_failure(model, primary_exc) from primary_exc
 
         logger.warning(
-            "Seedance 2 primary KIE failed; falling back to Neironych: %s",
+            "Seedance 2 primary KIE submission failed; falling back to Neironych: %s",
             primary_exc,
         )
         try:
