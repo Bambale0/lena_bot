@@ -5,16 +5,33 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from api import neironych_seedance_runtime, seedance25_adapter, video_service
+from api import seedance25_adapter, video_service
 from api.video_runtime_fixes import VEO_PUBLIC_CAPS, install_video_runtime_fixes
 from bot.services.veo_ui import install_veo_handler_presentation
 
 
 @pytest.mark.asyncio
-async def test_seedance_runtime_sends_prompt_inside_neironych_request(monkeypatch):
+async def test_seedance_runtime_sends_prompt_inside_provider_input(monkeypatch):
     install_video_runtime_fixes()
-    submit = AsyncMock(return_value="seedance-task")
-    monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
+    calls = []
+
+    async def create_task(payload, callback_url=None):
+        calls.append((payload, callback_url))
+        return {"code": 200, "data": {"taskId": "seedance-task"}}
+
+    async def prepare_images(value):
+        return value
+
+    async def prepare_video(value):
+        return value
+
+    async def upload_media(value, upload_path):
+        return value
+
+    monkeypatch.setattr(video_service.kieai_client, "create_task", create_task)
+    monkeypatch.setattr(video_service, "_prepare_video_reference_urls", prepare_images)
+    monkeypatch.setattr(video_service, "_prepare_video_reference_url", prepare_video)
+    monkeypatch.setattr(video_service, "_upload_local_media", upload_media)
 
     result = await video_service.generate_video(
         video_service.VideoModel(seedance25_adapter.MODEL_KEY),
@@ -27,18 +44,31 @@ async def test_seedance_runtime_sends_prompt_inside_neironych_request(monkeypatc
     )
 
     assert result.task_id == "seedance-task"
-    assert result.provider == "neironych"
-    kwargs = submit.await_args.kwargs
-    assert kwargs["prompt"] == "оживи фото"
-    assert kwargs["image_urls"] == ["https://example.test/ref.jpg"]
-    assert kwargs["aspect_ratio"] == "16:9"
+    assert calls[0][0]["model"] == seedance25_adapter.MODEL_KEY
+    assert calls[0][0]["input"]["prompt"] == "оживи фото"
+    assert calls[0][0]["input"]["reference_image_urls"] == ["https://example.test/ref.jpg"]
+    assert calls[0][0]["input"]["aspect_ratio"] == "16:9"
+    assert "first_frame_url" not in calls[0][0]["input"]
 
 
 @pytest.mark.asyncio
-async def test_seedance_runtime_forwards_video_references_to_neironych(monkeypatch):
+async def test_seedance_runtime_forwards_video_references_to_kie(monkeypatch):
     install_video_runtime_fixes()
-    submit = AsyncMock(return_value="seedance-video-ref-task")
-    monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
+    calls = []
+
+    async def create_task(payload, callback_url=None):
+        calls.append(payload)
+        return {"code": 200, "data": {"taskId": "seedance-video-ref-task"}}
+
+    async def prepare_images(value):
+        return value
+
+    async def prepare_video(value):
+        return value
+
+    monkeypatch.setattr(video_service.kieai_client, "create_task", create_task)
+    monkeypatch.setattr(video_service, "_prepare_video_reference_urls", prepare_images)
+    monkeypatch.setattr(video_service, "_prepare_reference_video_url", prepare_video)
 
     result = await video_service.generate_video(
         video_service.VideoModel(seedance25_adapter.MODEL_KEY),
@@ -54,9 +84,9 @@ async def test_seedance_runtime_forwards_video_references_to_neironych(monkeypat
     )
 
     assert result.task_id == "seedance-video-ref-task"
-    kwargs = submit.await_args.kwargs
-    assert kwargs["image_urls"] == ["https://example.test/person.jpg"]
-    assert kwargs["video_urls"] == [
+    provider_input = calls[0]["input"]
+    assert provider_input["reference_image_urls"] == ["https://example.test/person.jpg"]
+    assert provider_input["reference_video_urls"] == [
         "https://example.test/motion-a.mp4",
         "https://example.test/motion-b.mov",
     ]
@@ -103,12 +133,24 @@ async def test_seedance_edit_billing_rejects_multiple_source_videos() -> None:
             ["https://example.test/a.mp4", "https://example.test/b.mp4"],
         )
 
-
 @pytest.mark.asyncio
 async def test_seedance_runtime_normalizes_explicit_video_edit_request(monkeypatch):
     install_video_runtime_fixes()
-    submit = AsyncMock(return_value="seedance-edit-task")
-    monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
+    calls = []
+
+    async def create_task(payload, callback_url=None):
+        calls.append(payload)
+        return {"code": 200, "data": {"taskId": "seedance-edit-task"}}
+
+    async def prepare_images(value):
+        return value
+
+    async def prepare_video(value):
+        return value
+
+    monkeypatch.setattr(video_service.kieai_client, "create_task", create_task)
+    monkeypatch.setattr(video_service, "_prepare_video_reference_urls", prepare_images)
+    monkeypatch.setattr(video_service, "_prepare_reference_video_url", prepare_video)
 
     await video_service.generate_video(
         video_service.VideoModel(seedance25_adapter.MODEL_KEY),
@@ -120,16 +162,25 @@ async def test_seedance_runtime_normalizes_explicit_video_edit_request(monkeypat
         resolution="480p",
     )
 
-    kwargs = submit.await_args.kwargs
-    assert kwargs["video_urls"] == ["https://example.test/source.mp4"]
-    assert kwargs["edit"] is True
-
+    provider_input = calls[0]["input"]
+    assert provider_input["reference_video_urls"] == ["https://example.test/source.mp4"]
+    assert provider_input["aspect_ratio"] == "adaptive"
+    assert provider_input["duration"] == -1
 
 @pytest.mark.asyncio
 async def test_seedance_runtime_multimodal_prompt_is_not_lost(monkeypatch):
     install_video_runtime_fixes()
-    submit = AsyncMock(return_value="seedance-ref-task")
-    monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
+    calls = []
+
+    async def create_task(payload, callback_url=None):
+        calls.append(payload)
+        return {"code": 200, "data": {"taskId": "seedance-ref-task"}}
+
+    async def prepare_images(value):
+        return value
+
+    monkeypatch.setattr(video_service.kieai_client, "create_task", create_task)
+    monkeypatch.setattr(video_service, "_prepare_video_reference_urls", prepare_images)
 
     await video_service.generate_video(
         video_service.VideoModel(seedance25_adapter.MODEL_KEY),
@@ -140,13 +191,15 @@ async def test_seedance_runtime_multimodal_prompt_is_not_lost(monkeypatch):
         resolution="720p",
     )
 
-    kwargs = submit.await_args.kwargs
-    assert kwargs["prompt"] == "камера медленно приближается"
-    assert kwargs["image_urls"] == [
+    provider_input = calls[0]["input"]
+    assert provider_input["prompt"] == "камера медленно приближается"
+    assert provider_input["reference_image_urls"] == [
         "https://example.test/a.jpg",
         "https://example.test/b.jpg",
     ]
-    assert kwargs["edit"] is False
+    assert "first_frame_url" not in provider_input
+    assert "last_frame_url" not in provider_input
+
 
 def test_veo_public_caps_remove_fake_controls_and_enable_image_input():
     assert VEO_PUBLIC_CAPS["veo3"]["modes"] == ["text", "image"]
