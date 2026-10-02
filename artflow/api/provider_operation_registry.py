@@ -197,7 +197,12 @@ def _build_specs() -> dict[str, OperationSpec]:
         )
 
     for contract_id, model in _PRIMARY_VIDEO_MODELS.items():
-        poll_kind = PollKind.VEO if model in {"veo3", "veo3_fast", "veo3_lite"} else PollKind.KIE
+        if model in {"veo3", "veo3_fast", "veo3_lite"}:
+            poll_kind = PollKind.VEO
+        elif model in {"bytedance/seedance-2", "bytedance/seedance-2-5"}:
+            poll_kind = PollKind.NEIRONYCH
+        else:
+            poll_kind = PollKind.KIE
         specs[contract_id] = OperationSpec(
             contract_id=contract_id,
             generation_type=GenerationType.video,

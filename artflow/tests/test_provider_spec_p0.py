@@ -10,24 +10,25 @@ from api.video_service import VideoGenerationType, VideoModel
 async def test_seedance_provider_fallback_keeps_same_model_and_never_calls_comet(monkeypatch) -> None:
     comet_called = False
 
-    async def fail_kie(payload: dict, callback_url: str | None = None) -> dict:
+    async def fail_neironych(**kwargs):
+        assert kwargs["product_model"] == VideoModel.SEEDANCE_2.value
         raise RuntimeError("provider unavailable")
 
-    async def fallback_seedance(**kwargs) -> str:
-        assert kwargs["product_model"] == VideoModel.SEEDANCE_2.value
-        return "neur-same-model"
+    async def fallback_kie(payload: dict, callback_url: str | None = None) -> dict:
+        assert payload["model"] == VideoModel.SEEDANCE_2.value
+        return {"code": 200, "data": {"taskId": "kie-same-model"}}
 
     async def forbidden_comet(**_kwargs):
         nonlocal comet_called
         comet_called = True
         raise AssertionError("cross-model fallback must not run")
 
-    monkeypatch.setattr(video_service.kieai_client, "create_task", fail_kie)
     monkeypatch.setattr(
         video_service.neironych_seedance_runtime,
         "generate_product_video",
-        fallback_seedance,
+        fail_neironych,
     )
+    monkeypatch.setattr(video_service.kieai_client, "create_task", fallback_kie)
     monkeypatch.setattr(video_service.comet_fallback, "generate_video", forbidden_comet)
 
     result = await video_service.generate_video(
@@ -38,8 +39,8 @@ async def test_seedance_provider_fallback_keeps_same_model_and_never_calls_comet
         resolution="720p",
     )
 
-    assert result.provider == "neironych"
-    assert result.task_id == "neironych:neur-same-model"
+    assert result.provider == "kieai"
+    assert result.task_id == "kie-same-model"
     assert comet_called is False
 
 

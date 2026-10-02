@@ -155,7 +155,6 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
             legacy_identity_transfer=identity_transfer,
         )
         raw_image_refs = list(role_plan.image_urls)
-        # The typed role plan supersedes legacy tokens before identity wrapping.
         identity_transfer = False
         clean_prompt = build_seedance_content_edit_prompt(role_plan, content_edit)
     elif identity_transfer:
@@ -176,9 +175,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         or ref
         for ref in raw_image_refs
     ]
-    prepared_images = seedance25._dedupe(
-        await video_service._prepare_video_reference_urls(fitted_image_refs)
-    )
+    prepared_images = seedance25._dedupe(fitted_image_refs)
 
     if role_plan is not None and len(prepared_images) != len(role_plan.image_urls):
         raise ValueError("Не удалось подготовить все фото без потери ролей. Загрузи референсы заново.")
@@ -187,54 +184,105 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         bool(raw_video_refs) and seedance25.is_explicit_video_edit_prompt(clean_prompt)
     )
     if video_edit:
-        # KIE/Seedance 2.5 video editing follows the source video's duration
-        # and frame geometry. Identity Transfer is always an edit operation.
         aspect_ratio = "adaptive"
         duration = seedance25.DURATION_AUTO
 
     prepared_videos: list[str] = []
     for raw_video_ref in raw_video_refs[: seedance25.MAX_REFERENCE_VIDEOS]:
         await _validate_seedance_reference_video_url(raw_video_ref, video_edit=video_edit)
-        prepared_video = await video_service._prepare_reference_video_url(raw_video_ref)
-        if prepared_video and prepared_video not in prepared_videos:
-            prepared_videos.append(prepared_video)
+        if raw_video_ref not in prepared_videos:
+            prepared_videos.append(raw_video_ref)
 
     if content_edit is not None and len(prepared_videos) != 1:
-        raise ValueError("Seedance content edit lost its source video during upload")
+        raise ValueError("Seedance content edit lost its source video before provider submission")
 
-    prepared_audio_refs: list[str] = []
-    for audio_ref in audio_refs[: seedance25.MAX_REFERENCE_AUDIOS]:
-        uploaded = await video_service._upload_local_media(audio_ref, upload_path="audio/apix-video-refs")
-        if uploaded and uploaded not in prepared_audio_refs:
-            prepared_audio_refs.append(uploaded)
-
+    prepared_audio_refs = seedance25._dedupe(audio_refs)[: seedance25.MAX_REFERENCE_AUDIOS]
     route = seedance25.route_for_inputs(
         images=prepared_images,
         videos=prepared_videos,
         audios=prepared_audio_refs,
     )
-    input_payload = seedance25._seedance25_params(
-        {
-            "reference_image_urls": prepared_images,
-            "reference_video_urls": prepared_videos,
-            "reference_audio_urls": prepared_audio_refs,
-            "duration": duration,
-            "aspect_ratio": aspect_ratio,
-            "resolution": resolution,
-            "return_last_frame": control_options.get("return_last_frame", kwargs.get("return_last_frame", False)),
-            "generate_audio": False if identity_transfer else control_options.get(
-                "generate_audio", kwargs.get("generate_audio", True)
-            ),
-            "output_format": control_options.get("output_format", kwargs.get("output_format", "mp4")),
-            "web_search": control_options.get("web_search", kwargs.get("web_search")),
-            "nsfw_checker": kwargs.get("nsfw_checker"),
-        }
-    )
+
+    from api import neironych_seedance_runtime
     from api.video_prompt_limits import validate_video_prompt
+
     validate_video_prompt(seedance25.MODEL_KEY, clean_prompt)
-    input_payload["prompt"] = clean_prompt
 
     try:
+        task_id = await neironych_seedance_runtime.generate_product_video(
+            product_model=seedance25.MODEL_KEY,
+            prompt=clean_prompt,
+            image_urls=prepared_images,
+            video_urls=prepared_videos,
+            audio_urls=prepared_audio_refs,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            edit=video_edit,
+            idempotency_key=kwargs.get("idempotency_key"),
+        )
+        logger.info(
+            "Neironych Seedance 2.5 task route=%s images=%d videos=%d audios=%d task=%s",
+            "identity_transfer" if identity_transfer else ("video_edit" if video_edit else route),
+            len(prepared_images),
+            len(prepared_videos),
+            len(prepared_audio_refs),
+            task_id,
+        )
+        return video_service.VideoResult(
+            task_id=neironych_seedance_runtime.encode_task_id(task_id),
+            provider="neironych",
+            uses_webhook=False,
+        )
+    except Exception as primary_exc:
+        logger.warning(
+            "Seedance 2.5 primary Neironych submission failed; falling back to KIE: %s",
+            primary_exc,
+        )
+        primary_error = primary_exc
+
+    try:
+        kie_images = seedance25._dedupe(
+            await video_service._prepare_video_reference_urls(fitted_image_refs)
+        )
+        if role_plan is not None and len(kie_images) != len(role_plan.image_urls):
+            raise ValueError("Не удалось подготовить все фото без потери ролей. Загрузи референсы заново.")
+
+        kie_videos: list[str] = []
+        for raw_video_ref in raw_video_refs[: seedance25.MAX_REFERENCE_VIDEOS]:
+            uploaded = await video_service._prepare_reference_video_url(raw_video_ref)
+            if uploaded and uploaded not in kie_videos:
+                kie_videos.append(uploaded)
+        if content_edit is not None and len(kie_videos) != 1:
+            raise ValueError("Seedance content edit lost its source video during upload")
+
+        kie_audio_refs: list[str] = []
+        for audio_ref in audio_refs[: seedance25.MAX_REFERENCE_AUDIOS]:
+            uploaded = await video_service._upload_local_media(
+                audio_ref,
+                upload_path="audio/apix-video-refs",
+            )
+            if uploaded and uploaded not in kie_audio_refs:
+                kie_audio_refs.append(uploaded)
+
+        input_payload = seedance25._seedance25_params(
+            {
+                "reference_image_urls": kie_images,
+                "reference_video_urls": kie_videos,
+                "reference_audio_urls": kie_audio_refs,
+                "duration": duration,
+                "aspect_ratio": aspect_ratio,
+                "resolution": resolution,
+                "return_last_frame": control_options.get("return_last_frame", kwargs.get("return_last_frame", False)),
+                "generate_audio": False if identity_transfer else control_options.get(
+                    "generate_audio", kwargs.get("generate_audio", True)
+                ),
+                "output_format": control_options.get("output_format", kwargs.get("output_format", "mp4")),
+                "web_search": control_options.get("web_search", kwargs.get("web_search")),
+                "nsfw_checker": kwargs.get("nsfw_checker"),
+            }
+        )
+        input_payload["prompt"] = clean_prompt
         response = await video_service.kieai_client.create_task(
             {"model": seedance25.MODEL_KEY, "input": input_payload},
             callback_url=kwargs.get("callback_url"),
@@ -249,52 +297,24 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         data = response.get("data") or {}
         if not isinstance(data, dict):
             raise RuntimeError(f"KIE.AI video: invalid createTask data for {seedance25.MODEL_KEY}: {data!r}")
-        task_id = str(data.get("taskId") or response.get("taskId") or "").strip()
-        if not task_id:
+        fallback_task_id = str(data.get("taskId") or response.get("taskId") or "").strip()
+        if not fallback_task_id:
             raise RuntimeError(f"KIE.AI video: empty taskId for {seedance25.MODEL_KEY}: {response!r}")
         logger.info(
-            "KIE.AI Seedance 2.5 task route=%s images=%d videos=%d audios=%d task=%s",
+            "KIE fallback Seedance 2.5 task route=%s task=%s",
             "identity_transfer" if identity_transfer else ("video_edit" if video_edit else route),
-            len(prepared_images),
-            len(prepared_videos),
-            len(prepared_audio_refs),
-            task_id,
+            fallback_task_id,
         )
         return video_service.VideoResult(
-            task_id=task_id,
+            task_id=fallback_task_id,
             provider="kieai",
             uses_webhook=bool(kwargs.get("callback_url")),
         )
-    except Exception as primary_exc:
-        logger.warning(
-            "Seedance 2.5 primary KIE submission failed; falling back to Neironych: %s",
-            primary_exc,
-        )
-        from api import neironych_seedance_runtime
-
-        try:
-            fallback_task_id = await neironych_seedance_runtime.generate_product_video(
-                product_model=seedance25.MODEL_KEY,
-                prompt=clean_prompt,
-                image_urls=fitted_image_refs,
-                video_urls=raw_video_refs[: seedance25.MAX_REFERENCE_VIDEOS],
-                audio_urls=audio_refs[: seedance25.MAX_REFERENCE_AUDIOS],
-                duration=duration,
-                aspect_ratio=aspect_ratio,
-                resolution=resolution,
-                edit=video_edit,
-                idempotency_key=kwargs.get("idempotency_key"),
-            )
-        except Exception as fallback_exc:
-            raise RuntimeError(
-                f"{seedance25.MODEL_KEY} failed via primary KIE and Neironych fallback: "
-                f"primary={primary_exc}; fallback={fallback_exc}"
-            ) from fallback_exc
-        return video_service.VideoResult(
-            task_id=neironych_seedance_runtime.encode_task_id(fallback_task_id),
-            provider="neironych",
-            uses_webhook=False,
-        )
+    except Exception as fallback_exc:
+        raise RuntimeError(
+            f"{seedance25.MODEL_KEY} failed via primary Neironych and KIE fallback: "
+            f"primary={primary_error}; fallback={fallback_exc}"
+        ) from fallback_exc
 
 async def _veo_generate(
     video_service: Any,

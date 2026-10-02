@@ -285,6 +285,63 @@ async def generate_video(
     raw_image_url = image_url
     raw_reference_video_url = reference_video_url
 
+    if model == VideoModel.SEEDANCE_2:
+        images = _reference_list(raw_image_url)
+        fitted_images = [
+            ensure_video_reference_aspect_url(url) or url
+            for url in images
+            if url
+        ]
+        try:
+            task_id = await neironych_seedance_runtime.generate_product_video(
+                product_model=model.value,
+                prompt=prompt,
+                image_urls=fitted_images,
+                video_urls=_reference_list(raw_reference_video_url),
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+                idempotency_key=idempotency_key,
+            )
+            return VideoResult(
+                task_id=neironych_seedance_runtime.encode_task_id(task_id),
+                provider="neironych",
+                uses_webhook=False,
+            )
+        except Exception as primary_exc:
+            logger.warning(
+                "Seedance 2 primary Neironych submission failed; falling back to KIE: %s",
+                primary_exc,
+            )
+            try:
+                kie_images = await _prepare_video_reference_urls(raw_image_url)
+                kie_last_frame = await _prepare_video_reference_url(last_frame_url)
+                kie_reference_video = await _prepare_reference_video_url(raw_reference_video_url)
+                return await _kieai_generate(
+                    model,
+                    prompt,
+                    image_url=kie_images,
+                    last_frame_url=kie_last_frame,
+                    motion=motion,
+                    duration=duration,
+                    aspect_ratio=aspect_ratio,
+                    resolution=resolution,
+                    reference_video_url=kie_reference_video,
+                    grok_mode=grok_mode,
+                    audio_ids=audio_ids,
+                    character_ids=character_ids,
+                    video_start=video_start,
+                    video_end=video_end,
+                    seed=seed,
+                    source_task_id=source_task_id,
+                    callback_url=callback_url,
+                )
+            except Exception as fallback_exc:
+                raise RuntimeError(
+                    f"{model.value} failed via primary Neironych and KIE fallback: "
+                    f"primary={primary_exc}; fallback={fallback_exc}"
+                ) from fallback_exc
+
     image_url = await _prepare_video_reference_urls(image_url)
     last_frame_url = await _prepare_video_reference_url(last_frame_url)
     reference_video_url = await _prepare_reference_video_url(reference_video_url)
@@ -326,35 +383,8 @@ async def generate_video(
             source_task_id=source_task_id,
             callback_url=callback_url,
         )
-    except Exception as primary_exc:
-        if model != VideoModel.SEEDANCE_2:
-            raise _exact_model_failure(model, primary_exc) from primary_exc
-
-        logger.warning(
-            "Seedance 2 primary KIE submission failed; falling back to Neironych: %s",
-            primary_exc,
-        )
-        try:
-            fallback_task_id = await neironych_seedance_runtime.generate_product_video(
-                product_model=model.value,
-                prompt=prompt,
-                image_urls=_reference_list(raw_image_url),
-                video_urls=_reference_list(raw_reference_video_url),
-                duration=duration,
-                aspect_ratio=aspect_ratio,
-                resolution=resolution,
-                idempotency_key=idempotency_key,
-            )
-        except Exception as fallback_exc:
-            raise RuntimeError(
-                f"{model.value} failed via primary KIE and Neironych fallback: "
-                f"primary={primary_exc}; fallback={fallback_exc}"
-            ) from fallback_exc
-        return VideoResult(
-            task_id=neironych_seedance_runtime.encode_task_id(fallback_task_id),
-            provider="neironych",
-            uses_webhook=False,
-        )
+    except Exception as exc:
+        raise _exact_model_failure(model, exc) from exc
 
 
 async def _kieai_generate(
