@@ -102,6 +102,7 @@ jobs:
             tests/test_minimax_h3_adapter.py \
             tests/test_minimax_h3_runtime_guards.py \
             tests/test_minimax_h3_uploads.py \
+            tests/test_neironych_seedance_runtime.py \
             tests/test_seedance25_auto_multimodal.py \
             tests/test_seedance25_provider_payload.py \
             tests/test_seedance25_uploads.py \
@@ -124,6 +125,7 @@ jobs:
       - name: Provider contract tests
         run: |
           pytest -q \
+            tests/test_neironych_seedance_runtime.py \
             tests/test_genjutsu_integration.py \
             tests/test_minimax_h3_adapter.py \
             tests/test_minimax_h3_runtime_guards.py \
