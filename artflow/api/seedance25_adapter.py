@@ -372,6 +372,7 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
                 "Seedance 2.5 primary Neironych failed; falling back to KIE: %s",
                 primary_exc,
             )
+            primary_error = primary_exc
 
         try:
             prepared_images = _dedupe(
@@ -431,7 +432,7 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
         except Exception as fallback_exc:
             raise RuntimeError(
                 f"{MODEL_KEY} failed via primary Neironych and KIE fallback: "
-                f"primary={primary_exc}; fallback={fallback_exc}"
+                f"primary={primary_error}; fallback={fallback_exc}"
             ) from fallback_exc
 
     video_service.generate_video = generate_video
