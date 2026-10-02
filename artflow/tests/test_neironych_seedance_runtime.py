@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 
-def test_seedance20_single_image_maps_to_neironych_frame_contract() -> None:
+def test_seedance20_single_image_preserves_reference_list_semantics() -> None:
     from api.neironych_seedance_runtime import build_product_payload
 
     model, payload = build_product_payload(
@@ -18,8 +18,8 @@ def test_seedance20_single_image_maps_to_neironych_frame_contract() -> None:
     )
 
     assert model == "seedance-2.0"
-    assert payload["start_image"] == {"url": "https://cdn.example.test/start.jpg"}
-    assert "reference_images" not in payload
+    assert payload["reference_images"] == [{"url": "https://cdn.example.test/start.jpg"}]
+    assert "start_image" not in payload
     assert payload["duration"] == 5
     assert payload["aspect_ratio"] == "9:16"
 
@@ -63,8 +63,8 @@ def test_seedance25_identity_edit_maps_to_edit_contract() -> None:
     assert model == "seedance-2.5"
     assert payload["omni_reference_task_type"] == "edit"
     assert payload["reference_videos"] == [{"url": "https://cdn.example.test/source.mp4"}]
-    assert payload["duration"] == -1
-    assert payload["aspect_ratio"] == "adaptive"
+    assert "duration" not in payload
+    assert "aspect_ratio" not in payload
 
 
 @pytest.mark.asyncio
