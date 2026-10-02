@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from api import seedance25_adapter, video_service
+from api import neironych_seedance_runtime, seedance25_adapter, video_service
 from api.video_runtime_fixes import VEO_PUBLIC_CAPS, install_video_runtime_fixes
 from bot.services.veo_ui import install_veo_handler_presentation
 
@@ -15,7 +15,6 @@ from bot.services.veo_ui import install_veo_handler_presentation
 async def test_seedance_runtime_sends_prompt_inside_neironych_request(monkeypatch):
     install_video_runtime_fixes()
     submit = AsyncMock(return_value="seedance-task")
-    from api import neironych_seedance_runtime
     monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
 
     result = await video_service.generate_video(
@@ -40,7 +39,6 @@ async def test_seedance_runtime_sends_prompt_inside_neironych_request(monkeypatc
 async def test_seedance_runtime_forwards_video_references_to_neironych(monkeypatch):
     install_video_runtime_fixes()
     submit = AsyncMock(return_value="seedance-video-ref-task")
-    from api import neironych_seedance_runtime
     monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
 
     result = await video_service.generate_video(
@@ -111,7 +109,6 @@ async def test_seedance_edit_billing_rejects_multiple_source_videos() -> None:
 async def test_seedance_runtime_normalizes_explicit_video_edit_request(monkeypatch):
     install_video_runtime_fixes()
     submit = AsyncMock(return_value="seedance-edit-task")
-    from api import neironych_seedance_runtime
     monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
 
     await video_service.generate_video(
@@ -133,7 +130,6 @@ async def test_seedance_runtime_normalizes_explicit_video_edit_request(monkeypat
 async def test_seedance_runtime_multimodal_prompt_is_not_lost(monkeypatch):
     install_video_runtime_fixes()
     submit = AsyncMock(return_value="seedance-ref-task")
-    from api import neironych_seedance_runtime
     monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
 
     await video_service.generate_video(
