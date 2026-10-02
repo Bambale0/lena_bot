@@ -136,6 +136,9 @@ jobs:
             tests/test_seedance25_provider_payload.py \
             tests/test_seedance25_uploads.py \
             tests/test_seedance25_site_surface.py \
+            tests/test_video_service.py::test_generate_video_prepares_reference_urls_before_neironych_payload \
+            tests/test_video_service.py::test_generate_video_does_not_cross_model_fallback_on_neironych_error \
+            tests/test_comet_fallback.py::test_seedance2_neironych_error_does_not_cross_model_fallback \
             tests/test_video_service.py::test_ensure_video_reference_aspect_url_can_upscale_provider_small_image \
             tests/test_seedance25_admin_model_visibility.py \
             tests/test_suno_source_audio.py \
