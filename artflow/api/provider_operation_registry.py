@@ -40,6 +40,7 @@ from db.models import GenerationType
 class PollKind(StrEnum):
     NONE = "none"
     KIE = "kie"
+    NEIRONYCH = "neironych"
     VEO = "veo"
     HIGGSFIELD = "higgsfield"
     MIDJOURNEY = "midjourney"
@@ -196,7 +197,12 @@ def _build_specs() -> dict[str, OperationSpec]:
         )
 
     for contract_id, model in _PRIMARY_VIDEO_MODELS.items():
-        poll_kind = PollKind.VEO if model in {"veo3", "veo3_fast", "veo3_lite"} else PollKind.KIE
+        if model in {"veo3", "veo3_fast", "veo3_lite"}:
+            poll_kind = PollKind.VEO
+        elif model in {"bytedance/seedance-2", "bytedance/seedance-2-5"}:
+            poll_kind = PollKind.NEIRONYCH
+        else:
+            poll_kind = PollKind.KIE
         specs[contract_id] = OperationSpec(
             contract_id=contract_id,
             generation_type=GenerationType.video,
@@ -443,7 +449,8 @@ async def execute_operation(spec: OperationSpec, params: dict[str, Any]) -> Oper
         urls = tuple(result.result_urls or ([result.url] if result.url else []))
         return OperationStart(result.task_id, "comet" if not result.is_async else "kie", spec.poll_kind if result.is_async else PollKind.NONE, urls, result)
     if isinstance(result, video_service.VideoResult):
-        return OperationStart(result.task_id, result.provider, spec.poll_kind, uses_webhook=result.uses_webhook)
+        poll_kind = PollKind.NEIRONYCH if result.provider == "neironych" else spec.poll_kind
+        return OperationStart(result.task_id, result.provider, poll_kind, uses_webhook=result.uses_webhook)
     if isinstance(result, (advanced_video_service.MarketVideoTask, kling_grok_service.ProviderVideoTask)):
         return OperationStart(result.task_id, "kie", spec.poll_kind, uses_webhook=result.uses_webhook)
     if isinstance(result, suno_full_service.SunoTask):
@@ -487,6 +494,12 @@ def _state_from_payload(payload: dict[str, Any]) -> str:
 async def poll_operation(spec: OperationSpec, task_id: str) -> OperationStatus:
     if spec.poll_kind == PollKind.NONE:
         return OperationStatus("completed")
+    if spec.poll_kind == PollKind.NEIRONYCH:
+        try:
+            url = await video_service.get_poll_fn("neironych")(task_id)
+        except Exception as exc:
+            return OperationStatus("failed", error=str(exc))
+        return OperationStatus("completed", (url,), url) if url else OperationStatus("processing")
     if spec.poll_kind == PollKind.KIE:
         payload = await kieai_client.get_task_status(task_id)
         state = _state_from_payload(payload)
