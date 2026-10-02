@@ -24,6 +24,10 @@ _PROVIDER_POLL_BUDGETS: dict[str, tuple[str, str]] = {
         "HIGGSFIELD_POLL_INTERVAL_SECONDS",
         "HIGGSFIELD_POLL_TIMEOUT_SECONDS",
     ),
+    "neironych": (
+        "NEIRONYCH_POLL_INTERVAL_SECONDS",
+        "NEIRONYCH_POLL_TIMEOUT_SECONDS",
+    ),
 }
 
 _MIN_INTERVAL_SECONDS = 0.5
