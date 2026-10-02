@@ -10,7 +10,6 @@ from api.video_runtime_fixes import VEO_PUBLIC_CAPS, install_video_runtime_fixes
 from bot.services.veo_ui import install_veo_handler_presentation
 
 
-
 @pytest.mark.asyncio
 async def test_seedance_runtime_sends_prompt_inside_neironych_request(monkeypatch):
     install_video_runtime_fixes()
