@@ -11,10 +11,28 @@ from api.public_files import save_public_file
 from core.config import settings
 from core.neironych_seedance_contract import build_seedance_payload
 
+TASK_PREFIX = "neironych:"
+
 PRODUCT_MODELS = {
     "bytedance/seedance-2": "seedance-2.0",
     "bytedance/seedance-2-5": "seedance-2.5",
 }
+
+
+def encode_task_id(request_id: str) -> str:
+    raw = str(request_id or "").strip()
+    if not raw:
+        raise ValueError("Neironych request id is empty")
+    return raw if raw.startswith(TASK_PREFIX) else f"{TASK_PREFIX}{raw}"
+
+
+def is_task_id(task_id: str | None) -> bool:
+    return str(task_id or "").startswith(TASK_PREFIX)
+
+
+def decode_task_id(task_id: str) -> str:
+    raw = str(task_id or "").strip()
+    return raw[len(TASK_PREFIX):] if raw.startswith(TASK_PREFIX) else raw
 
 
 def _list(value: str | list[str] | None) -> list[str]:
@@ -127,6 +145,7 @@ async def generate_product_video(
 async def poll_product_video(request_id: str) -> str | None:
     """Return a durable APIX-owned video URL once Neironych reports completion."""
 
+    request_id = decode_task_id(request_id)
     client = _client()
     try:
         status = await client.get_video(request_id)
