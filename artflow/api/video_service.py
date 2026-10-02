@@ -275,6 +275,7 @@ async def generate_video(
     veo_generation_type: VideoGenerationType | str | None = None,
     watermark: str | None = None,
     enable_translation: bool = False,
+    idempotency_key: str | None = None,
 ) -> VideoResult:
     del image_bytes  # the URL/file-upload path is the canonical provider contract
 
@@ -296,6 +297,7 @@ async def generate_video(
                 duration=duration,
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
+                idempotency_key=idempotency_key,
             )
             return VideoResult(task_id=task_id, provider="neironych", uses_webhook=False)
         except Exception as exc:
