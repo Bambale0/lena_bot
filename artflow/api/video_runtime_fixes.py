@@ -239,6 +239,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
             "Seedance 2.5 primary Neironych submission failed; falling back to KIE: %s",
             primary_exc,
         )
+        primary_error = primary_exc
 
     try:
         kie_images = seedance25._dedupe(
@@ -312,7 +313,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
     except Exception as fallback_exc:
         raise RuntimeError(
             f"{seedance25.MODEL_KEY} failed via primary Neironych and KIE fallback: "
-            f"primary={primary_exc}; fallback={fallback_exc}"
+            f"primary={primary_error}; fallback={fallback_exc}"
         ) from fallback_exc
 
 async def _veo_generate(
