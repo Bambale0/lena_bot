@@ -219,6 +219,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         aspect_ratio=aspect_ratio,
         resolution=resolution,
         edit=video_edit,
+        idempotency_key=kwargs.get("idempotency_key"),
     )
     logger.info(
         "Neironych Seedance 2.5 task route=%s images=%d videos=%d audios=%d task=%s",
