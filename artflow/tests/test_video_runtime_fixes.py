@@ -26,7 +26,7 @@ async def test_seedance_runtime_sends_prompt_inside_neironych_request(monkeypatc
         callback_url="https://example.test/callback",
     )
 
-    assert result.task_id == "seedance-task"
+    assert result.task_id == "neironych:seedance-task"
     assert result.provider == "neironych"
     kwargs = submit.await_args.kwargs
     assert kwargs["prompt"] == "оживи фото"
@@ -53,7 +53,7 @@ async def test_seedance_runtime_forwards_video_references_to_neironych(monkeypat
         resolution="720p",
     )
 
-    assert result.task_id == "seedance-video-ref-task"
+    assert result.task_id == "neironych:seedance-video-ref-task"
     kwargs = submit.await_args.kwargs
     assert kwargs["image_urls"] == ["https://example.test/person.jpg"]
     assert kwargs["video_urls"] == [
