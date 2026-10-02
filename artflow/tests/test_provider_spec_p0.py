@@ -7,11 +7,15 @@ from api.video_service import VideoGenerationType, VideoModel
 
 
 @pytest.mark.asyncio
-async def test_video_failure_never_calls_cross_model_fallback(monkeypatch) -> None:
+async def test_seedance_provider_fallback_keeps_same_model_and_never_calls_comet(monkeypatch) -> None:
     comet_called = False
 
     async def fail_kie(payload: dict, callback_url: str | None = None) -> dict:
         raise RuntimeError("provider unavailable")
+
+    async def fallback_seedance(**kwargs) -> str:
+        assert kwargs["product_model"] == VideoModel.SEEDANCE_2.value
+        return "neur-same-model"
 
     async def forbidden_comet(**_kwargs):
         nonlocal comet_called
@@ -19,17 +23,23 @@ async def test_video_failure_never_calls_cross_model_fallback(monkeypatch) -> No
         raise AssertionError("cross-model fallback must not run")
 
     monkeypatch.setattr(video_service.kieai_client, "create_task", fail_kie)
+    monkeypatch.setattr(
+        video_service.neironych_seedance_runtime,
+        "generate_product_video",
+        fallback_seedance,
+    )
     monkeypatch.setattr(video_service.comet_fallback, "generate_video", forbidden_comet)
 
-    with pytest.raises(RuntimeError, match="cross-model fallback is disabled"):
-        await video_service.generate_video(
-            VideoModel.SEEDANCE_2,
-            "A cinematic scene",
-            duration=5,
-            aspect_ratio="16:9",
-            resolution="720p",
-        )
+    result = await video_service.generate_video(
+        VideoModel.SEEDANCE_2,
+        "A cinematic scene",
+        duration=5,
+        aspect_ratio="16:9",
+        resolution="720p",
+    )
 
+    assert result.provider == "neironych"
+    assert result.task_id == "neironych:neur-same-model"
     assert comet_called is False
 
 
