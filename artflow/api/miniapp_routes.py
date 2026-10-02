@@ -2522,6 +2522,7 @@ async def create_video_generation(
             video_end=normalized["video_end"],
             seed=normalized["seed"],
             callback_url=_kie_callback_url(),
+            idempotency_key=f"apix-video-{gen.id}",
         )
     except Exception as exc:
         logger.error("miniapp video gen error user=%s: %s", user.id, exc)
@@ -3228,6 +3229,7 @@ async def remix_feed_post(
                 video_end=normalized_video["video_end"],
                 seed=normalized_video["seed"],
                 callback_url=_kie_callback_url(),
+                idempotency_key=f"apix-video-{gen.id}",
             )
         else:
             result = await image_service.generate_image(
