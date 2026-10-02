@@ -176,9 +176,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         or ref
         for ref in raw_image_refs
     ]
-    prepared_images = seedance25._dedupe(
-        await video_service._prepare_video_reference_urls(fitted_image_refs)
-    )
+    prepared_images = seedance25._dedupe(fitted_image_refs)
 
     if role_plan is not None and len(prepared_images) != len(role_plan.image_urls):
         raise ValueError("Не удалось подготовить все фото без потери ролей. Загрузи референсы заново.")
@@ -187,72 +185,44 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         bool(raw_video_refs) and seedance25.is_explicit_video_edit_prompt(clean_prompt)
     )
     if video_edit:
-        # KIE/Seedance 2.5 video editing follows the source video's duration
-        # and frame geometry. Identity Transfer is always an edit operation.
+        # Neironych edit mode follows source video geometry/duration.
         aspect_ratio = "adaptive"
         duration = seedance25.DURATION_AUTO
 
     prepared_videos: list[str] = []
     for raw_video_ref in raw_video_refs[: seedance25.MAX_REFERENCE_VIDEOS]:
         await _validate_seedance_reference_video_url(raw_video_ref, video_edit=video_edit)
-        prepared_video = await video_service._prepare_reference_video_url(raw_video_ref)
-        if prepared_video and prepared_video not in prepared_videos:
-            prepared_videos.append(prepared_video)
+        if raw_video_ref not in prepared_videos:
+            prepared_videos.append(raw_video_ref)
 
     if content_edit is not None and len(prepared_videos) != 1:
-        raise ValueError("Seedance content edit lost its source video during upload")
+        raise ValueError("Seedance content edit lost its source video before provider submission")
 
-    prepared_audio_refs: list[str] = []
-    for audio_ref in audio_refs[: seedance25.MAX_REFERENCE_AUDIOS]:
-        uploaded = await video_service._upload_local_media(audio_ref, upload_path="audio/apix-video-refs")
-        if uploaded and uploaded not in prepared_audio_refs:
-            prepared_audio_refs.append(uploaded)
-
+    prepared_audio_refs = seedance25._dedupe(audio_refs)[: seedance25.MAX_REFERENCE_AUDIOS]
     route = seedance25.route_for_inputs(
         images=prepared_images,
         videos=prepared_videos,
         audios=prepared_audio_refs,
     )
-    input_payload = seedance25._seedance25_params(
-        {
-            "reference_image_urls": prepared_images,
-            "reference_video_urls": prepared_videos,
-            "reference_audio_urls": prepared_audio_refs,
-            "duration": duration,
-            "aspect_ratio": aspect_ratio,
-            "resolution": resolution,
-            "return_last_frame": control_options.get("return_last_frame", kwargs.get("return_last_frame", False)),
-            "generate_audio": False if identity_transfer else control_options.get(
-                "generate_audio", kwargs.get("generate_audio", True)
-            ),
-            "output_format": control_options.get("output_format", kwargs.get("output_format", "mp4")),
-            "web_search": control_options.get("web_search", kwargs.get("web_search")),
-            "nsfw_checker": kwargs.get("nsfw_checker"),
-        }
-    )
-    from api.video_prompt_limits import validate_video_prompt
-    validate_video_prompt(seedance25.MODEL_KEY, clean_prompt)
-    input_payload["prompt"] = clean_prompt
 
-    response = await video_service.kieai_client.create_task(
-        {"model": seedance25.MODEL_KEY, "input": input_payload},
-        callback_url=kwargs.get("callback_url"),
+    from api import neironych_seedance_runtime
+    from api.video_prompt_limits import validate_video_prompt
+
+    validate_video_prompt(seedance25.MODEL_KEY, clean_prompt)
+    task_id = await neironych_seedance_runtime.generate_product_video(
+        product_model=seedance25.MODEL_KEY,
+        prompt=clean_prompt,
+        image_urls=prepared_images,
+        video_urls=prepared_videos,
+        audio_urls=prepared_audio_refs,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        edit=video_edit,
+        idempotency_key=kwargs.get("idempotency_key"),
     )
-    if not isinstance(response, dict):
-        raise RuntimeError(f"KIE.AI video: invalid createTask response for {seedance25.MODEL_KEY}: {response!r}")
-    code = response.get("code")
-    if code not in (None, 200, "200"):
-        raise RuntimeError(
-            f"KIE.AI video createTask failed for {seedance25.MODEL_KEY}: {code} {response.get('msg')}"
-        )
-    data = response.get("data") or {}
-    if not isinstance(data, dict):
-        raise RuntimeError(f"KIE.AI video: invalid createTask data for {seedance25.MODEL_KEY}: {data!r}")
-    task_id = str(data.get("taskId") or response.get("taskId") or "").strip()
-    if not task_id:
-        raise RuntimeError(f"KIE.AI video: empty taskId for {seedance25.MODEL_KEY}: {response!r}")
     logger.info(
-        "KIE.AI Seedance 2.5 task route=%s images=%d videos=%d audios=%d task=%s",
+        "Neironych Seedance 2.5 task route=%s images=%d videos=%d audios=%d task=%s",
         "identity_transfer" if identity_transfer else ("video_edit" if video_edit else route),
         len(prepared_images),
         len(prepared_videos),
@@ -261,8 +231,8 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
     )
     return video_service.VideoResult(
         task_id=task_id,
-        provider="kieai",
-        uses_webhook=bool(kwargs.get("callback_url")),
+        provider="neironych",
+        uses_webhook=False,
     )
 
 async def _veo_generate(

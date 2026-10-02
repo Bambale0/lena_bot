@@ -174,6 +174,7 @@ def _plan_stars_price(plan: Any) -> int:
     return max(1, math.ceil(float(plan.price_rub) / _TELEGRAM_STARS_RUB_PER_STAR))
 
 _VEO_MODEL_KEYS = {item.value for item in (VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE)}
+_NEIRONYCH_SEEDANCE_MODEL_KEYS = {"bytedance/seedance-2", "bytedance/seedance-2-5"}
 _MIDJOURNEY_IMAGE_MODEL_KEYS = {"midjourney-imagine", "midjourney-blend", "midjourney-action"}
 _MIDJOURNEY_VIDEO_MODEL_KEYS = {"midjourney-video"}
 _MJ_STUDIO_IMAGE_MODELS = {"midjourney-imagine", "midjourney-blend"}
@@ -563,6 +564,8 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 result_url = await midjourney_service.poll_mj_video(task_id)
             elif gen.model in _VEO_MODEL_KEYS:
                 result_url = await video_service.poll_veo_status(task_id)
+            elif gen.model in _NEIRONYCH_SEEDANCE_MODEL_KEYS:
+                result_url = await video_service.get_poll_fn("neironych")(task_id)
             else:
                 result_url = await video_service.poll_kieai_status(task_id)
         else:
@@ -2519,6 +2522,7 @@ async def create_video_generation(
             video_end=normalized["video_end"],
             seed=normalized["seed"],
             callback_url=_kie_callback_url(),
+            idempotency_key=f"apix-video-{gen.id}",
         )
     except Exception as exc:
         logger.error("miniapp video gen error user=%s: %s", user.id, exc)
@@ -3225,6 +3229,7 @@ async def remix_feed_post(
                 video_end=normalized_video["video_end"],
                 seed=normalized_video["seed"],
                 callback_url=_kie_callback_url(),
+                idempotency_key=f"apix-video-{gen.id}",
             )
         else:
             result = await image_service.generate_image(

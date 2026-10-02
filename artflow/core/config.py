@@ -51,10 +51,13 @@ class Settings(BaseSettings):
     MUSIC_RECONCILE_INTERVAL_SECONDS: int = Field(default=300, ge=30, le=3600)
     MUSIC_RECONCILE_MIN_AGE_SECONDS: int = Field(default=180, ge=60, le=3600)
 
-    # Neironych API — isolated admin Seedance provider lab
+    # Neironych API — Seedance 2.0/2.5 production provider + admin lab
     NEIRONYCH_API_KEY: str = ""
     NEIRONYCH_API_BASE_URL: str = "https://api.xn--e1aikcel5c5a.online"
     NEIRONYCH_HTTP_TIMEOUT_SECONDS: float = 120.0
+    NEIRONYCH_POLL_INTERVAL_SECONDS: float = 10.0
+    NEIRONYCH_POLL_TIMEOUT_SECONDS: int = 1800
+    NEIRONYCH_MAX_VIDEO_BYTES: int = 250 * 1024 * 1024
     NEIRONYCH_TEST_POLL_INTERVAL_SECONDS: float = 10.0
     NEIRONYCH_TEST_POLL_TIMEOUT_SECONDS: int = 1800
     NEIRONYCH_TEST_MAX_VIDEO_BYTES: int = 250 * 1024 * 1024

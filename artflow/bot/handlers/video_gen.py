@@ -2033,6 +2033,7 @@ async def _launch_video_generation_from_state(
             video_end=data.get("video_clip_end"),
             seed=data.get("seed"),
             callback_url=_kie_callback_url(),
+            idempotency_key=f"apix-video-{gen_id}",
             **seedance_kwargs,
         )
     except Exception as e:
@@ -2721,6 +2722,7 @@ async def cb_regen_video(
             video_end=repeat_params.get("video_end"),
             seed=seed,
             callback_url=_kie_callback_url(),
+            idempotency_key=f"apix-video-{gen_id}",
         )
     except Exception as exc:
         logger.error("Video regeneration error: %s", exc)
