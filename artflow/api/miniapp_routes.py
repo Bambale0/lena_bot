@@ -174,6 +174,7 @@ def _plan_stars_price(plan: Any) -> int:
     return max(1, math.ceil(float(plan.price_rub) / _TELEGRAM_STARS_RUB_PER_STAR))
 
 _VEO_MODEL_KEYS = {item.value for item in (VideoModel.VEO_3, VideoModel.VEO_3_FAST, VideoModel.VEO_3_LITE)}
+_NEIRONYCH_SEEDANCE_MODEL_KEYS = {"bytedance/seedance-2", "bytedance/seedance-2-5"}
 _MIDJOURNEY_IMAGE_MODEL_KEYS = {"midjourney-imagine", "midjourney-blend", "midjourney-action"}
 _MIDJOURNEY_VIDEO_MODEL_KEYS = {"midjourney-video"}
 _MJ_STUDIO_IMAGE_MODELS = {"midjourney-imagine", "midjourney-blend"}
@@ -563,6 +564,8 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 result_url = await midjourney_service.poll_mj_video(task_id)
             elif gen.model in _VEO_MODEL_KEYS:
                 result_url = await video_service.poll_veo_status(task_id)
+            elif gen.model in _NEIRONYCH_SEEDANCE_MODEL_KEYS:
+                result_url = await video_service.get_poll_fn("neironych")(task_id)
             else:
                 result_url = await video_service.poll_kieai_status(task_id)
         else:
