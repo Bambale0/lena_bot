@@ -29,6 +29,17 @@ Set these variables both on the repository or environment:
 The server checkout must already contain production `.env` at `artflow/.env`.
 The deploy script never creates or overwrites `.env`.
 
+The application loads its runtime credentials only from `artflow/.env`.
+In particular, `NEIRONYCH_API_KEY` must come from this canonical file.
+The existing `.env.neironych` is a separate local lab file: production Compose
+must not load it. Leave that real file untouched; do not copy, rename, overwrite
+or delete it as part of a production deployment or credential repair.
+
+The `backend-quality` deploy-contract gate resolves Compose against synthetic
+files in a temporary directory, including a conflicting lab value, to prevent
+an optional local file from overriding or supplying production credentials.
+These tests never read either real server secret file.
+
 Required runtime tools:
 
 - Git
