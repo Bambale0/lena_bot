@@ -76,6 +76,8 @@ def build_product_payload(
         video_urls=videos,
         audio_urls=audios,
     )
+    if not selected_ratio:
+        payload.pop("aspect_ratio", None)
     return provider_model, payload
 
 
