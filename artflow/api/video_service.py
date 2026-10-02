@@ -22,7 +22,7 @@ except ImportError:
     class StrEnum(str, Enum):
         pass
 
-from api import comet_fallback, kieai_client
+from api import comet_fallback, kieai_client, neironych_seedance_runtime
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
 from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
 from api.video_prompt_limits import validate_video_prompt
@@ -278,8 +278,28 @@ async def generate_video(
 ) -> VideoResult:
     del image_bytes  # the URL/file-upload path is the canonical provider contract
 
-    # Never truncate Seedance prompts. Validate the exact KIE contract before upload/submission.
+    # Never truncate Seedance prompts. Validate the selected product contract before submission.
     prompt = validate_video_prompt(model.value, prompt)
+
+    if model == VideoModel.SEEDANCE_2:
+        try:
+            images = _reference_list(image_url)
+            fitted_images = [
+                ensure_video_reference_aspect_url(url) or url
+                for url in images
+                if url
+            ]
+            task_id = await neironych_seedance_runtime.generate_product_video(
+                product_model=model.value,
+                prompt=prompt,
+                image_urls=fitted_images,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+            )
+            return VideoResult(task_id=task_id, provider="neironych", uses_webhook=False)
+        except Exception as exc:
+            raise _exact_model_failure(model, exc) from exc
 
     image_url = await _prepare_video_reference_urls(image_url)
     last_frame_url = await _prepare_video_reference_url(last_frame_url)
@@ -720,6 +740,7 @@ async def poll_comet_status(task_id: str) -> str | None:
 
 POLL_FN_MAP: dict[str, Any] = {
     "kieai": poll_kieai_status,
+    "neironych": neironych_seedance_runtime.poll_product_video,
     "veo": poll_veo_status,
     "veo_4k": poll_veo_4k_status,
     "comet": poll_comet_status,
