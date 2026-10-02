@@ -111,6 +111,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           bash -n scripts/deploy-production.sh
+          ruff check tests/test_production_env_contract.py
+          python -m unittest discover -s tests -p test_production_env_contract.py -v
           grep -Fq 'docker compose run --rm -T app alembic upgrade head </dev/null' scripts/deploy-production.sh
           grep -Fq 'verifying Seedance 2.5 feed-repeat runtime and Telegram webhook' scripts/deploy-production.sh
 

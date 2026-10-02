@@ -939,3 +939,35 @@ Branch: `fix/neironych-direct-reference-upload`.
 - GREEN: all Neironych admin tests pass and Ruff is clean.
 - Live provider media upload smoke succeeded without starting a billed video generation.
 - Required CI, review, merge, autodeploy, production state/log checks remain release gates.
+
+
+---
+
+# Execution ledger - production Neironych credential source
+
+Date: 2026-10-02.
+Baseline: `0076d346c24fb80dbebac3312820e6c5d0289a23`.
+Branch: `fix/production-neironych-canonical-env`.
+
+## Evidence and scope
+- Live Seedance primary submissions returned HTTP 401 `invalid_api_key`, then KIE fallback.
+- Compose loads `.env.neironych` after `.env`, overriding the canonical production key.
+- Owner confirms `artflow/.env` is the only correct production credential source.
+- Do not read, modify, delete, rename or copy the real `.env.neironych`; neither real secret file is part of this change.
+- Neironych remains primary, KIE remains fallback; no billing, provider routing or DB changes.
+- Site, Mini App and Telegram bot share this app container and credential source.
+
+## Plan and acceptance
+1. Add real Compose resolution regression tests using synthetic files in a temporary directory; observe RED.
+2. Remove the lab overlay declaration from production Compose; leave the real lab file untouched.
+3. Gate the new tests in backend CI and document the single credential source.
+4. Verify GREEN, review the diff, PR auto-merge, exact-SHA CI and production autodeploy.
+5. Verify runtime key equality to canonical `.env` without exposing values, then a read-only provider auth probe. No billed test generations.
+
+## Verification
+- RED: 4 Compose tests ran; 2 failed because the synthetic lab value overrode/supplied the production key.
+- GREEN: the same 4 tests passed after removing only the lab env_file declaration.
+- Python compilation and deployment shell syntax passed.
+- backend-quality now runs these regressions (with real Docker Compose, no application/provider calls).
+- Exact-SHA CI, PR review/auto-merge, autodeploy and runtime verification remain pending.
+- Pre-deploy read-only auth probe: canonical `.env` key received HTTP 404 for a synthetic nonexistent video ID; unauthenticated control received HTTP 401. The running app still did not match the canonical key. No billed request was made.
