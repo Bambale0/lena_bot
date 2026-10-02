@@ -80,18 +80,22 @@ async def test_veo_poll_status_treats_flags_2_and_3_as_failure(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_generate_video_prepares_reference_urls_before_kie_payload(monkeypatch) -> None:
+async def test_generate_video_prepares_reference_urls_before_neironych_payload(monkeypatch) -> None:
     calls: list[dict] = []
 
     def fake_ensure(url: str | None) -> str | None:
         return f"{url}?fit=video" if url else url
 
-    async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
-        calls.append(payload)
-        return {"code": 200, "data": {"taskId": "task_1"}}
+    async def fake_generate_product_video(**kwargs) -> str:
+        calls.append(kwargs)
+        return "task_1"
 
     monkeypatch.setattr(video_service, "ensure_video_reference_aspect_url", fake_ensure)
-    monkeypatch.setattr(video_service.kieai_client, "create_task", fake_create_task)
+    monkeypatch.setattr(
+        video_service.neironych_seedance_runtime,
+        "generate_product_video",
+        fake_generate_product_video,
+    )
 
     result = await video_service.generate_video(
         VideoModel.SEEDANCE_2,
@@ -103,24 +107,29 @@ async def test_generate_video_prepares_reference_urls_before_kie_payload(monkeyp
     )
 
     assert result.task_id == "task_1"
-    assert calls[0]["input"]["reference_image_urls"] == [
+    assert result.provider == "neironych"
+    assert calls[0]["image_urls"] == [
         "https://example.test/ref-a.jpg?fit=video",
         "https://example.test/ref-b.jpg?fit=video",
     ]
 
 
 @pytest.mark.asyncio
-async def test_generate_video_skips_comet_fallback_for_kie_validation_error(monkeypatch) -> None:
-    async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
-        raise RuntimeError("KIE.AI video createTask failed: 422 Image aspect ratio must be between 1:2.5 and 2.5:1")
+async def test_generate_video_does_not_cross_model_fallback_on_neironych_error(monkeypatch) -> None:
+    async def fail_neironych(**kwargs):
+        raise RuntimeError("Neironych Seedance validation failed: invalid image ratio")
 
     async def fail_comet(**kwargs):
-        raise AssertionError("Comet fallback should not run for provider validation errors")
+        raise AssertionError("Comet fallback should not run for exact-model provider errors")
 
-    monkeypatch.setattr(video_service.kieai_client, "create_task", fake_create_task)
+    monkeypatch.setattr(
+        video_service.neironych_seedance_runtime,
+        "generate_product_video",
+        fail_neironych,
+    )
     monkeypatch.setattr(video_service.comet_fallback, "generate_video", fail_comet)
 
-    with pytest.raises(RuntimeError, match="Image aspect ratio"):
+    with pytest.raises(RuntimeError, match="invalid image ratio"):
         await video_service.generate_video(
             VideoModel.SEEDANCE_2,
             "animate",
