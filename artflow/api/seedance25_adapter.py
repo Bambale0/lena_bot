@@ -1,4 +1,4 @@
-"""Runtime support for KIE Bytedance Seedance 2.5.
+"""Runtime support for APIX Seedance 2.5.
 
 Seedance 2.5 is exposed as one public multimodal model. The user never chooses
 text/image/first-last/reference provider scenarios manually. APIX derives the
@@ -322,72 +322,48 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
         if "duration" in control_options:
             duration = control_options["duration"]
 
-        prepared_images = _dedupe(await video_service._prepare_video_reference_urls(image_url))
-
+        image_refs = _dedupe(image_url)[:MAX_REFERENCE_IMAGES]
         raw_video_refs = _dedupe([
             *_list(kwargs.get("reference_video_url")),
             *extra_video_refs,
-        ])
-        prepared_videos: list[str] = []
-        for raw_video_ref in raw_video_refs[:MAX_REFERENCE_VIDEOS]:
-            prepared_video = await video_service._prepare_reference_video_url(raw_video_ref)
-            if prepared_video and prepared_video not in prepared_videos:
-                prepared_videos.append(prepared_video)
-
-        prepared_audio_refs: list[str] = []
-        for audio_ref in audio_refs[:MAX_REFERENCE_AUDIOS]:
-            uploaded = await video_service._upload_local_media(audio_ref, upload_path="audio/apix-video-refs")
-            if uploaded and uploaded not in prepared_audio_refs:
-                prepared_audio_refs.append(uploaded)
+        ])[:MAX_REFERENCE_VIDEOS]
+        audio_refs = _dedupe(audio_refs)[:MAX_REFERENCE_AUDIOS]
 
         route = route_for_inputs(
-            images=prepared_images,
-            videos=prepared_videos,
-            audios=prepared_audio_refs,
+            images=image_refs,
+            videos=raw_video_refs,
+            audios=audio_refs,
         )
-        input_payload = _seedance25_params(
-            {
-                "reference_image_urls": prepared_images,
-                "reference_video_urls": prepared_videos,
-                "reference_audio_urls": prepared_audio_refs,
-                "duration": duration,
-                "aspect_ratio": aspect_ratio,
-                "resolution": resolution,
-                "return_last_frame": control_options.get("return_last_frame", kwargs.get("return_last_frame", False)),
-                "generate_audio": control_options.get("generate_audio", kwargs.get("generate_audio", True)),
-                "output_format": control_options.get("output_format", kwargs.get("output_format", "mp4")),
-                "web_search": control_options.get("web_search", kwargs.get("web_search")),
-                "nsfw_checker": kwargs.get("nsfw_checker"),
-            }
+        edit = bool(control_options.get("identity_transfer")) or (
+            bool(raw_video_refs) and is_explicit_video_edit_prompt(prompt)
         )
 
-        resp = await video_service.kieai_client.create_task(
-            {"model": MODEL_KEY, "input": input_payload},
-            callback_url=kwargs.get("callback_url"),
+        from api import neironych_seedance_runtime
+
+        task_id = await neironych_seedance_runtime.generate_product_video(
+            product_model=MODEL_KEY,
+            prompt=prompt,
+            image_urls=image_refs,
+            video_urls=raw_video_refs,
+            audio_urls=audio_refs,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            edit=edit,
         )
-        if not isinstance(resp, dict):
-            raise RuntimeError(f"KIE.AI video: invalid createTask response for {MODEL_KEY}: {resp!r}")
-        code = resp.get("code")
-        if code not in (None, 200, "200"):
-            raise RuntimeError(f"KIE.AI video createTask failed for {MODEL_KEY}: {code} {resp.get('msg')}")
-        data = resp.get("data") or {}
-        if not isinstance(data, dict):
-            raise RuntimeError(f"KIE.AI video: invalid createTask data for {MODEL_KEY}: {data!r}")
-        task_id = str(data.get("taskId") or resp.get("taskId") or "").strip()
-        if not task_id:
-            raise RuntimeError(f"KIE.AI video: empty taskId for {MODEL_KEY}: {resp!r}")
         logger.info(
-            "KIE.AI Seedance 2.5 task route=%s images=%d videos=%d audios=%d task=%s",
+            "Neironych Seedance 2.5 task route=%s edit=%s images=%d videos=%d audios=%d task=%s",
             route,
-            len(prepared_images),
-            len(prepared_videos),
-            len(prepared_audio_refs),
+            edit,
+            len(image_refs),
+            len(raw_video_refs),
+            len(audio_refs),
             task_id,
         )
         return video_service.VideoResult(
             task_id=task_id,
-            provider="kieai",
-            uses_webhook=bool(kwargs.get("callback_url")),
+            provider="neironych",
+            uses_webhook=False,
         )
 
     video_service.generate_video = generate_video
