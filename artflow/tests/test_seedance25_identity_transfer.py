@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
-from api import seedance25_adapter, video_service
+from api import neironych_seedance_runtime, seedance25_adapter, video_service
 from api.video_runtime_fixes import install_video_runtime_fixes
 from bot.keyboards.models import video_mode_kb, video_params_kb
 
@@ -104,8 +105,6 @@ async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_r
     monkeypatch,
     resolution: str,
 ) -> None:
-    from unittest.mock import AsyncMock
-    from api import neironych_seedance_runtime
 
     install_video_runtime_fixes()
     submit = AsyncMock(return_value=f"identity-{resolution}")
