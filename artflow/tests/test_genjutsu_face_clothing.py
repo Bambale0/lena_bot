@@ -5,9 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from api import neironych_seedance_runtime
+from api import neironych_seedance_runtime, video_service
 from api import seedance25_adapter as s25
-from api import video_service
 from core.seedance_repeat_overrides import (
     build_seedance_repeat_prompt,
     build_seedance_repeat_reference_plan,
