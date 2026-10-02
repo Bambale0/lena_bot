@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 
-from api import neironych_seedance_runtime, seedance25_adapter, video_service
+from api import seedance25_adapter, video_service
 from api.video_runtime_fixes import install_video_runtime_fixes
 from bot.keyboards.models import video_mode_kb, video_params_kb
 
@@ -105,14 +104,25 @@ async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_r
     monkeypatch,
     resolution: str,
 ) -> None:
-
     install_video_runtime_fixes()
-    submit = AsyncMock(return_value=f"identity-{resolution}")
+    calls: list[dict] = []
+
+    async def create_task(payload, callback_url=None):
+        calls.append(payload)
+        return {"code": 200, "data": {"taskId": f"identity-{resolution}"}}
+
+    async def prepare_images(value):
+        return value
+
+    async def prepare_video(value):
+        return value
 
     async def validate_video(_url, *, video_edit=False):
         assert video_edit is True
 
-    monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
+    monkeypatch.setattr(video_service.kieai_client, "create_task", create_task)
+    monkeypatch.setattr(video_service, "_prepare_video_reference_urls", prepare_images)
+    monkeypatch.setattr(video_service, "_prepare_reference_video_url", prepare_video)
     monkeypatch.setattr(
         "api.video_runtime_fixes._validate_seedance_reference_video_url",
         validate_video,
@@ -136,20 +146,22 @@ async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_r
         ],
     )
 
-    kwargs = submit.await_args.kwargs
-    assert kwargs["resolution"] == resolution
-    assert kwargs["edit"] is True
-    assert kwargs["image_urls"] == [
+    provider_input = calls[0]["input"]
+    assert provider_input["resolution"] == resolution
+    assert provider_input["aspect_ratio"] == "adaptive"
+    assert provider_input["duration"] == -1
+    assert provider_input["generate_audio"] is False
+    assert provider_input["reference_image_urls"] == [
         "https://example.test/front.jpg",
         "https://example.test/three-quarter.jpg",
         "https://example.test/profile.jpg",
     ]
-    assert kwargs["video_urls"] == ["https://example.test/source.mp4"]
-    assert "@Image1" in kwargs["prompt"]
-    assert "@Image2" in kwargs["prompt"]
-    assert "@Image3" in kwargs["prompt"]
-    assert "@Video1" in kwargs["prompt"]
-    assert "keep the source outfit" in kwargs["prompt"]
+    assert provider_input["reference_video_urls"] == ["https://example.test/source.mp4"]
+    assert "@Image1" in provider_input["prompt"]
+    assert "@Image2" in provider_input["prompt"]
+    assert "@Image3" in provider_input["prompt"]
+    assert "@Video1" in provider_input["prompt"]
+    assert "keep the source outfit" in provider_input["prompt"]
 
 
 def test_telegram_seedance_identity_mode_and_quality_choices_are_explicit() -> None:
