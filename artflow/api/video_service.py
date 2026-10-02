@@ -279,29 +279,11 @@ async def generate_video(
 ) -> VideoResult:
     del image_bytes  # the URL/file-upload path is the canonical provider contract
 
-    # Never truncate Seedance prompts. Validate the selected product contract before submission.
+    # Never truncate Seedance prompts. Validate before touching either provider.
     prompt = validate_video_prompt(model.value, prompt)
 
-    if model == VideoModel.SEEDANCE_2:
-        try:
-            images = _reference_list(image_url)
-            fitted_images = [
-                ensure_video_reference_aspect_url(url) or url
-                for url in images
-                if url
-            ]
-            task_id = await neironych_seedance_runtime.generate_product_video(
-                product_model=model.value,
-                prompt=prompt,
-                image_urls=fitted_images,
-                duration=duration,
-                aspect_ratio=aspect_ratio,
-                resolution=resolution,
-                idempotency_key=idempotency_key,
-            )
-            return VideoResult(task_id=task_id, provider="neironych", uses_webhook=False)
-        except Exception as exc:
-            raise _exact_model_failure(model, exc) from exc
+    raw_image_url = image_url
+    raw_reference_video_url = reference_video_url
 
     image_url = await _prepare_video_reference_urls(image_url)
     last_frame_url = await _prepare_video_reference_url(last_frame_url)
@@ -344,8 +326,35 @@ async def generate_video(
             source_task_id=source_task_id,
             callback_url=callback_url,
         )
-    except Exception as exc:
-        raise _exact_model_failure(model, exc) from exc
+    except Exception as primary_exc:
+        if model != VideoModel.SEEDANCE_2:
+            raise _exact_model_failure(model, primary_exc) from primary_exc
+
+        logger.warning(
+            "Seedance 2 primary KIE submission failed; falling back to Neironych: %s",
+            primary_exc,
+        )
+        try:
+            fallback_task_id = await neironych_seedance_runtime.generate_product_video(
+                product_model=model.value,
+                prompt=prompt,
+                image_urls=_reference_list(raw_image_url),
+                video_urls=_reference_list(raw_reference_video_url),
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+                idempotency_key=idempotency_key,
+            )
+        except Exception as fallback_exc:
+            raise RuntimeError(
+                f"{model.value} failed via primary KIE and Neironych fallback: "
+                f"primary={primary_exc}; fallback={fallback_exc}"
+            ) from fallback_exc
+        return VideoResult(
+            task_id=neironych_seedance_runtime.encode_task_id(fallback_task_id),
+            provider="neironych",
+            uses_webhook=False,
+        )
 
 
 async def _kieai_generate(

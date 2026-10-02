@@ -189,12 +189,11 @@ async def test_confirm_reaches_real_provider_and_persists_full_repeat_snapshot(
     ]
     assert params["reference_video_url"] == "https://example.test/source.mp4"
     assert billing.spend.await_args.args[2] == 21
-    request = provider.await_args.kwargs
-    assert request["video_urls"] == [params["reference_video_url"]]
-    assert request["image_urls"] == params["image_url"]
-    assert request["edit"] is True
-    assert "@Image2 is the clothing" in request["prompt"]
-    assert 'must read exactly "25"' in request["prompt"]
+    payload = provider.await_args.args[0]["input"]
+    assert payload["reference_video_urls"] == [params["reference_video_url"]]
+    assert payload["reference_image_urls"] == params["image_url"]
+    assert "@Image2 is the clothing" in payload["prompt"]
+    assert 'must read exactly "25"' in payload["prompt"]
     await callback(f"gjreplace:launch:{token}", state, io)
     assert billing.spend.await_count == 1
 
@@ -296,7 +295,7 @@ async def test_resolution_prices_come_from_current_rate_and_source_duration(
     await action("launch", state, io)
     assert billing.spend.await_args.args[2] == rate * 7
     assert resolve.await_args.kwargs["resolution"] == resolution
-    assert provider.await_args.kwargs["resolution"] == resolution
+    assert provider.await_args.args[0]["input"]["resolution"] == resolution
 
 
 @pytest.mark.asyncio
