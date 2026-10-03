@@ -971,3 +971,32 @@ Branch: `fix/production-neironych-canonical-env`.
 - backend-quality now runs these regressions (with real Docker Compose, no application/provider calls).
 - Exact-SHA CI, PR review/auto-merge, autodeploy and runtime verification remain pending.
 - Pre-deploy read-only auth probe: canonical `.env` key received HTTP 404 for a synthetic nonexistent video ID; unauthenticated control received HTTP 401. The running app still did not match the canonical key. No billed request was made.
+
+---
+
+# Execution ledger - temporary KIE primary for Seedance
+
+Date: 2026-10-03.
+Baseline: `da7f94e48347fd8e5ac279dbb4e282d40756edb0`.
+Branch: `fix/seedance-kie-primary`.
+
+## Scope and acceptance
+- Seedance 2 and both Seedance 2.5 submission paths currently prefer Neironych; KIE is secondary. Fast/Mini already use KIE.
+- User requests temporary KIE primary and authorizes merge.
+- Use one validated `SEEDANCE_PRIMARY_PROVIDER` setting, default `kieai`; `neironych` restores the previous order after app restart.
+- Preserve same-model fallback, existing request preparation, billing, callbacks and polling of in-flight tasks from either provider.
+- `site`, `mini_app`, `telegram_bot` all share the generation backend and provider order. Public parameters and pricing are unchanged.
+- No migrations or new secrets. Existing environment configuration is reused; a DB/admin routing control plane is outside this temporary operational switch.
+
+## Plan and verification
+1. RED: four provider-order regressions failed against the baseline because Neironych ran first.
+2. GREEN: the same five-test file passes with KIE first and Neironych secondary.
+3. Verify configurable reversal, media/edit payloads, failure handling and the legacy Seedance 2.5 wrapper; run focused checks and review.
+4. Create PR, enable native squash auto-merge after review, and verify required exact-SHA CI.
+5. Verify Production Autodeploy and public health for the merge SHA.
+
+## Local results
+- 93 focused tests passed on Python 3.14: provider order/reversal, both-provider failure, KIE media/edit/identity payloads, legacy wrapper, existing Neironych contracts and product-surface guards.
+- New routing module is included in the provider CI compile/lint gate; routing tests already belong to that gate.
+- Four initial routing failures reproduced the old Neironych-first behavior before implementation.
+- Exact Python 3.12 CI, independent review, merge and deploy verification remain pending.

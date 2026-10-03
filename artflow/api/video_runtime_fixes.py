@@ -16,6 +16,7 @@ from api.seedance25_identity import (
     build_identity_transfer_prompt,
     validate_identity_transfer_refs,
 )
+from api.seedance_provider_routing import submit_seedance
 from core.seedance_repeat_overrides import (
     build_seedance_content_edit_prompt,
     restore_seedance_reference_plan,
@@ -208,7 +209,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
 
     validate_video_prompt(seedance25.MODEL_KEY, clean_prompt)
 
-    try:
+    async def submit_neironych() -> Any:
         task_id = await neironych_seedance_runtime.generate_product_video(
             product_model=seedance25.MODEL_KEY,
             prompt=clean_prompt,
@@ -234,14 +235,8 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
             provider="neironych",
             uses_webhook=False,
         )
-    except Exception as primary_exc:
-        logger.warning(
-            "Seedance 2.5 primary Neironych submission failed; falling back to KIE: %s",
-            primary_exc,
-        )
-        primary_error = primary_exc
 
-    try:
+    async def submit_kie() -> Any:
         kie_images = seedance25._dedupe(
             await video_service._prepare_video_reference_urls(fitted_image_refs)
         )
@@ -297,24 +292,22 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
         data = response.get("data") or {}
         if not isinstance(data, dict):
             raise RuntimeError(f"KIE.AI video: invalid createTask data for {seedance25.MODEL_KEY}: {data!r}")
-        fallback_task_id = str(data.get("taskId") or response.get("taskId") or "").strip()
-        if not fallback_task_id:
+        kie_task_id = str(data.get("taskId") or response.get("taskId") or "").strip()
+        if not kie_task_id:
             raise RuntimeError(f"KIE.AI video: empty taskId for {seedance25.MODEL_KEY}: {response!r}")
         logger.info(
-            "KIE fallback Seedance 2.5 task route=%s task=%s",
+            "KIE Seedance 2.5 task route=%s task=%s",
             "identity_transfer" if identity_transfer else ("video_edit" if video_edit else route),
-            fallback_task_id,
+            kie_task_id,
         )
         return video_service.VideoResult(
-            task_id=fallback_task_id,
+            task_id=kie_task_id,
             provider="kieai",
             uses_webhook=bool(kwargs.get("callback_url")),
         )
-    except Exception as fallback_exc:
-        raise RuntimeError(
-            f"{seedance25.MODEL_KEY} failed via primary Neironych and KIE fallback: "
-            f"primary={primary_error}; fallback={fallback_exc}"
-        ) from fallback_exc
+
+    return await submit_seedance(seedance25.MODEL_KEY, kie=submit_kie, neironych=submit_neironych)
+
 
 async def _veo_generate(
     video_service: Any,

@@ -25,6 +25,7 @@ except ImportError:
 from api import comet_fallback, kieai_client, neironych_seedance_runtime
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
 from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
+from api.seedance_provider_routing import submit_seedance
 from api.video_prompt_limits import validate_video_prompt
 from core.gemini_omni import (
     build_gemini_omni_audio_payload,
@@ -292,7 +293,8 @@ async def generate_video(
             for url in images
             if url
         ]
-        try:
+
+        async def submit_neironych() -> VideoResult:
             task_id = await neironych_seedance_runtime.generate_product_video(
                 product_model=model.value,
                 prompt=prompt,
@@ -308,39 +310,32 @@ async def generate_video(
                 provider="neironych",
                 uses_webhook=False,
             )
-        except Exception as primary_exc:
-            logger.warning(
-                "Seedance 2 primary Neironych submission failed; falling back to KIE: %s",
-                primary_exc,
+
+        async def submit_kie() -> VideoResult:
+            kie_images = await _prepare_video_reference_urls(raw_image_url)
+            kie_last_frame = await _prepare_video_reference_url(last_frame_url)
+            kie_reference_video = await _prepare_reference_video_url(raw_reference_video_url)
+            return await _kieai_generate(
+                model,
+                prompt,
+                image_url=kie_images,
+                last_frame_url=kie_last_frame,
+                motion=motion,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+                reference_video_url=kie_reference_video,
+                grok_mode=grok_mode,
+                audio_ids=audio_ids,
+                character_ids=character_ids,
+                video_start=video_start,
+                video_end=video_end,
+                seed=seed,
+                source_task_id=source_task_id,
+                callback_url=callback_url,
             )
-            try:
-                kie_images = await _prepare_video_reference_urls(raw_image_url)
-                kie_last_frame = await _prepare_video_reference_url(last_frame_url)
-                kie_reference_video = await _prepare_reference_video_url(raw_reference_video_url)
-                return await _kieai_generate(
-                    model,
-                    prompt,
-                    image_url=kie_images,
-                    last_frame_url=kie_last_frame,
-                    motion=motion,
-                    duration=duration,
-                    aspect_ratio=aspect_ratio,
-                    resolution=resolution,
-                    reference_video_url=kie_reference_video,
-                    grok_mode=grok_mode,
-                    audio_ids=audio_ids,
-                    character_ids=character_ids,
-                    video_start=video_start,
-                    video_end=video_end,
-                    seed=seed,
-                    source_task_id=source_task_id,
-                    callback_url=callback_url,
-                )
-            except Exception as fallback_exc:
-                raise RuntimeError(
-                    f"{model.value} failed via primary Neironych and KIE fallback: "
-                    f"primary={primary_exc}; fallback={fallback_exc}"
-                ) from fallback_exc
+
+        return await submit_seedance(model.value, kie=submit_kie, neironych=submit_neironych)
 
     image_url = await _prepare_video_reference_urls(image_url)
     last_frame_url = await _prepare_video_reference_url(last_frame_url)

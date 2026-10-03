@@ -43,6 +43,7 @@ jobs:
             api/minimax_h3_product_surface.py \
             api/minimax_h3_runtime_guards.py \
             api/neironych_seedance_runtime.py \
+            api/seedance_provider_routing.py \
             api/seedance25_adapter.py \
             api/seedance25_product_surface.py \
             api/suno_source_audio.py \
@@ -71,6 +72,7 @@ jobs:
       - name: Ruff provider integration
         run: |
           ruff check \
+            api/seedance_provider_routing.py \
             api/minimax_h3_adapter.py \
             api/minimax_h3_pricing.py \
             api/minimax_h3_product_surface.py \

@@ -1,5 +1,6 @@
 # core/config.py
 import os
+from typing import Literal
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,6 +49,7 @@ class Settings(BaseSettings):
 
     # kie.ai
     KIE_AI_KEY: str = ""
+    SEEDANCE_PRIMARY_PROVIDER: Literal["kieai", "neironych"] = "kieai"
     MUSIC_RECONCILE_INTERVAL_SECONDS: int = Field(default=300, ge=30, le=3600)
     MUSIC_RECONCILE_MIN_AGE_SECONDS: int = Field(default=180, ge=60, le=3600)
 

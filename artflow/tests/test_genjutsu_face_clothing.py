@@ -7,6 +7,7 @@ import pytest
 
 from api import neironych_seedance_runtime, video_service
 from api import seedance25_adapter as s25
+from core.config import settings
 from core.seedance_repeat_overrides import (
     build_seedance_repeat_prompt,
     build_seedance_repeat_reference_plan,
@@ -72,6 +73,7 @@ def test_identity_only_edit_replaces_face_instead_of_keeping_content_unchanged()
 
 @pytest.fixture
 def provider(monkeypatch):
+    monkeypatch.setattr(settings, "SEEDANCE_PRIMARY_PROVIDER", "neironych")
     monkeypatch.setattr(
         "api.video_runtime_fixes._validate_seedance_reference_video_url", AsyncMock()
     )

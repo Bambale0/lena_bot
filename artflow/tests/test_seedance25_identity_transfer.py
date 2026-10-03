@@ -113,6 +113,7 @@ async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_r
         assert video_edit is True
 
     monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit)
+    monkeypatch.setattr("core.config.settings.SEEDANCE_PRIMARY_PROVIDER", "neironych")
     monkeypatch.setattr(
         "api.video_runtime_fixes._validate_seedance_reference_video_url",
         validate_video,
