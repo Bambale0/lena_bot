@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.i18n import t
 from bot.keyboards.main_menu import back_to_menu_kb, balance_screen_kb
 from bot.legal_offer import PUBLIC_OFFER_PAGES
+from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from db import repository as repo
@@ -542,12 +543,24 @@ async def cb_history(
             gen.status.value, "❓"
         )
         lines.append(
-            f"{i}. {icon} {status_icon} <code>{gen.model}</code>\n"
-            f"   <i>{gen.prompt[:60]}{'...' if len(gen.prompt) > 60 else ''}</i>\n"
+            f"{i}. {icon} {status_icon} <code>{escape(gen.model)}</code>\n"
+            f"   <i>{escape(gen.prompt[:60])}{'...' if len(gen.prompt) > 60 else ''}</i>\n"
             f"   -{gen.credits_spent} 💋"
+            + provider_task_reference(getattr(gen, "task_id", None), language=lang)
         )
 
+    # Keep each entry (including its full provider ID) intact when paging HTML.
+    pages: list[str] = []
+    page = lines[0]
+    for entry in lines[1:]:
+        if len(page) + len(entry) + 1 > 3500:
+            pages.append(page)
+            page = lines[0]
+        page += "\n" + entry
+    pages.append(page)
     await call.message.edit_text(  # type: ignore[union-attr]
-        "\n".join(lines), reply_markup=back_to_menu_kb()
+        pages[0], reply_markup=back_to_menu_kb()
     )
+    for page in pages[1:]:
+        await call.message.answer(page, reply_markup=back_to_menu_kb())  # type: ignore[union-attr]
     await call.answer()

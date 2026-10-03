@@ -1000,3 +1000,33 @@ Branch: `fix/seedance-kie-primary`.
 - New routing module is included in the provider CI compile/lint gate; routing tests already belong to that gate.
 - Four initial routing failures reproduced the old Neironych-first behavior before implementation.
 - Exact Python 3.12 CI, independent review, merge and deploy verification remain pending.
+
+---
+
+# Execution ledger - provider task IDs in Telegram
+
+Date: 2026-10-03.
+Baseline: `9c045a2db0c57b717d8ba29a74147b25f92c9d3b`.
+Branch: `feat/bot-provider-task-id`.
+
+## Existing state and requested outcome
+- User explicitly wants the provider task ID (KIE/Neironych) to find disputed generations in provider dashboards.
+- Generation.task_id already persists provider IDs with internal routing prefixes where applicable. Existing admin search matches task_id.
+- Telegram launch, result and failure messages mostly omit this ID. History lists also omit it.
+- Add a copyable HTML code reference to bot launch acknowledgments, results, terminal failures and own history. Decode only documented internal prefixes; never invent an ID when a provider has not assigned one.
+- Apply to image/video/music/Midjourney delivery paths, including callbacks, polling and file/link fallbacks. Do not expose other users' tasks or change ownership checks.
+- `telegram_bot`: explicitly requested surface. `site` / `mini_app`: no UI change requested; provider persistence and admin search remain shared. No schema changes, migrations or new configuration.
+
+## Plan and acceptance
+1. Add message-boundary regressions and observe missing-ID failures.
+2. Reuse persisted provider IDs through one HTML-safe formatter and wire bot delivery paths.
+3. Verify launch, webhook/poll success and failure, history recovery, prefix decoding, missing-ID behavior and Telegram length limits.
+4. Run focused lint/tests, independent standards/spec review, required CI, PR delivery and production verification.
+
+## Implementation and local verification
+- Shared formatter renders escaped, complete provider IDs in HTML code spans; strips documented web/neironych/nexus/comet transport namespaces and leaves unknown IDs intact. Missing task IDs produce no label.
+- Wired accepted-task acknowledgments, webhook/poll results and errors, original-file/link fallbacks, Midjourney actions/modal, and the owner's newest ten history records. History pages preserve complete IDs within Telegram message limits.
+- RED: three result-caption regressions failed for missing IDs before implementation. GREEN: 111 focused tests pass on pinned Python 3.12, including actual Neironych video launch, polling success/failure and music webhook delivery. 42 additional image-reference tests pass (one pre-existing model-selection test is incompatible with the baseline handler signature and is outside the maintained CI gate).
+- Formatter tests cover HTML safety, missing IDs, routing namespaces, unknown prefixes, history ownership query and full-ID pagination. Ruff maintained changed files and git diff whitespace checks pass.
+- New formatter and tests included in maintained CI gates. No paid generation initiated.
+- Independent Standards/Spec review, required GitHub CI and exact-SHA production deployment checks follow.

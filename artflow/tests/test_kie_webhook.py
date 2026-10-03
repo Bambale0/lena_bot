@@ -109,13 +109,13 @@ def test_extract_error_prefers_nested_message() -> None:
 
 
 def test_kie_result_caption_hides_feed_prompt() -> None:
-    gen = SimpleNamespace(prompt="secret feed prompt", source_feed_gen_id=42)
-    assert main._kie_result_caption(gen) == "✅ <b>Готово!</b>"
+    gen = SimpleNamespace(prompt="secret feed prompt", source_feed_gen_id=42, task_id="kie-task-42")
+    assert main._kie_result_caption(gen) == "✅ <b>Готово!</b>\n\n🆔 ID задачи: <code>kie-task-42</code>"
 
 
 def test_kie_result_caption_hides_own_prompt_preview() -> None:
-    gen = SimpleNamespace(prompt="own prompt", source_feed_gen_id=None)
-    assert main._kie_result_caption(gen) == "✅ <b>Готово!</b>"
+    gen = SimpleNamespace(prompt="own prompt", source_feed_gen_id=None, task_id="nexus:request-42")
+    assert main._kie_result_caption(gen) == "✅ <b>Готово!</b>\n\n🆔 ID задачи: <code>request-42</code>"
 
 
 def test_prompt_menu_text_does_not_inline_prompt() -> None:

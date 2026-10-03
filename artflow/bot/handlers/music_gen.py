@@ -8,6 +8,7 @@ from api.suno_source_audio import create_source_audio_generation, upload_source_
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.states import MusicFSM
 from bot.ui.router import render_screen
+from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import GenerationType, User
@@ -218,7 +219,8 @@ async def music_source_prompt(msg: Message, state: FSMContext, session: AsyncSes
         if gen.task_id:
             register_task(str(gen.task_id), msg.from_user.id)  # type: ignore[union-attr]
         await msg.answer(
-            "🎵 <b>Задача с твоим аудио запущена!</b>\n\nРезультат придёт сюда автоматически.",
+            "🎵 <b>Задача с твоим аудио запущена!</b>\n\nРезультат придёт сюда автоматически."
+            + provider_task_reference(gen.task_id),
             reply_markup=back_to_menu_kb(),
         )
     except PermissionError as exc:
@@ -271,7 +273,8 @@ async def music_prompt(msg: Message, state: FSMContext, session: AsyncSession, d
         register_miniapp_task(task_id, gen.id)
         await repo.update_generation_task(session, gen.id, task_id)
         await msg.answer(
-            "🎵 <b>Генерация запущена!</b>\n\nТрек придёт сюда автоматически (~1-2 мин).",
+            "🎵 <b>Генерация запущена!</b>\n\nТрек придёт сюда автоматически (~1-2 мин)."
+            + provider_task_reference(task_id),
             reply_markup=back_to_menu_kb(),
         )
     except Exception as e:

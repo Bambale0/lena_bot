@@ -45,6 +45,7 @@ from bot.keyboards.models import (
 )
 from bot.states import ImageGenFSM
 from bot.ui.router import render_screen
+from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_images import (
     send_image_group_to_message,
     send_image_to_message,
@@ -960,6 +961,7 @@ async def _launch_session_generation(
     prompt_actions_allowed = publish_actions_allowed and action_type != ImageGenerationAction.repeat
     prompt_for_menu = prompt if prompt_actions_allowed else None
     await repo.update_generation_task(session, gen.id, result.task_id or "")
+    task_reference = provider_task_reference(result.task_id)
     await _sync_state_with_image_session(state, image_session)
     await state.update_data(credits=nominal_credits, source_feed_gen_id=source_feed_gen_id)
 
@@ -975,7 +977,7 @@ async def _launch_session_generation(
                 refund_note="bot_image_reference_echo",
             )
             await status_msg.edit_text(
-                "❌ Генератор вернул референс вместо нового результата. 💋 возвращены.",
+                "❌ Генератор вернул референс вместо нового результата. 💋 возвращены." + task_reference,
                 reply_markup=image_session_kb(parent_generation_id, allow_publish=publish_actions_allowed),
             )
             return False
@@ -994,6 +996,7 @@ async def _launch_session_generation(
             + (f"🖼️ <b>Вариантов:</b> {len(result_urls)}\n\n" if len(result_urls) > 1 else "")
             + "🎨 <b>Серия активна.</b>\n"
             + "Теперь просто отправляй новый текст или фото — настройки сохранятся."
+            + task_reference
         )
         deliveries = []
         if len(result_urls) > 1:
@@ -1045,7 +1048,8 @@ async def _launch_session_generation(
                     message=source_message,
                     result_url=url,
                     generation_id=f"{gen.id}_{idx + 1}",
-                    caption=(f"Исходник {idx + 1}/{len(result_urls)}" if len(result_urls) > 1 else "Исходник"),
+                    caption=(f"Исходник {idx + 1}/{len(result_urls)}" if len(result_urls) > 1 else "Исходник")
+                    + task_reference,
                     log_prefix="image-gen-source-document",
                 )
                 if not sent:
@@ -1057,7 +1061,7 @@ async def _launch_session_generation(
             await source_message.answer(
                 "✅ <b>Результат готов.</b>\n\n"
                 "Telegram не принял часть файлов, поэтому оставляю прямую ссылку:\n"
-                f"{links}",
+                f"{links}" + task_reference,
             )
 
         await source_message.answer(
@@ -1072,7 +1076,7 @@ async def _launch_session_generation(
         return True
 
     await status_msg.edit_text(
-        queued_text,
+        queued_text + task_reference,
         reply_markup=image_session_kb(
             gen.id,
             prompt=prompt_for_menu,

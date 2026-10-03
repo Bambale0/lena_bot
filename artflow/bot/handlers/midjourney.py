@@ -41,6 +41,7 @@ from bot.keyboards.midjourney import (
     mj_video_speed_kb,
 )
 from bot.states import MidjourneyFSM
+from bot.utils.generation_reference import provider_task_reference
 from bot.utils.midjourney_state import owns_midjourney_task
 from core.config import settings
 from db import repository as repo
@@ -49,6 +50,16 @@ from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 router = Router(name="midjourney")
+
+
+async def _show_midjourney_task_started(status_msg: Message, task_id: str) -> None:
+    try:
+        await status_msg.edit_text(
+            "⏳ Задача Midjourney запущена. Пришлю результат автоматически."
+            + provider_task_reference(task_id)
+        )
+    except Exception as exc:
+        logger.warning("Could not update Midjourney acknowledgment task_id=%s: %s", task_id, exc)
 
 
 def _ensure_admin_access(tg_id: int) -> bool:
@@ -130,20 +141,21 @@ async def _finish_initial_mj_image(
         await bot.send_photo(
             chat_id=chat_id,
             photo=URLInputFile(media_url, filename="image.jpg"),
-            caption=caption,
+            caption=caption + provider_task_reference(task_id),
             reply_markup=reply_markup,
         )
         await bot.send_document(
             chat_id=chat_id,
             document=URLInputFile(media_url, filename="image.jpg"),
+            caption="📎 Оригинал" + provider_task_reference(task_id),
         )
 
     async def on_failure(err: str) -> None:
         await _fail_generation_and_refund(gen_id, err)
         try:
-            await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
+            await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены." + provider_task_reference(task_id), reply_markup=main_menu_kb())
         except Exception:
-            await bot.send_message(chat_id, f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
+            await bot.send_message(chat_id, f"❌ Ошибка Midjourney: {err}\n💋 возвращены." + provider_task_reference(task_id), reply_markup=main_menu_kb())
         if await owns_midjourney_task(state, task_id):
             await state.clear()
 
@@ -185,16 +197,16 @@ async def _finish_initial_mj_video(
         await bot.send_video(
             chat_id=chat_id,
             video=URLInputFile(media_url, filename="video.mp4"),
-            caption="✅ MJ Видео готово!",
+            caption="✅ MJ Видео готово!" + provider_task_reference(task_id),
             reply_markup=main_menu_kb(),
         )
 
     async def on_failure(err: str) -> None:
         await _fail_generation_and_refund(gen_id, err)
         try:
-            await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
+            await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены." + provider_task_reference(task_id), reply_markup=main_menu_kb())
         except Exception:
-            await bot.send_message(chat_id, f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
+            await bot.send_message(chat_id, f"❌ Ошибка Midjourney: {err}\n💋 возвращены." + provider_task_reference(task_id), reply_markup=main_menu_kb())
         if await owns_midjourney_task(state, task_id):
             await state.clear()
 
@@ -232,16 +244,16 @@ async def _finish_initial_mj_describe(
         await _safe_delete_message(status_msg)
         await bot.send_message(
             chat_id=chat_id,
-            text=f"🔍 <b>Описание изображения:</b>\n\n{prompts_text}",
+            text=f"🔍 <b>Описание изображения:</b>\n\n{prompts_text}" + provider_task_reference(task_id),
             reply_markup=main_menu_kb(),
         )
 
     async def on_failure(err: str) -> None:
         await _fail_generation_and_refund(gen_id, err)
         try:
-            await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
+            await status_msg.edit_text(f"❌ Ошибка Midjourney: {err}\n💋 возвращены." + provider_task_reference(task_id), reply_markup=main_menu_kb())
         except Exception:
-            await bot.send_message(chat_id, f"❌ Ошибка Midjourney: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
+            await bot.send_message(chat_id, f"❌ Ошибка Midjourney: {err}\n💋 возвращены." + provider_task_reference(task_id), reply_markup=main_menu_kb())
         if await owns_midjourney_task(state, task_id):
             await state.clear()
 
@@ -477,6 +489,7 @@ async def handle_imagine_prompt(
         return
 
     await repo.update_generation_task(session, gen.id, task_id)
+    await _show_midjourney_task_started(status_msg, task_id)
 
     await state.update_data(mj_status_message_id=status_msg.message_id, pending_mj_task_id=task_id)
     await _finish_initial_mj_image(
@@ -547,9 +560,10 @@ async def cb_mj_action(
         return
 
     status_msg = await call.message.answer(  # type: ignore[union-attr]
-        f"⏳ Обрабатываю <b>{label}</b>..."
+        f"⏳ Обрабатываю <b>{label}</b>..." + provider_task_reference(new_task_id)
     )
 
+    await _show_midjourney_task_started(status_msg, new_task_id)
     await state.update_data(pending_mj_task_id=new_task_id)
 
     async def on_success(url: str) -> None:
@@ -571,7 +585,7 @@ async def cb_mj_action(
             pass
 
         media_url = task_result.image_url or url
-        caption = f"✅ <b>{label}</b> готово!"
+        caption = f"✅ <b>{label}</b> готово!" + provider_task_reference(new_task_id)
         await bot.send_photo(
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
             photo=URLInputFile(media_url, filename="image.jpg"),
@@ -581,6 +595,7 @@ async def cb_mj_action(
         await bot.send_document(
             chat_id=call.message.chat.id,  # type: ignore[union-attr]
             document=URLInputFile(media_url, filename="image.jpg"),
+            caption="📎 Оригинал" + provider_task_reference(new_task_id),
         )
 
     async def on_failure(err: str) -> None:
@@ -591,14 +606,14 @@ async def cb_mj_action(
             await state.set_state(MidjourneyFSM.waiting_modal_input)
             await status_msg.edit_text(
                 "🖌 Midjourney требует дополнительный ввод.\n"
-                "Введи уточняющий промпт или нажми 'Без промпта':",
+                "Введи уточняющий промпт или нажми 'Без промпта':" + provider_task_reference(new_task_id),
                 reply_markup=mj_skip_prompt_kb(),
             )
             return
 
         await repo.add_credits(session, db_user.id, credits)
         await status_msg.edit_text(
-            f"❌ Ошибка: {err}\nвозвращены.", reply_markup=main_menu_kb()
+            f"❌ Ошибка: {err}\nвозвращены." + provider_task_reference(new_task_id), reply_markup=main_menu_kb()
         )
         if await owns_midjourney_task(state, new_task_id):
             await state.clear()
@@ -641,6 +656,7 @@ async def _submit_modal(
         await state.clear()
         return
 
+    await _show_midjourney_task_started(status_msg, new_task_id)
     await state.update_data(pending_mj_task_id=new_task_id)
 
     async def on_success(url: str) -> None:
@@ -665,16 +681,17 @@ async def _submit_modal(
         await bot.send_photo(
             chat_id=message.chat.id,
             photo=URLInputFile(_modal_url, filename="image.jpg"),
-            caption="✅ Modal готово!",
+            caption="✅ Modal готово!" + provider_task_reference(new_task_id),
             reply_markup=mj_action_buttons_kb(task_result.buttons, task_id=task_result.task_id),
         )
         await bot.send_document(
             chat_id=message.chat.id,
             document=URLInputFile(_modal_url, filename="image.jpg"),
+            caption="📎 Оригинал" + provider_task_reference(new_task_id),
         )
 
     async def on_failure(err: str) -> None:
-        await status_msg.edit_text(f"❌ Ошибка: {err}", reply_markup=main_menu_kb())
+        await status_msg.edit_text(f"❌ Ошибка: {err}" + provider_task_reference(new_task_id), reply_markup=main_menu_kb())
         if await owns_midjourney_task(state, new_task_id):
             await state.clear()
 
@@ -795,6 +812,7 @@ async def cb_blend_submit(
         return
 
     await repo.update_generation_task(session, gen.id, task_id)
+    await _show_midjourney_task_started(status_msg, task_id)
 
     await state.update_data(mj_status_message_id=status_msg.message_id, pending_mj_task_id=task_id)
     await _finish_initial_mj_image(
@@ -896,6 +914,7 @@ async def handle_describe_photo(
         return
 
     await repo.update_generation_task(session, gen.id, task_id)
+    await _show_midjourney_task_started(status_msg, task_id)
 
     await state.update_data(mj_status_message_id=status_msg.message_id, pending_mj_task_id=task_id)
     await _finish_initial_mj_describe(
@@ -1026,6 +1045,7 @@ async def _submit_mj_video(
         return
 
     await repo.update_generation_task(session, gen.id, task_id)
+    await _show_midjourney_task_started(status_msg, task_id)
 
     await state.update_data(mj_status_message_id=status_msg.message_id, pending_mj_task_id=task_id)
     await _finish_initial_mj_video(

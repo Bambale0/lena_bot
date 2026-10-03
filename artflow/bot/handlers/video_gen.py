@@ -70,6 +70,7 @@ from bot.keyboards.models import (
 )
 from bot.keyboards.video_navigation import video_back_kb
 from bot.states import VideoGenFSM
+from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from core.gemini_omni import (
@@ -93,6 +94,17 @@ from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 router = Router(name="video_gen")
+
+
+async def _show_video_task_started(status_msg: Message, task_id: str) -> None:
+    try:
+        await status_msg.edit_text(
+            "⏳ <b>Видео-задача запущена.</b>\n"
+            "Пришлю результат автоматически, как только видео будет готово."
+            + provider_task_reference(task_id)
+        )
+    except Exception as exc:
+        logger.warning("Could not update video task acknowledgment task_id=%s: %s", task_id, exc)
 
 
 def _long_prompt_done_kb() -> InlineKeyboardMarkup:
@@ -2057,6 +2069,7 @@ async def _launch_video_generation_from_state(
         return False
 
     await repo.update_generation_task(session, gen_id, result.task_id)
+    await _show_video_task_started(status_msg, result.task_id)
     poll_fn = video_service.get_poll_fn(result.provider)
 
     async def on_success(url: str) -> None:
@@ -2070,7 +2083,7 @@ async def _launch_video_generation_from_state(
             await status_msg.delete()
         except Exception:
             pass
-        caption = "✅ <b>Видео готово!</b>"
+        caption = "✅ <b>Видео готово!</b>" + provider_task_reference(result.task_id)
         if hidden_feed_prompt:
             caption += "\n\nПромпт из ленты применён скрыто."
         else:
@@ -2103,13 +2116,12 @@ async def _launch_video_generation_from_state(
                 err,
                 refund_note="bot_video_poll",
             )
-        await status_msg.edit_text(f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
+        await status_msg.edit_text(
+            f"❌ Ошибка: {err}\n💋 возвращены." + provider_task_reference(result.task_id),
+            reply_markup=main_menu_kb(),
+        )
 
     if getattr(result, "uses_webhook", False) or result.provider == "kieai":
-        await status_msg.edit_text(
-            "⏳ <b>Видео-задача запущена.</b>\n"
-            "Пришлю результат автоматически, как только видео будет готово."
-        )
         if result.provider == "comet":
             _start_video_polling(result, poll_fn, on_success, on_failure)
         await state.clear()
@@ -2741,6 +2753,7 @@ async def cb_regen_video(
         return
 
     await repo.update_generation_task(session, gen_id, result.task_id)
+    await _show_video_task_started(status_msg, result.task_id)
     poll_fn = video_service.get_poll_fn(result.provider)
 
     async def on_success(url: str) -> None:
@@ -2754,7 +2767,7 @@ async def cb_regen_video(
             await status_msg.delete()
         except Exception:
             pass
-        caption = "✅ <b>Видео готово!</b>"
+        caption = "✅ <b>Видео готово!</b>" + provider_task_reference(result.task_id)
         if source_feed_gen_id:
             caption += "\n\nПромпт из ленты применён скрыто."
         else:
@@ -2787,13 +2800,12 @@ async def cb_regen_video(
                 err,
                 refund_note="bot_video_repeat_poll",
             )
-        await status_msg.edit_text(f"❌ Ошибка: {err}\n💋 возвращены.", reply_markup=main_menu_kb())
+        await status_msg.edit_text(
+            f"❌ Ошибка: {err}\n💋 возвращены." + provider_task_reference(result.task_id),
+            reply_markup=main_menu_kb(),
+        )
 
     if getattr(result, "uses_webhook", False) or result.provider == "kieai":
-        await status_msg.edit_text(
-            "⏳ <b>Видео-задача запущена.</b>\n"
-            "Пришлю результат автоматически, как только видео будет готово."
-        )
         if result.provider == "comet":
             _start_video_polling(result, poll_fn, on_success, on_failure)
         await state.clear()
