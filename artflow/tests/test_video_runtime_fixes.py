@@ -8,6 +8,13 @@ import pytest
 from api import neironych_seedance_runtime, seedance25_adapter, video_service
 from api.video_runtime_fixes import VEO_PUBLIC_CAPS, install_video_runtime_fixes
 from bot.services.veo_ui import install_veo_handler_presentation
+from core.config import settings
+
+
+@pytest.fixture(autouse=True)
+def neironych_contract_mode(monkeypatch):
+    # These existing tests pin the secondary provider's translation contract.
+    monkeypatch.setattr(settings, "SEEDANCE_PRIMARY_PROVIDER", "neironych")
 
 
 @pytest.mark.asyncio
