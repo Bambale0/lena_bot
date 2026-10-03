@@ -8,6 +8,9 @@ def provider_task_reference(task_id: str | None, *, language: str = "ru") -> str
     raw = str(task_id or "").strip()
     if raw.startswith("web:"):
         raw = raw.removeprefix("web:")
+    # Synchronous Comet images use this local sentinel without a provider ID.
+    if raw == "comet:image:direct":
+        return ""
     if raw.startswith(("neironych:", "nexus:")):
         raw = raw.split(":", 1)[1]
     elif raw.startswith("comet:"):

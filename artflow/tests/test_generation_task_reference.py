@@ -23,7 +23,7 @@ def test_original_provider_id_is_copyable(stored, raw):
     assert provider_task_reference(stored) == f"\n\n🆔 ID задачи: <code>{raw}</code>"
 
 
-@pytest.mark.parametrize("task_id", [None, "", " ", "neironych:"])
+@pytest.mark.parametrize("task_id", [None, "", " ", "neironych:", "comet:image:direct", "web:comet:image:direct"])
 def test_no_reference_without_provider_id(task_id):
     assert provider_task_reference(task_id) == ""
 

@@ -1030,3 +1030,4 @@ Branch: `feat/bot-provider-task-id`.
 - Formatter tests cover HTML safety, missing IDs, routing namespaces, unknown prefixes, history ownership query and full-ID pagination. Ruff maintained changed files and git diff whitespace checks pass.
 - New formatter and tests included in maintained CI gates. No paid generation initiated.
 - Independent Standards/Spec review, required GitHub CI and exact-SHA production deployment checks follow.
+- Full maintained bot-navigation gate passed locally (348 tests). Standards and Spec each identified the same Comet synchronous-image sentinel issue; fixed by suppressing comet:image:direct and its web-prefixed form. Both sentinel regressions pass (17 formatter/history tests total).
