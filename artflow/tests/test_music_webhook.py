@@ -55,6 +55,9 @@ async def test_kie_music_webhook_uses_db_generation_when_in_memory_task_is_missi
     get_generation_by_task_id.assert_awaited()
     finish_generation.assert_awaited_once()
     assert finish_generation.await_args.args[1:] == (77, "https://cdn.test/track.mp3")
+    assert main.bot.send_audio.await_args.kwargs["caption"] == (
+        "🎵 <b>Трек готов!</b>\n\n🆔 ID задачи: <code>music-task-1</code>"
+    )
 
 
 @pytest.mark.asyncio

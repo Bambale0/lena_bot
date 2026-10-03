@@ -94,6 +94,7 @@ from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.states import MidjourneyFSM
 from bot.utils.dispatcher import create_dispatcher
+from bot.utils.generation_reference import provider_task_reference
 from bot.utils.midjourney_state import owns_midjourney_task
 from bot.utils.telegram_images import (
     send_image_group_to_chat,
@@ -330,7 +331,7 @@ async def _prompt_actions_allowed_for_generation(session, gen: Generation) -> bo
 
 
 def _kie_result_caption(gen: Generation) -> str:
-    return "✅ <b>Готово!</b>"
+    return "✅ <b>Готово!</b>" + provider_task_reference(getattr(gen, "task_id", None))
 
 
 def _is_repeat_generation(gen: Generation) -> bool:
@@ -489,6 +490,7 @@ async def _finish_midjourney_image_generation(
         await state_ctx.set_state(MidjourneyFSM.viewing_result)
 
     caption = "✅ Blend готово!" if gen.model == "midjourney-blend" else f"✅ Готово!\n\n<i>{gen.prompt[:200]}</i>"
+    caption += provider_task_reference(task_result.task_id)
     reply_markup = mj_action_buttons_kb(task_result.buttons, task_id=task_result.task_id) if task_result.buttons else main_menu_kb()
     await bot.send_photo(  # type: ignore[union-attr]
         chat_id=user_tg_id,
@@ -499,6 +501,7 @@ async def _finish_midjourney_image_generation(
     await bot.send_document(  # type: ignore[union-attr]
         chat_id=user_tg_id,
         document=URLInputFile(task_result.image_url, filename="image.jpg"),
+        caption="📎 Оригинал" + provider_task_reference(task_result.task_id),
     )
 
 
@@ -517,7 +520,7 @@ async def _finish_midjourney_describe_generation(
     prompts_text = task_result.prompt or "Промпт не получен"
     await bot.send_message(  # type: ignore[union-attr]
         chat_id=user_tg_id,
-        text=f"🔍 <b>Описание изображения:</b>\n\n{prompts_text}",
+        text=f"🔍 <b>Описание изображения:</b>\n\n{prompts_text}" + provider_task_reference(task_result.task_id),
         reply_markup=main_menu_kb(),
     )
 
@@ -540,7 +543,7 @@ async def _finish_midjourney_video_generation(
             task_result.video_url or (task_result.video_urls[0] if task_result.video_urls else "") or task_result.image_url,
             filename="video.mp4",
         ),
-        caption="✅ MJ Видео готово!",
+        caption="✅ MJ Видео готово!" + provider_task_reference(task_result.task_id),
         reply_markup=main_menu_kb(),
     )
 
@@ -1075,7 +1078,8 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                 await bot.send_message(
                     user.tg_id,
                     f"❌ Ошибка Midjourney: <code>{_sanitize_provider_error(err)[:500]}</code>"
-                    + ("\n💋 возвращены." if refunded > 0 else ""),
+                    + ("\n💋 возвращены." if refunded > 0 else "")
+                    + provider_task_reference(task_result.task_id),
                     reply_markup=main_menu_kb(),
                 )
             return {"ok": True}
@@ -1092,7 +1096,8 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                     await bot.send_message(
                         user.tg_id,
                         "❌ Midjourney вернул успех, но без изображения."
-                        + (" 💋 возвращены." if refunded > 0 else ""),
+                        + (" 💋 возвращены." if refunded > 0 else "")
+                        + provider_task_reference(task_result.task_id),
                         reply_markup=main_menu_kb(),
                     )
                 return {"ok": True}
@@ -1125,7 +1130,8 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                     await bot.send_message(
                         user.tg_id,
                         "❌ Midjourney вернул успех, но без видео."
-                        + (" 💋 возвращены." if refunded > 0 else ""),
+                        + (" 💋 возвращены." if refunded > 0 else "")
+                        + provider_task_reference(task_result.task_id),
                         reply_markup=main_menu_kb(),
                     )
                 return {"ok": True}
@@ -1654,7 +1660,8 @@ async def kie_webhook(
                 try:
                     await bot.send_message(
                         user.tg_id,
-                        f"❌ Генерация не удалась.{_refund_notice_line(refunded)}\n\n<code>{user_err[:500]}</code>",
+                        f"❌ Генерация не удалась.{_refund_notice_line(refunded)}\n\n<code>{user_err[:500]}</code>"
+                        + provider_task_reference(task_id),
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
@@ -1686,7 +1693,8 @@ async def kie_webhook(
                 try:
                     await bot.send_message(
                         user.tg_id,
-                        f"❌ {user_err}." + (" Кредиты возвращены." if refunded > 0 else ""),
+                        f"❌ {user_err}." + (" Кредиты возвращены." if refunded > 0 else "")
+                        + provider_task_reference(task_id),
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
@@ -1724,7 +1732,8 @@ async def kie_webhook(
                 try:
                     await bot.send_message(
                         user.tg_id,
-                        f"❌ {user_err}." + (" Кредиты возвращены." if refunded > 0 else ""),
+                        f"❌ {user_err}." + (" Кредиты возвращены." if refunded > 0 else "")
+                        + provider_task_reference(task_id),
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
@@ -1822,7 +1831,8 @@ async def kie_webhook(
                                 chat_id=user.tg_id,
                                 result_url=url,
                                 generation_id=f"{gen.id}_{idx + 1}",
-                                caption=(f"Исходник {idx + 1}/{len(result_urls)}" if len(result_urls) > 1 else "Исходник"),
+                                caption=(f"Исходник {idx + 1}/{len(result_urls)}" if len(result_urls) > 1 else "Исходник")
+                                + provider_task_reference(task_id),
                                 log_prefix="main-source-document",
                             )
                             if not sent:
@@ -1836,7 +1846,7 @@ async def kie_webhook(
                             text=(
                                 "✅ <b>Результат готов.</b>\n\n"
                                 "Telegram не принял часть файлов, поэтому оставляю прямую ссылку:\n"
-                                f"{links}"
+                                f"{links}" + provider_task_reference(task_id)
                             ),
                         )
 
@@ -1862,7 +1872,7 @@ async def kie_webhook(
                     try:
                         await bot.send_message(
                             chat_id=user.tg_id,
-                            text="✅ <b>Видео готово.</b> Отправляю ролик ниже.",
+                            text="✅ <b>Видео готово.</b> Отправляю ролик ниже." + provider_task_reference(task_id),
                             reply_markup=video_reply_markup,
                         )
                         logger.info("Video ready notification sent user=%s gen=%s", user.tg_id, gen.id)
@@ -1936,7 +1946,7 @@ async def kie_webhook(
                                 await bot.send_document(
                                     chat_id=user.tg_id,
                                     document=FSInputFile(tmp_video, filename=f"video_{gen.id}.mp4"),
-                                    caption="📎 <b>Видео готово файлом</b>",
+                                    caption="📎 <b>Видео готово файлом</b>" + provider_task_reference(task_id),
                                     reply_markup=video_reply_markup,
                                 )
                                 video_sent = True
@@ -1965,7 +1975,7 @@ async def kie_webhook(
                                 )
                             await bot.send_message(
                                 chat_id=user.tg_id,
-                                text=fallback_text,
+                                text=fallback_text + provider_task_reference(task_id),
                                 reply_markup=video_reply_markup,
                             )
                             logger.info("Video link fallback sent user=%s gen=%s", user.tg_id, gen.id)
@@ -2187,7 +2197,8 @@ async def kie_music_webhook(
             try:
                 await bot.send_message(
                     tg_id,
-                    f"❌ Ошибка генерации музыки:\n{user_err}" + _refund_notice_line(refunded),
+                    f"❌ Ошибка генерации музыки:\n{user_err}" + _refund_notice_line(refunded)
+                    + provider_task_reference(task_id),
                     reply_markup=back_to_menu_kb(),
                 )
             except Exception as e:
@@ -2198,7 +2209,10 @@ async def kie_music_webhook(
         logger.warning("KIE music webhook: no audio URLs task_id=%s status=%s payload=%s", task_id, status, payload)
         if tg_id and int(tg_id) > 0 and bot:
             try:
-                await bot.send_message(tg_id, "❌ Музыка готова, но ссылка не найдена.", reply_markup=back_to_menu_kb())
+                await bot.send_message(
+                    tg_id, "❌ Музыка готова, но ссылка не найдена." + provider_task_reference(task_id),
+                    reply_markup=back_to_menu_kb(),
+                )
             except Exception:
                 pass
         return {"ok": True}
@@ -2213,7 +2227,7 @@ async def kie_music_webhook(
                 await bot.send_audio(
                     chat_id=tg_id,
                     audio=URLInputFile(url, filename="track.mp3"),
-                    caption="🎵 <b>Трек готов!</b>",
+                    caption="🎵 <b>Трек готов!</b>" + provider_task_reference(task_id),
                     reply_markup=back_to_menu_kb(),
                 )
         except Exception as e:
@@ -2222,7 +2236,8 @@ async def kie_music_webhook(
                 links = "\n".join(audio_urls)
                 await bot.send_message(
                     tg_id,
-                    f"🎵 <b>Трек готов</b>\n\nTelegram не принял аудио напрямую. Вот ссылка на результат:\n{links}",
+                    f"🎵 <b>Трек готов</b>\n\nTelegram не принял аудио напрямую. Вот ссылка на результат:\n{links}"
+                    + provider_task_reference(task_id),
                     reply_markup=back_to_menu_kb(),
                 )
                 logger.info("Music link fallback sent tg_id=%s task_id=%s", tg_id, task_id)

@@ -1190,7 +1190,8 @@ async def test_handle_video_prompt_preserves_fractional_credit_price() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_video_prompt_polls_on_provider_budget() -> None:
+@pytest.mark.parametrize("provider,task_id", [("higgsfield", "hf-task-1"), ("neironych", "neironych:provider-uuid")])
+async def test_handle_video_prompt_polls_on_provider_budget(provider, task_id) -> None:
     """Провайдер задачи уходит в poll_until_done, чтобы Genjutsu получил свой таймаут."""
     msg = make_message(text="animate this scene")
     msg.answer = AsyncMock()
@@ -1213,10 +1214,13 @@ async def test_handle_video_prompt_polls_on_provider_budget() -> None:
         resolve_video_model_cost=AsyncMock(return_value=mock_cost),
         fail_generation=AsyncMock(),
         add_credits=AsyncMock(),
+        get_generation_by_id=AsyncMock(return_value=SimpleNamespace(status="processing")),
+        finish_generation=AsyncMock(return_value=True),
+        fail_generation_and_refund=AsyncMock(return_value=(True, 10)),
     )):
         with patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
             generate_video=AsyncMock(
-                return_value=SimpleNamespace(task_id="hf-task-1", provider="higgsfield"),
+                return_value=SimpleNamespace(task_id=task_id, provider=provider),
             ),
             get_poll_fn=MagicMock(return_value=MagicMock()),
         )):
@@ -1225,9 +1229,23 @@ async def test_handle_video_prompt_polls_on_provider_budget() -> None:
             )):
                 await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
                 await asyncio.sleep(0.05)
+                context = AsyncMock()
+                context.__aenter__.return_value = mock_session
+                with (
+                    patch("bot.handlers.video_gen.AsyncSessionLocal", return_value=context),
+                    patch("bot.handlers.video_gen._send_video_with_fallback", AsyncMock()) as deliver,
+                ):
+                    await poll_until_done.await_args.args[2]("https://cdn.test/video.mp4")
+                    assert f"<code>{task_id.removeprefix('neironych:')}</code>" in deliver.await_args.kwargs["caption"]
+                    await poll_until_done.await_args.args[3]("Provider failed")
+                    assert f"<code>{task_id.removeprefix('neironych:')}</code>" in msg.answer.return_value.edit_text.await_args.args[0]
 
-    assert poll_until_done.await_args.args[0] == "hf-task-1"
-    assert poll_until_done.await_args.kwargs["provider"] == "higgsfield"
+    assert poll_until_done.await_args.args[0] == task_id
+    assert poll_until_done.await_args.kwargs["provider"] == provider
+
+    acknowledgment = msg.answer.return_value.edit_text.await_args_list[0].args[0]
+    assert f"<code>{task_id.removeprefix('neironych:')}</code>" in acknowledgment
+    assert "neironych:" not in acknowledgment
 
 
 def test_video_state_resolution_normalizes_kling_motion_aliases() -> None:
