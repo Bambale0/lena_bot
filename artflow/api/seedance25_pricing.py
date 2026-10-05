@@ -15,7 +15,7 @@ from db.models import GenerationType
 MODEL_KEY = "bytedance/seedance-2-5"
 DISPLAY_NAME = "🌱 Seedance 2.5"
 DEFAULT_RESOLUTION = "480p"
-CREDITS_PER_SECOND: dict[str, float] = {"480p": 7.0, "720p": 10.0}
+CREDITS_PER_SECOND: dict[str, float] = {"480p": 30.0, "720p": 60.0, "1080p": 130.0}
 
 logger = logging.getLogger(__name__)
 

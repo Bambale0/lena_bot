@@ -100,7 +100,7 @@ def test_identity_transfer_control_token_is_typed_option() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("resolution", ["480p", "720p"])
+@pytest.mark.parametrize("resolution", ["480p", "720p", "1080p"])
 async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_roles(
     monkeypatch,
     resolution: str,
