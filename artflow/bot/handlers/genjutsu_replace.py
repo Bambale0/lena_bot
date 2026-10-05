@@ -84,7 +84,7 @@ async def _quote(state: FSMContext, session: AsyncSession) -> float:
     plan, edit = await _plan(state)
     build_seedance_content_edit_prompt(plan, edit)  # Validate full technical prompt before charge.
     if data.get("resolution") not in RESOLUTIONS:
-        raise ValueError("Выбери качество видео: 480p или 720p.")
+        raise ValueError("Выбери качество видео: 480p, 720p или 1080p.")
     duration = await legacy.seedance25_edit_billing_duration(
         "", data.get("reference_video_url"), force_edit=True
     )

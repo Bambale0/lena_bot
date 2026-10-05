@@ -468,7 +468,7 @@ def _video_params_hint(model_key: str, data: dict) -> str:
     if model_key == SEEDANCE25_MODEL_KEY and data.get("seedance_identity_transfer"):
         return (
             "🎭 Фото задают внешность персонажа, исходное видео — только движение и сцену. "
-            "Выбери качество <b>480p</b> или <b>720p</b>, затем нажми <b>Далее</b>."
+            "Выбери качество <b>480p</b>, <b>720p</b> или <b>1080p</b>, затем нажми <b>Далее</b>."
         )
     parts = ["Нажимай кнопки ниже: ✅ показывает выбранные параметры."]
     if model_key == GEMINI_OMNI_VIDEO_MODEL:

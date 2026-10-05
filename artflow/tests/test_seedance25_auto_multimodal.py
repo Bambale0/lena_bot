@@ -250,3 +250,10 @@ def test_telegram_product_surface_restores_seedance25_in_public_video_groups(mon
     for group_name in ("fast", "i2v"):
         assert groups[group_name].count(s25.MODEL_KEY) == 1
         assert groups[group_name].index(s25.MODEL_KEY) < groups[group_name].index("bytedance/seedance-2")
+
+
+def test_seedance25_product_description_lists_1080p() -> None:
+    from bot.keyboards import models as keyboard_models
+
+    s25_surface.install_seedance25_product_surface()
+    assert "1080p" in keyboard_models.VIDEO_MODEL_DESC[s25.MODEL_KEY]

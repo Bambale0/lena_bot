@@ -168,7 +168,7 @@ function renderPanel(): HTMLElement {
       🎭 Замена персонажа · 1–3 фото одного человека + 1 исходное видео
     </label>
     <p class="text-[10px] text-muted-foreground">
-      В этом режиме фото задают внешность, а видео — только движение и сцену. Качество 480p / 720p выбирается в параметрах генерации.
+      В этом режиме фото задают внешность, а видео — только движение и сцену. Качество 480p / 720p / 1080p выбирается в параметрах генерации.
     </p>
     <label class="flex min-w-0 items-center gap-2 rounded-md border bg-background/60 px-2 py-2 text-xs font-medium">
       <input data-seedance25="webSearch" type="checkbox" />
