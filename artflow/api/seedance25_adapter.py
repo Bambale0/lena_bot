@@ -27,7 +27,7 @@ DURATIONS = [4, 5, 10, 15, 30]
 ASPECT_RATIOS = ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
 RESOLUTIONS = ["480p", "720p", "1080p"]
 OUTPUT_FORMATS = ["mp4", "mov"]
-CREDITS_PER_SECOND = {"480p": 30.0, "720p": 60.0, "1080p": 130.0}
+CREDITS_PER_SECOND = {"480p": 7.0, "720p": 10.0}
 AUTO_DURATION_BILLING_SECONDS = 30
 CONTROL_PREFIX = "__apix_seedance25:"
 

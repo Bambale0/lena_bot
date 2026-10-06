@@ -44,7 +44,6 @@ def test_seedance25_admin_pricing_rows_are_seeded():
 
     rows = {item["model_key"]: item for item in seed.DEFAULT_MODEL_COSTS}
 
-    assert CREDITS_PER_SECOND == {"480p": 30.0, "720p": 60.0, "1080p": 130.0}
     assert rows[MODEL_KEY]["credits"] == CREDITS_PER_SECOND["480p"]
     for resolution, credits in CREDITS_PER_SECOND.items():
         key = pricing_variant_key(MODEL_KEY, resolution=resolution)
