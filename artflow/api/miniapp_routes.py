@@ -19,7 +19,7 @@ from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.types import LabeledPrice
+from aiogram.types import LabeledPrice, URLInputFile
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import Date, String, cast, desc, func, or_, select
@@ -82,9 +82,11 @@ from bot.keyboards.models import (
     _VIDEO_MODEL_ORDER,
     IMAGE_CAPS,
     VIDEO_CAPS,
+    after_generation_kb,
     image_session_kb,
 )
 from bot.utils.deep_links import build_start_payload
+from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_images import (
     send_image_group_to_chat,
     send_image_to_chat,
@@ -580,9 +582,29 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         return await repo.get_generation_by_id(session, gen.id)
 
     if result_url:
-        await repo.finish_generation(session, gen.id, result_url, result_urls=result_urls)
+        finished = await repo.finish_generation(session, gen.id, result_url, result_urls=result_urls)
         if gen.image_session_id:
             await repo.update_image_session_last_result(session, gen.image_session_id, result_url, gen.id)
+
+        # Poll-only providers (notably Neironych Seedance) do not have the KIE
+        # webhook path that normally delivers completed videos to Telegram.
+        # Notify only the winner of the atomic pending/processing -> done
+        # transition, so reconcile/webhook races cannot duplicate messages.
+        if (
+            finished
+            and gen.gen_type == GenerationType.video
+            and not is_web_task_id(getattr(finished, "task_id", None))
+        ):
+            user = await repo.get_user_by_id(session, finished.user_id)
+            if user:
+                await _notify_reconciled_video_result_in_bot(user=user, gen=finished)
+            else:
+                logger.warning(
+                    "Reconciled video user not found gen=%s user_id=%s",
+                    finished.id,
+                    finished.user_id,
+                )
+
         return await repo.get_generation_by_id(session, gen.id)
 
     if age >= STALE_GENERATION_TIMEOUT:
@@ -634,6 +656,99 @@ def _direct_result_prompt_actions_allowed(gen) -> bool:
     action_type = getattr(gen, "action_type", None)
     action_value = str(getattr(action_type, "value", action_type) or "")
     return action_value != "repeat" and not action_value.endswith(".repeat")
+
+
+async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> None:
+    """Deliver a video that reached done through polling/reconciliation.
+
+    The DB transition is the idempotency gate: callers invoke this helper only
+    when finish_generation() actually changed pending/processing -> done.
+    """
+    if is_web_task_id(getattr(gen, "task_id", None)):
+        return
+
+    tg_id = getattr(user, "tg_id", None)
+    result_url = str(getattr(gen, "result_url", None) or "").strip()
+    if not tg_id or not result_url:
+        logger.warning(
+            "Skip reconciled video delivery user=%s gen=%s reason=missing_chat_or_result",
+            tg_id,
+            getattr(gen, "id", None),
+        )
+        return
+
+    prompt_actions_allowed = _direct_result_prompt_actions_allowed(gen)
+    reply_markup = after_generation_kb(
+        gen.id,
+        "video",
+        prompt=getattr(gen, "prompt", None) if prompt_actions_allowed else None,
+        allow_publish=True,
+        allow_library=prompt_actions_allowed,
+        allow_copy_prompt=prompt_actions_allowed,
+    )
+    caption = "✅ <b>Видео готово.</b>" + provider_task_reference(
+        getattr(gen, "task_id", None)
+    )
+
+    delivery_bot = Bot(
+        token=settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    try:
+        try:
+            message = await delivery_bot.send_video(
+                chat_id=tg_id,
+                video=URLInputFile(result_url, filename=f"video_{gen.id}.mp4"),
+                caption=caption,
+                reply_markup=reply_markup,
+            )
+            logger.info(
+                "Reconciled video delivered user=%s gen=%s message_id=%s",
+                tg_id,
+                gen.id,
+                getattr(message, "message_id", None),
+            )
+            return
+        except Exception as video_exc:
+            logger.warning(
+                "Reconciled video direct delivery failed user=%s gen=%s url=%s err=%s",
+                tg_id,
+                gen.id,
+                result_url,
+                video_exc,
+            )
+
+        message = await delivery_bot.send_message(
+            chat_id=tg_id,
+            text=(
+                f"{caption}\n\n"
+                "Telegram не принял ролик как видео. Вот прямая ссылка:\n"
+                f"{result_url}"
+            ),
+            reply_markup=reply_markup,
+        )
+        logger.info(
+            "Reconciled video link fallback delivered user=%s gen=%s message_id=%s",
+            tg_id,
+            gen.id,
+            getattr(message, "message_id", None),
+        )
+    except (TelegramBadRequest, TelegramForbiddenError) as exc:
+        logger.warning(
+            "Reconciled video delivery failed user=%s gen=%s err=%s",
+            tg_id,
+            gen.id,
+            exc,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Unexpected reconciled video delivery error user=%s gen=%s err=%s",
+            tg_id,
+            gen.id,
+            exc,
+        )
+    finally:
+        await delivery_bot.session.close()
 
 
 async def _notify_direct_image_result_in_bot(
