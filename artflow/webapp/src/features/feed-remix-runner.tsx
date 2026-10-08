@@ -8,6 +8,10 @@ import { Sheet } from "@/components/ui/sheet";
 import type { FeedItem, GenerationTask, ModelInfo } from "@/lib/types";
 import { notifyHaptic, openExternalUrl } from "@/lib/telegram";
 import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
+import {
+  canReopenPayment, clearRepeatDraft, paymentFromResponse, paymentResolution, readRepeatDraft, saveRepeatDraft,
+  type PaymentProvider, type RepeatDraft, type RepeatPayment,
+} from "@/features/feed-repeat-payment";
 
 const FEED_REMIX_EVENT = "apix:open-feed-remix-runner";
 const RUNNER_ROOT_ID = "apix-feed-remix-runner-root";
@@ -28,68 +32,10 @@ type FeedCheckoutQuote = {
   can_run: boolean;
   recommended_plan?: { key: string; label: string; credits: number; price_rub: number } | null;
 };
-type PaymentProvider = "tbank" | "crypto" | "tribute" | "lava";
 const ACCEPTED_PAYMENT_PROVIDERS: PaymentProvider[] = ["tbank", "crypto", "tribute", "lava"];
-const REPEAT_DRAFT_TTL_MS = 60 * 60 * 1000;
 
-type RepeatDraft = {
-  savedAt: number;
-  references: string[];
-  changeRequest: string;
-  modelKey: string;
-  mode: string;
-  aspectRatio: string;
-  quality: string;
-  count: number;
-  duration: number;
-  resolution: string;
-  grokMode: string;
-  paymentWaiting: boolean;
-};
-
-function draftKey(postId: number): string {
-  const viewer = String(window.Telegram?.WebApp?.initDataUnsafe?.user?.id || "session");
-  return `apix:feed-repeat-draft:${viewer}:${postId}`;
-}
-
-function readRepeatDraft(postId: number): RepeatDraft | null {
-  try {
-    const raw = window.sessionStorage.getItem(draftKey(postId));
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return null;
-    const saved = parsed as Partial<RepeatDraft>;
-    if (typeof saved.savedAt !== "number" || Date.now() - saved.savedAt > REPEAT_DRAFT_TTL_MS) {
-      window.sessionStorage.removeItem(draftKey(postId));
-      return null;
-    }
-    return {
-      savedAt: saved.savedAt,
-      references: Array.isArray(saved.references)
-        ? saved.references.filter((value): value is string => typeof value === "string" && value.startsWith("https://")).slice(0, 4)
-        : [],
-      changeRequest: typeof saved.changeRequest === "string" ? saved.changeRequest.slice(0, 800) : "",
-      modelKey: String(saved.modelKey || ""),
-      mode: String(saved.mode || "image"),
-      aspectRatio: String(saved.aspectRatio || "1:1"),
-      quality: String(saved.quality || "basic"),
-      count: Number(saved.count) || 1,
-      duration: Number(saved.duration) || 5,
-      resolution: String(saved.resolution || "720p"),
-      grokMode: String(saved.grokMode || "normal"),
-      paymentWaiting: saved.paymentWaiting === true,
-    };
-  } catch {
-    return null; // Blocked sessionStorage should never block generation.
-  }
-}
-
-function clearRepeatDraft(postId: number): void {
-  try {
-    window.sessionStorage.removeItem(draftKey(postId));
-  } catch {
-    // Private browsing may disable sessionStorage.
-  }
+function draftStorage(): Storage | null {
+  try { return window.sessionStorage; } catch { return null; }
 }
 
 let runnerRoot: Root | null = null;
@@ -226,7 +172,14 @@ function FeedRemixRunnerPortal() {
   const [quote, setQuote] = useState<FeedCheckoutQuote | null>(null);
   const [quotedBody, setQuotedBody] = useState("");
   const [quoteBusy, setQuoteBusy] = useState(false);
-  const [paymentWaiting, setPaymentWaiting] = useState(false);
+  const [payment, setPayment] = useState<RepeatPayment | null>(null);
+  const paymentWaiting = Boolean(payment);
+  const paymentRef = useRef<RepeatPayment | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [paymentChecking, setPaymentChecking] = useState(false);
+  const activeScope = useRef<{ actorId: number; sourceId: number } | null>(null);
+  const openSequence = useRef(0);
+  const paymentCheckInFlight = useRef(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState<PaymentProvider[]>([]);
   const quoteRequestSequence = useRef(0);
@@ -237,7 +190,7 @@ function FeedRemixRunnerPortal() {
   const allModels = useMemo(() => [...imageModels, ...videoModels], [imageModels, videoModels]);
   const selectedModel = useMemo(() => allModels.find((model) => model.key === modelKey), [allModels, modelKey]);
   const bucket = selectedModelBucket(modelKey, videoModels);
-  const busy = phase === "uploading" || phase === "generating" || modelsLoading;
+  const busy = opening || phase === "uploading" || phase === "generating" || modelsLoading;
   const sourcePreview = safeExternalUrl(firstMedia(item || {}));
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
   const aspectRatios = modelAspectRatios(selectedModel);
@@ -275,11 +228,12 @@ function FeedRemixRunnerPortal() {
     };
   }, [aspectRatio, bucket, changeRequest, count, duration, grokMode, item, mode, quality, references, resolution, selectedModel, sourceIsVideo, sourcePreview]);
   const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
+  const liveQuoteRequest = useRef<{ id: number; body: Record<string, unknown>; key: string } | null>(null);
+  liveQuoteRequest.current = item && requestBody ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
   const quoteReady = Boolean(quote && quotedBody === requestBodyKey && !quoteBusy);
   const canLaunch = quoteReady && quote?.can_run === true;
 
-  const resetForm = useCallback((nextItem: FeedItem | null = null) => {
-    const draft = nextItem ? readRepeatDraft(nextItem.id) : null;
+  const resetForm = useCallback((nextItem: FeedItem | null = null, draft: RepeatDraft | null = null) => {
     setItem(nextItem);
     setPhase("idle");
     setError("");
@@ -288,7 +242,9 @@ function FeedRemixRunnerPortal() {
     setQuote(null);
     setQuotedBody("");
     setQuoteBusy(false);
-    setPaymentWaiting(draft?.paymentWaiting || false);
+    paymentRef.current = draft?.payment || null;
+    setPayment(paymentRef.current);
+    setPaymentChecking(false);
     setPaymentBusy(false);
     setModelKey(draft?.modelKey || nextItem?.model || "");
     setMode(draft?.mode || (nextItem && itemLooksVideo(nextItem) ? "text" : "image"));
@@ -300,20 +256,22 @@ function FeedRemixRunnerPortal() {
     setGrokMode(draft?.grokMode || "normal");
   }, []);
 
-  // External bank checkout may close/reload the Telegram WebView. Keep only
-  // non-secret editing settings and public upload URLs in tab-scoped storage.
+  // Persist the same actor/source snapshot synchronously before each payment side effect.
+  const draftSnapshot = useRef<RepeatDraft | null>(null);
+  draftSnapshot.current = item ? {
+    savedAt: Date.now(), references, changeRequest, modelKey, mode,
+    aspectRatio, quality, count, duration, resolution, grokMode, payment: paymentRef.current,
+  } : null;
+  const persistDraft = useCallback((nextPayment = paymentRef.current) => {
+    const scope = activeScope.current;
+    if (!scope || !draftSnapshot.current || scope.sourceId !== item?.id) return false;
+    return saveRepeatDraft(draftStorage(), scope.actorId, scope.sourceId, {
+      ...draftSnapshot.current, savedAt: Date.now(), payment: nextPayment,
+    });
+  }, [item?.id]);
   useEffect(() => {
-    if (!item) return;
-    const draft: RepeatDraft = {
-      savedAt: Date.now(), references, changeRequest, modelKey, mode,
-      aspectRatio, quality, count, duration, resolution, grokMode, paymentWaiting,
-    };
-    try {
-      window.sessionStorage.setItem(draftKey(item.id), JSON.stringify(draft));
-    } catch {
-      // Storage is optional in privacy-restricted browsers.
-    }
-  }, [item?.id, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, resolution, grokMode, paymentWaiting]);
+    if (!opening) persistDraft();
+  }, [opening, persistDraft, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, resolution, grokMode, payment]);
 
   const cancelPending = useCallback((message = "Повтор отменён") => {
     if (pendingRemix) pendingRemix.reject(new Error(message));
@@ -338,8 +296,26 @@ function FeedRemixRunnerPortal() {
     const onOpen = (event: Event) => {
       const detail = (event as CustomEvent<FeedRemixEventDetail>).detail;
       if (!detail?.item) return;
+      const sequence = ++openSequence.current;
+      activeScope.current = null;
+      setOpening(true);
       resetForm(detail.item);
       void loadModels();
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 15_000);
+      void apiJson<{ id: number; tg_id?: number }>("/me", { signal: controller.signal }).then((viewer) => {
+        if (sequence !== openSequence.current) return;
+        if (!Number.isSafeInteger(viewer.id) || viewer.id <= 0) throw new Error("Не удалось подтвердить аккаунт");
+        activeScope.current = { actorId: viewer.id, sourceId: detail.item.id };
+        const telegramId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+        const legacyId = telegramId && viewer.tg_id === telegramId ? telegramId : undefined;
+        resetForm(detail.item, readRepeatDraft(draftStorage(), viewer.id, detail.item.id, Date.now(), legacyId));
+      }).catch(() => {
+        if (sequence === openSequence.current) setError("Не удалось подтвердить аккаунт. Откройте повтор ещё раз перед оплатой.");
+      }).finally(() => {
+        window.clearTimeout(timeout);
+        if (sequence === openSequence.current) setOpening(false);
+      });
     };
     window.addEventListener(FEED_REMIX_EVENT, onOpen);
     return () => window.removeEventListener(FEED_REMIX_EVENT, onOpen);
@@ -430,60 +406,153 @@ function FeedRemixRunnerPortal() {
       .catch(() => setPaymentMethods([]));
   }, [item?.id]);
 
+  const checkPayment = useCallback(async (quiet = false) => {
+    const current = paymentRef.current;
+    const scope = activeScope.current;
+    if (!current || !scope || !item || !requestBody || paymentCheckInFlight.current) return;
+    paymentCheckInFlight.current = true;
+    setPaymentChecking(true);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    void refreshQuote(item.id, requestBody, requestBodyKey, true);
+    try {
+      const transactions = current.transactionId
+        ? await apiJson<{ transactions: unknown[] }>("/api/web/billing/transactions?limit=100", { signal: controller.signal })
+        : { transactions: [] };
+      if (activeScope.current !== scope || paymentRef.current !== current) return;
+      const resolution = paymentResolution(current, transactions.transactions);
+      if (resolution !== "pending") {
+        if (!persistDraft(null)) throw new Error("Не удалось сохранить результат проверки. Повторите проверку оплаты.");
+        // A receipt can beat its balance refresh. Never expose actions using the pre-settlement quote.
+        setQuote(null);
+        setQuotedBody("");
+        const latestRequest = liveQuoteRequest.current;
+        if (latestRequest) void refreshQuote(latestRequest.id, latestRequest.body, latestRequest.key);
+        paymentRef.current = null;
+        setPayment(null);
+        if (resolution === "paid") {
+          setError("");
+          notifyHaptic("success");
+          toast.success("Оплата подтверждена");
+        } else {
+          setError(resolution === "failed"
+            ? "Платёж завершился ошибкой. При необходимости можно создать новую оплату."
+            : "Платёж возвращён. При необходимости можно создать новую оплату.");
+        }
+      } else if (!quiet) {
+        setError(current.transactionId
+          ? "Платёж пока не подтверждён. Проверьте его позже или откройте ту же оплату."
+          : "Статус этой оплаты пока нельзя подтвердить. Проверьте операцию у платёжного сервиса или обратитесь в поддержку. Новая оплата не создаётся.");
+      }
+    } catch (checkError) {
+      if (!quiet && activeScope.current === scope) setError(checkError instanceof Error ? checkError.message : "Не удалось проверить оплату. Попробуйте позже.");
+    } finally {
+      window.clearTimeout(timeout);
+      paymentCheckInFlight.current = false;
+      if (activeScope.current === scope) setPaymentChecking(false);
+    }
+  }, [item, persistDraft, refreshQuote, requestBodyKey]);
+
   useEffect(() => {
-    if (!paymentWaiting || !item || !requestBody || !requestBodyKey) return;
+    if (!paymentWaiting || !item || !requestBody || !requestBodyKey || opening || paymentBusy) return;
     let attempts = 0;
     const timer = window.setInterval(() => {
       if (++attempts > 48) {
         window.clearInterval(timer);
-        setPaymentWaiting(false);
-        setError("Платёж пока не подтверждён. Проверь статус операции в банке перед повторным пополнением.");
+        setError("Платёж пока не подтверждён. Нажмите «Проверить оплату»; если статус не обновляется, обратитесь в поддержку. Новая оплата не создаётся.");
         return;
       }
-      void refreshQuote(item.id, requestBody, requestBodyKey, true).then((fresh) => {
-        if (fresh?.can_run) {
-          window.clearInterval(timer);
-          setPaymentWaiting(false);
-          notifyHaptic("success");
-          toast.success("Оплата зачислена — теперь можно запускать");
-        }
-      });
+      void checkPayment(true);
     }, 2500);
-    return () => window.clearInterval(timer);
-  }, [item?.id, paymentWaiting, refreshQuote, requestBodyKey]);
+    const onReturn = () => {
+      if (document.visibilityState === "visible") void checkPayment(true);
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [item?.id, paymentWaiting, checkPayment, requestBodyKey, opening, paymentBusy]);
 
   const payInline = useCallback(async () => {
     const plan = quote?.recommended_plan;
     const provider = paymentMethods[0];
-    if (!plan || !provider || paymentBusy || paymentInFlight.current) return;
+    const scope = activeScope.current;
+    if (!plan || !provider || !scope || !draftSnapshot.current || busy || paymentBusy || paymentInFlight.current || paymentRef.current) return;
+    const pending: RepeatPayment = {
+      startedAt: Date.now(), provider, planKey: plan.key, transactionId: null, checkoutUrl: null,
+    };
+    const snapshot = { ...draftSnapshot.current, savedAt: Date.now(), payment: pending };
+    // A lost POST response may still have created an invoice. Save its guard before the first await.
+    if (!saveRepeatDraft(draftStorage(), scope.actorId, scope.sourceId, snapshot)) {
+      setError("Не удалось сохранить оплату в этом браузере. Разрешите хранилище и откройте повтор ещё раз; счёт не создан.");
+      return;
+    }
+    paymentRef.current = pending;
+    setPayment(pending);
     paymentInFlight.current = true;
     setPaymentBusy(true);
     setError("");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 45_000);
     try {
-      const payment = await apiJson<Record<string, unknown>>(`/topup/${provider}`, {
-        method: "POST", body: JSON.stringify({ plan_key: plan.key }),
+      const response = await apiJson<Record<string, unknown>>(`/topup/${provider}`, {
+        method: "POST", body: JSON.stringify({ plan_key: plan.key }), signal: controller.signal,
       });
-      const url = safeExternalUrl(String(payment.pay_url || payment.invoice_link || payment.invoice_url || payment.url || ""));
-      if (!url.startsWith("https://")) throw new Error("Безопасная платёжная ссылка не получена");
-      setPaymentWaiting(true);
-      openExternalUrl(url);
+      const nextPayment = paymentFromResponse(pending, response);
+      // Preserve the returned same-checkout URL before Telegram or the browser can leave this page.
+      const liveScope = activeScope.current;
+      const sameAttempt = liveScope?.actorId === scope.actorId && liveScope.sourceId === scope.sourceId
+        && paymentRef.current?.startedAt === pending.startedAt
+        && paymentRef.current.provider === pending.provider && paymentRef.current.planKey === pending.planKey;
+      const latestDraft = sameAttempt && draftSnapshot.current ? draftSnapshot.current
+        : readRepeatDraft(draftStorage(), scope.actorId, scope.sourceId) || snapshot;
+      const stored = saveRepeatDraft(draftStorage(), scope.actorId, scope.sourceId, { ...latestDraft, payment: nextPayment });
+      // A reopened view of this attempt must not later autosave its pre-response marker over the invoice.
+      if (sameAttempt) {
+        paymentRef.current = nextPayment;
+        setPayment(nextPayment);
+      }
+      if (liveScope !== scope) return; // Never navigate a newer view after a late response.
+      if (!stored) throw new Error("Ссылка оплаты получена, но не сохранена. Не создавайте новый платёж; проверьте текущую оплату.");
+      if (!nextPayment.checkoutUrl) throw new Error("Безопасная платёжная ссылка не получена. Проверьте текущую оплату перед повтором.");
+      openExternalUrl(nextPayment.checkoutUrl);
       toast.success("Оплата открыта — вернись сюда после зачисления");
     } catch (payError) {
-      const message = payError instanceof Error ? payError.message : "Не удалось открыть оплату";
-      setError(message);
-      toast.error(message);
+      if (activeScope.current === scope) {
+        const message = payError instanceof Error ? payError.message : "Не удалось открыть оплату";
+        setError(`${message} Проверьте текущую оплату: новый счёт не создаётся.`);
+        toast.error(message);
+      }
     } finally {
+      window.clearTimeout(timeout);
       paymentInFlight.current = false;
-      setPaymentBusy(false);
+      if (activeScope.current === scope) setPaymentBusy(false);
     }
-  }, [paymentBusy, paymentMethods, quote?.recommended_plan]);
+  }, [busy, paymentBusy, paymentMethods, quote?.recommended_plan]);
+
+  const reopenPayment = useCallback(() => {
+    const current = paymentRef.current;
+    if (!current?.checkoutUrl || !canReopenPayment(current) || paymentBusy) return;
+    if (!persistDraft(current)) {
+      setError("Не удалось сохранить оплату в этом браузере. Проверьте текущую операцию у платёжного сервиса.");
+      return;
+    }
+    openExternalUrl(current.checkoutUrl);
+  }, [paymentBusy, persistDraft]);
 
   const close = useCallback(() => {
     if (busy || paymentBusy) return;
     cancelPending();
-    if (item) clearRepeatDraft(item.id);
+    persistDraft();
+    const scope = activeScope.current;
+    if (scope) clearRepeatDraft(draftStorage(), scope.actorId, scope.sourceId);
+    activeScope.current = null;
+    openSequence.current++;
     resetForm(null);
-  }, [busy, paymentBusy, cancelPending, item, resetForm]);
+  }, [busy, paymentBusy, cancelPending, persistDraft, resetForm]);
 
   const addReferenceFiles = useCallback(async (files: File[]) => {
     if (!files.length || busy) return;
@@ -531,7 +600,11 @@ function FeedRemixRunnerPortal() {
       pendingRemix = null;
       notifyHaptic("success");
       toast.success("Повтор запущен");
-      clearRepeatDraft(item.id);
+      persistDraft();
+      const scope = activeScope.current;
+      if (scope) clearRepeatDraft(draftStorage(), scope.actorId, scope.sourceId);
+      activeScope.current = null;
+      openSequence.current++;
       resetForm(null);
     } catch (runError) {
       notifyHaptic("error");
@@ -543,7 +616,7 @@ function FeedRemixRunnerPortal() {
     } finally {
       launchInFlight.current = false;
     }
-  }, [busy, canLaunch, item, refreshQuote, requestBody, requestBodyKey, resetForm, selectedModel]);
+  }, [busy, canLaunch, item, persistDraft, refreshQuote, requestBody, requestBodyKey, resetForm, selectedModel]);
 
   const phaseLabel = useMemo(() => {
     if (phase === "uploading") return "Загружаем референсы…";
@@ -567,13 +640,24 @@ function FeedRemixRunnerPortal() {
             <span className="font-semibold">Стоимость: {quoteReady ? `${quote?.cost_credits} 💋` : "считаем…"}</span>
             <span className="text-muted-foreground">Баланс: {quoteReady ? `${quote?.balance_credits} 💋` : "—"}</span>
           </div>
-          {quoteReady && !quote?.can_run && quote?.recommended_plan ? (
-            <Button className="min-h-11 w-full rounded-xl" disabled={busy || paymentBusy || paymentWaiting || !paymentMethods.length} onClick={() => void payInline()}>
+          {paymentWaiting ? (
+            <div className="grid gap-2">
+              <Button className="min-h-11 w-full rounded-xl" disabled>Ждём подтверждение оплаты…</Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" disabled={busy || paymentBusy || paymentChecking} onClick={() => void checkPayment()}>
+                  {paymentChecking ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                  Проверить оплату
+                </Button>
+                {payment && canReopenPayment(payment) ? <Button variant="outline" disabled={busy || paymentBusy} onClick={reopenPayment}>Открыть эту оплату</Button> : null}
+              </div>
+            </div>
+          ) : quoteReady && !quote?.can_run && quote?.recommended_plan ? (
+            <Button className="min-h-11 w-full rounded-xl" disabled={busy || paymentBusy || !activeScope.current || !paymentMethods.length} onClick={() => void payInline()}>
               {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {paymentWaiting ? "Ждём подтверждение оплаты…" : `Пополнить здесь · ${quote.recommended_plan.price_rub} ₽`}
+              {`Пополнить здесь · ${quote.recommended_plan.price_rub} ₽`}
             </Button>
           ) : null}
-          {quoteReady && !quote?.can_run && !quote?.recommended_plan ? (
+          {!paymentWaiting && quoteReady && !quote?.can_run && !quote?.recommended_plan ? (
             <p className="text-xs text-destructive">Недостаточно 💋, активных пакетов пополнения пока нет.</p>
           ) : null}
           <Button className="min-h-11 rounded-xl" disabled={busy || paymentBusy || !canLaunch} onClick={() => void submit()}>

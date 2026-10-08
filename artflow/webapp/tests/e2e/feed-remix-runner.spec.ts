@@ -217,3 +217,202 @@ test("insufficient balance can top up inline while preserving photo and settings
   await restored.getByRole("button", { name: /Запустить повтор/ }).click();
   expect(paidRequests).toBe(1);
 });
+
+async function pendingCheckout(page: Page) {
+  await mockMiniAppApi(page);
+  const state = { topups: 0, funded: false };
+  await page.route("**/api/v1/feed/201/remix/quote", route => route.fulfill({ json: {
+    cost_credits: 5, balance_credits: state.funded ? 10 : 0, can_run: state.funded,
+    deficit_credits: state.funded ? 0 : 5,
+    recommended_plan: state.funded ? null : { key: "starter", label: "Старт", credits: 10, price_rub: 100 },
+  } }));
+  await page.route("**/api/v1/topup/tbank", route => {
+    state.topups++;
+    return route.fulfill({ json: { pay_url: "https://pay.example.test/original", transaction_id: 701, credits: 10 } });
+  });
+  await page.route("**/api/web/billing/transactions?**", route => route.fulfill({ json: { data: {
+    transactions: [{ id: 701, provider: "tbank", status: state.funded ? "paid" : "pending", credits: 10 }],
+  } } }));
+  return state;
+}
+
+test("pending invoice is durable at the exact external handoff before any React effect", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByLabel("Что изменить в образе").fill("Сохранить мой образ");
+  await page.evaluate(() => {
+    window.Telegram!.WebApp!.openLink = () => {
+      const snapshot = Object.fromEntries(Object.keys(sessionStorage).map(key => [key, sessionStorage.getItem(key)]));
+      sessionStorage.setItem("test:external-handoff", JSON.stringify(snapshot));
+      window.location.reload();
+    };
+  });
+  const reloadedDocument = page.waitForEvent("domcontentloaded");
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  // The snapshot is captured synchronously inside openLink; read it only after
+  // the intentionally replaced document has a usable JavaScript context.
+  await reloadedDocument;
+  const snapshot = await page.evaluate(() => JSON.parse(sessionStorage.getItem("test:external-handoff") || "{}"));
+  const saved = JSON.parse(String(snapshot["apix:feed-repeat-draft:v2:1:201"]));
+  expect(saved.payment).toMatchObject({ transactionId: 701, checkoutUrl: "https://pay.example.test/original" });
+  expect(saved.changeRequest).toBe("Сохранить мой образ");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Сохранить мой образ");
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  expect(state.topups).toBe(1);
+});
+
+test("delayed webhook never unlocks a second invoice after poll timeout and reload", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  await page.clock.install();
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Открыть эту оплату", exact: true })).toBeVisible();
+  await page.clock.runFor(130_000);
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  expect(state.topups).toBe(1);
+  await page.reload();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  expect(state.topups).toBe(1);
+});
+
+test("close and reopen preserves the same invoice while unrelated balance does not settle it", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+  await page.getByRole("button", { name: "Повторить", exact: true }).first().click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  const opened: string[] = [];
+  await page.exposeFunction("recordCheckoutURL", (url: string) => { opened.push(url); });
+  await page.evaluate(() => { window.Telegram!.WebApp!.openLink = (url: string) => { void (window as unknown as { recordCheckoutURL: (url: string) => Promise<void> }).recordCheckoutURL(url); }; });
+  await dialog.getByRole("button", { name: "Открыть эту оплату", exact: true }).click();
+  await expect.poll(() => opened.length).toBe(1);
+  expect(opened[0]).toBe("https://pay.example.test/original");
+  expect(state.topups).toBe(1);
+  // Another balance update is deliberately not the pending invoice's receipt.
+  await page.route("**/api/v1/feed/201/remix/quote", route => route.fulfill({ json: {
+    cost_credits: 5, balance_credits: 20, can_run: true, deficit_credits: 0, recommended_plan: null,
+  } }));
+  await dialog.getByRole("button", { name: "Проверить оплату", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Открыть эту оплату", exact: true })).toBeVisible();
+  expect(state.topups).toBe(1);
+});
+
+test("lost invoice creation response remains guarded across reload", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  await page.route("**/api/v1/topup/tbank", route => { state.topups++; return route.abort("failed"); });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  await page.reload();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  expect(state.topups).toBe(1);
+});
+
+test("exact paid transaction unlocks checkout state but never launches generation automatically", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  let generations = 0;
+  await page.route("**/api/v1/feed/201/remix", route => { generations++; return route.fulfill({ status: 502, json: { detail: "Not expected" } }); });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  state.funded = true;
+  await dialog.getByRole("button", { name: "Проверить оплату", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+  expect(generations).toBe(0);
+  expect(state.topups).toBe(1);
+});
+
+test("delayed invoice response persists the latest edits before external navigation", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/v1/topup/tbank", async route => {
+    state.topups++;
+    await gate;
+    await route.fulfill({ json: { pay_url: "https://pay.example.test/original", transaction_id: 701 } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await page.evaluate(() => {
+    window.Telegram!.WebApp!.openLink = () => {
+      sessionStorage.setItem("test:latest-handoff", sessionStorage.getItem("apix:feed-repeat-draft:v2:1:201") || "null");
+    };
+  });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await dialog.getByLabel("Что изменить в образе").fill("Последнее изменение");
+  release();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test:latest-handoff") || "null")?.changeRequest)).toBe("Последнее изменение");
+  expect(state.topups).toBe(1);
+});
+
+test("reopening the same source during invoice creation adopts its late checkout identity", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/v1/topup/tbank", async route => {
+    state.topups++;
+    await gate;
+    await route.fulfill({ json: { pay_url: "https://pay.example.test/original", transaction_id: 701 } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await page.evaluate(item => window.dispatchEvent(new CustomEvent("apix:open-feed-remix-runner", { detail: { item } })), feedItems[0]);
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  release();
+  await expect(dialog.getByRole("button", { name: "Открыть эту оплату", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(dialog.getByRole("button", { name: "Открыть эту оплату", exact: true })).toBeVisible();
+  expect(state.topups).toBe(1);
+});
+
+test("unresolved Tribute product checkout is not offered as the same invoice", async ({ page }) => {
+  await pendingCheckout(page);
+  let topups = 0;
+  await page.route("**/api/v1/payment-methods", route => route.fulfill({ json: ["tribute"] }));
+  await page.route("**/api/v1/topup/tribute", route => {
+    topups++;
+    return route.fulfill({ json: { pay_url: "https://pay.example.test/reusable-product", provider: "tribute", amount_usd: 2 } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Открыть эту оплату", exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Открыть эту оплату", exact: true })).toHaveCount(0);
+  expect(topups).toBe(1);
+});
+
+test("paid receipt cannot expose a stale insufficient-balance top-up while quote refresh is delayed", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/v1/feed/201/remix/quote", async route => {
+    await gate;
+    await route.fulfill({ json: { cost_credits: 5, balance_credits: 10, can_run: true, deficit_credits: 0, recommended_plan: null } });
+  });
+  state.funded = true;
+  await dialog.getByRole("button", { name: "Проверить оплату", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Пополнить здесь/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+  release();
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+  expect(state.topups).toBe(1);
+});
