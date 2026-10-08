@@ -29,6 +29,8 @@ from api import (
     image_service,
     kieai_client,
     midjourney_service,
+    neironych_image_adapter,
+    nexus_image_adapter,
     seedance25_adapter,
     suno_full_service,
     video_service,
@@ -102,6 +104,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.provider_routing import get_nano21_route
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
 from db import repository as repo
@@ -201,6 +204,7 @@ _FRIENDLY_MODEL_NAMES: dict[str, str] = {
     "wan/2-7-image-pro": "WAN 2.7 Pro",
     "google/nano-banana": "Nano Banana",
     "nano-banana-2": "Nano Banana 2",
+    "nano-banana-2.1": "Nano Banana 2.1",
     "nano-banana-pro": "Nano Banana Pro",
     "nano-banana-pro-vip": "Нана Банано Про ВИП",
     "qwen/text-to-image": "Qwen",
@@ -524,6 +528,72 @@ async def _reconcile_music_generation_status(session: AsyncSession, gen, task_id
     return gen
 
 
+async def _reconcile_neironych_image_generation(
+    session: AsyncSession, gen, request_id: str
+):
+    """Check paid submissions by persisted UUID without speculative refunds.
+
+    Neironych may report a completed image without a downloadable result URL
+    when the original synchronous response used b64_json. That is a manual
+    recovery case, not proof of failure or a reason to issue another paid POST.
+    """
+    expected_task_id = gen.task_id
+    try:
+        state = await neironych_image_adapter.fetch_nano_banana21_status(request_id)
+    except Exception as exc:
+        logger.warning("Neironych image reconciliation delayed gen=%s request_id=%s error=%s",
+                       gen.id, request_id, type(exc).__name__)
+        return gen
+
+    provider_state = state["status"]
+    if provider_state in {"failed", "timeout", "cancelled"}:
+        await repo.fail_generation_and_refund(
+            session, gen.id, f"Neironych definitively failed ({provider_state})",
+            refund_note="neironych_image_provider_failed",
+            expected_task_id=expected_task_id,
+        )
+        return await repo.get_generation_by_id(session, gen.id)
+
+    if provider_state == "completed":
+        url = state.get("result_url")
+        if not url:
+            logger.error(
+                "Neironych completed without recoverable image; manual support required gen=%s request_id=%s",
+                gen.id, request_id,
+            )
+            return gen
+        try:
+            durable_url = await neironych_image_adapter.mirror_verified_nano_banana21_result(url)
+            finished = await repo.finish_generation(
+                session, gen.id, durable_url, result_urls=[durable_url],
+                expected_task_id=expected_task_id,
+            )
+            if finished:
+                final_urls = _generation_result_urls(finished) or [durable_url]
+                final_url = final_urls[0]
+                if gen.image_session_id:
+                    await repo.update_image_session_last_result(
+                        session, gen.image_session_id, final_url, gen.id
+                    )
+                if not is_web_task_id(gen.task_id):
+                    # Only the successful DB state transition winner delivers.
+                    user = await repo.get_user_by_id(session, finished.user_id)
+                    if user:
+                        await _notify_direct_image_result_in_bot(
+                            user=user, gen=finished, result_urls=final_urls
+                        )
+        except Exception:
+            logger.exception(
+                "Neironych image delivery/reconcile failed gen=%s request_id=%s",
+                gen.id, request_id,
+            )
+        return await repo.get_generation_by_id(session, gen.id)
+
+    # not_found, reconciliation_required, submitting, processing, queued:
+    # no definitive evidence that the provider did not reserve credits.
+    return gen
+
+
 async def _reconcile_generation_status(session: AsyncSession, gen):
     if not gen or gen.status not in {GenerationStatus.pending, GenerationStatus.processing}:
         return gen
@@ -533,6 +603,16 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
     age = now - created_at
 
     stored_task_id = (gen.task_id or '').strip()
+    if gen.gen_type == GenerationType.image:
+        neironych_request_id = neironych_image_adapter.decode_task_id(stored_task_id)
+        if neironych_request_id:
+            return await _reconcile_neironych_image_generation(
+                session, gen, neironych_request_id
+            )
+        if nexus_image_adapter.decode_submission_id(stored_task_id):
+            # This is a persisted idempotency identity, not a pollable task id.
+            # Keep the charge and generation active for safe manual recovery.
+            return gen
     task_id = provider_task_id(stored_task_id)
     if not task_id:
         if age >= STALE_GENERATION_TIMEOUT:
@@ -552,13 +632,23 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
     if gen.gen_type == GenerationType.music and str(gen.model).startswith("suno/"):
         return await _reconcile_music_generation_status(session, gen, task_id, age)
 
+    strict_nexus_image = (
+        gen.gen_type == GenerationType.image
+        and gen.model == 'nano-banana-2.1'
+        and nexus_image_adapter.is_nexus_task_id(task_id)
+    )
+    if strict_nexus_image and not nexus_image_adapter.submission_scope_matches(getattr(gen, "input_params", None)):
+        logger.error("Nexus credential scope changed; manual reconciliation required gen=%s", gen.id)
+        return gen
     try:
         result_urls: list[str] | None = None
         if gen.gen_type == GenerationType.image:
             if gen.model in _MIDJOURNEY_IMAGE_MODEL_KEYS:
                 result_url = await midjourney_service.poll_mj_image(task_id)
             else:
-                result_urls = await image_service.poll_image_result_urls(task_id)
+                result_urls = await image_service.poll_image_result_urls(
+                    task_id, **({"strict_nexus": True} if strict_nexus_image else {})
+                )
                 result_url = result_urls[0] if result_urls else None
         elif gen.gen_type == GenerationType.video:
             if gen.model in _MIDJOURNEY_VIDEO_MODEL_KEYS:
@@ -572,19 +662,44 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         else:
             return gen
     except Exception as exc:
-        logger.warning('Reconcile failed generation gen=%s task=%s: %s', gen.id, task_id, exc)
+        logger.warning('Reconcile failed generation gen=%s task=%s error=%s', gen.id, task_id, type(exc).__name__)
+        if strict_nexus_image:
+            if (not isinstance(exc, nexus_image_adapter.NexusImageTaskFailed)
+                    or exc.task_id != nexus_image_adapter.strip_nexus_task_id(task_id)):
+                return gen
         await repo.fail_generation_and_refund(
             session,
             gen.id,
             str(exc),
             refund_note='reconcile:poll_error',
+            **({'expected_task_id': stored_task_id} if strict_nexus_image else {}),
         )
         return await repo.get_generation_by_id(session, gen.id)
 
     if result_url:
-        finished = await repo.finish_generation(session, gen.id, result_url, result_urls=result_urls)
-        if gen.image_session_id:
+        if strict_nexus_image:
+            try:
+                result_urls = [
+                    await nexus_image_adapter.mirror_verified_nano_banana21_result(url)
+                    for url in (result_urls or [result_url])
+                ]
+                result_url = result_urls[0]
+            except Exception:
+                logger.exception("Nexus image verification deferred gen=%s", gen.id)
+                return gen
+        finished = await repo.finish_generation(
+            session, gen.id, result_url, result_urls=result_urls,
+            **({"expected_task_id": stored_task_id} if strict_nexus_image else {}),
+        )
+        if finished and gen.image_session_id:
             await repo.update_image_session_last_result(session, gen.image_session_id, result_url, gen.id)
+
+        if finished and strict_nexus_image and not is_web_task_id(gen.task_id):
+            user = await repo.get_user_by_id(session, finished.user_id)
+            if user:
+                await _notify_direct_image_result_in_bot(
+                    user=user, gen=finished, result_urls=result_urls
+                )
 
         # Poll-only providers (notably Neironych Seedance) do not have the KIE
         # webhook path that normally delivers completed videos to Telegram.
@@ -606,6 +721,10 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 )
 
         return await repo.get_generation_by_id(session, gen.id)
+
+    if strict_nexus_image:
+        # A pending/unknown Nexus task is not proof that paid work failed.
+        return gen
 
     if age >= STALE_GENERATION_TIMEOUT:
         logger.warning(
@@ -632,15 +751,15 @@ async def _finish_direct_image_result(session: AsyncSession, gen, result, *, sur
     if not result_urls:
         raise RuntimeError("CometAPI image fallback returned no result URL")
 
-    await repo.update_generation_task(
-        session,
-        gen.id,
-        task_id_for_surface(getattr(result, "task_id", None) or "comet:image:direct", surface),
+    result_task_id = task_id_for_surface(getattr(result, "task_id", None) or "comet:image:direct", surface)
+    guard = {"expected_task_id": result_task_id} if neironych_image_adapter.decode_task_id(result_task_id) else {}
+    await repo.update_generation_task(session, gen.id, result_task_id, **guard)
+    finished = await repo.finish_generation(
+        session, gen.id, result_urls[0], result_urls=result_urls, **guard
     )
-    await repo.finish_generation(session, gen.id, result_urls[0], result_urls=result_urls)
-    if gen.image_session_id:
+    if finished and gen.image_session_id:
         await repo.update_image_session_last_result(session, gen.image_session_id, result_urls[0], gen.id)
-    return await repo.get_generation_by_id(session, gen.id)
+    return await repo.get_generation_by_id(session, gen.id), finished is not None
 
 
 def _direct_result_should_notify_bot(gen, *, surface: str) -> bool:
@@ -2336,6 +2455,10 @@ async def create_image_generation(
     model_cost = await repo.resolve_image_model_cost(session, body.model, quality=normalized_quality)
     if not model_cost:
         raise HTTPException(status_code=422, detail="Model not available")
+    image_primary = (
+        (await get_nano21_route(session)).primary_provider
+        if model == ImageModel.NANO_BANANA_21 else None
+    )
 
     max_refs = int(caps.get("max_refs", 1) or 1)
     if len(all_refs) > max_refs:
@@ -2391,7 +2514,32 @@ async def create_image_generation(
     elif len(all_refs) > 1:
         ref_urls = all_refs
 
+    image_request_id = (
+        neironych_image_adapter.client_request_id_for_generation(gen.id)
+        if model == ImageModel.NANO_BANANA_21 else None
+    )
+
+    async def persist_nexus_submission(request_id: str, snapshot: dict) -> None:
+        saved = await repo.persist_nexus_image_submission(
+            session, gen.id, task_id_for_surface(nexus_image_adapter.encode_submission_id(request_id), surface), snapshot
+        )
+        if not saved:
+            raise nexus_image_adapter.NexusImageSubmissionUnknown(
+                "Nexus submission already persisted or generation finalized",
+                idempotency_key=request_id,
+            )
+
     try:
+        if image_request_id:
+            # Commit a provider-specific recovery identity before every paid POST.
+            initial_identity = (
+                neironych_image_adapter.encode_task_id(image_request_id)
+                if image_primary == "neironych"
+                else nexus_image_adapter.encode_submission_id(image_request_id)
+            )
+            await repo.update_generation_task(
+                session, gen.id, task_id_for_surface(initial_identity, surface),
+            )
         result = await image_service.generate_image(
             model,
             user_prompt,
@@ -2400,7 +2548,24 @@ async def create_image_generation(
             n=body.count,
             quality=normalized_quality,
             callback_url=_kie_callback_url(),
+            request_id=image_request_id,
+            primary_provider=image_primary,
+            before_nexus_submit=persist_nexus_submission,
         )
+    except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
+        logger.warning(
+            "Nexus image awaiting reconciliation gen=%s idempotency_key=%s",
+            gen.id, exc.idempotency_key,
+        )
+        await session.refresh(gen)
+        return _gen_out(gen)
+    except neironych_image_adapter.NeironychImageError as exc:
+        # Provider may have accepted and charged the POST before the response was lost.
+        # Never refund or submit another task while its outcome is unknown.
+        logger.warning("Neironych image awaiting reconciliation gen=%s request_id=%s status=%s",
+                       gen.id, exc.request_id, exc.status_code)
+        await session.refresh(gen)
+        return _gen_out(gen)
     except Exception as exc:
         logger.error("miniapp image gen error user=%s: %s", user.id, exc)
         if await repo.fail_generation(session, gen.id, str(exc)) and charged_credits > 0:
@@ -2408,15 +2573,20 @@ async def create_image_generation(
         raise HTTPException(status_code=502, detail=image_generation_user_error(exc))
 
     if not getattr(result, "is_async", True):
-        gen = await _finish_direct_image_result(session, gen, result, surface=surface)
-        await _notify_direct_image_result_in_bot(
-            user=user,
-            gen=gen,
-            result_urls=_generation_result_urls(gen),
-            surface=surface,
-        )
+        gen, won = await _finish_direct_image_result(session, gen, result, surface=surface)
+        if won:
+            await _notify_direct_image_result_in_bot(
+                user=user,
+                gen=gen,
+                result_urls=_generation_result_urls(gen),
+                surface=surface,
+            )
     else:
-        await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
+        await repo.update_generation_task(
+            session, gen.id, task_id_for_surface(result.task_id or "", surface),
+            **({"expected_task_id": task_id_for_surface(nexus_image_adapter.encode_submission_id(image_request_id), surface)}
+               if image_request_id else {}),
+        )
     await repo.update_image_session_last_prompt(session, image_session.id, user_prompt)
     await _mark_prompt_used_after_generation(
         session,
@@ -3262,6 +3432,11 @@ async def remix_feed_post(
 
     if not model_cost:
         raise HTTPException(status_code=422, detail="Model not available")
+    image_primary = (
+        (await get_nano21_route(session)).primary_provider
+        if gen_type == "image" and body.model == ImageModel.NANO_BANANA_21.value
+        else None
+    )
 
     nominal_credits = (
         _video_total_credits(
@@ -3325,8 +3500,32 @@ async def remix_feed_post(
     )
     failed_generation_id = gen.id
     failed_user_id = user.id
+    image_request_id = (
+        neironych_image_adapter.client_request_id_for_generation(gen.id)
+        if gen_type == "image" and body.model == ImageModel.NANO_BANANA_21.value
+        else None
+    )
+
+    async def persist_remix_nexus_submission(request_id: str, snapshot: dict) -> None:
+        saved = await repo.persist_nexus_image_submission(
+            session, gen.id, task_id_for_surface(nexus_image_adapter.encode_submission_id(request_id), surface), snapshot
+        )
+        if not saved:
+            raise nexus_image_adapter.NexusImageSubmissionUnknown(
+                "Nexus submission already persisted or generation finalized",
+                idempotency_key=request_id,
+            )
 
     try:
+        if image_request_id:
+            initial_identity = (
+                neironych_image_adapter.encode_task_id(image_request_id)
+                if image_primary == "neironych"
+                else nexus_image_adapter.encode_submission_id(image_request_id)
+            )
+            await repo.update_generation_task(
+                session, gen.id, task_id_for_surface(initial_identity, surface),
+            )
         if gen_type == "video":
             result = await video_service.generate_video(
                 model,
@@ -3354,7 +3553,24 @@ async def remix_feed_post(
                 n=body.count,
                 quality=normalized_quality,
                 callback_url=_kie_callback_url(),
+                request_id=image_request_id,
+                primary_provider=image_primary,
+                before_nexus_submit=persist_remix_nexus_submission,
             )
+    except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
+        logger.warning(
+            "Nexus remix awaiting reconciliation gen=%s idempotency_key=%s",
+            gen.id, exc.idempotency_key,
+        )
+        await repo.increment_feed_share(session, gen_id)
+        await session.refresh(gen)
+        return _gen_out(gen)
+    except neironych_image_adapter.NeironychImageError as exc:
+        logger.warning("Neironych remix awaiting reconciliation gen=%s request_id=%s",
+                       gen.id, exc.request_id)
+        await repo.increment_feed_share(session, gen_id)
+        await session.refresh(gen)
+        return _gen_out(gen)
     except Exception as exc:
         logger.error("feed remix error user=%s gen=%s: %s", user.id, gen_id, exc)
         await session.rollback()
@@ -3363,15 +3579,20 @@ async def remix_feed_post(
         raise HTTPException(status_code=502, detail="Generation service error")
 
     if gen_type == "image" and not getattr(result, "is_async", True):
-        gen = await _finish_direct_image_result(session, gen, result, surface=surface)
-        await _notify_direct_image_result_in_bot(
-            user=user,
-            gen=gen,
-            result_urls=_generation_result_urls(gen),
-            surface=surface,
-        )
+        gen, won = await _finish_direct_image_result(session, gen, result, surface=surface)
+        if won:
+            await _notify_direct_image_result_in_bot(
+                user=user,
+                gen=gen,
+                result_urls=_generation_result_urls(gen),
+                surface=surface,
+            )
     else:
-        await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
+        await repo.update_generation_task(
+            session, gen.id, task_id_for_surface(result.task_id or "", surface),
+            **({"expected_task_id": task_id_for_surface(nexus_image_adapter.encode_submission_id(image_request_id), surface)}
+               if image_request_id else {}),
+        )
     await repo.increment_feed_share(session, gen_id)
     await session.refresh(gen)
     return _gen_out(gen)

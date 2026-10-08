@@ -18,7 +18,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import image_service
+from api import image_service, neironych_image_adapter, nexus_image_adapter
 from api.image_errors import telegram_image_error_text
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
@@ -53,6 +53,7 @@ from bot.utils.telegram_images import (
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.provider_routing import get_nano21_route
 from db import repository as repo
 from db.models import GenerationType, ImageGenerationAction, ImageSession, User
 
@@ -889,6 +890,11 @@ async def _launch_session_generation(
         )
         return False
 
+    image_primary = (
+        (await get_nano21_route(session)).primary_provider
+        if model == ImageModel.NANO_BANANA_21 else None
+    )
+
     if _requires_reference_image(image_session.model) and not reference_url:
         await source_message.answer(
             "❌ Эта модель требует референс-изображение. Отправь фото.",
@@ -932,8 +938,29 @@ async def _launch_session_generation(
     image_session.last_prompt = prompt
 
     status_msg = await source_message.answer(launching_text)
+    image_request_id = (
+        neironych_image_adapter.client_request_id_for_generation(gen.id)
+        if model == ImageModel.NANO_BANANA_21 else None
+    )
+
+    async def persist_nexus_submission(request_id: str, snapshot: dict) -> None:
+        saved = await repo.persist_nexus_image_submission(
+            session, gen.id, nexus_image_adapter.encode_submission_id(request_id), snapshot
+        )
+        if not saved:
+            raise nexus_image_adapter.NexusImageSubmissionUnknown(
+                "Nexus submission already persisted or generation finalized",
+                idempotency_key=request_id,
+            )
 
     try:
+        if image_request_id:
+            initial_identity = (
+                neironych_image_adapter.encode_task_id(image_request_id)
+                if image_primary == "neironych"
+                else nexus_image_adapter.encode_submission_id(image_request_id)
+            )
+            await repo.update_generation_task(session, gen.id, initial_identity)
         result = await image_service.generate_image(
             model,
             prompt,
@@ -942,7 +969,33 @@ async def _launch_session_generation(
             n=normalized_count,
             quality=normalized_quality,
             callback_url=_kie_callback_url(),
+            request_id=image_request_id,
+            primary_provider=image_primary,
+            before_nexus_submit=persist_nexus_submission,
         )
+    except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
+        logger.warning(
+            "Telegram Nano Banana 2.1 Nexus outcome unknown gen=%s idempotency_key=%s",
+            gen.id, exc.idempotency_key,
+        )
+        await _sync_state_with_image_session(state, image_session)
+        await status_msg.edit_text(
+            f"⏳ Запрос отправлен, уточняем результат у провайдера.\n"
+            f"Задача APIX: <code>{gen.id}</code>\n"
+            "Не запускай её повторно: результат может ещё прийти."
+        )
+        return True
+    except neironych_image_adapter.NeironychImageError as exc:
+        # A lost HTTP response is not proof that Neironych rejected the paid job.
+        logger.warning("Telegram Nano Banana 2.1 awaiting reconciliation gen=%s request_id=%s",
+                       gen.id, exc.request_id)
+        await _sync_state_with_image_session(state, image_session)
+        await status_msg.edit_text(
+            f"⏳ Запрос отправлен, уточняем результат у провайдера.\n"
+            f"Задача APIX: <code>{gen.id}</code>\n"
+            "Не запускай её повторно: результат может ещё прийти."
+        )
+        return True
     except Exception as e:
         logger.error("Session image generation error: %s", e)
         _, refunded = await repo.fail_generation_and_refund(
@@ -960,7 +1013,13 @@ async def _launch_session_generation(
     publish_actions_allowed = not bool(source_feed_gen_id)
     prompt_actions_allowed = publish_actions_allowed and action_type != ImageGenerationAction.repeat
     prompt_for_menu = prompt if prompt_actions_allowed else None
-    await repo.update_generation_task(session, gen.id, result.task_id or "")
+    expected_task_id = (
+        nexus_image_adapter.encode_submission_id(image_request_id)
+        if image_request_id and getattr(result, "is_async", True)
+        else neironych_image_adapter.encode_task_id(image_request_id) if image_request_id else None
+    )
+    guard = {"expected_task_id": expected_task_id} if expected_task_id else {}
+    await repo.update_generation_task(session, gen.id, result.task_id or "", **guard)
     task_reference = provider_task_reference(result.task_id)
     await _sync_state_with_image_session(state, image_session)
     await state.update_data(credits=nominal_credits, source_feed_gen_id=source_feed_gen_id)
@@ -982,7 +1041,9 @@ async def _launch_session_generation(
             )
             return False
 
-        await repo.finish_generation(session, gen.id, result_urls[0], result_urls=result_urls)
+        finished = await repo.finish_generation(session, gen.id, result_urls[0], result_urls=result_urls, **guard)
+        if not finished:
+            return True
         await repo.update_image_session_last_result(session, image_session.id, result_urls[0], gen.id)
         image_session.last_result_url = result_urls[0]
         image_session.last_generation_id = gen.id
@@ -1092,6 +1153,7 @@ async def _launch_session_generation(
 _NANA_BANANO_MODEL_LABELS = {
     ImageModel.NANO_BANANA_PRO.value: "Nano Banana Pro",
     ImageModel.NANO_BANANA_2.value: "Nano Banana 2",
+    ImageModel.NANO_BANANA_21.value: "Nano Banana 2.1",
     ImageModel.NANO_BANANA_PRO_VIP.value: "Нана Банано Про ВИП",
 }
 

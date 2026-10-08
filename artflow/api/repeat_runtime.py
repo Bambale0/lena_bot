@@ -214,11 +214,27 @@ def install_repeat_runtime(repository: Any) -> None:
             input_params=payload if gen_type_value == "image" else input_params,
         )
 
-    async def update_generation_task_with_aliases(session, gen_id: int, task_id: str) -> None:
-        await original_update_generation_task(session, gen_id, task_id)
-        generation = await repository.get_generation_by_id(session, gen_id)
+    async def update_generation_task_with_aliases(
+        session, gen_id: int, task_id: str, *, expected_task_id: str | None = None
+    ) -> bool:
+        updated = await original_update_generation_task(
+            session, gen_id, task_id, expected_task_id=expected_task_id
+        )
+        if not updated:
+            return False
+        # Read fresh under lock: alias maintenance must not overwrite a newly
+        # persisted submission snapshot or a concurrent refund marker.
+        from sqlalchemy import select
+
+        from db.models import Generation
+        result = await session.execute(
+            select(Generation).where(Generation.id == gen_id).with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        generation = result.scalar_one_or_none()
         if generation is None:
-            return
+            await session.commit()
+            return True
         payload = _json_dict(getattr(generation, "input_params", None))
         gen_type = str(
             getattr(getattr(generation, "gen_type", None), "value", getattr(generation, "gen_type", ""))
@@ -229,7 +245,8 @@ def install_repeat_runtime(repository: Any) -> None:
             if provider_id.startswith("web:"):
                 _merge_aliases(payload, provider_id[len("web:") :])
             generation.input_params = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-            await session.commit()
+        await session.commit()
+        return True
 
     async def resolve_image_model_cost_with_override(*args: Any, **kwargs: Any):
         result = await original_resolve_image_model_cost(*args, **kwargs)

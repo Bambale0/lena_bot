@@ -51,6 +51,7 @@ def _model_label(model_key: str) -> str:
         "nano-banana-pro": "Nano Banana Pro",
         "nano-banana-pro-vip": "Нана Банано Про ВИП",
         "nano-banana-2": "Nano Banana 2",
+        "nano-banana-2.1": "Nano Banana 2.1",
         "seedream/4.5-text-to-image": "Seedream 4.5",
         "seedream/4.5-edit": "Seedream 4.5 Edit",
         "wan/2-7-image": "WAN",

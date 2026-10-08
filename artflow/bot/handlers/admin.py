@@ -53,6 +53,7 @@ from bot.states import AdminStates
 from bot.utils.telegram_ui import safe_answer_callback
 from core.broadcast_scheduler import schedule_broadcast_job
 from core.model_pricing import pricing_variant_key
+from core.provider_routing import get_nano21_route, set_nano21_route
 from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
@@ -116,6 +117,7 @@ def admin_menu_kb():
     builder.button(text="💳 Прайс-лист", callback_data="adm:price")
     builder.button(text="🎟 Промокоды", callback_data="adm:promos")
     builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
+    builder.button(text="🔀 Banana 2.1 провайдер", callback_data="adm:nano21_route")
     builder.button(text="🥷 Genjutsu цены", callback_data="adm:genjutsu_prices")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
     builder.button(text="♾ Фото-безлимит", callback_data="adm:image_unlimited")
@@ -136,6 +138,48 @@ async def _show_admin_menu(call: CallbackQuery, state: FSMContext) -> None:
         if "there is no text in the message to edit" not in str(e).lower():
             raise
         await call.message.answer(text, reply_markup=admin_menu_kb())  # type: ignore[union-attr]
+    await call.answer()
+
+
+def _nano21_provider_kb(primary: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for provider, label in (("neironych", "Нейроныч"), ("nexus", "Nexus")):
+        builder.row(InlineKeyboardButton(
+            text=f"{'✅ ' if primary == provider else ''}{label}",
+            callback_data=f"adm:nano21_primary:{provider}",
+        ))
+    builder.row(InlineKeyboardButton(text="← Админ-панель", callback_data="adm:back"))
+    return builder.as_markup()
+
+
+@router.callback_query(F.data == "adm:nano21_route")
+async def cb_nano21_route(call: CallbackQuery, session: AsyncSession) -> None:
+    route = await get_nano21_route(session)
+    await call.message.edit_text(
+        "🔀 <b>Nano Banana 2.1</b>\n"
+        f"Основной провайдер: <b>{route.primary_provider}</b>\n"
+        f"Источник: {route.source}\n"
+        "Резерв: Nexus при подтверждённом отказе Нейроныча.\n"
+        "При timeout или неопределённом ответе повторный платный запрос не создаётся.",
+        reply_markup=_nano21_provider_kb(route.primary_provider),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:nano21_primary:"))
+async def cb_nano21_primary(call: CallbackQuery, session: AsyncSession) -> None:
+    requested = (call.data or "").rsplit(":", 1)[-1]
+    if requested not in {"neironych", "nexus"}:
+        await call.answer("Недопустимый провайдер", show_alert=True)
+        return
+    route = await set_nano21_route(
+        session, requested, admin_tg_id=call.from_user.id, source="telegram"
+    )
+    await call.message.edit_text(
+        f"✅ <b>Nano Banana 2.1</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
+        "Изменение применено для новых задач и записано в журнал.",
+        reply_markup=_nano21_provider_kb(route.primary_provider),
+    )
     await call.answer()
 
 
