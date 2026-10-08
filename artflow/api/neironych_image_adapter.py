@@ -95,10 +95,12 @@ def _verified_image_bytes(data: bytes) -> bytes:
 
 async def mirror_verified_nano_banana21_result(url: str) -> str:
     """Download, fully decode and persist a reconciled provider image."""
-    data, content_type = await download_public_url(url)
+    data, _content_type = await download_public_url(url)
     if not data or len(data) > settings.NEIRONYCH_IMAGE_MAX_BYTES:
         raise ValueError("Reconciled image is empty or oversized")
     await asyncio.to_thread(_verified_image_bytes, data)
+    with Image.open(io.BytesIO(data)) as image:
+        content_type = Image.MIME[image.format]
     return save_public_file(
         data,
         content_type,

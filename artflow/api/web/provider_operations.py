@@ -218,10 +218,15 @@ async def start_provider_operation(
         if spec.model == "nano-banana-2.1" else None
     )
 
-    async def persist_nexus_submission(request_id: str) -> None:
-        await repo.update_generation_task(
-            session, generation.id, nexus_image_adapter.encode_submission_id(request_id)
+    async def persist_nexus_submission(request_id: str, snapshot: dict) -> None:
+        saved = await repo.persist_nexus_image_submission(
+            session, generation.id, nexus_image_adapter.encode_submission_id(request_id), snapshot
         )
+        if not saved:
+            raise nexus_image_adapter.NexusImageSubmissionUnknown(
+                "Nexus submission already persisted or generation finalized",
+                idempotency_key=request_id,
+            )
 
     try:
         if image_request_id:

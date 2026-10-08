@@ -51,6 +51,7 @@ jobs:
             db/migrations/versions/037_provider_routing_settings.py \
             tests/test_nano_banana21_routing.py \
             tests/test_nano_banana21_control_plane.py \
+            tests/test_nano_banana21_recovery.py \
             tests/test_nano_banana21_api_integration.py \
             api/kling_grok_service.py \
             api/kling_motion_visibility.py \
@@ -142,6 +143,7 @@ jobs:
             tests/test_nexus_image_migration.py \
             tests/test_nano_banana21_routing.py \
             tests/test_nano_banana21_control_plane.py \
+            tests/test_nano_banana21_recovery.py \
             tests/test_nano_banana21_api_integration.py \
             tests/test_nexus_admin_pricing.py \
             tests/test_referral_commission_defaults.py \

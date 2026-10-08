@@ -444,7 +444,7 @@ def _urls_from_any(value: Any) -> tuple[str, ...]:
 async def execute_operation(
     spec: OperationSpec, params: dict[str, Any], *, request_id: str | None = None,
     primary_provider: str | None = None,
-    before_nexus_submit: Callable[[str], Awaitable[None]] | None = None,
+    before_nexus_submit: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
 ) -> OperationStart:
     validated = validate_operation_params(spec, params)
     if spec.model == "nano-banana-2.1":

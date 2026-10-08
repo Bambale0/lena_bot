@@ -27,6 +27,40 @@ Verified contracts (8 October 2026): Neironych `GET /v1/models` returned `nano-b
 - After timeout, HTTP 5xx or an invalid result, **leave the already charged APIX generation processing** with its persisted `request_id`. Reconcile through the read-only `GET /api/v1/generations/by-client-request-id/<uuid>` and the bounded background scheduler (`NEIRONYCH_IMAGE_RECONCILE_INTERVAL_SECONDS=75`, configurable). Only provider-confirmed terminal failures are eligible for the existing atomic refund. Recovered completed results are finalized and delivered with a single-winner DB state transition. If the synchronous base64 result is not recoverable from the provider's persisted status, leave it pending for **manual operator reconciliation**; do not claim delivered or retry automatically.
 - Failover happens at launch, not in a second run after a task is already accepted.
 
+### Nexus lost-response recovery
+
+The acceptance request carries the same persisted submission UUID as its
+idempotency key and as an authenticated correlation in `webhook_url`. The
+callback verifies the configured secret and per-submission signature, fetches
+the canonical task with the configured Nexus account, then atomically binds
+that task to the matching pending submission. Completion requires verified
+JPEG/PNG/WebP bytes in durable APIX storage; corrupt or unavailable media stays
+non-terminal. The original response and callback cannot reopen terminal work
+or win delivery twice.
+
+An immutable request snapshot preserves the original submission evidence;
+credentials and callback secrets are not stored in that snapshot. Recovery
+does not reconstruct inputs from a subsequently edited image session and does
+not replay a paid POST. Nexus documents a 24-hour idempotency cache but also an
+in-flight race before the first response is cached, so a matching key alone is
+not sufficient to guarantee a safe retry.
+
+If both the initial response and all three provider callback attempts are lost,
+manual provider reconciliation remains necessary. Legacy submission markers
+without authenticated correlation are also not replayed. Once a task ID is
+bound, scheduled/on-demand status checks can recover its result. For manual
+reconciliation, the operator must use the original provider account and the
+saved submission UUID/callback correlation to identify the provider task;
+prompt similarity alone is not sufficient evidence. Do not generate a new key,
+retry with changed parameters, or refund an ambiguous accepted task merely to
+clear its pending state. If the provider account or base URL changes, preserve
+the original account context for unresolved work.
+
+Provider references, checked 8 October 2026:
+- https://docs.nexusapi.dev/concepts/idempotency/
+- https://docs.nexusapi.dev/concepts/webhooks/
+- https://nexusapi.dev/openapi.json
+
 ## Pricing and product surfaces
 
 On startup, `db.seed._seed_nano_banana_21_prices` creates missing base/2K/4K commercial rows by cloning the **current DB-admin-configured Nano Banana 2 prices**. It never overwrites existing 2.1 rows. The 1K option falls back to the base row. Administrators can adjust 2.1 independently through the regular model price editor; no fixed business prices are hardcoded.
@@ -45,3 +79,12 @@ cd webapp && npm run build
 Live smoke: one low-cost 1K text-to-image generation with an innocuous prompt. Verify Neironych completion, existence of local result file, an accessible public URL, site/Mini App/Telegram model availability, and absence of double charges.
 
 **Rollback**: change primary to Nexus in Telegram/Web admin (no redeploy) or deactivate the 2.1 commercial model in the model-cost editor. Existing Neironych tasks keep their own correlation IDs and are reconciled on their original provider; never migrate pending work to the new primary. Secrets remain in the environment. **Schema**: additive Alembic migration `037_provider_routing_settings` creates routing/audit tables; applying it to production requires explicit operator approval under `AGENTS.md`.
+
+
+### Mounted API scope
+
+The website and Mini App use the mounted shared image-generation routes; the
+text bot uses the same image service. The repository also contains a dormant
+`api/web/provider_operations.py` implementation that is not mounted and has
+pre-existing incompatible dependencies/repository calls. This release does
+not activate that generic API or claim it as a working public product surface.

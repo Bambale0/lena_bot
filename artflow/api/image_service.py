@@ -420,7 +420,7 @@ async def generate_image(
     bbox_list: list[list[Any]] | None = None,
     request_id: str | None = None,
     primary_provider: str | None = None,
-    before_nexus_submit: Callable[[str], Awaitable[None]] | None = None,
+    before_nexus_submit: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
 ) -> ImageResult:
     del image_bytes, image_mime, size
 
@@ -456,8 +456,6 @@ async def generate_image(
                 )
         # No fallback after timeout, 5xx or malformed Neironych results. Those
         # outcomes may already be billed upstream (see Neironych API guide).
-        if request_id and before_nexus_submit:
-            await before_nexus_submit(request_id)
         task_id = await nexus_image_adapter.create_nexus_image_task(
             model_key=model.value,
             prompt=prompt,
@@ -467,6 +465,7 @@ async def generate_image(
             callback_url=callback_url,
             output_format=output_format,
             idempotency_key=request_id,
+            before_submit=before_nexus_submit,
         )
         return ImageResult(is_async=True, task_id=task_id, provider="nexus")
 
@@ -844,9 +843,11 @@ async def poll_kieai_status(task_id: str) -> str | None:
     return urls[0] if urls else None
 
 
-async def poll_image_result_urls(task_id: str) -> list[str] | None:
+async def poll_image_result_urls(task_id: str, *, strict_nexus: bool = False) -> list[str] | None:
     if nexus_image_adapter.is_nexus_task_id(task_id):
-        return await nexus_image_adapter.poll_nexus_image_result_urls(task_id)
+        return await nexus_image_adapter.poll_nexus_image_result_urls(
+            task_id, **({"strict": True} if strict_nexus else {})
+        )
     return await poll_kieai_result_urls(task_id)
 
 

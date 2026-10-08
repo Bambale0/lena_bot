@@ -1205,17 +1205,54 @@ async def create_generation(
 
 
 async def update_generation_task(
-    session: AsyncSession, gen_id: int, task_id: str
-) -> None:
+    session: AsyncSession, gen_id: int, task_id: str, *, expected_task_id: str | None = None
+) -> bool:
+    conditions = [
+        Generation.id == gen_id,
+        Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
+    ]
+    if expected_task_id is not None:
+        conditions.append(Generation.task_id == expected_task_id)
     result = await session.execute(
         update(Generation)
-        .where(Generation.id == gen_id)
+        .where(*conditions)
         .values(task_id=task_id, status=GenerationStatus.processing)
         .returning(Generation)
     )
     gen = result.scalar_one_or_none()
     await session.commit()
+    if gen is not None:
+        await _publish_generation_update(gen)
+    return gen is not None
+
+
+async def persist_nexus_image_submission(
+    session: AsyncSession, gen_id: int, task_id: str, snapshot: dict
+) -> bool:
+    """Commit immutable launch evidence once, before making any paid request.
+
+    Even concurrent callers with the same UUID cannot both submit: the second
+    sees the existing snapshot under a row lock and must not issue a POST.
+    """
+    result = await session.execute(
+        select(Generation).where(Generation.id == gen_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    gen = result.scalar_one_or_none()
+    if not gen or gen.status not in (GenerationStatus.pending, GenerationStatus.processing):
+        await session.commit()
+        return False
+    params = parse_input_params(gen.input_params)
+    if params.get("nexus_submission"):
+        await session.commit()
+        return False
+    params["nexus_submission"] = snapshot
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    gen.task_id = task_id
+    gen.status = GenerationStatus.processing
+    await session.commit()
     await _publish_generation_update(gen)
+    return True
 
 
 async def finish_generation(
@@ -1223,6 +1260,8 @@ async def finish_generation(
     gen_id: int,
     result_url: str,
     result_urls: list[str] | None = None,
+    *,
+    expected_task_id: str | None = None,
 ) -> Generation | None:
     original_urls = [url for url in (result_urls or [result_url]) if url]
     clean_urls: list[str] = []
@@ -1233,12 +1272,15 @@ async def finish_generation(
     if not clean_urls:
         clean_urls = original_urls
     result_url = clean_urls[0] if clean_urls else result_url
+    conditions = [
+        Generation.id == gen_id,
+        Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
+    ]
+    if expected_task_id is not None:
+        conditions.append(Generation.task_id == expected_task_id)
     result = await session.execute(
         update(Generation)
-        .where(
-            Generation.id == gen_id,
-            Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
-        )
+        .where(*conditions)
         .values(
             status=GenerationStatus.done,
             result_url=result_url,
@@ -1352,6 +1394,7 @@ async def fail_generation_and_refund(
     *,
     entry_type: str = "generation_refund",
     refund_note: str | None = None,
+    expected_task_id: str | None = None,
 ) -> tuple[bool, float]:
     """Fail a pending/processing generation and return its credits in one commit.
 
@@ -1372,6 +1415,9 @@ async def fail_generation_and_refund(
     )
     generation = result.scalar_one_or_none()
     if generation is None:
+        return False, 0.0
+    if expected_task_id is not None and generation.task_id != expected_task_id:
+        await session.commit()
         return False, 0.0
     status = getattr(generation.status, "value", generation.status)
     if status not in (GenerationStatus.pending.value, GenerationStatus.processing.value):

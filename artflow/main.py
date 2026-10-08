@@ -1608,12 +1608,45 @@ async def tribute_webhook(request: Request) -> dict:
     return {"status": "ok"}
 
 
+async def _recover_nexus_submission(session, request_id: str, task_id: str):
+    """Bind a verified signed callback, never replay a possibly paid POST.
+
+    Nexus caches for 24h but does not serialize concurrent requests and does not
+    cache 5xx. Even a same-key retry can duplicate remote work after a timeout.
+    The immutable submission marker is the compare-and-swap recovery authority.
+    """
+    from db.repeat_lookup import parse_input_params
+
+    marker = nexus_image_adapter.encode_submission_id(request_id)
+    gen = await repo.get_generation_by_task_id(session, marker)
+    if not gen:
+        marker = _web_task_lookup_id(marker)
+        gen = await repo.get_generation_by_task_id(session, marker)
+    if not gen:
+        return None
+    snapshot = parse_input_params(getattr(gen, "input_params", None)).get("nexus_submission", {})
+    if (gen.model != "nano-banana-2.1" or gen.gen_type != GenerationType.image
+            or snapshot.get("request_id") != request_id or not snapshot.get("has_webhook")):
+        raise HTTPException(status_code=409, detail="Nexus submission correlation mismatch")
+    if not nexus_image_adapter.submission_scope_matches(gen.input_params):
+        raise HTTPException(status_code=503, detail="Nexus credential scope requires manual reconciliation")
+    bound_task = _web_task_lookup_id(task_id) if is_web_task_id(marker) else task_id
+    won = await repo.update_generation_task(
+        session, gen.id, bound_task, expected_task_id=marker
+    )
+    if not won:
+        return None
+    return await repo.get_generation_by_id(session, gen.id)
+
+
 @app.post(settings.KIE_WEBHOOK_PATH)
 async def kie_webhook(
     request: Request,
     secret: str | None = None,
     provider: str | None = None,
     comet_kind: str | None = None,
+    nexus_request_id: str | None = None,
+    nexus_signature: str | None = None,
     x_kie_webhook_secret: str | None = Header(default=None, alias="X-KIE-Webhook-Secret"),
 ) -> dict:
     _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
@@ -1626,11 +1659,22 @@ async def kie_webhook(
 
     lookup_task_id = task_id
     if provider == "nexus":
+        if nexus_request_id:
+            try:
+                expected_signature = nexus_image_adapter.submission_signature(
+                    nexus_request_id, settings.KIE_WEBHOOK_SECRET
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid Nexus correlation") from exc
+            if not settings.KIE_WEBHOOK_SECRET or not hmac.compare_digest(expected_signature, nexus_signature or ""):
+                raise HTTPException(status_code=403, detail="Invalid Nexus correlation signature")
         try:
             payload = await nexus_image_adapter.get_nexus_task_payload(task_id)
         except Exception as exc:
             logger.warning("Nexus webhook canonical task fetch failed task_id=%s: %s", task_id, exc)
             raise HTTPException(status_code=503, detail="Nexus task status temporarily unavailable") from exc
+        if str(payload.get("task_id") or "") != task_id:
+            raise HTTPException(status_code=503, detail="Nexus canonical task mismatch")
         lookup_task_id = nexus_image_adapter.prefix_nexus_task_id(task_id)
     elif provider == "comet" and comet_kind:
         lookup_task_id = comet_fallback.prefixed_task_id(comet_kind, task_id)
@@ -1643,9 +1687,17 @@ async def kie_webhook(
             gen = await repo.get_generation_by_task_id(session, _web_task_lookup_id(lookup_task_id))
         if not gen and lookup_task_id != task_id:
             gen = await repo.get_generation_by_task_id(session, _web_task_lookup_id(task_id))
+        if not gen and provider == "nexus" and nexus_request_id:
+            gen = await _recover_nexus_submission(session, nexus_request_id, lookup_task_id)
         if not gen:
             logger.warning("KIE webhook for unknown task_id=%s lookup_task_id=%s", task_id, lookup_task_id)
             return {"ok": True}
+
+        if provider == "nexus" and nexus_request_id:
+            from db.repeat_lookup import parse_input_params
+            snapshot = parse_input_params(getattr(gen, "input_params", None)).get("nexus_submission", {})
+            if snapshot.get("request_id") != nexus_request_id:
+                raise HTTPException(status_code=409, detail="Nexus submission correlation mismatch")
 
         # Idempotency: if already finished, acknowledge duplicate callback.
         if gen.status.value in {"done", "failed"}:
@@ -1654,6 +1706,15 @@ async def kie_webhook(
         user = await repo.get_user_by_id(session, gen.user_id)
         if not user:
             logger.warning("KIE webhook user not found for generation=%s", gen.id)
+            return {"ok": True}
+
+        strict_nexus_image = (
+            provider == "nexus" and gen.gen_type == GenerationType.image
+            and gen.model == "nano-banana-2.1"
+        )
+        if strict_nexus_image and not nexus_image_adapter.submission_scope_matches(getattr(gen, "input_params", None)):
+            raise HTTPException(status_code=503, detail="Nexus credential scope requires manual reconciliation")
+        if strict_nexus_image and payload.get("status") not in {"completed", "failed"}:
             return {"ok": True}
 
         if not is_success(payload):
@@ -1667,6 +1728,7 @@ async def kie_webhook(
                 gen.id,
                 err,
                 refund_note=f"kie_webhook:{user_err}"[:160],
+                **({"expected_task_id": gen.task_id} if strict_nexus_image else {}),
             )
             if not failed:
                 logger.info("KIE failure callback ignored for final generation=%s", gen.id)
@@ -1693,6 +1755,8 @@ async def kie_webhook(
                     urls = filtered_urls
 
         if not urls:
+            if strict_nexus_image:
+                raise HTTPException(status_code=503, detail="Nexus image result awaiting recovery")
             err = "Provider callback success but no result urls"
             user_err = "Результат готов, но ссылка на файл не пришла"
             failed, refunded = await repo.fail_generation_and_refund(
@@ -1722,8 +1786,14 @@ async def kie_webhook(
         result_urls: list[str] = []
         for url in urls:
             try:
-                result_urls.append(await mirror_url(url))
+                if strict_nexus_image:
+                    result_urls.append(await nexus_image_adapter.mirror_verified_nano_banana21_result(url))
+                else:
+                    result_urls.append(await mirror_url(url))
             except Exception as e:
+                if strict_nexus_image:
+                    logger.warning("Nexus image verification deferred gen=%s error=%s", gen.id, type(e).__name__)
+                    raise HTTPException(status_code=503, detail="Nexus image verification pending") from e
                 logger.warning("Failed to mirror KIE result task_id=%s url=%s: %s", task_id, url, e)
                 result_urls.append(url)
         if image_session is not None:
@@ -1732,6 +1802,8 @@ async def kie_webhook(
                 result_urls = [url for url in result_urls if not _is_reference_echo_url(url, reference_urls)]
 
         if not result_urls:
+            if strict_nexus_image:
+                raise HTTPException(status_code=503, detail="Nexus image result awaiting recovery")
             err = "Provider returned reference image instead of generated result"
             user_err = "Генератор вернул референс вместо нового результата"
             failed, refunded = await repo.fail_generation_and_refund(
@@ -1757,7 +1829,12 @@ async def kie_webhook(
 
         result_url = result_urls[0]
 
-        await repo.finish_generation(session, gen.id, result_url, result_urls=result_urls)
+        finished = await repo.finish_generation(
+            session, gen.id, result_url, result_urls=result_urls,
+            **({"expected_task_id": gen.task_id} if strict_nexus_image else {}),
+        )
+        if not finished:
+            return {"ok": True}
 
         if gen.image_session_id:
             await repo.update_image_session_last_result(

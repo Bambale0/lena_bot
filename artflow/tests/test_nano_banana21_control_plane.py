@@ -171,7 +171,7 @@ async def test_neironych_confirmed_failed_refunds_once(monkeypatch):
     import uuid
 
     request_id = str(uuid.uuid4())
-    gen = SimpleNamespace(id=202, status=GenerationStatus.processing)
+    gen = SimpleNamespace(id=202, status=GenerationStatus.processing, task_id=f"neironych-image:{request_id}")
     monkeypatch.setattr(
         neironych_image_adapter, "fetch_nano_banana21_status",
         AsyncMock(return_value={"status": "failed", "result_url": None}),
@@ -188,7 +188,7 @@ async def test_neironych_completed_without_file_requires_manual_resolution(monke
     import uuid
 
     request_id = str(uuid.uuid4())
-    gen = SimpleNamespace(id=203, status=GenerationStatus.processing)
+    gen = SimpleNamespace(id=203, status=GenerationStatus.processing, task_id=f"neironych-image:{request_id}")
     monkeypatch.setattr(
         neironych_image_adapter, "fetch_nano_banana21_status",
         AsyncMock(return_value={"status": "completed", "result_url": None}),
@@ -244,7 +244,7 @@ async def test_reconciled_image_is_verified_and_uses_durable_url_everywhere(monk
 
     verify.assert_awaited_once_with(temporary_url)
     finish.assert_awaited_once_with(
-        session, 301, durable_url, result_urls=[durable_url]
+        session, 301, durable_url, result_urls=[durable_url], expected_task_id=gen.task_id
     )
     update_session.assert_awaited_once_with(session, 30, durable_url, 301)
     assert deliver.await_args.kwargs["result_urls"] == [durable_url]
@@ -297,6 +297,7 @@ async def test_scheduler_rotates_forward_and_honors_stop_between_rows(monkeypatc
     execute = AsyncMock(side_effect=[
         SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: first)),
         SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: second)),
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: first[:1])),
     ])
     session = SimpleNamespace(execute=execute, rollback=AsyncMock())
 
@@ -319,6 +320,8 @@ async def test_scheduler_rotates_forward_and_honors_stop_between_rows(monkeypatc
     monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", reconcile)
     monkeypatch.setattr(scheduler.settings, "NEIRONYCH_IMAGE_RECONCILE_BATCH_SIZE", 2)
     monkeypatch.setattr(scheduler, "_last_reconciled_id", 0, raising=False)
+    monkeypatch.setattr(scheduler, "_revisit_id", 0)
+    monkeypatch.setattr(scheduler, "_revisit_ceiling", 0)
 
     assert await scheduler.reconcile_neironych_images_once() == 2
     assert await scheduler.reconcile_neironych_images_once(stop) == 1
@@ -328,43 +331,34 @@ async def test_scheduler_rotates_forward_and_honors_stop_between_rows(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_nexus_submission_replays_same_identity_and_recovers_task(monkeypatch):
-    import uuid
-
+async def test_nexus_submission_recovers_via_correlated_callback_without_replaying(monkeypatch):
+    import main
     from api import nexus_image_adapter
 
-    request_id = str(uuid.uuid4())
+    request_id = "d9307625-cff7-4341-8280-5a778154ccef"
     gen = SimpleNamespace(
         id=401, user_id=2, task_id=f"nexus-submit:{request_id}",
         image_session_id=31, status=GenerationStatus.processing,
         gen_type=GenerationType.image, model="nano-banana-2.1",
-        prompt="recover the exact paid request", input_params=None,
+        input_params={"nexus_submission": {"request_id": request_id, "has_webhook": True}},
         created_at=None,
     )
-    image_session = SimpleNamespace(
-        reference_urls='["https://example.test/ref.png"]',
-        reference_url="https://example.test/ref.png",
-        aspect_ratio="4:3", quality="4K",
-    )
-    replay = AsyncMock(return_value="nexus:recovered-task")
-    update = AsyncMock()
+    replay = AsyncMock(side_effect=AssertionError("Never replay a possibly paid POST"))
+    update = AsyncMock(return_value=True)
     refreshed = SimpleNamespace(**{**gen.__dict__, "task_id": "nexus:recovered-task"})
-    monkeypatch.setattr(miniapp_routes.repo, "get_image_session", AsyncMock(return_value=image_session))
+    session = object()
+    monkeypatch.setattr(main.repo, "get_generation_by_task_id", AsyncMock(return_value=gen))
     monkeypatch.setattr(nexus_image_adapter, "create_nexus_image_task", replay)
-    monkeypatch.setattr(miniapp_routes.repo, "update_generation_task", update)
-    monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=refreshed))
+    monkeypatch.setattr(main.repo, "update_generation_task", update)
+    monkeypatch.setattr(main.repo, "get_generation_by_id", AsyncMock(return_value=refreshed))
 
-    result = await miniapp_routes._reconcile_generation_status(object(), gen)
+    result = await main._recover_nexus_submission(session, request_id, "nexus:recovered-task")
 
     assert result is refreshed
-    replay.assert_awaited_once()
-    kwargs = replay.await_args.kwargs
-    assert kwargs["idempotency_key"] == request_id
-    assert kwargs["prompt"] == gen.prompt
-    assert kwargs["image_urls"] == ["https://example.test/ref.png"]
-    assert kwargs["aspect_ratio"] == "4:3"
-    assert kwargs["quality"] == "4K"
-    update.assert_awaited_once_with(object(), 401, "nexus:recovered-task")
+    replay.assert_not_awaited()
+    update.assert_awaited_once_with(
+        session, 401, "nexus:recovered-task", expected_task_id=f"nexus-submit:{request_id}"
+    )
 
 
 @pytest.mark.asyncio
@@ -387,18 +381,20 @@ async def test_nexus_completed_image_requires_verified_durable_copy(monkeypatch)
     monkeypatch.setattr(
         nexus_image_adapter, "mirror_verified_nano_banana21_result", verify
     )
-    finish = AsyncMock(return_value=SimpleNamespace(id=402))
+    finish = AsyncMock(return_value=SimpleNamespace(id=402, user_id=2))
+    monkeypatch.setattr(miniapp_routes.repo, "get_user_by_id", AsyncMock(return_value=None))
     monkeypatch.setattr(miniapp_routes.repo, "finish_generation", finish)
     monkeypatch.setattr(
         miniapp_routes.repo, "get_generation_by_id",
         AsyncMock(return_value=SimpleNamespace(id=402)),
     )
 
-    await miniapp_routes._reconcile_generation_status(object(), gen)
+    session = object()
+    await miniapp_routes._reconcile_generation_status(session, gen)
 
     verify.assert_awaited_once_with(temporary)
     finish.assert_awaited_once_with(
-        object(), 402, durable, result_urls=[durable]
+        session, 402, durable, result_urls=[durable], expected_task_id=gen.task_id
     )
 
 
@@ -471,6 +467,8 @@ async def test_scheduler_reserves_capacity_for_wrapped_rows_under_full_forward_l
     session = SimpleNamespace(execute=execute)
     monkeypatch.setattr(scheduler.settings, "NEIRONYCH_IMAGE_RECONCILE_BATCH_SIZE", 2)
     monkeypatch.setattr(scheduler, "_last_reconciled_id", 100)
+    monkeypatch.setattr(scheduler, "_revisit_id", 0)
+    monkeypatch.setattr(scheduler, "_revisit_ceiling", 0)
 
     rows = await scheduler._load_reconcile_rows(session)
 
