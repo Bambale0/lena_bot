@@ -174,7 +174,7 @@ test("insufficient balance can top up inline while preserving photo and settings
   } }));
   await page.route("**/api/v1/topup/tbank", (route) => {
     topups++;
-    funded = true; // stand-in for provider webhook credit
+    // The webhook is deliberately delayed until after WebView reload.
     return route.fulfill({ json: { pay_url: "https://pay.example.test/checkout" } });
   });
   await page.route("**/api/v1/feed/201/remix", (route) => {
@@ -198,17 +198,21 @@ test("insufficient balance can top up inline while preserving photo and settings
   await dialog.getByRole("button", { name: "Пополнить здесь · 100 ₽" }).click();
   await expect(dialog.getByText("Реф #1")).toBeVisible();
   await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Сделать белый костюм");
-  await expect(dialog.getByText("Можно запускать")).toBeVisible({ timeout: 12000 });
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
   expect(topups).toBe(1);
   expect(paidRequests).toBe(0);
 
-  // External bank checkout is allowed to reload the WebView. The draft must
-  // survive and no paid generation may be launched automatically.
+  // External bank checkout may reload Telegram's WebView while its webhook is
+  // delayed. Never show a second payment button or lose uploaded media.
   await page.reload();
   const restored = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(restored).toBeVisible();
   await expect(restored.getByText("Реф #1")).toBeVisible();
   await expect(restored.getByLabel("Что изменить в образе")).toHaveValue("Сделать белый костюм");
+  await expect(restored.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  funded = true; // provider webhook has now reconciled the balance
+  await expect(restored.getByText("Можно запускать")).toBeVisible({ timeout: 12000 });
+  expect(topups).toBe(1);
   expect(paidRequests).toBe(0);
   await restored.getByRole("button", { name: /Запустить повтор/ }).click();
   expect(paidRequests).toBe(1);

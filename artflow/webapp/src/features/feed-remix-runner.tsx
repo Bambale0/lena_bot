@@ -44,6 +44,7 @@ type RepeatDraft = {
   duration: number;
   resolution: string;
   grokMode: string;
+  paymentWaiting: boolean;
 };
 
 function draftKey(postId: number): string {
@@ -76,6 +77,7 @@ function readRepeatDraft(postId: number): RepeatDraft | null {
       duration: Number(saved.duration) || 5,
       resolution: String(saved.resolution || "720p"),
       grokMode: String(saved.grokMode || "normal"),
+      paymentWaiting: saved.paymentWaiting === true,
     };
   } catch {
     return null; // Blocked sessionStorage should never block generation.
@@ -286,7 +288,7 @@ function FeedRemixRunnerPortal() {
     setQuote(null);
     setQuotedBody("");
     setQuoteBusy(false);
-    setPaymentWaiting(false);
+    setPaymentWaiting(draft?.paymentWaiting || false);
     setPaymentBusy(false);
     setModelKey(draft?.modelKey || nextItem?.model || "");
     setMode(draft?.mode || (nextItem && itemLooksVideo(nextItem) ? "text" : "image"));
@@ -304,14 +306,14 @@ function FeedRemixRunnerPortal() {
     if (!item) return;
     const draft: RepeatDraft = {
       savedAt: Date.now(), references, changeRequest, modelKey, mode,
-      aspectRatio, quality, count, duration, resolution, grokMode,
+      aspectRatio, quality, count, duration, resolution, grokMode, paymentWaiting,
     };
     try {
       window.sessionStorage.setItem(draftKey(item.id), JSON.stringify(draft));
     } catch {
       // Storage is optional in privacy-restricted browsers.
     }
-  }, [item?.id, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, resolution, grokMode]);
+  }, [item?.id, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, resolution, grokMode, paymentWaiting]);
 
   const cancelPending = useCallback((message = "Повтор отменён") => {
     if (pendingRemix) pendingRemix.reject(new Error(message));
@@ -435,6 +437,7 @@ function FeedRemixRunnerPortal() {
       if (++attempts > 48) {
         window.clearInterval(timer);
         setPaymentWaiting(false);
+        setError("Платёж пока не подтверждён. Проверь статус операции в банке перед повторным пополнением.");
         return;
       }
       void refreshQuote(item.id, requestBody, requestBodyKey, true).then((fresh) => {
