@@ -1092,6 +1092,7 @@ async def _launch_session_generation(
 _NANA_BANANO_MODEL_LABELS = {
     ImageModel.NANO_BANANA_PRO.value: "Nano Banana Pro",
     ImageModel.NANO_BANANA_2.value: "Nano Banana 2",
+    ImageModel.NANO_BANANA_21.value: "Nano Banana 2.1",
     ImageModel.NANO_BANANA_PRO_VIP.value: "Нана Банано Про ВИП",
 }
 

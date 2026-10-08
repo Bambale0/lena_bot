@@ -23,9 +23,10 @@ except ImportError:
     class StrEnum(str, Enum):
         pass
 
-from api import comet_fallback, kieai_client, nexus_image_adapter
+from api import comet_fallback, kieai_client, neironych_image_adapter, nexus_image_adapter
 from api.kie_model_specs import IMAGE_SPECS, build_kie_input, resolve_model_for_reference
 from api.public_files import ensure_provider_safe_png_url, local_upload_path_from_url
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class ImageModel(StrEnum):
     # Nano Banana
     NANO_BANANA = "google/nano-banana"
     NANO_BANANA_2 = "nano-banana-2"
+    NANO_BANANA_21 = "nano-banana-2.1"
     NANO_BANANA_2_LITE = "nano-banana-2-lite"
     NANO_BANANA_PRO = "nano-banana-pro"
     NANO_BANANA_PRO_VIP = "nano-banana-pro-vip"
@@ -66,6 +68,7 @@ _SUPPORTS_IMG2IMG: set[ImageModel] = {
     if "image" in spec.supported_modes and spec.model in {item.value for item in ImageModel}
 } | {
     ImageModel.NANO_BANANA_PRO_VIP,
+    ImageModel.NANO_BANANA_21,
     ImageModel.GPT_IMAGE_2_VIP,
 }
 
@@ -126,6 +129,7 @@ _REFERENCE_LIMITS: dict[str, int] = {
     ImageModel.WAN_27.value: 9,
     ImageModel.WAN_27_PRO.value: 9,
     ImageModel.NANO_BANANA_2.value: 4,
+    ImageModel.NANO_BANANA_21.value: 4,
     ImageModel.NANO_BANANA_2_LITE.value: 10,
     ImageModel.NANO_BANANA_PRO.value: 4,
     ImageModel.NANO_BANANA_PRO_VIP.value: 14,
@@ -148,6 +152,7 @@ MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.WAN_27_PRO: ["1:1", "16:9", "4:3", "21:9", "3:4", "9:16", "8:1", "1:8"],
     ImageModel.NANO_BANANA: ["auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"],
     ImageModel.NANO_BANANA_2: ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+    ImageModel.NANO_BANANA_21: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1"],
     ImageModel.NANO_BANANA_2_LITE: ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
     ImageModel.NANO_BANANA_PRO: ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
     ImageModel.NANO_BANANA_PRO_VIP: ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
@@ -206,6 +211,7 @@ class ImageResult:
     result_urls: list[str] = field(default_factory=list)
     image_bytes: bytes | None = None
     mime_type: str = "image/png"
+    provider: str = ""
 
 
 def normalize_quality_for_aspect_ratio(
@@ -418,6 +424,40 @@ async def generate_image(
     prompt = _validate_prompt(prompt)
     _validate_reference_count(model, image_url)
 
+    if model == ImageModel.NANO_BANANA_21:
+        if n != 1:
+            raise ValueError("Nano Banana 2.1 supports exactly one image per request")
+        refs = _reference_list(image_url)
+        if settings.NANO_BANANA_21_PRIMARY_PROVIDER == "neironych":
+            try:
+                result_url = await neironych_image_adapter.generate_nano_banana21_image(
+                    prompt=prompt,
+                    image_urls=refs,
+                    aspect_ratio=aspect_ratio,
+                    quality=quality,
+                )
+            except neironych_image_adapter.NeironychImageRejected as exc:
+                logger.warning(
+                    "Neironych Nano Banana 2.1 definitively rejected request status=%s; using Nexus",
+                    exc.status_code,
+                )
+            else:
+                return ImageResult(
+                    is_async=False, url=result_url, result_urls=[result_url], provider="neironych"
+                )
+        # No fallback after timeout, 5xx or malformed Neironych results. Those
+        # outcomes may already be billed upstream (see Neironych API guide).
+        task_id = await nexus_image_adapter.create_nexus_image_task(
+            model_key=model.value,
+            prompt=prompt,
+            image_urls=refs,
+            aspect_ratio=aspect_ratio or "1:1",
+            quality=quality,
+            callback_url=callback_url,
+            output_format=output_format,
+        )
+        return ImageResult(is_async=True, task_id=task_id, provider="nexus")
+
     if nexus_image_adapter.is_nexus_image_model(model.value):
         task_id = await nexus_image_adapter.create_nexus_image_task(
             model_key=model.value,
@@ -429,7 +469,7 @@ async def generate_image(
             output_format=output_format,
         )
         logger.info("NexusAPI image task %s: %s", model.value, task_id)
-        return ImageResult(is_async=True, task_id=task_id)
+        return ImageResult(is_async=True, task_id=task_id, provider="nexus")
 
     prepared_image_url = await _prepare_reference_urls_for_model(model, image_url)
     resolved_model, inp = _build_input(

@@ -201,6 +201,7 @@ _FRIENDLY_MODEL_NAMES: dict[str, str] = {
     "wan/2-7-image-pro": "WAN 2.7 Pro",
     "google/nano-banana": "Nano Banana",
     "nano-banana-2": "Nano Banana 2",
+    "nano-banana-2.1": "Nano Banana 2.1",
     "nano-banana-pro": "Nano Banana Pro",
     "nano-banana-pro-vip": "Нана Банано Про ВИП",
     "qwen/text-to-image": "Qwen",

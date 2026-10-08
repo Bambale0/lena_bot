@@ -14,6 +14,7 @@ _MODEL_LABELS: dict[str, str] = {
     "wan/2-7-image-pro": "🌊 WAN 2.7 Image Pro",
     "google/nano-banana": "🍌 Nano Banana",
     "nano-banana-2": "🍌 Nano Banana 2",
+    "nano-banana-2.1": "🍌 Nano Banana 2.1",
     "nano-banana-2-lite": "⚡ Nano Banana 2 Lite",
     "nano-banana-pro": "🍌 Nano Banana Pro",
     "nano-banana-pro-vip": "🍌 Нана Банано Про ВИП",

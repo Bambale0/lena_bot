@@ -3995,7 +3995,13 @@ function App() {
       const body = kind === "video"
         ? { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-video" ? "mj-video" : ""), prompt_id: payload.prompt_id || null, mode: payload.mode, duration: payload.duration, aspect_ratio: payload.aspect_ratio, resolution: payload.resolution, image_url: payload.image_url, reference_urls: payload.reference_urls || [], grok_mode: payload.grok_mode }
         : { model: payload.model, prompt: payload.prompt || (payload.model === "midjourney-blend" ? "mj-blend" : ""), prompt_id: payload.prompt_id || null, aspect_ratio: payload.aspect_ratio, quality: payload.quality, count: payload.count, reference_url: payload.reference_url, reference_urls: payload.reference_urls || [] };
-      const g = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
+      const g = await api(endpoint, {
+        method: "POST",
+        body: JSON.stringify(body),
+        // Neironych's Nano Banana 2.1 endpoint is synchronous; default 30s would
+        // abort the request while the already charged generation is still running.
+        ...(kind === "image" && body.model === "nano-banana-2.1" ? { timeoutMs: 110000 } : {}),
+      });
       setGeneration(g);
       setPollId(g.id);
       me.reload();

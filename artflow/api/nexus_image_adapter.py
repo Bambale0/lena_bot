@@ -14,6 +14,7 @@ NEXUS_TASK_PREFIX = "nexus:"
 NEXUS_IMAGE_MODEL_MAP: dict[str, str] = {
     "nano-banana-pro": "nano-banana-pro",
     "nano-banana-2": "nano-banana-2",
+    "nano-banana-2.1": "nano-banana-2.1",
     "gpt-image-2-text-to-image": "gpt-image-2",
     "gpt-image-2-image-to-image": "gpt-image-2",
     "nano-banana-pro-vip": "nano-banana-pro-vip",
@@ -23,6 +24,7 @@ NEXUS_IMAGE_MODEL_MAP: dict[str, str] = {
 NEXUS_IMAGE_REFERENCE_LIMITS: dict[str, int] = {
     "nano-banana-pro": 4,
     "nano-banana-2": 4,
+    "nano-banana-2.1": 4,
     "gpt-image-2": 4,
     "nano-banana-pro-vip": 14,
     "gpt-image-2-vip": 4,
@@ -41,6 +43,7 @@ _NANO_RATIOS = {
     "4:5",
     "21:9",
 }
+_NANO21_RATIOS = _NANO_RATIOS | {"1:4", "4:1", "1:8", "8:1"}
 _GPT_RATIOS = {
     "auto",
     "1:1",
@@ -63,6 +66,7 @@ _GPT_RATIOS = {
 NEXUS_IMAGE_ASPECT_RATIOS: dict[str, set[str]] = {
     "nano-banana-pro": _NANO_RATIOS,
     "nano-banana-2": _NANO_RATIOS,
+    "nano-banana-2.1": _NANO21_RATIOS,
     "gpt-image-2": _GPT_RATIOS,
     "nano-banana-pro-vip": _NANO_RATIOS,
     "gpt-image-2-vip": _GPT_RATIOS,
@@ -179,7 +183,7 @@ def build_nexus_image_params(
         params["aspect_ratio"] = ratio
 
     quality_value = str(quality or "").strip()
-    if model_name in {"nano-banana-pro", "nano-banana-2"}:
+    if model_name in {"nano-banana-pro", "nano-banana-2", "nano-banana-2.1"}:
         params["image_size"] = quality_value if quality_value in {"1K", "2K", "4K"} else "2K"
     elif model_name == "nano-banana-pro-vip":
         params["image_size"] = quality_value if quality_value in {"1K", "2K"} else "2K"

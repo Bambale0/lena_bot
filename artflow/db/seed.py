@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
+from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -281,11 +283,48 @@ LEGACY_MODEL_ALIASES_TO_DISABLE = {
 }
 
 
+def derive_nano_banana_21_prices(rows: Iterable[ModelCost]) -> list[dict[str, Any]]:
+    """Bootstrap new 2.1 tiers using live, admin-configured Nano Banana 2 prices.
+
+    Existing 2.1 prices are never overwritten by seed on later deployments.
+    """
+    by_key = {row.model_key: row for row in rows}
+    created: list[dict[str, Any]] = []
+    for suffix in ("", "__quality=2K", "__quality=4K"):
+        source = by_key.get(f"nano-banana-2{suffix}")
+        target_key = f"nano-banana-2.1{suffix}"
+        if source is None or target_key in by_key:
+            continue
+        name = "🍌 Nano Banana 2.1" + (f" · {suffix.split('=')[-1]}" if suffix else "")
+        created.append({
+            "model_key": target_key,
+            "display_name": name,
+            "gen_type": source.gen_type,
+            "credits": source.credits,
+            "is_active": True,
+        })
+    return created
+
+
+async def _seed_nano_banana_21_prices(session: AsyncSession) -> None:
+    rows = (await session.execute(
+        select(ModelCost).where(ModelCost.model_key.like("nano-banana-2%"))
+    )).scalars().all()
+    additions = derive_nano_banana_21_prices(rows)
+    if not additions:
+        return
+    for values in additions:
+        session.add(ModelCost(**values))
+    await session.commit()
+    logger.info("Seed: initialized %s Nano Banana 2.1 price entries from live pricing", len(additions))
+
+
 async def run_seed() -> None:
     """Вставляет данные только если таблицы пустые."""
     async with AsyncSessionLocal() as session:
         await _seed_price_plans(session)
         await _seed_model_costs(session)
+        await _seed_nano_banana_21_prices(session)
         await _disable_legacy_model_aliases(session)
 
 

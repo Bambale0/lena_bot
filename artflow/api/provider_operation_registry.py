@@ -447,7 +447,8 @@ async def execute_operation(spec: OperationSpec, params: dict[str, Any]) -> Oper
 
     if isinstance(result, image_service.ImageResult):
         urls = tuple(result.result_urls or ([result.url] if result.url else []))
-        return OperationStart(result.task_id, "comet" if not result.is_async else "kie", spec.poll_kind if result.is_async else PollKind.NONE, urls, result)
+        provider = result.provider or ("comet" if not result.is_async else "kie")
+        return OperationStart(result.task_id, provider, spec.poll_kind if result.is_async else PollKind.NONE, urls, result)
     if isinstance(result, video_service.VideoResult):
         poll_kind = PollKind.NEIRONYCH if result.provider == "neironych" else spec.poll_kind
         return OperationStart(result.task_id, result.provider, poll_kind, uses_webhook=result.uses_webhook)

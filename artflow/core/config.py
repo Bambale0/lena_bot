@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     NEIRONYCH_API_KEY: str = ""
     NEIRONYCH_API_BASE_URL: str = "https://api.xn--e1aikcel5c5a.online"
     NEIRONYCH_HTTP_TIMEOUT_SECONDS: float = 120.0
+    # Nano Banana 2.1: Neironych synchronous primary, Nexus async fallback.
+    NANO_BANANA_21_PRIMARY_PROVIDER: Literal["neironych", "nexus"] = "neironych"
+    # Keep below APIX's current nginx proxy_read_timeout (120s); this is a paid synchronous POST.
+    NEIRONYCH_IMAGE_TIMEOUT_SECONDS: float = Field(default=100.0, ge=10.0, le=600.0)
+    NEIRONYCH_IMAGE_MAX_BYTES: int = Field(default=32 * 1024 * 1024, ge=1024)
     NEIRONYCH_POLL_INTERVAL_SECONDS: float = 10.0
     NEIRONYCH_POLL_TIMEOUT_SECONDS: int = 1800
     NEIRONYCH_MAX_VIDEO_BYTES: int = 250 * 1024 * 1024

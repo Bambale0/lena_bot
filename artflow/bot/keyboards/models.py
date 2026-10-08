@@ -308,6 +308,15 @@ IMAGE_CAPS: dict[str, dict] = {
         "quality_options": [("2K", "2K"), ("4K", "4K")],
         "max_refs": 4,
     },
+    ImageModel.NANO_BANANA_21: {
+        "modes": ["text", "image"],
+        "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_21, []),
+        "aspect_ratio_modes": ["text", "image"],
+        "counts": [1],
+        "has_quality": True,
+        "quality_options": [("1K", "1K"), ("2K", "2K"), ("4K", "4K")],
+        "max_refs": 4,
+    },
     ImageModel.NANO_BANANA_2_LITE: {
         "modes": ["text", "image"],
         "aspect_ratios": MODEL_ASPECT_RATIOS.get(ImageModel.NANO_BANANA_2_LITE, []),
@@ -405,6 +414,7 @@ IMAGE_MODEL_DESC: dict[str, str] = {
     ImageModel.NANO_BANANA_PRO: "🍌 Nano Banana Pro · точное следование промпту · работа по референсу",
     ImageModel.NANO_BANANA_PRO_VIP: "🍌 Нана Банано Про ВИП",
     ImageModel.NANO_BANANA_2: "🍌 Nano Banana 2 · быстрый стиль · иллюстрации",
+    ImageModel.NANO_BANANA_21: "🍌 Nano Banana 2.1 · точное редактирование и референсы",
     ImageModel.WAN_27: "🌊 WAN 2.7 · базовая версия",
     ImageModel.WAN_27_PRO: "🎭 WAN 2.7 Pro · выразительный стиль · персонажи",
     ImageModel.QWEN_T2I: "🟣 Qwen · реализм · детали",
@@ -442,6 +452,7 @@ NANA_BANANO_DEFAULT_MODEL = ImageModel.NANO_BANANA_PRO.value
 NANA_BANANO_MODEL_CHOICES = (
     ImageModel.NANO_BANANA_PRO.value,
     ImageModel.NANO_BANANA_2.value,
+    ImageModel.NANO_BANANA_21.value,
     ImageModel.NANO_BANANA_PRO_VIP.value,
 )
 
@@ -449,6 +460,7 @@ _IMAGE_MODEL_ORDER: list[str] = [
     ImageModel.NANO_BANANA_PRO,
     ImageModel.NANO_BANANA_PRO_VIP,
     ImageModel.NANO_BANANA_2,
+    ImageModel.NANO_BANANA_21,
     ImageModel.NANO_BANANA_2_LITE,
     ImageModel.SEEDREAM_5_PRO_T2I,
     ImageModel.SEEDREAM_5_PRO_I2I,
@@ -680,6 +692,7 @@ def image_nana_banano_kb(
     selected = selected_model.value if isinstance(selected_model, ImageModel) else str(selected_model)
     pro = ImageModel.NANO_BANANA_PRO.value
     banana2 = ImageModel.NANO_BANANA_2.value
+    banana21 = ImageModel.NANO_BANANA_21.value
     pro_vip = ImageModel.NANO_BANANA_PRO_VIP.value
     builder.row(
         InlineKeyboardButton(
@@ -690,6 +703,12 @@ def image_nana_banano_kb(
             text=f"{'✅ ' if selected == banana2 else ''}Banana 2",
             callback_data=f"img_nb:model:{banana2}",
         ),
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text=f"{'✅ ' if selected == banana21 else ''}Nano Banana 2.1",
+            callback_data=f"img_nb:model:{banana21}",
+        )
     )
     builder.row(
         InlineKeyboardButton(
