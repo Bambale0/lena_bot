@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import neironych_image_adapter
+from api import neironych_image_adapter, nexus_image_adapter
 from api.provider_contract_catalog import CONTRACTS_BY_ID
 from api.provider_operation_registry import (
     PUBLIC_API_CONTRACT_IDS,
@@ -215,17 +215,36 @@ async def start_provider_operation(
 
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(generation.id)
-        if spec.model == "nano-banana-2.1" and image_primary == "neironych" else None
+        if spec.model == "nano-banana-2.1" else None
     )
+
+    async def persist_nexus_submission(request_id: str) -> None:
+        await repo.update_generation_task(
+            session, generation.id, nexus_image_adapter.encode_submission_id(request_id)
+        )
+
     try:
         if image_request_id:
-            await repo.update_generation_task(
-                session, generation.id,
-                neironych_image_adapter.encode_task_id(image_request_id),
+            initial_identity = (
+                neironych_image_adapter.encode_task_id(image_request_id)
+                if image_primary == "neironych"
+                else nexus_image_adapter.encode_submission_id(image_request_id)
             )
+            await repo.update_generation_task(session, generation.id, initial_identity)
         started = await execute_operation(
             spec, dict(request.params), request_id=image_request_id,
             primary_provider=image_primary,
+            before_nexus_submit=persist_nexus_submission,
+        )
+    except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
+        logger.warning(
+            "Provider operation Nexus outcome unknown gen=%s idempotency_key=%s",
+            generation.id, exc.idempotency_key,
+        )
+        return ProviderOperationAccepted(
+            generation_id=generation.id, contract_id=contract_id,
+            model=spec.model, status="processing", credits=credits,
+            task_id=nexus_image_adapter.encode_submission_id(exc.idempotency_key),
         )
     except neironych_image_adapter.NeironychImageError as exc:
         # A POST with an ambiguous outcome must stay billable and reconcilable.

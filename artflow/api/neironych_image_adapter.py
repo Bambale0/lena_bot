@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 import httpx
 from PIL import Image
 
-from api.public_files import save_public_file
+from api.public_files import download_public_url, save_public_file
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,19 @@ def _verified_image_bytes(data: bytes) -> bytes:
     with Image.open(io.BytesIO(data)) as im:
         im.load()
     return data
+
+
+async def mirror_verified_nano_banana21_result(url: str) -> str:
+    """Download, fully decode and persist a reconciled provider image."""
+    data, content_type = await download_public_url(url)
+    if not data or len(data) > settings.NEIRONYCH_IMAGE_MAX_BYTES:
+        raise ValueError("Reconciled image is empty or oversized")
+    await asyncio.to_thread(_verified_image_bytes, data)
+    return save_public_file(
+        data,
+        content_type,
+        subdir="generated/nano-banana-2.1",
+    )
 
 
 def _normalized_references(image_urls: list[str] | None) -> list[str]:

@@ -13,7 +13,7 @@ import mimetypes
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -420,6 +420,7 @@ async def generate_image(
     bbox_list: list[list[Any]] | None = None,
     request_id: str | None = None,
     primary_provider: str | None = None,
+    before_nexus_submit: Callable[[str], Awaitable[None]] | None = None,
 ) -> ImageResult:
     del image_bytes, image_mime, size
 
@@ -455,6 +456,8 @@ async def generate_image(
                 )
         # No fallback after timeout, 5xx or malformed Neironych results. Those
         # outcomes may already be billed upstream (see Neironych API guide).
+        if request_id and before_nexus_submit:
+            await before_nexus_submit(request_id)
         task_id = await nexus_image_adapter.create_nexus_image_task(
             model_key=model.value,
             prompt=prompt,
@@ -463,6 +466,7 @@ async def generate_image(
             quality=quality,
             callback_url=callback_url,
             output_format=output_format,
+            idempotency_key=request_id,
         )
         return ImageResult(is_async=True, task_id=task_id, provider="nexus")
 

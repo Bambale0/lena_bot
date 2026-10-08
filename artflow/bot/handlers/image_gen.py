@@ -18,7 +18,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import image_service, neironych_image_adapter
+from api import image_service, neironych_image_adapter, nexus_image_adapter
 from api.image_errors import telegram_image_error_text
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
@@ -940,14 +940,22 @@ async def _launch_session_generation(
     status_msg = await source_message.answer(launching_text)
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if model == ImageModel.NANO_BANANA_21 and image_primary == "neironych" else None
+        if model == ImageModel.NANO_BANANA_21 else None
     )
+
+    async def persist_nexus_submission(request_id: str) -> None:
+        await repo.update_generation_task(
+            session, gen.id, nexus_image_adapter.encode_submission_id(request_id)
+        )
 
     try:
         if image_request_id:
-            await repo.update_generation_task(
-                session, gen.id, neironych_image_adapter.encode_task_id(image_request_id)
+            initial_identity = (
+                neironych_image_adapter.encode_task_id(image_request_id)
+                if image_primary == "neironych"
+                else nexus_image_adapter.encode_submission_id(image_request_id)
             )
+            await repo.update_generation_task(session, gen.id, initial_identity)
         result = await image_service.generate_image(
             model,
             prompt,
@@ -958,7 +966,20 @@ async def _launch_session_generation(
             callback_url=_kie_callback_url(),
             request_id=image_request_id,
             primary_provider=image_primary,
+            before_nexus_submit=persist_nexus_submission,
         )
+    except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
+        logger.warning(
+            "Telegram Nano Banana 2.1 Nexus outcome unknown gen=%s idempotency_key=%s",
+            gen.id, exc.idempotency_key,
+        )
+        await _sync_state_with_image_session(state, image_session)
+        await status_msg.edit_text(
+            f"⏳ Запрос отправлен, уточняем результат у провайдера.\n"
+            f"Задача APIX: <code>{gen.id}</code>\n"
+            "Не запускай её повторно: результат может ещё прийти."
+        )
+        return True
     except neironych_image_adapter.NeironychImageError as exc:
         # A lost HTTP response is not proof that Neironych rejected the paid job.
         logger.warning("Telegram Nano Banana 2.1 awaiting reconciliation gen=%s request_id=%s",

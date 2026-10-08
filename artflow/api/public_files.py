@@ -481,6 +481,13 @@ def _download_public_url(url: str) -> tuple[bytes, str | None]:
     return data, content_type
 
 
+async def download_public_url(url: str) -> tuple[bytes, str | None]:
+    """Download one public URL with SSRF and size protections; raise on failure."""
+    if not url:
+        raise ValueError("download URL is required")
+    return await asyncio.to_thread(_download_public_url, url)
+
+
 async def mirror_url(url: str, *, subdir: str | None = None) -> str:
     """Mirror public URLs into local static storage when possible.
 

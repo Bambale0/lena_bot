@@ -2,11 +2,21 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Any
+import uuid
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from api.nexusapi_client import NexusApiClient, NexusApiError, extract_result_urls
 
 NEXUS_TASK_PREFIX = "nexus:"
+NEXUS_SUBMISSION_PREFIX = "nexus-submit:"
+
+
+class NexusImageSubmissionUnknown(NexusApiError):
+    """Nexus may have accepted a paid POST but no task id was returned."""
+
+    def __init__(self, message: str, *, idempotency_key: str) -> None:
+        super().__init__(message)
+        self.idempotency_key = idempotency_key
 
 # APIX keeps its historical/public model keys so Telegram/Mini App UX, history,
 # pricing rows and repeat contracts stay stable. Only the provider boundary is
@@ -103,6 +113,20 @@ def strip_nexus_task_id(task_id: str) -> str:
 
 def is_nexus_task_id(task_id: str | None) -> bool:
     return str(task_id or "").strip().startswith(NEXUS_TASK_PREFIX)
+
+
+def encode_submission_id(idempotency_key: str) -> str:
+    return NEXUS_SUBMISSION_PREFIX + str(uuid.UUID(idempotency_key))
+
+
+def decode_submission_id(task_id: str | None) -> str | None:
+    value = str(task_id or "").strip().removeprefix("web:")
+    if not value.startswith(NEXUS_SUBMISSION_PREFIX):
+        return None
+    try:
+        return str(uuid.UUID(value[len(NEXUS_SUBMISSION_PREFIX):]))
+    except (ValueError, AttributeError):
+        return None
 
 
 def nexus_webhook_url(callback_url: str | None) -> str | None:
@@ -206,6 +230,7 @@ async def create_nexus_image_task(
     quality: str | None = None,
     callback_url: str | None = None,
     output_format: str | None = None,
+    idempotency_key: str | None = None,
 ) -> str:
     params = build_nexus_image_params(
         model_key=model_key,
@@ -216,7 +241,24 @@ async def create_nexus_image_task(
         callback_url=callback_url,
         output_format=output_format,
     )
-    result = await NexusApiClient().create_params(params)
+    persisted_key = (
+        str(uuid.UUID(idempotency_key)) if idempotency_key else None
+    )
+    try:
+        result = await NexusApiClient().create_params(
+            params,
+            idempotency_key=persisted_key,
+        )
+    except NexusApiError as exc:
+        status = exc.status_code
+        if persisted_key and (
+            status is None or status >= 500 or 200 <= status < 300
+        ):
+            raise NexusImageSubmissionUnknown(
+                "Nexus submission outcome unknown; do not refund or resubmit with a new key",
+                idempotency_key=persisted_key,
+            ) from exc
+        raise
     return prefix_nexus_task_id(result.task_id)
 
 

@@ -444,6 +444,7 @@ def _urls_from_any(value: Any) -> tuple[str, ...]:
 async def execute_operation(
     spec: OperationSpec, params: dict[str, Any], *, request_id: str | None = None,
     primary_provider: str | None = None,
+    before_nexus_submit: Callable[[str], Awaitable[None]] | None = None,
 ) -> OperationStart:
     validated = validate_operation_params(spec, params)
     if spec.model == "nano-banana-2.1":
@@ -451,6 +452,8 @@ async def execute_operation(
             validated["request_id"] = request_id
         if primary_provider:
             validated["primary_provider"] = primary_provider
+        if before_nexus_submit:
+            validated["before_nexus_submit"] = before_nexus_submit
     result = await spec.executor(**validated)
 
     if isinstance(result, image_service.ImageResult):

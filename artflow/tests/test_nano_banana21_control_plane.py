@@ -141,7 +141,15 @@ async def test_neironych_completed_with_url_finishes_once_and_delivers(monkeypat
         neironych_image_adapter, "fetch_nano_banana21_status",
         AsyncMock(return_value={"status": "completed", "result_url": result_url}),
     )
-    completed = SimpleNamespace(id=101, user_id=2, task_id=gen.task_id)
+    monkeypatch.setattr(
+        neironych_image_adapter,
+        "mirror_verified_nano_banana21_result",
+        AsyncMock(return_value=result_url),
+    )
+    completed = SimpleNamespace(
+        id=101, user_id=2, task_id=gen.task_id,
+        result_url=result_url, result_urls=None,
+    )
     finish = AsyncMock(return_value=completed)
     deliver = AsyncMock()
     monkeypatch.setattr(miniapp_routes.repo, "finish_generation", finish)
@@ -231,13 +239,14 @@ async def test_reconciled_image_is_verified_and_uses_durable_url_everywhere(monk
     monkeypatch.setattr(miniapp_routes.repo, "update_image_session_last_result", update_session)
     monkeypatch.setattr(miniapp_routes, "_notify_direct_image_result_in_bot", deliver)
 
-    await miniapp_routes._reconcile_neironych_image_generation(object(), gen, request_id)
+    session = object()
+    await miniapp_routes._reconcile_neironych_image_generation(session, gen, request_id)
 
     verify.assert_awaited_once_with(temporary_url)
     finish.assert_awaited_once_with(
-        object(), 301, durable_url, result_urls=[durable_url]
+        session, 301, durable_url, result_urls=[durable_url]
     )
-    update_session.assert_awaited_once_with(object(), 30, durable_url, 301)
+    update_session.assert_awaited_once_with(session, 30, durable_url, 301)
     assert deliver.await_args.kwargs["result_urls"] == [durable_url]
 
 
