@@ -248,8 +248,11 @@ test("pending invoice is durable at the exact external handoff before any React 
       window.location.reload();
     };
   });
+  const reloadedDocument = page.waitForEvent("domcontentloaded");
   await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
-  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("test:external-handoff"))).not.toBeNull();
+  // The snapshot is captured synchronously inside openLink; read it only after
+  // the intentionally replaced document has a usable JavaScript context.
+  await reloadedDocument;
   const snapshot = await page.evaluate(() => JSON.parse(sessionStorage.getItem("test:external-handoff") || "{}"));
   const saved = JSON.parse(String(snapshot["apix:feed-repeat-draft:v2:1:201"]));
   expect(saved.payment).toMatchObject({ transactionId: 701, checkoutUrl: "https://pay.example.test/original" });
