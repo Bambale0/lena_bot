@@ -463,8 +463,8 @@ function FeedRemixRunnerPortal() {
       const payment = await apiJson<Record<string, unknown>>(`/topup/${provider}`, {
         method: "POST", body: JSON.stringify({ plan_key: plan.key }),
       });
-      const url = String(payment.pay_url || payment.invoice_link || payment.invoice_url || payment.url || "");
-      if (!url) throw new Error("Платёжная ссылка не получена");
+      const url = safeExternalUrl(String(payment.pay_url || payment.invoice_link || payment.invoice_url || payment.url || ""));
+      if (!url.startsWith("https://")) throw new Error("Безопасная платёжная ссылка не получена");
       setPaymentWaiting(true);
       openExternalUrl(url);
       toast.success("Оплата открыта — вернись сюда после зачисления");
