@@ -462,7 +462,7 @@ async def test_direct_result_loser_does_not_update_session_or_deliver(monkeypatc
 async def test_scheduler_reserves_capacity_for_wrapped_rows_under_full_forward_load(monkeypatch):
     from core import neironych_image_reconcile_scheduler as scheduler
 
-    forward = [SimpleNamespace(id=101)]
+    forward = [SimpleNamespace(id=101), SimpleNamespace(id=102)]
     wrapped = [SimpleNamespace(id=1)]
     execute = AsyncMock(side_effect=[
         SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: forward)),
