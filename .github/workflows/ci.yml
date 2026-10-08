@@ -46,7 +46,13 @@ jobs:
             api/advanced_video_service.py \
             api/image_service.py \
             api/neironych_image_adapter.py \
+            api/neironych_seedance_runtime.py \
             core/neironych_image_reconcile_scheduler.py \
+            core/neironych_video_reconcile_scheduler.py \
+            db/repository.py \
+            tests/test_neironych_video_stuck_recovery.py \
+            tests/test_neironych_video_notice_outbox.py \
+            tests/test_reconcile_video_delivery.py \
             core/provider_routing.py \
             db/migrations/versions/037_provider_routing_settings.py \
             tests/test_nano_banana21_routing.py \
@@ -148,6 +154,10 @@ jobs:
             tests/test_nano_banana21_control_plane.py \
             tests/test_nano_banana21_recovery.py \
             tests/test_nano_banana21_api_integration.py \
+            tests/test_neironych_video_stuck_recovery.py \
+            tests/test_neironych_video_notice_outbox.py \
+            tests/test_reconcile_video_delivery.py \
+            tests/test_neironych_seedance_runtime.py \
             tests/test_nexus_admin_pricing.py \
             tests/test_referral_commission_defaults.py \
             tests/test_stars_payment.py \

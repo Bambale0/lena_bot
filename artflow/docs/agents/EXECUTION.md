@@ -1177,3 +1177,42 @@ Baseline `02c807eb1b73e20dc3a0e2af2c76efa1b3e1f26d` (main after #200/#201); bran
   offered as reusable invoices. Existing provider/support guidance is shown.
 - Other PR202 findings (quote/provider compatibility/currency and model-dependent
   hidden-prompt confidentiality) are outside this narrow payment-recovery fix.
+
+
+
+---
+
+# Incident execution ledger — Neironych Seedance video hangs and delivery (2026-10-09)
+
+**Task:** eliminate end-user stuck video tasks across APIX site, Mini App and Telegram bot. Incident source: Seedance 2.5 UUID `aeb56f5f-ddfd-42fe-baba-115372cbb1e4`, APIX generation `56698`. The provider independently reported failed, while APIX remained processing for >2 h until manual reconciliation; 70 credits were refunded exactly once through the existing atomic repository function. Production read-only inspection after the incident found no other active videos waiting.
+
+**Baseline:** origin/main `396cd57fbbaab64f4c9638d1a9665f6216c72b3a`; feature branch `fix/apix-neironych-video-stuck-recovery`, isolated worktree `/root/agent-work/apix-neironych-video-stuck-20261009`.
+
+**Root causes confirmed:**
+1. No scheduled reconciliation of active Neironych video generations; only on-demand endpoint/user-history polling calls `_reconcile_generation_status`. Music and Nano Banana image have schedulers, video does not.
+2. Generic `_reconcile_generation_status` treats *all* Neironych poll exceptions as terminal and refunds, including HTTP/network/download errors; it also applies a 20-minute wall-clock refund to a provider that may still be working.
+3. The result-delivery helper swallows Telegram failures and has no durable retry after `done` commit; a completed but undelivered video can remain unnotified.
+
+**Scope and target:**
+- Enforce provider terminal `failed/cancelled/expired` as sole basis for refund. Unknown, HTTP errors, 404, timeout, slow progress, or valid completion with temporarily unavailable video file cannot trigger refund or a second paid POST.
+- Query Neironych Seedance 2.0 and 2.5 active generations periodically, with bounded rate, rotating fairness, database-driven task identities, backoff and observability.
+- Download and persist completed video once, settle the DB with existing atomic `finish_generation`, and deliver via Telegram if chat exists. Keep `web:` origin without unsolicited chat.
+- Add durable, leased Telegram notification receipt for success and confirmed failure, so a transient blocked chat or Telegram outage can be retried after restart (at-least-once; residual crash-after-send duplicate risk explained).
+- No schema migration or modification to primary provider selection, tariffs, prices, balance/credits for successful/unknown requests, or user data. Only normal atomic failure refunds.
+- Keep site, Mini App and text bot in sync through shared `generations` state; only Telegram chat needs message delivery. Public status/history must see terminal updates automatically.
+- Tests: failing tests first, terminal/transient/slow/completed/no-file/refund-once/lease/bot-delivery/scheduler fairness, then focused suite, CI PR, deploy and read-only smoke.
+- Safety: no backfill paid POSTs; no webhook bypass; never expose keys or prompts; no production DDL. PR and CI requirements from `AGENTS.md`.
+
+**Progress:** [x] skill setup and local instructions; [x] incident traced DB→provider→refund; [x] baseline 22 tests passed; [x] 9 regression cases observed failing on unmodified main; [x] typed terminal provider failure, safe non-terminal handling, 20m timeout bypass, bounded concurrent fair video scheduler; [x] transactional success/failure delivery receipts, leased Telegram retries and user failure notice; [x] 47 focused tests passed and 191-video/backend compatibility tests passed; [x] Ruff/py_compile and production PostgreSQL regex selector read-only test passed; [x] required CI gate augmented; [ ] independent PR code review + exact SHA CI; [ ] main auto-deploy and read-only production smoke.
+
+**Observability plan:** log `generation_id`, provider task ID (UUID), state, task age, poll failures, finish winner, notification claim/attempt/message ID, pending oldest age, durable pending count; redact errors/prompts and credentials. If a task is > configured alert age and upstream is unknown, keep it pending, report for manual inspection, **never** launch fallback automatically.
+
+**Risk / rollback:** Notification send then DB ack can be interrupted, causing a duplicate retry after lease expiry; acceptable to prefer delivery over silent loss, mitigated with lease and bounded backoff. Git revert PR restores prior process without rewriting money ledger or pending provider tasks. Production migration not needed.
+
+
+## Verified incident safeguards (2026-10-09)
+- Previous production task 56698: direct Neironych GET returned `failed` while DB was `processing`. Atomic on-demand reconciliation set `failed` and returned exactly 70 credits once; `credit_ledger` has one matching +70 `generation_refund` row. This historical compensation is already complete and is **not** part of the future PR.
+- New tests: timeout/404/unknown/mismatched provider ID and >20m slow provider task preserve `processing` and balance; confirmed terminal error applies existing guarded atomic refund + failure notice; completed media copy outage stays retryable; web-origin tasks never send Telegram notifications; successful video queues pending notification transactionally with DB completion; lease/backoff/single-winner token tests prevent duplicate delivery attempts in normal concurrent runs; recovered expired claim can resend after restart.
+- Scheduler: 90s default periodic status GET and delivery scans; fair cursor, 24-task batches, 4 parallel bounded workers, 240s max task time. Malformed individual tasks do not block other work. Outages log oldest task IDs and status without exposing secrets/prompts.
+- PostgreSQL 16 read-only regexp selector tests: pending=true, sending=true, sent=false. This was tested using literal temporary SQL strings, not customer records or schema writes.
+- Deployment risk: no Alembic schema changes, no manual balance or task updates as part of PR. Roll back by reverting PR; records with pending delivery keys persist.
