@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from core.config import settings
 
 
 def feed_card_kb(
@@ -22,7 +24,13 @@ def feed_card_kb(
         ),
     )
     builder.row(
-        InlineKeyboardButton(text="🔁 Повторить", callback_data=f"feed:use:{gen_id}"),
+        InlineKeyboardButton(
+            text="✨ Повторить со своим фото",
+            web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?remix={gen_id}"),
+        ),
+    )
+    builder.row(
+        InlineKeyboardButton(text="💬 Повторить в чате", callback_data=f"feed:use:{gen_id}"),
     )
     if can_delete:
         builder.row(

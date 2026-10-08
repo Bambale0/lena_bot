@@ -63,6 +63,9 @@ from api.miniapp_routes import (
     publish_generation_to_library as miniapp_publish_generation,
 )
 from api.miniapp_routes import (
+    quote_feed_remix as miniapp_quote_feed_remix,
+)
+from api.miniapp_routes import (
     refresh_suno_voice as miniapp_refresh_suno_voice,
 )
 from api.miniapp_routes import (
@@ -431,6 +434,20 @@ async def remove_feed_generation(
     if auth_error := _auth_required(user):
         return auth_error
     return await _call_miniapp(miniapp_remove_feed_post, gen_id=generation_id, session=session, user=user)
+
+
+@router.post("/feed/{generation_id}/remix/quote")
+async def quote_feed_generation(
+    generation_id: int,
+    body: FeedRemixRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(
+        miniapp_quote_feed_remix, gen_id=generation_id, body=body, session=session, user=user
+    )
 
 
 @router.post("/feed/{generation_id}/remix", status_code=202)

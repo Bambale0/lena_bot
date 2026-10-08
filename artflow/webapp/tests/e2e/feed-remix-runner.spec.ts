@@ -85,6 +85,10 @@ async function mockMiniAppApi(page: Page) {
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: feedItems }));
   await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/payment-methods", (route) => route.fulfill({ json: ["tbank"] }));
+  await page.route("**/api/v1/feed/201/remix/quote", (route) => route.fulfill({ json: {
+    cost_credits: 1.5, balance_credits: 100, can_run: true, deficit_credits: 0, recommended_plan: null,
+  } }));
   await page.route("**/api/web/upload-media", (route) => route.fulfill({
     json: { data: { url: "https://example.test/uploaded-ref.png", kind: "image", content_type: "image/jpeg", size: 4 } },
   }));
@@ -128,7 +132,9 @@ test("feed work repeat asks for settings and preserves source media payload", as
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
   await expect(dialog.getByText("Реф #1")).toBeVisible();
-  await dialog.getByRole("button", { name: "Запустить повтор" }).click();
+  await dialog.getByLabel("Что изменить в образе").fill("Замени одежду на красное платье до генерации");
+  await expect(dialog.getByText("Стоимость: 1.5 💋").first()).toBeVisible();
+  await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
 
   await expect(page.getByRole("dialog", { name: /Задача #9201/ })).toBeVisible();
   expect(remixPayload).toMatchObject({
@@ -137,5 +143,64 @@ test("feed work repeat asks for settings and preserves source media payload", as
     source_image_url: "https://example.test/source.png",
     image_url: "https://example.test/uploaded-ref.png",
     reference_urls: ["https://example.test/uploaded-ref.png"],
+    change_request: "Замени одежду на красное платье до генерации",
   });
+});
+
+test("shared link opens exact repeat settings before any paid generation", async ({ page }) => {
+  await mockMiniAppApi(page);
+  let paidRequests = 0;
+  await page.route("**/api/v1/feed/201/remix", async (route) => {
+    paidRequests++;
+    await route.fulfill({ status: 502, json: { detail: "Must not run before confirmation" } });
+  });
+  await page.goto("/?tgWebAppData=test&feed=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Artist QA")).toBeVisible();
+  await expect(dialog.getByLabel("Что изменить в образе")).toBeVisible();
+  expect(paidRequests).toBe(0);
+});
+
+test("insufficient balance can top up inline while preserving photo and settings", async ({ page }) => {
+  await mockMiniAppApi(page);
+  let paidRequests = 0;
+  let topups = 0;
+  let funded = false;
+  await page.route("**/api/v1/feed/201/remix/quote", (route) => route.fulfill({ json: {
+    cost_credits: 5, balance_credits: funded ? 12 : 0,
+    can_run: funded, deficit_credits: funded ? 0 : 5,
+    recommended_plan: funded ? null : { key: "starter", label: "Старт", credits: 10, price_rub: 100 },
+  } }));
+  await page.route("**/api/v1/topup/tbank", (route) => {
+    topups++;
+    funded = true; // stand-in for provider webhook credit
+    return route.fulfill({ json: { pay_url: "https://pay.example.test/checkout" } });
+  });
+  await page.route("**/api/v1/feed/201/remix", (route) => {
+    paidRequests++;
+    return route.fulfill({ status: 202, json: {
+      id: 9202, model: "nano-banana-2", gen_type: "image",
+      prompt: "", prompt_hidden: true, status: "pending", result_url: null, result_urls: [],
+      credits_spent: 5, created_at: new Date().toISOString(),
+    } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog).toBeVisible();
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+  await dialog.getByLabel("Что изменить в образе").fill("Сделать белый костюм");
+  await expect(dialog.getByText("Реф #1")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+  expect(paidRequests).toBe(0);
+  await dialog.getByRole("button", { name: "Пополнить здесь · 100 ₽" }).click();
+  await expect(dialog.getByText("Реф #1")).toBeVisible();
+  await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Сделать белый костюм");
+  await expect(dialog.getByText("Можно запускать")).toBeVisible({ timeout: 12000 });
+  expect(topups).toBe(1);
+  expect(paidRequests).toBe(0);
+  await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+  expect(paidRequests).toBe(1);
 });

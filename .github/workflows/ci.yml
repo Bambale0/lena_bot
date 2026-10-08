@@ -111,6 +111,9 @@ jobs:
             tests/test_video_prompt_service.py \
             tests/test_video_prompt_surface.py \
             tests/test_webapp_routes.py \
+            tests/test_feed_remix_prelaunch.py \
+            api/web/generations.py \
+            bot/keyboards/feed.py \
             tests/test_kie_model_specs.py \
             tests/test_miniapp_feed_webkit_stability.py
 
@@ -159,6 +162,7 @@ jobs:
             tests/test_admin_image_unlimited.py \
             tests/test_image_gen_references.py::test_launch_session_generation_unlimited_records_zero_credits \
             tests/test_webapp_routes.py::test_generate_image_unlimited_allows_zero_balance_and_records_zero_charge \
+            tests/test_feed_remix_prelaunch.py \
             tests/test_provider_contract_catalog.py \
             tests/test_public_files.py \
             tests/test_seedance25_identity_transfer.py \
