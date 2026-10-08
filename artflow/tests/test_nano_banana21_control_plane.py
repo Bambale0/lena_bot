@@ -192,3 +192,127 @@ async def test_neironych_completed_without_file_requires_manual_resolution(monke
     assert await miniapp_routes._reconcile_neironych_image_generation(object(), gen, request_id) is gen
     fail.assert_not_awaited()
     finish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reconciled_image_is_verified_and_uses_durable_url_everywhere(monkeypatch):
+    import uuid
+
+    request_id = str(uuid.uuid4())
+    temporary_url = "https://cdn.example.test/temporary.png"
+    durable_url = "https://apix.example.test/static/generated/verified.png"
+    gen = SimpleNamespace(
+        id=301, user_id=2, task_id=f"neironych-image:{request_id}",
+        image_session_id=30, status=GenerationStatus.processing,
+        gen_type=GenerationType.image, model="nano-banana-2.1", created_at=None,
+    )
+    monkeypatch.setattr(
+        neironych_image_adapter,
+        "fetch_nano_banana21_status",
+        AsyncMock(return_value={"status": "completed", "result_url": temporary_url}),
+    )
+    verify = AsyncMock(return_value=durable_url)
+    monkeypatch.setattr(
+        neironych_image_adapter,
+        "mirror_verified_nano_banana21_result",
+        verify,
+        raising=False,
+    )
+    completed = SimpleNamespace(
+        id=301, user_id=2, task_id=gen.task_id,
+        result_url=durable_url, result_urls=None,
+    )
+    finish = AsyncMock(return_value=completed)
+    update_session = AsyncMock()
+    deliver = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "finish_generation", finish)
+    monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=completed))
+    monkeypatch.setattr(miniapp_routes.repo, "get_user_by_id", AsyncMock(return_value=SimpleNamespace(tg_id=555)))
+    monkeypatch.setattr(miniapp_routes.repo, "update_image_session_last_result", update_session)
+    monkeypatch.setattr(miniapp_routes, "_notify_direct_image_result_in_bot", deliver)
+
+    await miniapp_routes._reconcile_neironych_image_generation(object(), gen, request_id)
+
+    verify.assert_awaited_once_with(temporary_url)
+    finish.assert_awaited_once_with(
+        object(), 301, durable_url, result_urls=[durable_url]
+    )
+    update_session.assert_awaited_once_with(object(), 30, durable_url, 301)
+    assert deliver.await_args.kwargs["result_urls"] == [durable_url]
+
+
+@pytest.mark.asyncio
+async def test_reconciled_invalid_image_never_finishes(monkeypatch):
+    import uuid
+
+    request_id = str(uuid.uuid4())
+    gen = SimpleNamespace(
+        id=302, user_id=2, task_id=f"neironych-image:{request_id}",
+        image_session_id=None, status=GenerationStatus.processing,
+        gen_type=GenerationType.image, model="nano-banana-2.1", created_at=None,
+    )
+    monkeypatch.setattr(
+        neironych_image_adapter,
+        "fetch_nano_banana21_status",
+        AsyncMock(return_value={
+            "status": "completed",
+            "result_url": "https://cdn.example.test/truncated.png",
+        }),
+    )
+    monkeypatch.setattr(
+        neironych_image_adapter,
+        "mirror_verified_nano_banana21_result",
+        AsyncMock(side_effect=ValueError("invalid image")),
+        raising=False,
+    )
+    finish = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "finish_generation", finish)
+    monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=gen))
+
+    result = await miniapp_routes._reconcile_neironych_image_generation(
+        object(), gen, request_id
+    )
+
+    assert result is gen
+    finish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_rotates_forward_and_honors_stop_between_rows(monkeypatch):
+    import asyncio
+
+    from core import neironych_image_reconcile_scheduler as scheduler
+
+    first = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
+    second = [SimpleNamespace(id=3), SimpleNamespace(id=4)]
+    execute = AsyncMock(side_effect=[
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: first)),
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: second)),
+    ])
+    session = SimpleNamespace(execute=execute, rollback=AsyncMock())
+
+    class SessionContext:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    stop = asyncio.Event()
+    seen = []
+
+    async def reconcile(_session, generation):
+        seen.append(generation.id)
+        if generation.id == 3:
+            stop.set()
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", reconcile)
+    monkeypatch.setattr(scheduler.settings, "NEIRONYCH_IMAGE_RECONCILE_BATCH_SIZE", 2)
+    monkeypatch.setattr(scheduler, "_last_reconciled_id", 0, raising=False)
+
+    assert await scheduler.reconcile_neironych_images_once() == 2
+    assert await scheduler.reconcile_neironych_images_once(stop) == 1
+    assert seen == [1, 2, 3]
+    second_statement = str(execute.await_args_list[1].args[0])
+    assert "generations.id >" in second_statement

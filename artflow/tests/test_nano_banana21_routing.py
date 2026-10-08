@@ -455,3 +455,66 @@ async def test_provider_status_does_not_accept_mismatched_model(monkeypatch):
     monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_KEY", "test-key")
     with pytest.raises(neironych_image_adapter.NeironychImageError, match="Invalid reconciliation"):
         await neironych_image_adapter.fetch_nano_banana21_status("d9307625-cff7-4341-8280-5a778154ccef")
+
+
+def test_nexus_submission_identity_round_trip():
+    import uuid
+
+    request_id = str(uuid.uuid4())
+    encoded = nexus_image_adapter.encode_submission_id(request_id)
+    assert encoded.startswith("nexus-submit:")
+    assert nexus_image_adapter.decode_submission_id("web:" + encoded) == request_id
+
+
+@pytest.mark.asyncio
+async def test_nexus_submission_uses_persisted_idempotency_and_classifies_unknown(monkeypatch):
+    from api.nexusapi_client import NexusApiError
+
+    request_id = "d9307625-cff7-4341-8280-5a778154ccef"
+    create = AsyncMock(side_effect=NexusApiError("network error"))
+    monkeypatch.setattr(
+        nexus_image_adapter,
+        "NexusApiClient",
+        lambda: SimpleNamespace(create_params=create),
+    )
+
+    with pytest.raises(nexus_image_adapter.NexusImageSubmissionUnknown) as error:
+        await nexus_image_adapter.create_nexus_image_task(
+            model_key="nano-banana-2.1",
+            prompt="test",
+            idempotency_key=request_id,
+        )
+
+    assert error.value.idempotency_key == request_id
+    assert create.await_args.kwargs["idempotency_key"] == request_id
+
+
+@pytest.mark.asyncio
+async def test_nexus_submission_identity_is_never_polled_or_refunded(monkeypatch):
+    import uuid
+
+    from api import miniapp_routes
+    from db.models import GenerationStatus, GenerationType
+
+    request_id = str(uuid.uuid4())
+    gen = SimpleNamespace(
+        id=315,
+        user_id=8,
+        status=GenerationStatus.processing,
+        model="nano-banana-2.1",
+        gen_type=GenerationType.image,
+        task_id=nexus_image_adapter.encode_submission_id(request_id),
+        created_at=None,
+        image_session_id=None,
+        input_params=None,
+    )
+    poll = AsyncMock(side_effect=AssertionError("idempotency identity is not a Nexus task id"))
+    refund = AsyncMock(side_effect=AssertionError("ambiguous paid work must not be refunded"))
+    monkeypatch.setattr(miniapp_routes.image_service, "poll_image_result_urls", poll)
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", refund)
+
+    result = await miniapp_routes._reconcile_generation_status(session=object(), gen=gen)
+
+    assert result is gen
+    poll.assert_not_awaited()
+    refund.assert_not_awaited()
