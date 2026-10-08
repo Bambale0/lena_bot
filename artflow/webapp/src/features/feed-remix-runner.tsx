@@ -30,6 +30,65 @@ type FeedCheckoutQuote = {
 };
 type PaymentProvider = "tbank" | "crypto" | "tribute" | "lava";
 const ACCEPTED_PAYMENT_PROVIDERS: PaymentProvider[] = ["tbank", "crypto", "tribute", "lava"];
+const REPEAT_DRAFT_TTL_MS = 60 * 60 * 1000;
+
+type RepeatDraft = {
+  savedAt: number;
+  references: string[];
+  changeRequest: string;
+  modelKey: string;
+  mode: string;
+  aspectRatio: string;
+  quality: string;
+  count: number;
+  duration: number;
+  resolution: string;
+  grokMode: string;
+};
+
+function draftKey(postId: number): string {
+  const viewer = String(window.Telegram?.WebApp?.initDataUnsafe?.user?.id || "session");
+  return `apix:feed-repeat-draft:${viewer}:${postId}`;
+}
+
+function readRepeatDraft(postId: number): RepeatDraft | null {
+  try {
+    const raw = window.sessionStorage.getItem(draftKey(postId));
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const saved = parsed as Partial<RepeatDraft>;
+    if (typeof saved.savedAt !== "number" || Date.now() - saved.savedAt > REPEAT_DRAFT_TTL_MS) {
+      window.sessionStorage.removeItem(draftKey(postId));
+      return null;
+    }
+    return {
+      savedAt: saved.savedAt,
+      references: Array.isArray(saved.references)
+        ? saved.references.filter((value): value is string => typeof value === "string" && value.startsWith("https://")).slice(0, 4)
+        : [],
+      changeRequest: typeof saved.changeRequest === "string" ? saved.changeRequest.slice(0, 800) : "",
+      modelKey: String(saved.modelKey || ""),
+      mode: String(saved.mode || "image"),
+      aspectRatio: String(saved.aspectRatio || "1:1"),
+      quality: String(saved.quality || "basic"),
+      count: Number(saved.count) || 1,
+      duration: Number(saved.duration) || 5,
+      resolution: String(saved.resolution || "720p"),
+      grokMode: String(saved.grokMode || "normal"),
+    };
+  } catch {
+    return null; // Blocked sessionStorage should never block generation.
+  }
+}
+
+function clearRepeatDraft(postId: number): void {
+  try {
+    window.sessionStorage.removeItem(draftKey(postId));
+  } catch {
+    // Private browsing may disable sessionStorage.
+  }
+}
 
 let runnerRoot: Root | null = null;
 let runnerMounted = false;
@@ -218,25 +277,41 @@ function FeedRemixRunnerPortal() {
   const canLaunch = quoteReady && quote?.can_run === true;
 
   const resetForm = useCallback((nextItem: FeedItem | null = null) => {
+    const draft = nextItem ? readRepeatDraft(nextItem.id) : null;
     setItem(nextItem);
     setPhase("idle");
     setError("");
-    setReferences([]);
-    setChangeRequest("");
+    setReferences(draft?.references || []);
+    setChangeRequest(draft?.changeRequest || "");
     setQuote(null);
     setQuotedBody("");
     setQuoteBusy(false);
     setPaymentWaiting(false);
     setPaymentBusy(false);
-    setModelKey(nextItem?.model || "");
-    setMode(nextItem && itemLooksVideo(nextItem) ? "text" : "image");
-    setAspectRatio(nextItem?.aspect_ratio || "1:1");
-    setQuality("basic");
-    setCount(1);
-    setDuration(5);
-    setResolution("720p");
-    setGrokMode("normal");
+    setModelKey(draft?.modelKey || nextItem?.model || "");
+    setMode(draft?.mode || (nextItem && itemLooksVideo(nextItem) ? "text" : "image"));
+    setAspectRatio(draft?.aspectRatio || nextItem?.aspect_ratio || "1:1");
+    setQuality(draft?.quality || "basic");
+    setCount(draft?.count || 1);
+    setDuration(draft?.duration || 5);
+    setResolution(draft?.resolution || "720p");
+    setGrokMode(draft?.grokMode || "normal");
   }, []);
+
+  // External bank checkout may close/reload the Telegram WebView. Keep only
+  // non-secret editing settings and public upload URLs in tab-scoped storage.
+  useEffect(() => {
+    if (!item) return;
+    const draft: RepeatDraft = {
+      savedAt: Date.now(), references, changeRequest, modelKey, mode,
+      aspectRatio, quality, count, duration, resolution, grokMode,
+    };
+    try {
+      window.sessionStorage.setItem(draftKey(item.id), JSON.stringify(draft));
+    } catch {
+      // Storage is optional in privacy-restricted browsers.
+    }
+  }, [item?.id, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, resolution, grokMode]);
 
   const cancelPending = useCallback((message = "Повтор отменён") => {
     if (pendingRemix) pendingRemix.reject(new Error(message));
@@ -403,8 +478,9 @@ function FeedRemixRunnerPortal() {
   const close = useCallback(() => {
     if (busy || paymentBusy) return;
     cancelPending();
+    if (item) clearRepeatDraft(item.id);
     resetForm(null);
-  }, [busy, paymentBusy, cancelPending, resetForm]);
+  }, [busy, paymentBusy, cancelPending, item, resetForm]);
 
   const addReferenceFiles = useCallback(async (files: File[]) => {
     if (!files.length || busy) return;
@@ -452,6 +528,7 @@ function FeedRemixRunnerPortal() {
       pendingRemix = null;
       notifyHaptic("success");
       toast.success("Повтор запущен");
+      clearRepeatDraft(item.id);
       resetForm(null);
     } catch (runError) {
       notifyHaptic("error");
