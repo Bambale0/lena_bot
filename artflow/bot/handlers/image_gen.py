@@ -18,7 +18,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import image_service
+from api import image_service, neironych_image_adapter
 from api.image_errors import telegram_image_error_text
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
@@ -53,6 +53,7 @@ from bot.utils.telegram_images import (
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.provider_routing import get_nano21_route
 from db import repository as repo
 from db.models import GenerationType, ImageGenerationAction, ImageSession, User
 
@@ -889,6 +890,11 @@ async def _launch_session_generation(
         )
         return False
 
+    image_primary = (
+        (await get_nano21_route(session)).primary_provider
+        if model == ImageModel.NANO_BANANA_21 else None
+    )
+
     if _requires_reference_image(image_session.model) and not reference_url:
         await source_message.answer(
             "❌ Эта модель требует референс-изображение. Отправь фото.",
@@ -932,8 +938,16 @@ async def _launch_session_generation(
     image_session.last_prompt = prompt
 
     status_msg = await source_message.answer(launching_text)
+    image_request_id = (
+        neironych_image_adapter.client_request_id_for_generation(gen.id)
+        if model == ImageModel.NANO_BANANA_21 and image_primary == "neironych" else None
+    )
 
     try:
+        if image_request_id:
+            await repo.update_generation_task(
+                session, gen.id, neironych_image_adapter.encode_task_id(image_request_id)
+            )
         result = await image_service.generate_image(
             model,
             prompt,
@@ -942,7 +956,20 @@ async def _launch_session_generation(
             n=normalized_count,
             quality=normalized_quality,
             callback_url=_kie_callback_url(),
+            request_id=image_request_id,
+            primary_provider=image_primary,
         )
+    except neironych_image_adapter.NeironychImageError as exc:
+        # A lost HTTP response is not proof that Neironych rejected the paid job.
+        logger.warning("Telegram Nano Banana 2.1 awaiting reconciliation gen=%s request_id=%s",
+                       gen.id, exc.request_id)
+        await _sync_state_with_image_session(state, image_session)
+        await status_msg.edit_text(
+            f"⏳ Запрос отправлен, уточняем результат у провайдера.\n"
+            f"Задача APIX: <code>{gen.id}</code>\n"
+            "Не запускай её повторно: результат может ещё прийти."
+        )
+        return True
     except Exception as e:
         logger.error("Session image generation error: %s", e)
         _, refunded = await repo.fail_generation_and_refund(

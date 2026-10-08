@@ -149,16 +149,22 @@ def test_initial_21_prices_are_cloned_from_current_admin_prices():
 @pytest.mark.asyncio
 async def test_neironych_client_uses_idempotency_header_and_saves_stable_url(monkeypatch):
     import base64
+    import io
     import json
 
     import httpx
+    from PIL import Image
+
+    with io.BytesIO() as buffer:
+        Image.new("RGB", (4, 4), "green").save(buffer, format="JPEG")
+        valid_image = buffer.getvalue()
 
     seen = []
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         return httpx.Response(
             200,
-            json={"created": 123, "data": [{"b64_json": base64.b64encode(b"\xff\xd8\xffmock-image").decode()}]},
+            json={"created": 123, "data": [{"b64_json": base64.b64encode(valid_image).decode()}]},
         )
     original_client = httpx.AsyncClient
     transport = httpx.MockTransport(handler)
@@ -192,7 +198,7 @@ async def test_neironych_client_uses_idempotency_header_and_saves_stable_url(mon
     assert payload["model"] == "nano-banana-2.1"
     assert payload["resolution"] == "2k"
     assert payload["images"] == [{"image_url": "https://example.test/ref1.jpg"}]
-    assert saved[0][0] == b"\xff\xd8\xffmock-image"
+    assert saved[0][0] == valid_image
 
 
 @pytest.mark.asyncio
@@ -306,3 +312,146 @@ def test_telegram_banana_keyboard_displays_version_21():
     keyboard = image_nana_banano_kb("nano-banana-2.1")
     labels = [button.text for row in keyboard.inline_keyboard for button in row]
     assert any("Nano Banana 2.1" in text for text in labels)
+
+
+@pytest.mark.asyncio
+async def test_neironych_image_rejects_insecure_api_base_before_sending_key(monkeypatch):
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_KEY", "secret-value")
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_BASE_URL", "http://example.test")
+    with pytest.raises(ValueError, match="HTTPS"):
+        await neironych_image_adapter.generate_nano_banana21_image(prompt="test")
+
+
+@pytest.mark.asyncio
+async def test_neironych_explicit_correlation_id_is_sent_to_both_headers(monkeypatch):
+    import base64
+    import io
+
+    import httpx
+    from PIL import Image
+
+    with io.BytesIO() as buffer:
+        Image.new("RGB", (4, 4), "green").save(buffer, format="PNG")
+        valid_image = buffer.getvalue()
+    headers_seen = []
+    transport = httpx.MockTransport(lambda req: (
+        headers_seen.append(req.headers),
+        httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(valid_image).decode()}]}),
+    )[1])
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(neironych_image_adapter.httpx, "AsyncClient", lambda **kwargs: original_client(transport=transport, **kwargs))
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_KEY", "dummy")
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_BASE_URL", "https://provider.test")
+    monkeypatch.setattr(neironych_image_adapter, "save_public_file", lambda data, **kw: "https://apix.test/image.png")
+    rid = "d9307625-cff7-4341-8280-5a778154ccef"
+    assert await neironych_image_adapter.generate_nano_banana21_image(
+        prompt="test", request_id=rid
+    ) == "https://apix.test/image.png"
+    assert headers_seen[0]["Idempotency-Key"] == rid
+    assert headers_seen[0]["X-Client-Request-Id"] == rid
+
+
+@pytest.mark.asyncio
+async def test_neironych_invalid_image_bytes_preserve_ambiguous_outcome(monkeypatch):
+    import base64
+
+    import httpx
+    payload = base64.b64encode(b"not a valid image").decode()
+    original_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, json={"data": [{"b64_json": payload}]}))
+    monkeypatch.setattr(neironych_image_adapter.httpx, "AsyncClient", lambda **kwargs: original_client(transport=transport, **kwargs))
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_KEY", "dummy")
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_BASE_URL", "https://provider.test")
+    saved = []
+    monkeypatch.setattr(neironych_image_adapter, "save_public_file", lambda data, **kwargs: saved.append(data))
+    with pytest.raises(neironych_image_adapter.NeironychImageError) as error:
+        await neironych_image_adapter.generate_nano_banana21_image(prompt="test")
+    assert type(error.value) is neironych_image_adapter.NeironychImageError
+    assert not saved
+
+
+def test_neironych_image_task_id_round_trip():
+    rid = neironych_image_adapter.client_request_id_for_generation(123)
+    assert len(rid) == 36
+    task_id = neironych_image_adapter.encode_task_id(rid)
+    assert task_id.startswith("neironych-image:")
+    assert neironych_image_adapter.decode_task_id("web:" + task_id) == rid
+
+
+@pytest.mark.asyncio
+async def test_reconcile_unknown_neironych_image_never_refunds(monkeypatch):
+    import uuid
+
+    from api import miniapp_routes
+    from db.models import GenerationStatus, GenerationType
+
+    rid = str(uuid.uuid4())
+    gen = SimpleNamespace(
+        id=314, user_id=8, status=GenerationStatus.processing,
+        model="nano-banana-2.1", gen_type=GenerationType.image,
+        task_id=f"neironych-image:{rid}", created_at=None,
+        image_session_id=None, input_params=None,
+    )
+    monkeypatch.setattr(miniapp_routes.neironych_image_adapter, "fetch_nano_banana21_status",
+                        AsyncMock(return_value={"status": "reconciliation_required", "result_url": None}))
+    refund = AsyncMock(side_effect=AssertionError("must not refund uncertain paid work"))
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", refund)
+    result = await miniapp_routes._reconcile_generation_status(session=object(), gen=gen)
+    assert result is gen
+    refund.assert_not_awaited()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("http_status", "payload", "expected_state", "expected_url"),
+    [
+        (200, {"model_slug": "nano-banana-2.1", "status": "completed",
+               "result_url": "https://cdn.example.test/result.png"}, "completed",
+         "https://cdn.example.test/result.png"),
+        (200, {"model_slug": "nano-banana-2.1", "status": "reconciliation_required",
+               "result_url": None}, "reconciliation_required", None),
+        (200, {"model_slug": "nano-banana-2.1", "status": "completed",
+               "result_url": None}, "completed", None),
+        (404, {"detail": "generation_not_found"}, "not_found", None),
+    ],
+)
+async def test_provider_status_lookup_never_submits_paid_post(
+    monkeypatch, http_status, payload, expected_state, expected_url
+):
+    import httpx
+
+    seen = []
+    def respond(request):
+        seen.append(request)
+        return httpx.Response(http_status, json=payload)
+    orig = httpx.AsyncClient
+    monkeypatch.setattr(
+        neironych_image_adapter.httpx, "AsyncClient",
+        lambda **kw: orig(transport=httpx.MockTransport(respond), **kw)
+    )
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_BASE_URL", "https://provider.test")
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_KEY", "test-key")
+    rid = "d9307625-cff7-4341-8280-5a778154ccef"
+    result = await neironych_image_adapter.fetch_nano_banana21_status(rid)
+    assert result["status"] == expected_state
+    assert result["result_url"] == expected_url
+    assert len(seen) == 1
+    assert seen[0].method == "GET"
+    assert seen[0].headers["Authorization"] == "Bearer test-key"
+    assert seen[0].url.path.endswith(f"by-client-request-id/{rid}")
+
+
+@pytest.mark.asyncio
+async def test_provider_status_does_not_accept_mismatched_model(monkeypatch):
+    import httpx
+
+    original = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, json={
+        "model_slug": "another-model", "status": "completed",
+        "result_url": "https://cdn.example.test/wrong.png",
+    }))
+    monkeypatch.setattr(neironych_image_adapter.httpx, "AsyncClient",
+                        lambda **kw: original(transport=transport, **kw))
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_BASE_URL", "https://provider.test")
+    monkeypatch.setattr(neironych_image_adapter.settings, "NEIRONYCH_API_KEY", "test-key")
+    with pytest.raises(neironych_image_adapter.NeironychImageError, match="Invalid reconciliation"):
+        await neironych_image_adapter.fetch_nano_banana21_status("d9307625-cff7-4341-8280-5a778154ccef")

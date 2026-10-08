@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -13,6 +13,7 @@ from api.web.billing import enabled_payment_methods
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import enum_value, iso_datetime
 from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
+from core.provider_routing import get_nano21_route, set_nano21_route
 from core.reporting_time import REPORTING_TZ, moscow_day_bounds_utc
 from db import repository as repo
 from db.models import (
@@ -34,6 +35,42 @@ from db.repository import InsufficientReferralBalanceError
 from db.session import get_session
 
 router = APIRouter(tags=["web-admin"])
+
+
+class Nano21ProviderRoutingUpdate(BaseModel):
+    primary_provider: Literal["neironych", "nexus"]
+
+
+@router.get("/admin/provider-routing/nano-banana-2.1")
+async def admin_get_nano21_provider(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    route = await get_nano21_route(session)
+    return ok({
+        "model_key": route.model_key, "primary_provider": route.primary_provider,
+        "source": route.source, "updated_by_admin_tg_id": route.updated_by_admin_tg_id,
+    })
+
+
+@router.put("/admin/provider-routing/nano-banana-2.1")
+async def admin_set_nano21_provider(
+    body: Nano21ProviderRoutingUpdate,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    route = await set_nano21_route(
+        session, body.primary_provider,
+        admin_tg_id=int(user.tg_id), source="web",
+    )
+    return ok({
+        "model_key": route.model_key, "primary_provider": route.primary_provider,
+        "source": route.source, "updated_by_admin_tg_id": route.updated_by_admin_tg_id,
+    })
 
 
 class AdminCreditAdjustmentRequest(BaseModel):

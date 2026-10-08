@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     # Keep below APIX's current nginx proxy_read_timeout (120s); this is a paid synchronous POST.
     NEIRONYCH_IMAGE_TIMEOUT_SECONDS: float = Field(default=100.0, ge=10.0, le=600.0)
     NEIRONYCH_IMAGE_MAX_BYTES: int = Field(default=32 * 1024 * 1024, ge=1024)
+    NEIRONYCH_IMAGE_MAX_PIXELS: int = Field(default=64 * 1024 * 1024, ge=4096)
+    NEIRONYCH_IMAGE_RECONCILE_INTERVAL_SECONDS: int = Field(default=75, ge=30, le=3600)
+    NEIRONYCH_IMAGE_RECONCILE_BATCH_SIZE: int = Field(default=60, ge=1, le=200)
     NEIRONYCH_POLL_INTERVAL_SECONDS: float = 10.0
     NEIRONYCH_POLL_TIMEOUT_SECONDS: int = 1800
     NEIRONYCH_MAX_VIDEO_BYTES: int = 250 * 1024 * 1024

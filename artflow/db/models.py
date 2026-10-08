@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import (
     ARRAY,
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -15,7 +16,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -452,6 +452,33 @@ class ModelCost(Base):
     gen_type: Mapped[GenerationType] = mapped_column(Enum(GenerationType), nullable=False)
     credits: Mapped[float] = mapped_column(Float, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class ProviderRoutingSetting(Base):
+    """Authenticated, audited runtime model routing; secrets remain in environment."""
+
+    __tablename__ = "provider_routing_settings"
+
+    model_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    primary_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    updated_by_admin_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class ProviderRoutingAudit(Base):
+    __tablename__ = "provider_routing_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    model_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    previous_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    new_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    changed_by_admin_tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class UserImageModelUnlimited(Base):

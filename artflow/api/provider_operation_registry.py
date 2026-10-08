@@ -441,8 +441,16 @@ def _urls_from_any(value: Any) -> tuple[str, ...]:
     return tuple(dict.fromkeys(urls))
 
 
-async def execute_operation(spec: OperationSpec, params: dict[str, Any]) -> OperationStart:
+async def execute_operation(
+    spec: OperationSpec, params: dict[str, Any], *, request_id: str | None = None,
+    primary_provider: str | None = None,
+) -> OperationStart:
     validated = validate_operation_params(spec, params)
+    if spec.model == "nano-banana-2.1":
+        if request_id:
+            validated["request_id"] = request_id
+        if primary_provider:
+            validated["primary_provider"] = primary_provider
     result = await spec.executor(**validated)
 
     if isinstance(result, image_service.ImageResult):

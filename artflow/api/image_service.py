@@ -418,6 +418,8 @@ async def generate_image(
     thinking_mode: bool | None = None,
     watermark: bool | None = None,
     bbox_list: list[list[Any]] | None = None,
+    request_id: str | None = None,
+    primary_provider: str | None = None,
 ) -> ImageResult:
     del image_bytes, image_mime, size
 
@@ -428,13 +430,17 @@ async def generate_image(
         if n != 1:
             raise ValueError("Nano Banana 2.1 supports exactly one image per request")
         refs = _reference_list(image_url)
-        if settings.NANO_BANANA_21_PRIMARY_PROVIDER == "neironych":
+        chosen_primary = primary_provider or settings.NANO_BANANA_21_PRIMARY_PROVIDER
+        if chosen_primary not in {"neironych", "nexus"}:
+            raise ValueError("Unsupported Nano Banana 2.1 primary provider")
+        if chosen_primary == "neironych":
             try:
                 result_url = await neironych_image_adapter.generate_nano_banana21_image(
                     prompt=prompt,
                     image_urls=refs,
                     aspect_ratio=aspect_ratio,
                     quality=quality,
+                    request_id=request_id,
                 )
             except neironych_image_adapter.NeironychImageRejected as exc:
                 logger.warning(
@@ -443,7 +449,9 @@ async def generate_image(
                 )
             else:
                 return ImageResult(
-                    is_async=False, url=result_url, result_urls=[result_url], provider="neironych"
+                    is_async=False, url=result_url, result_urls=[result_url],
+                    provider="neironych",
+                    task_id=neironych_image_adapter.encode_task_id(request_id) if request_id else None,
                 )
         # No fallback after timeout, 5xx or malformed Neironych results. Those
         # outcomes may already be billed upstream (see Neironych API guide).

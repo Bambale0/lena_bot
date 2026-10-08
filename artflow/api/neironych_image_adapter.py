@@ -5,13 +5,17 @@ Neironych explicitly documents these as potentially ambiguous outcomes.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
+import io
 import logging
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
+from PIL import Image
 
 from api.public_files import save_public_file
 from core.config import settings
@@ -40,6 +44,53 @@ class NeironychImageError(RuntimeError):
 
 class NeironychImageRejected(NeironychImageError):
     """Provider definitely rejected the request without accepting a generation."""
+
+
+_TASK_PREFIX = "neironych-image:"
+
+
+def client_request_id_for_generation(generation_id: int) -> str:
+    """Deterministic UUID for a persisted APIX generation, even across restarts."""
+    if int(generation_id) <= 0:
+        raise ValueError("generation_id must be positive")
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{settings.WEBHOOK_URL}:artflow:nano-banana-2.1:{generation_id}"))
+
+
+def encode_task_id(request_id: str) -> str:
+    return _TASK_PREFIX + str(uuid.UUID(request_id))
+
+
+def decode_task_id(task_id: str | None) -> str | None:
+    value = str(task_id or "").removeprefix("web:")
+    if not value.startswith(_TASK_PREFIX):
+        return None
+    try:
+        return str(uuid.UUID(value[len(_TASK_PREFIX):]))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _https_base_url() -> str:
+    base = str(settings.NEIRONYCH_API_BASE_URL or "").strip().rstrip("/")
+    parsed = urlparse(base)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Neironych API requires an HTTPS base URL without credentials")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ValueError("Neironych API base URL must not contain a path or query")
+    return base
+
+
+def _verified_image_bytes(data: bytes) -> bytes:
+    """Validate complete raster decoding to reject corrupt provider JPEG/PNG/WebP bytes."""
+    with Image.open(io.BytesIO(data)) as im:
+        if im.format not in {"JPEG", "PNG", "WEBP"}:
+            raise ValueError("Unsupported provider image format")
+        if im.width < 1 or im.height < 1 or im.width * im.height > settings.NEIRONYCH_IMAGE_MAX_PIXELS:
+            raise ValueError("Provider image dimensions are unsafe")
+        im.verify()
+    with Image.open(io.BytesIO(data)) as im:
+        im.load()
+    return data
 
 
 def _normalized_references(image_urls: list[str] | None) -> list[str]:
@@ -107,12 +158,14 @@ async def generate_nano_banana21_image(
     image_urls: list[str] | None = None,
     aspect_ratio: str | None = None,
     quality: str | None = None,
+    request_id: str | None = None,
 ) -> str:
     """Generate once; save the returned base64 as a durable APIX public URL."""
     payload = build_nano_banana21_payload(
         prompt=prompt, image_urls=image_urls, aspect_ratio=aspect_ratio, quality=quality
     )
-    request_id = str(uuid.uuid4())
+    request_id = str(uuid.UUID(request_id)) if request_id else str(uuid.uuid4())
+    base_url = _https_base_url()  # Fail closed before constructing bearer headers.
     api_key = str(settings.NEIRONYCH_API_KEY or "").strip()
     if not api_key:
         raise NeironychImageRejected(
@@ -120,7 +173,7 @@ async def generate_nano_banana21_image(
         )
 
     endpoint = "edits" if payload.get("images") else "generations"
-    url = f"{settings.NEIRONYCH_API_BASE_URL.rstrip('/')}/v1/images/{endpoint}"
+    url = f"{base_url}/v1/images/{endpoint}"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Idempotency-Key": request_id,
@@ -171,6 +224,7 @@ async def generate_nano_banana21_image(
         image = base64.b64decode(encoded, validate=True)
         if not image or len(image) > max_bytes:
             raise ValueError("invalid or oversized image")
+        await asyncio.to_thread(_verified_image_bytes, image)
         saved_url = save_public_file(image, subdir="generated/nano-banana-2.1")
     except (ValueError, KeyError, TypeError, IndexError, binascii.Error, OSError) as exc:
         logger.exception("Neironych image response/persistence error request_id=%s", request_id)
@@ -180,3 +234,48 @@ async def generate_nano_banana21_image(
         ) from exc
     logger.info("Neironych image completed model=%s request_id=%s", MODEL_NAME, request_id)
     return saved_url
+
+async def fetch_nano_banana21_status(request_id: str) -> dict[str, Any]:
+    """Read persisted provider status by correlation UUID. A missing record is not a failure."""
+    rid = str(uuid.UUID(request_id))
+    base = _https_base_url()
+    api_key = str(settings.NEIRONYCH_API_KEY or "").strip()
+    if not api_key:
+        raise NeironychImageError("Neironych API key is unavailable for reconciliation", request_id=rid)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                f"{base}/api/v1/generations/by-client-request-id/{rid}",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except httpx.RequestError as exc:
+        raise NeironychImageError("Neironych reconciliation unavailable", request_id=rid) from exc
+    if response.status_code == 404:
+        return {"status": "not_found", "result_url": None}
+    if response.status_code != 200:
+        raise NeironychImageError(
+            f"Neironych reconciliation HTTP {response.status_code}",
+            status_code=response.status_code, request_id=rid,
+        )
+    try:
+        body = response.json()
+        if not isinstance(body, dict):
+            raise ValueError("status response must be an object")
+        if body.get("model_slug") != MODEL_NAME:
+            raise ValueError("reconciled generation model mismatch")
+        state = str(body.get("status") or "").lower()
+        if state not in {
+            "completed", "failed", "cancelled", "timeout", "queued",
+            "submitting", "processing", "running", "reconciliation_required",
+        }:
+            raise ValueError("unknown generation status")
+        urls = body.get("result_urls") or []
+        url = body.get("result_url") or (urls[0] if isinstance(urls, list) and urls else None)
+        if url and (not isinstance(url, str) or urlparse(url).scheme != "https"):
+            raise ValueError("invalid result URL")
+        return {
+            "status": state, "result_url": url,
+            "error_code": str(body.get("public_error_code") or ""),
+        }
+    except (ValueError, TypeError, IndexError) as exc:
+        raise NeironychImageError("Invalid reconciliation response", request_id=rid) from exc

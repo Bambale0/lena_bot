@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import dataclasses
+import json
+import logging
 from enum import Enum
 from typing import Any
 
@@ -9,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import neironych_image_adapter
 from api.provider_contract_catalog import CONTRACTS_BY_ID
 from api.provider_operation_registry import (
     PUBLIC_API_CONTRACT_IDS,
@@ -19,10 +22,12 @@ from api.provider_operation_registry import (
     resolve_operation_price,
 )
 from api.web.deps import WebUser, get_current_user
+from core.provider_routing import get_nano21_route
 from db import repository as repo
 from db.models import GenerationStatus
 from db.session import get_session
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/provider-operations", tags=["provider-operations"])
 
 
@@ -182,6 +187,11 @@ async def start_provider_operation(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
+    image_primary = (
+        (await get_nano21_route(session)).primary_provider
+        if spec.model == "nano-banana-2.1" else None
+    )
+
     if credits > 0:
         spent = await repo.spend_credits(
             session,
@@ -203,8 +213,31 @@ async def start_provider_operation(
         input_params=_stored_params(contract_id, request.params),
     )
 
+    image_request_id = (
+        neironych_image_adapter.client_request_id_for_generation(generation.id)
+        if spec.model == "nano-banana-2.1" and image_primary == "neironych" else None
+    )
     try:
-        started = await execute_operation(spec, dict(request.params))
+        if image_request_id:
+            await repo.update_generation_task(
+                session, generation.id,
+                neironych_image_adapter.encode_task_id(image_request_id),
+            )
+        started = await execute_operation(
+            spec, dict(request.params), request_id=image_request_id,
+            primary_provider=image_primary,
+        )
+    except neironych_image_adapter.NeironychImageError as exc:
+        # A POST with an ambiguous outcome must stay billable and reconcilable.
+        logger.warning(
+            "Provider operation Nano Banana 2.1 needs reconciliation gen=%s request_id=%s",
+            generation.id, exc.request_id,
+        )
+        return ProviderOperationAccepted(
+            generation_id=generation.id, contract_id=contract_id,
+            model=spec.model, status="processing", credits=credits,
+            task_id=neironych_image_adapter.encode_task_id(image_request_id),
+        )
     except (TypeError, ValueError) as exc:
         await _refund(
             session,
@@ -283,6 +316,23 @@ async def get_provider_operation_status(
 ) -> ProviderOperationStatus:
     generation, contract_id = await _load_owned_generation(session, generation_id, user.tg_id)
     spec = get_operation_spec(contract_id)
+
+    if generation.model == "nano-banana-2.1" and neironych_image_adapter.decode_task_id(generation.task_id):
+        from api.miniapp_routes import _reconcile_generation_status
+
+        generation = await _reconcile_generation_status(session, generation)
+        result_urls = generation.result_urls
+        if isinstance(result_urls, str):
+            try:
+                result_urls = json.loads(result_urls)
+            except (ValueError, TypeError):
+                result_urls = []
+        return ProviderOperationStatus(
+            generation_id=generation.id, contract_id=contract_id,
+            model=generation.model, status=generation.status.value,
+            credits=generation.credits_spent, task_id=generation.task_id,
+            result_urls=list(result_urls or []), error=getattr(generation, "error_msg", None),
+        )
 
     if generation.status in {
         GenerationStatus.COMPLETED,

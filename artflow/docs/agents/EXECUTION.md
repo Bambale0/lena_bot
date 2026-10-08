@@ -1031,3 +1031,46 @@ Branch: `feat/bot-provider-task-id`.
 - New formatter and tests included in maintained CI gates. No paid generation initiated.
 - Independent Standards/Spec review, required GitHub CI and exact-SHA production deployment checks follow.
 - Full maintained bot-navigation gate passed locally (348 tests). Standards and Spec each identified the same Comet synchronous-image sentinel issue; fixed by suppressing comet:image:direct and its web-prefixed form. Both sentinel regressions pass (17 formatter/history tests total).
+
+
+
+---
+
+# Execution ledger — Nano Banana 2.1 Artflow provider routing and reconciliation
+
+Baseline: PR #200, commit `2440734` (2026-10-08). User task: complete the release across Telegram bot, Telegram Mini App and website. Existing CI checks for `2440734` were green, but Codex identified four merge-blocking findings in unresolved review conversations.
+
+## Findings and root cause
+1. P1: ambiguous upstream HTTP timeouts caused immediate application-level credit refunds while upstream provider work might still be billed.
+2. P2: primary route was environment-only; changing it required deployment, lacked an audit trail.
+3. P2: HTTPS was not enforced on the image adapter's bearer-key endpoint.
+4. P2: base64 decoding without full image verification could mark corrupt data as completed.
+
+## Target, preservation and risk
+- Keep exact `nano-banana-2.1` provider IDs, 1K/2K/4K and up to four references.
+- Preserve working Nano Banana 2, Pro, existing session and billing semantics; add only one new routing control plane and scoped reconciler.
+- **No double credit/refund or double paid POST after unknown provider outcome.** Protect `Neironych` direct generation, user-facing initial generation, feed remix, and public provider-operation API; use durable UUID and read-only status recovery.
+- The provider's synchronous base64 image may not be available in later status responses. Such completed-but-missing-file tasks require manual reconciliation; do not automatically resubmit.
+- Provider credentials and API base URL remain in secure settings; only provider choice and its audit are database-backed.
+- Production migration `036 → 037` is an explicit safety/rollback gate requiring operator approval (per `AGENTS.md`).
+
+## Implementation and test seams
+1. [x] Diagnosed PR reviews and actual Neironych code; confirmed `GET /api/v1/generations/by-client-request-id/<UUID>`.
+2. [x] Reproduced HTTPS, correlation ID, corrupt payload and ambiguous-refund failures with tests.
+3. [x] Added UUID-before-POST, HTTPS-only transport, PIL raster decode verification, definitive-only fallback.
+4. [x] Persisted uncertain tasks as processing, added bounded scheduled and on-demand reconciliation; completion/refund uses atomic existing repository transitions.
+5. [x] Added typed, validated admin routing table, DB audit trail, web admin GET/PUT and Telegram admin keyboard; environment is bootstrap fallback.
+6. [x] Added unit and integration regression tests for direct model calls, Mini App, admin authorization, routing and recovery.
+7. [x] Offline-only review: generated SQL for `036_referral_commission_ledger:037_provider_routing_settings`; read-only production version check confirms `036`. No production DDL applied.
+8. [ ] Exact new PR SHA passes GitHub backend-quality, bot-navigation, webapp, provider-contracts, photo-prompt, Pinterest and user-journeys.
+9. [ ] Codex review conversations re-reviewed and resolved only after fixes verified.
+10. [ ] Production migration/deployment with explicit operator approval; post-deploy model, DB routing, live billing/delivery and health verification.
+
+## Observability and rollback
+- Trace via `generation_id`, idempotency UUID, provider choice, correlated status lookup and credit ledger.
+- Log no API keys, full user images, or sensitive prompts.
+- Control plane change recorded in `provider_routing_audit`, actor ID and source. Rollback primary to Nexus through authenticated admin panel, not by editing environment; pending jobs remain attached to Neironych.
+- All new tables and migration are additive; no destructive migration step is required. Deactivation/rollback does not delete in-flight user financial records.
+
+## Technical guidance
+- Follow repository `AGENTS.md`, its `.agents/` engineering TDD/playbook and review workflow. Prioritize a failing test → fix → focused regression → PR CI → production verification. Avoid changing unrelated legacy tests to hide failures.
