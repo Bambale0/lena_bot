@@ -216,6 +216,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Pending payment state regressions
+        run: npm run test:unit
+
       - name: Build
         run: npm run build
 

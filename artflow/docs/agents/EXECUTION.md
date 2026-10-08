@@ -1138,3 +1138,42 @@ Baseline `02c807eb1b73e20dc3a0e2af2c76efa1b3e1f26d` (main after #200/#201); bran
 
 
 **Verification note (2026-10-08):** the broader `test_webapp_routes.py` suite contains three baseline failures. All three were reproduced unchanged from clean `origin/main` commit `02c807e` using an isolated snapshot: `test_photo_prompt_rejects_disguised_non_image`, `test_webapp_feed_returns_items`, and `test_webapp_my_feed_returns_only_current_user_cards`. None of these assertions, helpers or paths were modified for this task. Keep separate from new PR gate and do not weaken tests. Browser job is required because local host lacks `libatk-1.0.so.0`.
+
+## 2026-10-08 — Narrow pending-payment recovery after PR202
+
+- Baseline verified fresh: `5279532ac5c5d6c6d52ea673b6017dbf3dcbb283`.
+  Branch `fix/feed-payment-recovery-20261008`; no competing current fix PR found.
+  Alternative `126775c`/migration038 remains unpublished and is not merged here.
+- User authorized fixing the deployed payment P1s in a separate PR and releasing
+  after checks. Scope is durable pending invoice state before external checkout,
+  retained unresolved payment across polling timeout/reload/close, and reopening
+  or checking the same invoice without creating a second one.
+- Preserve PR202 image-count billing, existing payment integrations, appearance
+  behavior and hidden-prompt design. No schema/config/secret/price changes.
+- Reuse authenticated billing transaction history for exact invoice resolution;
+  unrelated balance sufficiency is not proof that an invoice settled. Unknown
+  create response or missing invoice remains guarded, never auto-retried.
+- Verification: pure-state RED/GREEN tests; mocked browser immediate external
+  handoff, delayed webhook, reload/TTL and repeated invoice creation regressions;
+  maintained backend/bot/CI, typecheck/build, independent review, exact-SHA CI and
+  production autodeploy/public health only after authorized merge.
+- Local Chromium execution remains environment-blocked (socket EPERM); do not
+  retry/bypass. Browser coverage is executed in existing GitHub Actions.
+
+### Narrow fix validation
+- Pure payment-state regressions demonstrated RED before implementation, then
+  10/10 GREEN. TypeScript and production build passed.
+- Existing maintained backend gate: 407 passed; PR202 prelaunch tests: 7 passed.
+  No backend, billing, schema, payment-provider or appearance code changed.
+- Independent review resolved same-source late invoice identity adoption,
+  Tribute fixed-product URL reopening, and stale quote after fast paid receipt.
+  No remaining high-severity findings in reviewed diff.
+- Added mocked immediate-handoff snapshot, 130-second webhook delay/reload,
+  same-invoice reopening, response loss, latest edits, exact paid receipt and
+  stale quote cases. 48 feed-repeat cases collect across four viewports;
+  browser execution awaits exact-SHA GitHub Actions.
+- Legacy/ambiguous requests with no transaction ID remain unresolved, rather
+  than guessing that an invoice settled. Tribute fixed product links are not
+  offered as reusable invoices. Existing provider/support guidance is shown.
+- Other PR202 findings (quote/provider compatibility/currency and model-dependent
+  hidden-prompt confidentiality) are outside this narrow payment-recovery fix.
