@@ -160,3 +160,37 @@ def test_video_prompt_frontend_copy_is_short_on_all_surfaces() -> None:
     assert "Видео → промпт" in services
     assert "Сделаю подробный промпт для похожего ролика" in services
     assert "MP4, MOV, WebM · стоимость по тарифу" not in services
+
+
+_PROVIDER_FAILURE = (
+    "The request could not be completed. Please retry later, "
+    "or reduce the request parameters/content."
+)
+
+
+@pytest.mark.parametrize("payload", [
+    {"choices": [{"message": {"content": _PROVIDER_FAILURE}}]},
+    {"choices": [{"message": {"content": [{"type": "text", "text": _PROVIDER_FAILURE}]}}]},
+    *[{key: _PROVIDER_FAILURE} for key in ("output_text", "text", "answer", "response")],
+    {"choices": [{"message": {"content": "  " + _PROVIDER_FAILURE.upper().replace(". ", ".\n") + "  "}}]},
+    {"error": {"message": "private upstream details"}, "text": "otherwise usable text"},
+    {"choices": [{"message": {"refusal": "blocked", "content": "otherwise usable text"}}]},
+    {"choices": [{"finish_reason": "content_filter", "message": {"content": "partial text"}}]},
+    {"choices": [{"message": {"content": [{"type": "refusal", "refusal": "blocked"}, {"type": "text", "text": "partial text"}]}}]},
+])
+def test_video_prompt_rejects_provider_failure_completions(payload) -> None:
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="Video prompt") as error:
+        video_prompt_service._extract_chat_text(payload)
+    assert "private upstream details" not in str(error.value)
+
+
+@pytest.mark.parametrize("text", [
+    "A. Ready-to-use prompt — камера плавно движется вдоль берега.",
+    'Покажи экран с надписью: "' + _PROVIDER_FAILURE + '". Камера отъезжает назад.',
+    "The request could not be completed appears on a sign in the scene.",
+])
+def test_video_prompt_preserves_valid_prompts_and_quoted_errors(text) -> None:
+    assert video_prompt_service._extract_chat_text({
+        "error": None,
+        "choices": [{"finish_reason": "stop", "message": {"refusal": None, "content": text}}],
+    }) == text

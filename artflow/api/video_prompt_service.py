@@ -73,28 +73,55 @@ def is_supported_video_prompt_video(data: bytes, content_type: str | None) -> bo
     )
 
 
+class VideoPromptProviderError(RuntimeError):
+    """Provider completion is not a usable video prompt (safe to log)."""
+
+
+# Exact failure-only provider output, not substring matching: a valid creative
+# prompt can quote the same message as text visible in the requested scene.
+_PROVIDER_FAILURE_TEXT = (
+    "The request could not be completed. Please retry later, "
+    "or reduce the request parameters/content."
+).casefold()
+
+
+def _validated_prompt_text(text: str) -> str:
+    clean = text.strip()
+    if " ".join(clean.split()).casefold() == _PROVIDER_FAILURE_TEXT:
+        raise VideoPromptProviderError("Video prompt provider returned a failure message")
+    return clean
+
+
 def _extract_chat_text(payload: Any) -> str:
     if not isinstance(payload, dict):
-        raise RuntimeError("Video prompt response is not an object")
+        raise VideoPromptProviderError("Video prompt response is not an object")
+    if payload.get("error"):
+        raise VideoPromptProviderError("Video prompt provider returned an error")
     choices = payload.get("choices") or []
     if choices and isinstance(choices[0], dict):
+        if choices[0].get("finish_reason") == "content_filter":
+            raise VideoPromptProviderError("Video prompt provider filtered the response")
         message = choices[0].get("message") if isinstance(choices[0].get("message"), dict) else {}
+        if message.get("refusal"):
+            raise VideoPromptProviderError("Video prompt provider refused the request")
         content = message.get("content")
         if isinstance(content, str) and content.strip():
-            return content.strip()
+            return _validated_prompt_text(content)
         if isinstance(content, list):
+            if any(isinstance(item, dict) and item.get("type") == "refusal" for item in content):
+                raise VideoPromptProviderError("Video prompt provider refused the request")
             text = "\n".join(
                 str(item.get("text") or "").strip()
                 for item in content
                 if isinstance(item, dict) and item.get("text")
             ).strip()
             if text:
-                return text
+                return _validated_prompt_text(text)
     for key in ("output_text", "text", "answer", "response"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
-    raise RuntimeError(f"Video prompt response did not contain text: {payload!r}")
+            return _validated_prompt_text(value)
+    raise VideoPromptProviderError("Video prompt response did not contain text")
 
 
 def _comet_video_prompt_model() -> str:
@@ -115,7 +142,7 @@ async def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any])
         response.raise_for_status()
         data = response.json()
     if not isinstance(data, dict):
-        raise RuntimeError(f"Video prompt provider returned non-object JSON: {data!r}")
+        raise VideoPromptProviderError("Video prompt provider returned non-object JSON")
     return data
 
 

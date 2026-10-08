@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 24297)
+Total output lines: 1120
+
 # Execution ledger — video to prompt integration
 
 Baseline: commit `31a91c6`; working tree had no tracked changes at task start.
@@ -486,154 +489,7 @@ Branch: `feat/higgsfield-seedance25-edit-lab`.
 ### Evidence / root cause
 - Production KIE Seedance 2.5 reference transport is intact: completed edit jobs persisted both image and video references, including #51012 with an explicit character/face replacement prompt.
 - Visual evidence from prior comparisons showed appearance traits transferring more reliably than facial identity. This is therefore not a missing-reference transport bug.
-- Mesh/noise/style transforms intended to evade provider safety detection are out of scope. The evaluation uses ordinary permitted reference media only.
-
-### Provider contract under evaluation
-- Higgsfield endpoint: `bytedance/seedance-2.5/video-edit`.
-- Required: `prompt`, `video_url`.
-- Optional published controls used by the lab: up to 30 `image_urls`, up to 10 `video_urls`, up to 10 `audio_urls`, `resolution` 480p/720p, `bitrate_mode` standard/high, `generate_audio`.
-- The lab reuses existing server-side Higgsfield Key auth and authenticated status polling.
-- No production model key, user pricing row, routing rule, or APIX billing path is changed.
-
-### Intended outcome
-- Add an admin-only Telegram lab entry under the existing Test Lab.
-- Default to 720p/high bitrate and an identity-preservation prompt.
-- Require one source video and at least one identity photo before a paid test.
-- Let admins upload separate identity images (front portrait first, then optional extra angles), plus optional extra video/audio references.
-- Provider result is polled through the existing Higgsfield budget and mirrored into APIX result storage.
-- APIX user credits are never charged by this lab; only Higgsfield provider balance is consumed.
-
-### TDD / verification
-1. [x] RED contract added to maintained CI.
-2. [x] Exact-head RED observed: 4 expected failures for missing adapter, missing selector entry and missing admin router.
-3. [x] Minimal provider payload adapter and admin lab flow implemented.
-4. [ ] Exact-head GREEN CI.
-5. [ ] Open code review.
-6. [ ] Merge/deploy only after green review; production Seedance routing remains unchanged.
-
-## Follow-up — promptless Genjutsu diagnostic and face-swap path
-
-Date: 2026-09-26. Baseline: `8f3aa98` (`main`, clean). User explicitly requests resubmitting the latest Higgsfield task without a prompt and implementing video face swap.
-
-- Existing state: Genjutsu Object Swap #51189 completed using one multi-view collage and a source video; face identity remained unreliable. The adapter currently rejects an empty prompt before calling Higgsfield. The live Higgsfield API key is available server-side, while the account/OAuth-backed MCP is not. Earlier Motion Transfer diagnostic on a short derivative was rejected by provider moderation; do not retry that mode/source. A separate KIE Seedance 2.5 edit path already exists but prior same-reference outputs did not demonstrate identity preservation.
-- Outcome/acceptance: submit one exact-media Object Swap comparison with no user prompt, record request ID/status and inspect output if completed. For product work, identify an official usable API contract and visually verify identity transfer before exposing a named face-swap operation. Preserve ownership, billing/refund, admin price configuration and parity across site, Mini App, and Telegram bot. No private media URLs or credentials in logs/commits.
-- Plan: (1) verify official prompt optionality and existing task inputs; (2) submit the single authorized comparison through the authenticated Higgsfield client and poll to a terminal state; (3) inventory face-swap provider API and current application seams; (4) implement only a verified route with red/green tests and all user surfaces; (5) run relevant checks, review, and report deployment status.
-- Diagnostic result: a direct Object Swap request with the exact saved photo/video inputs and no `prompt` field was accepted as Higgsfield task `86652201-fe36-4396-be8d-6815dd959a1c`, then failed immediately: API credit balance too low. No output exists to inspect. No further paid task was submitted.
-- Seedance 2.5 audit: production generation #51012 contained one photo and one source video, an explicit replacement prompt, `adaptive` aspect ratio, and source-duration editing. The bot and KIE adapter forwarded both media references. The observed problem is therefore identity fidelity, not loss of the photo in transport. KIE's published multimodal reference contract offers no face-identity guarantee; treating it as an exact face swap would mislabel the product. User confirmed it takes only broad appearance from photos.
-- Implemented promptless Genjutsu transport across shared API, site/Mini App, and text bot: blank prompt omits the provider field; non-Genjutsu video models still reject blank prompts; bot accepts `-` and explains it. Focused regression tests and web build pass. Dedicated Face Swap remains blocked by an accessible, documented, visually verified provider route; Higgsfield has insufficient API balance, and the available KIE Seedance route demonstrably lacks exact facial fidelity. No new model or billing was exposed.
-- Verification: 83 focused Genjutsu, video bot, Seedance runtime/reference tests passed; webapp TypeScript and Vite build passed; Python compilation and focused Ruff passed; `git diff --check` passed. Repository-wide pytest remains red on unrelated existing tests (including legacy V4 entrypoint assertions and coroutine mocks); the changed-route-specific failure inspected is an outdated mock returning a coroutine for active-generation count. Full Ruff for `miniapp_routes.py` reports the pre-existing `_anonymous_user` undefined reference, present at baseline. CI for this uncommitted change was not run. No commit, push, or deploy yet.
-
-## Follow-up — payment button advertises rails, not the acquirer
-
-Date: 2026-09-26. Baseline: `a587206` (`main`, clean). Branch: `fix/payment-button-card-sbp-20260926`.
-
-- Problem: the RUB payment method button named the acquirer (`💳 T-Bank / СБП` in the bot, `T-Bank / банковская карта` in the Mini App, `💳 Т-Банк` on the legacy site). User report: people read the brand name as "payment is only possible through T-Bank" and abandon checkout.
-- Scope: user-visible payment copy only, in RU and EN. The acquirer stays the processing provider — no provider, routing, pricing, billing, webhook, or feature-flag change. `bot/legal_offer.py` bank details (`АО «ТБанк»`, the merchant's own bank) are legally required and intentionally unchanged, as are internal logs/identifiers and the `tbank` provider key.
-- Reuse audit: the RUB acquirer is already exposed as rails — `topup_tbank_desc` and `rub_methods_kb` already offered "картой или через СБП". This change only removes the brand name from the surfaces that still showed it, so no new affordance is introduced.
-- No hardcode note: payment-method copy remains in the existing i18n/keyboard/component surfaces with the existing pattern. Moving these labels to an admin-editable control plane is a larger, separate change and was not requested; `api/web/billing.py` labels stay the single API-side source consumed by the site/Mini App.
-- Plan: (1) locate every user-visible acquirer mention with a repo-wide search; (2) update bot keyboards, i18n (RU/EN), bot payment screens, API label, and both frontend payment surfaces to `Карта | СБП` / `Card | SBP`; (3) add regression tests asserting the copy advertises rails and no acquirer brand; (4) run the maintained CI subset, Ruff, and the webapp build; (5) commit, push, and open a PR since `main` is protected.
-- Steps: 1. [x] Located all mentions — bot keyboard (2), i18n RU+EN (4), bot payment screens (2), API label (1), Mini App balance sheet (1), legacy site (1). 2. [x] Applied the copy change on all ten surfaces; the RUB button now reads `💳 Карта | СБП` (RU) and `💳 Card | SBP` (EN). 3. [x] Added four regression tests in `tests/test_plan_payment_method_choice.py` (bot buttons RU/EN, i18n copy, API label, frontend sources) and updated the API label expectation in `tests/test_web_api_contract.py`.
-- Verification: maintained CI pytest subset — 270 passed. Payment-focused sweep (`test_plan_payment_method_choice`, `test_stars_payment`, `test_tribute`, `test_payment_webhooks`, `test_apix_legacy_concept_runtime`, `test_web_generation_parity`, `test_public_offer`) — 53 passed. Ruff on changed files clean except the pre-existing `bot/i18n.py` W292 (no trailing newline at baseline; file is outside the maintained Ruff list). `npm run build` (tsc + Vite) passed. `git diff --check` clean. Pre-existing unrelated red: `tests/test_web_api_contract.py` contact-auth rate-limit tests fail identically with the change stashed.
-- Follow-up: `webapp/src/components/balance-sheet.tsx` also labels Lava as `СБП / Lava`, which now overlaps the RUB method's `Карта | СБП`; consider disambiguating copy if both providers are enabled for the same user.
-
-### Follow-up — public landing payment button parity
-
-Date: 2026-09-26. Baseline: `63d9334` (`main`, clean). Branch: `fix/landing-payment-label-card-sbp-20260926`.
-
-- Gap found while verifying the deployed release: the production marketing site (`/`) is served from `artflow/landing/`, not the Vite bundle. `landing/js/prototype-premium.js` keeps its own payment-method label map and renders the provider buttons from it, so the merged bot/Mini App change did not cover this surface.
-- Reuse audit: `/billing/payment-methods` returns provider keys only, so the landing fallback map is what decides the visible button text. The landing map already said `Карта` (no acquirer brand), so the original complaint was not reproducible there, but the wording did not match the requested `Карта | СБП`.
-- Steps: 1. [x] Changed the landing label map entry to `tbank: "Карта | СБП"`. 2. [x] Bumped the cache-busting query on all nine `landing/*.html` pages from `v=20260907_dual_prices` to `v=20260926_card_sbp_label`, otherwise returning visitors keep the cached script. 3. [x] Updated `tests/test_web_generation_parity.py` to assert the new cache-bust token and extended the CI-covered regression test to cover the landing source.
-- Verification: maintained CI pytest subset plus `test_web_generation_parity` — green. `node --check landing/js/prototype-premium.js` passed. Ruff clean; `git diff --check` clean.
-- Deployment: PR #171 merged to `main` (merge commit `827001086a71463617b62ab95679cd5ce1f5d3ee`).
-  - Production Autodeploy workflow ran and succeeded (run `36238352403`).
-  - Public live verification confirmed on `https://apixbotai.com/`:
-    - Cache-busting script tag served: `prototype-premium.js?v=20260926_card_sbp_label`.
-    - Landing JS label verified live: `tbank: "Карта | СБП"`.
-    - Mini App assets bundle verified live (`/assets/index-CRzVm_CW.js`): contains `Карта | СБП` and subtitle `Оплата в рублях`.
-    - API landing endpoint verified live (`/api/web/landing`): `[{'key': 'tbank', 'provider': 'tbank', 'label': 'Карта | СБП', 'status': 'enabled'}, ...]`.
-    - Health endpoint verified live: HTTP 200 (`https://apixbotai.com/api/v1/health`).
-
-
----
-
-# Execution ledger — Seedance 2.5 Identity Transfer preset
-
-Date: 2026-09-26.
-Baseline: `0b8170e61da7b113692e94a39018ace541c72d3b`.
-Branch: `feat/seedance25-identity-transfer`.
-
-## Production evidence before implementation
-- KIE Seedance 2.5 receives both image and video references correctly; transport was already proven in production.
-- A controlled one-image/one-video edit using an unstructured replacement prompt mostly transferred appearance traits such as hair color but did not preserve facial identity well enough.
-- Re-running the same media with explicit role separation materially improved the result in operator review: `@Image1` as the identity/appearance authority and `@Video1` only for motion, camera, timing, lighting and scene.
-- A second A/B run with three photos of the same person was rated successful by the operator. `@Image1` remained the primary identity anchor while `@Image2` and `@Image3` supported head-angle consistency.
-- No adversarial mesh/noise/safety-evasion technique is part of this feature.
-
-## Intended outcome
-- Add a first-class Seedance 2.5 preset named `Замена персонажа` without creating a fake provider model.
-- Keep the normal Seedance 2.5 multimodal product unchanged.
-- Identity preset accepts 1–3 photos of the same person and exactly one source video.
-- Backend, not user-written prompt wording, assigns reference roles deterministically:
-  - `@Image1`: primary identity anchor;
-  - `@Image2..3`: same-person identity support;
-  - `@Video1`: motion/performance/camera/timing/background/lighting only.
-- Identity mode always uses source-video edit semantics: adaptive frame geometry, automatic provider duration, audio generation off.
-- User can choose `480p` or `720p`; the selected resolution is preserved through pricing and the KIE payload.
-
-## Surfaces
-- `telegram_bot`: dedicated `🎭 Замена персонажа` mode inside Seedance 2.5, 1–3 photo collection, source-video step, then 480p/720p choice.
-- `mini_app`: Seedance panel exposes the identity preset and validates 1–3 photos + exactly one source video before request.
-- `site/web`: Seedance Studio exposes the same preset and validation.
-- All three surfaces use the same backend provider contract and control token.
-
-## Test / safety contract
-- RED was observed at exact test commit `5c0180b91e46086722f2bda10bc636ce9026e327`: 12/12 new identity tests failed before implementation.
-- GREEN focused run after implementation: 72/72 Seedance/video tests passed.
-- Ruff passed for the touched Seedance runtime/adapter, Telegram video handler and new identity test.
-- Python compileall passed for `api` and `bot`.
-- Mini App TypeScript typecheck and production Vite build passed.
-- A broader legacy keyboard/UI test file still has pre-existing assertions unrelated to this diff; these are not introduced by Identity Transfer.
-
-## Control plane / product constraints
-- Pricing remains database-backed by the existing Seedance resolution variants; no new hardcoded mutable price is introduced.
-- The role prompt is a provider-specific technical contract required for deterministic multimodal semantics, not mutable marketing copy.
-- The preset does not promise exact biometric identity preservation; UI copy describes reference roles and recommended input quality.
-- No customer media or paid provider job is used by automated tests.
-
-
-## Review follow-up
-- Open review found one provider-boundary edge case: the public Seedance 2.5 input allows a 30,000-character user prompt, but Identity Transfer prepends deterministic role instructions. Without a second check, the final provider prompt could exceed KIE's 30,000-character contract.
-- TDD RED: commit `aaf5a6252ce9465c31c6190e3be1baddaf39cf95` added a regression test and CI failed exactly because the expanded prompt did not raise.
-- Fix: `build_identity_transfer_prompt` now validates the fully expanded provider prompt against the existing Seedance 2.5 hard limit and raises before provider submission instead of sending an invalid payload.
-- The feature uses project skills `systematic-debugging`, `test-driven-development`, `requesting-code-review`, `verification-before-completion`, and `finishing-a-development-branch`; external scan also applied WondelAI clean-code/testing principles and Anthropic webapp-testing guidance. No relevant implementation skill was found in `Bambale0/claw`.
-
-
----
-
-# Execution ledger — Personalized trend repeat fields
-
-Date: 2026-09-26.
-Baseline at implementation start: `3a174db2de8b774203bc7b6732c6f535c1cb7bfb`.
-Branch: `feat/trend-personalization-fields`.
-PR: #175.
-
-## User outcome
-- Trend authors can declare up to six safe user-editable values for repeat runs.
-- Initial presets include `Возраст`, `Имя`, `Надпись`, `Дата`, `Число`, and `Одежда`; admins may add a custom short label.
-- The repeat sheet shows only those declared values plus the user's reference photo. The canonical prompt remains server-owned and hidden.
-- Values are validated server-side, substituted into matching `{{Field}}` tokens when present, and also appended as explicit priority overrides so existing trends can add fields without rewriting their whole hidden prompt.
-- Numeric fields reject non-numeric input; undeclared keys are rejected; explicit empty field configuration disables legacy placeholder auto-discovery.
-- Telegram delegates a personalized trend to the same Mini App repeat sheet instead of exposing or duplicating prompt logic.
-
-## Tanyapi reuse audit
-- Inspected the live tanyapi worktrees before implementation:
-  - `/root/ksu-personalized-trend-fields`, commit `ab808e5` (`feat(trends): add personalized template fields`);
-  - `/root/ksu-trend-edit-fields`, commit `42f0e6150b50` (`fix(trends): edit fields on existing templates`).
-- Reused the product contract, not copied provider/business implementation: public schema + private prompt, admin-configured fields, server-side rendering/validation, and editable existing templates.
-
-## TDD / review findings
-- Existing branch work first stored the field schema inside `UserPrompt.tags`. Review found this is unsafe in APIX because `db.prompt_repository._normalize_tags` lowercases and truncates each tag to 32 characters.
-- Regression RED observed at exact commit `4b19d542e81be7c4677e7ecc6cd8efd1229396f7`: CI failed `test_explicit_user_fields_survive_repository_tag_normalization` after the encoded schema was lowercased/truncated.
+- Mesh/noise/style transforms intended…4297 tokens truncated…ased/truncated.
 - Fix: explicit trend field configuration is now a first-class nullable JSON column `user_prompts.trend_user_fields` (migration `035_trend_user_fields`).
   - `NULL` preserves legacy `{{Field}}` auto-discovery for old prompts;
   - `[]` explicitly disables personalization;
@@ -1074,3 +930,47 @@ Baseline: PR #200, commit `2440734` (2026-10-08). User task: complete the releas
 
 ## Technical guidance
 - Follow repository `AGENTS.md`, its `.agents/` engineering TDD/playbook and review workflow. Prioritize a failing test → fix → focused regression → PR CI → production verification. Avoid changing unrelated legacy tests to hide failures.
+
+---
+
+# Execution ledger — reject failed video-to-prompt responses
+
+Baseline: production/main `5f02ff2f5a38de56ec4b41be4a419f95f640b934`, tree
+`a4155a917df8a7c186989e79fa9573f00f1f770c`; 2026-10-08.
+User authorized fix and deployment. No historical credit adjustments authorized.
+
+- Evidence: shared Comet extractor accepts failure-only text as a successful prompt;
+  bot and API spend before the provider call and refund only on exceptions.
+- Scope: shared response validation, preserving legitimate prompts that quote an
+  error; explicit provider errors/refusals/content filtering fail closed.
+- All surfaces: Telegram handler and Mini App endpoint use the shared service;
+  website delegates to the Mini App endpoint. No UI, model, tariff, migration,
+  credential, retry policy or admin-setting changes needed.
+- Acceptance: invalid completion causes one existing refund and no success result;
+  valid completion remains successful and is not refunded. No paid retries.
+- Observability: typed safe error reason, never include full provider payload in
+  failure exceptions/logs. Current request and credit attribution remain intact.
+- Steps: [x] read-only diagnosis and current-main verification; [x] RED tests;
+  [x] minimal fix; [x] GREEN focused/maintained gates; [x] independent review;
+  [ ] exact-SHA CI; [ ] authorized merge/autodeploy and public health.
+- Constraints: no production Docker/filesystem/journal access, live generations,
+  or historical ledger changes. Provider-side cause and prior charges unverified.
+- Guidance: repository systematic-debugging, TDD and verification-before-completion;
+  Bambale0/claw integration safety; anthropics webapp-testing reviewed (no UI change).
+  Connector search found no relevant Bambale0/skills or wondelai testing guidance.
+
+Verification progress: RED reproduced 14 failures before implementation; GREEN
+34 focused tests pass, including real shared parser through Telegram/Mini App/web
+and success controls. Maintained backend gate: 407 passed; bot-navigation: 351
+passed; maintained Ruff and diff whitespace checks passed. Provider contract
+inventory first lacked local dummy config; rerun uses test-only BOT_TOKEN and
+COMET_API_KEY, not production secrets. Existing CI already includes both modified
+test modules. No full legacy-suite claim is made.
+Provider contract inventory passed after supplying all test-only required settings
+(including dummy DATABASE_URL); no database connection or provider call performed.
+Python compilation passed. Independent review found no blocker in validation,
+billing/refund integration or legitimate quoted-error preservation.
+
+Independent review reran both changed test modules: 30 passed (the 34-test
+focused run also includes four existing API route tests). Typed-error assertions
+were strengthened per the reviewer; final exact-SHA CI and deployment remain pending.
