@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+from fastapi import HTTPException, UploadFile
+from starlette.datastructures import Headers
+
+from api import miniapp_routes, video_prompt_service
+from api.web import generations as web_generations
+from bot.handlers import video_prompt as telegram_video_prompt
 from db.models import GenerationType
 from db.seed import DEFAULT_MODEL_COSTS
 
@@ -58,3 +68,80 @@ def test_telegram_bot_exposes_video_prompt_and_uses_configured_billing() -> None
     assert 'entry_type="video_prompt_refund"' in handler
     assert "_video_prompt.router" in routers
     assert menus.count("vid:video2prompt") >= 3
+
+
+# Exercise the real shared parser through each surface; only external IO/billing
+# is mocked. No provider request, database write or Telegram send is performed.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["telegram", "miniapp", "web"])
+@pytest.mark.parametrize("failed", [True, False])
+async def test_video_prompt_provider_completion_settles_once(monkeypatch, surface, failed):
+    failure = (
+        "The request could not be completed. Please retry later, "
+        "or reduce the request parameters/content."
+    )
+    text = failure if failed else "Камера плавно движется вдоль берега."
+    post = AsyncMock(return_value={"choices": [{"message": {"content": text}}]})
+    monkeypatch.setattr(video_prompt_service, "_post_json", post)
+    handler = telegram_video_prompt if surface == "telegram" else miniapp_routes
+    spend = AsyncMock(return_value=True)
+    refund = AsyncMock()
+    monkeypatch.setattr(handler.repo, "get_model_cost", AsyncMock(return_value=SimpleNamespace(
+        credits=3.0, is_active=True, display_name="Видео → промпт",
+    )))
+    monkeypatch.setattr(handler.repo, "spend_credits", spend)
+    monkeypatch.setattr(handler.repo, "add_credits", refund)
+    monkeypatch.setattr(handler, "save_public_file", MagicMock(return_value="https://example.test/video.mp4"))
+    cleanup = MagicMock(return_value=True)
+    monkeypatch.setattr(handler, "delete_public_file", cleanup)
+    raw = b"\x00\x00\x00\x18ftypmp42payload"
+    session = AsyncMock()
+    user = SimpleNamespace(id=42, credits=100.0)
+    if surface == "telegram":
+        monkeypatch.setattr(handler, "_download_telegram_file", AsyncMock(return_value=raw))
+        wait = AsyncMock()
+        message = AsyncMock()
+        message.answer.return_value = wait
+        state = AsyncMock()
+        await handler._analyse_video(
+            message=message, state=state, session=session, db_user=user, bot=AsyncMock(),
+            file_id="fixture-video", mime_type="video/mp4", file_size=len(raw),
+        )
+        sent = [call.args[0] for call in message.answer.await_args_list]
+        if failed:
+            assert not any("промпт готов" in item for item in sent)
+            assert all(failure not in item for item in sent)
+            wait.edit_text.assert_awaited_once()
+            state.clear.assert_not_awaited()
+        else:
+            assert any("промпт готов" in item and text in item for item in sent)
+            state.clear.assert_awaited_once()
+    else:
+        upload = UploadFile(file=io.BytesIO(raw), filename="clip.mp4", headers=Headers({"content-type": "video/mp4"}))
+        if surface == "miniapp" and failed:
+            with pytest.raises(HTTPException) as exc:
+                await handler.miniapp_video_prompt(file=upload, session=session, user=user)
+            assert exc.value.status_code == 502
+            assert failure not in str(exc.value.detail)
+        elif surface == "miniapp":
+            result = await handler.miniapp_video_prompt(file=upload, session=session, user=user)
+            assert result["prompt"] == text
+        else:
+            result = await web_generations.video_prompt(file=upload, session=session, user=user)
+            if failed:
+                assert result.status_code == 502
+                assert failure.encode() not in result.body
+            else:
+                assert text in str(result)
+    spend.assert_awaited_once()
+    post.assert_awaited_once()  # No automatic paid retries.
+    cleanup.assert_called_once_with("https://example.test/video.mp4")
+    if failed:
+        refund.assert_awaited_once()
+        assert refund.await_args.args == (session, 42, 3.0)
+        assert refund.await_args.kwargs["entry_type"] == "video_prompt_refund"
+        assert refund.await_args.kwargs["source_id"] == spend.await_args.kwargs["source_id"]
+    else:
+        refund.assert_not_awaited()

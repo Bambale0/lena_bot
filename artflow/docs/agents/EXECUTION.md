@@ -1074,3 +1074,47 @@ Baseline: PR #200, commit `2440734` (2026-10-08). User task: complete the releas
 
 ## Technical guidance
 - Follow repository `AGENTS.md`, its `.agents/` engineering TDD/playbook and review workflow. Prioritize a failing test → fix → focused regression → PR CI → production verification. Avoid changing unrelated legacy tests to hide failures.
+
+---
+
+# Execution ledger — reject failed video-to-prompt responses
+
+Baseline: production/main `5f02ff2f5a38de56ec4b41be4a419f95f640b934`, tree
+`a4155a917df8a7c186989e79fa9573f00f1f770c`; 2026-10-08.
+User authorized fix and deployment. No historical credit adjustments authorized.
+
+- Evidence: shared Comet extractor accepts failure-only text as a successful prompt;
+  bot and API spend before the provider call and refund only on exceptions.
+- Scope: shared response validation, preserving legitimate prompts that quote an
+  error; explicit provider errors/refusals/content filtering fail closed.
+- All surfaces: Telegram handler and Mini App endpoint use the shared service;
+  website delegates to the Mini App endpoint. No UI, model, tariff, migration,
+  credential, retry policy or admin-setting changes needed.
+- Acceptance: invalid completion causes one existing refund and no success result;
+  valid completion remains successful and is not refunded. No paid retries.
+- Observability: typed safe error reason, never include full provider payload in
+  failure exceptions/logs. Current request and credit attribution remain intact.
+- Steps: [x] read-only diagnosis and current-main verification; [x] RED tests;
+  [x] minimal fix; [x] GREEN focused/maintained gates; [x] independent review;
+  [ ] exact-SHA CI; [ ] authorized merge/autodeploy and public health.
+- Constraints: no production Docker/filesystem/journal access, live generations,
+  or historical ledger changes. Provider-side cause and prior charges unverified.
+- Guidance: repository systematic-debugging, TDD and verification-before-completion;
+  Bambale0/claw integration safety; anthropics webapp-testing reviewed (no UI change).
+  Connector search found no relevant Bambale0/skills or wondelai testing guidance.
+
+Verification progress: RED reproduced 14 failures before implementation; GREEN
+34 focused tests pass, including real shared parser through Telegram/Mini App/web
+and success controls. Maintained backend gate: 407 passed; bot-navigation: 351
+passed; maintained Ruff and diff whitespace checks passed. Provider contract
+inventory first lacked local dummy config; rerun uses test-only BOT_TOKEN and
+COMET_API_KEY, not production secrets. Existing CI already includes both modified
+test modules. No full legacy-suite claim is made.
+Provider contract inventory passed after supplying all test-only required settings
+(including dummy DATABASE_URL); no database connection or provider call performed.
+Python compilation passed. Independent review found no blocker in validation,
+billing/refund integration or legitimate quoted-error preservation.
+
+Independent review reran both changed test modules: 30 passed (the 34-test
+focused run also includes four existing API route tests). Typed-error assertions
+were strengthened per the reviewer; final exact-SHA CI and deployment remain pending.
