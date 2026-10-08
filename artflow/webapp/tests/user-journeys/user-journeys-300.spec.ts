@@ -298,6 +298,17 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
     const likeMatch = path.match(/^\/api\/v1\/feed\/(\d+)\/like$/);
     if (likeMatch && method === "POST") return route.fulfill({ json: { likes_count: 99 } });
 
+    const quoteMatch = path.match(/^\/api\/v1\/feed\/(\d+)\/remix\/quote$/);
+    if (quoteMatch && method === "POST") {
+      const balance = Number(user.credits || 0);
+      const cost = 1.5;
+      return route.fulfill({ json: {
+        cost_credits: cost, balance_credits: balance, can_run: balance >= cost,
+        deficit_credits: Math.max(0, cost - balance),
+        recommended_plan: balance >= cost ? null : { key: "mini", label: "Мини", credits: 15, price_rub: 150 },
+      } });
+    }
+
     const remixMatch = path.match(/^\/api\/v1\/feed\/(\d+)\/remix$/);
     if (remixMatch && method === "POST") {
       captures.remix = requestJson(route);
@@ -517,7 +528,7 @@ registerDomain("06 · Повтор работы из ленты сохраняе
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
   await expect(dialog.getByText("Реф #1")).toBeVisible();
-  await dialog.getByRole("button", { name: "Запустить повтор" }).click();
+  await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
   await expect(page.getByRole("dialog", { name: /Задача #/ })).toBeVisible();
   expect(captures.remix).toMatchObject({
     source_image_url: source,

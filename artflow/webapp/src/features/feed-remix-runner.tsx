@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import type { FeedItem, GenerationTask, ModelInfo } from "@/lib/types";
-import { notifyHaptic } from "@/lib/telegram";
+import { notifyHaptic, openExternalUrl } from "@/lib/telegram";
 import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
 
 const FEED_REMIX_EVENT = "apix:open-feed-remix-runner";
@@ -21,6 +21,76 @@ type FeedRemixEventDetail = { item: FeedItem };
 type PendingRemix = { resolve: (task: GenerationTask) => void; reject: (error: Error) => void };
 
 type UploadResponse = { url?: string; content_type?: string; size?: number };
+type FeedCheckoutQuote = {
+  cost_credits: number;
+  balance_credits: number;
+  deficit_credits: number;
+  can_run: boolean;
+  recommended_plan?: { key: string; label: string; credits: number; price_rub: number } | null;
+};
+type PaymentProvider = "tbank" | "crypto" | "tribute" | "lava";
+const ACCEPTED_PAYMENT_PROVIDERS: PaymentProvider[] = ["tbank", "crypto", "tribute", "lava"];
+const REPEAT_DRAFT_TTL_MS = 60 * 60 * 1000;
+
+type RepeatDraft = {
+  savedAt: number;
+  references: string[];
+  changeRequest: string;
+  modelKey: string;
+  mode: string;
+  aspectRatio: string;
+  quality: string;
+  count: number;
+  duration: number;
+  resolution: string;
+  grokMode: string;
+  paymentWaiting: boolean;
+};
+
+function draftKey(postId: number): string {
+  const viewer = String(window.Telegram?.WebApp?.initDataUnsafe?.user?.id || "session");
+  return `apix:feed-repeat-draft:${viewer}:${postId}`;
+}
+
+function readRepeatDraft(postId: number): RepeatDraft | null {
+  try {
+    const raw = window.sessionStorage.getItem(draftKey(postId));
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const saved = parsed as Partial<RepeatDraft>;
+    if (typeof saved.savedAt !== "number" || Date.now() - saved.savedAt > REPEAT_DRAFT_TTL_MS) {
+      window.sessionStorage.removeItem(draftKey(postId));
+      return null;
+    }
+    return {
+      savedAt: saved.savedAt,
+      references: Array.isArray(saved.references)
+        ? saved.references.filter((value): value is string => typeof value === "string" && value.startsWith("https://")).slice(0, 4)
+        : [],
+      changeRequest: typeof saved.changeRequest === "string" ? saved.changeRequest.slice(0, 800) : "",
+      modelKey: String(saved.modelKey || ""),
+      mode: String(saved.mode || "image"),
+      aspectRatio: String(saved.aspectRatio || "1:1"),
+      quality: String(saved.quality || "basic"),
+      count: Number(saved.count) || 1,
+      duration: Number(saved.duration) || 5,
+      resolution: String(saved.resolution || "720p"),
+      grokMode: String(saved.grokMode || "normal"),
+      paymentWaiting: saved.paymentWaiting === true,
+    };
+  } catch {
+    return null; // Blocked sessionStorage should never block generation.
+  }
+}
+
+function clearRepeatDraft(postId: number): void {
+  try {
+    window.sessionStorage.removeItem(draftKey(postId));
+  } catch {
+    // Private browsing may disable sessionStorage.
+  }
+}
 
 let runnerRoot: Root | null = null;
 let runnerMounted = false;
@@ -152,6 +222,16 @@ function FeedRemixRunnerPortal() {
   const [resolution, setResolution] = useState("720p");
   const [grokMode, setGrokMode] = useState("normal");
   const [references, setReferences] = useState<string[]>([]);
+  const [changeRequest, setChangeRequest] = useState("");
+  const [quote, setQuote] = useState<FeedCheckoutQuote | null>(null);
+  const [quotedBody, setQuotedBody] = useState("");
+  const [quoteBusy, setQuoteBusy] = useState(false);
+  const [paymentWaiting, setPaymentWaiting] = useState(false);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentProvider[]>([]);
+  const quoteRequestSequence = useRef(0);
+  const launchInFlight = useRef(false);
+  const paymentInFlight = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const allModels = useMemo(() => [...imageModels, ...videoModels], [imageModels, videoModels]);
@@ -168,21 +248,72 @@ function FeedRemixRunnerPortal() {
   const modeOptions = selectedModel?.modes?.length ? selectedModel.modes : [bucket === "video" ? "image" : "image"];
   const qualityOptions = selectedModel?.quality_options?.length ? selectedModel.quality_options : [{ value: "basic", label: "Базовое" }];
   const countOptions = selectedModel?.counts?.length ? selectedModel.counts : [1];
+  const requestBody = useMemo(() => {
+    if (!item || !selectedModel) return null;
+    const sourceMedia = sourcePreview || "";
+    const primaryUserReference = references[0] || "";
+    const chosenMode = bucket === "video" ? mode : "image";
+    return {
+      model: selectedModel.key,
+      change_request: changeRequest.trim(),
+      mode: chosenMode,
+      duration,
+      aspect_ratio: aspectRatio,
+      resolution,
+      image_url: primaryUserReference || (!sourceIsVideo ? sourceMedia || null : null),
+      source_image_url: !sourceIsVideo ? sourceMedia || null : null,
+      reference_urls: references,
+      video_url: sourceIsVideo && chosenMode === "video" ? sourceMedia || null : null,
+      video_start: 0,
+      video_end: null,
+      audio_ids: [],
+      character_ids: [],
+      seed: null,
+      grok_mode: grokMode,
+      quality,
+      count,
+    };
+  }, [aspectRatio, bucket, changeRequest, count, duration, grokMode, item, mode, quality, references, resolution, selectedModel, sourceIsVideo, sourcePreview]);
+  const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
+  const quoteReady = Boolean(quote && quotedBody === requestBodyKey && !quoteBusy);
+  const canLaunch = quoteReady && quote?.can_run === true;
 
   const resetForm = useCallback((nextItem: FeedItem | null = null) => {
+    const draft = nextItem ? readRepeatDraft(nextItem.id) : null;
     setItem(nextItem);
     setPhase("idle");
     setError("");
-    setReferences([]);
-    setModelKey(nextItem?.model || "");
-    setMode(nextItem && itemLooksVideo(nextItem) ? "text" : "image");
-    setAspectRatio(nextItem?.aspect_ratio || "1:1");
-    setQuality("basic");
-    setCount(1);
-    setDuration(5);
-    setResolution("720p");
-    setGrokMode("normal");
+    setReferences(draft?.references || []);
+    setChangeRequest(draft?.changeRequest || "");
+    setQuote(null);
+    setQuotedBody("");
+    setQuoteBusy(false);
+    setPaymentWaiting(draft?.paymentWaiting || false);
+    setPaymentBusy(false);
+    setModelKey(draft?.modelKey || nextItem?.model || "");
+    setMode(draft?.mode || (nextItem && itemLooksVideo(nextItem) ? "text" : "image"));
+    setAspectRatio(draft?.aspectRatio || nextItem?.aspect_ratio || "1:1");
+    setQuality(draft?.quality || "basic");
+    setCount(draft?.count || 1);
+    setDuration(draft?.duration || 5);
+    setResolution(draft?.resolution || "720p");
+    setGrokMode(draft?.grokMode || "normal");
   }, []);
+
+  // External bank checkout may close/reload the Telegram WebView. Keep only
+  // non-secret editing settings and public upload URLs in tab-scoped storage.
+  useEffect(() => {
+    if (!item) return;
+    const draft: RepeatDraft = {
+      savedAt: Date.now(), references, changeRequest, modelKey, mode,
+      aspectRatio, quality, count, duration, resolution, grokMode, paymentWaiting,
+    };
+    try {
+      window.sessionStorage.setItem(draftKey(item.id), JSON.stringify(draft));
+    } catch {
+      // Storage is optional in privacy-restricted browsers.
+    }
+  }, [item?.id, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, resolution, grokMode, paymentWaiting]);
 
   const cancelPending = useCallback((message = "Повтор отменён") => {
     if (pendingRemix) pendingRemix.reject(new Error(message));
@@ -217,8 +348,14 @@ function FeedRemixRunnerPortal() {
   useEffect(() => {
     if (!item || !allModels.length) return;
     if (modelKey && allModels.some((model) => model.key === modelKey)) return;
-    const fallback = allModels.find((model) => model.key === item.model) || imageModels[0] || videoModels[0];
-    if (fallback) setModelKey(fallback.key);
+    const matchingKind = itemLooksVideo(item) ? videoModels : imageModels;
+    const fallback = matchingKind.find((model) => model.key === item.model) || matchingKind[0];
+    if (fallback) {
+      setModelKey(fallback.key);
+      if (fallback.key !== item.model) toast.info("Модель автора недоступна. Выбрана похожая модель — проверь настройки.");
+    } else {
+      setError("Нет доступной модели для повтора этой работы");
+    }
   }, [allModels, imageModels, item, modelKey, videoModels]);
 
   useEffect(() => {
@@ -236,14 +373,125 @@ function FeedRemixRunnerPortal() {
     if (!modeOptions.includes(mode)) setMode(modeOptions[0] || "image");
   }, [aspectRatio, count, duration, mode, modeOptions, quality, resolution, selectedModel]);
 
+  // A quote is a read-only offer; it must match the exact payload ultimately
+  // submitted. A changed duration/quality/photo invalidates the old price.
+  const refreshQuote = useCallback(async (id: number, body: Record<string, unknown>, key: string, quiet = false) => {
+    const requestSequence = ++quoteRequestSequence.current;
+    if (!quiet) setQuoteBusy(true);
+    try {
+      const latest = await apiJson<FeedCheckoutQuote>(`/feed/${id}/remix/quote`, {
+        method: "POST", body: JSON.stringify(body),
+      });
+      if (!Number.isFinite(Number(latest.cost_credits)) || typeof latest.can_run !== "boolean") {
+        throw new Error("Стоимость повтора временно недоступна");
+      }
+      if (requestSequence === quoteRequestSequence.current) {
+        setQuote(latest);
+        setQuotedBody(key);
+      }
+      return latest;
+    } catch (quoteError) {
+      if (requestSequence === quoteRequestSequence.current) {
+        setQuote(null);
+        setQuotedBody("");
+        if (!quiet) setError(quoteError instanceof Error ? quoteError.message : "Не удалось получить стоимость");
+      }
+      return null;
+    } finally {
+      if (requestSequence === quoteRequestSequence.current) setQuoteBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!item || !requestBody || !requestBodyKey) {
+      quoteRequestSequence.current++;
+      setQuote(null);
+      setQuotedBody("");
+      return;
+    }
+    setQuote(null);
+    setQuotedBody("");
+    setError("");
+    setQuoteBusy(true);
+    const timer = window.setTimeout(() => {
+      void refreshQuote(item.id, requestBody, requestBodyKey);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [item?.id, requestBodyKey, refreshQuote]);
+
+  useEffect(() => {
+    if (!item) return;
+    void apiJson<string[]>("/payment-methods")
+      .then((methods) => setPaymentMethods(
+        (Array.isArray(methods) ? methods : []).filter(
+          (method): method is PaymentProvider => ACCEPTED_PAYMENT_PROVIDERS.includes(method as PaymentProvider),
+        ),
+      ))
+      .catch(() => setPaymentMethods([]));
+  }, [item?.id]);
+
+  useEffect(() => {
+    if (!paymentWaiting || !item || !requestBody || !requestBodyKey) return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      if (++attempts > 48) {
+        window.clearInterval(timer);
+        setPaymentWaiting(false);
+        setError("Платёж пока не подтверждён. Проверь статус операции в банке перед повторным пополнением.");
+        return;
+      }
+      void refreshQuote(item.id, requestBody, requestBodyKey, true).then((fresh) => {
+        if (fresh?.can_run) {
+          window.clearInterval(timer);
+          setPaymentWaiting(false);
+          notifyHaptic("success");
+          toast.success("Оплата зачислена — теперь можно запускать");
+        }
+      });
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [item?.id, paymentWaiting, refreshQuote, requestBodyKey]);
+
+  const payInline = useCallback(async () => {
+    const plan = quote?.recommended_plan;
+    const provider = paymentMethods[0];
+    if (!plan || !provider || paymentBusy || paymentInFlight.current) return;
+    paymentInFlight.current = true;
+    setPaymentBusy(true);
+    setError("");
+    try {
+      const payment = await apiJson<Record<string, unknown>>(`/topup/${provider}`, {
+        method: "POST", body: JSON.stringify({ plan_key: plan.key }),
+      });
+      const url = safeExternalUrl(String(payment.pay_url || payment.invoice_link || payment.invoice_url || payment.url || ""));
+      if (!url.startsWith("https://")) throw new Error("Безопасная платёжная ссылка не получена");
+      setPaymentWaiting(true);
+      openExternalUrl(url);
+      toast.success("Оплата открыта — вернись сюда после зачисления");
+    } catch (payError) {
+      const message = payError instanceof Error ? payError.message : "Не удалось открыть оплату";
+      setError(message);
+      toast.error(message);
+    } finally {
+      paymentInFlight.current = false;
+      setPaymentBusy(false);
+    }
+  }, [paymentBusy, paymentMethods, quote?.recommended_plan]);
+
   const close = useCallback(() => {
-    if (busy) return;
+    if (busy || paymentBusy) return;
     cancelPending();
+    if (item) clearRepeatDraft(item.id);
     resetForm(null);
-  }, [busy, cancelPending, resetForm]);
+  }, [busy, paymentBusy, cancelPending, item, resetForm]);
 
   const addReferenceFiles = useCallback(async (files: File[]) => {
     if (!files.length || busy) return;
+    const maximum = selectedModel?.max_refs || 1;
+    if (references.length + files.length > maximum) {
+      setError(`Можно добавить максимум ${maximum} фото для этой модели`);
+      return;
+    }
     setPhase("uploading");
     setError("");
     try {
@@ -254,6 +502,7 @@ function FeedRemixRunnerPortal() {
       }
       if (!uploaded.length) throw new Error("Backend не вернул ссылки на референсы");
       setReferences((current) => Array.from(new Set([...current, ...uploaded])));
+      if (bucket === "video" && modeOptions.includes("image")) setMode("image");
       notifyHaptic("success");
       toast.success(uploaded.length === 1 ? "Референс добавлен" : `Добавлено референсов: ${uploaded.length}`);
       setPhase("idle");
@@ -266,42 +515,23 @@ function FeedRemixRunnerPortal() {
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [busy]);
+  }, [bucket, busy, modeOptions, references.length, selectedModel?.max_refs]);
 
   const submit = useCallback(async () => {
-    if (!item || !selectedModel || busy) return;
+    if (!item || !selectedModel || !requestBody || !canLaunch || busy || launchInFlight.current) return;
+    launchInFlight.current = true;
     setPhase("generating");
     setError("");
     try {
-      const isVideoModel = bucket === "video";
-      const sourceMedia = sourcePreview || "";
-      const primaryUserReference = references[0] || "";
       const task = await apiJson<GenerationTask>(`/feed/${item.id}/remix`, {
         method: "POST",
-        body: JSON.stringify({
-          model: selectedModel.key,
-          mode: isVideoModel ? mode : "image",
-          duration,
-          aspect_ratio: aspectRatio,
-          resolution,
-          image_url: primaryUserReference || (!sourceIsVideo ? sourceMedia || null : null),
-          source_image_url: !sourceIsVideo ? sourceMedia || null : null,
-          reference_urls: references,
-          video_url: sourceIsVideo ? sourceMedia || null : null,
-          video_start: 0,
-          video_end: null,
-          audio_ids: [],
-          character_ids: [],
-          seed: null,
-          grok_mode: grokMode,
-          quality,
-          count,
-        }),
+        body: JSON.stringify(requestBody),
       });
       pendingRemix?.resolve(task);
       pendingRemix = null;
       notifyHaptic("success");
       toast.success("Повтор запущен");
+      clearRepeatDraft(item.id);
       resetForm(null);
     } catch (runError) {
       notifyHaptic("error");
@@ -309,8 +539,11 @@ function FeedRemixRunnerPortal() {
       setError(message);
       setPhase("error");
       toast.error(message);
+      if (requestBody) void refreshQuote(item.id, requestBody, requestBodyKey, true);
+    } finally {
+      launchInFlight.current = false;
     }
-  }, [aspectRatio, bucket, busy, count, duration, grokMode, item, mode, quality, references, resetForm, resolution, selectedModel, sourceIsVideo, sourcePreview]);
+  }, [busy, canLaunch, item, refreshQuote, requestBody, requestBodyKey, resetForm, selectedModel]);
 
   const phaseLabel = useMemo(() => {
     if (phase === "uploading") return "Загружаем референсы…";
@@ -330,9 +563,22 @@ function FeedRemixRunnerPortal() {
       footer={
         <div className="grid gap-2">
           {error ? <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p> : null}
-          <Button className="min-h-11 rounded-xl" disabled={busy || !selectedModel} onClick={() => void submit()}>
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="font-semibold">Стоимость: {quoteReady ? `${quote?.cost_credits} 💋` : "считаем…"}</span>
+            <span className="text-muted-foreground">Баланс: {quoteReady ? `${quote?.balance_credits} 💋` : "—"}</span>
+          </div>
+          {quoteReady && !quote?.can_run && quote?.recommended_plan ? (
+            <Button className="min-h-11 w-full rounded-xl" disabled={busy || paymentBusy || paymentWaiting || !paymentMethods.length} onClick={() => void payInline()}>
+              {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              {paymentWaiting ? "Ждём подтверждение оплаты…" : `Пополнить здесь · ${quote.recommended_plan.price_rub} ₽`}
+            </Button>
+          ) : null}
+          {quoteReady && !quote?.can_run && !quote?.recommended_plan ? (
+            <p className="text-xs text-destructive">Недостаточно 💋, активных пакетов пополнения пока нет.</p>
+          ) : null}
+          <Button className="min-h-11 rounded-xl" disabled={busy || paymentBusy || !canLaunch} onClick={() => void submit()}>
             {phase === "generating" ? <LoaderCircle className="size-4 animate-spin" /> : <Repeat2 className="size-4" />}
-            {phase === "generating" ? "Запуск…" : "Запустить повтор"}
+            {phase === "generating" ? "Запуск…" : `Запустить повтор · ${quoteReady ? quote?.cost_credits : "—"} 💋`}
           </Button>
         </div>
       }
@@ -358,10 +604,24 @@ function FeedRemixRunnerPortal() {
             </div>
           </div>
 
+          <label className="grid gap-1 rounded-xl border border-primary/25 bg-primary/5 p-3 text-sm">
+            <span className="font-semibold">Что изменить в образе</span>
+            <textarea
+              rows={2}
+              maxLength={800}
+              className="min-h-16 resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm"
+              placeholder="Например: замени одежду на белый костюм, сохрани лицо и позу"
+              value={changeRequest}
+              disabled={busy}
+              onChange={(event) => setChangeRequest(event.target.value)}
+            />
+            <span className="text-[11px] text-muted-foreground">Необязательно. Изменения применятся при первом запуске, промпт автора скрыт.</span>
+          </label>
+
           <div className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="font-semibold">Референсы</p>
+                <p className="font-semibold">Твоё фото / референсы</p>
                 <p className="text-xs text-muted-foreground">Можно добавить свои фото поверх исходной работы.</p>
               </div>
               <input
@@ -489,6 +749,17 @@ function FeedRemixRunnerPortal() {
             </label>
           ) : null}
 
+          <div className="rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 text-xs">
+            {quoteReady ? (
+              <div className="flex items-center justify-between gap-3">
+                <span>Стоимость: <strong>{quote?.cost_credits} 💋</strong></span>
+                <span className={quote?.can_run ? "text-emerald-500" : "text-destructive"}>
+                  {quote?.can_run ? "Можно запускать" : `Не хватает ${quote?.deficit_credits} 💋`}
+                </span>
+              </div>
+            ) : <span>{quoteBusy ? "Рассчитываем стоимость по тарифу…" : "Стоимость пока недоступна"}</span>}
+            {paymentWaiting ? <p className="mt-2 text-muted-foreground">После оплаты баланс обновится здесь автоматически. Фото и настройки останутся на месте.</p> : null}
+          </div>
           <p className={cn("rounded-xl border border-border bg-muted/45 px-3 py-2 text-xs text-muted-foreground", phase !== "idle" && "text-foreground")}>{phaseLabel}</p>
         </div>
       ) : null}

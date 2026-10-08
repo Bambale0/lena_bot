@@ -1118,3 +1118,23 @@ billing/refund integration or legitimate quoted-error preservation.
 Independent review reran both changed test modules: 30 passed (the 34-test
 focused run also includes four existing API route tests). Typed-error assertions
 were strengthened per the reviewer; final exact-SHA CI and deployment remain pending.
+
+---
+## Execution ledger — Feed deep-link repeat conversion (2026-10-08)
+
+Baseline `02c807eb1b73e20dc3a0e2af2c76efa1b3e1f26d` (main after #200/#201); branch `feat/feed-remix-prelaunch-conversion`, isolated worktree `/root/agent-work/lena-feed-remix-prelaunch-20261008`.
+
+**Source of task:** user-supplied feedback from Lena and screenshot of post-generation «Ремикс / Повторить генерацию» actions. Customer wants a first-repeat prelaunch editor with optional appearance change, simple post link entry, user photo/reference, visible cost, inline top-up, and immediate start without navigating menus.
+
+**Root-cause preflight:** `App.processStartParam` routes both `feed_*` and `remix_*` to the feed tab without opening the edit runner. The existing `feed-remix-runner.tsx` renders a model/reference/settings form but no user edit text, quote or top-up; `MiniAppApi.remixFeed` fabricates partial feed metadata. Telegram `feed:use` opens intermediate model selectors. Backend `FeedRemixRequest` has no edit instruction. Pricing is in DB (`ModelCost`, `resolve_image_model_cost`/`resolve_video_model_cost`) and existing payment endpoints exist (`/topup/{provider}`).
+
+**Scope / acceptance criteria:** (1) direct feed/remix shared link opens exact public work in the *prelaunch* runner; never submits by itself; (2) user's photo refs + optional appearance change entered before initial repeat; hidden author prompt never exposed; (3) quote from DB before payment/launch including variant + count + video seconds and per-user unlimited, not frontend hardcode; (4) balance, deficit, one-tap top-up with configured payment plans and available methods from APIs, preserve form while payment completes, refresh balance; (5) no accidental duplicate paid POST, safe 402 handling and idempotent retry; (6) obvious chat shortcut from Telegram post to the same inline flow; preserve existing chat generation flows; (7) parity: site and Telegram Mini App share React; text bot provides direct wizard entrance, pre-launch optional change; (8) automated negative/positive tests across backend/Playwright/bot, mobile widths, regression and GitHub PR checks.
+
+**Safety/configuration:** No secrets in frontend; no direct writes to `main`; no DB schema changes unless shown necessary; money tariffs and package/provider selection always read from DB or existing authenticated APIs; only already-public feed posts can be repeated, ownership enforced server-side. No auto-launch on opening a deep link; a paid generation starts only after explicit button press.
+
+**Execution steps:** [x] root cause and relevant `AGENTS.md`, `.clinerules` TDD/debug/worktree and `.agents` frontend/UX skills reviewed; [x] baseline five feed remix pytest tests passed; [x] regression tests failed before fix (405 quote, missing edit helper); [x] backend quote and optional edit instruction; [x] frontend link-to-setup plus balance/top-up; [x] Telegram source WebApp shortcut and chat fallback; [x] API/bot regressions + TypeScript/build; [ ] Playwright E2E on GitHub CI (local Chromium lacks libatk); [ ] PR/review/CI; [ ] production verification if authorized. No migrations introduced.
+
+**Observability:** correlate `source_feed_gen_id`, `generation.id`, quote resolution/model, failed 402, provider task ID, payment id/status, without logging tokens/source prompts. Validate exact deep-link and upload→edit→quote→topup→launch transitions.
+
+
+**Verification note (2026-10-08):** the broader `test_webapp_routes.py` suite contains three baseline failures. All three were reproduced unchanged from clean `origin/main` commit `02c807e` using an isolated snapshot: `test_photo_prompt_rejects_disguised_non_image`, `test_webapp_feed_returns_items`, and `test_webapp_my_feed_returns_only_current_user_cards`. None of these assertions, helpers or paths were modified for this task. Keep separate from new PR gate and do not weaken tests. Browser job is required because local host lacks `libatk-1.0.so.0`.

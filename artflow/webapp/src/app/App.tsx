@@ -326,6 +326,26 @@ function App() {
       }
       if (target.kind === "feed" || target.kind === "remix") {
         setActiveTab("feed");
+        const feedId = Number(target.value);
+        if (!Number.isSafeInteger(feedId) || feedId <= 0) return;
+        // Opening a link must prepare a repeat, never start paid work.
+        // Bootstrap already hydrates this exact public source (not a nearby card).
+        const source = bootstrap.feed.find((entry) => entry.id === feedId);
+        if (!source) {
+          toast.error("Работа из ссылки не найдена или больше не опубликована");
+          return;
+        }
+        void client.remixFeedItem(source).then((task) => {
+          setData((current) => current ? {
+            ...current, recentTasks: [task, ...current.recentTasks.filter((entry) => entry.id !== task.id)],
+          } : current);
+          setSelectedTask(task);
+          setTaskOpen(true);
+        }).catch((cause: Error) => {
+          if (cause.message !== "Повтор отменён" && cause.message !== "Открыт новый повтор") {
+            toast.error(cause.message || "Не удалось настроить повтор");
+          }
+        });
         return;
       }
       if (target.kind === "trend") {
@@ -667,18 +687,7 @@ function App() {
     if (!api || remixingId) return;
     setRemixingId(item.id);
     try {
-      const media = firstMedia(item);
-      const videoMedia = mediaLooksVideo(item);
-      const task = await api.remixFeed(item.id, {
-        model: item.model,
-        mode: videoMedia ? "text" : "image",
-        duration: 5,
-        aspect_ratio: item.aspect_ratio || (videoMedia ? "16:9" : "1:1"),
-        resolution: "720p",
-        source_image_url: media && !videoMedia ? media : null,
-        video_url: null,
-        reference_urls: [],
-      });
+      const task = await api.remixFeedItem(item);
       setData((current) => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter((entry) => entry.id !== task.id)] } : current);
       openTask(task);
       notifyHaptic("success");

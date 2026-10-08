@@ -296,6 +296,10 @@ export class MiniAppApi {
     return this.request<{ likes_count?: number }>(`/feed/${id}/like`, { method: "POST", body: "{}" });
   }
 
+  remixFeedItem(item: FeedItem): Promise<GenerationTask> {
+    return openFeedRemixRunner(item);
+  }
+
   remixFeed(id: number, body: Record<string, unknown>): Promise<GenerationTask> {
     const media = remixBodyMedia(body);
     return openFeedRemixRunner({
