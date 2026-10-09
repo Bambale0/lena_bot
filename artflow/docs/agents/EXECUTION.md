@@ -1299,3 +1299,37 @@ A final production read-only/scratch-key Redis test using the **actual deployed 
 ## CI service isolation after fb5f226
 
 GitHub Actions backend-quality failed on exact `fb5f226` even though the on-host recovery suites passed. The action's failing `Pytest maintained PR gate` step listed precisely two failures: `test_video_scheduler_releases_read_transaction_before_provider_poll` and `test_scheduler_does_not_abort_post_commit_royalty_after_poll_deadline`. Their FakeSession stubs mocked the DB but not the newly introduced durable Redis intent call. CI has no Redis at localhost:6379, whereas the server workstation does, so their accidental integration dependency was invisible locally. Root-cause fix is test-only: those two tests mock the Redis intent seam `_track_active_video_notice_intent` and additionally assert it was invoked exactly once for the generation. Separate `test_active_old_video_persists_notice_intent_before_db_completion` continues to test actual Redis ZSET registration with a fake Redis. Targeted suite rerun under an intentionally unavailable `REDIS_URL=redis://127.0.0.1:1/0` now passes. All provider, finance and delivery semantics remain unchanged; do not start Redis in GitHub just to cover mock isolation.
+
+---
+## Video → prompt: Comet silently discarded video input (2026-10-09)
+
+Baseline: `427e57e9ea518a42be2bdd999791febe56f2db46` (origin/main), clean isolated worktree `fix/apix-video-prompt-visible-frames-20261009`.
+
+### Confirmed root cause (provider + code)
+- `api.video_prompt_service.generate_prompt_from_video_url` constructs a Qwen video message with `video_url` but no top-level `fps` when called by Telegram, Mini App, and website. Optional FPS, when provided, was put **inside** `video_url` instead of as a sibling of `video_url`.
+- Live CometAPI contract probes using a temporary **synthetic** 4-second red/blue MP4 served by `https://apixbotai.com/static/upload/...`: baseline exact payload returned 200 / "Видео не видно / файл не прикреплён" (480 tokens); adding top-level `fps:2` returned 200 / "Первый кадр — красный, последний — синий" (564 tokens); sending base64 JPEG image frames likewise correctly identified colors (471 tokens). User uploads, balances and source media were not touched by these probes.
+- Current `_validated_prompt_text` treats any nonblank free-form text except one exact English failure message as success; therefore a polite "no video" explanation was billed as valid completed analysis, not refunded. Shared bot/web/MiniApp spending occurs before provider I/O and refund executes only when an exception is raised.
+
+### Scope and acceptance
+1. Preserve Qwen/Comet configured model/provider, but send `video_url.url` plus top-level non-null `fps` on every call. Default video FPS is a typed runtime configuration setting (no changed tariff, no hardcoded model), and explicit override respects provider bounds.
+2. Validate unambiguously unusable responses that state no video/frames was received; raise typed `VideoPromptProviderError` with no provider raw payload in error/logs. Preserve legitimate scene descriptions quoting error-like text.
+3. Both /api/v1/video-prompt (Mini App), /api/web/video-prompt (site), Telegram `vid:video2prompt` reuse the shared service and existing single credit refund on failure. No double charge or automatic provider retry.
+4. RED → GREEN provider-contract tests, rejection/legitimate quote tests, financial settlement regressions on all three surfaces, CI and reviewed PR; then deploy via squash auto-merge only with exact SHA checks.
+5. Verify production via a controlled synthetic video to Comet (no user credit charge), runtime configuration, and a safe postdeploy billing/health smoke. No historical user refund unless exact affected operation can be attributed from durable records.
+
+### Risks
+- Aggregator may intermittently ignore media even with correct `fps`; reject text that clearly says media was absent and refund rather than trust HTTP 200. A second paid inference attempt must not be automatic.
+- Web/MiniApp accepts 100 MB, bot 20 MB, unchanged; local temporary public video uploads are deleted by current finally paths.
+- User's prior 3-credit result has no provided generation/ledger id. Avoid guessing recipient or refunding unrelated transactions.
+
+### Progress
+1. [x] Installed/updated Bambale0/claw, wondelai/skills and anthropics/skills; inspected repo `AGENTS.md`, README, Comet adapter and source/tests; applied systematic-debugging/TDD/verification instructions; reviewed Anthropic webapp-testing guidance (UI unchanged).
+2. [x] Original behavior reproduced against configured production model with synthetic MP4 and compared to correct top-level fps and image-frames alternatives.
+3. [x] RED regression tests: original missing-FPS/absent-media completion generated nine failing assertions (provider and all three billing surfaces); further Markdown/soft refusal variations generated three expected failures.
+4. [x] Minimal implementation: always set top-level `fps`, default via typed `COMET_VIDEO_PROMPT_FPS` (0.1–10, default 2.0); detect missing-video model responses at the opening of the reply, preserving valid prompt quotations. `VideoPromptProviderError` triggers existing refund handlers. GREEN: 49 tests in shared service and surface suites, Ruff and compile checks passed. Additional `test_public_files`, `test_photo_prompt_service`, `test_runtime_reliability`, `test_main_menu_contract`, and focused web HTTP tests passed (31 more tests).
+5. [ ] Independent review, exact-SHA GitHub CI, production smoke.
+
+
+### Regression baseline exception
+
+Full `tests/test_keyboards_and_ui.py` includes two unrelated, pre-existing stale main-menu expectations (`test_main_menu_keyboard_keeps_core_buttons`, `test_main_menus_show_webapp_button_at_top`). Both were reproduced against untouched production `main` with exactly the same failed assertions and are not part of the maintained CI gate. No production/menu behavior or test was changed just to silence them.

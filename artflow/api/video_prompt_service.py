@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,15 +50,19 @@ class VideoPromptResult:
 
 
 def _video_prompt_chat_messages(video_url: str, *, fps: float | int | None = None) -> list[dict[str, Any]]:
+    # The Comet/Qwen gateway ignores video unless fps is a sibling of
+    # video_url, not nested inside video_url. Always send an explicit fps:
+    # the no-fps request returned HTTP 200 but the model saw no frames.
+    sample_fps = float(settings.COMET_VIDEO_PROMPT_FPS if fps is None else fps)
+    if not math.isfinite(sample_fps) or not 0.1 <= sample_fps <= 10:
+        raise ValueError("Video prompt FPS must be between 0.1 and 10")
     video_payload: dict[str, Any] = {"url": video_url}
-    if fps is not None:
-        video_payload["fps"] = fps
     return [
         {"role": "system", "content": [{"type": "text", "text": _VIDEO_SYSTEM_PROMPT}]},
         {
             "role": "user",
             "content": [
-                {"type": "video_url", "video_url": video_payload},
+                {"type": "video_url", "video_url": video_payload, "fps": sample_fps},
                 {"type": "text", "text": _VIDEO_PROMPT_REQUEST_TEXT},
             ],
         },
@@ -85,10 +91,57 @@ _PROVIDER_FAILURE_TEXT = (
 ).casefold()
 
 
+def _missing_video_completion(text: str) -> bool:
+    """Detect provider *answers* that declare the input video invisible.
+
+    Test only the opening answer, not arbitrary quotes in a generated scene
+    description: a valid creative prompt may contain these words on a sign.
+    """
+    opening = " ".join(text.casefold().split())
+    opening = re.sub(
+        r"^[`*_#\s]*a\s*[.)]\s*ready-to-use prompt[`*_#\s:—–-]*",
+        "",
+        opening,
+    )[:420]
+    if opening.startswith((
+        "видео не видно",
+        "видео не прикреплено",
+        "видео не было прикреплено",
+        "видеоматериал отсутствует",
+        "нет исходного видео",
+        "no video was attached",
+        "no video was provided",
+        "no video is available",
+        "i cannot see the video",
+        "i can't see the video",
+        "i cannot access the video",
+        "i can't access the video",
+        "the video is not available",
+        "please upload a video",
+    )):
+        return True
+    if opening.startswith(("к сожалению,", "извините,", "sorry,")):
+        explanation = opening.split(",", 1)[1].strip()
+        if any(term in explanation for term in ("видео", "видеоматериал", "кадр")) and any(
+            term in explanation for term in (
+                "не было прикреплено", "не прикреплено", "не загружено",
+                "не доступно", "недоступно", "отсутствует", "не поступило",
+            )
+        ):
+            return True
+    if opening.startswith(("невозможно ", "не могу ", "к сожалению, не могу ")) and any(
+        word in opening for word in ("видео", "видеоматериал", "кадр")
+    ):
+        return True
+    return False
+
+
 def _validated_prompt_text(text: str) -> str:
     clean = text.strip()
     if " ".join(clean.split()).casefold() == _PROVIDER_FAILURE_TEXT:
         raise VideoPromptProviderError("Video prompt provider returned a failure message")
+    if _missing_video_completion(clean):
+        raise VideoPromptProviderError("Video prompt provider could not access video input")
     return clean
 
 

@@ -75,6 +75,7 @@ async def test_generate_prompt_from_video_url_calls_comet_with_video_url(monkeyp
             COMET_API_KEY="test-comet",
             COMET_BASE_URL="https://api.cometapi.com",
             COMET_VIDEO_PROMPT_MODEL="qwen3.8-max",
+            COMET_VIDEO_PROMPT_FPS=2.0,
         ),
     )
 
@@ -92,7 +93,8 @@ async def test_generate_prompt_from_video_url_calls_comet_with_video_url(monkeyp
     assert payload["model"] == "qwen3.8-max"
     content = payload["messages"][1]["content"]
     assert content[0]["type"] == "video_url"
-    assert content[0]["video_url"] == {"url": "https://cdn.example.test/video.mp4", "fps": 3}
+    assert content[0]["video_url"] == {"url": "https://cdn.example.test/video.mp4"}
+    assert content[0]["fps"] == 3
     assert content[1]["type"] == "text"
 
 
@@ -110,6 +112,7 @@ async def test_generate_prompt_from_video_url_uses_assistant_fallback_model(monk
             COMET_BASE_URL="https://api.cometapi.com/",
             COMET_VIDEO_PROMPT_MODEL="",
             COMET_ASSISTANT_MODEL="qwen3.8-max",
+            COMET_VIDEO_PROMPT_FPS=2.0,
         ),
     )
 
@@ -117,6 +120,12 @@ async def test_generate_prompt_from_video_url_uses_assistant_fallback_model(monk
 
     assert result.text == "fallback prompt"
     assert fake_client.calls[0][1]["json"]["model"] == "qwen3.8-max"
+    video_part = fake_client.calls[0][1]["json"]["messages"][1]["content"][0]
+    assert video_part == {
+        "type": "video_url",
+        "video_url": {"url": "https://cdn.example.test/video.mp4"},
+        "fps": 2.0,
+    }
 
 
 def test_video_prompt_telegram_chunks_preserve_full_text() -> None:
@@ -194,3 +203,56 @@ def test_video_prompt_preserves_valid_prompts_and_quoted_errors(text) -> None:
         "error": None,
         "choices": [{"finish_reason": "stop", "message": {"refusal": None, "content": text}}],
     }) == text
+
+
+
+@pytest.mark.parametrize("text", [
+    (
+        "A. Ready-to-use prompt\n"
+        "Невозможно составить точный генерационный промпт, потому что видео или кадры из него "
+        "не были прикреплены / не доступны для анализа.\n"
+        "B. Что я увидел\nВидеоматериал отсутствует.\n"
+        "C. Неоднозначности\nНет исходного видео.\n"
+        "D. Audio note\nАудиодорожка не анализировалась."
+    ),
+    "Видео не видно / файл не прикреплён, поэтому кадры определить невозможно.",
+    "I cannot see the video. No video was attached to the request.",
+    "A. Ready-to-use prompt\nВидеоматериал отсутствует, пришлите видео.",
+    "**A. Ready-to-use prompt**\nНевозможно составить промпт: кадры не доступны.",
+    "`A. Ready-to-use prompt`\nВидеоматериал отсутствует, пожалуйста, пришлите видео.",
+    "К сожалению, видео не было прикреплено, поэтому я не могу составить промпт.",
+])
+def test_video_prompt_rejects_missing_video_completion(text):
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._extract_chat_text(
+            {"choices": [{"finish_reason": "stop", "message": {"content": text}}]}
+        )
+
+
+@pytest.mark.parametrize("text", [
+    'Камера приближается к билборду с надписью «Видеоматериал отсутствует».',
+    'В начале видео человек говорит: «Видео не видно», затем поворачивается к окну.',
+    "A. Ready-to-use prompt — Покажи постер с текстом 'No video was attached'.",
+])
+def test_video_prompt_does_not_reject_missing_video_quotes_in_real_scene(text):
+    assert video_prompt_service._validated_prompt_text(text) == text
+
+
+def test_video_prompt_native_payload_always_supplies_frame_sampling():
+    item = video_prompt_service._video_prompt_chat_messages(
+        "https://cdn.example.test/clip.mp4", fps=2,
+    )[1]["content"][0]
+    assert item == {
+        "type": "video_url",
+        "video_url": {"url": "https://cdn.example.test/clip.mp4"},
+        "fps": 2,
+    }
+
+
+
+@pytest.mark.parametrize("invalid", [0, 0.09, 10.01, float("nan"), float("inf")])
+def test_video_prompt_rejects_invalid_frame_rate(invalid):
+    with pytest.raises(ValueError, match="FPS"):
+        video_prompt_service._video_prompt_chat_messages(
+            "https://cdn.example.test/movie.mp4", fps=invalid,
+        )
