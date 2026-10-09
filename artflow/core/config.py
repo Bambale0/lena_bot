@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # kie.ai
     KIE_AI_KEY: str = ""
-    SEEDANCE_PRIMARY_PROVIDER: Literal["kieai", "neironych"] = "kieai"
+    SEEDANCE_PRIMARY_PROVIDER: Literal["kieai", "neironych"] = "neironych"
     SEEDANCE_UNCERTAIN_ROUTE_COOLDOWN_SECONDS: int = Field(default=1800, ge=180, le=86400)
     MUSIC_RECONCILE_INTERVAL_SECONDS: int = Field(default=300, ge=30, le=3600)
     MUSIC_RECONCILE_MIN_AGE_SECONDS: int = Field(default=180, ge=60, le=3600)

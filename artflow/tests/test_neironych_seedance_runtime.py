@@ -113,11 +113,17 @@ async def test_seedance25_falls_back_to_neironych_when_kie_fails(monkeypatch) ->
     assert neironych.await_args.kwargs["idempotency_key"] == "apix-video-25"
 
 
-def test_seedance_primary_setting_defaults_to_kie_and_rejects_unknown_provider(monkeypatch):
+def test_seedance_primary_setting_defaults_to_neironych_and_rejects_unknown_provider(monkeypatch):
     monkeypatch.delenv("SEEDANCE_PRIMARY_PROVIDER", raising=False)
-    assert Settings(_env_file=None).SEEDANCE_PRIMARY_PROVIDER == "kieai"
+    assert Settings(_env_file=None).SEEDANCE_PRIMARY_PROVIDER == "neironych"
     with pytest.raises(ValidationError, match="SEEDANCE_PRIMARY_PROVIDER"):
         Settings(_env_file=None, SEEDANCE_PRIMARY_PROVIDER="comet")
+
+
+@pytest.mark.parametrize("provider", ["kieai", "neironych"])
+def test_seedance_primary_environment_overrides_default(monkeypatch, provider):
+    monkeypatch.setenv("SEEDANCE_PRIMARY_PROVIDER", provider)
+    assert Settings(_env_file=None).SEEDANCE_PRIMARY_PROVIDER == provider
 
 
 @pytest.mark.asyncio
@@ -250,3 +256,61 @@ def isolate_seedance_admission(monkeypatch):
 
     from api import seedance_provider_routing
     monkeypatch.setattr(seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False))
+
+
+@pytest.fixture
+def default_primary_mode(monkeypatch, kie_primary_mode):
+    monkeypatch.delenv("SEEDANCE_PRIMARY_PROVIDER", raising=False)
+    default_settings = Settings(_env_file=None)
+    monkeypatch.setattr(settings, "SEEDANCE_PRIMARY_PROVIDER", default_settings.SEEDANCE_PRIMARY_PROVIDER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_key", ["bytedance/seedance-2", seedance25_adapter.MODEL_KEY])
+@pytest.mark.parametrize("primary_fails", [False, True])
+async def test_seedance_default_routes_neironych_then_kie(
+    monkeypatch, default_primary_mode, model_key, primary_fails,
+):
+    install_video_runtime_fixes()
+    calls = []
+
+    async def submit_neironych(**kwargs):
+        calls.append("neironych")
+        assert kwargs["product_model"] == model_key
+        assert kwargs["idempotency_key"] == "default-route"
+        if primary_fails:
+            raise RuntimeError("neironych unavailable")
+        return "neur-default"
+
+    async def submit_kie(payload, **kwargs):
+        calls.append("kieai")
+        assert payload["model"] == model_key
+        return {"code": 200, "data": {"taskId": "kie-fallback"}}
+
+    monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", submit_neironych)
+    monkeypatch.setattr(video_service.kieai_client, "create_task", submit_kie)
+    result = await video_service.generate_video(
+        video_service.VideoModel(model_key), "animate", idempotency_key="default-route",
+    )
+
+    assert calls == (["neironych", "kieai"] if primary_fails else ["neironych"])
+    assert result.provider == ("kieai" if primary_fails else "neironych")
+    assert result.task_id == ("kie-fallback" if primary_fails else "neironych:neur-default")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", [video_service.VideoModel.SEEDANCE_2_FAST, video_service.VideoModel.SEEDANCE_2_MINI])
+async def test_seedance_fast_mini_still_use_kie_with_default_primary(
+    monkeypatch, default_primary_mode, model,
+):
+    kie = AsyncMock(return_value={"code": 200, "data": {"taskId": "kie-fast-mini"}})
+    neironych = AsyncMock()
+    monkeypatch.setattr(video_service.kieai_client, "create_task", kie)
+    monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", neironych)
+
+    result = await video_service.generate_video(model, "animate")
+
+    assert result.provider == "kieai"
+    assert result.task_id == "kie-fast-mini"
+    assert kie.await_args.args[0]["model"] == model.value
+    neironych.assert_not_awaited()

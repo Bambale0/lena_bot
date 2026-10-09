@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from PIL import Image
 
-from api import public_files, video_service
+from api import neironych_seedance_runtime, public_files, seedance_provider_routing, video_service
 from api.video_service import VideoModel
 
 
@@ -81,6 +83,7 @@ async def test_veo_poll_status_treats_flags_2_and_3_as_failure(monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_generate_video_prepares_reference_urls_before_kie_payload(monkeypatch) -> None:
+    monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "kieai")
     calls: list[dict] = []
 
     def fake_ensure(url: str | None) -> str | None:
@@ -111,8 +114,15 @@ async def test_generate_video_prepares_reference_urls_before_kie_payload(monkeyp
 
 @pytest.mark.asyncio
 async def test_generate_video_skips_comet_fallback_for_kie_validation_error(monkeypatch) -> None:
+    monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "kieai")
     async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
         raise RuntimeError("KIE.AI video createTask failed: 422 Image aspect ratio must be between 1:2.5 and 2.5:1")
+
+    monkeypatch.setattr(seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        neironych_seedance_runtime, "generate_product_video",
+        AsyncMock(side_effect=RuntimeError("neironych unavailable")),
+    )
 
     async def fail_comet(**kwargs):
         raise AssertionError("Comet fallback should not run for provider validation errors")
