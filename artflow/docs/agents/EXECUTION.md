@@ -1343,3 +1343,12 @@ Codex PR #205 code review raised two P2 findings; both were confirmed using addi
 - Reconfirmed GREEN: 59 shared-service and 3-surface billing tests + Ruff. Exact SHA review and CI must be re-run after committing review changes.
 
 Deployment smoke check: import new shared service from running container (correct top-level fps 2.0), analyze the pre-existing synthetic red/blue test MP4 without a user debit, inspect safe log/prompt; verify 200 health, main SHA, container StartedAt. Cleanup only generated synthetic test media; no user media files.
+
+
+### Independent review of a439639 (second iteration)
+
+Codex PR #205 found two additional P2 cases after first corrections, both reproduced RED before replacement of the classifier:
+- A phrase "Я не вижу видео на экране телевизора, только статичную заставку; камера..." describes an in-scene television, **not** missing source footage; substring-only visibility checks wrongly rejected billable valid prompts.
+- Definitively missing source responses without preamble (`Видео недоступно для анализа`, `Видео отсутствует`, `Кадры не были предоставлены`, `The source video was not provided`) slipped past preamble-only matching, accepting garbage as success and charging 3 credits.
+
+The classifier now requires evidence about the *input* source, not just words about camera/visible screen: source noun + adjacent availability verb, provider refusal plus a clear missing-attachment reason, or a short unequivocal no-source header. Media statements quoted inside an otherwise valid scene are not treated as refusals. All new RED examples plus prior regressions GREEN: 67 shared service and Telegram/MiniApp/web money tests. No pricing or provider routing change, no additional paid retries. Independent review + exact CI required again on final SHA.

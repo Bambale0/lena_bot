@@ -92,10 +92,11 @@ _PROVIDER_FAILURE_TEXT = (
 
 
 def _missing_video_completion(text: str) -> bool:
-    """Detect provider *answers* that declare the input video invisible.
+    """Reject provider statements about a missing *source*, not missing scene details.
 
-    Test only the opening answer, not arbitrary quotes in a generated scene
-    description: a valid creative prompt may contain these words on a sign.
+    The reply can begin with a section-A label or a first-person refusal.
+    Quotes and descriptions of empty screens inside an actual video must stay
+    valid prompts; their absence is an in-scene fact, not an upload failure.
     """
     opening = " ".join(text.casefold().split())
     opening = re.sub(
@@ -103,59 +104,72 @@ def _missing_video_completion(text: str) -> bool:
         "",
         opening,
     )[:420]
+
     if opening.startswith((
-        "видео не видно",
-        "видео не прикреплено",
-        "видео не было прикреплено",
-        "видеоматериал отсутствует",
         "нет исходного видео",
+        "please upload a video",
         "no video was attached",
         "no video was provided",
         "no video is available",
-        "i cannot see the video",
-        "i can't see the video",
-        "i cannot access the video",
-        "i can't access the video",
-        "the video is not available",
-        "please upload a video",
     )):
         return True
-    # General refusals must contain affirmative evidence that the *source*
-    # media is unavailable. "Невозможно определить марку автомобиля в кадре"
-    # describes a visible scene and must remain a billable valid prompt.
-    if opening.startswith((
+
+    # If a scene contains "Видеоматериал отсутствует" as a sign or caption,
+    # it is not a statement about the input. Recognize these phrases only
+    # when the provider's *answer* opens with an input noun or a refusal.
+    refusal_opening = opening.startswith((
         "невозможно ", "не могу ", "я не могу ", "я не вижу ",
         "к сожалению,", "извините,", "sorry,",
         "i cannot ", "i can't ", "unable to ",
+    ))
+    source_opening = opening.startswith((
+        "видео ", "видеоматериал ", "кадры ", "исходный файл ",
+        "video ", "source video ", "the video ", "the source video ",
+        "footage ", "frames ", "source file ", "no video ",
+    ))
+    if not (refusal_opening or source_opening):
+        return False
+
+    # A missing/blocked INPUT is different from an unidentified car model,
+    # absent label, or invisible video *on a screen in the recorded scene*.
+    source_missing_ru = re.search(
+        r"(?:видео|видеоматериал|кадры|исходный файл)"
+        r"(?:\s+или\s+кадры\s+из\s+него)?\s+"
+        r"(?:не\s+(?:(?:был[ои]|были)\s+)?"
+        r"(?:прикреплен\w*|прикреплён\w*|загружен\w*|"
+        r"предоставлен\w*|доступн\w*|поступил\w*)|"
+        r"недоступ\w*|отсутству\w*)",
+        opening,
+    )
+    source_missing_en = re.search(
+        r"(?:source video|the video|video|footage|frames?|source file)\s+"
+        r"(?:(?:was|were|is|are)\s+)?"
+        r"(?:not\s+(?:provided|attached|available|accessible|received)|"
+        r"missing|unavailable)",
+        opening,
+    )
+    if source_missing_ru or source_missing_en:
+        return True
+
+    # Handle pronoun references to the uploaded file and messages containing
+    # an explicit instruction to re-upload rather than source-adjacent nouns.
+    if refusal_opening and any(phrase in opening for phrase in (
+        "не могу просмотреть видео", "не могу увидеть видео",
+        "i cannot access the video", "i can't access the video",
+        "i cannot see the video", "i can't see the video",
     )):
-        # Only a statement about an *unavailable input* counts. A missing
-        # label, license plate, person's identity or other scene detail does
-        # not mean the model was unable to see the provided footage.
-        if any(phrase in opening for phrase in (
-            "не могу просмотреть видео", "не могу увидеть видео",
-            "не вижу видео", "cannot see the video", "can't see the video",
-            "cannot access the video", "can't access the video",
-        )):
-            return True
-        return bool(
-            re.search(
-                r"(?:видео|видеоматериал|кадры|исходный файл)"
-                r"(?:\s+или\s+кадры\s+из\s+него)?\s+"
-                r"(?:не\s+(?:(?:был[ои]|были)\s+)?"
-                r"(?:прикреплен\w*|прикреплён\w*|загружен\w*|"
-                r"предоставлен\w*|доступн\w*|видн\w*)|"
-                r"недоступ\w*|отсутству\w*)",
-                opening,
-            )
-            or re.search(
-                r"(?:source video|the video|video|footage|frames?|source file)\s+"
-                r"(?:(?:was|were|is|are)\s+)?"
-                r"(?:not\s+(?:provided|attached|available|accessible|visible)|"
-                r"missing|unavailable)",
-                opening,
-            )
-        )
-    return False
+        return any(phrase in opening for phrase in (
+            "не было прикреплено", "не было загружено",
+            "не предоставлено", "файл не прикреплен", "файл не прикреплён",
+            "was not attached", "wasn't attached", "was not provided",
+            "not provided", "no video", "not uploaded",
+        ))
+
+    if opening.startswith("видео не видно"):
+        return any(phrase in opening for phrase in (
+            "файл не прикреплен", "файл не прикреплён",
+            "загрузите видео", "пришлите видео",
+        ))
     return False
 
 
