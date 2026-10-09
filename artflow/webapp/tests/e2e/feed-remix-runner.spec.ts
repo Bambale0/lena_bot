@@ -518,6 +518,6 @@ test("Seedance source-video edit discloses measured billing without starting gen
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await dialog.getByLabel("Что изменить в образе").fill("Сделай одежду синей");
   await expect(dialog.getByText("Редактирование исходного ролика: длительность и кадр берутся из источника. Для оплаты: 7 сек.")).toBeVisible();
-  await expect(dialog.getByText("Стоимость: 28 💋")).toBeVisible();
+  await expect(dialog.getByRole("contentinfo").getByText("Стоимость: 28 💋", { exact: true })).toBeVisible();
   expect(paidRequests).toBe(0);
 });
