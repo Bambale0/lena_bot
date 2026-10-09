@@ -1427,3 +1427,8 @@ The PostgreSQL predicate failed three true-marker cases and passed only negative
 ### Source-reference quote regression
 
 The c7568c6 reviewer reproduced a new false success: a quoted bare source reference followed by a display location could be removed as if it were caption text. Two exact Russian/English cases failed before the fix. Bare source names in quotes are now normalized to the same unquoted validation antecedent before scene-caption masking; quoted descriptive captions remain scene text, and all successful prompt strings remain unchanged. Focused service/money/uncertain-submission checks pass (141 cases), with real-PostgreSQL predicate coverage unchanged. Required CI and exact-head independent review remain mandatory.
+
+
+## Resume after refund confirmation (2026-10-09)
+
+Production refund for the user-provided Seedance task was verified read-only against the authoritative single generation_refund ledger row; no second credit operation was attempted. PR #206 already deployed on main. PR #205 resumed at 44fa768 with two existing, uncommitted regression cases. They failed exactly as reviewer PRRT_kwDOSSmOms6qut9W described: normalization removed quotes around a bare source name before an explicit caption/label could be masked. Minimal fix reorders the already-existing two normalization stages: first mask explicitly labeled scene text, then retain unlabelled quoted source antecedents. This preserves true missing-input refunds and valid scene-caption completions without adding another semantic rule. All earlier tests retained. The same PR also contains the previously prepared real-PostgreSQL admission-predicate correction and its nine SQL-operator tests; exact CI and production checks are required before merging.

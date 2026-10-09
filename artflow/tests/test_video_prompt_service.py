@@ -358,3 +358,11 @@ def test_bare_and_typographic_refusals_trigger_refund(text):
 def test_quoted_source_reference_is_not_discarded_as_scene_caption(text):
     with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
         video_prompt_service._validated_prompt_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    'I cannot analyze the caption "the source video" because it was not provided with a translation; the camera pans right.',
+    'Я не могу проанализировать надпись «исходное видео», потому что оно не было прикреплено с переводом; камера приближается.',
+])
+def test_explicit_scene_label_takes_precedence_over_bare_source_quote(text):
+    assert video_prompt_service._validated_prompt_text(text) == text
