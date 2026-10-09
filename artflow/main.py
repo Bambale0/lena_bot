@@ -105,6 +105,7 @@ from bot.utils.telegram_ui import is_benign_telegram_error
 from core.broadcast_scheduler import run_broadcast_scheduler
 from core.config import settings
 from core.db_backup_scheduler import run_database_backup_scheduler
+from core.feed_remix_prompt import generation_prompt_is_protected
 from core.logger import setup_logging
 from core.music_reconcile_scheduler import run_music_reconcile_scheduler
 from core.neironych_image_reconcile_scheduler import run_neironych_image_reconcile_scheduler
@@ -119,6 +120,7 @@ from db.models import (
     TransactionStatus,
     User,
 )
+from db.repeat_lookup import parse_input_params
 from db.seed import run_seed
 from db.session import AsyncSessionLocal
 from payments.cryptobot import verify_webhook_signature
@@ -326,11 +328,17 @@ def _is_feed_prompt_derivative(gen: Generation) -> bool:
 
 
 async def _prompt_actions_allowed_for_generation(session, gen: Generation) -> bool:
+    if parse_input_params(getattr(gen, "input_params", None)).get("hidden_prompt"):
+        return False
     source_feed_gen_id = getattr(gen, "source_feed_gen_id", None)
     if not source_feed_gen_id:
         return True
     source = await repo.get_generation_by_id(session, source_feed_gen_id)
-    return bool(source and getattr(source, "user_id", None) == getattr(gen, "user_id", None))
+    return bool(
+        source
+        and getattr(source, "user_id", None) == getattr(gen, "user_id", None)
+        and not generation_prompt_is_protected(source)
+    )
 
 
 def _kie_result_caption(gen: Generation) -> str:
@@ -492,7 +500,9 @@ async def _finish_midjourney_image_generation(
         )
         await state_ctx.set_state(MidjourneyFSM.viewing_result)
 
-    caption = "✅ Blend готово!" if gen.model == "midjourney-blend" else f"✅ Готово!\n\n<i>{gen.prompt[:200]}</i>"
+    caption = "✅ Blend готово!" if gen.model == "midjourney-blend" else "✅ Готово!"
+    if gen.model != "midjourney-blend" and not generation_prompt_is_protected(gen):
+        caption += f"\n\n<i>{gen.prompt[:200]}</i>"
     caption += provider_task_reference(task_result.task_id)
     reply_markup = mj_action_buttons_kb(task_result.buttons, task_id=task_result.task_id) if task_result.buttons else main_menu_kb()
     await bot.send_photo(  # type: ignore[union-attr]
@@ -1118,9 +1128,10 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                 logger.info("Midjourney failure callback ignored for final generation=%s", gen.id)
                 return {"ok": True}
             if bot and _should_notify_generation_in_bot(gen):
+                user_err = _sanitize_provider_error(None if generation_prompt_is_protected(gen) else err)
                 await bot.send_message(
                     user.tg_id,
-                    f"❌ Ошибка Midjourney: <code>{_sanitize_provider_error(err)[:500]}</code>"
+                    f"❌ Ошибка Midjourney: <code>{user_err[:500]}</code>"
                     + ("\n💋 возвращены." if refunded > 0 else "")
                     + provider_task_reference(task_result.task_id),
                     reply_markup=main_menu_kb(),
@@ -1750,7 +1761,7 @@ async def kie_webhook(
                 logger.info("KIE webhook ignoring non-terminal task_id=%s status update", task_id)
                 return {"ok": True}
             err = extract_error(payload)
-            user_err = _sanitize_provider_error(err)
+            user_err = _sanitize_provider_error(None if generation_prompt_is_protected(gen) else err)
             failed, refunded = await repo.fail_generation_and_refund(
                 session,
                 gen.id,

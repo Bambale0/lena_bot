@@ -156,11 +156,11 @@ async def test_cb_feed_use() -> None:
         gen_type=GenerationType.image, is_active=True,
     )
     model_kb = MagicMock()
-    with patch("bot.handlers.feed.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=gen), get_all_model_costs=AsyncMock(return_value=[model_cost]))):
+    with patch("bot.handlers.feed.repo", AsyncMock(get_public_feed_generation=AsyncMock(return_value=gen), get_all_model_costs=AsyncMock(return_value=[model_cost]))):
         with patch("bot.handlers.feed.prompt_use_model_kb", MagicMock(return_value=model_kb)) as kb:
             await feed.cb_feed_use(call, AsyncMock(), SimpleNamespace(id=42, credits=500, is_banned=False), mock_state)
     mock_state.set_state.assert_called_with(PromptUseFSM.model_select)
-    kb.assert_called_once_with(42, [model_cost], reference_only=True)
+    kb.assert_called_once_with(42, [model_cost], reference_only=True, reserved_refs=1)
     assert mock_state.update_data.await_args.kwargs["feed_use_gen_type"] == "image"
 
 
@@ -183,8 +183,8 @@ async def test_cb_feed_use_video_opens_video_reference_models() -> None:
         is_active=True,
     )
     model_kb = MagicMock()
-    with patch("bot.handlers.feed.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=gen), get_all_model_costs=AsyncMock(return_value=[model_cost]))):
-        with patch("bot.handlers.feed.video_models_kb", MagicMock(return_value=model_kb)) as kb:
+    with patch("bot.handlers.feed.repo", AsyncMock(get_public_feed_generation=AsyncMock(return_value=gen), get_all_model_costs=AsyncMock(return_value=[model_cost]))):
+        with patch("bot.handlers.feed.feed_video_models_kb", MagicMock(return_value=model_kb)) as kb:
             await feed.cb_feed_use(
                 call,
                 AsyncMock(),
@@ -193,7 +193,7 @@ async def test_cb_feed_use_video_opens_video_reference_models() -> None:
             )
 
     mock_state.set_state.assert_called_with(VideoGenFSM.model_select)
-    kb.assert_called_once_with([model_cost], "i2v")
+    kb.assert_called_once_with([model_cost])
     assert mock_state.update_data.await_args.kwargs["feed_force_reference"] is True
     assert mock_state.update_data.await_args.kwargs["source_feed_gen_id"] == 42
 
@@ -203,7 +203,7 @@ async def test_cb_feed_use_no_prompt() -> None:
     call = make_callback(data="feed:use:42")
     call.answer = AsyncMock()
     gen = SimpleNamespace(id=42, prompt=None, model="sdxl")
-    with patch("bot.handlers.feed.repo", AsyncMock(get_generation_by_id=AsyncMock(return_value=gen))):
+    with patch("bot.handlers.feed.repo", AsyncMock(get_public_feed_generation=AsyncMock(return_value=gen))):
         await feed.cb_feed_use(call, AsyncMock(), SimpleNamespace(id=42, credits=500, is_banned=False), AsyncMock())
     call.answer.assert_awaited_once()
     assert "не найдена" in call.answer.call_args[0][0].lower()

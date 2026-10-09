@@ -394,7 +394,7 @@ async def cb_topup_lava_plan(
 
     return_callback, return_label = await _payment_return_context(state)
     await call.message.edit_text(  # type: ignore[union-attr]
-        (f"💸 <b>Lava</b>\n\nПакет: <b>{plan.label}</b>\nК оплате: <b>{_fmt_amount(plan.price_rub)} ₽</b>" if lang == "ru" else f"💸 <b>Lava</b>\n\nPlan: <b>{plan.label}</b>\nTo pay: <b>{_fmt_amount(plan.price_rub)} ₽</b>"),
+        (f"💸 <b>Lava</b>\n\nПакет: <b>{plan.label}</b>\nСумма в ₽ на странице оплаты" if lang == "ru" else f"💸 <b>Lava</b>\n\nPlan: <b>{plan.label}</b>\nRUB amount at checkout"),
         reply_markup=payment_link_kb(
             "💸 " + ("Перейти к оплате" if lang == "ru" else "Pay now"),
             invoice.payment_url,

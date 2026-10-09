@@ -21,7 +21,7 @@ async def back_to_models(call: CallbackQuery, state: FSMContext, session: AsyncS
 
     data = await state.get_data()
     if data.get("feed_force_reference"):
-        from bot.keyboards.models import video_models_kb
+        from bot.keyboards.models import feed_video_models_kb
         from db import repository as repo
 
         repeat_data = {
@@ -35,7 +35,7 @@ async def back_to_models(call: CallbackQuery, state: FSMContext, session: AsyncS
         await safe_edit_message(
             call.message,
             "🎬 <b>Повторить видео</b>\n\nВыбери модель для повтора по твоему фото:",
-            reply_markup=video_models_kb(costs, "i2v"),
+            reply_markup=feed_video_models_kb(costs),
         )
         await safe_answer_callback(call)
         return
@@ -93,6 +93,9 @@ async def show_references(
         or key in video_gen.GENJUTSU_MODEL_KEYS
         or data.get("seedance_identity_transfer")
     )
+    if data.get("feed_force_reference") and key != MODEL_KEY:
+        await video_gen._handle_mode(call, state, session, key, key, mode)
+        return True
     if two_step:
         await state.set_state(VideoGenFSM.image_upload)
         if mode == "motion":
@@ -234,7 +237,7 @@ async def back_in_video(
     if current == VideoGenFSM.params_select.state:
         if await show_references(call, state, session):
             return
-    if data.get("wizard_mode") or len(VIDEO_CAPS.get(key, {}).get("modes", [])) < 2:
+    if data.get("feed_force_reference") or data.get("wizard_mode") or len(VIDEO_CAPS.get(key, {}).get("modes", [])) < 2:
         await back_to_models(call, state, session)
         return
     await state.set_state(VideoGenFSM.mode_select)

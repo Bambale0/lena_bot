@@ -151,7 +151,7 @@ async def test_cb_video_model_insufficient_credits() -> None:
     mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_cost = _make_video_model_cost("kling-3.0/video", credits=8)
     with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=mock_cost))):
-        await video_gen.cb_video_model(call, AsyncMock(), AsyncMock(), mock_db_user)
+        await video_gen.cb_video_model(call, AsyncMock(), _fake_state(), mock_db_user)
     call.answer.assert_awaited_once()
     assert "Недостаточно" in call.answer.call_args[0][0]
 
@@ -176,7 +176,7 @@ async def test_cb_video_model_no_cost_found() -> None:
     call.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=None))):
-        await video_gen.cb_video_model(call, AsyncMock(), AsyncMock(), mock_db_user)
+        await video_gen.cb_video_model(call, AsyncMock(), _fake_state(), mock_db_user)
     call.answer.assert_awaited_once()
 
 
@@ -199,7 +199,7 @@ async def test_cb_video_model_single_mode() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cb_video_model_feed_repeat_forces_image_upload() -> None:
+async def test_cb_video_model_feed_repeat_rejects_image_only_model() -> None:
     call = make_callback(data="vid_model:kling-3.0/video")
     call.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
@@ -214,9 +214,11 @@ async def test_cb_video_model_feed_repeat_forces_image_upload() -> None:
         with patch("bot.handlers.video_gen.safe_edit_message", AsyncMock()) as edit:
             await video_gen.cb_video_model(call, AsyncMock(), mock_state, mock_db_user)
 
-    assert any(call.kwargs == {"mode": "image"} for call in mock_state.update_data.await_args_list)
-    mock_state.set_state.assert_awaited_with(VideoGenFSM.image_upload)
-    assert "повтор по фото" in edit.await_args.args[1]
+    mock_state.update_data.assert_not_awaited()
+    mock_state.set_state.assert_not_awaited()
+    edit.assert_not_awaited()
+    assert "поддержкой исходного видео" in call.answer.await_args.args[0]
+    assert call.answer.await_args.kwargs["show_alert"] is True
 
 
 # ── vid_mode ──────────────────────────────────────────────────────────────────
@@ -341,7 +343,7 @@ async def test_handle_omni_ids_input_rejects_multiple_audio_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cb_vpar_next_feed_repeat_launches_hidden_prompt() -> None:
+async def test_cb_vpar_next_feed_video_repeat_rejects_model_without_video_input() -> None:
     call = make_callback(data="vpar_next")
     status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
     call.message.answer = AsyncMock(return_value=status_msg)
@@ -371,6 +373,10 @@ async def test_cb_vpar_next_feed_repeat_launches_hidden_prompt() -> None:
         create_generation=AsyncMock(return_value=mock_gen),
         update_generation_task=AsyncMock(),
         get_generation_by_id=AsyncMock(return_value=SimpleNamespace(id=88, user_id=99)),
+        get_public_feed_generation=AsyncMock(return_value=SimpleNamespace(
+            id=88, user_id=99, gen_type=GenerationType.video, prompt="hidden source prompt",
+            result_url="https://cdn.test/source.mp4", result_urls=None,
+        )),
         fail_generation=AsyncMock(),
         add_credits=AsyncMock(),
     )
@@ -383,12 +389,12 @@ async def test_cb_vpar_next_feed_repeat_launches_hidden_prompt() -> None:
             )) as mock_video_service:
                 await video_gen.cb_vpar_next(call, mock_state, mock_session, mock_db_user, mock_bot)
 
-    assert repo_stub.create_generation.await_args.args[4] == "hidden source prompt"
-    assert repo_stub.create_generation.await_args.kwargs["source_feed_gen_id"] == 88
-    assert mock_video_service.generate_video.await_args.args[1] == "hidden source prompt"
-    assert mock_video_service.generate_video.await_args.kwargs["image_url"] == "https://cdn.test/ref.jpg"
+    repo_stub.spend_credits.assert_not_awaited()
+    repo_stub.create_generation.assert_not_awaited()
+    mock_video_service.generate_video.assert_not_awaited()
+    assert "исходное фото или видео" in call.message.answer.await_args.args[0]
     assert "hidden source prompt" not in call.message.answer.await_args.args[0]
-    mock_state.clear.assert_awaited_once()
+    mock_state.clear.assert_not_awaited()
 
 
 # ── handle_image_upload ───────────────────────────────────────────────────────

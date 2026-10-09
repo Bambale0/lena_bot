@@ -305,7 +305,9 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
       return route.fulfill({ json: {
         cost_credits: cost, balance_credits: balance, can_run: balance >= cost,
         deficit_credits: Math.max(0, cost - balance),
-        recommended_plan: balance >= cost ? null : { key: "mini", label: "Мини", credits: 15, price_rub: 150 },
+        recommended_plan: balance >= cost ? null : { key: "mini", label: "Мини", credits: 15, price_rub: 150,
+          payment_options: [{ provider: "tbank", amount: 150, currency: "RUB" }],
+        },
       } });
     }
 

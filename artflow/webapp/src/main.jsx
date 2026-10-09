@@ -333,7 +333,7 @@ function modelModesLabel(model) {
 function formatGenerationStatus(status) {
   if (status === "done") return "Готово";
   if (status === "failed") return "Ошибка";
-  if (status === "reconciliation_required") return "На проверке у поставщика";
+  if (status === "reconciliation_required") return "Уточняем статус у поставщика";
   if (status === "processing") return "В обработке";
   if (status === "pending") return "В очереди";
   return status || "В работе";

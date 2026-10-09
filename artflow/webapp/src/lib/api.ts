@@ -405,6 +405,10 @@ export class MiniAppApi {
   }
 
   async videoPrompt(file: File): Promise<VideoPromptResult> {
+    // Match the API file cap; ingress allows a separate multipart envelope.
+    if (file.size > 100 * 1024 * 1024) {
+      throw new ApiError("Файл слишком большой. Максимум 100 МБ.", 413);
+    }
     const form = new FormData();
     form.append("file", file);
     const payload = await this.request<unknown>("/video-prompt", { method: "POST", body: form });

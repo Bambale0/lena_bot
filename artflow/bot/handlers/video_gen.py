@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import secrets
 import tempfile
 from html import escape
 from urllib.parse import urlencode
@@ -48,6 +50,9 @@ from api.seedance25_adapter import (
 from api.seedance25_adapter import (
     MODEL_KEY as SEEDANCE25_MODEL_KEY,
 )
+from api.seedance25_adapter import (
+    _control_payload as seedance25_control_payload,
+)
 from api.video_prompt_limits import (
     append_telegram_seedance_prompt_chunk,
     seedance_prompt_max_chars,
@@ -61,6 +66,7 @@ from bot.keyboards.models import (
     VIDEO_CAPS,
     VIDEO_GROUP_TITLES,
     after_generation_kb,
+    feed_video_models_kb,
     model_cost_display_text,
     multi_ref_kb,
     video_mode_kb,
@@ -70,9 +76,21 @@ from bot.keyboards.models import (
 )
 from bot.keyboards.video_navigation import video_back_kb
 from bot.states import VideoGenFSM
+from bot.utils.feed_media import canonical_generation_result_url
 from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.feed_remix_prompt import (
+    FEED_REMIX_CONTEXT_KEY,
+    FeedRemixUnavailable,
+    build_feed_remix_prompt,
+    feed_remix_context,
+    feed_video_edit_prompt,
+    generation_prompt_is_protected,
+    legacy_feed_edit_unavailable,
+    supports_feed_source_media,
+    trusted_feed_prompt,
+)
 from core.gemini_omni import (
     GEMINI_OMNI_AUDIO_VOICES,
     GEMINI_OMNI_MAX_AUDIO_IDS,
@@ -81,6 +99,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_ids,
     normalize_gemini_omni_resolution,
     normalize_gemini_omni_seed,
+    validate_gemini_omni_media_slots,
 )
 from core.seedance_repeat_overrides import (
     build_seedance_content_edit_prompt,
@@ -569,6 +588,27 @@ def _url_list(value) -> list[str]:
     return []
 
 
+def _seedance_effective_video_refs(data: dict) -> list[str]:
+    _, extra_video_refs, _ = seedance25_control_payload(_url_list(data.get("audio_ids")))
+    return list(dict.fromkeys([*_url_list(data.get("reference_video_url")), *extra_video_refs]))
+
+
+async def _seedance_edit_duration_from_state(prompt: str, data: dict, *, force_edit: bool = False) -> int | None:
+    _, _, controls = seedance25_control_payload(_url_list(data.get("audio_ids")))
+    try:
+        return await seedance25_edit_billing_duration(
+            prompt, _seedance_effective_video_refs(data),
+            force_edit=force_edit or bool(controls.get("identity_transfer")),
+        )
+    except ValueError:
+        raise
+    except Exception as exc:
+        logger.warning("Seedance source preflight failed error_type=%s", type(exc).__name__)
+        raise ValueError(
+            "Не удалось проверить исходное видео. Поцелуи не списаны. Попробуй позже или загрузи ролик заново."
+        ) from exc
+
+
 def _first_url_value(inp: dict, keys: tuple[str, ...]):
     for key in keys:
         urls = _url_list(inp.get(key))
@@ -603,9 +643,83 @@ async def _external_source_feed_id(
     if not source_feed_gen_id:
         return None
     source = await repo.get_generation_by_id(session, source_feed_gen_id)
-    if source and getattr(source, "user_id", None) == getattr(db_user, "id", None):
+    if (source and getattr(source, "user_id", None) == getattr(db_user, "id", None)
+            and not generation_prompt_is_protected(source)):
         return None
     return source_feed_gen_id
+
+
+async def _prepare_feed_video_inputs(
+    *, session: AsyncSession, db_user: User, source_feed_gen_id: int | None,
+    model_key: str, prompt: str, image_url: str | list[str] | None, data: dict,
+    parent_generation_id: int | None = None,
+) -> tuple[str, str | list[str] | None, dict, int | None]:
+    source_feed_gen_id = await _external_source_feed_id(
+        session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+    )
+    if not source_feed_gen_id:
+        return prompt, image_url, data, None
+    source = await repo.get_public_feed_generation(session, source_feed_gen_id)
+    source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
+    source_url = canonical_generation_result_url(source) if source else None
+    refs = list(dict.fromkeys(_url_list(image_url)))
+    user_refs = any(url != source_url or source_type != "image" for url in refs)
+    source_videos = (
+        _seedance_effective_video_refs(data) if model_key == SEEDANCE25_MODEL_KEY
+        else list(dict.fromkeys(_url_list(data.get("reference_video_url"))))
+    )
+    personalized = bool(
+        prompt.strip() != str(getattr(source, "prompt", "") or "").strip()
+        or user_refs or data.get("audio_ids") or data.get("character_ids")
+        or (source_videos and (source_type != "video" or source_videos != [source_url]))
+        or data.get("seedance_repeat_editor") or data.get("flow_id") == "genjutsu_face_clothing"
+    )
+    if not personalized:
+        return prompt, image_url, data, source_feed_gen_id
+
+    caps = VIDEO_CAPS.get(model_key, {})
+    applicable = bool(source_url) and (
+        bool(caps.get("supports_video_input")) if source_type == "video"
+        else supports_feed_source_media(caps, source_type)
+    )
+    # Stored/reused prompts may include private author text. Only later
+    # user-authored edit controls may extend this public base.
+    previous = (
+        await repo.get_generation_by_id(session, parent_generation_id)
+        if parent_generation_id and parent_generation_id != source_feed_gen_id else None
+    )
+    safe_previous = trusted_feed_prompt(previous, user_id=db_user.id, source_generation_id=source_feed_gen_id)
+    if prompt.strip() != str(getattr(source, "prompt", "") or "").strip() and safe_previous is None:
+        raise legacy_feed_edit_unavailable()
+    public_base = build_feed_remix_prompt("", has_user_references=True, has_source_media=applicable)
+    prompt = safe_previous or public_base
+    if model_key == SEEDANCE25_MODEL_KEY and source_type == "video":
+        prompt = feed_video_edit_prompt(prompt)
+    data = {**data, FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, prompt)}
+    if source_type == "image":
+        refs = list(dict.fromkeys([source_url, *refs]))
+        max_refs = int(caps.get("max_refs", 1) or 1)
+        if len(refs) > max_refs:
+            raise FeedRemixUnavailable("Слишком много фото с учётом исходного поста. Выбери другую модель или убери лишние референсы.")
+        image_url = refs[0] if len(refs) == 1 else refs
+    else:
+        if source_videos and source_videos != [source_url]:
+            raise FeedRemixUnavailable("Для повтора нужен исходный ролик из ленты. Убери дополнительное видео.")
+        data = {**data, "reference_video_url": source_url}
+    max_refs = int(caps.get("max_refs", 1) or 1)
+    if len(refs) > max_refs:
+        raise FeedRemixUnavailable(f"Модель поддерживает до {max_refs} фото с учётом исходного поста.")
+    if model_key == GEMINI_OMNI_VIDEO_MODEL:
+        try:
+            characters = normalize_gemini_omni_ids(data.get("character_ids"), field_name="character_ids", max_items=GEMINI_OMNI_MAX_CHARACTER_IDS)
+            normalize_gemini_omni_ids(data.get("audio_ids"), field_name="audio_ids", max_items=GEMINI_OMNI_MAX_AUDIO_IDS)
+            validate_gemini_omni_media_slots(
+                image_count=len(refs), video_count=int(bool(data.get("reference_video_url"))),
+                character_count=len(characters),
+            )
+        except ValueError as exc:
+            raise FeedRemixUnavailable(str(exc)) from exc
+    return prompt, image_url, data, source_feed_gen_id
 
 
 async def _video_repeat_params_from_task(task_id: str | None) -> dict:
@@ -702,7 +816,9 @@ def _video_state_from_repeat_params(model_key: str, repeat_params: dict) -> dict
         image_url = None
 
     reference_video_url = repeat_params.get("reference_video_url")
-    if reference_video_url:
+    if isinstance(reference_video_url, list):
+        reference_video_url = _url_list(reference_video_url)
+    elif reference_video_url:
         reference_video_url = str(reference_video_url)
 
     caps = VIDEO_CAPS.get(model_key, {})
@@ -1043,6 +1159,11 @@ async def cb_video_model(
     call: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User
 ) -> None:
     model_key = call.data.split(":")[1]  # type: ignore[union-attr]
+    state_data = await state.get_data()
+    caps = VIDEO_CAPS.get(model_key, {})
+    if state_data.get("feed_force_reference") and not supports_feed_source_media(caps, "video"):
+        await call.answer("Для этого повтора нужна модель с поддержкой исходного видео.", show_alert=True)
+        return
     default_duration = _DEFAULT_DURATION.get(model_key, 5)
     default_resolution = _DEFAULT_RES.get(model_key)
     model_cost = await _resolve_video_model_cost(
@@ -1074,11 +1195,15 @@ async def cb_video_model(
     caps = VIDEO_CAPS.get(model_key, {})
     modes = caps.get("modes", ["text"])
     state_data = await state.get_data()
-    force_feed_reference = bool(state_data.get("feed_force_reference") and "image" in modes)
+    force_feed_reference = bool(state_data.get("feed_force_reference"))
 
     if force_feed_reference:
-        await state.update_data(mode="image")
-        await _handle_mode(call, state, session, model_key, model_cost.display_name, "image")
+        mode = "multimodal" if caps.get("auto_route_by_inputs") and "multimodal" in modes else "video"
+        await state.update_data(
+            mode=mode,
+            reference_video_url=state_data.get("feed_use_source_video_url"),
+        )
+        await _handle_mode(call, state, session, model_key, model_cost.display_name, mode)
     elif state_data.get("wizard_mode") in modes:
         mode = state_data["wizard_mode"]
         await state.update_data(mode=mode)
@@ -1113,14 +1238,28 @@ async def _handle_mode(
     call: CallbackQuery, state: FSMContext,
     session: AsyncSession, model_key: str, display_name: str, mode: str,
 ) -> None:
-    if mode == "image":
+    data = await state.get_data()
+    if data.get("feed_force_reference") and mode in {"video", "multimodal"}:
+        from bot.handlers.gemini_omni_references import _media_keyboard, _status_text
+
+        await state.set_state(VideoGenFSM.image_upload)
+        text = (
+            f"✅ <b>{display_name}</b> · повтор по исходному ролику\n\n"
+            "Исходное видео из ленты уже выбрано. Загрузи своё фото/референс."
+        )
+        markup = video_back_kb()
+        if model_key == GEMINI_OMNI_VIDEO_MODEL:
+            text += "\n\n" + _status_text(data) + "\nПосле загрузки фото нажми «Готово»."
+            markup = _media_keyboard()
+        await safe_edit_message(call.message, text, reply_markup=markup)
+    elif mode == "image":
         await state.set_state(VideoGenFSM.image_upload)
         max_refs = _video_max_refs(model_key)
         data = await state.get_data()
         if _is_feed_video_use(data):
             upload_text = (
                 f"✅ <b>{display_name}</b> · повтор по фото\n\n"
-                "🖼️ Загрузи своё фото/референс. Промпт из ленты применю скрыто, "
+                "🖼️ Загрузи своё фото/референс. Повтор создадим по опубликованному ролику, "
                 "а новый ролик соберу по твоему изображению."
             )
             if max_refs > 1:
@@ -1174,9 +1313,10 @@ async def cb_video_mode(
     parts = call.data.split(":")  # type: ignore[union-attr]
     mode, model_key = parts[1], parts[2]
     data = await state.get_data()
-    if data.get("feed_force_reference") and "image" in VIDEO_CAPS.get(model_key, {}).get("modes", []):
-        if mode != "image":
-            await call.answer("Для повтора из ленты сначала загрузи своё фото.", show_alert=True)
+    if data.get("feed_force_reference"):
+        caps = VIDEO_CAPS.get(model_key, {})
+        if not supports_feed_source_media(caps, "video") or mode not in {"video", "multimodal"}:
+            await call.answer("Для повтора из ленты нужен режим с исходным видео.", show_alert=True)
             return
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
@@ -1721,7 +1861,7 @@ async def cb_vpar_next(
     rate_or_flat = float(model_cost.credits if model_cost else data.get("credits", 0))
     await state.update_data(credits=rate_or_flat)
     if _is_feed_video_use(data):
-        await safe_answer_callback(call, "Запускаю повтор")
+        await safe_answer_callback(call)
         await _launch_video_generation_from_state(
             source_message=call.message,  # type: ignore[arg-type]
             state=state,
@@ -1779,7 +1919,7 @@ async def cb_vpar_back(call: CallbackQuery, state: FSMContext, session: AsyncSes
         await call.message.edit_text(  # type: ignore[union-attr]
             "🎬 <b>Повторить видео</b>\n\n"
             "Выбери модель для повтора по твоему фото/референсу:",
-            reply_markup=video_models_kb(model_costs, "i2v"),
+            reply_markup=feed_video_models_kb(model_costs),
         )
         await call.answer()
         return
@@ -1802,6 +1942,57 @@ async def cb_vpar_back(call: CallbackQuery, state: FSMContext, session: AsyncSes
 
 
 
+async def _show_video_cost_quote(
+    source_message: Message, state: FSMContext, *, state_key: str,
+    user_id: int, fingerprint: str, duration: int, credits: float,
+    callback_prefix: str, context: dict,
+) -> None:
+    token = secrets.token_hex(8)
+    credits_text = f"{credits:.6f}".rstrip("0").rstrip(".")
+    await state.update_data(**{state_key: {
+        **context, "token": token, "user_id": user_id, "fingerprint": fingerprint,
+    }})
+    await source_message.answer(
+        "🔁 <b>Проверь стоимость повтора</b>\n\n"
+        f"Длительность: <b>{duration} сек</b> (по исходному видео).\n"
+        f"Итого: <b>{credits_text} 💋</b>.\n\n"
+        "Параметры уточнены. Подтверди запуск по этой цене.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"Запустить за {credits_text} 💋", callback_data=f"{callback_prefix}{token}")],
+            [InlineKeyboardButton(text="Отмена", callback_data="menu:main")],
+        ]),
+    )
+
+
+@router.callback_query(F.data.startswith("feed_video_confirm:"))
+async def cb_feed_video_confirm(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
+) -> None:
+    data = await state.get_data()
+    quote = data.get("video_feed_quote")
+    token = str(call.data or "").removeprefix("feed_video_confirm:")
+    if (not isinstance(quote, dict) or quote.get("user_id") != db_user.id
+            or not secrets.compare_digest(str(quote.get("token") or "").encode(), token.encode())
+            or quote.get("model_key") != data.get("model_key")
+            or any(data.get(key) and data[key] != quote.get("source_feed_gen_id")
+                   for key in ("source_feed_gen_id", "feed_use_gen_id"))):
+        await safe_answer_callback(call, "Это подтверждение устарело. Открой параметры повтора ещё раз.", show_alert=True)
+        return
+    source = await repo.get_public_feed_generation(session, quote["source_feed_gen_id"])
+    parent_id = quote.get("parent_generation_id")
+    parent = await repo.get_generation_by_id(session, parent_id) if parent_id else None
+    if not source or (parent_id and (not parent or parent.user_id != db_user.id)):
+        await safe_answer_callback(call, "Исходный пост больше недоступен", show_alert=True)
+        return
+    await safe_answer_callback(call)
+    await _launch_video_generation_from_state(
+        source_message=call.message, state=state, session=session, db_user=db_user, bot=bot,
+        prompt=parent.prompt if parent else source.prompt,
+        source_feed_gen_id=quote["source_feed_gen_id"], parent_generation_id=parent_id,
+        hidden_feed_prompt=True, price_confirmation_token=token,
+    )
+
+
 async def _launch_video_generation_from_state(
     *,
     source_message: Message,
@@ -1813,6 +2004,7 @@ async def _launch_video_generation_from_state(
     source_feed_gen_id: int | None = None,
     parent_generation_id: int | None = None,
     hidden_feed_prompt: bool = False,
+    price_confirmation_token: str | None = None,
 ) -> bool:
     data = await state.get_data()
     model_key: str = data["model_key"]
@@ -1836,6 +2028,16 @@ async def _launch_video_generation_from_state(
 
     grok_mode: str = data.get("grok_mode", "normal")
     image_url = await _video_reference_image_url(bot, data)
+
+    try:
+        prompt, image_url, data, source_feed_gen_id = await _prepare_feed_video_inputs(
+            session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+            model_key=model_key, prompt=prompt, image_url=image_url, data=data,
+            parent_generation_id=parent_generation_id,
+        )
+    except FeedRemixUnavailable as exc:
+        await source_message.answer(str(exc), reply_markup=main_menu_kb())
+        return False
 
     content_edit = model_key == SEEDANCE25_MODEL_KEY and data.get("flow_id") == "genjutsu_face_clothing"
     seedance_kwargs = {}
@@ -1921,11 +2123,11 @@ async def _launch_video_generation_from_state(
         }
         image_url = planned_images or None
 
+    edit_billing_duration = None
     if model_key == SEEDANCE25_MODEL_KEY:
         try:
-            edit_billing_duration = await seedance25_edit_billing_duration(
-                prompt,
-                data.get("reference_video_url"),
+            edit_billing_duration = await _seedance_edit_duration_from_state(
+                prompt, data,
                 force_edit=bool(
                     content_edit or data.get("seedance_identity_transfer")
                     or data.get("seedance_repeat_editor")
@@ -1995,17 +2197,39 @@ async def _launch_video_generation_from_state(
         resolution=resolution,
         grok_mode=grok_mode,
     )
+    if source_feed_gen_id and FEED_REMIX_CONTEXT_KEY in data:
+        input_params[FEED_REMIX_CONTEXT_KEY] = feed_remix_context(source_feed_gen_id, prompt)
+    if price_confirmation_token is not None or (
+        source_feed_gen_id and model_key == SEEDANCE25_MODEL_KEY and edit_billing_duration is not None
+    ):
+        # Every feed-source edit needs a measured quote, even after a previous
+        # preflight updated FSM duration. Pressing Next again is not consent.
+        fingerprint = hashlib.sha256(json.dumps({
+            "user_id": db_user.id, "source_feed_gen_id": source_feed_gen_id,
+            "parent_generation_id": parent_generation_id, "model": model_key,
+            "prompt": prompt, "input_params": input_params, "credits": credits,
+        }, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
+        quote = data.get("video_feed_quote")
+        if (price_confirmation_token is None or not isinstance(quote, dict)
+                or quote.get("user_id") != db_user.id or quote.get("fingerprint") != fingerprint
+                or not secrets.compare_digest(str(quote.get("token") or "").encode(), price_confirmation_token.encode())):
+            await _show_video_cost_quote(
+                source_message, state, state_key="video_feed_quote", user_id=db_user.id,
+                fingerprint=fingerprint, duration=duration, credits=credits,
+                callback_prefix="feed_video_confirm:", context={
+                    "source_feed_gen_id": source_feed_gen_id, "parent_generation_id": parent_generation_id,
+                    "model_key": model_key,
+                },
+            )
+            return False
+        # The Redis FSM quote is single use, including across an interrupted launch.
+        await state.update_data(video_feed_quote=None)
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
         return False
 
-    source_feed_gen_id = await _external_source_feed_id(
-        session=session,
-        db_user=db_user,
-        source_feed_gen_id=source_feed_gen_id,
-    )
     gen = await repo.create_generation(
         session,
         db_user.id,
@@ -2089,7 +2313,7 @@ async def _launch_video_generation_from_state(
             pass
         caption = "✅ <b>Видео готово!</b>" + provider_task_reference(result.task_id)
         if hidden_feed_prompt:
-            caption += "\n\nПромпт из ленты применён скрыто."
+            caption += "\n\nСоздано по посту из ленты. Промпт автора скрыт."
         else:
             caption += f"\n\n<i>{prompt[:200]}</i>"
         if summary != "по умолчанию":
@@ -2114,6 +2338,11 @@ async def _launch_video_generation_from_state(
             current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
             if current_status in {"done", "failed"}:
                 return
+            user_err = (
+                "Ошибка на стороне генератора"
+                if source_feed_gen_id or generation_prompt_is_protected(current)
+                else escape(err)
+            )
             _, refunded = await repo.fail_generation_and_refund(
                 bg_session,
                 gen_id,
@@ -2121,7 +2350,7 @@ async def _launch_video_generation_from_state(
                 refund_note="bot_video_poll",
             )
         await status_msg.edit_text(
-            f"❌ Ошибка: {err}\n💋 возвращены." + provider_task_reference(result.task_id),
+            f"❌ Ошибка: {user_err}\n💋 возвращены." + provider_task_reference(result.task_id),
             reply_markup=main_menu_kb(),
         )
 
@@ -2600,7 +2829,20 @@ async def cb_regen_video(
     db_user: User,
     bot: Bot,
 ) -> None:
-    gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
+    parts = str(call.data or "").split(":")
+    if len(parts) not in {3, 4} or not parts[2].isascii() or not parts[2].isdigit():
+        await call.answer("Кнопка повтора устарела", show_alert=True)
+        return
+    gen_id = int(parts[2])
+    confirmation_token = parts[3] if len(parts) == 4 else None
+    quote = (await state.get_data()).get("video_regen_quote") if confirmation_token is not None else None
+    if confirmation_token is not None and (
+        not isinstance(quote, dict) or quote.get("user_id") != db_user.id
+        or quote.get("generation_id") != gen_id
+        or not secrets.compare_digest(str(quote.get("token") or "").encode(), confirmation_token.encode())
+    ):
+        await call.answer("Это подтверждение устарело. Нажми «Повторить» ещё раз.", show_alert=True)
+        return
     prev = await repo.get_generation_by_id(session, gen_id)
     if not prev or prev.user_id != db_user.id or not prev.prompt:
         await call.answer("Генерация не найдена", show_alert=True)
@@ -2631,7 +2873,9 @@ async def cb_regen_video(
         image_url = None
 
     reference_video_url = repeat_params.get("reference_video_url")
-    if reference_video_url:
+    if isinstance(reference_video_url, list):
+        reference_video_url = _url_list(reference_video_url)
+    elif reference_video_url:
         reference_video_url = str(reference_video_url)
 
     caps = VIDEO_CAPS.get(model_key, {})
@@ -2644,6 +2888,7 @@ async def cb_regen_video(
         return
 
     duration = _as_int(repeat_params.get("duration"), _DEFAULT_DURATION.get(model_key, 5))
+    requested_duration = duration
     aspect_ratio = repeat_params.get("aspect_ratio") or _DEFAULT_RATIO.get(model_key)
     resolution = _normalize_resolution_for_state(
         model_key,
@@ -2672,6 +2917,32 @@ async def cb_regen_video(
         "seed": seed,
         "grok_mode": grok_mode,
     }
+    try:
+        repeat_prompt, image_url, repeat_data, source_feed_gen_id = await _prepare_feed_video_inputs(
+            session=session, db_user=db_user,
+            source_feed_gen_id=getattr(prev, "source_feed_gen_id", None),
+            model_key=model_key, prompt=prev.prompt, image_url=image_url, data=repeat_data,
+            parent_generation_id=prev.id,
+        )
+    except FeedRemixUnavailable as exc:
+        await call.answer(str(exc), show_alert=True)
+        return
+    reference_video_url = repeat_data.get("reference_video_url")
+    repeat_data = {**repeat_data, "image_url": image_url}
+    edit_billing_duration = None
+    if model_key == SEEDANCE25_MODEL_KEY:
+        try:
+            edit_billing_duration = await _seedance_edit_duration_from_state(repeat_prompt, repeat_data)
+        except ValueError as exc:
+            await call.answer(str(exc), show_alert=True)
+            return
+        if edit_billing_duration is not None:
+            duration = edit_billing_duration
+            aspect_ratio = "adaptive"
+            repeat_data = {
+                **repeat_data, "duration": duration, "aspect_ratio": aspect_ratio,
+                "seedance_video_edit": True,
+            }
     input_params = {
         **repeat_data,
         "video_start": repeat_params.get("video_start"),
@@ -2690,23 +2961,42 @@ async def cb_regen_video(
         return
 
     credits = float(_video_total_credits(model_key, duration, model_cost.credits))
+    previous_credits = getattr(prev, "credits_spent", None)
+    needs_quote = confirmation_token is not None or (
+        edit_billing_duration is not None and (
+            duration != requested_duration
+            or (isinstance(previous_credits, (int, float)) and previous_credits != credits)
+        )
+    )
+    if needs_quote:
+        fingerprint = hashlib.sha256(json.dumps({
+            "user_id": db_user.id, "generation_id": gen_id, "model": model_key,
+            "prompt": repeat_prompt, "input_params": input_params, "credits": credits,
+        }, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
+        if confirmation_token is None or quote.get("fingerprint") != fingerprint:
+            # Production FSM is Redis-backed and updates are serialized per user.
+            await _show_video_cost_quote(
+                call.message, state, state_key="video_regen_quote", user_id=db_user.id,
+                fingerprint=fingerprint, duration=duration, credits=credits,
+                callback_prefix=f"regen:video:{gen_id}:", context={"generation_id": gen_id},
+            )
+            await safe_answer_callback(call)
+            return
+        # Consume before the existing spend/submit flow: a repeated click or a
+        # restart after spending must never reuse this authorization.
+        await state.update_data(video_regen_quote=None)
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await call.answer("Недостаточно 💋", show_alert=True)
         return
 
-    source_feed_gen_id = await _external_source_feed_id(
-        session=session,
-        db_user=db_user,
-        source_feed_gen_id=getattr(prev, "source_feed_gen_id", None),
-    )
     await safe_answer_callback(call, "🔁 Запускаю ещё вариант")
     gen = await repo.create_generation(
         session,
         db_user.id,
         model_key,
         GenerationType.video,
-        prev.prompt,
+        repeat_prompt,
         credits,
         parent_generation_id=prev.id,
         source_feed_gen_id=source_feed_gen_id,
@@ -2725,7 +3015,7 @@ async def cb_regen_video(
     try:
         result = await video_service.generate_video(
             video_model,
-            prev.prompt,
+            repeat_prompt,
             image_url=image_url,
             duration=duration,
             aspect_ratio=aspect_ratio,
@@ -2773,7 +3063,7 @@ async def cb_regen_video(
             pass
         caption = "✅ <b>Видео готово!</b>" + provider_task_reference(result.task_id)
         if source_feed_gen_id:
-            caption += "\n\nПромпт из ленты применён скрыто."
+            caption += "\n\nСоздано по посту из ленты. Промпт автора скрыт."
         else:
             caption += f"\n\n<i>{prev.prompt[:200]}</i>"
         if summary != "по умолчанию":
@@ -2798,6 +3088,11 @@ async def cb_regen_video(
             current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
             if current_status in {"done", "failed"}:
                 return
+            user_err = (
+                "Ошибка на стороне генератора"
+                if source_feed_gen_id or generation_prompt_is_protected(current)
+                else escape(err)
+            )
             _, refunded = await repo.fail_generation_and_refund(
                 bg_session,
                 gen_id,
@@ -2805,7 +3100,7 @@ async def cb_regen_video(
                 refund_note="bot_video_repeat_poll",
             )
         await status_msg.edit_text(
-            f"❌ Ошибка: {err}\n💋 возвращены." + provider_task_reference(result.task_id),
+            f"❌ Ошибка: {user_err}\n💋 возвращены." + provider_task_reference(result.task_id),
             reply_markup=main_menu_kb(),
         )
 

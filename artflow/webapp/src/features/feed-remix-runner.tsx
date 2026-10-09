@@ -8,9 +8,11 @@ import { Sheet } from "@/components/ui/sheet";
 import type { FeedItem, GenerationTask, ModelInfo } from "@/lib/types";
 import { notifyHaptic, openExternalUrl } from "@/lib/telegram";
 import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
+import { feedUserReferenceCapacity } from "@/features/feed-repeat-references";
 import {
-  canReopenPayment, clearRepeatDraft, paymentFromResponse, paymentResolution, readRepeatDraft, saveRepeatDraft,
-  type PaymentProvider, type RepeatDraft, type RepeatPayment,
+  canReopenPayment, checkoutAmountLabel, checkoutOptions, checkoutProviderLabel, clearRepeatDraft,
+  paymentFromResponse, paymentResolution, readRepeatDraft, saveRepeatDraft,
+  type FeedCheckoutPlan, type PaymentProvider, type RepeatDraft, type RepeatPayment,
 } from "@/features/feed-repeat-payment";
 
 const FEED_REMIX_EVENT = "apix:open-feed-remix-runner";
@@ -30,9 +32,10 @@ type FeedCheckoutQuote = {
   balance_credits: number;
   deficit_credits: number;
   can_run: boolean;
-  recommended_plan?: { key: string; label: string; credits: number; price_rub: number } | null;
+  recommended_plan?: FeedCheckoutPlan | null;
+  source_video_edit?: boolean;
+  effective_duration_seconds?: number;
 };
-const ACCEPTED_PAYMENT_PROVIDERS: PaymentProvider[] = ["tbank", "crypto", "tribute", "lava"];
 
 function draftStorage(): Storage | null {
   try { return window.sessionStorage; } catch { return null; }
@@ -181,7 +184,7 @@ function FeedRemixRunnerPortal() {
   const openSequence = useRef(0);
   const paymentCheckInFlight = useRef(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
-  const [paymentMethods, setPaymentMethods] = useState<PaymentProvider[]>([]);
+  const [selectedPaymentProvider, setSelectedPaymentProvider] = useState<PaymentProvider | null>(null);
   const quoteRequestSequence = useRef(0);
   const launchInFlight = useRef(false);
   const paymentInFlight = useRef(false);
@@ -193,6 +196,11 @@ function FeedRemixRunnerPortal() {
   const busy = opening || phase === "uploading" || phase === "generating" || modelsLoading;
   const sourcePreview = safeExternalUrl(firstMedia(item || {}));
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
+  const userReferenceLimit = feedUserReferenceCapacity(selectedModel, sourceIsVideo);
+  const referencesOverLimit = references.length > userReferenceLimit;
+  const referenceLimitMessage = sourceIsVideo
+    ? `Для этой модели можно добавить своих фото: ${userReferenceLimit}. Нужна поддержка исходного видео.`
+    : `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`;
   const aspectRatios = modelAspectRatios(selectedModel);
   const durations = modelDurations(selectedModel);
   const durationIndex = Math.max(0, durations.indexOf(duration));
@@ -202,7 +210,7 @@ function FeedRemixRunnerPortal() {
   const qualityOptions = selectedModel?.quality_options?.length ? selectedModel.quality_options : [{ value: "basic", label: "Базовое" }];
   const countOptions = selectedModel?.counts?.length ? selectedModel.counts : [1];
   const requestBody = useMemo(() => {
-    if (!item || !selectedModel) return null;
+    if (!item || !selectedModel || referencesOverLimit) return null;
     const sourceMedia = sourcePreview || "";
     const primaryUserReference = references[0] || "";
     const chosenMode = bucket === "video" ? mode : "image";
@@ -226,17 +234,20 @@ function FeedRemixRunnerPortal() {
       quality,
       count,
     };
-  }, [aspectRatio, bucket, changeRequest, count, duration, grokMode, item, mode, quality, references, resolution, selectedModel, sourceIsVideo, sourcePreview]);
+  }, [aspectRatio, bucket, changeRequest, count, duration, grokMode, item, mode, quality, references, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
   const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
   const liveQuoteRequest = useRef<{ id: number; body: Record<string, unknown>; key: string } | null>(null);
   liveQuoteRequest.current = item && requestBody ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
   const quoteReady = Boolean(quote && quotedBody === requestBodyKey && !quoteBusy);
   const canLaunch = quoteReady && quote?.can_run === true;
+  const paymentOptions = checkoutOptions(quote?.recommended_plan);
+  const paymentOption = paymentOptions.find((option) => option.provider === selectedPaymentProvider) || paymentOptions[0];
 
   const resetForm = useCallback((nextItem: FeedItem | null = null, draft: RepeatDraft | null = null) => {
     setItem(nextItem);
     setPhase("idle");
     setError("");
+    setSelectedPaymentProvider(null);
     setReferences(draft?.references || []);
     setChangeRequest(draft?.changeRequest || "");
     setQuote(null);
@@ -395,17 +406,6 @@ function FeedRemixRunnerPortal() {
     return () => window.clearTimeout(timer);
   }, [item?.id, requestBodyKey, refreshQuote]);
 
-  useEffect(() => {
-    if (!item) return;
-    void apiJson<string[]>("/payment-methods")
-      .then((methods) => setPaymentMethods(
-        (Array.isArray(methods) ? methods : []).filter(
-          (method): method is PaymentProvider => ACCEPTED_PAYMENT_PROVIDERS.includes(method as PaymentProvider),
-        ),
-      ))
-      .catch(() => setPaymentMethods([]));
-  }, [item?.id]);
-
   const checkPayment = useCallback(async (quiet = false) => {
     const current = paymentRef.current;
     const scope = activeScope.current;
@@ -478,9 +478,9 @@ function FeedRemixRunnerPortal() {
 
   const payInline = useCallback(async () => {
     const plan = quote?.recommended_plan;
-    const provider = paymentMethods[0];
+    const provider = paymentOption?.provider;
     const scope = activeScope.current;
-    if (!plan || !provider || !scope || !draftSnapshot.current || busy || paymentBusy || paymentInFlight.current || paymentRef.current) return;
+    if (!quoteReady || quote?.can_run || !plan || !provider || !scope || !draftSnapshot.current || busy || paymentBusy || paymentInFlight.current || paymentRef.current) return;
     const pending: RepeatPayment = {
       startedAt: Date.now(), provider, planKey: plan.key, transactionId: null, checkoutUrl: null,
     };
@@ -531,7 +531,7 @@ function FeedRemixRunnerPortal() {
       paymentInFlight.current = false;
       if (activeScope.current === scope) setPaymentBusy(false);
     }
-  }, [busy, paymentBusy, paymentMethods, quote?.recommended_plan]);
+  }, [busy, paymentBusy, paymentOption?.provider, quote?.can_run, quote?.recommended_plan, quoteReady]);
 
   const reopenPayment = useCallback(() => {
     const current = paymentRef.current;
@@ -556,9 +556,9 @@ function FeedRemixRunnerPortal() {
 
   const addReferenceFiles = useCallback(async (files: File[]) => {
     if (!files.length || busy) return;
-    const maximum = selectedModel?.max_refs || 1;
+    const maximum = userReferenceLimit;
     if (references.length + files.length > maximum) {
-      setError(`Можно добавить максимум ${maximum} фото для этой модели`);
+      setError(referenceLimitMessage);
       return;
     }
     setPhase("uploading");
@@ -584,7 +584,7 @@ function FeedRemixRunnerPortal() {
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [bucket, busy, modeOptions, references.length, selectedModel?.max_refs]);
+  }, [bucket, busy, modeOptions, referenceLimitMessage, references.length, userReferenceLimit]);
 
   const submit = useCallback(async () => {
     if (!item || !selectedModel || !requestBody || !canLaunch || busy || launchInFlight.current) return;
@@ -642,7 +642,12 @@ function FeedRemixRunnerPortal() {
           </div>
           {paymentWaiting ? (
             <div className="grid gap-2">
-              <Button className="min-h-11 w-full rounded-xl" disabled>Ждём подтверждение оплаты…</Button>
+              {payment?.provider === "tribute" && !payment.transactionId && quoteReady && quote?.can_run ? (
+                <div className="grid gap-1 rounded-xl border border-border px-3 py-2 text-xs" role="status">
+                  <p className="font-semibold">Баланс достаточен для повтора</p>
+                  <p className="text-muted-foreground">Статус этой оплаты не подтверждён. Новое пополнение заблокировано, чтобы избежать повторной оплаты.</p>
+                </div>
+              ) : <Button className="min-h-11 w-full rounded-xl" disabled>Ждём подтверждение оплаты…</Button>}
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" disabled={busy || paymentBusy || paymentChecking} onClick={() => void checkPayment()}>
                   {paymentChecking ? <LoaderCircle className="size-4 animate-spin" /> : null}
@@ -652,10 +657,26 @@ function FeedRemixRunnerPortal() {
               </div>
             </div>
           ) : quoteReady && !quote?.can_run && quote?.recommended_plan ? (
-            <Button className="min-h-11 w-full rounded-xl" disabled={busy || paymentBusy || !activeScope.current || !paymentMethods.length} onClick={() => void payInline()}>
-              {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {`Пополнить здесь · ${quote.recommended_plan.price_rub} ₽`}
-            </Button>
+            paymentOption ? <div className="grid gap-2">
+              <p className="text-xs text-muted-foreground">{quote.recommended_plan.label} · {quote.recommended_plan.credits} 💋</p>
+              {paymentOptions.length > 1 ? <label className="grid gap-1 text-xs font-semibold">
+                Способ оплаты
+                <select
+                  className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm"
+                  value={paymentOption.provider}
+                  disabled={busy || paymentBusy}
+                  onChange={(event) => setSelectedPaymentProvider(event.target.value as PaymentProvider)}
+                >
+                  {paymentOptions.map((option) => <option key={option.provider} value={option.provider}>
+                    {checkoutProviderLabel(option.provider)} · {checkoutAmountLabel(option)}
+                  </option>)}
+                </select>
+              </label> : <p className="text-xs text-muted-foreground">{checkoutProviderLabel(paymentOption.provider)}</p>}
+              <Button className="min-h-11 w-full rounded-xl" disabled={busy || paymentBusy || !activeScope.current} onClick={() => void payInline()}>
+                {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {`Пополнить здесь · ${checkoutAmountLabel(paymentOption)}`}
+              </Button>
+            </div> : <p className="text-xs text-destructive">Для этого пакета пока нет доступного способа оплаты.</p>
           ) : null}
           {!paymentWaiting && quoteReady && !quote?.can_run && !quote?.recommended_plan ? (
             <p className="text-xs text-destructive">Недостаточно 💋, активных пакетов пополнения пока нет.</p>
@@ -699,14 +720,14 @@ function FeedRemixRunnerPortal() {
               disabled={busy}
               onChange={(event) => setChangeRequest(event.target.value)}
             />
-            <span className="text-[11px] text-muted-foreground">Необязательно. Изменения применятся при первом запуске, промпт автора скрыт.</span>
+            <span className="text-[11px] text-muted-foreground">Необязательно. Со своим фото или изменениями повтор создаётся по опубликованному изображению или видео. Исходное фото занимает один слот референса. Промпт автора остаётся скрыт.</span>
           </label>
 
           <div className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="font-semibold">Твоё фото / референсы</p>
-                <p className="text-xs text-muted-foreground">Можно добавить свои фото поверх исходной работы.</p>
+                <p className="text-xs text-muted-foreground">{referenceLimitMessage}</p>
               </div>
               <input
                 ref={fileInputRef}
@@ -714,13 +735,15 @@ function FeedRemixRunnerPortal() {
                 className="hidden"
                 accept={`${ACCEPTED_REFERENCE_IMAGES},${ACCEPTED_REFERENCE_EXTENSIONS}`}
                 multiple
+                disabled={busy || references.length >= userReferenceLimit}
                 onChange={(event) => void addReferenceFiles(Array.from(event.target.files || []))}
               />
-              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+              <Button type="button" variant="outline" size="sm" disabled={busy || references.length >= userReferenceLimit} onClick={() => fileInputRef.current?.click()}>
                 {phase === "uploading" ? <LoaderCircle className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
                 Добавить
               </Button>
             </div>
+            {referencesOverLimit ? <p role="alert" className="text-xs text-destructive">Сохранённые фото не удалены. {referenceLimitMessage} Удали лишние фото или выбери другую модель.</p> : null}
             {references.length ? (
               <div className="flex flex-wrap gap-1.5">
                 {references.map((url, index) => (
@@ -739,8 +762,8 @@ function FeedRemixRunnerPortal() {
             Модель
             <select className="min-h-11 rounded-xl border border-input bg-background px-3 text-sm" value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={busy || modelsLoading}>
               {modelsLoading ? <option>Загружаем модели…</option> : null}
-              {imageModels.length ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key}>{model.display_name}</option>)}</optgroup> : null}
-              {videoModels.length ? <optgroup label="Видео">{videoModels.map((model) => <option key={model.key} value={model.key}>{model.display_name}</option>)}</optgroup> : null}
+              {imageModels.length ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo)}>{model.display_name}</option>)}</optgroup> : null}
+              {videoModels.length ? <optgroup label="Видео">{videoModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo)}>{model.display_name}</option>)}</optgroup> : null}
             </select>
           </label>
 
@@ -842,6 +865,7 @@ function FeedRemixRunnerPortal() {
                 </span>
               </div>
             ) : <span>{quoteBusy ? "Рассчитываем стоимость по тарифу…" : "Стоимость пока недоступна"}</span>}
+            {quoteReady && quote?.source_video_edit ? <p className="mt-2 text-muted-foreground">Редактирование исходного ролика: длительность и кадр берутся из источника. Для оплаты: {quote.effective_duration_seconds} сек.</p> : null}
             {paymentWaiting ? <p className="mt-2 text-muted-foreground">После оплаты баланс обновится здесь автоматически. Фото и настройки останутся на месте.</p> : null}
           </div>
           <p className={cn("rounded-xl border border-border bg-muted/45 px-3 py-2 text-xs text-muted-foreground", phase !== "idle" && "text-foreground")}>{phaseLabel}</p>

@@ -827,7 +827,12 @@ async def test_handle_session_photo_switches_active_session_to_image_mode() -> N
         last_generation_id=99,
     )
     session_obj = AsyncMock()
-    repo_stub = SimpleNamespace(update_image_session_references=AsyncMock())
+    repo_stub = SimpleNamespace(
+        update_image_session_references=AsyncMock(),
+        get_generation_by_id=AsyncMock(
+            return_value=SimpleNamespace(id=99, user_id=42, source_feed_gen_id=None),
+        ),
+    )
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
@@ -919,7 +924,12 @@ async def test_handle_session_photo_appends_reference_for_multiref_model() -> No
         last_generation_id=99,
     )
     session_obj = AsyncMock()
-    repo_stub = SimpleNamespace(update_image_session_references=AsyncMock())
+    repo_stub = SimpleNamespace(
+        update_image_session_references=AsyncMock(),
+        get_generation_by_id=AsyncMock(
+            return_value=SimpleNamespace(id=99, user_id=42, source_feed_gen_id=None),
+        ),
+    )
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
@@ -968,7 +978,12 @@ async def test_handle_session_photo_keeps_single_reference_for_single_ref_model(
         last_generation_id=99,
     )
     session_obj = AsyncMock()
-    repo_stub = SimpleNamespace(update_image_session_references=AsyncMock())
+    repo_stub = SimpleNamespace(
+        update_image_session_references=AsyncMock(),
+        get_generation_by_id=AsyncMock(
+            return_value=SimpleNamespace(id=99, user_id=42, source_feed_gen_id=None),
+        ),
+    )
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),

@@ -169,8 +169,8 @@ def lava_plans_kb(plans: list[PricePlan], lang: str = "ru", currency: str = "rub
     back_text = "← " + ("Назад" if lang == "ru" else "Back")
     back_cb = "topup:usd" if currency == "usd" else "menu:topup"
     for plan in plans:
-        amount = plan.price_rub / RUB_TO_USDT
-        price_text = f"${_fmt_amount(amount)}" if currency == "usd" else f"{_fmt_amount(plan.price_rub)}₽"
+        # Lava invoices use the configured RUB offer price; the DB price is not a charge quote.
+        price_text = "Сумма в ₽ на странице оплаты" if lang == "ru" else "RUB amount at checkout"
         builder.row(
             InlineKeyboardButton(
                 text=f"💸 {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else _fmt_amount(plan.credits)} 💋 · {price_text}",

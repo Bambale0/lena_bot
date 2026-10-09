@@ -12,8 +12,10 @@ from bot.ui.image_menu import (
 from bot.ui.main_menu import render_main_menu
 from bot.ui.model_labels import public_model_items
 from bot.ui.music_menu import render_music_menu
+from core.feed_remix_prompt import generation_prompt_is_protected
 from db import repository as repo
 from db.models import User
+from db.repeat_lookup import parse_input_params
 
 
 async def render_screen(
@@ -40,11 +42,17 @@ async def render_screen(
             last_generation_id = getattr(image_session, "last_generation_id", None)
             if last_generation_id:
                 active_generation = await repo.get_generation_by_id(session, last_generation_id)
-        if prompt_actions_allowed is None and active_generation is not None:
+        if prompt_actions_allowed is not False and active_generation is not None:
             source_feed_gen_id = getattr(active_generation, "source_feed_gen_id", None)
-            if source_feed_gen_id:
+            if parse_input_params(getattr(active_generation, "input_params", None)).get("hidden_prompt"):
+                prompt_actions_allowed = False
+            elif source_feed_gen_id:
                 source = await repo.get_generation_by_id(session, source_feed_gen_id)
-                prompt_actions_allowed = bool(source and getattr(source, "user_id", None) == db_user.id)
+                prompt_actions_allowed = bool(
+                    source
+                    and getattr(source, "user_id", None) == db_user.id
+                    and not generation_prompt_is_protected(source)
+                )
         return render_active_image_session(
             image_session,
             active_generation=active_generation,

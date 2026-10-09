@@ -188,6 +188,7 @@ function renderStudio() {
     <section class="panel-grid">
       <article class="paper-card yellow">
         <h3>Session</h3>
+        ${session?.prompt_unavailable_reason ? `<p>${escapeHtml(session.prompt_unavailable_reason)}</p>` : ""}
         ${session ? `<p class="mono">#${session.id} ${escapeHtml(session.model)}</p><p>${escapeHtml(session.aspect_ratio || "auto")} / ${escapeHtml(session.quality || "basic")}</p>` : empty("No active image session.", state.errors.session)}
       </article>
       <article class="dark-card">

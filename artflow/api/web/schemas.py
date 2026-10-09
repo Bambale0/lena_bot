@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from api.public_files import preview_public_image_url, public_url_is_available
 from core.config import settings
+from core.feed_remix_prompt import generation_prompt_is_protected, generation_public_error
 from core.seedance_reconciliation import public_generation_status
 
 
@@ -347,7 +348,7 @@ class GenerationCard(BaseModel):
 
     @classmethod
     def from_generation(cls, generation: Any, *, image_session: Any | None = None) -> "GenerationCard":
-        prompt_hidden = bool(getattr(generation, "source_feed_gen_id", None))
+        prompt_hidden = generation_prompt_is_protected(generation)
         reference_urls = json_url_list(getattr(image_session, "reference_urls", None)) if image_session is not None else []
         reference_url = getattr(image_session, "reference_url", None) if image_session is not None else None
         if reference_url and reference_url not in reference_urls:
@@ -375,7 +376,7 @@ class GenerationCard(BaseModel):
             credits_spent=float(getattr(generation, "credits_spent", 0) or 0),
             is_public_feed=bool(getattr(generation, "is_public_feed", False)),
             is_prompt_library=bool(getattr(generation, "is_prompt_library", False)),
-            error=getattr(generation, "error_msg", None),
+            error=generation_public_error(generation),
             created_at=iso_datetime(getattr(generation, "created_at", None)),
             finished_at=iso_datetime(getattr(generation, "finished_at", None)),
         )
@@ -392,6 +393,7 @@ class ImageSessionCard(BaseModel):
     last_prompt: str | None = None
     prompt_hidden: bool = False
     prompt_actions_allowed: bool = True
+    prompt_unavailable_reason: str | None = None
     reference_url: str | None = None
     reference_urls: list[str] = Field(default_factory=list)
     last_result_url: str | None = None
@@ -402,6 +404,9 @@ class ImageSessionCard(BaseModel):
 
     @classmethod
     def from_image_session(cls, image_session: Any, *, hide_prompt: bool = False) -> "ImageSessionCard":
+        # A missing lineage row never proves ownership, including orphaned
+        # legacy sessions. Explicit protected lineage always wins at callers.
+        hide_prompt = hide_prompt or getattr(image_session, "prompt_provenance", None) != "user_supplied"
         reference_urls = json_url_list(getattr(image_session, "reference_urls", None))
         reference_url = getattr(image_session, "reference_url", None)
         if reference_url and reference_url not in reference_urls:
@@ -417,6 +422,10 @@ class ImageSessionCard(BaseModel):
             last_prompt=None if hide_prompt else getattr(image_session, "last_prompt", None),
             prompt_hidden=hide_prompt,
             prompt_actions_allowed=not hide_prompt,
+            prompt_unavailable_reason=(
+                "Промпт недоступен для восстановления. Введите описание заново."
+                if hide_prompt else None
+            ),
             reference_url=getattr(image_session, "reference_url", None),
             reference_urls=reference_urls,
             last_result_url=getattr(image_session, "last_result_url", None),

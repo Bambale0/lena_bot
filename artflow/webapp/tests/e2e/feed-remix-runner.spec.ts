@@ -126,6 +126,7 @@ test("feed work repeat asks for settings and preserves source media payload", as
   await expect(dialog.getByText("Исходная работа будет использована как основной референс.")).toBeVisible();
   await expect(dialog.getByLabel("Модель")).toBeVisible();
 
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
   await dialog.locator("input[type=file]").setInputFiles({
     name: "ref.jpg",
     mimeType: "image/jpeg",
@@ -170,7 +171,9 @@ test("insufficient balance can top up inline while preserving photo and settings
   await page.route("**/api/v1/feed/201/remix/quote", (route) => route.fulfill({ json: {
     cost_credits: 5, balance_credits: funded ? 12 : 0,
     can_run: funded, deficit_credits: funded ? 0 : 5,
-    recommended_plan: funded ? null : { key: "starter", label: "Старт", credits: 10, price_rub: 100 },
+    recommended_plan: funded ? null : { key: "starter", label: "Старт", credits: 10, price_rub: 100,
+      payment_options: [{ provider: "tbank", amount: 100, currency: "RUB" }],
+    },
   } }));
   await page.route("**/api/v1/topup/tbank", (route) => {
     topups++;
@@ -188,6 +191,7 @@ test("insufficient balance can top up inline while preserving photo and settings
   await page.goto("/?tgWebAppData=test&remix=201");
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
   await dialog.locator("input[type=file]").setInputFiles({
     name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
@@ -218,13 +222,15 @@ test("insufficient balance can top up inline while preserving photo and settings
   expect(paidRequests).toBe(1);
 });
 
-async function pendingCheckout(page: Page) {
+async function pendingCheckout(page: Page, paymentOptions = [{ provider: "tbank", amount: 100 as number | null, currency: "RUB" }]) {
   await mockMiniAppApi(page);
   const state = { topups: 0, funded: false };
   await page.route("**/api/v1/feed/201/remix/quote", route => route.fulfill({ json: {
     cost_credits: 5, balance_credits: state.funded ? 10 : 0, can_run: state.funded,
     deficit_credits: state.funded ? 0 : 5,
-    recommended_plan: state.funded ? null : { key: "starter", label: "Старт", credits: 10, price_rub: 100 },
+    recommended_plan: state.funded ? null : { key: "starter", label: "Старт", credits: 10, price_rub: 100,
+      payment_options: paymentOptions,
+    },
   } }));
   await page.route("**/api/v1/topup/tbank", route => {
     state.topups++;
@@ -377,7 +383,7 @@ test("reopening the same source during invoice creation adopts its late checkout
 });
 
 test("unresolved Tribute product checkout is not offered as the same invoice", async ({ page }) => {
-  await pendingCheckout(page);
+  await pendingCheckout(page, [{ provider: "tribute", amount: 2, currency: "USD" }]);
   let topups = 0;
   await page.route("**/api/v1/payment-methods", route => route.fulfill({ json: ["tribute"] }));
   await page.route("**/api/v1/topup/tribute", route => {
@@ -393,6 +399,77 @@ test("unresolved Tribute product checkout is not offered as the same invoice", a
   await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
   await expect(dialog.getByRole("button", { name: "Открыть эту оплату", exact: true })).toHaveCount(0);
   expect(topups).toBe(1);
+});
+
+test("repeat checkout ignores global providers that cannot sell the recommended plan", async ({ page }) => {
+  const state = await pendingCheckout(page, [{ provider: "tribute", amount: 2, currency: "USD" }]);
+  await page.route("**/api/v1/payment-methods", route => route.fulfill({ json: ["lava", "tribute"] }));
+  let tributeTopups = 0;
+  let lavaTopups = 0;
+  await page.route("**/api/v1/topup/lava", route => {
+    lavaTopups++;
+    return route.fulfill({ status: 404, json: { detail: "Plan has no Lava offer" } });
+  });
+  await page.route("**/api/v1/topup/tribute", route => {
+    tributeTopups++;
+    expect(route.request().postDataJSON()).toEqual({ plan_key: "starter" });
+    return route.fulfill({ json: { pay_url: "https://pay.example.test/product", amount_usd: 2 } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: "Пополнить здесь · 2 USD", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  expect(tributeTopups).toBe(1);
+  expect(lavaTopups).toBe(0);
+  expect(state.topups).toBe(0);
+});
+
+test("repeat checkout displays CryptoBot charge in USDT", async ({ page }) => {
+  await pendingCheckout(page, [{ provider: "crypto", amount: 1.11, currency: "USDT" }]);
+  await page.route("**/api/v1/payment-methods", route => route.fulfill({ json: ["crypto"] }));
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: "Пополнить здесь · 1.11 USDT", exact: true })).toBeVisible();
+  await expect(dialog.getByText("CryptoBot", { exact: true })).toBeVisible();
+});
+
+test("repeat checkout provider choice changes both charge disclosure and checkout destination", async ({ page }) => {
+  const state = await pendingCheckout(page, [
+    { provider: "tbank", amount: 100, currency: "RUB" },
+    { provider: "crypto", amount: 1.11, currency: "USDT" },
+  ]);
+  let cryptoTopups = 0;
+  await page.route("**/api/v1/topup/crypto", route => {
+    cryptoTopups++;
+    return route.fulfill({ json: { pay_url: "https://pay.example.test/crypto", transaction_id: 702, amount_usdt: 1.11 } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: "Пополнить здесь · 100 ₽", exact: true })).toBeVisible();
+  await dialog.getByLabel("Способ оплаты").selectOption("crypto");
+  await dialog.getByRole("button", { name: "Пополнить здесь · 1.11 USDT", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  expect(cryptoTopups).toBe(1);
+  expect(state.topups).toBe(0);
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("apix:feed-repeat-draft:v2:1:201")!).payment.provider)).toBe("crypto");
+});
+
+test("repeat checkout never invents the amount of a mapped Lava offer", async ({ page }) => {
+  await pendingCheckout(page, [{ provider: "lava", amount: null, currency: "RUB" }]);
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: "Пополнить здесь · сумма в ₽ на странице оплаты", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Пополнить здесь · 100 ₽", exact: true })).toHaveCount(0);
+});
+
+test("repeat checkout fails closed when a plan has no eligible payment options", async ({ page }) => {
+  const state = await pendingCheckout(page, []);
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByText("Для этого пакета пока нет доступного способа оплаты.")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Пополнить здесь/ })).toHaveCount(0);
+  expect(state.topups).toBe(0);
 });
 
 test("paid receipt cannot expose a stale insufficient-balance top-up while quote refresh is delayed", async ({ page }) => {
@@ -415,4 +492,163 @@ test("paid receipt cannot expose a stale insufficient-balance top-up while quote
   release();
   await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
   expect(state.topups).toBe(1);
+});
+
+test("Seedance source-video edit discloses measured billing without starting generation", async ({ page }) => {
+  await mockMiniAppApi(page);
+  let paidRequests = 0;
+  await page.route("https://example.test/source.mp4", (route) => route.fulfill({ contentType: "video/mp4", body: Buffer.alloc(32) }));
+  await page.route("**/api/v1/models/video", (route) => route.fulfill({ json: [{
+    key: "bytedance/seedance-2-5", display_name: "Seedance 2.5", credits: 4,
+    modes: ["text", "multimodal"], supports_video_input: true, max_refs: 30,
+    aspect_ratios: ["adaptive", "16:9", "9:16"], durations: [5, 10, 30], resolutions: ["720p"],
+  }] }));
+  await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [{
+    ...feedItems[0], model: "bytedance/seedance-2-5", gen_type: "video",
+    result_url: "https://example.test/source.mp4", result_urls: ["https://example.test/source.mp4"],
+  }] }));
+  await page.route("**/api/v1/feed/201/remix/quote", (route) => route.fulfill({ json: {
+    cost_credits: 28, balance_credits: 100, can_run: true, deficit_credits: 0,
+    source_video_edit: true, effective_duration_seconds: 7,
+  } }));
+  await page.route("**/api/v1/feed/201/remix", (route) => {
+    paidRequests++;
+    return route.fulfill({ status: 502, json: { detail: "Must not run before confirmation" } });
+  });
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("button", { name: "Повторить" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByLabel("Что изменить в образе").fill("Сделай одежду синей");
+  await expect(dialog.getByText("Редактирование исходного ролика: длительность и кадр берутся из источника. Для оплаты: 7 сек.")).toBeVisible();
+  await expect(dialog.getByRole("contentinfo").getByText("Стоимость: 28 💋", { exact: true })).toBeVisible();
+  expect(paidRequests).toBe(0);
+});
+
+test("image personalization reserves a source slot before uploading photos", async ({ page }) => {
+  await mockMiniAppApi(page);
+  await page.route("**/api/v1/models/image", route => route.fulfill({ json: [
+    ...imageModels, { ...imageModels[0], key: "qwen/image-edit", display_name: "Single reference", max_refs: 1 },
+  ] }));
+  let uploads = 0;
+  let paidRequests = 0;
+  await page.route("**/api/web/upload-media", route => {
+    uploads++;
+    return route.fulfill({ json: { data: { url: `https://example.test/ref-${uploads}.png` } } });
+  });
+  await page.route("**/api/v1/feed/201/remix", route => {
+    paidRequests++;
+    return route.fulfill({ status: 500, json: { detail: "Unexpected launch" } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByText("Исходная работа занимает один слот. Можно добавить своих фото: 3.")).toBeVisible();
+  const photo = (index: number) => ({ name: `ref-${index}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, index]) });
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+  await dialog.locator("input[type=file]").setInputFiles([1, 2, 3, 4].map(photo));
+  await expect(dialog.getByRole("contentinfo").getByText("Исходная работа занимает один слот. Можно добавить своих фото: 3.")).toBeVisible();
+  expect(uploads).toBe(0);
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+  await dialog.locator("input[type=file]").setInputFiles([1, 2, 3].map(photo));
+  await expect(dialog.getByLabel("Удалить референс")).toHaveCount(3);
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeDisabled();
+  await expect(dialog.getByLabel("Модель").locator('option[value="qwen/image-edit"]')).toHaveJSProperty("disabled", true);
+  expect(uploads).toBe(3);
+  expect(paidRequests).toBe(0);
+});
+
+test("one-reference image models retain text edits without offering impossible photo uploads", async ({ page }) => {
+  await mockMiniAppApi(page);
+  await page.route("**/api/v1/models/image", route => route.fulfill({ json: [{ ...imageModels[0], max_refs: 1 }] }));
+  let latestQuote: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/feed/201/remix/quote", route => {
+    latestQuote = route.request().postDataJSON();
+    return route.fulfill({ json: { cost_credits: 2, balance_credits: 100, can_run: true, deficit_credits: 0 } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeDisabled();
+  await dialog.getByLabel("Что изменить в образе").fill("Сделай фон синим");
+  await expect(dialog.getByRole("button", { name: /Запустить повтор · 2/ })).toBeEnabled();
+  expect(latestQuote?.["reference_urls"]).toEqual([]);
+  expect(latestQuote?.["source_image_url"]).toBe("https://example.test/source.png");
+  expect(latestQuote?.["change_request"]).toBe("Сделай фон синим");
+});
+
+test("restored photos beyond current source-reserved capacity remain visible and cannot launch", async ({ page }) => {
+  await mockMiniAppApi(page);
+  let maxRefs = 3;
+  let uploads = 0;
+  await page.route("**/api/v1/models/image", route => route.fulfill({ json: [{ ...imageModels[0], max_refs: maxRefs }] }));
+  await page.route("**/api/web/upload-media", route => {
+    uploads++;
+    return route.fulfill({ json: { data: { url: `https://example.test/ref-${uploads}.png` } } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+  await dialog.locator("input[type=file]").setInputFiles([1, 2].map(index => ({ name: `ref-${index}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, index]) })));
+  await expect(dialog.getByLabel("Удалить референс")).toHaveCount(2);
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+  maxRefs = 2;
+  await page.reload();
+  await expect(dialog.getByLabel("Удалить референс")).toHaveCount(2);
+  await expect(dialog.getByRole("alert")).toContainText("Сохранённые фото не удалены");
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+  await dialog.getByLabel("Удалить референс").last().click();
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+  await expect(dialog.getByLabel("Удалить референс")).toHaveCount(1);
+});
+
+test("a valid six-photo repeat draft restores every photo without silent truncation", async ({ page }) => {
+  await mockMiniAppApi(page);
+  let uploads = 0;
+  await page.route("**/api/v1/models/image", route => route.fulfill({ json: [{ ...imageModels[0], max_refs: 7 }] }));
+  await page.route("**/api/web/upload-media", route => {
+    uploads++;
+    return route.fulfill({ json: { data: { url: `https://example.test/ref-${uploads}.png` } } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+  await dialog.locator("input[type=file]").setInputFiles([1, 2, 3, 4, 5, 6].map(index => ({ name: `ref-${index}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, index]) })));
+  await expect(dialog.getByLabel("Удалить референс")).toHaveCount(6);
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+  await page.reload();
+  await expect(dialog.getByLabel("Удалить референс")).toHaveCount(6);
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+  expect(uploads).toBe(6);
+});
+
+test("Gemini source-video quota reserves two shared slots before photo upload", async ({ page }) => {
+  await mockMiniAppApi(page);
+  await page.route("https://example.test/source.mp4", route => route.fulfill({ contentType: "video/mp4", body: Buffer.alloc(32) }));
+  await page.route("**/api/v1/models/video", route => route.fulfill({ json: [{
+    key: "gemini-omni-video", display_name: "Gemini Omni", credits: 38, modes: ["text", "image", "video"],
+    max_refs: 7, max_refs_with_video: 5, supports_video_input: true,
+    aspect_ratios: ["16:9"], durations: [4], resolutions: ["1080p"],
+  }] }));
+  await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
+    ...feedItems[0], model: "gemini-omni-video", gen_type: "video",
+    result_url: "https://example.test/source.mp4", result_urls: ["https://example.test/source.mp4"],
+  }] }));
+  let uploads = 0;
+  await page.route("**/api/web/upload-media", route => {
+    uploads++;
+    return route.fulfill({ json: { data: { url: `https://example.test/ref-${uploads}.png` } } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByText("Для этой модели можно добавить своих фото: 5. Нужна поддержка исходного видео.")).toBeVisible();
+  const photo = (index: number) => ({ name: `ref-${index}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, index]) });
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+  await dialog.locator("input[type=file]").setInputFiles([1, 2, 3, 4, 5, 6].map(photo));
+  await expect(dialog.getByRole("contentinfo")).toContainText("можно добавить своих фото: 5");
+  expect(uploads).toBe(0);
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+  await dialog.locator("input[type=file]").setInputFiles([1, 2, 3, 4, 5].map(photo));
+  await expect(dialog.getByLabel("Удалить референс")).toHaveCount(5);
+  await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeDisabled();
+  expect(uploads).toBe(5);
 });

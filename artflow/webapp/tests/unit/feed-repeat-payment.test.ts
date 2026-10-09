@@ -126,3 +126,34 @@ test("only invoice-backed providers can reopen a checkout, never a reusable Trib
   assert.equal(canReopenPayment({ ...checkout, provider: null }), false);
   assert.equal(canReopenPayment(pending), false);
 });
+
+test("Tribute product remains guarded after a funded repeat, even when an owned paid purchase exists", () => {
+  const storage = memoryStorage();
+  const payment = paymentFromResponse({ ...pending, provider: "tribute", planKey: "credits_15" }, {
+    pay_url: "https://web.tribute.tg/p/DDs", credits: 15, amount_usd: 2, provider: "tribute",
+  });
+  assert.equal(payment.transactionId, null);
+  assert.equal(paymentResolution(payment, [{
+    id: 701, provider: "tribute", external_id: "digital:78901", status: "paid", credits: 15,
+  }]), "pending");
+  assert.equal(saveRepeatDraft(storage, 7, 201, { ...draft, payment }), true);
+  // Successful generation uses this same cleanup; a balance increase or spend
+  // must not be interpreted as settlement of an uncorrelated product checkout.
+  clearRepeatDraft(storage, 7, 201);
+  const reopened = readRepeatDraft(storage, 7, 201, 1000 + 48 * 60 * 60 * 1000);
+  assert.deepEqual(reopened?.payment, payment);
+  assert.equal(canReopenPayment(reopened!.payment!), false);
+  assert.equal(reopened?.changeRequest, draft.changeRequest);
+  assert.deepEqual(reopened?.references, draft.references);
+});
+
+test("all valid model references survive ordinary and pending-payment draft restoration", () => {
+  for (const count of [6, 30]) {
+    const storage = memoryStorage();
+    const references = Array.from({ length: count }, (_, index) => `https://example.test/ref-${index}.png`);
+    for (const payment of [null, pending]) {
+      assert.equal(saveRepeatDraft(storage, 7, 201, { ...draft, references, payment }), true);
+      assert.deepEqual(readRepeatDraft(storage, 7, 201, 1001)?.references, references);
+    }
+  }
+});

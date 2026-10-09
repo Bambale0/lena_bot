@@ -13,10 +13,12 @@ from core.gemini_omni import (
     GEMINI_OMNI_DURATIONS,
     GEMINI_OMNI_MAX_AUDIO_IDS,
     GEMINI_OMNI_MAX_CHARACTER_IDS,
+    GEMINI_OMNI_MAX_IMAGE_SLOTS,
     GEMINI_OMNI_PRICE_TABLE,
     GEMINI_OMNI_RESOLUTIONS,
     GEMINI_OMNI_VIDEO_INPUT_PRICES,
     GEMINI_OMNI_VIDEO_MODEL,
+    GEMINI_OMNI_VIDEO_SLOT_COST,
 )
 from db.models import ModelCost
 
@@ -188,7 +190,8 @@ VIDEO_CAPS: dict[str, dict] = {
         "has_resolution": True,
         "resolutions": list(GEMINI_OMNI_RESOLUTIONS),
         "resolution_labels": {"720p": "720p", "1080p": "1080p", "4k": "4K"},
-        "max_refs": 7,
+        "max_refs": GEMINI_OMNI_MAX_IMAGE_SLOTS,
+        "max_refs_with_video": GEMINI_OMNI_MAX_IMAGE_SLOTS - GEMINI_OMNI_VIDEO_SLOT_COST,
         "supports_video_input": True,
         "max_audio_ids": GEMINI_OMNI_MAX_AUDIO_IDS,
         "max_character_ids": GEMINI_OMNI_MAX_CHARACTER_IDS,
@@ -942,6 +945,17 @@ def video_models_kb(
         builder.row(_model_button(mc, "vid_model", model_costs))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="menu:video"))
     return builder.as_markup()
+
+
+def feed_video_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
+    """Offer the same source-video capabilities validated by feed preflight."""
+    from core.feed_remix_prompt import supports_feed_source_media
+
+    compatible = [
+        cost for cost in model_costs
+        if supports_feed_source_media(VIDEO_CAPS.get(cost.model_key, {}), "video")
+    ]
+    return video_models_kb(compatible)
 
 
 def video_model_info(model_key: str) -> str:

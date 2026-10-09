@@ -24,6 +24,8 @@ from db import repository as repo
 from db.models import GenerationStatus, GenerationType, ImageGenerationAction, User
 from db.repeat_lookup import (
     find_repeat_by_confirm_key as _find_repeat_by_confirm_key,
+)
+from db.repeat_lookup import (
     get_repeat_task_by_any_id,
     parse_input_params,
 )
@@ -132,7 +134,7 @@ def _confirmation_keyboard(data: dict[str, Any]) -> InlineKeyboardMarkup:
     label = "✅ Запустить бесплатно" if cost <= 0 else f"✅ Запустить за {cost:g} 💋"
     builder.row(InlineKeyboardButton(text=label, callback_data=f"repeat_run_confirm_{raw}"))
     if not data.get("repeat_is_pinterest"):
-        builder.row(InlineKeyboardButton(text="✏️ Изменить промпт", callback_data=f"repeat_edit_prompt_{raw}"))
+        builder.row(InlineKeyboardButton(text="✏️ Изменить образ" if data.get("repeat_source_feed_gen_id") else "✏️ Изменить промпт", callback_data=f"repeat_edit_prompt_{raw}"))
     if bool(data.get("repeat_supports_refs")):
         builder.row(InlineKeyboardButton(text="📎 Добавить референсы", callback_data=f"repeat_add_refs_{raw}"))
     builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"repeat_run_cancel_{raw}"))
@@ -144,7 +146,11 @@ def _confirmation_text(data: dict[str, Any]) -> str:
     missing = _unique_urls(data.get("repeat_missing_references"))
     cost = float(data.get("repeat_cost") or 0)
     prompt = str(data.get("repeat_prompt") or "").strip()
-    prompt_line = "🔒 Скрытый трендовый промпт" if data.get("repeat_prompt_hidden") else html.escape(prompt)
+    protected_feed = bool(data.get("repeat_source_feed_gen_id"))
+    prompt_line = (
+        "🔒 Скрытый промпт автора" if protected_feed
+        else "🔒 Скрытый трендовый промпт" if data.get("repeat_prompt_hidden") else html.escape(prompt)
+    )
     price_label = "бесплатно" if cost <= 0 else f"{cost:g} 💋"
     lines = [
         "🔁 <b>Повторить эту генерацию?</b>",
@@ -159,6 +165,8 @@ def _confirmation_text(data: dict[str, Any]) -> str:
         "",
         "💋 Списание произойдёт только после подтверждения запуска.",
     ]
+    if protected_feed and data.get("repeat_feed_change_request"):
+        lines.extend(["", "✏️ Изменения: " + html.escape(str(data["repeat_feed_change_request"]))])
     if missing:
         lines.extend(["", "⚠️ Часть старых фото уже очищена. Добавьте фото заново."])
     if data.get("repeat_reference_required") and not refs:
@@ -179,7 +187,10 @@ async def _source_session_snapshot(
         source_session = await repo.get_image_session(session, generation.image_session_id, generation.user_id)
 
     model_key = str(payload.get("img_service") or payload.get("model") or generation.model)
-    prompt = str(payload.get("prompt") or generation.prompt or "")
+    prompt = str(
+        generation.prompt or "" if getattr(generation, "source_feed_gen_id", None)
+        else payload.get("prompt") or generation.prompt or ""
+    )
     ratio = payload.get("img_ratio") or getattr(source_session, "aspect_ratio", None)
     quality = str(payload.get("img_quality") or getattr(source_session, "quality", None) or "basic")
     count = int(payload.get("img_count") or getattr(source_session, "count", 1) or 1)
@@ -253,7 +264,8 @@ async def _prepare_repeat(
         repeat_raw_task_id=public_id,
         repeat_model_key=model_key,
         repeat_prompt=str(snapshot.get("prompt") or generation.prompt or ""),
-        repeat_prompt_hidden=bool(snapshot.get("hidden_prompt")) or is_pinterest,
+        repeat_prompt_hidden=bool(getattr(generation, "source_feed_gen_id", None)) or bool(snapshot.get("hidden_prompt")) or is_pinterest,
+        repeat_feed_change_request=None,
         repeat_aspect_ratio=snapshot.get("aspect_ratio"),
         repeat_quality=str(snapshot.get("quality") or "basic"),
         repeat_count=max(1, int(snapshot.get("count") or 1)),
@@ -314,6 +326,7 @@ async def confirm_repeat(
             await call.message.answer("❌ Для этой модели сначала отправьте фото.")  # type: ignore[union-attr]
             return
 
+        source_feed_gen_id = getattr(source, "source_feed_gen_id", None) or data.get("repeat_source_feed_gen_id")
         model_key = str(data.get("repeat_model_key") or source.model)
         prompt = str(data.get("repeat_prompt") or source.prompt or "").strip()
         if not prompt:
@@ -329,7 +342,7 @@ async def confirm_repeat(
             "repeat_confirm_key": confirm_key,
             "action_type": "repeat",
             "parent_generation_id": source_id,
-            "source_feed_gen_id": data.get("repeat_source_feed_gen_id"),
+            "source_feed_gen_id": source_feed_gen_id,
             "prompt": prompt,
             "img_service": model_key,
             "img_ratio": data.get("repeat_aspect_ratio"),
@@ -367,7 +380,7 @@ async def confirm_repeat(
             aspect_ratio=data.get("repeat_aspect_ratio"),
             quality=str(data.get("repeat_quality") or "basic"),
             count=max(1, int(data.get("repeat_count") or 1)),
-            base_prompt=prompt,
+            base_prompt=None if source_feed_gen_id else prompt,
             reference_file_id=None,
             reference_file_ids=None,
             reference_url=logical_refs[0] if logical_refs else None,
@@ -397,7 +410,8 @@ async def confirm_repeat(
                     action_type=ImageGenerationAction.repeat,
                     reference_url=provider_refs or None,
                     parent_generation_id=source_id,
-                    source_feed_gen_id=data.get("repeat_source_feed_gen_id"),
+                    source_feed_gen_id=source_feed_gen_id,
+                    feed_change_request=data.get("repeat_feed_change_request") if source_feed_gen_id else None,
                     launching_text="🔁 <b>Повторяю генерацию...</b>",
                     queued_text="⏳ <b>Повтор запущен.</b> Результат придёт сюда автоматически.",
                 )
@@ -438,7 +452,7 @@ async def edit_repeat_prompt(call: CallbackQuery, state: FSMContext) -> None:
         await safe_answer_callback(call, "В Pinterest-сценарии скрытый prompt сохраняется без изменений", show_alert=True)
         return
     await state.set_state(SafeRepeatFSM.editing_prompt)
-    await call.message.answer("✏️ Отправьте новый prompt одним сообщением.")  # type: ignore[union-attr]
+    await call.message.answer("✏️ Опишите изменения опубликованного изображения одним сообщением." if data.get("repeat_source_feed_gen_id") else "✏️ Отправьте новый prompt одним сообщением.")  # type: ignore[union-attr]
     await safe_answer_callback(call)
 
 
@@ -451,7 +465,11 @@ async def save_repeat_prompt(message: Message, state: FSMContext) -> None:
     if len(prompt) > 4000:
         await message.answer("Prompt слишком длинный — максимум 4000 символов.")
         return
-    await state.update_data(repeat_prompt=prompt)
+    data = await state.get_data()
+    await state.update_data(
+        repeat_prompt=prompt,
+        repeat_feed_change_request=prompt if data.get("repeat_source_feed_gen_id") else None,
+    )
     await state.set_state(SafeRepeatFSM.confirming)
     data = await state.get_data()
     await message.answer(_confirmation_text(data), reply_markup=_confirmation_keyboard(data))

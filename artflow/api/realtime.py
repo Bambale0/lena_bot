@@ -22,6 +22,7 @@ from api.miniapp_auth import _verify_init_data, verify_web_auth_token
 from api.prompt_privacy import PROMPT_HIDDEN_PLACEHOLDER
 from api.public_files import public_url_is_available
 from api.web_auth_constants import WEB_AUTH_COOKIE_NAME
+from core.feed_remix_prompt import generation_public_error
 from core.seedance_reconciliation import public_generation_status
 from db import repository as repo
 from db.models import Generation, User
@@ -77,7 +78,7 @@ def generation_event_payload(gen: Generation) -> dict[str, Any]:
         "status": public_generation_status(gen),
         "result_url": _generation_primary_result_url(gen),
         "result_urls": _generation_result_urls(gen),
-        "error": gen.error_msg,
+        "error": generation_public_error(gen),
         "credits_spent": float(gen.credits_spent or 0),
         "created_at": _iso(gen.created_at),
         "finished_at": _iso(gen.finished_at),

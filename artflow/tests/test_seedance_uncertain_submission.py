@@ -316,8 +316,13 @@ async def test_review_notice_text_does_not_claim_refund_or_provider_failure(monk
         user=SimpleNamespace(tg_id=125), gen=gen
     )
     text = bot.send_message.await_args.kwargs["text"]
-    assert "не подтвердил" in text and "удержаны" in text and "provider-id" in text
+    assert "Уточняем статус видео у поставщика" in text
+    assert "Проверка продолжается автоматически" in text
+    assert "Сообщим, когда получим результат или подтверждённую ошибку" in text
+    assert "Повторно запускать эту задачу не нужно" in text
+    assert "удержаны" in text and "provider-id" in text
     assert "возвращено" not in text and "подтвердил ошибку" not in text
+    assert "поддержк" not in text.lower() and "ручн" not in text.lower()
     bot.session.close.assert_awaited_once()
 
 
@@ -482,8 +487,13 @@ def test_standalone_site_review_to_terminal_polling_predicate():
     checks = """
     if (!generationIsActive('reconciliation_required')) process.exit(1);
     if (generationIsActive('done') || generationIsActive('failed')) process.exit(2);
-    if (!generationStatusCopy('reconciliation_required').includes('не подтвердил')) process.exit(3);
-    if (!statusLabel('reconciliation_required').includes('проверке')) process.exit(4);
+    const copy = generationStatusCopy('reconciliation_required');
+    if (!copy.includes('Проверка продолжается автоматически')) process.exit(3);
+    if (!statusLabel('reconciliation_required').includes('уточняем статус')) process.exit(4);
+    if (!copy.includes('Сообщим, когда получим результат или подтверждённую ошибку')) process.exit(5);
+    if (!copy.includes('Повторно запускать эту задачу не нужно')) process.exit(6);
+    if (!copy.includes('Кредиты пока удержаны')) process.exit(7);
+    if (/поддержк|ручн|возвращено/i.test(copy)) process.exit(8);
     """
     result = subprocess.run(
         ["node", "-e", "\n".join(functions) + checks], capture_output=True, text=True, timeout=5

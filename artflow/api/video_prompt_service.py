@@ -1,7 +1,9 @@
 """Video-to-prompt routing through CometAPI/Qwen video understanding."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +14,9 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 
 VIDEO_PROMPT_MODEL_KEY = "llm.video-prompt"
+# A wall-clock budget, unlike HTTPX's per-operation timeout. Canonical ingress
+# gives only these synchronous routes 240s, leaving time for refund and cleanup.
+VIDEO_PROMPT_TIMEOUT_SECONDS = 180.0
 
 _SUPPORTED_VIDEO_MIME_TYPES = {
     "video/mp4",
@@ -48,15 +53,18 @@ class VideoPromptResult:
 
 
 def _video_prompt_chat_messages(video_url: str, *, fps: float | int | None = None) -> list[dict[str, Any]]:
+    # Qwen OpenAI-compatible video inputs use fps beside video_url.
+    # See Model Studio vision/video documentation; adapted from PR205.
+    sample_fps = float(settings.COMET_VIDEO_PROMPT_FPS if fps is None else fps)
+    if not math.isfinite(sample_fps) or not 0.1 <= sample_fps <= 10:
+        raise ValueError("Video prompt FPS must be between 0.1 and 10")
     video_payload: dict[str, Any] = {"url": video_url}
-    if fps is not None:
-        video_payload["fps"] = fps
     return [
         {"role": "system", "content": [{"type": "text", "text": _VIDEO_SYSTEM_PROMPT}]},
         {
             "role": "user",
             "content": [
-                {"type": "video_url", "video_url": video_payload},
+                {"type": "video_url", "video_url": video_payload, "fps": sample_fps},
                 {"type": "text", "text": _VIDEO_PROMPT_REQUEST_TEXT},
             ],
         },
@@ -97,8 +105,12 @@ def _extract_chat_text(payload: Any) -> str:
         raise VideoPromptProviderError("Video prompt response is not an object")
     if payload.get("error"):
         raise VideoPromptProviderError("Video prompt provider returned an error")
-    choices = payload.get("choices") or []
-    if choices and isinstance(choices[0], dict):
+    choices = payload.get("choices")
+    if choices is None:
+        choices = []
+    if not isinstance(choices, list) or (choices and not isinstance(choices[0], dict)):
+        raise VideoPromptProviderError("Video prompt response contained invalid choices")
+    if choices:
         if choices[0].get("finish_reason") == "content_filter":
             raise VideoPromptProviderError("Video prompt provider filtered the response")
         message = choices[0].get("message") if isinstance(choices[0].get("message"), dict) else {}
@@ -111,9 +123,9 @@ def _extract_chat_text(payload: Any) -> str:
             if any(isinstance(item, dict) and item.get("type") == "refusal" for item in content):
                 raise VideoPromptProviderError("Video prompt provider refused the request")
             text = "\n".join(
-                str(item.get("text") or "").strip()
+                item["text"].strip()
                 for item in content
-                if isinstance(item, dict) and item.get("text")
+                if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"]
             ).strip()
             if text:
                 return _validated_prompt_text(text)
@@ -137,10 +149,16 @@ def _comet_video_prompt_model() -> str:
 
 
 async def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        response = await client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
+    try:
+        async with asyncio.timeout(VIDEO_PROMPT_TIMEOUT_SECONDS):
+            async with httpx.AsyncClient(timeout=VIDEO_PROMPT_TIMEOUT_SECONDS) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+    except (TimeoutError, httpx.TimeoutException) as exc:
+        # Convert our own deadline into an ordinary failure so both API and bot
+        # handlers run their existing once-only refund and temporary-file cleanup.
+        raise VideoPromptProviderError("Video prompt analysis timed out") from exc
     if not isinstance(data, dict):
         raise VideoPromptProviderError("Video prompt provider returned non-object JSON")
     return data

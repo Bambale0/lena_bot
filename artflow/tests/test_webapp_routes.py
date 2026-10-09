@@ -1978,9 +1978,10 @@ async def test_feed_remix_image_uses_and_saves_reference(client, monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_feed_remix_image_prefers_user_reference_over_source(client, monkeypatch) -> None:
+async def test_feed_remix_image_uses_public_source_and_user_reference_without_secret(client, monkeypatch) -> None:
     source = SimpleNamespace(
         id=188,
+        gen_type=GenerationType.image,
         model="seedream-4.0",
         prompt="hidden prompt",
         result_url="https://example.test/source.jpg",
@@ -2028,8 +2029,13 @@ async def test_feed_remix_image_prefers_user_reference_over_source(client, monke
 
     assert response.status_code == 202
     assert response.json()["prompt_hidden"] is True
-    assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/user-ref.jpg"
-    assert image_generate.await_args.kwargs["image_url"] == "https://example.test/user-ref.jpg"
+    assert create_image_session.await_args.kwargs["reference_url"] == [
+        "https://example.test/source.jpg", "https://example.test/user-ref.jpg",
+    ]
+    assert image_generate.await_args.kwargs["image_url"] == [
+        "https://example.test/source.jpg", "https://example.test/user-ref.jpg",
+    ]
+    assert "hidden prompt" not in image_generate.await_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -2129,6 +2135,7 @@ async def test_feed_remix_midjourney_blend_requires_refs_before_spending(client,
 async def test_feed_remix_midjourney_blend_uses_source_ref_and_reference_urls(client, monkeypatch) -> None:
     source = SimpleNamespace(
         id=91,
+        gen_type=GenerationType.image,
         model="midjourney-imagine",
         prompt="hidden blend prompt",
         result_url="https://example.test/source-blend.jpg",

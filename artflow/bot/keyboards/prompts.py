@@ -91,6 +91,7 @@ def prompt_use_model_kb(
     model_costs: list[ModelCost],
     *,
     reference_only: bool = False,
+    reserved_refs: int = 0,
 ) -> InlineKeyboardMarkup:
     from bot.keyboards.models import HIDDEN_IMAGE_MODELS, IMAGE_CAPS
 
@@ -102,6 +103,7 @@ def prompt_use_model_kb(
             and caps is not None
             and mc.model_key not in HIDDEN_IMAGE_MODELS
             and (not reference_only or "image" in caps.get("modes", []))
+            and (not reserved_refs or int(caps.get("max_refs", 0) or 0) > reserved_refs)
         ):
             builder.row(
                 InlineKeyboardButton(
