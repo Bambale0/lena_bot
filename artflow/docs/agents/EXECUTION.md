@@ -1270,3 +1270,13 @@ Latest Codex reviewed `244c97b` and raised two P2 liveness concerns:
 - Polling-only mode fell back from Redis to MemoryStorage even while Neironych API credentials were configured, causing the now-unified Redis-guarded video worker to fail closed and potentially strand newly charged work. **Fixed:** fail polling startup before Bot creation when Neironych is enabled and Redis unavailable; KIE-only development can retain existing MemoryStorage fallback. Added negative/positive regression.
 
 No new SQL migrations or hardcoded prices, and no paid POST or manual credit writes.
+
+
+## Codex PR #204 final outbox/readiness checks
+
+Codex code/security review on `6c676a0` found three further P2 cases, reproduced as failing tests and fixed before release:
+1. `claim_neironych_video_notice` could reclaim an expired `sending` or overdue `pending` receipt even when `attempts >= MAX_ATTEMPTS` after a process crash. Now transitions to `dead_letter` before claiming, with stale lease token cleared; the completion-time cap remains. Regression verifies both cases.
+2. Redis historical notice cursor alone skipped the retry window of previously discovered old receipts. New Redis ZSET tracks discovered notice IDs by due time and a Lua operation atomically commits IDs **before** checkpoint advance. After an attempt, next due is derived from the DB's `retry_at` or `claimed_at + lease`, and terminal `sent/dead_letter` are removed. Tests cover old notice backoff without sweep wrap, token lease expiry, removed successful notice, loss of Redis during discovery, and prior restart recovery.
+3. Main ASGI lifespan created a lazy Redis client but could start the webhook/site even if its configured Redis endpoint was unreachable. It now performs a bounded PING against the exact configured Redis before Bot/Webhook creation and fails startup if unavailable (without leaking credentials). Unit regression probes success and connection failure; source contract ensures call precedes webhook.
+
+All recovery paths remain read-only provider GET/download plus atomic existing DB transitions. No additional paid provider submissions or price/configuration hardcoding.

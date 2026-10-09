@@ -33,6 +33,7 @@ def _video(*, age_minutes=12):
 class _FakeNoticeCursorRedis:
     def __init__(self):
         self.store = {}
+        self.scores = {}
 
     async def get(self, key):
         return self.store.get(key)
@@ -40,6 +41,27 @@ class _FakeNoticeCursorRedis:
     async def set(self, key, value):
         self.store[key] = str(value)
         return True
+
+    async def eval(self, script, key_count, checkpoint, due_key, cursor, now, *ids):
+        assert key_count == 2
+        for gen_id in ids:
+            self.scores.setdefault(str(gen_id), float(now))
+        self.store[checkpoint] = str(cursor)
+        return 1
+
+    async def zrangebyscore(self, key, min, max, *, start=0, num=None):
+        entries = sorted(
+            ((score, int(gen_id)) for gen_id, score in self.scores.items() if score <= float(max))
+        )
+        return [str(gen_id) for _, gen_id in entries[start:][:num]]
+
+    async def zadd(self, key, scores):
+        for gen_id, due in scores.items():
+            self.scores[str(gen_id)] = float(due)
+        return len(scores)
+
+    async def zrem(self, key, gen_id):
+        return int(self.scores.pop(str(gen_id), None) is not None)
 
     async def aclose(self):
         pass
@@ -674,18 +696,7 @@ async def test_notice_historical_cursor_survives_worker_restart(monkeypatch):
     from core import neironych_video_reconcile_scheduler as scheduler
     from core.config import settings
 
-    storage = {}
-
-    class FakeRedis:
-        async def get(self, key):
-            return storage.get(key)
-
-        async def set(self, key, value):
-            storage[key] = str(value)
-            return True
-
-        async def aclose(self):
-            pass
+    redis_store = _FakeNoticeCursorRedis()
 
     class EmptyRows:
         def scalars(self):
@@ -702,16 +713,16 @@ async def test_notice_historical_cursor_survives_worker_restart(monkeypatch):
     monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
     monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE", 4)
     monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_NOTICE_SCAN_ID_SPAN", 1000)
-    monkeypatch.setattr(scheduler.aioredis.Redis, "from_url", lambda *args, **kwargs: FakeRedis())
+    monkeypatch.setattr(scheduler.aioredis.Redis, "from_url", lambda *args, **kwargs: redis_store)
     assert await scheduler._load_notice_batch() == []
     assert scheduler._notice_cursor.older_id == 1000
-    assert list(storage.values()) == ["1000"]
+    assert list(redis_store.store.values()) == ["1000"]
 
     # A deploy creates a fresh process-local cursor, but Redis survives.
     monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
     assert await scheduler._load_notice_batch() == []
     assert scheduler._notice_cursor.older_id == 2000
-    assert list(storage.values()) == ["2000"]
+    assert list(redis_store.store.values()) == ["2000"]
 
 
 def test_polling_entry_rejects_memory_fallback_for_billable_neironych(monkeypatch):
@@ -722,3 +733,143 @@ def test_polling_entry_rejects_memory_fallback_for_billable_neironych(monkeypatc
     with pytest.raises(RuntimeError, match="Redis"):
         run_polling._require_neironych_recovery_redis(None)
     assert run_polling._require_neironych_recovery_redis(object()) is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_redis_preflight_checks_exact_url_before_accepting_requests():
+    from core.neironych_video_poll_gate import require_neironych_video_redis_ready
+
+    good = SimpleNamespace(ping=AsyncMock(return_value=True))
+    await require_neironych_video_redis_ready(good)
+    good.ping.assert_awaited_once()
+
+    down = SimpleNamespace(ping=AsyncMock(side_effect=ConnectionError("unreachable")))
+    with pytest.raises(RuntimeError, match="Redis"):
+        await require_neironych_video_redis_ready(down)
+
+
+def test_production_lifespan_requires_redis_preflight_before_webhook():
+    import inspect
+
+    import main
+
+    source = inspect.getsource(main.lifespan)
+    assert "await require_neironych_video_redis_ready(redis_client)" in source
+    assert source.index("await require_neironych_video_redis_ready(redis_client)") < source.index("await bot.set_webhook(")
+
+
+@pytest.mark.asyncio
+async def test_swept_old_notice_retries_on_due_time_without_cursor_wrap(monkeypatch):
+    """An old failed notice must not wait for a multi-day ID sweep to wrap."""
+    import json
+
+    from core import neironych_video_reconcile_scheduler as scheduler
+    from core.config import settings
+
+    redis = _FakeNoticeCursorRedis()
+    monkeypatch.setattr(scheduler.aioredis.Redis, "from_url", lambda *a, **kw: redis)
+    monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE", 4)
+    sweep = AsyncMock(side_effect=[[77], [], []])
+    monkeypatch.setattr(scheduler, "_load_notice_batch_at_cursor", sweep)
+
+    notice = {"neironych_video_notice": {
+        "kind": "done", "state": "pending", "attempts": 1,
+        "retry_at": (datetime.now(timezone.utc)+timedelta(minutes=4)).isoformat(),
+    }}
+
+    class DbSession:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): return False
+        async def scalar(self, _sql): return json.dumps(notice)
+        async def rollback(self): pass
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", DbSession)
+
+    assert await scheduler._load_notice_batch() == [77]
+    await scheduler._sync_notice_retry_schedule(77)
+    assert await scheduler._load_notice_batch() == [], "retry must respect backoff"
+    redis.scores["77"] = 1  # Simulate time passing; cursor still beyond 77.
+    assert await scheduler._load_notice_batch() == [77], "due notice must reappear"
+    assert sweep.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_notice_retry_queue_removes_sent_receipts(monkeypatch):
+    import json
+
+    from core import neironych_video_reconcile_scheduler as scheduler
+
+    redis = _FakeNoticeCursorRedis()
+    redis.scores["91"] = 0
+    monkeypatch.setattr(scheduler.aioredis.Redis, "from_url", lambda *a, **k: redis)
+
+    class FakeSession:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): return False
+        async def scalar(self, _sql):
+            return json.dumps({"neironych_video_notice": {"state": "sent"}})
+        async def rollback(self): pass
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
+    await scheduler._sync_notice_retry_schedule(91)
+    assert "91" not in redis.scores
+
+
+@pytest.mark.asyncio
+async def test_notice_retry_queue_respects_stale_sending_lease(monkeypatch):
+    import json
+
+    from core import neironych_video_reconcile_scheduler as scheduler
+    from core.config import settings
+
+    redis = _FakeNoticeCursorRedis()
+    redis.scores["19"] = 0
+    monkeypatch.setattr(scheduler.aioredis.Redis, "from_url", lambda *a, **k: redis)
+    now = datetime.now(timezone.utc)
+
+    class FakeSession:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): return False
+        async def scalar(self, _sql):
+            return json.dumps({"neironych_video_notice": {
+                "state": "sending", "claimed_at": now.isoformat(),
+                "attempts": 1,
+            }})
+        async def rollback(self): pass
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
+    await scheduler._sync_notice_retry_schedule(19)
+    assert redis.scores["19"] >= (
+        now.timestamp() + settings.NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS - 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_notice_atomic_cursor_unchanged_when_redis_tracking_fails(monkeypatch):
+    from core import neironych_video_reconcile_scheduler as scheduler
+
+    class FaultyRedis(_FakeNoticeCursorRedis):
+        async def eval(self, *args):
+            raise ConnectionError("redis lost connection before MULTI")
+
+    redis = FaultyRedis()
+    monkeypatch.setattr(scheduler.aioredis.Redis, "from_url", lambda *a, **kw: redis)
+    monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
+
+    async def fake_sql_sweep():
+        scheduler._notice_cursor.older_id = 500
+        return [77]
+
+    monkeypatch.setattr(scheduler, "_load_notice_batch_at_cursor", fake_sql_sweep)
+    with pytest.raises(ConnectionError):
+        await scheduler._load_notice_batch()
+    assert redis.store == {}
+    assert redis.scores == {}
+    assert scheduler._notice_cursor.older_id == 500
+
+    redis = _FakeNoticeCursorRedis()
+    monkeypatch.setattr(scheduler.aioredis.Redis, "from_url", lambda *a, **kw: redis)
+    assert await scheduler._load_notice_batch() == [77]
+    assert "77" in redis.scores
+    assert scheduler._notice_cursor.older_id == 500

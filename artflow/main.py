@@ -108,6 +108,7 @@ from core.db_backup_scheduler import run_database_backup_scheduler
 from core.logger import setup_logging
 from core.music_reconcile_scheduler import run_music_reconcile_scheduler
 from core.neironych_image_reconcile_scheduler import run_neironych_image_reconcile_scheduler
+from core.neironych_video_poll_gate import require_neironych_video_redis_ready
 from core.neironych_video_reconcile_scheduler import run_neironych_video_reconcile_scheduler
 from db import repository as repo
 from db.models import (
@@ -766,7 +767,19 @@ async def lifespan(app: FastAPI):
     setup_logging()
 
     # Redis
-    redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    redis_client = aioredis.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,
+        socket_connect_timeout=2.0,
+        socket_timeout=3.0,
+    )
+    try:
+        # Mandatory before webhook setup or serving HTTP: a lazy Redis client
+        # does not guarantee the worker can claim/persist Seedance tasks.
+        await require_neironych_video_redis_ready(redis_client)
+    except Exception:
+        await redis_client.aclose()
+        raise
 
     # Bot + Dispatcher
     storage = RedisStorage(redis=redis_client)

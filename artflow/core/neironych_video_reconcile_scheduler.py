@@ -25,6 +25,16 @@ _NOTICE_PENDING_REGEX = (
     r'"neironych_video_notice"\s*:\s*\{[^}]*"state"\s*:\s*"(pending|sending)"'
 )
 
+_TRACK_NOTICES_AND_CHECKPOINT_LUA = """
+-- An old notice MUST be in the retry queue before the sweep cursor advances.
+-- This Lua transaction cannot leave a persisted checkpoint without its IDs.
+for i = 3, #ARGV do
+    redis.call('ZADD', KEYS[2], 'NX', ARGV[2], ARGV[i])
+end
+redis.call('SET', KEYS[1], ARGV[1])
+return 1
+"""
+
 
 @dataclass
 class _ScanCursor:
@@ -138,15 +148,12 @@ def _notice_checkpoint_key() -> str:
     return f"apix:neironych-video-notice-sweep:{env}:last-id"
 
 
-async def _load_notice_batch() -> list[int]:
-    """Persist historical scan progress outside the app process.
+def _notice_retry_queue_key() -> str:
+    return _notice_checkpoint_key() + ":retry-due"
 
-    Redis has a dedicated compose volume. Retaining the last examined ID
-    makes pending/sending notifications discoverable across daily redeploys
-    without unbounded scans or a database schema migration. If Redis fails,
-    defer this iteration rather than repeatedly restarting the sweep.
-    """
-    client = aioredis.Redis.from_url(
+
+def _notice_redis_client():
+    return aioredis.Redis.from_url(
         settings.REDIS_URL,
         decode_responses=True,
         socket_connect_timeout=1.5,
@@ -154,13 +161,37 @@ async def _load_notice_batch() -> list[int]:
         health_check_interval=30,
         max_connections=3,
     )
+
+
+async def _load_notice_batch() -> list[int]:
+    """Discover notices by ID and preserve pending retry IDs across restarts.
+
+    Lua atomically records all discovered IDs in the durable Redis sorted set
+    before advancing the historical cursor. Failed sends and unexpired leases
+    stay in the sorted set until their next due time, without another DB sweep.
+    """
+    client = _notice_redis_client()
     try:
         checkpoint_key = _notice_checkpoint_key()
+        queue_key = _notice_retry_queue_key()
         stored = await client.get(checkpoint_key)
         _notice_cursor.older_id = max(0, int(stored or 0))
         ids = await _load_notice_batch_at_cursor()
-        await client.set(checkpoint_key, str(_notice_cursor.older_id))
-        return ids
+        now = datetime.now(timezone.utc).timestamp()
+        await client.eval(
+            _TRACK_NOTICES_AND_CHECKPOINT_LUA,
+            2,
+            checkpoint_key,
+            queue_key,
+            str(_notice_cursor.older_id),
+            str(now),
+            *(str(gen_id) for gen_id in ids),
+        )
+        due_ids = await client.zrangebyscore(
+            queue_key, "-inf", now,
+            start=0, num=settings.NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE,
+        )
+        return list(dict.fromkeys(int(gen_id) for gen_id in due_ids))
     finally:
         await client.aclose()
 
@@ -218,6 +249,44 @@ async def _load_notice_batch_at_cursor() -> list[int]:
         await session.rollback()
 
     return list(dict.fromkeys([*recent_ids, *sweep_ids]))[:size]
+
+
+async def _sync_notice_retry_schedule(gen_id: int) -> None:
+    """Reschedule a claimed notice using the authoritative DB receipt.
+
+    An old swept ID remains in the Redis ZSET across crashes/restarts until
+    its receipt is confirmed sent/dead_letter. Never infer completion from the
+    return value of a network send.
+    """
+    async with AsyncSessionLocal() as session:
+        input_params = await session.scalar(
+            select(Generation.input_params).where(Generation.id == gen_id)
+        )
+        await session.rollback()
+
+    params = repo.parse_input_params(input_params)
+    notice = params.get(repo.NEIRONYCH_VIDEO_NOTICE_KEY)
+    state = notice.get("state") if isinstance(notice, dict) else None
+    now = datetime.now(timezone.utc).timestamp()
+    due: float | None = None
+    if state == "pending":
+        scheduled = repo._notice_timestamp(notice.get("retry_at"))
+        due = max(now, scheduled.timestamp()) if scheduled else now
+    elif state == "sending":
+        claimed = repo._notice_timestamp(notice.get("claimed_at"))
+        due = (
+            max(now, (claimed + timedelta(seconds=settings.NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS)).timestamp())
+            if claimed else now + settings.NEIRONYCH_VIDEO_RECONCILE_INTERVAL_SECONDS
+        )
+
+    client = _notice_redis_client()
+    try:
+        if due is None:
+            await client.zrem(_notice_retry_queue_key(), str(gen_id))
+        else:
+            await client.zadd(_notice_retry_queue_key(), {str(gen_id): due})
+    finally:
+        await client.aclose()
 
 
 async def _process_active_video(gen_id: int) -> bool:
@@ -286,6 +355,15 @@ async def _process_delivery_notice(gen_id: int) -> bool:
                 gen_id, type(exc).__name__,
             )
             return False
+        finally:
+            try:
+                await _sync_notice_retry_schedule(gen_id)
+            except Exception:
+                # A crashed/failed sync cannot remove the previously tracked
+                # Redis ID; it remains due and is retried next scheduler cycle.
+                logger.exception(
+                    "Neironych video retry queue update delayed gen=%s", gen_id
+                )
 
 
 async def _count_missing_id_alerts() -> int:

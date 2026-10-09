@@ -1561,8 +1561,25 @@ async def claim_neironych_video_notice(
             await session.commit()
             return None
 
+    # Crash after Telegram send but before acknowledgement can leave a
+    # stale "sending" lease. Enforce the budget at *claim* time as well as at
+    # completion, otherwise every restart can silently exceed max_attempts.
+    current_attempts = max(0, int(data.get("attempts", 0) or 0))
+    if current_attempts >= settings.NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS:
+        data.update({"state": "dead_letter", "failed_at": now.isoformat()})
+        for stale_key in ("token", "claimed_at", "retry_at"):
+            data.pop(stale_key, None)
+        params[NEIRONYCH_VIDEO_NOTICE_KEY] = data
+        generation.input_params = json.dumps(params, ensure_ascii=False)
+        await session.commit()
+        logger.error(
+            "Neironych video Telegram notice exhausted after crash gen=%s attempts=%s",
+            gen_id, current_attempts,
+        )
+        return None
+
     token = str(uuid.uuid4())
-    attempts = min(int(data.get("attempts", 0) or 0) + 1, 100000)
+    attempts = current_attempts + 1
     data.update({
         "state": "sending", "token": token, "attempts": attempts,
         "claimed_at": now.isoformat(),

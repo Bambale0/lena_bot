@@ -31,6 +31,22 @@ def protect_neironych_video_poll_settlement() -> None:
         marker.set()
 
 
+async def require_neironych_video_redis_ready(client) -> None:
+    """Verify the exact configured Redis connection before paid jobs can start.
+
+    aioredis.from_url is lazy: creating a client doesn't prove the lease
+    coordinator is reachable. Never log credentials or the full Redis URL.
+    """
+    try:
+        if not await asyncio.wait_for(client.ping(), timeout=3.0):
+            raise RuntimeError("Redis PING returned a negative response")
+    except Exception as exc:
+        logger.critical("Neironych video recovery Redis preflight failed error=%s", type(exc).__name__)
+        raise RuntimeError(
+            "Redis is required for durable Neironych Seedance video processing"
+        ) from exc
+
+
 class NeironychVideoPollLeaseLost(RuntimeError):
     """Redis lease lost during a poll; caller must defer without refund."""
 

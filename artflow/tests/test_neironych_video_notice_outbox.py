@@ -208,3 +208,31 @@ async def test_permanent_delivery_failures_stop_at_dead_letter(monkeypatch):
     assert status["state"] == "dead_letter"
     assert status["failed_at"]
     assert await repo.claim_neironych_video_notice(session, row.id) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["pending", "sending"])
+async def test_expired_or_pending_notice_exhausted_attempts_cannot_reclaim(monkeypatch, state):
+    from core.config import settings
+
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS", 2)
+    row = _row()
+    metadata = json.loads(row.input_params)
+    notice = metadata["neironych_video_notice"]
+    notice["state"] = state
+    notice["attempts"] = 2
+    if state == "sending":
+        notice["token"] = "abandoned"
+        notice["claimed_at"] = (datetime.now(timezone.utc)-timedelta(hours=2)).isoformat()
+    metadata["neironych_video_notice"] = notice
+    row.input_params = json.dumps(metadata)
+    session = FakeSession(row)
+
+    assert await repo.claim_neironych_video_notice(session, row.id, lease_seconds=60) is None
+    saved = json.loads(row.input_params)["neironych_video_notice"]
+    assert saved["state"] == "dead_letter"
+    assert saved["attempts"] == 2
+    assert saved.get("failed_at")
+    assert "token" not in saved
+    assert "claimed_at" not in saved
+    assert await repo.claim_neironych_video_notice(session, row.id) is None
