@@ -1,0 +1,3 @@
+# Browser test outputs
+artflow/webapp/test-results/
+artflow/webapp/playwright-report/

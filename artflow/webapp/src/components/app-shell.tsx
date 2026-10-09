@@ -1,5 +1,8 @@
 import { startTransition, useEffect, useState, type ReactNode } from "react";
 import {
+  ArrowLeft,
+  Plus,
+  Images,
   Bot,
   Film,
   Flame,
@@ -15,6 +18,7 @@ import { t } from "@/lib/i18n";
 import type { AppTab, UserProfile } from "@/lib/types";
 import { cn, formatKisses } from "@/lib/utils";
 import { haptic } from "@/lib/telegram";
+import { editorParent, primaryTab } from "@/lib/ux2";
 
 // Regression marker for backend QA gate: label: "Лента" must remain feed-first.
 const tabs: Array<{ id: AppTab; labelKey: keyof ReturnType<typeof t>["nav"]; icon: typeof GalleryVerticalEnd }> = [
@@ -29,6 +33,7 @@ const tabs: Array<{ id: AppTab; labelKey: keyof ReturnType<typeof t>["nav"]; ico
 ];
 
 interface AppShellProps {
+  ux2?: boolean;
   activeTab: AppTab;
   user: UserProfile;
   children: ReactNode;
@@ -110,11 +115,21 @@ function useViewportMode() {
   return viewport;
 }
 
-function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: AppShellProps) {
+function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 = false }: AppShellProps) {
   const copy = t(user.language);
   const name = user.full_name || user.first_name || user.username || "Пользователь";
   const initial = name.trim().slice(0, 1).toUpperCase() || "A";
   const viewport = useViewportMode();
+  const en = user.language === "en";
+  const parent = ux2 ? editorParent(activeTab) : null;
+  const navigation: Array<{ id: AppTab; label: string; icon: typeof GalleryVerticalEnd }> = ux2 ? [
+    { id: "feed", label: copy.nav.feed, icon: GalleryVerticalEnd },
+    { id: "trends", label: copy.nav.trends, icon: Flame },
+    { id: "create", label: en ? "Create" : "Создать", icon: Plus },
+    { id: "works", label: en ? "Works" : "Работы", icon: Images },
+    { id: "profile", label: copy.nav.profile, icon: UserRound },
+  ] : tabs.map(tab => ({ id: tab.id, icon: tab.icon, label: copy.nav[tab.labelKey] }));
+
   const [optimisticTab, setOptimisticTab] = useState(activeTab);
 
   useEffect(() => {
@@ -134,12 +149,16 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
   return (
     <div
       className="apix-shell"
+      data-ui-version={ux2 ? "2" : "1"}
       data-viewport={viewport.mode}
       data-short={viewport.short ? "true" : "false"}
       data-width={viewport.width}
       data-height={viewport.height}
     >
       <header className="apix-app-header grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-border/70 bg-background/95 px-2 py-1.5 shadow-sm">
+        {ux2 ? <button type="button" className="ux2-wordmark apix-focus-ring" onClick={() => navigate("feed")} aria-label={en ? "APIX feed" : "APIX — лента"}>
+          <strong>APIX</strong><span>{en ? "Preview" : "Предпросмотр"}</span>
+        </button> : (
         <button
           type="button"
           className="apix-profile-button apix-focus-ring flex min-w-0 max-w-full items-center gap-2 rounded-lg text-left"
@@ -153,22 +172,28 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen }: App
             <span className="apix-profile-subtitle hidden truncate text-[10px] text-muted-foreground sm:block">APIX Mini App</span>
           </span>
         </button>
+        )}
 
         <Button variant="soft" size="sm" className="apix-balance-button min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
           <span>{formatKisses(user.credits, { compact: true })}</span>
         </Button>
       </header>
 
-      <main>{children}</main>
+      <main>
+        {parent && <button type="button" className="ux2-editor-back apix-focus-ring" data-apix-editor-back onClick={() => navigate(parent)}>
+          <ArrowLeft size={18} aria-hidden="true" />{parent === "profile" ? (en ? "Profile" : "Профиль") : (en ? "Create" : "Создать")}
+        </button>}
+        {children}
+      </main>
 
       <nav className="apix-bottom-nav apix-glass rounded-2xl p-1" aria-label="Основная навигация">
         <div className="apix-nav-scroll flex min-w-0 gap-1 overflow-x-auto overscroll-x-contain" role="tablist" aria-label="Разделы Mini App">
-          {tabs.map(({ id, labelKey, icon: Icon }) => {
-            const active = id === optimisticTab;
-            const label = copy.nav[labelKey];
+          {navigation.map(({ id, label, icon: Icon }) => {
+            const active = id === (ux2 ? primaryTab(optimisticTab) : optimisticTab);
             return (
               <button
                 key={id}
+                data-destination={id}
                 type="button"
                 role="tab"
                 aria-selected={active}

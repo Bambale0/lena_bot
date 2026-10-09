@@ -1730,6 +1730,8 @@ async def _resolve_video_price_table(
 # ── schemas ───────────────────────────────────────────────────────────────────
 
 class UserProfile(BaseModel):
+    # Admin-only opt-in preview; never inferred from Telegram initDataUnsafe.
+    miniapp_ux2_available: bool = False
     id: int
     tg_id: int
     username: str | None
@@ -2018,6 +2020,7 @@ def _credits_out(value: float | int | None) -> float:
 
 def _user_profile(user: User) -> UserProfile:
     return UserProfile(
+        miniapp_ux2_available=_is_admin_user(user),
         id=user.id,
         tg_id=user.tg_id,
         username=user.username,

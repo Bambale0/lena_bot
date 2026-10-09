@@ -83,6 +83,12 @@ function installTelegramNavigation(): () => void {
       scheduleSync();
       return;
     }
+    const editorBack = document.querySelector<HTMLButtonElement>("[data-apix-editor-back]");
+    if (editorBack) {
+      editorBack.click();
+      scheduleSync();
+      return;
+    }
     const first = firstNavigationTab();
     const active = activeNavigationTab();
     if (first && active && first !== active) {

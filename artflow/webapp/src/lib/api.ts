@@ -178,6 +178,7 @@ export class MiniAppApi {
         // Keep partial history instead of wiping the profile: a transient
         // failure on page N must not discard the N-1 pages already loaded.
         if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
+        if (pageIndex === 0) throw error;
         console.warn("Mini App history page failed, keeping partial history", offset, error);
         break;
       }
@@ -237,6 +238,7 @@ export class MiniAppApi {
       imageModels: asArray<ModelInfo>(settledValue(imageResult, [])),
       videoModels: asArray<ModelInfo>(settledValue(videoResult, [])),
       recentTasks: settledValue(historyResult, []),
+      historyUnavailable: historyResult.status === "rejected",
       feed,
       trends: asArray<TrendItem>(settledValue(trendsResult, [])),
       paymentPlans: asArray<PaymentPlan>(settledValue(plansResult, [])),

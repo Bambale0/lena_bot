@@ -238,6 +238,7 @@ jobs:
             tests/test_plan_payment_method_choice.py \
             tests/test_payment_webhooks.py \
             tests/test_miniapp_feed_webkit_stability.py \
+            tests/test_miniapp_ux2_preview.py \
             tests/test_repository_feed.py \
             tests/test_midjourney.py \
             tests/test_image_model_unlimited.py \
@@ -333,6 +334,19 @@ jobs:
 
       - name: Playwright Mini App smoke
         run: npm run test:e2e
+
+      - name: Playwright UX2 admin preview regressions
+        if: ${{ !cancelled() }}
+        run: npm run test:e2e:ux2
+
+      - name: UX2 preview screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apix-ux2-preview
+          path: artflow/webapp/test-results/
+          retention-days: 3
+          if-no-files-found: ignore
 
   deploy:
     name: Production Autodeploy

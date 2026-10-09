@@ -652,3 +652,23 @@ test("Gemini source-video quota reserves two shared slots before photo upload", 
   await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeDisabled();
   expect(uploads).toBe(5);
 });
+
+
+test("payment notification leaves underlying controls clickable while visible", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  const notice = page.locator("[data-sonner-toast]").filter({ hasText: "Оплата открыта" });
+  await expect(notice).toBeVisible();
+  // Informational surfaces must not capture input. Dismiss/action controls remain interactive.
+  await expect(notice).toHaveCSS("pointer-events", "none");
+  await expect(notice.locator("button")).toHaveCSS("pointer-events", "auto");
+  await dialog.getByRole("button", { name: "Закрыть", exact: true }).click({ timeout: 2000 });
+  await expect(dialog).toHaveCount(0);
+  expect(state.topups).toBe(1);
+  await page.getByRole("button", { name: "Повторить", exact: true }).first().click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  expect(state.topups).toBe(1);
+});
