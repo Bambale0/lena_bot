@@ -1,6 +1,8 @@
 export type AppMode = "booting" | "live" | "locked" | "error";
 
 export type AppTab =
+  | "create"
+  | "works"
   | "studio"
   | "photo"
   | "video"
@@ -15,6 +17,7 @@ export type GenerationStatus = "pending" | "processing" | "done" | "failed" | st
 export type AppLanguage = "ru" | "en";
 
 export interface UserProfile {
+  miniapp_ux2_available?: boolean;
   id: number;
   tg_id?: number;
   telegram_id?: number;
@@ -216,6 +219,7 @@ export interface ReferralStats {
 }
 
 export interface BootstrapData {
+  historyUnavailable?: boolean;
   user: UserProfile;
   imageModels: ModelInfo[];
   videoModels: ModelInfo[];

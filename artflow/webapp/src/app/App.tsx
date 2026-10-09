@@ -7,6 +7,11 @@ import { BalanceSheet } from "@/components/balance-sheet";
 import { LockedScreen } from "@/components/locked-screen";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { FeedScreen } from "@/features/feed-screen";
+import { CreateScreen } from "@/features/create-screen";
+import { WorksScreen } from "@/features/works-screen";
+import { Button } from "@/components/ui/button";
+import { hasDraftInput, readUserDrafts, saveUserDrafts, tabStorage } from "@/lib/draft-storage";
+import { previewEnabled, previewKey } from "@/lib/ux2";
 import { GenerationScreen } from "@/features/generation-screen";
 import { ProfileScreen } from "@/features/profile-screen";
 import { ServicesScreen } from "@/features/services-screen";
@@ -153,6 +158,11 @@ function App() {
   const [api, setApi] = useState<MiniAppApi | null>(null);
   const [data, setData] = useState<BootstrapData | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>("feed");
+  const [ux2, setUx2] = useState(false);
+  const [worksRefreshing, setWorksRefreshing] = useState(false);
+  const [draftStorageUnavailable, setDraftStorageUnavailable] = useState(false);
+  const draftOwner = useRef<number | null>(null);
+
   const [selectedTask, setSelectedTask] = useState<GenerationTask | null>(null);
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
@@ -186,42 +196,51 @@ function App() {
   const processedStartParam = useRef("");
   const refreshAbortRef = useRef<AbortController | null>(null);
 
-  const hydrateDraftDefaults = useCallback((bootstrap: BootstrapData) => {
+  const hydrateDraftDefaults = useCallback((bootstrap: BootstrapData, preview: boolean) => {
+    if (draftOwner.current === bootstrap.user.id) return;
+    draftOwner.current = bootstrap.user.id;
+    const stored = preview ? readUserDrafts(tabStorage(), bootstrap.user.id) : {};
     const firstImage = bootstrap.imageModels[0];
-    const firstVideo = bootstrap.videoModels.find((model) => !/motion-control/i.test(model.key)) || bootstrap.videoModels[0];
-    const firstMotion = bootstrap.videoModels.find((model) => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"));
-    const firstVideoDurations = modelDurations(firstVideo);
-    const firstVideoResolutions = modelResolutions(firstVideo);
-    const firstMotionDurations = modelDurations(firstMotion);
-    const firstMotionResolutions = modelResolutions(firstMotion);
-    setImageDraft((current) => ({
-      ...current,
-      model: current.model || firstImage?.key || "",
-      mode: firstImage?.modes?.[0] || current.mode,
-      aspectRatio: firstImage?.aspect_ratios?.[0] || current.aspectRatio,
-      quality: firstImage?.quality_options?.[0]?.value || current.quality,
-      count: firstImage?.counts?.[0] || current.count,
-      taskCount: current.taskCount || 1,
-    }));
-    setVideoDraft((current) => ({
-      ...current,
-      model: current.model || firstVideo?.key || "",
-      mode: firstVideo?.modes?.[0] || current.mode,
-      aspectRatio: firstVideo?.aspect_ratios?.[0] || current.aspectRatio,
-      duration: firstVideoDurations[0] || current.duration,
-      resolution: firstVideoResolutions[0] || current.resolution,
-      grokMode: firstVideo?.mode_options?.[0] || current.grokMode || "normal",
-    }));
-    setMotionDraft((current) => ({
-      ...current,
-      model: current.model || firstMotion?.key || "",
-      mode: firstMotion?.modes?.[0] || current.mode || "motion",
-      aspectRatio: firstMotion?.aspect_ratios?.[0] || current.aspectRatio,
-      duration: firstMotionDurations[0] || current.duration,
-      resolution: firstMotionResolutions[0] || current.resolution,
-      grokMode: firstMotion?.mode_options?.[0] || current.grokMode || "normal",
-    }));
+    const firstVideo = bootstrap.videoModels.find(model => !/motion-control/i.test(model.key)) || bootstrap.videoModels[0];
+    const firstMotion = bootstrap.videoModels.find(model => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"));
+    const make = (kind: GenerationDraft["kind"], model?: ModelInfo): GenerationDraft => ({
+      ...emptyDraft(kind), model: model?.key || "", mode: model?.modes?.[0] || (kind === "motion" ? "motion" : "text"),
+      aspectRatio: model?.aspect_ratios?.[0] || emptyDraft(kind).aspectRatio,
+      quality: model?.quality_options?.[0]?.value || "basic", count: model?.counts?.[0] || 1,
+      duration: modelDurations(model)[0] || 5, resolution: modelResolutions(model)[0] || "720p",
+      grokMode: model?.mode_options?.[0] || "normal",
+    });
+    setImageDraft(stored.image || make("image", firstImage));
+    setVideoDraft(stored.video || make("video", firstVideo));
+    setMotionDraft(stored.motion || make("motion", firstMotion));
   }, []);
+
+  useEffect(() => {
+    if (mode !== "live" || !ux2 || !data || draftOwner.current !== data.user.id) return;
+    const saved = saveUserDrafts(tabStorage(), data.user.id, { image: imageDraft, video: videoDraft, motion: motionDraft });
+    setDraftStorageUnavailable(!saved);
+  }, [mode, ux2, data?.user.id, imageDraft, videoDraft, motionDraft]);
+
+  useEffect(() => {
+    if (ux2 && data?.user.miniapp_ux2_available !== true) { setUx2(false); setActiveTab("feed"); }
+  }, [data?.user.miniapp_ux2_available, ux2]);
+
+  const changePreview = (enabled: boolean) => {
+    if (!data || data.user.miniapp_ux2_available !== true) return;
+    const storage = tabStorage();
+    try { storage?.setItem(previewKey(data.user.id), enabled ? "2" : "1"); } catch { /* In-memory preview still works. */ }
+    if (enabled) {
+      const stored = readUserDrafts(storage, data.user.id);
+      if (imageDraft.promptId === null && !hasDraftInput(imageDraft) && stored.image) setImageDraft(stored.image);
+      if (videoDraft.promptId === null && !hasDraftInput(videoDraft) && stored.video) setVideoDraft(stored.video);
+      if (motionDraft.promptId === null && !hasDraftInput(motionDraft) && stored.motion) setMotionDraft(stored.motion);
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set("ux", enabled ? "2" : "1");
+    window.history.replaceState(window.history.state, "", url);
+    setUx2(enabled);
+    setActiveTab("feed");
+  };
 
   const patchDraft = useCallback((kind: GenerationDraft["kind"], patcher: (current: GenerationDraft) => GenerationDraft) => {
     if (kind === "image") setImageDraft(patcher);
@@ -401,7 +420,11 @@ function App() {
       setData(bootstrap);
       setFeedLimit(FEED_PAGE_SIZE);
       setFeedHasMore(bootstrap.feed.length >= FEED_PAGE_SIZE);
-      hydrateDraftDefaults(bootstrap);
+      let savedPreview: string | null = null;
+      try { savedPreview = tabStorage()?.getItem(previewKey(bootstrap.user.id)) || null; } catch { /* Storage is optional. */ }
+      const preview = previewEnabled(bootstrap.user, window.location.search, savedPreview);
+      setUx2(preview);
+      hydrateDraftDefaults(bootstrap, preview);
       setMode("live");
       await processStartParam(client, bootstrap);
     } catch (error) {
@@ -441,6 +464,7 @@ function App() {
         return {
           ...current,
           user: core.user,
+          historyUnavailable: false,
           recentTasks,
         };
       });
@@ -834,6 +858,27 @@ function App() {
     }
   }, [api, referralActionBusy, refreshCore, refreshReferrals]);
 
+  const refreshWorks = async () => {
+    if (!api || worksRefreshing) return;
+    setWorksRefreshing(true);
+    try {
+      const history = await api.getHistory();
+      setData(current => {
+        if (!current) return current;
+        const currentById = new Map(current.recentTasks.map(task => [task.id, task]));
+        const incomingIds = new Set(history.map(task => task.id));
+        const refreshed = history.map(task => {
+          const known = currentById.get(task.id);
+          // A delayed history response must not downgrade a completed local task.
+          return known && !isPendingTask(known) && isPendingTask(task) ? known : task;
+        });
+        return { ...current, historyUnavailable: false, recentTasks: [...refreshed, ...current.recentTasks.filter(task => !incomingIds.has(task.id))].slice(0, MAX_HISTORY_ITEMS) };
+      });
+    } catch {
+      setData(current => current ? { ...current, historyUnavailable: true } : current);
+    } finally { setWorksRefreshing(false); }
+  };
+
   const showFeed = activeTab === "feed" || activeTab === "studio";
 
   if (mode === "booting") {
@@ -853,6 +898,12 @@ function App() {
   }
 
   const screen = (() => {
+    if (ux2 && activeTab === "create") {
+      return <CreateScreen imageModels={data.imageModels} videoModels={data.videoModels} drafts={[imageDraft, videoDraft, motionDraft]} language={data.user.language} onNavigate={setActiveTab} />;
+    }
+    if (ux2 && activeTab === "works") {
+      return <WorksScreen tasks={data.recentTasks} models={[...data.imageModels, ...data.videoModels]} language={data.user.language} unavailable={data.historyUnavailable} refreshing={worksRefreshing} onOpenTask={openTask} onCreate={() => setActiveTab("create")} onRefresh={() => void refreshWorks()} />;
+    }
     if (showFeed) {
       return (
         <FeedScreen
@@ -875,13 +926,13 @@ function App() {
       );
     }
     if (activeTab === "photo") {
-      return <GenerationScreen kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "image"} videoUploading={videoUploadingKind === "image"} onChange={(patch) => setImageDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("image", files)} onUploadVideoFile={(file) => void uploadVideoFile("image", file)} onSubmit={() => void submitGeneration("image")} onResetPreset={() => setImageDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
+      return <GenerationScreen ux2={ux2} kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "image"} videoUploading={videoUploadingKind === "image"} onChange={(patch) => setImageDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("image", files)} onUploadVideoFile={(file) => void uploadVideoFile("image", file)} onSubmit={() => void submitGeneration("image")} onResetPreset={() => setImageDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
     }
     if (activeTab === "video") {
-      return <GenerationScreen kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video"} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onSubmit={() => void submitGeneration("video")} onResetPreset={() => setVideoDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
+      return <GenerationScreen ux2={ux2} kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video"} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onSubmit={() => void submitGeneration("video")} onResetPreset={() => setVideoDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
     }
     if (activeTab === "motion") {
-      return <GenerationScreen kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "motion"} videoUploading={videoUploadingKind === "motion"} onChange={(patch) => setMotionDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("motion", files)} onUploadVideoFile={(file) => void uploadVideoFile("motion", file)} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => setMotionDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
+      return <GenerationScreen ux2={ux2} kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "motion"} videoUploading={videoUploadingKind === "motion"} onChange={(patch) => setMotionDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("motion", files)} onUploadVideoFile={(file) => void uploadVideoFile("motion", file)} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => setMotionDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
     }
     if (activeTab === "trends") {
       return <TrendsScreen items={data.trends} filter={trendsFilter} loading={trendsLoading} preparingId={preparingTrendId} onFilterChange={setTrendsFilter} onRefresh={() => void loadTrends()} onPrepare={(trend) => void prepareTrend(trend)} />;
@@ -890,7 +941,7 @@ function App() {
       return <ServicesScreen messages={assistantMessages} assistantBusy={assistantBusy} photoPromptBusy={photoPromptBusy} photoPromptResult={photoPromptResult} videoPromptBusy={videoPromptBusy} videoPromptResult={videoPromptResult} onAssistantSend={(message) => void sendAssistant(message)} onPhotoPrompt={(file) => void createPhotoPrompt(file)} onVideoPrompt={(file) => void createVideoPrompt(file)} onUsePrompt={(prompt) => { setImageDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("photo"); }} onUseVideoPrompt={(prompt) => { setVideoDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("video"); }} onNavigate={setActiveTab} />;
     }
     if (activeTab === "settings") {
-      return <SettingsScreen user={data.user} busy={languageBusy} onLanguageChange={(language) => void changeLanguage(language)} onResetApp={() => void initialize()} />;
+      return <SettingsScreen previewEnabled={ux2} onPreviewChange={changePreview} user={data.user} busy={languageBusy} onLanguageChange={(language) => void changeLanguage(language)} onResetApp={() => void initialize()} />;
     }
     return (
       <ProfileScreen
@@ -910,7 +961,9 @@ function App() {
 
   return (
     <>
-      <AppShell activeTab={showFeed ? "feed" : activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={() => setBalanceOpen(true)}>
+      <AppShell ux2={ux2} activeTab={showFeed ? "feed" : activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={() => setBalanceOpen(true)}>
+        {ux2 && activeTab === "profile" && <div className="ux2-profile-actions"><Button variant="outline" onClick={() => setActiveTab("settings")}>{data.user.language === "en" ? "Settings" : "Настройки"}</Button></div>}
+        {ux2 && draftStorageUnavailable && <div className="ux2-inline-notice" role="status">{data.user.language === "en" ? "Browser storage is unavailable. Keep this tab open to retain your draft." : "Хранилище браузера недоступно. Не закрывайте вкладку, чтобы не потерять черновик."}</div>}
         {screen}
       </AppShell>
       <TaskDetailSheet task={selectedTask} open={taskOpen} busy={taskBusy} onOpenChange={setTaskOpen} onRefresh={(task) => void refreshTask(task)} onShare={(task) => void toggleTaskShare(task)} onToggleLibrary={(task) => void toggleTaskLibrary(task)} />

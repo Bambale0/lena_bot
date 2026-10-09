@@ -9,6 +9,8 @@ import type { AppLanguage, UserProfile } from "@/lib/types";
 import { cn, formatKisses } from "@/lib/utils";
 
 interface SettingsScreenProps {
+  previewEnabled?: boolean;
+  onPreviewChange?: (enabled: boolean) => void;
   user: UserProfile;
   busy?: boolean;
   onLanguageChange: (language: AppLanguage) => void;
@@ -20,7 +22,7 @@ const languages: Array<{ value: AppLanguage; title: string; subtitle: string; em
   { value: "en", title: "English", subtitle: "Bot language and service messages in English", emoji: "🇬🇧" },
 ];
 
-function SettingsScreen({ user, busy, onLanguageChange, onResetApp }: SettingsScreenProps) {
+function SettingsScreen({ user, busy, onLanguageChange, onResetApp, previewEnabled = false, onPreviewChange }: SettingsScreenProps) {
   const copy = t(user.language);
   const color = useColorScheme();
   const currentLanguage = user.language || "ru";
@@ -36,6 +38,16 @@ function SettingsScreen({ user, busy, onLanguageChange, onResetApp }: SettingsSc
           </div>
         </div>
       </div>
+
+      {user.miniapp_ux2_available === true && onPreviewChange && <Card>
+        <CardHeader><CardTitle>APIX UX 2.0</CardTitle></CardHeader>
+        <CardContent className="grid gap-3">
+          <p className="text-sm text-muted-foreground">{currentLanguage === "en" ? "Admin preview. You can return to the current interface at any time." : "Админский предпросмотр. Обычный интерфейс можно вернуть в любой момент."}</p>
+          <Button variant="outline" onClick={() => onPreviewChange(!previewEnabled)}>
+            {previewEnabled ? (currentLanguage === "en" ? "Return to current interface" : "Вернуть обычный интерфейс") : (currentLanguage === "en" ? "Open preview" : "Открыть предпросмотр")}
+          </Button>
+        </CardContent>
+      </Card>}
 
       <Card>
         <CardHeader className="pb-2">

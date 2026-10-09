@@ -11,6 +11,7 @@ import type { GenerationDraft, ModelInfo, UserProfile } from "@/lib/types";
 import { cn, formatCredits, modelSupports, splitUrls } from "@/lib/utils";
 
 interface GenerationScreenProps {
+  ux2?: boolean;
   kind: "image" | "video" | "motion";
   user: UserProfile;
   models: ModelInfo[];
@@ -132,6 +133,7 @@ function LabeledChips({ label, children }: { label: string; children: ReactNode 
 }
 
 function GenerationScreen({
+  ux2 = false,
   kind,
   user,
   models,
@@ -151,7 +153,7 @@ function GenerationScreen({
     kind === "motion"
       ? models.filter((model) => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"))
       : models.filter((model) => !model.modes?.includes("motion") && !/motion-control/i.test(model.key));
-  const selectedModel = availableModels.find((model) => model.key === draft.model) || availableModels[0];
+  const selectedModel = availableModels.find((model) => model.key === draft.model) || (ux2 && draft.model ? undefined : availableModels[0]);
   const modes = selectedModel?.modes?.length ? selectedModel.modes : [kind === "motion" ? "motion" : "text"];
   const ratioModes = selectedModel?.aspect_ratio_modes?.length ? selectedModel.aspect_ratio_modes : modes;
   const ratios = ratioModes.includes(draft.mode) && selectedModel?.aspect_ratios?.length ? selectedModel.aspect_ratios : [];
@@ -191,7 +193,31 @@ function GenerationScreen({
     : 0;
   const mediaQuotaExceeded = selectedModel?.key === GEMINI_OMNI_MODEL && geminiMediaSlots > GEMINI_MAX_MEDIA_SLOTS;
   const advancedInvalid = invalidSeed || invalidTrim || tooManyAudioIds || tooManyCharacterIds || mediaQuotaExceeded;
-  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid;
+  const unsupportedSettings = ux2 && !draft.promptId && Boolean(selectedModel && (
+    !modes.includes(draft.mode) ||
+    (ratios.length > 0 && !ratios.includes(draft.aspectRatio)) ||
+    (kind === "image" && ((qualities.length > 0 && !qualities.some(option => option.value === draft.quality)) || !outputCounts.includes(draft.count))) ||
+    (kind !== "image" && (
+      (!selectedModel.duration_from_source && durations.length > 0 && !durations.includes(draft.duration)) ||
+      !resolutions.includes(draft.resolution) ||
+      (modeOptions.length > 0 && !modeOptions.includes(draft.grokMode))
+    )) || !TASK_COUNT_OPTIONS.includes(draft.taskCount)
+  ));
+  const refreshDraftParameters = () => {
+    const nextMode = modes.includes(draft.mode) ? draft.mode : modes[0];
+    onChange({
+      mode: nextMode,
+      aspectRatio: selectedModel?.aspect_ratios?.includes(draft.aspectRatio) ? draft.aspectRatio : selectedModel?.aspect_ratios?.[0] || draft.aspectRatio,
+      quality: qualities.some(option => option.value === draft.quality) ? draft.quality : qualities[0]?.value || draft.quality,
+      count: outputCounts.includes(draft.count) ? draft.count : outputCounts[0],
+      taskCount: clampTaskCount(draft.taskCount),
+      duration: durations.includes(draft.duration) ? draft.duration : durations[0] || draft.duration,
+      resolution: resolutions.includes(draft.resolution) ? draft.resolution : resolutions[0],
+      grokMode: modeOptions.includes(draft.grokMode) ? draft.grokMode : modeOptions[0] || draft.grokMode,
+    });
+  };
+
+  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid || unsupportedSettings;
   const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion" || selectedModel?.key === SEEDANCE_25_MODEL;
   const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input);
   const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);
@@ -260,12 +286,19 @@ function GenerationScreen({
           </div>
         ) : null}
 
+        {unsupportedSettings && <div className="ux2-inline-notice" role="alert">
+          <div><p>Возможности модели изменились. Обновите недоступные параметры перед запуском. Текст и материалы сохранятся.</p>
+            <Button variant="outline" className="mt-2" onClick={refreshDraftParameters}>Обновить параметры</Button>
+          </div>
+        </div>}
+
         <Card className="apix-generation-card min-w-0 overflow-hidden">
           <CardHeader className="apix-generation-card-header pb-2"><CardTitle>Модель и идея</CardTitle></CardHeader>
           <CardContent className="apix-generation-card-content grid min-w-0 gap-2.5">
             <label className="grid min-w-0 gap-1 text-xs font-medium">
               Модель
               <Select value={selectedModel?.key || ""} onChange={(event) => syncSelectedModel(event.target.value)}>
+                {ux2 && !selectedModel && draft.model && <option value="" disabled>Модель черновика недоступна — выберите другую</option>}
                 {availableModels.map((model) => (
                   <option key={model.key} value={model.key}>{model.display_name} · {formatCredits(model.credits)} кр.</option>
                 ))}
