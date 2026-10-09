@@ -100,7 +100,9 @@ def _ratio_keyboard(model_key: str, selected: str | None) -> InlineKeyboardMarku
     return builder.as_markup()
 
 
-def _model_keyboard(costs: list[Any], *, uploaded: int, selected: str) -> InlineKeyboardMarkup:
+def _model_keyboard(
+    costs: list[Any], *, uploaded: int, selected: str, feed_repeat: bool = False,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     seen: set[str] = set()
     for cost in costs:
@@ -110,7 +112,9 @@ def _model_keyboard(costs: list[Any], *, uploaded: int, selected: str) -> Inline
             or model_key in seen
             or "__" in model_key
             or not image_gen._supports_img2img(model_key)
-            or repeat_references._repeat_max_refs(model_key) < uploaded
+            or repeat_references._prompt_user_reference_limit(
+                model_key, {"feed_use_prompt": ""} if feed_repeat else {},
+            ) < max(uploaded, 1)
         ):
             continue
         seen.add(model_key)
@@ -134,8 +138,13 @@ async def _collect_prompt_reference(
 ) -> None:
     data = await state.get_data()
     model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
-    max_refs = repeat_references._repeat_max_refs(model_key)
-    if max_refs <= 1 or not image_gen._supports_img2img(model_key):
+    max_refs = repeat_references._prompt_user_reference_limit(model_key, data)
+    if data.get("feed_use_prompt") is not None and (
+        max_refs < 1 or not image_gen._supports_img2img(model_key)
+    ):
+        await message.answer("Эта модель не вместит исходный пост и твоё фото. Выбери другую модель.")
+        return
+    if data.get("feed_use_prompt") is None and (max_refs <= 1 or not image_gen._supports_img2img(model_key)):
         await marketplace.fsm_prompt_use_reference(message, session, db_user, state, bot)
         return
 
@@ -220,7 +229,10 @@ async def _model_menu(call: CallbackQuery, session: AsyncSession, state: FSMCont
     await call.message.answer(  # type: ignore[union-attr]
         "🧠 <b>Выбери нейросеть</b>\n\n"
         "Показаны только модели, которые примут все загруженные референсы.",
-        reply_markup=_model_keyboard(costs, uploaded=uploaded, selected=selected),
+        reply_markup=_model_keyboard(
+            costs, uploaded=uploaded, selected=selected,
+            feed_repeat=data.get("feed_use_prompt") is not None,
+        ),
     )
     await safe_answer_callback(call)
 
@@ -230,8 +242,8 @@ async def _set_model(call: CallbackQuery, session: AsyncSession, state: FSMConte
     data = await state.get_data()
     uploaded = len(list(data.get("prompt_multi_ref_file_ids") or []))
     model_cost = await repo.get_model_cost(session, model_key)
-    max_refs = repeat_references._repeat_max_refs(model_key)
-    if not model_cost or not image_gen._supports_img2img(model_key) or max_refs < uploaded:
+    max_refs = repeat_references._prompt_user_reference_limit(model_key, data)
+    if not model_cost or not image_gen._supports_img2img(model_key) or max_refs < max(uploaded, 1):
         await call.answer("Эта нейросеть не поддерживает все загруженные фото", show_alert=True)
         return
     ratio = _current_ratio(data, model_key)
@@ -334,7 +346,10 @@ async def _run(
         await state.clear()
         return
     file_ids = list(data.get("prompt_multi_ref_file_ids") or [])
-    max_refs = repeat_references._repeat_max_refs(model_key)
+    max_refs = repeat_references._prompt_user_reference_limit(model_key, data)
+    if data.get("feed_use_prompt") is not None and (len(file_ids) > max_refs or max_refs < 1):
+        await call.answer("Слишком много фото с учётом исходного поста. Убери лишние или выбери другую модель.", show_alert=True)
+        return
     file_ids = file_ids[:max_refs]
     if not file_ids:
         await call.answer("Сначала добавь хотя бы одно фото", show_alert=True)

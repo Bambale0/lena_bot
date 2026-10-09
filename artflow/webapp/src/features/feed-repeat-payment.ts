@@ -89,7 +89,7 @@ function cleanDraft(value: unknown): RepeatDraft | null {
   return {
     savedAt: saved.savedAt,
     references: Array.isArray(saved.references)
-      ? saved.references.filter((value): value is string => typeof value === "string" && value.startsWith("https://")).slice(0, 4) : [],
+      ? saved.references.filter((value): value is string => typeof value === "string" && value.startsWith("https://")) : [],
     changeRequest: typeof saved.changeRequest === "string" ? saved.changeRequest.slice(0, 800) : "",
     modelKey: String(saved.modelKey || ""), mode: String(saved.mode || "image"),
     aspectRatio: String(saved.aspectRatio || "1:1"), quality: String(saved.quality || "basic"),

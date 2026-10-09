@@ -248,11 +248,11 @@ async def _enter_seedance25_flow(
         duration=5,
         aspect_ratio="adaptive",
         resolution="720p",
-        mode="text",
+        mode="multimodal" if old.get("feed_use_source_video_url") else "text",
         image_url=None,
         image_file_id=None,
         ref_file_ids=[],
-        reference_video_url=None,
+        reference_video_url=old.get("feed_use_source_video_url"),
         audio_ids=[],
         character_ids=[],
         grok_mode=None,
@@ -363,11 +363,12 @@ async def no_seedance25_refs(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(VideoGenFSM.seedance25_reference_upload, F.data == "s25ref:clear")
 async def clear_seedance25_refs(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
     await state.update_data(
         image_url=None,
         image_file_id=None,
         ref_file_ids=[],
-        reference_video_url=None,
+        reference_video_url=data.get("feed_use_source_video_url"),
         audio_ids=[],
     )
     updated = await state.get_data()
@@ -394,6 +395,9 @@ async def add_seedance25_photo(message: Message, state: FSMContext) -> None:
 async def add_seedance25_video(message: Message, state: FSMContext, bot: Bot) -> None:
     data = await state.get_data()
     refs = _as_list(data.get("reference_video_url"))
+    if data.get("feed_use_source_video_url"):
+        await message.answer("Исходное видео уже взято из ленты. Добавь своё фото.", reply_markup=_kb_for_data(data))
+        return
     if len(refs) >= MAX_REFERENCE_VIDEOS:
         await message.answer(f"Лимит видео — {MAX_REFERENCE_VIDEOS}.", reply_markup=_kb_for_data(data))
         return

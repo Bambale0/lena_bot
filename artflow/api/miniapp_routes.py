@@ -1762,6 +1762,7 @@ class ModelInfo(BaseModel):
     quality_options: list[dict[str, str]]
     quality_prices: dict[str, float] = Field(default_factory=dict)
     max_refs: int = 1
+    max_refs_with_video: int | None = Field(default=None, ge=0)
     counts: list[int]
     has_quality: bool
     is_per_second: bool = False
@@ -2514,6 +2515,7 @@ async def list_video_models(
             motion_controls=caps.get("motion_controls", []),
             mode_options=caps.get("mode_options", []),
             max_refs=int(caps.get("max_refs", 1) or 1),
+            max_refs_with_video=caps.get("max_refs_with_video"),
             supports_video_input=bool(caps.get("supports_video_input")),
             requires_video_input=bool(caps.get("requires_video_input")),
             requires_reference_images=bool(caps.get("requires_reference_images")),

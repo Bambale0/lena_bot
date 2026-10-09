@@ -20,10 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.public_files import public_url_is_available
 from bot.keyboards.feed import empty_feed_kb, feed_card_kb
 from bot.keyboards.main_menu import back_to_menu_kb
-from bot.keyboards.models import IMAGE_CAPS, video_models_kb
+from bot.keyboards.models import IMAGE_CAPS, feed_video_models_kb
 from bot.keyboards.prompts import prompt_use_model_kb
 from bot.states import ImageGenFSM, PromptUseFSM, VideoGenFSM
 from bot.utils.deep_links import build_start_payload
+from bot.utils.feed_media import canonical_generation_result_url
 from bot.utils.telegram_images import (
     TELEGRAM_PHOTO_TARGET_BYTES,
     fallback_document_caption,
@@ -433,6 +434,7 @@ async def cb_feed_use(
             feed_use_prompt=gen.prompt,
             feed_use_model=gen.model,
             feed_use_gen_type="video",
+            feed_use_source_video_url=canonical_generation_result_url(gen),
             source_feed_gen_id=gen_id,
             feed_force_reference=True,
         )
@@ -440,7 +442,7 @@ async def cb_feed_use(
             "🎬 <b>Повторить видео</b>\n\n"
             "Выбери видео-модель. Следующим шагом загрузи своё фото/референс — "
             "повтор создадим по опубликованному ролику. Нужна модель с поддержкой исходного видео.",
-            reply_markup=video_models_kb(model_costs, "i2v"),
+            reply_markup=feed_video_models_kb(model_costs),
         )
         await safe_answer_callback(call)
         return
@@ -456,7 +458,7 @@ async def cb_feed_use(
         "🎨 <b>Повторить изображение</b>\n\n"
         "Выбери модель для работы по фото. Потом загрузи свой референс — "
         "повтор создадим по опубликованному изображению. Оно занимает один слот референса.",
-        reply_markup=prompt_use_model_kb(gen_id, model_costs, reference_only=True),
+        reply_markup=prompt_use_model_kb(gen_id, model_costs, reference_only=True, reserved_refs=1),
     )
     await safe_answer_callback(call)
 

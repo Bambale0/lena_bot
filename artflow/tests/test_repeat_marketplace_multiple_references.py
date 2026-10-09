@@ -101,7 +101,8 @@ async def test_feed_repeat_collects_first_photo_without_starting_generation() ->
         )
 
     assert state.data["prompt_multi_ref_file_ids"] == ["ref-1"]
-    assert state.data["prompt_multi_ref_max"] == 5
+    # The public source image consumes one of the five provider slots.
+    assert state.data["prompt_multi_ref_max"] == 4
     legacy.assert_not_awaited()
     message.answer.assert_awaited_once()
 

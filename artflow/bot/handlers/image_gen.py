@@ -16,6 +16,7 @@ from aiogram.types import (
     Message,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, neironych_image_adapter, nexus_image_adapter
@@ -66,7 +67,7 @@ from core.feed_remix_prompt import (
 )
 from core.provider_routing import get_nano21_route
 from db import repository as repo
-from db.models import GenerationType, ImageGenerationAction, ImageSession, User
+from db.models import Generation, GenerationType, ImageGenerationAction, ImageSession, User
 
 logger = logging.getLogger(__name__)
 router = Router(name="image_gen")
@@ -704,6 +705,31 @@ async def _ensure_active_image_session_from_state(
     return image_session
 
 
+async def _remember_direct_user_prompt(
+    *, session: AsyncSession, db_user: User, image_session: ImageSession,
+    prompt: str, data: dict, parent_generation_id: int | None = None,
+) -> None:
+    """Promote only authenticated direct text, never copied session/history text."""
+    if (not prompt or getattr(image_session, "user_id", None) != db_user.id
+            or data.get("source_feed_gen_id") or data.get("pending_source_feed_gen_id")
+            or data.get("hidden_prompt") or data.get("style_edit_kind")):
+        return
+    parent_ids = [value for value in (image_session.last_generation_id, parent_generation_id) if value]
+    history = await session.execute(
+        select(Generation.user_id, Generation.source_feed_gen_id, Generation.input_params)
+        .where(or_(Generation.image_session_id == image_session.id, Generation.id.in_(parent_ids)))
+    )
+    if any(row.user_id != db_user.id or generation_prompt_is_protected(row) for row in history.all()):
+        return
+    # An old unmarked session may contain a foreign prompt even without history.
+    # Replacing both fields prevents a new user message from blessing that text.
+    if image_session.prompt_provenance != "user_supplied":
+        image_session.base_prompt = prompt
+    image_session.last_prompt = prompt
+    image_session.prompt_provenance = "user_supplied"
+    await session.commit()
+
+
 async def _promote_reference_mode_if_needed(
     *,
     session: AsyncSession,
@@ -883,6 +909,7 @@ async def _launch_session_generation(
         # Protected text belongs only to the provenance-guarded Generation row.
         image_session.base_prompt = None
         image_session.last_prompt = None
+        image_session.prompt_provenance = None
         await session.commit()
         # Legacy sessions can still contain the original private prompt. Remove
         # it at the provider boundary whenever a reader adds text or references.
@@ -2120,6 +2147,10 @@ async def handle_prompt(
     if current_mode != "image" or not _supports_img2img(image_session.model):
         reference_url = None
 
+    await _remember_direct_user_prompt(
+        session=session, db_user=db_user, image_session=image_session, prompt=prompt, data=data,
+    )
+
     if current_mode == "image" and not reference_url:
         await message.answer(
             "🖼 Для выбранной модели нужен фото-референс.\n\n"
@@ -2452,6 +2483,11 @@ async def handle_session_prompt(
 
     if current_mode != "image" or not _supports_img2img(image_session.model):
         reference_url = None
+
+    await _remember_direct_user_prompt(
+        session=session, db_user=db_user, image_session=image_session, prompt=prompt, data=data,
+        parent_generation_id=parent_id,
+    )
 
     if current_mode == "image" and not reference_url:
         await message.answer(

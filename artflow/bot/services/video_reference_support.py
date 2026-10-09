@@ -9,7 +9,6 @@ from api.kie_model_specs import VIDEO_SPECS
 from api.video_service import VideoModel, VideoResult
 from bot.keyboards.models import VIDEO_CAPS, VIDEO_MODEL_DESC
 
-
 SEEDANCE_VIDEO_REFERENCE_MODELS = {
     VideoModel.SEEDANCE_2.value,
     VideoModel.SEEDANCE_2_FAST.value,
@@ -66,6 +65,7 @@ async def _generate_video_with_references(
             SeedanceModel(model.value),
             prompt,
             reference_video_urls=refs[:3],
+            reference_image_urls=_reference_video_list(kwargs.get("image_url")),
             duration=duration,
             aspect_ratio=aspect_ratio or "16:9",
             resolution=resolution or "720p",

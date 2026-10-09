@@ -8,6 +8,7 @@ import { Sheet } from "@/components/ui/sheet";
 import type { FeedItem, GenerationTask, ModelInfo } from "@/lib/types";
 import { notifyHaptic, openExternalUrl } from "@/lib/telegram";
 import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
+import { feedUserReferenceCapacity } from "@/features/feed-repeat-references";
 import {
   canReopenPayment, checkoutAmountLabel, checkoutOptions, checkoutProviderLabel, clearRepeatDraft,
   paymentFromResponse, paymentResolution, readRepeatDraft, saveRepeatDraft,
@@ -195,6 +196,11 @@ function FeedRemixRunnerPortal() {
   const busy = opening || phase === "uploading" || phase === "generating" || modelsLoading;
   const sourcePreview = safeExternalUrl(firstMedia(item || {}));
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
+  const userReferenceLimit = feedUserReferenceCapacity(selectedModel, sourceIsVideo);
+  const referencesOverLimit = references.length > userReferenceLimit;
+  const referenceLimitMessage = sourceIsVideo
+    ? `Для этой модели можно добавить своих фото: ${userReferenceLimit}. Нужна поддержка исходного видео.`
+    : `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`;
   const aspectRatios = modelAspectRatios(selectedModel);
   const durations = modelDurations(selectedModel);
   const durationIndex = Math.max(0, durations.indexOf(duration));
@@ -204,7 +210,7 @@ function FeedRemixRunnerPortal() {
   const qualityOptions = selectedModel?.quality_options?.length ? selectedModel.quality_options : [{ value: "basic", label: "Базовое" }];
   const countOptions = selectedModel?.counts?.length ? selectedModel.counts : [1];
   const requestBody = useMemo(() => {
-    if (!item || !selectedModel) return null;
+    if (!item || !selectedModel || referencesOverLimit) return null;
     const sourceMedia = sourcePreview || "";
     const primaryUserReference = references[0] || "";
     const chosenMode = bucket === "video" ? mode : "image";
@@ -228,7 +234,7 @@ function FeedRemixRunnerPortal() {
       quality,
       count,
     };
-  }, [aspectRatio, bucket, changeRequest, count, duration, grokMode, item, mode, quality, references, resolution, selectedModel, sourceIsVideo, sourcePreview]);
+  }, [aspectRatio, bucket, changeRequest, count, duration, grokMode, item, mode, quality, references, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
   const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
   const liveQuoteRequest = useRef<{ id: number; body: Record<string, unknown>; key: string } | null>(null);
   liveQuoteRequest.current = item && requestBody ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
@@ -550,9 +556,9 @@ function FeedRemixRunnerPortal() {
 
   const addReferenceFiles = useCallback(async (files: File[]) => {
     if (!files.length || busy) return;
-    const maximum = selectedModel?.max_refs || 1;
+    const maximum = userReferenceLimit;
     if (references.length + files.length > maximum) {
-      setError(`Можно добавить максимум ${maximum} фото для этой модели`);
+      setError(referenceLimitMessage);
       return;
     }
     setPhase("uploading");
@@ -578,7 +584,7 @@ function FeedRemixRunnerPortal() {
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [bucket, busy, modeOptions, references.length, selectedModel?.max_refs]);
+  }, [bucket, busy, modeOptions, referenceLimitMessage, references.length, userReferenceLimit]);
 
   const submit = useCallback(async () => {
     if (!item || !selectedModel || !requestBody || !canLaunch || busy || launchInFlight.current) return;
@@ -636,7 +642,12 @@ function FeedRemixRunnerPortal() {
           </div>
           {paymentWaiting ? (
             <div className="grid gap-2">
-              <Button className="min-h-11 w-full rounded-xl" disabled>Ждём подтверждение оплаты…</Button>
+              {payment?.provider === "tribute" && !payment.transactionId && quoteReady && quote?.can_run ? (
+                <div className="grid gap-1 rounded-xl border border-border px-3 py-2 text-xs" role="status">
+                  <p className="font-semibold">Баланс достаточен для повтора</p>
+                  <p className="text-muted-foreground">Статус этой оплаты не подтверждён. Новое пополнение заблокировано, чтобы избежать повторной оплаты.</p>
+                </div>
+              ) : <Button className="min-h-11 w-full rounded-xl" disabled>Ждём подтверждение оплаты…</Button>}
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" disabled={busy || paymentBusy || paymentChecking} onClick={() => void checkPayment()}>
                   {paymentChecking ? <LoaderCircle className="size-4 animate-spin" /> : null}
@@ -716,7 +727,7 @@ function FeedRemixRunnerPortal() {
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="font-semibold">Твоё фото / референсы</p>
-                <p className="text-xs text-muted-foreground">Можно добавить свои фото поверх исходной работы.</p>
+                <p className="text-xs text-muted-foreground">{referenceLimitMessage}</p>
               </div>
               <input
                 ref={fileInputRef}
@@ -724,13 +735,15 @@ function FeedRemixRunnerPortal() {
                 className="hidden"
                 accept={`${ACCEPTED_REFERENCE_IMAGES},${ACCEPTED_REFERENCE_EXTENSIONS}`}
                 multiple
+                disabled={busy || references.length >= userReferenceLimit}
                 onChange={(event) => void addReferenceFiles(Array.from(event.target.files || []))}
               />
-              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+              <Button type="button" variant="outline" size="sm" disabled={busy || references.length >= userReferenceLimit} onClick={() => fileInputRef.current?.click()}>
                 {phase === "uploading" ? <LoaderCircle className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
                 Добавить
               </Button>
             </div>
+            {referencesOverLimit ? <p role="alert" className="text-xs text-destructive">Сохранённые фото не удалены. {referenceLimitMessage} Удали лишние фото или выбери другую модель.</p> : null}
             {references.length ? (
               <div className="flex flex-wrap gap-1.5">
                 {references.map((url, index) => (
@@ -749,8 +762,8 @@ function FeedRemixRunnerPortal() {
             Модель
             <select className="min-h-11 rounded-xl border border-input bg-background px-3 text-sm" value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={busy || modelsLoading}>
               {modelsLoading ? <option>Загружаем модели…</option> : null}
-              {imageModels.length ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key}>{model.display_name}</option>)}</optgroup> : null}
-              {videoModels.length ? <optgroup label="Видео">{videoModels.map((model) => <option key={model.key} value={model.key}>{model.display_name}</option>)}</optgroup> : null}
+              {imageModels.length ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo)}>{model.display_name}</option>)}</optgroup> : null}
+              {videoModels.length ? <optgroup label="Видео">{videoModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo)}>{model.display_name}</option>)}</optgroup> : null}
             </select>
           </label>
 

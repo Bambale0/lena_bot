@@ -33,3 +33,20 @@ Baseline: main `07595403a7375ecba50347c820b6a645c301b8ef`.
   Unknown submissions without a recoverable provider identity remain a separate
   upstream limitation. General natural-language missing-media refusals are not
   universally classified; PR205's broader prose classifier is not included
+
+### Review corrections
+- Telegram offers compatible source-video models and keeps that video through
+  reference collection and back navigation. Personalized image repeats reserve
+  one source slot; ordinary repeats retain their existing reference capacity
+- Mini App restoration keeps all valid uploaded references. Excess references
+  remain visible and block launch until corrected, rather than being discarded
+- Authenticated ordinary Telegram text establishes trusted session provenance;
+  copied or protected prompt history remains excluded
+- A changed measured Seedance repeat duration or total requires a new explicit
+  confirmation. The total and inputs are revalidated before spending
+- A fresh sufficient balance already allows a Tribute-funded repeat. The UI now
+  explains that the static-product receipt remains uncorrelated; its unresolved
+  checkout guard still prevents another inline payment for the same draft
+- Correction gate locally: 984 backend tests passed with the same 12 environment
+  skips; 351 bot and 25 frontend unit tests passed, plus typecheck/build and Ruff.
+  Browser discovery includes 144 cases; execution remains an exact-head CI gate

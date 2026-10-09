@@ -453,8 +453,14 @@ async def cb_prompt_pick_model(
     data = await state.get_data()
     is_feed_use = data.get("feed_use_prompt") is not None
     from bot.handlers import repeat_references
+    from bot.keyboards.models import IMAGE_CAPS
 
-    max_refs = repeat_references._repeat_max_refs(model_key)
+    max_refs = repeat_references._prompt_user_reference_limit(model_key, data)
+    if is_feed_use and (
+        max_refs < 1 or "image" not in IMAGE_CAPS.get(model_key, {}).get("modes", [])
+    ):
+        await call.answer("Для исходного поста и твоего фото нужна модель минимум с двумя референсами.", show_alert=True)
+        return
     ratios = repeat_references._repeat_ratio_options(model_key)
     await state.update_data(
         use_model_key=model_key,

@@ -151,7 +151,7 @@ async def test_cb_video_model_insufficient_credits() -> None:
     mock_db_user = SimpleNamespace(id=42, credits=5, language="ru")
     mock_cost = _make_video_model_cost("kling-3.0/video", credits=8)
     with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=mock_cost))):
-        await video_gen.cb_video_model(call, AsyncMock(), AsyncMock(), mock_db_user)
+        await video_gen.cb_video_model(call, AsyncMock(), _fake_state(), mock_db_user)
     call.answer.assert_awaited_once()
     assert "Недостаточно" in call.answer.call_args[0][0]
 
@@ -176,7 +176,7 @@ async def test_cb_video_model_no_cost_found() -> None:
     call.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
     with patch("bot.handlers.video_gen.repo", AsyncMock(resolve_video_model_cost=AsyncMock(return_value=None))):
-        await video_gen.cb_video_model(call, AsyncMock(), AsyncMock(), mock_db_user)
+        await video_gen.cb_video_model(call, AsyncMock(), _fake_state(), mock_db_user)
     call.answer.assert_awaited_once()
 
 
@@ -199,7 +199,7 @@ async def test_cb_video_model_single_mode() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cb_video_model_feed_repeat_forces_image_upload() -> None:
+async def test_cb_video_model_feed_repeat_rejects_image_only_model() -> None:
     call = make_callback(data="vid_model:kling-3.0/video")
     call.answer = AsyncMock()
     mock_db_user = SimpleNamespace(id=42, credits=500, language="ru")
@@ -214,9 +214,11 @@ async def test_cb_video_model_feed_repeat_forces_image_upload() -> None:
         with patch("bot.handlers.video_gen.safe_edit_message", AsyncMock()) as edit:
             await video_gen.cb_video_model(call, AsyncMock(), mock_state, mock_db_user)
 
-    assert any(call.kwargs == {"mode": "image"} for call in mock_state.update_data.await_args_list)
-    mock_state.set_state.assert_awaited_with(VideoGenFSM.image_upload)
-    assert "повтор по фото" in edit.await_args.args[1]
+    mock_state.update_data.assert_not_awaited()
+    mock_state.set_state.assert_not_awaited()
+    edit.assert_not_awaited()
+    assert "поддержкой исходного видео" in call.answer.await_args.args[0]
+    assert call.answer.await_args.kwargs["show_alert"] is True
 
 
 # ── vid_mode ──────────────────────────────────────────────────────────────────

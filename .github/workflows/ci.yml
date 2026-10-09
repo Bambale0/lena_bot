@@ -171,6 +171,8 @@ jobs:
             tests/test_feed_remix_prompt_security.py \
             tests/test_seedance_feed_personalization.py \
             tests/test_seedance_feed_bot.py \
+            tests/test_bot_prompt_and_regen_confirmation.py \
+            tests/test_feed_picker_reference_limits.py \
             tests/test_feed_repeat_snapshot_security.py \
             tests/test_prompt_privacy.py \
             tests/test_realtime.py \
@@ -247,6 +249,8 @@ jobs:
             tests/test_feed_remix_prompt_security.py \
             tests/test_seedance_feed_personalization.py \
             tests/test_seedance_feed_bot.py \
+            tests/test_bot_prompt_and_regen_confirmation.py \
+            tests/test_feed_picker_reference_limits.py \
             tests/test_feed_repeat_snapshot_security.py \
             tests/test_prompt_privacy.py \
             tests/test_realtime.py \

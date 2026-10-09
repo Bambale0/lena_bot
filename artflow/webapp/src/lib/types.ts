@@ -58,6 +58,7 @@ export interface ModelInfo {
   mode_options?: string[];
   counts?: number[];
   max_refs?: number;
+  max_refs_with_video?: number | null;
   has_quality?: boolean;
   is_per_second?: boolean;
   credits_per_sec?: number | null;

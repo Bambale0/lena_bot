@@ -321,6 +321,9 @@ async def finish_gemini_omni_media(
     session: AsyncSession,
 ) -> None:
     data = await state.get_data()
+    if data.get("feed_force_reference") and _image_count(data) < 1:
+        await safe_answer_callback(call, "Для повтора сначала загрузи своё фото", show_alert=True)
+        return
     if not data.get("reference_video_url"):
         await safe_answer_callback(call, "Сначала загрузи видео", show_alert=True)
         return

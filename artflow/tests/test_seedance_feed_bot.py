@@ -38,6 +38,13 @@ def seedance_bot(video_launch, monkeypatch):
         input_params={},
     )
     fixture.previous = previous
+    # Keep mocked FSM writes observable across quote/confirm callbacks.
+    async def update_state(**values):
+        fixture.data.update(values)
+        return fixture.data
+
+    fixture.kwargs["state"].update_data.side_effect = update_state
+    fixture.kwargs["state"].clear.side_effect = fixture.data.clear
     fixture.repo.get_generation_by_id.side_effect = (
         lambda _session, generation_id: previous if generation_id == 88 else fixture.source
     )
@@ -78,6 +85,12 @@ def seedance_bot(video_launch, monkeypatch):
     fixture.call = SimpleNamespace(data="regen:video:88", answer=AsyncMock(), message=AsyncMock())
 
     async def run(operation):
+        if operation == "confirm_launch":
+            markup = fixture.kwargs["source_message"].answer.await_args.kwargs["reply_markup"]
+            call = SimpleNamespace(data=markup.inline_keyboard[0][0].callback_data,
+                                   message=fixture.kwargs["source_message"], answer=AsyncMock())
+            return await video_gen.cb_feed_video_confirm(call, fixture.kwargs["state"], fixture.kwargs["session"],
+                                                        fixture.kwargs["db_user"], fixture.kwargs["bot"])
         if operation == "launch":
             return await video_gen._launch_video_generation_from_state(
                 **{**fixture.kwargs, "prompt": previous.prompt, "parent_generation_id": previous.id},
@@ -144,6 +157,17 @@ async def test_seedance_feed_source_video_enters_edit_and_prices_actual_duration
         fixture.data["image_url"] = None
         _trust_prompt(fixture, build_feed_remix_prompt("", "make the coat blue", has_source_media=True))
     await fixture.run(operation)
+    if operation == "regen":
+        fixture.repo.spend_credits.assert_not_awaited()
+        fixture.service.generate_video.assert_not_awaited()
+        assert "7 сек" in fixture.call.message.answer.await_args.args[0]
+        assert "28 💋" in fixture.call.message.answer.await_args.args[0]
+        fixture.call.data = fixture.call.message.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data
+        await fixture.run(operation)
+    else:
+        fixture.repo.spend_credits.assert_not_awaited()
+        fixture.service.generate_video.assert_not_awaited()
+        await fixture.run("confirm_launch")
     submitted = fixture.service.generate_video.await_args
     assert submitted is not None
     assert submitted.args[1].startswith("Edit the video @Video1.")
@@ -154,7 +178,7 @@ async def test_seedance_feed_source_video_enters_edit_and_prices_actual_duration
     assert "seedance_content_edit" not in submitted.kwargs
     assert submitted.kwargs["duration"] == 7
     assert submitted.kwargs["aspect_ratio"] == "adaptive"
-    assert fixture.events == ["probe", "price", "charge"]
+    assert fixture.events == ["probe", "price", "probe", "price", "charge"]
     assert fixture.repo.resolve_video_model_cost.await_args.kwargs["duration"] == 7
     assert fixture.repo.spend_credits.await_args.args[2] == 28
     saved = fixture.repo.create_generation.await_args
@@ -210,13 +234,20 @@ async def test_seedance_feed_repeated_safe_edits_keep_changes_and_dedup_source(s
         audio_ids=[f"__apix_seedance25:video_ref={SOURCE_VIDEO}", "__apix_seedance25:generate_audio=false"],
     )
     await fixture.run(operation)
+    if operation == "regen":
+        fixture.repo.spend_credits.assert_not_awaited()
+        fixture.call.data = fixture.call.message.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data
+        await fixture.run(operation)
+    else:
+        fixture.repo.spend_credits.assert_not_awaited()
+        await fixture.run("confirm_launch")
     submitted = fixture.service.generate_video.await_args
     assert submitted is not None
     assert submitted.args[1] == safe_prompt
     assert submitted.kwargs["reference_video_url"] == SOURCE_VIDEO
     assert "__apix_seedance25:generate_audio=false" in submitted.kwargs["audio_ids"]
     assert submitted.kwargs["duration"] == 7
-    assert fixture.events == ["probe", "price", "charge"]
+    assert fixture.events == ["probe", "price", "probe", "price", "charge"]
     saved = fixture.repo.create_generation.await_args
     assert saved.kwargs["input_params"][FEED_REMIX_CONTEXT_KEY]["prompt"] == safe_prompt
 

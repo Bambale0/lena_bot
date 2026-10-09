@@ -13,6 +13,7 @@ GEMINI_OMNI_PROVIDER_RESOLUTIONS = ("720p", "1080p", "4k")
 GEMINI_OMNI_RESOLUTIONS = GEMINI_OMNI_PROVIDER_RESOLUTIONS
 
 GEMINI_OMNI_MAX_IMAGE_SLOTS = 7
+GEMINI_OMNI_VIDEO_SLOT_COST = 2
 GEMINI_OMNI_MAX_AUDIO_IDS = 1
 GEMINI_OMNI_MAX_CHARACTER_IDS = 3
 GEMINI_OMNI_MAX_VIDEO_CLIPS = 1
@@ -146,7 +147,7 @@ def validate_gemini_omni_media_slots(
         raise ValueError("Gemini Omni supports at most 1 source video")
     if character_count > GEMINI_OMNI_MAX_CHARACTER_IDS:
         raise ValueError(f"Gemini Omni supports at most {GEMINI_OMNI_MAX_CHARACTER_IDS} character IDs")
-    used_slots = image_count + video_count * 2 + character_count
+    used_slots = image_count + video_count * GEMINI_OMNI_VIDEO_SLOT_COST + character_count
     if used_slots > GEMINI_OMNI_MAX_IMAGE_SLOTS:
         raise ValueError(
             "Gemini Omni media quota exceeded: "

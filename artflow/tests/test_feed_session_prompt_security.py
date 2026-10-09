@@ -143,6 +143,14 @@ async def test_rejected_feed_reference_never_persists_or_serializes_author_promp
         for base, last in feed_launch.session.persisted_prompts
     )
     active = await web_sessions.active_image_session(feed_launch.session, feed_launch.user)
+    if entrypoint == "multi" and failure == "reference_limit":
+        # Capacity now rejects before a session exists, which also closes the
+        # intermediate-persistence window this regression protects.
+        assert active["data"] is None
+        assert feed_launch.session.sync.scalars(select(ImageSession)).all() == []
+        feed_launch.mirror.assert_not_awaited()
+        assert feed_launch.call.answer.await_args.kwargs["show_alert"] is True
+        return
     assert active["data"]["base_prompt"] is None
     assert active["data"]["last_prompt"] is None
     archived = await web_sessions.archive_image_session(
@@ -177,7 +185,9 @@ async def test_rejected_multi_reference_does_not_report_a_successful_launch(feed
     await _run_feed_reference(feed_launch, "multi")
 
     feed_launch.generate.assert_not_awaited()
-    assert feed_launch.message.answer.await_args is not None
+    assert feed_launch.call.answer.await_args.kwargs["show_alert"] is True
+    assert feed_launch.session.sync.scalars(select(ImageSession)).all() == []
+    feed_launch.mirror.assert_not_awaited()
     assert "Запущено" not in str(feed_launch.call.answer.await_args_list)
 
 

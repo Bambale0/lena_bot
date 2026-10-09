@@ -58,6 +58,12 @@ def _repeat_max_refs(model_key: str) -> int:
     return 1
 
 
+def _prompt_user_reference_limit(model_key: str, data: dict[str, Any]) -> int:
+    """Public image repeats reserve one provider slot for the source post."""
+    reserved = 1 if data.get("feed_use_prompt") is not None else 0
+    return max(0, _repeat_max_refs(model_key) - reserved)
+
+
 def _repeat_ratio_options(model_key: str) -> list[str]:
     caps = IMAGE_CAPS.get(model_key, {})
     ratios = list(caps.get("aspect_ratios") or [])
