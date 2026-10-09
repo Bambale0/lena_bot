@@ -607,6 +607,14 @@ async def _reconcile_neironych_video_generation(
             # Another process/request owns the same video status/download.
             return gen
 
+        # The history/status API already loaded this ORM row in a read
+        # transaction. Release its PostgreSQL connection BEFORE any slow GET
+        # or 250 MB media download, exactly as the scheduled worker does.
+        # Existing FastAPI generation/history callers are read-only until
+        # the subsequent guarded finish/refund starts a fresh transaction.
+        if isinstance(session, AsyncSession):
+            await session.commit()
+
         try:
             # Bound status GET and media download for both background and
             # on-demand (history) callers. A timed-out GET never refunds.
@@ -1149,6 +1157,21 @@ async def _notify_direct_image_result_in_bot(
         await bot.session.close()
 
 
+def _neironych_video_status_is_background_only(gen) -> bool:
+    """Don't block Mini App/website GET responses on paid provider I/O.
+
+    Background reconciliation owns the status GET, media download, settlement
+    and durable notification. Other video providers retain existing behavior.
+    """
+    return bool(
+        gen
+        and gen.gen_type == GenerationType.video
+        and video_service.neironych_seedance_runtime.is_task_id(
+            provider_task_id(str(getattr(gen, "task_id", None) or ""))
+        )
+    )
+
+
 async def _reconcile_user_active_generations(session: AsyncSession, user_id: int) -> None:
     if session.__class__.__module__.startswith('unittest.mock'):
         return
@@ -1160,6 +1183,8 @@ async def _reconcile_user_active_generations(session: AsyncSession, user_id: int
         return
 
     for gen in active_gens:
+        if _neironych_video_status_is_background_only(gen):
+            continue
         await _reconcile_generation_status(session, gen)
 
 
@@ -3309,7 +3334,8 @@ async def get_generation(
     gen = await repo.get_generation_by_id(session, gen_id)
     if not gen or gen.user_id != user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    gen = await _reconcile_generation_status(session, gen)
+    if not _neironych_video_status_is_background_only(gen):
+        gen = await _reconcile_generation_status(session, gen)
     return _gen_out(gen)
 
 

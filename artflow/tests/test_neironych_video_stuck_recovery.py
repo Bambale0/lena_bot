@@ -432,3 +432,72 @@ async def test_lost_provider_poll_ownership_defers_without_refund(monkeypatch):
     monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", refund)
     assert await miniapp_routes._reconcile_generation_status(object(), gen) is gen
     refund.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_history_video_reconciliation_releases_db_before_provider_download(monkeypatch):
+    gen = _video(age_minutes=3)
+    events = []
+
+    class FakeSession:
+        async def commit(self):
+            events.append("read_transaction_closed")
+
+    async def poll(_task_id):
+        assert events == ["read_transaction_closed"]
+        events.append("upstream_status_and_download")
+        return None
+
+    monkeypatch.setattr(miniapp_routes, "AsyncSession", FakeSession)
+    monkeypatch.setattr(
+        miniapp_routes.video_service, "get_poll_fn",
+        lambda _provider: poll,
+    )
+    session = FakeSession()
+    assert await miniapp_routes._reconcile_generation_status(session, gen) is gen
+    assert events == ["read_transaction_closed", "upstream_status_and_download"]
+
+
+@pytest.mark.asyncio
+async def test_user_history_video_check_uses_persisted_state_without_provider_io(monkeypatch):
+    gen = _video(age_minutes=2)
+    reconcile = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=gen))
+    monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", reconcile)
+    monkeypatch.setattr(miniapp_routes, "_gen_out", lambda value: value)
+    result = await miniapp_routes.get_generation(
+        gen.id, object(), SimpleNamespace(id=gen.user_id),
+    )
+    assert result is gen
+    reconcile.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_history_reconciles_other_models_but_skips_seedance_network(monkeypatch):
+    seedance = _video(age_minutes=1)
+    kie = _video(age_minutes=1)
+    kie.task_id = "kie-task"
+
+    class FakeSession:
+        pass
+
+    get_active = AsyncMock(return_value=[seedance, kie])
+    reconcile = AsyncMock(return_value=kie)
+    monkeypatch.setattr(miniapp_routes.repo, "get_user_active_generations", get_active)
+    monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", reconcile)
+    session = FakeSession()
+    await miniapp_routes._reconcile_user_active_generations(session, seedance.user_id)
+    reconcile.assert_awaited_once_with(session, kie)
+
+
+@pytest.mark.asyncio
+async def test_website_neironych_status_is_read_from_db_without_polling(monkeypatch):
+    gen = _video(age_minutes=40)
+    gen.task_id = "web:neironych:provider-uuid"
+    monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=gen))
+    reconcile = AsyncMock()
+    monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", reconcile)
+    monkeypatch.setattr(miniapp_routes, "_gen_out", lambda value: value)
+    result = await miniapp_routes.get_generation(gen.id, object(), SimpleNamespace(id=gen.user_id))
+    assert result is gen
+    reconcile.assert_not_awaited()
