@@ -1,4 +1,4 @@
-import { selectGenerationInputs } from "./reference-selection.ts";
+import { referenceMaterials, selectGenerationInputs } from "./reference-selection.ts";
 import type { GenerationDraft, ModelInfo } from "./types";
 
 export interface MediaConflict { code: string; message: string }
@@ -40,6 +40,10 @@ export function switchDraftModel(draft: GenerationDraft, model: ModelInfo): Gene
 export function inspectDraftMedia(source: GenerationDraft, model: ModelInfo | undefined): DraftMediaInspection {
   const draft = selectGenerationInputs(source);
   const issues: MediaConflict[] = [];
+  const inputs = referenceMaterials(source);
+  if (inputs.some(item => item.upload && item.upload.status !== "error")) issues.push({ code: "reference_upload_pending", message: "Дождитесь загрузки фото или отмените её." });
+  else if (inputs.some(item => item.included && item.upload)) issues.push({ code: "reference_upload_failed", message: "Не все выбранные фото загружены. Повторите загрузку, выберите файл снова или исключите его из запуска." });
+
   if (!model) return { maxReferences: null, referenceInputsSupported: false, videoInputSupported: false,
     issues: [{ code: "model_unavailable", message: "Модель недоступна. Выберите доступную модель; материалы сохранены." }] };
   const modes = Array.isArray(model.modes) ? model.modes : [];

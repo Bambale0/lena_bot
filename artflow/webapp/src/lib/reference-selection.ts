@@ -11,7 +11,7 @@ export function referenceMaterials(draft: GenerationDraft): ReferenceMaterial[] 
 /** A detached request view; it contains no parked urls or selection metadata. */
 export function selectGenerationInputs(draft: GenerationDraft): GenerationDraft {
   const { referenceMaterials: _selection, ...base } = draft;
-  return { ...base, referenceUrls: referenceMaterials(draft).filter(item => item.included).map(item => item.url),
+  return { ...base, referenceUrls: referenceMaterials(draft).filter(item => item.included && item.url && !item.upload).map(item => item.url),
     audioIds: [...draft.audioIds], characterIds: [...draft.characterIds] };
 }
 

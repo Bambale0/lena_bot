@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { hasDraftInput, readUserDrafts, saveUserDrafts, tabStorage } from "@/lib/draft-storage";
 import { previewEnabled, previewKey } from "@/lib/ux2";
 import { inspectDraftMedia } from "@/lib/draft-media";
+import { usePhotoUploads } from "@/lib/use-photo-uploads";
+import { photoUploading } from "@/lib/photo-upload";
 import { appendReferenceUrls, applyDraftPatch, modelSnapshotKey, selectGenerationInputs } from "@/lib/reference-selection";
 import { GenerationScreen } from "@/features/generation-screen";
 import { ProfileScreen } from "@/features/profile-screen";
@@ -232,6 +234,7 @@ function App() {
 
   const changePreview = (enabled: boolean) => {
     if (!data || data.user.miniapp_ux2_available !== true) return;
+    if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото или отмените её в редакторе."); return; }
     const storage = tabStorage();
     try { storage?.setItem(previewKey(data.user.id), enabled ? "2" : "1"); } catch { /* In-memory preview still works. */ }
     if (enabled) {
@@ -253,6 +256,17 @@ function App() {
     else setMotionDraft(patcher);
   }, []);
 
+  const photoQueue = usePhotoUploads({
+    owner: data?.user.id ?? null, enabled: ux2 && mode === "live", locked: submitting || Boolean(referenceUploadingKind || videoUploadingKind),
+    drafts: { image: imageDraft, video: videoDraft, motion: motionDraft },
+    models: { image: data?.imageModels || [], video: data?.videoModels || [] },
+    update: patchDraft,
+    policy: signal => api ? api.getPhotoUploadPolicy(signal) : Promise.reject(new Error("Unavailable")),
+    upload: (file, signal) => api ? api.uploadMedia(file, signal) : Promise.reject(new Error("Unavailable")),
+    notice: message => toast.info(message),
+    emit: detail => window.dispatchEvent(new CustomEvent("apix:photo-upload", { detail })),
+  });
+
   const resetPreset = useCallback((kind: GenerationDraft["kind"]) => {
     const saved = data ? readUserDrafts(tabStorage(), data.user.id)[kind] : undefined;
     patchDraft(kind, current => saved?.referenceMaterials !== undefined ? saved
@@ -260,6 +274,8 @@ function App() {
   }, [data?.user.id, patchDraft]);
 
   const uploadReferenceFiles = useCallback(async (kind: GenerationDraft["kind"], files: File[]) => {
+    const current = kind === "image" ? imageDraft : kind === "video" ? videoDraft : motionDraft;
+    if (ux2 && current.promptId === null) { photoQueue.add(kind, files); return; }
     if (!api || referenceUploadingKind || !files.length) return;
     setReferenceUploadingKind(kind);
     try {
@@ -278,7 +294,7 @@ function App() {
     } finally {
       setReferenceUploadingKind(null);
     }
-  }, [api, patchDraft, referenceUploadingKind]);
+  }, [api, patchDraft, referenceUploadingKind, ux2, photoQueue, imageDraft, videoDraft, motionDraft]);
 
   const uploadVideoFile = useCallback(async (kind: GenerationDraft["kind"], file: File) => {
     if (!api || videoUploadingKind) return;
@@ -555,6 +571,7 @@ function App() {
   const submitGeneration = useCallback(async (kind: "image" | "video" | "motion") => {
     if (!api || !data || submitting || submissionLock.current) return;
     const sourceDraft = currentDraft[kind];
+    if (photoQueue.hasPending(kind)) return;
     const draft = selectGenerationInputs(sourceDraft);
     const hasSelection = sourceDraft.promptId === null && sourceDraft.referenceMaterials !== undefined;
     if ((ux2 || hasSelection) && draft.promptId === null) {
@@ -660,7 +677,7 @@ function App() {
       submissionLock.current = false;
       setSubmitting(false);
     }
-  }, [api, currentDraft, data, refreshCore, submitting, ux2, referenceUploadingKind, videoUploadingKind]);
+  }, [api, currentDraft, data, refreshCore, submitting, ux2, referenceUploadingKind, videoUploadingKind, photoQueue]);
 
   const refreshTask = useCallback(async (task: GenerationTask) => {
     if (!api || taskBusy) return;
@@ -980,13 +997,13 @@ function App() {
       );
     }
     if (activeTab === "photo") {
-      return <GenerationScreen ux2={ux2} kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "image"} videoUploading={videoUploadingKind === "image"} onChange={(patch) => setImageDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("image", files)} onUploadVideoFile={(file) => void uploadVideoFile("image", file)} onSubmit={() => void submitGeneration("image")} onResetPreset={() => resetPreset("image")} />;
+      return <GenerationScreen ux2={ux2} kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "image" || photoUploading(imageDraft)} photoUploads={ux2 && imageDraft.promptId === null ? photoQueue.controls("image") : undefined} videoUploading={videoUploadingKind === "image"} onChange={(patch) => setImageDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("image", files)} onUploadVideoFile={(file) => void uploadVideoFile("image", file)} onSubmit={() => void submitGeneration("image")} onResetPreset={() => resetPreset("image")} />;
     }
     if (activeTab === "video") {
-      return <GenerationScreen ux2={ux2} kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video"} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onSubmit={() => void submitGeneration("video")} onResetPreset={() => resetPreset("video")} />;
+      return <GenerationScreen ux2={ux2} kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video" || photoUploading(videoDraft)} photoUploads={ux2 && videoDraft.promptId === null ? photoQueue.controls("video") : undefined} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onSubmit={() => void submitGeneration("video")} onResetPreset={() => resetPreset("video")} />;
     }
     if (activeTab === "motion") {
-      return <GenerationScreen ux2={ux2} kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "motion"} videoUploading={videoUploadingKind === "motion"} onChange={(patch) => setMotionDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("motion", files)} onUploadVideoFile={(file) => void uploadVideoFile("motion", file)} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => resetPreset("motion")} />;
+      return <GenerationScreen ux2={ux2} kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "motion" || photoUploading(motionDraft)} photoUploads={ux2 && motionDraft.promptId === null ? photoQueue.controls("motion") : undefined} videoUploading={videoUploadingKind === "motion"} onChange={(patch) => setMotionDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("motion", files)} onUploadVideoFile={(file) => void uploadVideoFile("motion", file)} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => resetPreset("motion")} />;
     }
     if (activeTab === "trends") {
       return <TrendsScreen items={data.trends} filter={trendsFilter} loading={trendsLoading} preparingId={preparingTrendId} onFilterChange={setTrendsFilter} onRefresh={() => void loadTrends()} onPrepare={(trend) => void prepareTrend(trend)} />;

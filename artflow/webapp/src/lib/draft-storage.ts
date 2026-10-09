@@ -1,5 +1,5 @@
 import { referenceMaterials, selectGenerationInputs } from "./reference-selection.ts";
-import type { GenerationDraft, ReferenceMaterial } from "./types";
+import type { GenerationDraft, PhotoUploadError, PhotoUploadState, ReferenceMaterial } from "./types";
 
 export type DraftKind = GenerationDraft["kind"];
 export type DraftSet = Partial<Record<DraftKind, GenerationDraft>>;
@@ -15,6 +15,10 @@ export function selectionStorageKey(owner: number): string {
   return `apix:ux2:drafts:v2:${owner}`;
 }
 
+export function uploadStorageKey(owner: number): string {
+  return `apix:ux2:drafts:v3:${owner}`;
+}
+
 export function hasDraftInput(draft: GenerationDraft): boolean {
   return draft.promptId === null && Boolean(draft.prompt.trim() || referenceMaterials(draft).length || draft.videoUrl || draft.audioIds.length || draft.characterIds.length);
 }
@@ -28,20 +32,38 @@ function safeMedia(value: unknown): value is string {
   } catch { return false; }
 }
 
-function decodeSelection(raw: unknown): ReferenceMaterial[] | null {
+const UPLOAD_ERRORS: PhotoUploadError[] = ["network", "timeout", "empty_file", "too_large", "invalid_file", "invalid_response", "policy_unavailable", "source_required", "rejected"];
+
+function decodeUpload(raw: unknown, restoring: boolean): PhotoUploadState | null {
+  const u = raw as PhotoUploadState | null;
+  if (!u || typeof u.operationId !== "string" || !u.operationId || u.operationId.length > 128
+    || !["queued", "uploading", "error"].includes(u.status) || typeof u.name !== "string" || u.name.length > 256
+    || !Number.isSafeInteger(u.size) || u.size < 0 || typeof u.contentType !== "string" || u.contentType.length > 128
+    || (u.error !== undefined && !UPLOAD_ERRORS.includes(u.error))) return null;
+  return { operationId: u.operationId, name: u.name, size: u.size, contentType: u.contentType,
+    status: restoring ? "error" : u.status, ...(restoring ? { error: "source_required" as const } : u.error ? { error: u.error } : {}) };
+}
+function decodeSelection(raw: unknown, uploads = false, restoring = false): ReferenceMaterial[] | null {
   if (!Array.isArray(raw)) return null;
-  const ids = new Set<string>();
-  const result: ReferenceMaterial[] = [];
+  const ids = new Set<string>(); const result: ReferenceMaterial[] = [];
   for (const value of raw) {
     if (!value || typeof value !== "object" || typeof value.id !== "string" || !value.id || value.id.length > 128
-      || ids.has(value.id) || !safeMedia(value.url) || typeof value.included !== "boolean") return null;
-    ids.add(value.id);
-    result.push({ id: value.id, url: value.url, included: value.included });
+      || ids.has(value.id) || typeof value.included !== "boolean") return null;
+    const upload = uploads && value.upload !== undefined ? decodeUpload(value.upload, restoring) : undefined;
+    if (upload === null || (!safeMedia(value.url) && !(value.url === "" && upload))) return null;
+    const item: ReferenceMaterial = { id: value.id, url: value.url, included: value.included };
+    if (uploads) {
+      if (value.name !== undefined) { if (typeof value.name !== "string" || value.name.length > 256) return null; item.name = value.name; }
+      if (value.size !== undefined) { if (!Number.isSafeInteger(value.size) || value.size < 0) return null; item.size = value.size; }
+      if (value.contentType !== undefined) { if (typeof value.contentType !== "string" || value.contentType.length > 128) return null; item.contentType = value.contentType; }
+      if (upload) item.upload = upload;
+    }
+    ids.add(value.id); result.push(item);
   }
   return result;
 }
 
-function decodeDraft(raw: unknown, kind: DraftKind, modern = false): GenerationDraft | null {
+function decodeDraft(raw: unknown, kind: DraftKind, modern = false, uploads = false, restoring = false): GenerationDraft | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const d = raw as Record<string, unknown>;
   // Hidden trend/remix data is not a device draft. Only explicit user-authored drafts.
@@ -56,7 +78,7 @@ function decodeDraft(raw: unknown, kind: DraftKind, modern = false): GenerationD
   if (![d.audioIds, d.characterIds].every(value => Array.isArray(value) && value.every(item => typeof item === "string"))) return null;
   let selection: ReferenceMaterial[] | undefined;
   if (modern && d.referenceMaterials !== undefined) {
-    const decoded = decodeSelection(d.referenceMaterials);
+    const decoded = decodeSelection(d.referenceMaterials, uploads, restoring);
     if (!decoded || d.referenceUrls.length !== 0) return null;
     selection = decoded;
   }
@@ -74,7 +96,7 @@ function decodeDraft(raw: unknown, kind: DraftKind, modern = false): GenerationD
   };
 }
 
-function decodeEnvelope(raw: string | null, owner: number, version: number): DraftSet | null {
+function decodeEnvelope(raw: string | null, owner: number, version: number, restoring = true): DraftSet | null {
   if (!raw || raw.length > MAX_STORED_CHARS) return null;
   try {
     const envelope = JSON.parse(raw);
@@ -83,7 +105,7 @@ function decodeEnvelope(raw: string | null, owner: number, version: number): Dra
     const result: DraftSet = {};
     for (const kind of KINDS) {
       if (envelope.drafts[kind] === undefined) continue;
-      const draft = decodeDraft(envelope.drafts[kind], kind, version === 2);
+      const draft = decodeDraft(envelope.drafts[kind], kind, version >= 2, version === 3, restoring);
       if (!draft) return null;
       if (hasDraftInput(draft)) result[kind] = draft;
     }
@@ -94,6 +116,8 @@ function decodeEnvelope(raw: string | null, owner: number, version: number): Dra
 export function readUserDrafts(storage: DraftStorage | null, owner: number): DraftSet {
   if (!storage || !Number.isSafeInteger(owner) || owner <= 0) return {};
   try {
+    const uploads = storage.getItem(uploadStorageKey(owner));
+    if (uploads !== null) return decodeEnvelope(uploads, owner, 3) || {};
     const modern = storage.getItem(selectionStorageKey(owner));
     // Never recover a stale all-active mirror if the canonical snapshot is invalid.
     return modern !== null ? decodeEnvelope(modern, owner, 2) || {}
@@ -104,6 +128,8 @@ export function readUserDrafts(storage: DraftStorage | null, owner: number): Dra
 export function saveUserDrafts(storage: DraftStorage | null, owner: number, drafts: DraftSet): boolean {
   if (!storage || !Number.isSafeInteger(owner) || owner <= 0) return false;
   try {
+    const existingUploads = storage.getItem(uploadStorageKey(owner));
+    if (existingUploads !== null && !decodeEnvelope(existingUploads, owner, 3, false)) return false;
     const existingModern = storage.getItem(selectionStorageKey(owner));
     if (existingModern !== null && !decodeEnvelope(existingModern, owner, 2)) return false;
     const next = readUserDrafts(storage, owner);
@@ -111,7 +137,7 @@ export function saveUserDrafts(storage: DraftStorage | null, owner: number, draf
       const current = drafts[kind];
       // Visiting a template must not erase a previously saved ordinary draft.
       if (!current || current.promptId !== null) continue;
-      const safe = decodeDraft(current, kind, true);
+      const safe = decodeDraft(current, kind, true, true);
       if (!safe) return false;
       if (hasDraftInput(safe)) next[kind] = safe;
       else delete next[kind];
@@ -120,11 +146,21 @@ export function saveUserDrafts(storage: DraftStorage | null, owner: number, draf
     const compatibility: DraftSet = {};
     for (const kind of KINDS) if (next[kind]) compatibility[kind] = selectGenerationInputs(next[kind]!);
     const legacyValue = JSON.stringify({ version: 1, owner, drafts: compatibility });
-    const modernValue = JSON.stringify({ version: 2, owner, drafts: next });
-    if (legacyValue.length > MAX_STORED_CHARS || modernValue.length > MAX_STORED_CHARS) return false;
+    const hasUploads = existingUploads !== null || Object.values(next).some(draft => referenceMaterials(draft).some(item =>
+      item.upload !== undefined || item.name !== undefined || item.size !== undefined || item.contentType !== undefined));
+    const oldSelection: DraftSet = {};
+    for (const kind of KINDS) {
+      const draft = next[kind]; if (!draft) continue;
+      oldSelection[kind] = draft.referenceMaterials === undefined ? draft : { ...draft,
+        referenceMaterials: referenceMaterials(draft).filter(item => item.url && !item.upload).map(({ id, url, included }) => ({ id, url, included })) };
+    }
+    const modernValue = JSON.stringify({ version: 2, owner, drafts: oldSelection });
+    const uploadValue = JSON.stringify({ version: 3, owner, drafts: next });
+    if (legacyValue.length > MAX_STORED_CHARS || modernValue.length > MAX_STORED_CHARS || uploadValue.length > MAX_STORED_CHARS) return false;
     // Commit the safe old-code view first. A failed write is reported, never claimed durable.
     storage.setItem(draftStorageKey(owner), legacyValue);
     if (modern) storage.setItem(selectionStorageKey(owner), modernValue);
+    if (hasUploads) storage.setItem(uploadStorageKey(owner), uploadValue);
     return true;
   } catch { return false; }
 }
