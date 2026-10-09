@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { hasDraftInput, readUserDrafts, saveUserDrafts, tabStorage } from "@/lib/draft-storage";
 import { previewEnabled, previewKey } from "@/lib/ux2";
 import { inspectDraftMedia } from "@/lib/draft-media";
+import { appendReferenceUrls, applyDraftPatch, modelSnapshotKey, selectGenerationInputs } from "@/lib/reference-selection";
 import { GenerationScreen } from "@/features/generation-screen";
 import { ProfileScreen } from "@/features/profile-screen";
 import { ServicesScreen } from "@/features/services-screen";
@@ -163,6 +164,9 @@ function App() {
   const [worksRefreshing, setWorksRefreshing] = useState(false);
   const [draftStorageUnavailable, setDraftStorageUnavailable] = useState(false);
   const draftOwner = useRef<number | null>(null);
+  const submissionLock = useRef(false);
+  const latestActor = useRef<number | null>(null);
+  latestActor.current = data?.user.id ?? null;
 
   const [selectedTask, setSelectedTask] = useState<GenerationTask | null>(null);
   const [taskOpen, setTaskOpen] = useState(false);
@@ -249,6 +253,12 @@ function App() {
     else setMotionDraft(patcher);
   }, []);
 
+  const resetPreset = useCallback((kind: GenerationDraft["kind"]) => {
+    const saved = data ? readUserDrafts(tabStorage(), data.user.id)[kind] : undefined;
+    patchDraft(kind, current => saved?.referenceMaterials !== undefined ? saved
+      : { ...current, promptId: null, sourceTitle: "", prompt: "" });
+  }, [data?.user.id, patchDraft]);
+
   const uploadReferenceFiles = useCallback(async (kind: GenerationDraft["kind"], files: File[]) => {
     if (!api || referenceUploadingKind || !files.length) return;
     setReferenceUploadingKind(kind);
@@ -259,7 +269,7 @@ function App() {
         if (result.url) uploaded.push(result.url);
       }
       if (!uploaded.length) throw new Error("Backend не вернул ссылки на файлы");
-      patchDraft(kind, (current) => ({ ...current, referenceUrls: uniqueStrings([...current.referenceUrls, ...uploaded]) }));
+      patchDraft(kind, (current) => appendReferenceUrls(current, uploaded));
       notifyHaptic("success");
       toast.success(uploaded.length === 1 ? "Фото загружено" : `Загружено файлов: ${uploaded.length}`);
     } catch (error) {
@@ -305,7 +315,7 @@ function App() {
     const settings = prepared.settings || {};
     if (prepared.kind === "video") {
       setVideoDraft((current) => ({
-        ...current,
+        ...selectGenerationInputs(current),
         model: prepared.model,
         prompt: "Использовать скрытый трендовый промпт",
         promptId: prepared.prompt_id,
@@ -319,7 +329,7 @@ function App() {
       setActiveTab("video");
     } else {
       setImageDraft((current) => ({
-        ...current,
+        ...selectGenerationInputs(current),
         model: prepared.model,
         prompt: "Использовать скрытый трендовый промпт",
         promptId: prepared.prompt_id,
@@ -387,7 +397,7 @@ function App() {
         const model = bootstrap.imageModels[0];
         if (Number.isInteger(promptId)) {
           setImageDraft((current) => ({
-            ...current,
+            ...selectGenerationInputs(current),
             model: current.model || model?.key || "",
             prompt: "Использовать промпт из библиотеки",
             promptId,
@@ -543,21 +553,52 @@ function App() {
   const currentDraft = useMemo(() => ({ image: imageDraft, video: videoDraft, motion: motionDraft }), [imageDraft, motionDraft, videoDraft]);
 
   const submitGeneration = useCallback(async (kind: "image" | "video" | "motion") => {
-    if (!api || !data || submitting) return;
-    const draft = currentDraft[kind];
-    if (ux2 && draft.promptId === null) {
+    if (!api || !data || submitting || submissionLock.current) return;
+    const sourceDraft = currentDraft[kind];
+    const draft = selectGenerationInputs(sourceDraft);
+    const hasSelection = sourceDraft.promptId === null && sourceDraft.referenceMaterials !== undefined;
+    if ((ux2 || hasSelection) && draft.promptId === null) {
       if (referenceUploadingKind === kind || videoUploadingKind === kind) return;
       const model = (kind === "image" ? data.imageModels : data.videoModels).find(item => item.key === draft.model);
-      const { issues } = inspectDraftMedia(draft, model);
+      const { issues } = inspectDraftMedia(sourceDraft, model);
       if (issues.length) {
         toast.error(issues[0].message);
         return;
       }
     }
     const taskCount = clampTaskCount(draft.taskCount);
+    submissionLock.current = true;
     setSubmitting(true);
     const createdTasks: GenerationTask[] = [];
+    let checkingSelection = hasSelection;
     try {
+      if (hasSelection) {
+        const previousModel = (kind === "image" ? data.imageModels : data.videoModels).find(item => item.key === draft.model);
+        const controller = new AbortController();
+        // Finite UI transport guard, independent of provider retry/billing policy.
+        const timer = window.setTimeout(() => controller.abort(), 15_000);
+        let freshModels: ModelInfo[];
+        try {
+          const response = await api.request<unknown>(kind === "image" ? "/models/image" : "/models/video", {}, controller.signal);
+          if (!Array.isArray(response) || response.some(item => !item || typeof item.key !== "string"
+            || typeof item.display_name !== "string" || !Array.isArray(item.modes)
+            || typeof item.credits !== "number" || !Number.isFinite(item.credits) || item.credits < 0)) {
+            throw new Error("Не удалось проверить возможности модели. Материалы сохранены.");
+          }
+          freshModels = response as ModelInfo[];
+        } finally { window.clearTimeout(timer); }
+        if (latestActor.current !== data.user.id || draftOwner.current !== data.user.id) throw new Error("Аккаунт изменился. Откройте редактор заново.");
+        const currentModel = freshModels.find(item => item.key === draft.model);
+        setData(current => current && current.user.id === data.user.id
+          ? { ...current, ...(kind === "image" ? { imageModels: freshModels } : { videoModels: freshModels }) } : current);
+        if (modelSnapshotKey(previousModel) !== modelSnapshotKey(currentModel)) {
+          toast.info("Условия модели обновились. Проверьте материалы и стоимость, затем подтвердите запуск ещё раз.");
+          return;
+        }
+        const freshIssues = inspectDraftMedia(sourceDraft, currentModel).issues;
+        if (freshIssues.length) { toast.error(freshIssues[0].message); return; }
+      }
+      checkingSelection = false;
       const prompt = draft.prompt.trim() || (draft.model.startsWith("higgsfield/genjutsu/") ? "" : "Использовать выбранный сценарий");
       for (let index = 0; index < taskCount; index += 1) {
         const task = kind === "image"
@@ -612,8 +653,11 @@ function App() {
       }
       notifyHaptic("error");
       const prefix = createdTasks.length ? `Создано ${createdTasks.length}, дальше ошибка: ` : "";
-      toast.error(`${prefix}${error instanceof Error ? error.message : "Не удалось создать задачу"}`);
+      toast.error(checkingSelection
+        ? "Не удалось проверить актуальные условия. Запуск не отправлен, материалы сохранены. Повторите проверку."
+        : `${prefix}${error instanceof Error ? error.message : "Не удалось создать задачу"}`);
     } finally {
+      submissionLock.current = false;
       setSubmitting(false);
     }
   }, [api, currentDraft, data, refreshCore, submitting, ux2, referenceUploadingKind, videoUploadingKind]);
@@ -936,13 +980,13 @@ function App() {
       );
     }
     if (activeTab === "photo") {
-      return <GenerationScreen ux2={ux2} kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "image"} videoUploading={videoUploadingKind === "image"} onChange={(patch) => setImageDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("image", files)} onUploadVideoFile={(file) => void uploadVideoFile("image", file)} onSubmit={() => void submitGeneration("image")} onResetPreset={() => setImageDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
+      return <GenerationScreen ux2={ux2} kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "image"} videoUploading={videoUploadingKind === "image"} onChange={(patch) => setImageDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("image", files)} onUploadVideoFile={(file) => void uploadVideoFile("image", file)} onSubmit={() => void submitGeneration("image")} onResetPreset={() => resetPreset("image")} />;
     }
     if (activeTab === "video") {
-      return <GenerationScreen ux2={ux2} kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video"} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onSubmit={() => void submitGeneration("video")} onResetPreset={() => setVideoDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
+      return <GenerationScreen ux2={ux2} kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video"} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onSubmit={() => void submitGeneration("video")} onResetPreset={() => resetPreset("video")} />;
     }
     if (activeTab === "motion") {
-      return <GenerationScreen ux2={ux2} kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "motion"} videoUploading={videoUploadingKind === "motion"} onChange={(patch) => setMotionDraft((current) => ({ ...current, ...patch }))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("motion", files)} onUploadVideoFile={(file) => void uploadVideoFile("motion", file)} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => setMotionDraft((current) => ({ ...current, promptId: null, sourceTitle: "", prompt: "" }))} />;
+      return <GenerationScreen ux2={ux2} kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "motion"} videoUploading={videoUploadingKind === "motion"} onChange={(patch) => setMotionDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("motion", files)} onUploadVideoFile={(file) => void uploadVideoFile("motion", file)} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => resetPreset("motion")} />;
     }
     if (activeTab === "trends") {
       return <TrendsScreen items={data.trends} filter={trendsFilter} loading={trendsLoading} preparingId={preparingTrendId} onFilterChange={setTrendsFilter} onRefresh={() => void loadTrends()} onPrepare={(trend) => void prepareTrend(trend)} />;
