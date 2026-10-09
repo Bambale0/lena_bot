@@ -54,3 +54,20 @@ mini_app: changed behind preview capability. site: visual UI unchanged; additive
 
 ## Remaining release checks
 Draft PR is appropriate until exact-commit CI and screenshot review finish. No production change is claimed. Real Telegram iOS/Android WebView, paid provider requests, and cross-device storage are outside this preview verification.
+
+## Result playback regression found during review
+- Confirmed RED: a video task with an original MP4 and JPG thumbnail rendered `<video src=cover.jpg>`; music rendered no audio player.
+- The task sheet now uses original result URLs for playback/open actions and the thumbnail only as video poster. Audio/music has a real controls-enabled audio element. No delivery/provider API changes.
+- Work tile titles also honor `prompt_actions_allowed=false` in addition to `prompt_hidden`.
+- The existing 300 user-journey suite passed on the foundation commit before this small playback fix; exact-head CI will re-run it.
+
+## First CI failure and regression fix
+- CI run 37971959793: backend-quality, bot-navigation, provider-contracts passed; webapp failed in an existing Pixel 5 repeat checkout test. Local prior suite had passed; CI was NOT green.
+- Browser trace proved that a success toast intercepted the modal close button. Informational toast surfaces now let pointer events through; explicit dismiss/action controls remain interactive. The existing payment test is unchanged. A new regression proves this contract and verifies that closing/reopening retains one pending invoice.
+- Both the existing failing scenario and the new regression passed three repeated Pixel 5 runs (6/6).
+- The first artifact contained only the failed smoke trace, not new UX2 screenshots. UX2 now has a separate output directory and runs after smoke failures without suppressing the original failure. Fresh screenshots still require review.
+
+## Dependency audit
+- `npm audit` identified two inherited transitive build-tool advisories: GHSA-2v37-7h3g-55p8 (nanoid) and GHSA-68fv-2mgg-jv7q (source-map-js).
+- Targeted patch updates changed only their two lockfile records; no direct dependency version or application stack change. Audit then reported 0 vulnerabilities.
+- References: https://github.com/advisories/GHSA-2v37-7h3g-55p8 and https://github.com/advisories/GHSA-68fv-2mgg-jv7q .

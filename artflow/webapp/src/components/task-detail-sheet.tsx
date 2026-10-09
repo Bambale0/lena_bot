@@ -42,8 +42,12 @@ function TaskDetailSheet({
   onToggleLibrary,
 }: TaskDetailSheetProps) {
   if (!task) return null;
-  const media = safeExternalUrl(firstMedia(task));
+  // Thumbnails are suitable for the library, not for playback/open-original actions.
+  const original = safeExternalUrl(task.result_url) || (task.result_urls || []).map(safeExternalUrl).find(Boolean) || "";
+  const preview = safeExternalUrl(firstMedia(task));
+  const media = original || preview;
   const isVideo = task.gen_type === "video" || /\.(mp4|webm|mov)(\?|$)/i.test(media);
+  const isAudio = !isVideo && (["music", "audio"].includes(task.gen_type) || /\.(mp3|m4a|ogg|wav|aac|flac)(\?|$)/i.test(media));
   const promptVisible = Boolean(task.prompt && !task.prompt_hidden && task.prompt_actions_allowed !== false);
   const canPublish = Boolean(media) && !isPendingTask(task) && task.status !== "failed";
 
@@ -94,8 +98,10 @@ function TaskDetailSheet({
       <div className="grid gap-2.5">
         {media ? (
           <div className="overflow-hidden rounded-xl border border-border bg-muted">
-            {isVideo ? (
-              <video src={media} controls playsInline className="max-h-[64dvh] w-full object-contain" />
+            {isAudio ? (
+              <audio src={media} controls preload="metadata" className="w-full" aria-label="Аудиорезультат генерации" />
+            ) : isVideo ? (
+              <video src={media} poster={preview && preview !== media ? preview : undefined} controls playsInline preload="metadata" className="max-h-[64dvh] w-full object-contain" />
             ) : (
               <img src={media} alt="Результат генерации" className="max-h-[64dvh] w-full object-contain" />
             )}

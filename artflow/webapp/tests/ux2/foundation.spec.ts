@@ -233,3 +233,21 @@ test("a saved draft does not silently use changed model capabilities", async ({ 
   await expect(page.getByRole("textbox", { name: /^Промпт/ })).toHaveValue("Keep my idea when options change");
   await expect(page.getByRole("complementary").getByRole("button", { name: "Создать", exact: true })).toBeEnabled();
 });
+
+
+for (const [kind, extension, tag] of [["video", "mp4", "video"], ["music", "mp3", "audio"]]) {
+  test(`works open original ${kind} media rather than its thumbnail`, async ({ page }) => {
+    await prepare(page);
+    const original = `https://media.example.test/result.${extension}`;
+    await page.route("**/api/v1/history**", route => route.fulfill({ json: [{
+      id: 201, task_id: "fixture-result", model: "fixture-video", gen_type: kind, status: "done",
+      created_at: "2026-10-09T10:00:00Z", result_url: original, preview_url: "https://media.example.test/cover.jpg",
+    }] }));
+    await page.goto("/?ux=2");
+    await page.getByRole("tab", { name: "Работы", exact: true }).click();
+    await page.locator(".ux2-work-tile").click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.locator(tag)).toHaveAttribute("src", original);
+    await expect(dialog.locator(tag)).toHaveAttribute("controls", "");
+  });
+}

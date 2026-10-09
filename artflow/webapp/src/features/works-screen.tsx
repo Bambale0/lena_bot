@@ -55,7 +55,7 @@ function WorkTile({ task, model, en, onOpen }: { task: GenerationTask; model?: M
   const needsReview = task.status === "reconciliation_required";
   const running = isPendingTask(task) && !needsReview;
   const status = en ? (done(task) ? "Ready" : needsReview ? "Under provider review" : running ? "In progress" : task.status === "failed" ? "Error" : "Checking status") : generationStatusLabel(task.status);
-  const title = (!task.prompt_hidden && task.prompt?.trim()) || model?.display_name || (isVideo ? (en ? "Video" : "Видео") : (en ? "Work" : "Работа"));
+  const title = (!task.prompt_hidden && task.prompt_actions_allowed !== false && task.prompt?.trim()) || model?.display_name || (isVideo ? (en ? "Video" : "Видео") : (en ? "Work" : "Работа"));
   return <button type="button" className="ux2-work-tile apix-focus-ring" onClick={() => onOpen(task)} aria-label={`${title} — ${status}`}>
     <span className="ux2-work-preview">
       {media && !broken ? (/\.(mp4|webm|mov)(\?|$)/i.test(media)

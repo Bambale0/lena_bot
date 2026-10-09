@@ -336,6 +336,7 @@ jobs:
         run: npm run test:e2e
 
       - name: Playwright UX2 admin preview regressions
+        if: ${{ !cancelled() }}
         run: npm run test:e2e:ux2
 
       - name: UX2 preview screenshots and traces
