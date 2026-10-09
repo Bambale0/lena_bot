@@ -131,6 +131,62 @@ async def _load_batch(query, cursor: _ScanCursor) -> list[int]:
     return ids
 
 
+
+async def _load_notice_batch() -> list[int]:
+    """Bound regex work to indexed primary-key windows, even when outbox is empty.
+
+    The recent lane notices new finished videos promptly; the sweep lane
+    eventually covers old undelivered receipts after outages/restarts.
+    Neither lane scans the entire historical Text column on every tick.
+    """
+    size = settings.NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE
+    span = settings.NEIRONYCH_VIDEO_NOTICE_SCAN_ID_SPAN
+    if size == 1:
+        recent_limit = 0 if _notice_cursor.single_old_next else 1
+        _notice_cursor.single_old_next = not _notice_cursor.single_old_next
+    else:
+        recent_limit = max(1, size // 2)
+    sweep_limit = size - recent_limit
+
+    async with AsyncSessionLocal() as session:
+        max_id = int(await session.scalar(select(func.max(Generation.id))) or 0)
+        if max_id <= 0:
+            await session.rollback()
+            return []
+
+        candidates = _eligible_notice_query()
+        recent_ids: list[int] = []
+        if recent_limit:
+            recent_start = max(0, max_id - span)
+            recent_ids = list((await session.execute(
+                candidates.where(
+                    Generation.id > recent_start,
+                    Generation.id <= max_id,
+                ).order_by(Generation.id.desc()).limit(recent_limit)
+            )).scalars().all())
+
+        sweep_ids: list[int] = []
+        if sweep_limit:
+            start = _notice_cursor.older_id
+            if start >= max_id:
+                start = 0
+            ceiling = min(max_id, start + span)
+            sweep_ids = list((await session.execute(
+                candidates.where(
+                    Generation.id > start,
+                    Generation.id <= ceiling,
+                ).order_by(Generation.id.asc()).limit(sweep_limit)
+            )).scalars().all())
+            if len(sweep_ids) >= sweep_limit:
+                _notice_cursor.older_id = sweep_ids[-1]
+            else:
+                # Advance even when no notices match; no repeated full scan.
+                _notice_cursor.older_id = 0 if ceiling >= max_id else ceiling
+        await session.rollback()
+
+    return list(dict.fromkeys([*recent_ids, *sweep_ids]))[:size]
+
+
 async def _process_active_video(gen_id: int) -> bool:
     from api.miniapp_routes import _reconcile_generation_status
 
@@ -157,10 +213,11 @@ async def _process_active_video(gen_id: int) -> bool:
                     gen.id, gen.model, age, task_id[:96],
                 )
         try:
-            final = await asyncio.wait_for(
-                _reconcile_generation_status(session, gen),
-                timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
-            )
+            # The provider network phase has its own wait_for budget, and
+            # Telegram sends are bounded independently. An outer timeout here
+            # could cancel a completed video's feed-royalty transaction *after*
+            # its first commit, leaving a partial settlement forever.
+            final = await _reconcile_generation_status(session, gen)
             logger.info(
                 "Neironych video reconciled gen=%s model=%s status=%s age_seconds=%d",
                 gen_id, gen.model, getattr(final.status, "value", final.status), age,
@@ -184,10 +241,9 @@ async def _process_delivery_notice(gen_id: int) -> bool:
 
     async with AsyncSessionLocal() as session:
         try:
-            return await asyncio.wait_for(
-                _deliver_pending_neironych_video_notice(session, gen_id),
-                timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
-            )
+            # The send itself has a timeout in the outbox helper. Do not
+            # cancel its DB receipt transaction after Telegram accepted media.
+            return await _deliver_pending_neironych_video_notice(session, gen_id)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -240,7 +296,7 @@ async def _process_bounded_batch(ids: list[int], action, stop: asyncio.Event | N
 async def reconcile_neironych_videos_once(stop: asyncio.Event | None = None) -> dict[str, int]:
     """Bounded video polling and notice retries operate concurrently."""
     video_ids = await _load_batch(_eligible_video_query(), _video_cursor)
-    notice_ids = await _load_batch(_eligible_notice_query(), _notice_cursor)
+    notice_ids = await _load_notice_batch()
     video_results, notice_results = await asyncio.gather(
         _process_bounded_batch(video_ids, _process_active_video, stop),
         _process_bounded_batch(notice_ids, _process_delivery_notice, stop),

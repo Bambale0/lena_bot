@@ -1247,3 +1247,17 @@ Additional reproducible root cause of perceived hanging UI: `GET /generations/{i
 ## Wide regression baseline comparison
 
 Full `tests/test_webapp_routes.py` revealed two unrelated pre-existing red cases: `test_photo_prompt_rejects_disguised_non_image` expects error text omitting existing GIF support, and `test_webapp_feed_returns_items` assumes images appear in `result_urls` whereas the existing feed endpoint sanitizes them to `[]`. Both cases were rerun against untouched `/root/mkdir/lena_bot/artflow` main `396cd57` and failed with identical assertions, proving they are **not introduced by the Seedance video recovery branch**. A broader run identified two more pre-existing feed/prompt assertions (`test_webapp_my_feed_returns_only_current_user_cards`, `test_generation_out_includes_all_result_urls`); both were independently reproduced on the same untouched main with identical failures. Neither production behavior nor tests were altered to silence these four unrelated baseline failures.
+
+
+## Codex PR #204 third-round findings
+
+Additional Codex P2 findings on `1260a00` addressed before merge:
+- Local `run_polling.py` mode had no FastAPI lifespan and therefore no Seedance recovery worker after foreground Neironych polling was removed. It now starts and shuts down the same scheduler; a red-to-green entrypoint regression test covers the omission.
+- On lost Redis ownership after the first `finish_generation` commit, cancellation could abort post-commit feed royalty and image-session updates. The lease now marks the irrevocable settlement phase immediately before refund/finish; Redis loss can abort provider GET/download, but cannot cancel already-committed money effects. Concurrent lease-loss-in-settlement regression added.
+- Unindexed `input_params` regex scan was repeated over all terminal history even when no pending notices existed. New cursor scans bounded `generations.id` primary-key ranges (recent and incremental old), advancing on empty matches, with operational window setting and no schema migration. TDD verifies cursor progress and new/old notice selection. PostgreSQL production `EXPLAIN ANALYZE` confirms primary-key index scan and about 8.6 ms on the most recent 5000 IDs.
+
+
+
+## Completion/receipt cancellation boundary
+
+Before release, an additional TDD regression reproduced an independent unsafe outer `asyncio.wait_for` wrapping the entire scheduler reconciliation and notification receipt. Even though provider polling and Telegram send were already independently bounded at 240 s, the redundant outer timer could cancel *irreversible* post-commit feed royalty/linked-session effects or the DB acknowledgement after Telegram accepted a message. Removed both redundant outer timers. Provider GET/download and Telegram send remain time-bounded inside their helpers. Two regressions prove the settlement/receipt work outlives the short provider timeout and finishes; this avoids silent partial settlement and needless redelivery.

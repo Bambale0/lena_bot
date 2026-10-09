@@ -10,6 +10,7 @@ import hashlib
 import logging
 import uuid
 from contextlib import asynccontextmanager, suppress
+from contextvars import ContextVar
 
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
@@ -17,6 +18,17 @@ from redis.exceptions import RedisError
 from core.config import settings
 
 logger = logging.getLogger(__name__)
+
+_post_commit_settlement: ContextVar[asyncio.Event | None] = ContextVar(
+    "neironych_poll_post_commit_settlement", default=None,
+)
+
+
+def protect_neironych_video_poll_settlement() -> None:
+    """Disable lease-loss cancellation before irreversible DB settlement begins."""
+    marker = _post_commit_settlement.get()
+    if marker is not None:
+        marker.set()
 
 
 class NeironychVideoPollLeaseLost(RuntimeError):
@@ -45,6 +57,7 @@ def _poll_heartbeat_interval_seconds() -> float:
 
 async def _renew_poll_lease(
     client, key: str, token: str, owner: asyncio.Task, lease_lost: asyncio.Event,
+    settlement_started: asyncio.Event,
 ) -> None:
     """Keep the lease alive throughout provider download AND DB settlement.
 
@@ -61,7 +74,10 @@ async def _renew_poll_lease(
             if int(refreshed or 0) != 1:
                 logger.error("Neironych video poll lease ownership lost; aborting owner")
                 lease_lost.set()
-                owner.cancel()
+                if not settlement_started.is_set():
+                    owner.cancel()
+                else:
+                    logger.error("Poll lease lost during critical DB settlement; preserving ledger consistency")
                 return
     except asyncio.CancelledError:
         raise
@@ -71,7 +87,10 @@ async def _renew_poll_lease(
             type(exc).__name__,
         )
         lease_lost.set()
-        owner.cancel()
+        if not settlement_started.is_set():
+            owner.cancel()
+        else:
+            logger.error("Poll lease renewal failed during critical DB settlement; preserving completion")
 
 
 @asynccontextmanager
@@ -90,6 +109,8 @@ async def neironych_video_poll_guard(task_id: str):
     acquired = False
     renewal_task: asyncio.Task | None = None
     lease_lost = asyncio.Event()
+    settlement_started = asyncio.Event()
+    context_token = None
     try:
         try:
             acquired = bool(await client.set(
@@ -103,8 +124,9 @@ async def neironych_video_poll_guard(task_id: str):
             owner = asyncio.current_task()
             if owner is None:
                 raise RuntimeError("Neironych poll lease requires an asyncio task")
+            context_token = _post_commit_settlement.set(settlement_started)
             renewal_task = asyncio.create_task(
-                _renew_poll_lease(client, key, claim, owner, lease_lost)
+                _renew_poll_lease(client, key, claim, owner, lease_lost, settlement_started)
             )
         try:
             yield acquired
@@ -115,6 +137,8 @@ async def neironych_video_poll_guard(task_id: str):
                 raise NeironychVideoPollLeaseLost("Poll ownership lost") from None
             raise
     finally:
+        if context_token is not None:
+            _post_commit_settlement.reset(context_token)
         if renewal_task is not None:
             renewal_task.cancel()
             with suppress(asyncio.CancelledError):

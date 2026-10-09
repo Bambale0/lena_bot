@@ -52,6 +52,7 @@ jobs:
             tests/test_neironych_video_poll_gate.py \
             core/neironych_image_reconcile_scheduler.py \
             core/neironych_video_reconcile_scheduler.py \
+            run_polling.py \
             db/repository.py \
             tests/test_neironych_video_stuck_recovery.py \
             tests/test_neironych_video_notice_outbox.py \

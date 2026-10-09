@@ -107,6 +107,7 @@ from core.gemini_omni import (
 from core.neironych_video_poll_gate import (
     NeironychVideoPollLeaseLost,
     neironych_video_poll_guard,
+    protect_neironych_video_poll_settlement,
 )
 from core.provider_routing import get_nano21_route
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
@@ -626,6 +627,9 @@ async def _reconcile_neironych_video_generation(
             if exc.request_id != video_service.neironych_seedance_runtime.decode_task_id(task_id):
                 logger.error("Neironych mismatched terminal response gen=%s", gen.id)
                 return gen
+            # The refund and credit-ledger transition must not be cancelled
+            # by loss of the Redis lock after irreversible settlement begins.
+            protect_neironych_video_poll_settlement()
             failed, refunded = await repo.fail_generation_and_refund(
                 session, gen.id, str(exc),
                 expected_task_id=stored_task_id,
@@ -647,6 +651,9 @@ async def _reconcile_neironych_video_generation(
         if not result_url:
             return gen
 
+        # Once the first done-commit succeeds, feed royalties and linked
+        # image-session state must finish even if Redis ownership is lost.
+        protect_neironych_video_poll_settlement()
         finished = await repo.finish_generation(
             session, gen.id, result_url,
             expected_task_id=stored_task_id,

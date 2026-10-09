@@ -159,3 +159,27 @@ async def test_lost_poll_lease_cancels_owner_before_more_provider_calls(monkeypa
     with pytest.raises(gate.NeironychVideoPollLeaseLost):
         await asyncio.wait_for(owner, 0.3)
     assert fake.entries[key] == "new-owner-token", "Old owner must not delete new lease"
+
+
+@pytest.mark.asyncio
+async def test_lost_poll_lease_during_post_commit_settlement_does_not_cancel(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(gate.aioredis.Redis, "from_url", lambda *args, **kwargs: fake)
+    monkeypatch.setattr(gate, "_poll_heartbeat_interval_seconds", lambda: 0.01)
+    settled = asyncio.Event()
+
+    async def critical_work():
+        async with gate.neironych_video_poll_guard("neironych:royalty") as acquired:
+            assert acquired
+            gate.protect_neironych_video_poll_settlement()
+            settled.set()
+            await asyncio.sleep(0.06)  # Simulate slow post-commit royalty settlement.
+            return "royalties_recorded"
+
+    owner = asyncio.create_task(critical_work())
+    await asyncio.wait_for(settled.wait(), timeout=1)
+    key = next(iter(fake.entries))
+    fake.entries[key] = "successor-owner"
+    result = await asyncio.wait_for(owner, 0.3)
+    assert result == "royalties_recorded", "Redis lease loss cannot abort settled money effects"
+    assert fake.entries[key] == "successor-owner"

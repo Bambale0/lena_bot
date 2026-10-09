@@ -179,7 +179,8 @@ async def test_scheduler_bounded_provider_polling_prevents_rate_limit_storm(monk
 async def test_scheduler_checks_active_tasks_and_pending_telegram_notices(monkeypatch):
     from core import neironych_video_reconcile_scheduler as scheduler
 
-    monkeypatch.setattr(scheduler, "_load_batch", AsyncMock(side_effect=[[12, 14], [12, 19]]))
+    monkeypatch.setattr(scheduler, "_load_batch", AsyncMock(return_value=[12, 14]))
+    monkeypatch.setattr(scheduler, "_load_notice_batch", AsyncMock(return_value=[12, 19]))
     check = AsyncMock(return_value=True)
     send = AsyncMock(side_effect=[True, False])
     monkeypatch.setattr(scheduler, "_process_active_video", check)
@@ -501,3 +502,145 @@ async def test_website_neironych_status_is_read_from_db_without_polling(monkeypa
     result = await miniapp_routes.get_generation(gen.id, object(), SimpleNamespace(id=gen.user_id))
     assert result is gen
     reconcile.assert_not_awaited()
+
+
+def test_polling_entrypoint_runs_video_recovery_scheduler():
+    import inspect
+
+    import run_polling
+
+    source = inspect.getsource(run_polling.main)
+    assert "run_neironych_video_reconcile_scheduler" in source
+    assert "video_reconcile_stop.set()" in source
+
+@pytest.mark.asyncio
+async def test_notice_scan_advances_over_empty_indexed_id_windows(monkeypatch):
+    from core import neironych_video_reconcile_scheduler as scheduler
+    from core.config import settings
+
+    class Results:
+        def scalars(self):
+            return SimpleNamespace(all=lambda: [])
+
+    class FakeSession:
+        def __init__(self):
+            self.queries = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def scalar(self, _sql):
+            return 10000
+
+        async def execute(self, query):
+            self.queries.append(str(query))
+            return Results()
+
+        async def rollback(self):
+            pass
+
+    db = FakeSession()
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", lambda: db)
+    monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE", 4)
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_NOTICE_SCAN_ID_SPAN", 1000, raising=False)
+    assert await scheduler._load_notice_batch() == []
+    assert scheduler._notice_cursor.older_id == 1000
+    assert await scheduler._load_notice_batch() == []
+    assert scheduler._notice_cursor.older_id == 2000
+    assert db.queries and all("generations.id" in q for q in db.queries)
+
+@pytest.mark.asyncio
+async def test_notice_scan_prioritizes_recent_ids_while_backfilling_old(monkeypatch):
+    from core import neironych_video_reconcile_scheduler as scheduler
+    from core.config import settings
+
+    class FakeSession:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_): return False
+        async def scalar(self, _query): return 1000000
+        async def rollback(self): pass
+        async def execute(self, query):
+            values = [999995] if "DESC" in str(query) else [12]
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: values))
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE", 4)
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_NOTICE_SCAN_ID_SPAN", 5000, raising=False)
+    found = await scheduler._load_notice_batch()
+    assert 999995 in found and 12 in found
+
+
+@pytest.mark.asyncio
+async def test_scheduler_does_not_abort_post_commit_royalty_after_poll_deadline(monkeypatch):
+    import asyncio
+
+    from core import neironych_video_reconcile_scheduler as scheduler
+    from core.config import settings
+
+    row = _video(age_minutes=2)
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def commit(self):
+            pass
+
+        async def rollback(self):
+            pass
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=row))
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS", 0.02)
+    events = []
+
+    async def after_provider_success(_session, gen):
+        events.append("provider_download_completed")
+        await asyncio.sleep(0.06)
+        events.append("feed_royalty_settlement_completed")
+        gen.status = GenerationStatus.done
+        return gen
+
+    monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", after_provider_success)
+    assert await asyncio.wait_for(scheduler._process_active_video(row.id), 0.25)
+    assert events == ["provider_download_completed", "feed_royalty_settlement_completed"]
+
+
+@pytest.mark.asyncio
+async def test_notice_worker_does_not_cancel_receipt_commit_after_telegram_sends(monkeypatch):
+    import asyncio
+
+    from core import neironych_video_reconcile_scheduler as scheduler
+    from core.config import settings
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def rollback(self):
+            pass
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS", 0.02)
+    recorded = []
+
+    async def delivery(_session, gen_id):
+        recorded.append(("telegram_accepted", gen_id))
+        await asyncio.sleep(0.05)
+        recorded.append(("db_receipt_saved", gen_id))
+        return True
+
+    monkeypatch.setattr(miniapp_routes, "_deliver_pending_neironych_video_notice", delivery)
+    assert await asyncio.wait_for(scheduler._process_delivery_notice(789123), 0.2)
+    assert recorded == [("telegram_accepted", 789123), ("db_receipt_saved", 789123)]
