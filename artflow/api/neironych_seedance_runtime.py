@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
@@ -9,10 +10,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from api import media_gateway, public_files
+from api.media_gateway import MediaProbe
 from api.neironych_seedance import NeironychSeedanceClient
 from api.public_files import save_public_file
 from core.config import settings
-from core.neironych_seedance_contract import build_seedance_payload
+from core.neironych_seedance_contract import (
+    SEEDANCE_FIXED_ASPECT_RATIOS,
+    SeedanceContractError,
+    build_seedance_payload,
+    get_seedance_spec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +81,33 @@ def _list(value: str | list[str] | None) -> list[str]:
     return list(dict.fromkeys(str(item).strip() for item in value if str(item or "").strip()))
 
 
+def _source_reference_controls(source: MediaProbe | None, model: str) -> tuple[int, str]:
+    """Resolve mixed-edit output controls from owned media, never UI -1/adaptive.
+
+    Reference mode cannot inherit dimensions like provider edit does. Use the
+    same ceil(source seconds) as precharge and the closest supported aspect.
+    """
+    if source is None:
+        raise SeedanceContractError("Seedance mixed edit requires verified source video metadata.")
+    seconds = source.duration_seconds
+    spec = get_seedance_spec(model)
+    if (
+        isinstance(seconds, bool)
+        or not isinstance(seconds, (int, float))
+        or not math.isfinite(seconds)
+        or not spec.min_duration <= seconds <= spec.max_duration
+    ):
+        raise SeedanceContractError("Seedance mixed edit source duration is invalid.")
+    if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in (source.width, source.height)):
+        raise SeedanceContractError("Seedance mixed edit source dimensions are invalid.")
+    source_ratio = source.width / source.height
+    ratio = min(
+        SEEDANCE_FIXED_ASPECT_RATIOS,
+        key=lambda value: abs(source_ratio / (int(value.split(":")[0]) / int(value.split(":")[1])) - 1),
+    )
+    return math.ceil(seconds), ratio
+
+
 def build_product_payload(
     *,
     product_model: str,
@@ -84,6 +119,7 @@ def build_product_payload(
     aspect_ratio: str | None = None,
     resolution: str | None = None,
     edit: bool = False,
+    source_probe: MediaProbe | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Translate stable APIX product semantics into the documented provider contract."""
 
@@ -97,7 +133,10 @@ def build_product_payload(
     audios = _list(audio_urls)
     has_refs = bool(images or videos or audios)
 
-    if edit:
+    if edit and len(videos) != 1:
+        raise SeedanceContractError("Seedance product edit requires exactly one source video.")
+    mixed_edit = edit and bool(images or audios)
+    if edit and not mixed_edit:
         mode = "edit"
     elif has_refs:
         # APIX Seedance 2 and 2.5 have historically treated normal images as
@@ -108,8 +147,12 @@ def build_product_payload(
 
     selected_resolution = str(resolution or "720p")
     selected_ratio = str(aspect_ratio or "16:9")
-    # APIX exposes "adaptive" for Seedance 2.5. Neironych accepts adaptive only
-    # for frame/edit. In text/reference mode omission means provider-auto.
+    if mixed_edit:
+        if provider_model != "seedance-2.5":
+            raise SeedanceContractError("Mixed edit is supported only for Seedance 2.5.")
+        duration, selected_ratio = _source_reference_controls(source_probe, provider_model)
+    # Generic reference requests with adaptive retain the provider default.
+    # Mixed edits above must instead resolve the real source ratio explicitly.
     if provider_model == "seedance-2.5" and selected_ratio == "adaptive" and mode != "edit":
         selected_ratio = ""
 
@@ -151,6 +194,16 @@ async def generate_product_video(
     idempotency_key: str | None = None,
     submission_context: SubmissionContext | None = None,
 ) -> str:
+    source_probe = None
+    if edit and (_list(image_urls) or _list(audio_urls)):
+        videos = _list(video_urls)
+        if len(videos) != 1:
+            raise SeedanceContractError("Seedance mixed edit requires exactly one source video.")
+        local_path = public_files.local_upload_path_from_url(videos[0])
+        if local_path is None:
+            # Do not add a remote fetch/SSRF path to the provider adapter.
+            raise SeedanceContractError("Seedance mixed edit requires an uploaded source video.")
+        source_probe = await media_gateway.probe_local_media(local_path, media_gateway.MediaKind.VIDEO)
     provider_model, payload = build_product_payload(
         product_model=product_model,
         prompt=prompt,
@@ -161,6 +214,13 @@ async def generate_product_video(
         aspect_ratio=aspect_ratio,
         resolution=resolution,
         edit=edit,
+        source_probe=source_probe,
+    )
+    logger.info(
+        "neironych_seedance_route model=%s product_edit=%s provider_mode=%s images=%d videos=%d audios=%d duration=%s aspect_ratio=%s",
+        provider_model, edit, payload.get("omni_reference_task_type", "text"),
+        len(payload.get("reference_images", [])), len(payload.get("reference_videos", [])),
+        len(payload.get("reference_audios", [])), payload.get("duration"), payload.get("aspect_ratio"),
     )
     client = _client()
     try:

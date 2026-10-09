@@ -73,6 +73,7 @@ jobs:
             core/seedance_reconciliation.py \
             api/seedance_provider_routing.py \
             api/realtime.py \
+            tests/test_seedance_neironych_mode_contract.py \
             tests/test_seedance_uncertain_submission.py \
             tests/test_seedance_postgres_admission.py \
             tests/test_neironych_automatic_recovery.py \
@@ -225,6 +226,7 @@ jobs:
             tests/test_neironych_video_stuck_recovery.py \
             tests/test_neironych_video_notice_outbox.py \
             tests/test_neironych_video_poll_gate.py \
+            tests/test_seedance_neironych_mode_contract.py \
             tests/test_seedance_uncertain_submission.py \
             tests/test_seedance_postgres_admission.py \
             tests/test_neironych_automatic_recovery.py \

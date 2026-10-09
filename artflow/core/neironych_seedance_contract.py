@@ -208,7 +208,7 @@ def normalize_seedance_request(model: str, input_data: dict[str, Any]) -> dict[s
     for field in _ALWAYS_DROP_FIELDS:
         payload.pop(field, None)
 
-    if payload.get("generate_audio") is False:
+    if payload.get("generate_audio") is False and model != "seedance-2.5":
         raise SeedanceContractError("Seedance не поддерживает generate_audio=false.")
     if "generate_audio" in payload and not isinstance(payload["generate_audio"], bool):
         raise SeedanceContractError("generate_audio должен быть boolean.")
@@ -321,8 +321,10 @@ def normalize_seedance_request(model: str, input_data: dict[str, Any]) -> dict[s
     if task_type == "edit":
         if model != "seedance-2.5":
             raise SeedanceContractError("Edit доступен только в Seedance 2.5.")
-        if not videos:
-            raise SeedanceContractError("Seedance 2.5 edit требует видео-референс.")
+        if len(videos) != 1 or images or audios:
+            raise SeedanceContractError("Seedance 2.5 edit accepts only one video; use reference for mixed assets.")
+        if "size" in payload or payload.get("duration", -1) != -1:
+            raise SeedanceContractError("Seedance 2.5 edit inherits source duration and size.")
         if has_frames:
             raise SeedanceContractError("Seedance 2.5 edit нельзя смешивать с frame mode.")
 
@@ -402,6 +404,6 @@ def build_seedance_payload(
         payload["omni_reference_task_type"] = "reference"
 
     if mode in {"reference", "edit"}:
-        payload["generate_audio"] = True
+        payload.setdefault("generate_audio", True)
 
     return normalize_seedance_request(model, payload)

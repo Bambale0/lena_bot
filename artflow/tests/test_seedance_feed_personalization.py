@@ -142,7 +142,7 @@ async def test_seedance_duration_comes_from_real_source_probe_before_tariff(seed
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["kie", "neironych"])
 @pytest.mark.parametrize("inputs", [{"change_request": "make the coat blue"}, {"image_url": USER_IMAGE}])
-async def test_feed_video_intent_reaches_existing_provider_edit_contract(seedance_api, monkeypatch, provider, inputs):
+async def test_feed_video_intent_reaches_provider_appropriate_mode_contract(seedance_api, monkeypatch, provider, inputs):
     from api import neironych_seedance_runtime
 
     captured = {}
@@ -178,10 +178,15 @@ async def test_feed_video_intent_reaches_existing_provider_edit_contract(seedanc
         _model, payload = neironych_seedance_runtime.build_product_payload(**{
             key: value for key, value in captured.items()
             if key not in {"idempotency_key", "submission_context"}
-        })
-        assert payload["omni_reference_task_type"] == "edit"
+        }, source_probe=SimpleNamespace(width=1280, height=720, duration_seconds=6.2))
         assert payload["reference_videos"] == [{"url": SOURCE_VIDEO}]
-        assert "duration" not in payload and "aspect_ratio" not in payload
+        if inputs.get("image_url"):
+            assert payload["omni_reference_task_type"] == "reference"
+            assert payload["reference_images"] == [{"url": USER_IMAGE}]
+            assert (payload["duration"], payload["aspect_ratio"]) == (7, "16:9")
+        else:
+            assert payload["omni_reference_task_type"] == "edit"
+            assert "duration" not in payload and "aspect_ratio" not in payload
     assert SECRET not in str(payload)
     assert seedance_api.charge.await_args.args[2] == 28
 
