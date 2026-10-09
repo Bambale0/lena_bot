@@ -410,6 +410,10 @@ async def test_video_scheduler_releases_read_transaction_before_provider_poll(mo
     fake = FakeSession()
     monkeypatch.setattr(scheduler, "AsyncSessionLocal", lambda: fake)
     monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=row))
+    # This unit test exercises DB settlement ordering, not Redis integration.
+    # CI has no Redis service; the dedicated intent test asserts ZSET durability.
+    track_notice = AsyncMock()
+    monkeypatch.setattr(scheduler, "_track_active_video_notice_intent", track_notice)
 
     async def fake_reconcile(_session, _generation):
         events.append("provider_get")
@@ -419,6 +423,7 @@ async def test_video_scheduler_releases_read_transaction_before_provider_poll(mo
     monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", fake_reconcile)
     assert await scheduler._process_active_video(row.id)
     assert events.index("commit") < events.index("provider_get")
+    track_notice.assert_awaited_once_with(row.id)
 
 
 @pytest.mark.asyncio
@@ -645,6 +650,10 @@ async def test_scheduler_does_not_abort_post_commit_royalty_after_poll_deadline(
 
     monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
     monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=row))
+    # This unit test exercises DB settlement ordering, not Redis integration.
+    # CI has no Redis service; the dedicated intent test asserts ZSET durability.
+    track_notice = AsyncMock()
+    monkeypatch.setattr(scheduler, "_track_active_video_notice_intent", track_notice)
     monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS", 0.02)
     events = []
 
@@ -658,6 +667,7 @@ async def test_scheduler_does_not_abort_post_commit_royalty_after_poll_deadline(
     monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", after_provider_success)
     assert await asyncio.wait_for(scheduler._process_active_video(row.id), 0.25)
     assert events == ["provider_download_completed", "feed_royalty_settlement_completed"]
+    track_notice.assert_awaited_once_with(row.id)
 
 
 @pytest.mark.asyncio
