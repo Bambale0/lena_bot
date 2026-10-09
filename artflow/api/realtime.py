@@ -22,6 +22,7 @@ from api.miniapp_auth import _verify_init_data, verify_web_auth_token
 from api.prompt_privacy import PROMPT_HIDDEN_PLACEHOLDER
 from api.public_files import public_url_is_available
 from api.web_auth_constants import WEB_AUTH_COOKIE_NAME
+from core.seedance_reconciliation import public_generation_status
 from db import repository as repo
 from db.models import Generation, User
 from db.session import get_session
@@ -73,7 +74,7 @@ def generation_event_payload(gen: Generation) -> dict[str, Any]:
         "prompt": PROMPT_HIDDEN_PLACEHOLDER,
         "prompt_hidden": True,
         "prompt_actions_allowed": False,
-        "status": _enum_value(gen.status),
+        "status": public_generation_status(gen),
         "result_url": _generation_primary_result_url(gen),
         "result_urls": _generation_result_urls(gen),
         "error": gen.error_msg,

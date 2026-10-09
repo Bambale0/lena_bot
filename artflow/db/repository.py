@@ -21,6 +21,7 @@ from api.public_files import mirror_url, public_url_is_available
 from core.config import settings
 from core.model_pricing import image_pricing_keys, pricing_variant_key, video_pricing_keys
 from core.reporting_time import moscow_day_bounds_utc
+from core.seedance_reconciliation import RECONCILIATION_KEY
 from db.models import (
     CreditLedgerEntry,
     FeedRemixPayout,
@@ -56,7 +57,7 @@ NEIRONYCH_VIDEO_NOTICE_KEY = "neironych_video_notice"
 
 
 def _new_neironych_video_notice(kind: str) -> dict[str, object]:
-    if kind not in {"done", "failed"}:
+    if kind not in {"done", "failed", "reconciliation"}:
         raise ValueError("Unsupported video notice kind")
     return {"kind": kind, "state": "pending", "attempts": 0}
 
@@ -1515,6 +1516,42 @@ def _notice_timestamp(value: object) -> datetime | None:
         return None
 
 
+async def mark_neironych_video_reconciliation(
+    session: AsyncSession, gen_id: int, *, expected_task_id: str,
+) -> bool:
+    """Persist explicit provider uncertainty + one user notice, with no credit change."""
+    generation = (await session.execute(
+        select(Generation).where(Generation.id == gen_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if (
+        generation is None
+        or generation.status not in {GenerationStatus.pending, GenerationStatus.processing}
+        or generation.gen_type != GenerationType.video
+        or generation.task_id != expected_task_id
+        or not expected_task_id.startswith(("neironych:", "web:neironych:"))
+    ):
+        await session.commit()
+        return False
+    params = parse_input_params(generation.input_params)
+    existing = params.get(RECONCILIATION_KEY)
+    if isinstance(existing, dict) and existing.get("required") is True:
+        await session.commit()
+        return False
+    params[RECONCILIATION_KEY] = {
+        "required": True,
+        "reason": "submission_outcome_unknown",
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if expected_task_id.startswith("neironych:"):
+        params[NEIRONYCH_VIDEO_NOTICE_KEY] = _new_neironych_video_notice("reconciliation")
+    generation.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    await _publish_generation_update(generation)
+    logger.warning("Neironych video requires manual reconciliation gen=%s task=%s", gen_id, expected_task_id)
+    return True
+
+
 async def claim_neironych_video_notice(
     session: AsyncSession, gen_id: int,
     *, lease_seconds: int | None = None,
@@ -1539,8 +1576,8 @@ async def claim_neironych_video_notice(
     kind = data.get("kind")
     state = data.get("state")
     if (
-        kind not in {"done", "failed"}
-        or kind != status
+        kind not in {"done", "failed", "reconciliation"}
+        or not (kind == status or (kind == "reconciliation" and status in {"pending", "processing"}))
         or generation.gen_type != GenerationType.video
         or not str(generation.task_id or "").startswith("neironych:")
         or state not in {"pending", "sending"}

@@ -49,6 +49,10 @@ jobs:
             api/neironych_seedance_runtime.py \
             api/neironych_seedance.py \
             core/neironych_video_poll_gate.py \
+            core/seedance_reconciliation.py \
+            api/seedance_provider_routing.py \
+            api/realtime.py \
+            tests/test_seedance_uncertain_submission.py \
             tests/test_neironych_video_poll_gate.py \
             core/neironych_image_reconcile_scheduler.py \
             core/neironych_video_reconcile_scheduler.py \
@@ -161,6 +165,7 @@ jobs:
             tests/test_neironych_video_stuck_recovery.py \
             tests/test_neironych_video_notice_outbox.py \
             tests/test_neironych_video_poll_gate.py \
+            tests/test_seedance_uncertain_submission.py \
             tests/test_reconcile_video_delivery.py \
             tests/test_neironych_seedance_runtime.py \
             tests/test_neironych_seedance_admin.py \

@@ -23,6 +23,14 @@ class NeironychVideoTaskFailed(RuntimeError):
         super().__init__(str(message or f"Neironych Seedance {state}")[:1000])
 
 
+class NeironychVideoReconciliationRequired(RuntimeError):
+    """An explicit uncertain submit requires review, not replay or false refund."""
+
+    def __init__(self, request_id: str) -> None:
+        self.request_id = decode_task_id(request_id)
+        super().__init__("Neironych video submission requires reconciliation")
+
+
 PRODUCT_MODELS = {
     "bytedance/seedance-2": "seedance-2.0",
     "bytedance/seedance-2-5": "seedance-2.5",
@@ -165,6 +173,11 @@ async def poll_product_video(request_id: str) -> str | None:
                 state=status.status,
             )
         if not status.done:
+            if (
+                getattr(status, "status", "") == "reconciliation_required"
+                or str(getattr(status, "error", "")).strip() == "submission_outcome_unknown"
+            ):
+                raise NeironychVideoReconciliationRequired(request_id)
             return None
 
         handle = tempfile.NamedTemporaryFile(

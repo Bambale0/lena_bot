@@ -59,13 +59,14 @@ export function formatRelativeDate(value?: string | null): string {
 export function generationStatusLabel(status: string): string {
   if (status === "done" || status === "completed") return "Готово";
   if (status === "failed") return "Ошибка";
+  if (status === "reconciliation_required") return "На проверке у поставщика";
   if (status === "processing" || status === "running") return "Создаётся";
   if (status === "pending" || status === "queued" || status === "created") return "В очереди";
   return status || "В работе";
 }
 
 export function isPendingTask(task?: GenerationTask | null): boolean {
-  return Boolean(task && ["created", "queued", "pending", "processing", "running"].includes(task.status));
+  return Boolean(task && ["created", "queued", "pending", "processing", "running", "reconciliation_required"].includes(task.status));
 }
 
 export function safeExternalUrl(value?: string | null): string {
