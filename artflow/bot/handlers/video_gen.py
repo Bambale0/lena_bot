@@ -43,6 +43,7 @@ from api.genjutsu_adapter import (
 from api.genjutsu_adapter import (
     resolve_source_duration_seconds as resolve_genjutsu_source_duration,
 )
+from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from api.public_files import mirror_telegram_file
 from api.seedance25_adapter import (
     CONTROL_PREFIX as SEEDANCE25_CONTROL_PREFIX,
@@ -101,6 +102,12 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.seedance_reconciliation import (
+    handle_submission_not_sent,
+    handle_submission_unknown,
+    make_submission_context,
+    persist_submission_result,
+)
 from core.seedance_repeat_overrides import (
     build_seedance_content_edit_prompt,
     build_seedance_repeat_prompt,
@@ -113,6 +120,47 @@ from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 router = Router(name="video_gen")
+
+
+async def _show_video_submission_review(
+    status_msg: Message, state: FSMContext, session: AsyncSession, gen_id: int,
+) -> None:
+    """Use the durable outbox claim for the foreground edit and scheduler alike."""
+    claim = None
+    delivered = False
+    try:
+        claim = await repo.claim_neironych_video_notice(session, gen_id, expected_kind="reconciliation")
+        if claim is None or claim.kind != "reconciliation":
+            return
+        current = await repo.current_neironych_review_notice(
+            session, gen_id, claim.token, expected_task_id=claim.generation.task_id,
+        )
+        if current is None:
+            return
+        await asyncio.wait_for(
+            status_msg.edit_text(
+                "⏳ Подтверждение запуска видео пока не получено. "
+                "Автоматически проверяю ту же заявку, без повторного запуска. "
+                "💋 сохранены за этой задачей до подтверждённого результата. "
+                "Если проверка затянется, заявка останется на разборе.",
+                reply_markup=main_menu_kb(),
+            ),
+            timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
+        )
+        delivered = True
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Could not update submission review acknowledgment error=%s", type(exc).__name__)
+    finally:
+        if claim is not None:
+            try:
+                await repo.complete_neironych_video_notice(
+                    session, gen_id, claim.token, delivered=delivered,
+                )
+            except Exception as exc:
+                logger.warning("Could not persist review edit receipt gen=%s error=%s", gen_id, type(exc).__name__)
+        await state.clear()
 
 
 async def _show_video_task_started(status_msg: Message, task_id: str) -> None:
@@ -2257,6 +2305,7 @@ async def _launch_video_generation_from_state(
         "\n\nЭто займёт 2–10 минут."
     )
 
+    submission_context = make_submission_context(session, gen_id, model_key, surface="telegram_bot")
     try:
         result = await video_service.generate_video(
             VideoModel(model_key),
@@ -2274,8 +2323,23 @@ async def _launch_video_generation_from_state(
             seed=data.get("seed"),
             callback_url=_kie_callback_url(),
             idempotency_key=f"apix-video-{gen_id}",
+            **({"neironych_submission": submission_context} if submission_context else {}),
             **seedance_kwargs,
         )
+    except NeironychPreSubmitFailure:
+        if await handle_submission_not_sent(session, gen_id, submission_context):
+            await status_msg.edit_text(
+                "Запрос видео не отправлен. 💋 возвращены. Попробуй позже.",
+                reply_markup=main_menu_kb(),
+            )
+            await state.clear()
+        else:
+            await _show_video_submission_review(status_msg, state, session, gen_id)
+        return False
+    except NeironychSubmissionUnknown:
+        await handle_submission_unknown(session, gen_id, submission_context)
+        await _show_video_submission_review(status_msg, state, session, gen_id)
+        return True
     except Exception as e:
         if content_edit:
             logger.warning("flow=genjutsu_face_clothing provider_start_failed error_type=%s", type(e).__name__)
@@ -2296,7 +2360,26 @@ async def _launch_video_generation_from_state(
         await state.clear()
         return False
 
-    await repo.update_generation_task(session, gen_id, result.task_id)
+    if submission_context and submission_context.started:
+        try:
+            saved = await persist_submission_result(
+                session, gen_id, submission_context, result.task_id or "", surface="telegram_bot",
+            )
+        except Exception:
+            logger.warning("Seedance bot result identity persistence deferred gen=%s", gen_id)
+            await handle_submission_unknown(session, gen_id, submission_context)
+            saved = False
+        if not saved:
+            await _show_video_submission_review(status_msg, state, session, gen_id)
+            return True
+    else:
+        saved = await repo.update_generation_task(
+            session, gen_id, result.task_id,
+            **({"expected_task_id": ""} if submission_context else {}),
+        )
+        if submission_context and saved is False:
+            await _show_video_submission_review(status_msg, state, session, gen_id)
+            return
     await _show_video_task_started(status_msg, result.task_id)
     poll_fn = video_service.get_poll_fn(result.provider)
 
@@ -3012,6 +3095,7 @@ async def cb_regen_video(
         "\n\nЭто займёт 2–10 минут."
     )
 
+    submission_context = make_submission_context(session, gen_id, model_key, surface="telegram_bot")
     try:
         result = await video_service.generate_video(
             video_model,
@@ -3029,7 +3113,22 @@ async def cb_regen_video(
             seed=seed,
             callback_url=_kie_callback_url(),
             idempotency_key=f"apix-video-{gen_id}",
+            **({"neironych_submission": submission_context} if submission_context else {}),
         )
+    except NeironychPreSubmitFailure:
+        if await handle_submission_not_sent(session, gen_id, submission_context):
+            await status_msg.edit_text(
+                "Запрос видео не отправлен. 💋 возвращены. Попробуй позже.",
+                reply_markup=main_menu_kb(),
+            )
+            await state.clear()
+        else:
+            await _show_video_submission_review(status_msg, state, session, gen_id)
+        return
+    except NeironychSubmissionUnknown:
+        await handle_submission_unknown(session, gen_id, submission_context)
+        await _show_video_submission_review(status_msg, state, session, gen_id)
+        return
     except Exception as exc:
         logger.error("Video regeneration error: %s", exc)
         await session.rollback()
@@ -3046,7 +3145,26 @@ async def cb_regen_video(
         await state.clear()
         return
 
-    await repo.update_generation_task(session, gen_id, result.task_id)
+    if submission_context and submission_context.started:
+        try:
+            saved = await persist_submission_result(
+                session, gen_id, submission_context, result.task_id or "", surface="telegram_bot",
+            )
+        except Exception:
+            logger.warning("Seedance bot result identity persistence deferred gen=%s", gen_id)
+            await handle_submission_unknown(session, gen_id, submission_context)
+            saved = False
+        if not saved:
+            await _show_video_submission_review(status_msg, state, session, gen_id)
+            return
+    else:
+        saved = await repo.update_generation_task(
+            session, gen_id, result.task_id,
+            **({"expected_task_id": ""} if submission_context else {}),
+        )
+        if submission_context and saved is False:
+            await _show_video_submission_review(status_msg, state, session, gen_id)
+            return
     await _show_video_task_started(status_msg, result.task_id)
     poll_fn = video_service.get_poll_fn(result.provider)
 

@@ -353,6 +353,7 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
                 resolution=resolution,
                 edit=edit,
                 idempotency_key=kwargs.get("idempotency_key"),
+                submission_context=kwargs.get("neironych_submission"),
             )
             logger.info(
                 "Neironych Seedance 2.5 task route=%s edit=%s images=%d videos=%d audios=%d task=%s",

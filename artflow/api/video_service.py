@@ -277,6 +277,7 @@ async def generate_video(
     watermark: str | None = None,
     enable_translation: bool = False,
     idempotency_key: str | None = None,
+    neironych_submission: neironych_seedance_runtime.SubmissionContext | None = None,
 ) -> VideoResult:
     del image_bytes  # the URL/file-upload path is the canonical provider contract
 
@@ -304,6 +305,7 @@ async def generate_video(
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
                 idempotency_key=idempotency_key,
+                submission_context=neironych_submission,
             )
             return VideoResult(
                 task_id=neironych_seedance_runtime.encode_task_id(task_id),

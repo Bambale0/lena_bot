@@ -1223,7 +1223,10 @@ async def update_generation_task(
         Generation.id == gen_id,
         Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
     ]
-    if expected_task_id is not None:
+    if expected_task_id == "":
+        # Explicit unsubmitted CAS, also forwarded by repeat-runtime wrappers.
+        conditions.append(or_(Generation.task_id.is_(None), Generation.task_id == ""))
+    elif expected_task_id is not None:
         conditions.append(Generation.task_id == expected_task_id)
     result = await session.execute(
         update(Generation)
@@ -1236,6 +1239,111 @@ async def update_generation_task(
     if gen is not None:
         await _publish_generation_update(gen)
     return gen is not None
+
+
+SEEDANCE_SUBMISSION_KEY = "neironych_submission"
+SEEDANCE_SUBMISSION_PREFIXES = ("neironych-submit:", "web:neironych-submit:")
+
+
+async def _locked_seedance_generation(session, gen_id):
+    return (await session.execute(
+        select(Generation).where(Generation.id == gen_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+
+
+def _active_seedance_submission(gen, client_request_id):
+    if (gen is None or gen.status not in (GenerationStatus.pending, GenerationStatus.processing)
+            or gen.gen_type != GenerationType.video):
+        return None
+    params = parse_input_params(gen.input_params)
+    marker = params.get(SEEDANCE_SUBMISSION_KEY)
+    if (not isinstance(marker, dict) or marker.get("client_request_id") != client_request_id
+            or marker.get("product_model") != gen.model
+            or marker.get("state") not in {"submitting", "submission_unknown"}
+            or gen.task_id not in ("neironych-submit:" + client_request_id,
+                                   "web:neironych-submit:" + client_request_id)):
+        return None
+    return params
+
+
+async def begin_seedance_submission(
+    session, gen_id: int, client_request_id: str, idempotency_key: str,
+    payload_sha256: str, *, product_model: str, surface: str = "miniapp",
+) -> bool:
+    """Single-use durable launch record. No caller may POST unless this commits."""
+    from core.seedance_reconciliation import PRODUCT_MODELS
+
+    if str(uuid.UUID(client_request_id)) != client_request_id:
+        raise ValueError("Invalid submission UUID")
+    if product_model not in PRODUCT_MODELS or not idempotency_key:
+        raise ValueError("Invalid submission identity")
+    if len(payload_sha256) != 64 or any(c not in "0123456789abcdef" for c in payload_sha256):
+        raise ValueError("Invalid submission fingerprint")
+    gen = await _locked_seedance_generation(session, gen_id)
+    params = parse_input_params(gen.input_params) if gen is not None else {}
+    if (gen is None or gen.status not in (GenerationStatus.pending, GenerationStatus.processing)
+            or gen.gen_type != GenerationType.video or gen.model != product_model
+            or gen.task_id or params.get(SEEDANCE_SUBMISSION_KEY)):
+        await session.commit()
+        return False
+    params[SEEDANCE_SUBMISSION_KEY] = {
+        "client_request_id": client_request_id, "idempotency_key": idempotency_key,
+        "payload_sha256": payload_sha256, "product_model": product_model,
+        "state": "submitting", "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    params[RECONCILIATION_KEY] = {"required": False}
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    gen.task_id = ("web:" if surface == "web" else "") + "neironych-submit:" + client_request_id
+    gen.status = GenerationStatus.processing
+    await session.commit()
+    return True
+
+
+async def mark_seedance_submission_unknown(
+    session, gen_id: int, client_request_id: str, *, reason: str = "submission_unknown",
+) -> bool:
+    """Keep credits held; CAS cannot turn a bound or terminal job into review."""
+    gen = await _locked_seedance_generation(session, gen_id)
+    params = _active_seedance_submission(gen, client_request_id)
+    if params is None:
+        await session.commit()
+        return False
+    params[SEEDANCE_SUBMISSION_KEY]["state"] = "submission_unknown"
+    params[RECONCILIATION_KEY] = {
+        "required": True, "reason": "submission_outcome_unknown",
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if gen.task_id.startswith("neironych-submit:") and NEIRONYCH_VIDEO_NOTICE_KEY not in params:
+        params[NEIRONYCH_VIDEO_NOTICE_KEY] = _new_neironych_video_notice("reconciliation")
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    await _publish_generation_update(gen)
+    return True
+
+
+async def bind_seedance_submission_task(session, gen_id: int, client_request_id: str, task_id: str) -> bool:
+    """Bind exactly once; accept a definite-rejection fallback ID as well."""
+    if not task_id or task_id.startswith(SEEDANCE_SUBMISSION_PREFIXES):
+        raise ValueError("A real provider task is required")
+    gen = await _locked_seedance_generation(session, gen_id)
+    params = _active_seedance_submission(gen, client_request_id)
+    if params is None:
+        await session.commit()
+        return False
+    if gen.task_id.startswith("web:") and not task_id.startswith("web:"):
+        task_id = "web:" + task_id
+    params[SEEDANCE_SUBMISSION_KEY]["state"] = "bound"
+    params[RECONCILIATION_KEY] = {"required": False}
+    notice = params.get(NEIRONYCH_VIDEO_NOTICE_KEY)
+    if isinstance(notice, dict) and notice.get("kind") == "reconciliation":
+        params.pop(NEIRONYCH_VIDEO_NOTICE_KEY)
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    gen.task_id = task_id
+    gen.status = GenerationStatus.processing
+    await session.commit()
+    await _publish_generation_update(gen)
+    return True
 
 
 async def persist_nexus_image_submission(
@@ -1582,7 +1690,7 @@ async def current_neironych_review_notice(
 
 async def claim_neironych_video_notice(
     session: AsyncSession, gen_id: int,
-    *, lease_seconds: int | None = None,
+    *, lease_seconds: int | None = None, expected_kind: str | None = None,
 ) -> NeironychVideoNoticeClaim | None:
     """Atomic Telegram notice lease. Only one worker may send at a time."""
     generation = (await session.execute(
@@ -1605,9 +1713,10 @@ async def claim_neironych_video_notice(
     state = data.get("state")
     if (
         kind not in {"done", "failed", "reconciliation"}
+        or (expected_kind is not None and kind != expected_kind)
         or not (kind == status or (kind == "reconciliation" and status in {"pending", "processing"}))
         or generation.gen_type != GenerationType.video
-        or not str(generation.task_id or "").startswith("neironych:")
+        or not str(generation.task_id or "").startswith(("neironych:", "neironych-submit:"))
         or state not in {"pending", "sending"}
     ):
         await session.commit()

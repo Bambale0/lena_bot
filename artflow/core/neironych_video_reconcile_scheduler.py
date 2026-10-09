@@ -61,6 +61,8 @@ def _eligible_video_query():
         or_(
             Generation.task_id.like("neironych:%"),
             Generation.task_id.like("web:neironych:%"),
+            Generation.task_id.like("neironych-submit:%"),
+            Generation.task_id.like("web:neironych-submit:%"),
         ),
         Generation.created_at <= cutoff,
     )
@@ -325,14 +327,14 @@ async def _process_active_video(gen_id: int) -> bool:
         if gen is None or gen.status not in (GenerationStatus.pending, GenerationStatus.processing):
             return False
         task_id = str(gen.task_id or "")
-        if not (task_id.startswith("neironych:") or task_id.startswith("web:neironych:")):
+        if not task_id.startswith(("neironych:", "web:neironych:", *repo.SEEDANCE_SUBMISSION_PREFIXES)):
             return False
         # Read-only ORM fields stay loaded with expire_on_commit=False. Drop
         # PostgreSQL transaction/connection before the slow provider GET or
         # potentially 250MB result download. Any terminal state re-check and
         # refund/finish acquires a fresh transaction with atomic row guards.
         await session.commit()
-        if task_id.startswith("neironych:"):
+        if task_id.startswith(("neironych:", "neironych-submit:")):
             # If the app crashes after the terminal DB commit, this ID still
             # reaches the notice worker even when it is far behind the sweep.
             await _track_active_video_notice_intent(gen.id)

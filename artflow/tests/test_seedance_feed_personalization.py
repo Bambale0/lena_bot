@@ -176,7 +176,8 @@ async def test_feed_video_intent_reaches_existing_provider_edit_contract(seedanc
     else:
         assert captured["edit"] is True
         _model, payload = neironych_seedance_runtime.build_product_payload(**{
-            key: value for key, value in captured.items() if key != "idempotency_key"
+            key: value for key, value in captured.items()
+            if key not in {"idempotency_key", "submission_context"}
         })
         assert payload["omni_reference_task_type"] == "edit"
         assert payload["reference_videos"] == [{"url": SOURCE_VIDEO}]
