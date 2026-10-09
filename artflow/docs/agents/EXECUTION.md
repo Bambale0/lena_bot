@@ -1365,3 +1365,7 @@ Further Code Review P2s reproduced RED before code changes:
 - Valid scene: `Видео отсутствует на экране телевизора; камера приближается...` or English video missing on the TV in frame was incorrectly treated as source media missing. Classifier now excludes clearly **in-scene display** contexts (screen/TV/monitor) before considering source absence.
 - Explicit source missing: `Исходное видео отсутствует`, `Загруженное видео недоступно`, `Входное видео не было прикреплено`, `The source footage is missing` was not matched by restrictive source noun whitelist. Added source-modifier variants to both opening gate and adjacent absence regex.
 - Confirmed GREEN with all earlier finance and provider contract tests: 83 shared service/surface cases plus Ruff. No historical credit/balance writes, no UI changes. Fresh review/CI on new exact SHA required.
+
+### Resume verification: explicit source precedence
+
+2026-10-09: resumed at 3a584ca with the prior uncommitted fix intact. Re-ran 86 shared provider/surface tests, Ruff, compile and diff checks successfully. PRRT_kwDOSSmOms6qqGWm is fixed: explicit source/uploaded qualifiers override in-scene display exemption. No unrelated source or balances changed. Fresh exact-SHA CI and review required before normal auto-deploy.

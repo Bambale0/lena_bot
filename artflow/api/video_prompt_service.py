@@ -114,9 +114,16 @@ def _missing_video_completion(text: str) -> bool:
     )):
         return True
 
-    # The absence of a moving picture *on a TV/monitor within the scene*
-    # does not say anything about the source file submitted for analysis.
-    if re.search(
+    # Absence *on a TV/monitor in the recorded scene* is valid visual
+    # content. Explicit "source/uploaded/input video" must override this
+    # exception: those qualifiers refer to the file supplied for inference.
+    explicit_source_opening = opening.startswith((
+        "исходное видео ", "входное видео ", "загруженное видео ",
+        "исходные кадры ", "прикреплённое видео ", "исходный файл ",
+        "source video ", "the source video ", "uploaded video ",
+        "input video ", "source footage ", "the source footage ",
+    ))
+    if not explicit_source_opening and re.search(
         r"(?:видео\s+(?:отсутству\w*|недоступ\w*)\s+"
         r"(?:на|в)\s+(?:экране|мониторе|телевизоре)|"
         r"video\s+(?:is\s+)?(?:missing|unavailable|not visible)\s+"
