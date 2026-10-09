@@ -105,6 +105,14 @@ def _missing_video_completion(text: str) -> bool:
     opening = re.sub(
         r"^a\s*[.)]\s*ready-to-use prompt[\s:—–-]*", "", opening,
     )
+    # Quotes around the name of the submitted source are not a scene
+    # caption. Retain that antecedent for "it/оно was not provided" checks.
+    opening = re.sub(
+        r"[\"'«“‘]((?:the\s+)?(?:(?:source|input|uploaded|provided)\s+)?"
+        r"(?:video|footage|file)|(?:исходн\w*|входн\w*|загруженн\w*|"
+        r"прикрепл[её]нн\w*)\s+(?:видео|кадры|файл))[\"'»”’]",
+        r"\1", opening,
+    )
     # A quoted caption describes text inside the visible scene. Do not let
     # it override source-absence checks, but retain every assertion outside
     # the quote so a genuine missing-input refusal cannot hide behind one.

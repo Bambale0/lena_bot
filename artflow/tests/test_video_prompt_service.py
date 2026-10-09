@@ -349,3 +349,12 @@ def test_scene_quote_with_following_label_is_not_a_source_failure(text):
 def test_bare_and_typographic_refusals_trigger_refund(text):
     with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
         video_prompt_service._validated_prompt_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    'I cannot analyze "the source video" on the monitor because it was not provided.',
+    'Я не могу проанализировать «исходное видео» на мониторе, потому что оно не было прикреплено.',
+])
+def test_quoted_source_reference_is_not_discarded_as_scene_caption(text):
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._validated_prompt_text(text)
