@@ -12,6 +12,7 @@ import { WorksScreen } from "@/features/works-screen";
 import { Button } from "@/components/ui/button";
 import { hasDraftInput, readUserDrafts, saveUserDrafts, tabStorage } from "@/lib/draft-storage";
 import { previewEnabled, previewKey } from "@/lib/ux2";
+import { inspectDraftMedia } from "@/lib/draft-media";
 import { GenerationScreen } from "@/features/generation-screen";
 import { ProfileScreen } from "@/features/profile-screen";
 import { ServicesScreen } from "@/features/services-screen";
@@ -544,6 +545,15 @@ function App() {
   const submitGeneration = useCallback(async (kind: "image" | "video" | "motion") => {
     if (!api || !data || submitting) return;
     const draft = currentDraft[kind];
+    if (ux2 && draft.promptId === null) {
+      if (referenceUploadingKind === kind || videoUploadingKind === kind) return;
+      const model = (kind === "image" ? data.imageModels : data.videoModels).find(item => item.key === draft.model);
+      const { issues } = inspectDraftMedia(draft, model);
+      if (issues.length) {
+        toast.error(issues[0].message);
+        return;
+      }
+    }
     const taskCount = clampTaskCount(draft.taskCount);
     setSubmitting(true);
     const createdTasks: GenerationTask[] = [];
@@ -606,7 +616,7 @@ function App() {
     } finally {
       setSubmitting(false);
     }
-  }, [api, currentDraft, data, refreshCore, submitting]);
+  }, [api, currentDraft, data, refreshCore, submitting, ux2, referenceUploadingKind, videoUploadingKind]);
 
   const refreshTask = useCallback(async (task: GenerationTask) => {
     if (!api || taskBusy) return;

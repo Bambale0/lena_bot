@@ -1754,6 +1754,7 @@ class MidjourneyCatalogItem(BaseModel):
 
 
 class ModelInfo(BaseModel):
+    auto_route_by_inputs: bool = False
     key: str
     display_name: str
     credits: float
@@ -2519,6 +2520,7 @@ async def list_video_models(
             mode_options=caps.get("mode_options", []),
             max_refs=int(caps.get("max_refs", 1) or 1),
             max_refs_with_video=caps.get("max_refs_with_video"),
+            auto_route_by_inputs=caps.get("auto_route_by_inputs") is True,
             supports_video_input=bool(caps.get("supports_video_input")),
             requires_video_input=bool(caps.get("requires_video_input")),
             requires_reference_images=bool(caps.get("requires_reference_images")),
