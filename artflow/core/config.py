@@ -68,6 +68,20 @@ class Settings(BaseSettings):
     NEIRONYCH_POLL_INTERVAL_SECONDS: float = 10.0
     NEIRONYCH_POLL_TIMEOUT_SECONDS: int = 1800
     NEIRONYCH_MAX_VIDEO_BYTES: int = 250 * 1024 * 1024
+    # Seedance video recovery is independent of user visits to history.
+    NEIRONYCH_VIDEO_RECONCILE_INTERVAL_SECONDS: int = Field(default=90, ge=30, le=3600)
+    NEIRONYCH_VIDEO_RECONCILE_MIN_AGE_SECONDS: int = Field(default=30, ge=0, le=3600)
+    NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE: int = Field(default=24, ge=1, le=200)
+    NEIRONYCH_VIDEO_RECONCILE_CONCURRENCY: int = Field(default=4, ge=1, le=12)
+    NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS: int = Field(default=240, ge=30, le=1800)
+    NEIRONYCH_VIDEO_TELEGRAM_UPLOAD_BUDGET_FRACTION: float = Field(default=0.75, ge=0.4, le=0.85)
+    NEIRONYCH_VIDEO_POLL_LEASE_SECONDS: int = Field(default=600, ge=120, le=3600)
+    NEIRONYCH_VIDEO_ALERT_AGE_SECONDS: int = Field(default=3600, ge=300, le=86400)
+    NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS: int = Field(default=600, ge=60, le=3600)
+    NEIRONYCH_VIDEO_NOTICE_RETRY_SECONDS: int = Field(default=60, ge=15, le=3600)
+    NEIRONYCH_VIDEO_NOTICE_MAX_BACKOFF_SECONDS: int = Field(default=900, ge=60, le=86400)
+    NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS: int = Field(default=8, ge=1, le=32)
+    NEIRONYCH_VIDEO_NOTICE_SCAN_ID_SPAN: int = Field(default=5000, ge=100, le=100000)
     NEIRONYCH_TEST_POLL_INTERVAL_SECONDS: float = 10.0
     NEIRONYCH_TEST_POLL_TIMEOUT_SECONDS: int = 1800
     NEIRONYCH_TEST_MAX_VIDEO_BYTES: int = 250 * 1024 * 1024
@@ -203,6 +217,19 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "MIDJOURNEY_WEBHOOK_SECRET or WEBHOOK_SECRET is required in production"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def require_video_recovery_lease_safety(self) -> "Settings":
+        minimum = self.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS + 30
+        if self.NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS <= minimum:
+            raise ValueError(
+                "NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS must exceed video recovery timeout + 30s"
+            )
+        if self.NEIRONYCH_VIDEO_POLL_LEASE_SECONDS <= minimum:
+            raise ValueError(
+                "NEIRONYCH_VIDEO_POLL_LEASE_SECONDS must exceed video recovery timeout + 30s"
+            )
         return self
 
     def lava_offer_id_for_plan(self, plan_key: str) -> str:

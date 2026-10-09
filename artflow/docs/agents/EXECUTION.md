@@ -1177,3 +1177,125 @@ Baseline `02c807eb1b73e20dc3a0e2af2c76efa1b3e1f26d` (main after #200/#201); bran
   offered as reusable invoices. Existing provider/support guidance is shown.
 - Other PR202 findings (quote/provider compatibility/currency and model-dependent
   hidden-prompt confidentiality) are outside this narrow payment-recovery fix.
+
+
+
+---
+
+# Incident execution ledger — Neironych Seedance video hangs and delivery (2026-10-09)
+
+**Task:** eliminate end-user stuck video tasks across APIX site, Mini App and Telegram bot. Incident source: Seedance 2.5 UUID `aeb56f5f-ddfd-42fe-baba-115372cbb1e4`, APIX generation `56698`. The provider independently reported failed, while APIX remained processing for >2 h until manual reconciliation; 70 credits were refunded exactly once through the existing atomic repository function. Production read-only inspection after the incident found no other active videos waiting.
+
+**Baseline:** origin/main `396cd57fbbaab64f4c9638d1a9665f6216c72b3a`; feature branch `fix/apix-neironych-video-stuck-recovery`, isolated worktree `/root/agent-work/apix-neironych-video-stuck-20261009`.
+
+**Root causes confirmed:**
+1. No scheduled reconciliation of active Neironych video generations; only on-demand endpoint/user-history polling calls `_reconcile_generation_status`. Music and Nano Banana image have schedulers, video does not.
+2. Generic `_reconcile_generation_status` treats *all* Neironych poll exceptions as terminal and refunds, including HTTP/network/download errors; it also applies a 20-minute wall-clock refund to a provider that may still be working.
+3. The result-delivery helper swallows Telegram failures and has no durable retry after `done` commit; a completed but undelivered video can remain unnotified.
+
+**Scope and target:**
+- Enforce provider terminal `failed/cancelled/expired` as sole basis for refund. Unknown, HTTP errors, 404, timeout, slow progress, or valid completion with temporarily unavailable video file cannot trigger refund or a second paid POST.
+- Query Neironych Seedance 2.0 and 2.5 active generations periodically, with bounded rate, rotating fairness, database-driven task identities, backoff and observability.
+- Download and persist completed video once, settle the DB with existing atomic `finish_generation`, and deliver via Telegram if chat exists. Keep `web:` origin without unsolicited chat.
+- Add durable, leased Telegram notification receipt for success and confirmed failure, so a transient blocked chat or Telegram outage can be retried after restart (at-least-once; residual crash-after-send duplicate risk explained).
+- No schema migration or modification to primary provider selection, tariffs, prices, balance/credits for successful/unknown requests, or user data. Only normal atomic failure refunds.
+- Keep site, Mini App and text bot in sync through shared `generations` state; only Telegram chat needs message delivery. Public status/history must see terminal updates automatically.
+- Tests: failing tests first, terminal/transient/slow/completed/no-file/refund-once/lease/bot-delivery/scheduler fairness, then focused suite, CI PR, deploy and read-only smoke.
+- Safety: no backfill paid POSTs; no webhook bypass; never expose keys or prompts; no production DDL. PR and CI requirements from `AGENTS.md`.
+
+**Progress:** [x] skill setup and local instructions; [x] incident traced DB→provider→refund; [x] baseline 22 tests passed; [x] 9 regression cases observed failing on unmodified main; [x] typed terminal provider failure, safe non-terminal handling, 20m timeout bypass, bounded concurrent fair video scheduler; [x] transactional success/failure delivery receipts, leased Telegram retries and user failure notice; [x] 47 focused tests passed and 191-video/backend compatibility tests passed; [x] Ruff/py_compile and production PostgreSQL regex selector read-only test passed; [x] required CI gate augmented; [ ] independent PR code review + exact SHA CI; [ ] main auto-deploy and read-only production smoke.
+
+**Observability plan:** log `generation_id`, provider task ID (UUID), state, task age, poll failures, finish winner, notification claim/attempt/message ID, pending oldest age, durable pending count; redact errors/prompts and credentials. If a task is > configured alert age and upstream is unknown, keep it pending, report for manual inspection, **never** launch fallback automatically.
+
+**Risk / rollback:** Notification send then DB ack can be interrupted, causing a duplicate retry after lease expiry; acceptable to prefer delivery over silent loss, mitigated with lease and bounded backoff. Git revert PR restores prior process without rewriting money ledger or pending provider tasks. Production migration not needed.
+
+
+## Verified incident safeguards (2026-10-09)
+- Previous production task 56698: direct Neironych GET returned `failed` while DB was `processing`. Atomic on-demand reconciliation set `failed` and returned exactly 70 credits once; `credit_ledger` has one matching +70 `generation_refund` row. This historical compensation is already complete and is **not** part of the future PR.
+- New tests: timeout/404/unknown/mismatched provider ID and >20m slow provider task preserve `processing` and balance; confirmed terminal error applies existing guarded atomic refund + failure notice; completed media copy outage stays retryable; web-origin tasks never send Telegram notifications; successful video queues pending notification transactionally with DB completion; lease/backoff/single-winner token tests prevent duplicate delivery attempts in normal concurrent runs; recovered expired claim can resend after restart.
+- Scheduler: 90s default periodic status GET and delivery scans; fair cursor, 24-task batches, 4 parallel bounded workers, 240s max task time. Malformed individual tasks do not block other work. Outages log oldest task IDs and status without exposing secrets/prompts.
+- PostgreSQL 16 read-only regexp selector tests: pending=true, sending=true, sent=false. This was tested using literal temporary SQL strings, not customer records or schema writes.
+- Deployment risk: no Alembic schema changes, no manual balance or task updates as part of PR. Roll back by reverting PR; records with pending delivery keys persist.
+
+## Codex PR #204 review remediation
+
+Reviewer observed five P2 issues on `6ed8acf`. All five have dedicated reproduction/regression checks:
+
+1. **Long PostgreSQL transactions while polling**: scheduler now commits read-only generation lookup before the provider call; SQL row locks are only acquired again during the short atomic settlement and durable notice claim. Test asserts `commit` occurs before provider GET.
+2. **Unbounded Telegram retries for blocked users**: `NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS=8`, then persisted `dead_letter` instead of endless re-sends. Test exercises both retry and terminal dead-letter states.
+3. **Foreign provider response UUID**: client validates any returned payload `request_id` against the queried one before interpreting terminal failure. Test simulates a failed status for a different UUID.
+4. **Lease-vs-timeout configuration**: Pydantic cross-validates notice and provider poll leases against the maximum configured video recovery timeout, with at least 30s margin; invalid configuration fails to start.
+5. **Concurrent user-history/scheduler polling**: new Redis NX/TTL task lease guards the *whole* provider GET + media download + settlement, from all entry points. It is released only by its unique claim token via Lua; unavailable Redis fails closed (no provider charge/refund mutation). Test uses concurrent callers and verifies provider poll only once.
+
+The original four top-level product paths remain shared: website and Mini App poll the generation and receive DB/refund state; Telegram subscribers additionally get success/failure notifications via durable outbox. No second paid POST, no migrations or changes to historical refunds. Independently await new exact SHA CI and code review before merge.
+
+
+## Codex PR #204 review round two (commit e20f0bb)
+
+Second Codex review discovered three new P2 issues (plus a redundant security finding), reproduced as red tests:
+1. Unbounded on-demand Telegram sends could outlive the DB delivery lease and generate a second message. **Fixed:** the outbox notification helper now applies the same `asyncio.wait_for` timeout regardless of caller; on timeout the receipt remains pending for bounded retry.
+2. Static Redis SET NX TTL could expire while the same task was finishing its DB settlement, permitting a duplicate provider download. **Fixed:** periodic token-checked atomic Redis lease renewal runs throughout status + download + settlement. Lost ownership cancels the polling attempt and is converted to a non-terminal retry outcome; one bad Redis renewal never takes down the scheduler.
+3. Existing Telegram bot foreground Seedance polling used `poll_until_done`, independent of the new Redis lease. It could race scheduled polling/download and refund after an ordinary elapsed timeout. **Fixed:** Telegram Neironych tasks are picked up exclusively by the new background scheduler and persistent notification outbox. Other video providers retain their foreground processing paths.
+
+Review regressions: actual bot video submission for Neironych starts no foreground polling while Higgsfield remains unchanged; 2-way Redis ownership with renewal, lost-owner cancellation/defer, successful token-only release; on-demand Telegram send timeout persists unconfirmed receipt for retry. No new paid submissions, schema changes or manual balance writes. PR review + exact SHA CI and production smoke still required.
+
+## HTTP status latency hardening (2026-10-09)
+
+Additional reproducible root cause of perceived hanging UI: `GET /generations/{id}` and first-page `GET /history` called `_reconcile_generation_status` synchronously for Neironych, and therefore could await the provider GET + up to 250 MB download for as long as 240 seconds, exceeding browser/reverse-proxy timeouts. The new scheduler already supplies the durable reconciliation path. Both read-only HTTP routes now skip Neironych provider I/O and return current database `processing/done/failed` status immediately. Other providers still use their original path. For the exceptional direct/manual reconciler, the read transaction is explicitly committed before slow provider HTTP I/O so PostgreSQL connections are not held while waiting. TDD: three red HTTP/status/history cases plus provider poll DB-connection regression, all now green. This addresses 503/timeouts without creating any new paid jobs; the status may lag by up to a configured background polling interval.
+
+
+## Wide regression baseline comparison
+
+Full `tests/test_webapp_routes.py` revealed two unrelated pre-existing red cases: `test_photo_prompt_rejects_disguised_non_image` expects error text omitting existing GIF support, and `test_webapp_feed_returns_items` assumes images appear in `result_urls` whereas the existing feed endpoint sanitizes them to `[]`. Both cases were rerun against untouched `/root/mkdir/lena_bot/artflow` main `396cd57` and failed with identical assertions, proving they are **not introduced by the Seedance video recovery branch**. A broader run identified two more pre-existing feed/prompt assertions (`test_webapp_my_feed_returns_only_current_user_cards`, `test_generation_out_includes_all_result_urls`); both were independently reproduced on the same untouched main with identical failures. Neither production behavior nor tests were altered to silence these four unrelated baseline failures.
+
+
+## Codex PR #204 third-round findings
+
+Additional Codex P2 findings on `1260a00` addressed before merge:
+- Local `run_polling.py` mode had no FastAPI lifespan and therefore no Seedance recovery worker after foreground Neironych polling was removed. It now starts and shuts down the same scheduler; a red-to-green entrypoint regression test covers the omission.
+- On lost Redis ownership after the first `finish_generation` commit, cancellation could abort post-commit feed royalty and image-session updates. The lease now marks the irrevocable settlement phase immediately before refund/finish; Redis loss can abort provider GET/download, but cannot cancel already-committed money effects. Concurrent lease-loss-in-settlement regression added.
+- Unindexed `input_params` regex scan was repeated over all terminal history even when no pending notices existed. New cursor scans bounded `generations.id` primary-key ranges (recent and incremental old), advancing on empty matches, with operational window setting and no schema migration. TDD verifies cursor progress and new/old notice selection. PostgreSQL production `EXPLAIN ANALYZE` confirms primary-key index scan and about 8.6 ms on the most recent 5000 IDs.
+
+
+
+## Completion/receipt cancellation boundary
+
+Before release, an additional TDD regression reproduced an independent unsafe outer `asyncio.wait_for` wrapping the entire scheduler reconciliation and notification receipt. Even though provider polling and Telegram send were already independently bounded at 240 s, the redundant outer timer could cancel *irreversible* post-commit feed royalty/linked-session effects or the DB acknowledgement after Telegram accepted a message. Removed both redundant outer timers. Provider GET/download and Telegram send remain time-bounded inside their helpers. Two regressions prove the settlement/receipt work outlives the short provider timeout and finishes; this avoids silent partial settlement and needless redelivery.
+
+
+## Codex PR #204 fourth-round recovery
+
+Latest Codex reviewed `244c97b` and raised two P2 liveness concerns:
+- In-memory old-notice scan cursor resets at every restart, and scanning millions of IDs from zero can take many hours, repeatedly interrupted by daily deployment. **Fixed:** scan cursor is checkpointed after each bounded indexed scan in Redis (existing compose `redisdata` volume), restored from Redis every cycle; new TDD test explicitly discards the Python cursor between cycles and verifies Redis restarts from previous position. If Redis fails, defer the sweep rather than report nonexistent completion.
+- Polling-only mode fell back from Redis to MemoryStorage even while Neironych API credentials were configured, causing the now-unified Redis-guarded video worker to fail closed and potentially strand newly charged work. **Fixed:** fail polling startup before Bot creation when Neironych is enabled and Redis unavailable; KIE-only development can retain existing MemoryStorage fallback. Added negative/positive regression.
+
+No new SQL migrations or hardcoded prices, and no paid POST or manual credit writes.
+
+
+## Codex PR #204 final outbox/readiness checks
+
+Codex code/security review on `6c676a0` found three further P2 cases, reproduced as failing tests and fixed before release:
+1. `claim_neironych_video_notice` could reclaim an expired `sending` or overdue `pending` receipt even when `attempts >= MAX_ATTEMPTS` after a process crash. Now transitions to `dead_letter` before claiming, with stale lease token cleared; the completion-time cap remains. Regression verifies both cases.
+2. Redis historical notice cursor alone skipped the retry window of previously discovered old receipts. New Redis ZSET tracks discovered notice IDs by due time and a Lua operation atomically commits IDs **before** checkpoint advance. After an attempt, next due is derived from the DB's `retry_at` or `claimed_at + lease`, and terminal `sent/dead_letter` are removed. Tests cover old notice backoff without sweep wrap, token lease expiry, removed successful notice, loss of Redis during discovery, and prior restart recovery.
+3. Main ASGI lifespan created a lazy Redis client but could start the webhook/site even if its configured Redis endpoint was unreachable. It now performs a bounded PING against the exact configured Redis before Bot/Webhook creation and fails startup if unavailable (without leaking credentials). Unit regression probes success and connection failure; source contract ensures call precedes webhook.
+
+All recovery paths remain read-only provider GET/download plus atomic existing DB transitions. No additional paid provider submissions or price/configuration hardcoding.
+
+
+## Codex PR #204 readiness, fallback and old-row intent
+
+Code review on `be993ee` and its security review identified three additional P2 issues (plus duplicate security finding), all reproduced via red regressions:
+1. A terminal notice created for an **old** Neironych Telegram generation after its ID range had already been swept was absent from the Redis ZSET if the process crashed immediately after DB commit, or the immediate Telegram attempt failed. The video scheduler now writes a durable Redis ZSET intent (`ZADD NX`) **before** provider status/download and any terminal DB settlement. The notice sync retains IDs while generation is still processing (before the receipt exists), reschedules pending/sending based on DB backoff/lease, removes only terminal sent/dead/missing. Verified an injected post-commit crash and an in-progress intent test.
+2. Redis PING did not prove write/ACL capability: a read-only replica could accept users' paid submissions without any working Redis lease, due queue, Lua scripts. The required startup preflight now exercises a random ephemeral lock's SET NX, token Lua renew/unlock, the actual atomic due-ZSET/checkpoint script and ZRANGEBYSCORE/ZADD/ZREM. Both production `main.lifespan` and local polling-only entrypoints call the helper before Bot/webhook setup. Unit tests cover ready Redis, unreachability, read-only SET and ACL denied EVAL.
+3. A Telegram `send_video` hang could exhaust the outer notice timeout, preventing a successful direct-link fallback and eventually dead-lettering a paid finished video. Added typed configurable upload budget fraction 0.75 of the total, separately bounded link message in the remainder, retaining outer notice timeout/lease safety and durable DB receipt. Red-to-green timeout/fallback regression.
+
+No new provider POST, SQL migration, uncontrolled user credit change or manual production modifications.
+
+
+## Latest release preflight and legacy static warning
+
+A final production read-only/scratch-key Redis test using the **actual deployed `settings.REDIS_URL`** confirmed `PING`, temporary `SET NX`, token-checked Lua `EXPIRE`/unlock, atomic notice ZSET/checkpoint Lua, sorted-set range and writes. Scratch keys were deleted; no paid provider requests or ledger mutations. Ruff on all other changed files passes. An unrelated pre-existing `F821` at `api/miniapp_routes.py` public-post route calling undefined `_anonymous_user()` was reproduced verbatim on the untouched `main` deployment (`main` source line 2340 versus branch line 2545). Not altered in this scoped Seedance recovery PR; tracked separately as a legacy issue. Image/other-route legacy tests have documented baseline failures as above.
+
+## CI service isolation after fb5f226
+
+GitHub Actions backend-quality failed on exact `fb5f226` even though the on-host recovery suites passed. The action's failing `Pytest maintained PR gate` step listed precisely two failures: `test_video_scheduler_releases_read_transaction_before_provider_poll` and `test_scheduler_does_not_abort_post_commit_royalty_after_poll_deadline`. Their FakeSession stubs mocked the DB but not the newly introduced durable Redis intent call. CI has no Redis at localhost:6379, whereas the server workstation does, so their accidental integration dependency was invisible locally. Root-cause fix is test-only: those two tests mock the Redis intent seam `_track_active_video_notice_intent` and additionally assert it was invoked exactly once for the generation. Separate `test_active_old_video_persists_notice_intent_before_db_completion` continues to test actual Redis ZSET registration with a fake Redis. Targeted suite rerun under an intentionally unavailable `REDIS_URL=redis://127.0.0.1:1/0` now passes. All provider, finance and delivery semantics remain unchanged; do not start Redis in GitHub just to cover mock isolation.

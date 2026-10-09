@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -51,6 +52,15 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_GENERATION_WINDOW = timedelta(minutes=45)
 EXPIRED_FEED_MEDIA_HOSTS = {"tempfile.aiquickdraw.com"}
+NEIRONYCH_VIDEO_NOTICE_KEY = "neironych_video_notice"
+
+
+def _new_neironych_video_notice(kind: str) -> dict[str, object]:
+    if kind not in {"done", "failed"}:
+        raise ValueError("Unsupported video notice kind")
+    return {"kind": kind, "state": "pending", "attempts": 0}
+
+
 
 
 def _feed_media_url_is_available(url: str | None) -> bool:
@@ -1262,6 +1272,7 @@ async def finish_generation(
     result_urls: list[str] | None = None,
     *,
     expected_task_id: str | None = None,
+    queue_neironych_video_notice: bool = False,
 ) -> Generation | None:
     original_urls = [url for url in (result_urls or [result_url]) if url]
     clean_urls: list[str] = []
@@ -1278,16 +1289,29 @@ async def finish_generation(
     ]
     if expected_task_id is not None:
         conditions.append(Generation.task_id == expected_task_id)
+
+    fields: dict[str, object] = {
+        "status": GenerationStatus.done,
+        "result_url": result_url,
+        "result_urls": json.dumps(clean_urls, ensure_ascii=False),
+        "finished_at": datetime.now(timezone.utc),
+    }
+    if queue_neironych_video_notice:
+        # Lock and set the pending notification in the SAME commit as completion:
+        # a crash immediately after this commit must not lose Telegram delivery.
+        locked = (await session.execute(
+            select(Generation).where(*conditions).with_for_update()
+            .execution_options(populate_existing=True)
+        )).scalar_one_or_none()
+        if locked is None:
+            await session.commit()
+            return None
+        params = parse_input_params(locked.input_params)
+        params[NEIRONYCH_VIDEO_NOTICE_KEY] = _new_neironych_video_notice("done")
+        fields["input_params"] = json.dumps(params, ensure_ascii=False)
+
     result = await session.execute(
-        update(Generation)
-        .where(*conditions)
-        .values(
-            status=GenerationStatus.done,
-            result_url=result_url,
-            result_urls=json.dumps(clean_urls, ensure_ascii=False),
-            finished_at=datetime.now(timezone.utc),
-        )
-        .returning(Generation)
+        update(Generation).where(*conditions).values(**fields).returning(Generation)
     )
     gen = result.scalar_one_or_none()
     await session.commit()
@@ -1395,6 +1419,7 @@ async def fail_generation_and_refund(
     entry_type: str = "generation_refund",
     refund_note: str | None = None,
     expected_task_id: str | None = None,
+    video_notice_kind: str | None = None,
 ) -> tuple[bool, float]:
     """Fail a pending/processing generation and return its credits in one commit.
 
@@ -1428,6 +1453,8 @@ async def fail_generation_and_refund(
     params["refund_applied"] = credits > 0
     if refund_note:
         params["refund_note"] = refund_note[:160]
+    if video_notice_kind:
+        params[NEIRONYCH_VIDEO_NOTICE_KEY] = _new_neironych_video_notice(video_notice_kind)
     generation.input_params = json.dumps(params, ensure_ascii=False)
     generation.status = GenerationStatus.failed
     generation.error_msg = error
@@ -1468,6 +1495,151 @@ async def fail_generation_and_refund(
     await _publish_generation_update(generation)
     return True, refunded
 
+
+
+@dataclass(frozen=True)
+class NeironychVideoNoticeClaim:
+    generation: Generation
+    kind: str
+    token: str
+    attempt: int
+
+
+def _notice_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+async def claim_neironych_video_notice(
+    session: AsyncSession, gen_id: int,
+    *, lease_seconds: int | None = None,
+) -> NeironychVideoNoticeClaim | None:
+    """Atomic Telegram notice lease. Only one worker may send at a time."""
+    generation = (await session.execute(
+        select(Generation).where(Generation.id == gen_id)
+        .with_for_update(skip_locked=True)
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if generation is None:
+        await session.commit()
+        return None
+
+    params = parse_input_params(generation.input_params)
+    data = params.get(NEIRONYCH_VIDEO_NOTICE_KEY)
+    if not isinstance(data, dict):
+        await session.commit()
+        return None
+
+    status = getattr(generation.status, "value", generation.status)
+    kind = data.get("kind")
+    state = data.get("state")
+    if (
+        kind not in {"done", "failed"}
+        or kind != status
+        or generation.gen_type != GenerationType.video
+        or not str(generation.task_id or "").startswith("neironych:")
+        or state not in {"pending", "sending"}
+    ):
+        await session.commit()
+        return None
+
+    now = datetime.now(timezone.utc)
+    if state == "pending":
+        next_try = _notice_timestamp(data.get("retry_at"))
+        if next_try and next_try > now:
+            await session.commit()
+            return None
+    if state == "sending":
+        claimed = _notice_timestamp(data.get("claimed_at"))
+        lease = int(lease_seconds or settings.NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS)
+        if claimed and now - claimed < timedelta(seconds=lease):
+            await session.commit()
+            return None
+
+    # Crash after Telegram send but before acknowledgement can leave a
+    # stale "sending" lease. Enforce the budget at *claim* time as well as at
+    # completion, otherwise every restart can silently exceed max_attempts.
+    current_attempts = max(0, int(data.get("attempts", 0) or 0))
+    if current_attempts >= settings.NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS:
+        data.update({"state": "dead_letter", "failed_at": now.isoformat()})
+        for stale_key in ("token", "claimed_at", "retry_at"):
+            data.pop(stale_key, None)
+        params[NEIRONYCH_VIDEO_NOTICE_KEY] = data
+        generation.input_params = json.dumps(params, ensure_ascii=False)
+        await session.commit()
+        logger.error(
+            "Neironych video Telegram notice exhausted after crash gen=%s attempts=%s",
+            gen_id, current_attempts,
+        )
+        return None
+
+    token = str(uuid.uuid4())
+    attempts = current_attempts + 1
+    data.update({
+        "state": "sending", "token": token, "attempts": attempts,
+        "claimed_at": now.isoformat(),
+    })
+    data.pop("retry_at", None)
+    params[NEIRONYCH_VIDEO_NOTICE_KEY] = data
+    generation.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    return NeironychVideoNoticeClaim(generation, str(kind), token, attempts)
+
+
+async def complete_neironych_video_notice(
+    session: AsyncSession, gen_id: int, claim_token: str, *,
+    delivered: bool,
+) -> bool:
+    """Record a successful send or schedule a retry, without overriding a newer claim."""
+    generation = (await session.execute(
+        select(Generation).where(Generation.id == gen_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if generation is None:
+        await session.commit()
+        return False
+    params = parse_input_params(generation.input_params)
+    data = params.get(NEIRONYCH_VIDEO_NOTICE_KEY)
+    if not isinstance(data, dict) or data.get("state") != "sending" or data.get("token") != claim_token:
+        await session.commit()
+        return False
+
+    now = datetime.now(timezone.utc)
+    data.pop("token", None)
+    data.pop("claimed_at", None)
+    if delivered:
+        data["state"] = "sent"
+        data["sent_at"] = now.isoformat()
+        data.pop("retry_at", None)
+    else:
+        attempts = max(int(data.get("attempts", 1) or 1), 1)
+        if attempts >= settings.NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS:
+            # Permanently blocked/deleted chats must not cause unbounded
+            # requests. Keep an operator-visible dead-letter record, with no
+            # further automatic Telegram sends.
+            data["state"] = "dead_letter"
+            data["failed_at"] = now.isoformat()
+            data.pop("retry_at", None)
+            logger.error(
+                "Neironych video Telegram notification dead-letter gen=%s attempts=%s",
+                gen_id, attempts,
+            )
+        else:
+            backoff = min(
+                settings.NEIRONYCH_VIDEO_NOTICE_MAX_BACKOFF_SECONDS,
+                settings.NEIRONYCH_VIDEO_NOTICE_RETRY_SECONDS * (2 ** min(attempts - 1, 16)),
+            )
+            data["state"] = "pending"
+            data["retry_at"] = (now + timedelta(seconds=backoff)).isoformat()
+    params[NEIRONYCH_VIDEO_NOTICE_KEY] = data
+    generation.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    return True
 
 async def get_generation_by_id(session: AsyncSession, gen_id: int) -> Generation | None:
     result = await session.execute(select(Generation).where(Generation.id == gen_id))

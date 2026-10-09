@@ -1,11 +1,22 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 
 from api import miniapp_routes
 from db.models import GenerationStatus, GenerationType
+
+
+@pytest.fixture(autouse=True)
+def allow_test_neironych_poll_gate(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def gate(_task_id: str):
+        yield True
+
+    monkeypatch.setattr(miniapp_routes, "neironych_video_poll_guard", gate)
 
 
 def _video_generation(*, task_id: str = "neironych:req-123"):
@@ -37,19 +48,19 @@ async def test_reconcile_video_success_notifies_telegram_once(monkeypatch):
     poll = AsyncMock(return_value=result_url)
     finish = AsyncMock(return_value=finalized)
     notify = AsyncMock()
-    user = SimpleNamespace(id=13, tg_id=645180669)
 
     monkeypatch.setattr(miniapp_routes.video_service, "get_poll_fn", lambda provider: poll)
     monkeypatch.setattr(miniapp_routes.repo, "finish_generation", finish)
     monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=finalized))
-    monkeypatch.setattr(miniapp_routes.repo, "get_user_by_id", AsyncMock(return_value=user))
-    monkeypatch.setattr(miniapp_routes, "_notify_reconciled_video_result_in_bot", notify, raising=False)
+    monkeypatch.setattr(miniapp_routes, "_deliver_pending_neironych_video_notice", notify)
 
     result = await miniapp_routes._reconcile_generation_status(object(), gen)
 
     assert result is finalized
     finish.assert_awaited_once()
-    notify.assert_awaited_once_with(user=user, gen=finalized)
+    assert finish.await_args.kwargs["queue_neironych_video_notice"] is True
+    assert finish.await_args.kwargs["expected_task_id"] == gen.task_id
+    notify.assert_awaited_once_with(ANY, finalized.id)
 
 
 @pytest.mark.asyncio
@@ -67,7 +78,7 @@ async def test_reconcile_video_does_not_duplicate_notification_when_already_fina
     monkeypatch.setattr(miniapp_routes.video_service, "get_poll_fn", lambda provider: poll)
     monkeypatch.setattr(miniapp_routes.repo, "finish_generation", finish)
     monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=finalized))
-    monkeypatch.setattr(miniapp_routes, "_notify_reconciled_video_result_in_bot", notify, raising=False)
+    monkeypatch.setattr(miniapp_routes, "_deliver_pending_neironych_video_notice", notify)
 
     result = await miniapp_routes._reconcile_generation_status(object(), gen)
 

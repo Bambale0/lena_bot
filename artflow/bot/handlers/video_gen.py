@@ -200,11 +200,15 @@ def _kie_callback_url() -> str:
 
 
 def _start_video_polling(result, poll_fn, on_success, on_failure) -> None:
-    """Запустить фоновый polling задачи на бюджете конкретного провайдера.
+    """Launch provider-specific foreground polling, except durable Seedance jobs.
 
-    Genjutsu/Higgsfield рендерится дольше общего видео-бюджета, поэтому таймаут
-    и интервал берутся из provider-aware настроек api.polling, а не из общих.
+    Neironych Seedance runs exclusively through the recovery scheduler and
+    transactional notice outbox. The generic foreground poller refunds on
+    timeout/HTTP errors and can race the outbox, duplicating media downloads.
     """
+    if getattr(result, "provider", None) == "neironych":
+        logger.info("Neironych video entrusted to durable reconciler task=%s", result.task_id)
+        return
     asyncio.create_task(
         polling.poll_until_done(
             result.task_id,

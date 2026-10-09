@@ -1190,7 +1190,10 @@ async def test_handle_video_prompt_preserves_fractional_credit_price() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider,task_id", [("higgsfield", "hf-task-1"), ("neironych", "neironych:provider-uuid")])
+@pytest.mark.parametrize("provider,task_id", [
+    ("higgsfield", "hf-task-1"),
+    ("neironych", "neironych:provider-uuid"),
+])
 async def test_handle_video_prompt_polls_on_provider_budget(provider, task_id) -> None:
     """Провайдер задачи уходит в poll_until_done, чтобы Genjutsu получил свой таймаут."""
     msg = make_message(text="animate this scene")
@@ -1229,19 +1232,27 @@ async def test_handle_video_prompt_polls_on_provider_budget(provider, task_id) -
             )):
                 await video_gen.handle_video_prompt(msg, mock_state, mock_session, mock_db_user, mock_bot)
                 await asyncio.sleep(0.05)
-                context = AsyncMock()
-                context.__aenter__.return_value = mock_session
-                with (
-                    patch("bot.handlers.video_gen.AsyncSessionLocal", return_value=context),
-                    patch("bot.handlers.video_gen._send_video_with_fallback", AsyncMock()) as deliver,
-                ):
-                    await poll_until_done.await_args.args[2]("https://cdn.test/video.mp4")
-                    assert f"<code>{task_id.removeprefix('neironych:')}</code>" in deliver.await_args.kwargs["caption"]
-                    await poll_until_done.await_args.args[3]("Provider failed")
-                    assert f"<code>{task_id.removeprefix('neironych:')}</code>" in msg.answer.return_value.edit_text.await_args.args[0]
+                if provider == "neironych":
+                    # Seedance completes through the durable scheduler/outbox,
+                    # not the foreground task whose timeout would refund it.
+                    poll_until_done.assert_not_awaited()
+                else:
+                    context = AsyncMock()
+                    context.__aenter__.return_value = mock_session
+                    with (
+                        patch("bot.handlers.video_gen.AsyncSessionLocal", return_value=context),
+                        patch("bot.handlers.video_gen._send_video_with_fallback", AsyncMock()) as deliver,
+                    ):
+                        await poll_until_done.await_args.args[2]("https://cdn.test/video.mp4")
+                        assert f"<code>{task_id.removeprefix('neironych:')}</code>" in deliver.await_args.kwargs["caption"]
+                        await poll_until_done.await_args.args[3]("Provider failed")
+                        assert f"<code>{task_id.removeprefix('neironych:')}</code>" in msg.answer.return_value.edit_text.await_args.args[0]
 
-    assert poll_until_done.await_args.args[0] == task_id
-    assert poll_until_done.await_args.kwargs["provider"] == provider
+    if provider == "neironych":
+        poll_until_done.assert_not_awaited()
+    else:
+        assert poll_until_done.await_args.args[0] == task_id
+        assert poll_until_done.await_args.kwargs["provider"] == provider
 
     acknowledgment = msg.answer.return_value.edit_text.await_args_list[0].args[0]
     assert f"<code>{task_id.removeprefix('neironych:')}</code>" in acknowledgment

@@ -13,6 +13,16 @@ from core.neironych_seedance_contract import build_seedance_payload
 
 TASK_PREFIX = "neironych:"
 
+
+class NeironychVideoTaskFailed(RuntimeError):
+    """Provider confirmed a terminal failure; unlike HTTP/transport/download errors."""
+
+    def __init__(self, request_id: str, message: str, *, state: str = "failed") -> None:
+        self.request_id = decode_task_id(request_id)
+        self.state = state
+        super().__init__(str(message or f"Neironych Seedance {state}")[:1000])
+
+
 PRODUCT_MODELS = {
     "bytedance/seedance-2": "seedance-2.0",
     "bytedance/seedance-2-5": "seedance-2.5",
@@ -150,7 +160,10 @@ async def poll_product_video(request_id: str) -> str | None:
     try:
         status = await client.get_video(request_id)
         if status.failed:
-            raise RuntimeError(status.error or f"Neironych Seedance failed: {status.status}")
+            raise NeironychVideoTaskFailed(
+                request_id, status.error or f"Neironych Seedance failed: {status.status}",
+                state=status.status,
+            )
         if not status.done:
             return None
 

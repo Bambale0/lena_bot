@@ -422,6 +422,18 @@ class NeironychSeedanceClient:
         if not isinstance(payload, dict):
             raise NeironychSeedanceError("Нейроныч API вернул неожиданный статус payload")
         source = _status_source(payload)
+        # The requested ID alone is not proof that the response refers to this
+        # paid job. A mismatched provider request_id must never authorize refund.
+        returned_ids = [
+            str(part.get("request_id")).strip()
+            for part in (payload, source)
+            if isinstance(part, dict) and part.get("request_id") is not None
+        ]
+        if any(reported != value for reported in returned_ids):
+            raise NeironychSeedanceError(
+                "Neironych video status request_id does not match requested task",
+                status_code=response.status_code,
+            )
         status = str(source.get("status") or source.get("state") or "").strip().lower()
         error = source.get("error")
         if isinstance(error, dict):

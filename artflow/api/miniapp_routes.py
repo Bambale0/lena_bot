@@ -104,6 +104,11 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.neironych_video_poll_gate import (
+    NeironychVideoPollLeaseLost,
+    neironych_video_poll_guard,
+    protect_neironych_video_poll_settlement,
+)
 from core.provider_routing import get_nano21_route
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
@@ -594,6 +599,75 @@ async def _reconcile_neironych_image_generation(
     return gen
 
 
+async def _reconcile_neironych_video_generation(
+    session: AsyncSession, gen, *, task_id: str, stored_task_id: str,
+):
+    """Single-provider, single-poller settlement: no repeated paid submits."""
+    async with neironych_video_poll_guard(task_id) as acquired:
+        if not acquired:
+            # Another process/request owns the same video status/download.
+            return gen
+
+        # The history/status API already loaded this ORM row in a read
+        # transaction. Release its PostgreSQL connection BEFORE any slow GET
+        # or 250 MB media download, exactly as the scheduled worker does.
+        # Existing FastAPI generation/history callers are read-only until
+        # the subsequent guarded finish/refund starts a fresh transaction.
+        if isinstance(session, AsyncSession):
+            await session.commit()
+
+        try:
+            # Bound status GET and media download for both background and
+            # on-demand (history) callers. A timed-out GET never refunds.
+            result_url = await asyncio.wait_for(
+                video_service.get_poll_fn("neironych")(task_id),
+                timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
+            )
+        except video_service.neironych_seedance_runtime.NeironychVideoTaskFailed as exc:
+            if exc.request_id != video_service.neironych_seedance_runtime.decode_task_id(task_id):
+                logger.error("Neironych mismatched terminal response gen=%s", gen.id)
+                return gen
+            # The refund and credit-ledger transition must not be cancelled
+            # by loss of the Redis lock after irreversible settlement begins.
+            protect_neironych_video_poll_settlement()
+            failed, refunded = await repo.fail_generation_and_refund(
+                session, gen.id, str(exc),
+                expected_task_id=stored_task_id,
+                refund_note="reconcile:neironych_provider_failed",
+                video_notice_kind="failed" if not is_web_task_id(stored_task_id) else None,
+            )
+            if failed and not is_web_task_id(stored_task_id):
+                # Notice is already durable in the refund transaction.
+                await _deliver_pending_neironych_video_notice(session, gen.id)
+            logger.info("Neironych confirmed failure gen=%s refunded=%s", gen.id, refunded)
+            return await repo.get_generation_by_id(session, gen.id)
+        except Exception as exc:
+            logger.warning(
+                "Neironych video poll deferred gen=%s provider_task=%s error=%s",
+                gen.id, task_id[:96], type(exc).__name__,
+            )
+            return gen
+
+        if not result_url:
+            return gen
+
+        # Once the first done-commit succeeds, feed royalties and linked
+        # image-session state must finish even if Redis ownership is lost.
+        protect_neironych_video_poll_settlement()
+        finished = await repo.finish_generation(
+            session, gen.id, result_url,
+            expected_task_id=stored_task_id,
+            queue_neironych_video_notice=not is_web_task_id(stored_task_id),
+        )
+        if finished and gen.image_session_id:
+            await repo.update_image_session_last_result(
+                session, gen.image_session_id, result_url, gen.id
+            )
+        if finished and not is_web_task_id(stored_task_id):
+            await _deliver_pending_neironych_video_notice(session, finished.id)
+        return await repo.get_generation_by_id(session, gen.id)
+
+
 async def _reconcile_generation_status(session: AsyncSession, gen):
     if not gen or gen.status not in {GenerationStatus.pending, GenerationStatus.processing}:
         return gen
@@ -615,6 +689,14 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             return gen
     task_id = provider_task_id(stored_task_id)
     if not task_id:
+        if (
+            gen.gen_type == GenerationType.video
+            and str(gen.model) in video_service.neironych_seedance_runtime.PRODUCT_MODELS
+        ):
+            if age.total_seconds() >= settings.NEIRONYCH_VIDEO_ALERT_AGE_SECONDS:
+                logger.warning("Seedance video missing task identity gen=%s age_seconds=%d",
+                               gen.id, age.total_seconds())
+            return gen
         if age >= STALE_GENERATION_TIMEOUT:
             logger.warning(
                 'Marking stale generation without task_id as failed: gen=%s model=%s age=%s',
@@ -631,6 +713,19 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
 
     if gen.gen_type == GenerationType.music and str(gen.model).startswith("suno/"):
         return await _reconcile_music_generation_status(session, gen, task_id, age)
+
+    strict_neironych_video = (
+        gen.gen_type == GenerationType.video
+        and video_service.neironych_seedance_runtime.is_task_id(task_id)
+    )
+    if strict_neironych_video:
+        try:
+            return await _reconcile_neironych_video_generation(
+                session, gen, task_id=task_id, stored_task_id=stored_task_id
+            )
+        except NeironychVideoPollLeaseLost:
+            logger.warning("Neironych video poll ownership lost gen=%s; retry later", gen.id)
+            return gen
 
     strict_nexus_image = (
         gen.gen_type == GenerationType.image
@@ -655,8 +750,6 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 result_url = await midjourney_service.poll_mj_video(task_id)
             elif gen.model in _VEO_MODEL_KEYS:
                 result_url = await video_service.poll_veo_status(task_id)
-            elif video_service.neironych_seedance_runtime.is_task_id(task_id):
-                result_url = await video_service.get_poll_fn("neironych")(task_id)
             else:
                 result_url = await video_service.poll_kieai_status(task_id)
         else:
@@ -777,14 +870,14 @@ def _direct_result_prompt_actions_allowed(gen) -> bool:
     return action_value != "repeat" and not action_value.endswith(".repeat")
 
 
-async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> None:
+async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> bool:
     """Deliver a video that reached done through polling/reconciliation.
 
     The DB transition is the idempotency gate: callers invoke this helper only
     when finish_generation() actually changed pending/processing -> done.
     """
     if is_web_task_id(getattr(gen, "task_id", None)):
-        return
+        return False
 
     tg_id = getattr(user, "tg_id", None)
     result_url = str(getattr(gen, "result_url", None) or "").strip()
@@ -794,7 +887,7 @@ async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> None:
             tg_id,
             getattr(gen, "id", None),
         )
-        return
+        return False
 
     prompt_actions_allowed = _direct_result_prompt_actions_allowed(gen)
     reply_markup = after_generation_kb(
@@ -813,13 +906,21 @@ async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> None:
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    # A stalled upload must not exhaust the outbox attempt's entire timeout.
+    # Preserve a separate, bounded window for delivering the permanent URL.
+    total_budget = float(settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS)
+    video_budget = max(0.001, total_budget * settings.NEIRONYCH_VIDEO_TELEGRAM_UPLOAD_BUDGET_FRACTION)
+    link_budget = max(0.001, (total_budget - video_budget) * 0.8)
     try:
         try:
-            message = await delivery_bot.send_video(
-                chat_id=tg_id,
-                video=URLInputFile(result_url, filename=f"video_{gen.id}.mp4"),
-                caption=caption,
-                reply_markup=reply_markup,
+            message = await asyncio.wait_for(
+                delivery_bot.send_video(
+                    chat_id=tg_id,
+                    video=URLInputFile(result_url, filename=f"video_{gen.id}.mp4"),
+                    caption=caption,
+                    reply_markup=reply_markup,
+                ),
+                timeout=video_budget,
             )
             logger.info(
                 "Reconciled video delivered user=%s gen=%s message_id=%s",
@@ -827,7 +928,7 @@ async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> None:
                 gen.id,
                 getattr(message, "message_id", None),
             )
-            return
+            return True
         except Exception as video_exc:
             logger.warning(
                 "Reconciled video direct delivery failed user=%s gen=%s url=%s err=%s",
@@ -837,14 +938,17 @@ async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> None:
                 video_exc,
             )
 
-        message = await delivery_bot.send_message(
-            chat_id=tg_id,
-            text=(
-                f"{caption}\n\n"
-                "Telegram не принял ролик как видео. Вот прямая ссылка:\n"
-                f"{result_url}"
+        message = await asyncio.wait_for(
+            delivery_bot.send_message(
+                chat_id=tg_id,
+                text=(
+                    f"{caption}\n\n"
+                    "Telegram не принял ролик как видео. Вот прямая ссылка:\n"
+                    f"{result_url}"
+                ),
+                reply_markup=reply_markup,
             ),
-            reply_markup=reply_markup,
+            timeout=link_budget,
         )
         logger.info(
             "Reconciled video link fallback delivered user=%s gen=%s message_id=%s",
@@ -852,6 +956,7 @@ async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> None:
             gen.id,
             getattr(message, "message_id", None),
         )
+        return True
     except (TelegramBadRequest, TelegramForbiddenError) as exc:
         logger.warning(
             "Reconciled video delivery failed user=%s gen=%s err=%s",
@@ -868,6 +973,89 @@ async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> None:
         )
     finally:
         await delivery_bot.session.close()
+    return False
+
+
+async def _notify_reconciled_video_failure_in_bot(*, user: User, gen) -> bool:
+    """Tell Telegram users when provider rejects a paid video (once credits refunded)."""
+    tg_id = getattr(user, "tg_id", None)
+    if not tg_id:
+        logger.warning("Skip Neironych video failure notice gen=%s reason=no_telegram_chat", gen.id)
+        return False
+
+    params = repo.parse_input_params(getattr(gen, "input_params", None))
+    refunded = bool(params.get("refund_applied"))
+    credits = float(getattr(gen, "credits_spent", 0.0) or 0.0)
+    finance_text = (
+        f"💳 На баланс возвращено {credits:g} кредитов."
+        if refunded and credits > 0
+        else "💳 Состояние баланса можно проверить в истории."
+    )
+    text = (
+        "❌ <b>Видео не удалось создать.</b>\n"
+        + "Провайдер подтвердил ошибку генерации.\n"
+        + finance_text
+        + provider_task_reference(getattr(gen, "task_id", None))
+    )
+    bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    try:
+        message = await bot.send_message(chat_id=tg_id, text=text)
+        logger.info(
+            "Neironych failed video user notified gen=%s message_id=%s",
+            gen.id, getattr(message, "message_id", None),
+        )
+        return True
+    except Exception as exc:
+        logger.warning(
+            "Neironych failed video notification deferred gen=%s error=%s",
+            gen.id, type(exc).__name__,
+        )
+        return False
+    finally:
+        await bot.session.close()
+
+
+async def _deliver_pending_neironych_video_notice(session: AsyncSession, gen_id: int) -> bool:
+    """Claim + send + acknowledge the durable notice; no money or provider POST."""
+    claim = await repo.claim_neironych_video_notice(session, gen_id)
+    if claim is None:
+        return False
+    delivered = False
+    try:
+        user = await repo.get_user_by_id(session, claim.generation.user_id)
+        await session.commit()  # Do not keep a DB transaction open during Telegram I/O.
+        if user is not None:
+            if claim.kind == "done":
+                send = _notify_reconciled_video_result_in_bot(
+                    user=user, gen=claim.generation,
+                )
+            else:
+                send = _notify_reconciled_video_failure_in_bot(
+                    user=user, gen=claim.generation,
+                )
+            # The same bound applies to foreground/history and scheduler sends.
+            # It must be shorter than the validated notice lease.
+            delivered = await asyncio.wait_for(
+                send, timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
+            )
+        else:
+            logger.warning("Neironych video notice user missing gen=%s", gen_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Neironych video notice send failed gen=%s", gen_id)
+    finally:
+        try:
+            await repo.complete_neironych_video_notice(
+                session, gen_id, claim.token, delivered=delivered,
+            )
+        except Exception:
+            logger.exception("Neironych video notice receipt persistence failed gen=%s", gen_id)
+    logger.info(
+        "Neironych video notification receipt gen=%s kind=%s attempt=%s delivered=%s",
+        gen_id, claim.kind, claim.attempt, delivered,
+    )
+    return delivered
 
 
 async def _notify_direct_image_result_in_bot(
@@ -987,6 +1175,21 @@ async def _notify_direct_image_result_in_bot(
         await bot.session.close()
 
 
+def _neironych_video_status_is_background_only(gen) -> bool:
+    """Don't block Mini App/website GET responses on paid provider I/O.
+
+    Background reconciliation owns the status GET, media download, settlement
+    and durable notification. Other video providers retain existing behavior.
+    """
+    return bool(
+        gen
+        and gen.gen_type == GenerationType.video
+        and video_service.neironych_seedance_runtime.is_task_id(
+            provider_task_id(str(getattr(gen, "task_id", None) or ""))
+        )
+    )
+
+
 async def _reconcile_user_active_generations(session: AsyncSession, user_id: int) -> None:
     if session.__class__.__module__.startswith('unittest.mock'):
         return
@@ -998,6 +1201,8 @@ async def _reconcile_user_active_generations(session: AsyncSession, user_id: int
         return
 
     for gen in active_gens:
+        if _neironych_video_status_is_background_only(gen):
+            continue
         await _reconcile_generation_status(session, gen)
 
 
@@ -3147,7 +3352,8 @@ async def get_generation(
     gen = await repo.get_generation_by_id(session, gen_id)
     if not gen or gen.user_id != user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    gen = await _reconcile_generation_status(session, gen)
+    if not _neironych_video_status_is_background_only(gen):
+        gen = await _reconcile_generation_status(session, gen)
     return _gen_out(gen)
 
 

@@ -32,6 +32,8 @@ from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.utils.dispatcher import create_dispatcher
 from core.config import settings
 from core.logger import setup_logging
+from core.neironych_video_poll_gate import require_neironych_video_redis_ready
+from core.neironych_video_reconcile_scheduler import run_neironych_video_reconcile_scheduler
 from db import repository as repo
 from db.referral_reward_policy import install_referral_reward_policy
 from db.seed import run_seed
@@ -85,12 +87,24 @@ async def _make_throttling_middleware(redis_client: object | None):
     return NoopThrottle()
 
 
+def _require_neironych_recovery_redis(redis_client: object | None) -> None:
+    """Fail closed: paid Neironych videos cannot recover in MemoryStorage mode."""
+    if redis_client is None and settings.NEIRONYCH_API_KEY:
+        raise RuntimeError(
+            "Redis is required for Neironych Seedance video reconciliation in polling mode. "
+            "The bot must not accept paid Seedance requests without its durable recovery worker."
+        )
+
+
 async def main() -> None:
     setup_logging(logging.INFO)
     logger = logging.getLogger(__name__)
     logger.info("Starting APIX in POLLING mode")
 
     storage, redis_client = await _make_storage()
+    _require_neironych_recovery_redis(redis_client)
+    if redis_client is not None:
+        await require_neironych_video_redis_ready(redis_client)
 
     bot = Bot(
         token=settings.BOT_TOKEN,
@@ -117,6 +131,10 @@ async def main() -> None:
     await run_seed()
     await bot.delete_webhook(drop_pending_updates=True)
     get_client()
+    video_reconcile_stop = asyncio.Event()
+    video_reconcile_task = asyncio.create_task(
+        run_neironych_video_reconcile_scheduler(video_reconcile_stop)
+    )
     logger.info("Bot started. Press Ctrl+C to stop.")
 
     try:
@@ -125,6 +143,11 @@ async def main() -> None:
             allowed_updates=dp.resolve_used_update_types(),
         )
     finally:
+        video_reconcile_stop.set()
+        try:
+            await video_reconcile_task
+        except Exception:
+            logger.exception("Neironych video reconciliation scheduler shutdown failed")
         await close_client()
         if redis_client:
             await redis_client.aclose()
