@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AlertCircle, Film, ImageIcon, LoaderCircle, Orbit, Upload, WandSparkles, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { GenerationDraft, ModelInfo, UserProfile } from "@/lib/types";
 import { cn, formatCredits, modelSupports, splitUrls } from "@/lib/utils";
+import { inspectDraftMedia, switchDraftModel } from "@/lib/draft-media";
 
 interface GenerationScreenProps {
   ux2?: boolean;
@@ -147,6 +148,8 @@ function GenerationScreen({
   onSubmit,
   onResetPreset,
 }: GenerationScreenProps) {
+  const preserveMedia = ux2 && draft.promptId === null;
+  const [switchNotice, setSwitchNotice] = useState("");
   const copy = titles[kind];
   const Icon = copy.icon;
   const availableModels =
@@ -154,6 +157,7 @@ function GenerationScreen({
       ? models.filter((model) => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"))
       : models.filter((model) => !model.modes?.includes("motion") && !/motion-control/i.test(model.key));
   const selectedModel = availableModels.find((model) => model.key === draft.model) || (ux2 && draft.model ? undefined : availableModels[0]);
+  const mediaInspection = inspectDraftMedia(draft, selectedModel);
   const modes = selectedModel?.modes?.length ? selectedModel.modes : [kind === "motion" ? "motion" : "text"];
   const ratioModes = selectedModel?.aspect_ratio_modes?.length ? selectedModel.aspect_ratio_modes : modes;
   const ratios = ratioModes.includes(draft.mode) && selectedModel?.aspect_ratios?.length ? selectedModel.aspect_ratios : [];
@@ -165,7 +169,7 @@ function GenerationScreen({
   const taskCount = clampTaskCount(draft.taskCount);
   const baseEstimate = kind === "image" ? imageBaseCost(selectedModel, draft.quality, draft.count) : videoBaseCost(selectedModel, draft);
   const estimate = baseEstimate * taskCount;
-  const maxRefs = Math.max(1, Number(selectedModel?.max_refs || 1));
+  const maxRefs = preserveMedia ? mediaInspection.maxReferences ?? 0 : Math.max(1, Number(selectedModel?.max_refs || 1));
   const maxAudioIds = Math.max(0, Number(selectedModel?.max_audio_ids || 0));
   const maxCharacterIds = Math.max(0, Number(selectedModel?.max_character_ids || 0));
   const refsRequired = kind === "motion" || Boolean(selectedModel?.requires_reference_images) || Boolean(selectedModel && !modelSupports(selectedModel, "text") && modelSupports(selectedModel, "image"));
@@ -217,13 +221,22 @@ function GenerationScreen({
     });
   };
 
-  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid || unsupportedSettings;
-  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion" || selectedModel?.key === SEEDANCE_25_MODEL;
-  const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input);
+  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid || unsupportedSettings || (preserveMedia && mediaInspection.issues.length > 0);
+  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion" || selectedModel?.key === SEEDANCE_25_MODEL || (preserveMedia && (draft.referenceUrls.length > 0 || (mediaInspection.referenceInputsSupported && (selectedModel?.auto_route_by_inputs === true || modes.includes("multimodal")))));
+  const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input) || (preserveMedia && Boolean(draft.videoUrl));
   const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);
 
   const syncSelectedModel = (modelKey: string) => {
     const model = availableModels.find((item) => item.key === modelKey);
+    if (preserveMedia) {
+      if (!model || mediaUploading || submitting) return;
+      const next = switchDraftModel(draft, model);
+      const labels = { mode: "режим", aspectRatio: "формат", quality: "качество", count: "число результатов", duration: "длительность", resolution: "разрешение", grokMode: "вариант модели", seed: "seed" } as const;
+      const changed = (Object.keys(labels) as Array<keyof typeof labels>).filter(key => next[key] !== draft[key]).map(key => labels[key]);
+      setSwitchNotice(`Модель изменена. Материалы сохранены. Проверьте стоимость.${changed.length ? ` Обновлены несовместимые параметры: ${changed.join(", ")}.` : ""}`);
+      onChange(next);
+      return;
+    }
     const nextDurations = listOr(model?.duration_options, model?.durations, kind === "motion" ? [] : [5]);
     const nextResolutions = listOr(model?.resolution_options, model?.resolutions, ["720p"]);
     const nextMode = model?.modes?.[0] || (kind === "motion" ? "motion" : "text");
@@ -252,6 +265,12 @@ function GenerationScreen({
   };
 
   const changeMode = (mode: string) => {
+    if (preserveMedia) {
+      if (mediaUploading || submitting || !modes.includes(mode)) return;
+      onChange({ mode });
+      setSwitchNotice("Режим изменён. Материалы сохранены; проверьте настройки перед запуском.");
+      return;
+    }
     const patch: Partial<GenerationDraft> = { mode };
     if (mode !== "image" && kind !== "motion") patch.referenceUrls = [];
     if (mode !== "video" && kind !== "motion") {
@@ -297,7 +316,7 @@ function GenerationScreen({
           <CardContent className="apix-generation-card-content grid min-w-0 gap-2.5">
             <label className="grid min-w-0 gap-1 text-xs font-medium">
               Модель
-              <Select value={selectedModel?.key || ""} onChange={(event) => syncSelectedModel(event.target.value)}>
+              <Select value={selectedModel?.key || ""} disabled={preserveMedia && (mediaUploading || submitting)} onChange={(event) => syncSelectedModel(event.target.value)}>
                 {ux2 && !selectedModel && draft.model && <option value="" disabled>Модель черновика недоступна — выберите другую</option>}
                 {availableModels.map((model) => (
                   <option key={model.key} value={model.key}>{model.display_name} · {formatCredits(model.credits)} кр.</option>
@@ -305,10 +324,18 @@ function GenerationScreen({
               </Select>
             </label>
 
+            {preserveMedia && switchNotice && <p role="status" className="text-sm text-muted-foreground">{switchNotice}</p>}
+            {preserveMedia && mediaInspection.issues.length > 0 && <div className="ux2-inline-notice" data-testid="draft-media-conflicts" role="alert">
+              <div className="grid gap-2"><strong>Материалы сохранены</strong>
+                {mediaInspection.issues.map(issue => <p key={issue.code}>{issue.message}</p>)}
+                <p>Запуск остановлен до исправления. Переключение модели само по себе ничего не удаляет.</p>
+              </div>
+            </div>}
+
             {modes.length > 1 || kind !== "image" ? (
               <LabeledChips label="Режим">
                 {modes.map((mode) => (
-                  <button key={mode} type="button" className={cn(chipClass(draft.mode === mode), "shrink-0")} onClick={() => changeMode(mode)}>
+                  <button key={mode} type="button" className={cn(chipClass(draft.mode === mode), "shrink-0")} disabled={preserveMedia && (mediaUploading || submitting)} onClick={() => changeMode(mode)}>
                     {modeLabel(mode)}
                   </button>
                 ))}
@@ -343,7 +370,7 @@ function GenerationScreen({
                       accept="image/*"
                       multiple={maxRefs > 1}
                       className="sr-only"
-                      disabled={!remainingRefs || referenceUploading}
+                      disabled={!remainingRefs || referenceUploading || (preserveMedia && !mediaInspection.referenceInputsSupported)}
                       onChange={(event) => {
                         const files = Array.from(event.currentTarget.files || []).slice(0, remainingRefs);
                         event.currentTarget.value = "";
@@ -373,7 +400,7 @@ function GenerationScreen({
                     className="min-h-14 font-mono text-base sm:text-xs"
                     value={draft.referenceUrls.join("\n")}
                     placeholder="Опционально: HTTPS-ссылки, по одной в строке"
-                    onChange={(event) => onChange({ referenceUrls: splitUrls(event.target.value).slice(0, maxRefs) })}
+                    onChange={(event) => onChange({ referenceUrls: preserveMedia ? splitUrls(event.target.value) : splitUrls(event.target.value).slice(0, maxRefs) })}
                   />
                 </details>
               </div>
@@ -393,7 +420,7 @@ function GenerationScreen({
                       type="file"
                       accept="video/mp4,video/webm,video/quicktime,video/*"
                       className="sr-only"
-                      disabled={videoUploading}
+                      disabled={videoUploading || (preserveMedia && !mediaInspection.videoInputSupported)}
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
                         event.currentTarget.value = "";
@@ -535,17 +562,17 @@ function GenerationScreen({
                   </label>
                 ) : null}
 
-                {maxAudioIds > 0 ? (
+                {maxAudioIds > 0 || (preserveMedia && draft.audioIds.length > 0) ? (
                   <label className="grid min-w-0 gap-1 text-xs font-medium">
                     Audio ID · до {maxAudioIds}
-                    <Textarea className="min-h-14 font-mono text-base sm:text-xs" value={draft.audioIds.join("\n")} placeholder="по одному ID в строке" onChange={(event) => onChange({ audioIds: splitUrls(event.target.value).slice(0, maxAudioIds) })} />
+                    <Textarea className="min-h-14 font-mono text-base sm:text-xs" value={draft.audioIds.join("\n")} placeholder="по одному ID в строке" onChange={(event) => onChange({ audioIds: preserveMedia ? splitUrls(event.target.value) : splitUrls(event.target.value).slice(0, maxAudioIds) })} />
                   </label>
                 ) : null}
 
-                {maxCharacterIds > 0 ? (
+                {maxCharacterIds > 0 || (preserveMedia && draft.characterIds.length > 0) ? (
                   <label className="grid min-w-0 gap-1 text-xs font-medium">
                     Character IDs · до {maxCharacterIds}
-                    <Textarea className="min-h-14 font-mono text-base sm:text-xs" value={draft.characterIds.join("\n")} placeholder="по одному ID в строке" onChange={(event) => onChange({ characterIds: splitUrls(event.target.value).slice(0, maxCharacterIds) })} />
+                    <Textarea className="min-h-14 font-mono text-base sm:text-xs" value={draft.characterIds.join("\n")} placeholder="по одному ID в строке" onChange={(event) => onChange({ characterIds: preserveMedia ? splitUrls(event.target.value) : splitUrls(event.target.value).slice(0, maxCharacterIds) })} />
                     {selectedModel?.key === GEMINI_OMNI_MODEL ? <span className="text-[10px] text-muted-foreground">Media slots: {geminiMediaSlots}/{GEMINI_MAX_MEDIA_SLOTS}. Видео занимает 2, Character ID — 1.</span> : null}
                   </label>
                 ) : null}
@@ -578,6 +605,7 @@ function GenerationScreen({
             </div>
 
             <div className="flex flex-wrap gap-x-2 gap-y-0.5" aria-live="polite">
+              {preserveMedia && mediaInspection.issues.length > 0 ? <ValidationError>Проверьте сохранённые материалы</ValidationError> : null}
               {missingPrompt ? <ValidationError>Нужен промпт</ValidationError> : null}
               {missingReference ? <ValidationError>{kind === "motion" ? "Нужно фото персонажа" : "Нужен референс"}</ValidationError> : null}
               {tooManyRefs ? <ValidationError>Лишние референсы</ValidationError> : null}

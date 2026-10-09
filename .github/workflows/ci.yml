@@ -239,6 +239,7 @@ jobs:
             tests/test_payment_webhooks.py \
             tests/test_miniapp_feed_webkit_stability.py \
             tests/test_miniapp_ux2_preview.py \
+            tests/test_ux2_media_capabilities.py \
             tests/test_repository_feed.py \
             tests/test_midjourney.py \
             tests/test_image_model_unlimited.py \

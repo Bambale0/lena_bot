@@ -43,6 +43,7 @@ export interface ModelOption {
 }
 
 export interface ModelInfo {
+  auto_route_by_inputs?: boolean;
   key: string;
   display_name: string;
   description?: string;
