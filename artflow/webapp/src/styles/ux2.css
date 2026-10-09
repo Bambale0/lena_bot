@@ -74,3 +74,18 @@
 @media (max-height: 680px) {
   .apix-shell[data-ui-version="2"] .apix-app-header { min-height: 48px; padding-block: 2px; }
 }
+
+/* Inclusion is reversible; deletion is a separate action. */
+.ux2-reference-selection { display: grid; gap: 8px; min-width: 0; }
+.ux2-reference-summary { font-size: 14px; font-weight: 650; }
+.ux2-reference-help { font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
+.ux2-reference-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); }
+.ux2-reference-row[data-included="false"] { border-style: dashed; }
+.ux2-reference-name { min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.ux2-reference-name svg { flex-shrink: 0; color: var(--primary); }
+.ux2-reference-name span { min-width: 0; overflow-wrap: anywhere; }
+.ux2-reference-delete { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 44px; min-width: 44px; padding: 4px; font-size: 13px; border-radius: 8px; color: var(--muted-foreground); }
+.ux2-reference-toggle { grid-column: 1 / -1; min-height: 44px; display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.ux2-reference-toggle input { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--primary); }
+.ux2-reference-toggle input:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+.ux2-reference-reason { grid-column: 1 / -1; font-size: 13px; line-height: 1.45; color: var(--muted-foreground); }

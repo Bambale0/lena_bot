@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import type { GenerationDraft, ModelInfo, UserProfile } from "@/lib/types";
 import { cn, formatCredits, modelSupports, splitUrls } from "@/lib/utils";
 import { inspectDraftMedia, switchDraftModel } from "@/lib/draft-media";
+import { referenceMaterials, replaceReferenceMaterials, selectGenerationInputs } from "@/lib/reference-selection";
+import { ReferenceSelection } from "@/components/reference-selection";
 
 interface GenerationScreenProps {
   ux2?: boolean;
@@ -138,7 +140,7 @@ function GenerationScreen({
   kind,
   user,
   models,
-  draft,
+  draft: storedDraft,
   submitting,
   referenceUploading,
   videoUploading,
@@ -148,7 +150,10 @@ function GenerationScreen({
   onSubmit,
   onResetPreset,
 }: GenerationScreenProps) {
+  const draft = selectGenerationInputs(storedDraft);
   const preserveMedia = ux2 && draft.promptId === null;
+  const selectionExists = storedDraft.promptId === null && storedDraft.referenceMaterials !== undefined;
+  const allReferences = referenceMaterials(storedDraft);
   const [switchNotice, setSwitchNotice] = useState("");
   const copy = titles[kind];
   const Icon = copy.icon;
@@ -157,7 +162,7 @@ function GenerationScreen({
       ? models.filter((model) => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"))
       : models.filter((model) => !model.modes?.includes("motion") && !/motion-control/i.test(model.key));
   const selectedModel = availableModels.find((model) => model.key === draft.model) || (ux2 && draft.model ? undefined : availableModels[0]);
-  const mediaInspection = inspectDraftMedia(draft, selectedModel);
+  const mediaInspection = inspectDraftMedia(storedDraft, selectedModel);
   const modes = selectedModel?.modes?.length ? selectedModel.modes : [kind === "motion" ? "motion" : "text"];
   const ratioModes = selectedModel?.aspect_ratio_modes?.length ? selectedModel.aspect_ratio_modes : modes;
   const ratios = ratioModes.includes(draft.mode) && selectedModel?.aspect_ratios?.length ? selectedModel.aspect_ratios : [];
@@ -222,7 +227,7 @@ function GenerationScreen({
   };
 
   const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid || unsupportedSettings || (preserveMedia && mediaInspection.issues.length > 0);
-  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion" || selectedModel?.key === SEEDANCE_25_MODEL || (preserveMedia && (draft.referenceUrls.length > 0 || (mediaInspection.referenceInputsSupported && (selectedModel?.auto_route_by_inputs === true || modes.includes("multimodal")))));
+  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion" || selectedModel?.key === SEEDANCE_25_MODEL || (preserveMedia && (allReferences.length > 0 || (mediaInspection.referenceInputsSupported && (selectedModel?.auto_route_by_inputs === true || modes.includes("multimodal")))));
   const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input) || (preserveMedia && Boolean(draft.videoUrl));
   const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);
 
@@ -230,7 +235,7 @@ function GenerationScreen({
     const model = availableModels.find((item) => item.key === modelKey);
     if (preserveMedia) {
       if (!model || mediaUploading || submitting) return;
-      const next = switchDraftModel(draft, model);
+      const next = switchDraftModel(storedDraft, model);
       const labels = { mode: "режим", aspectRatio: "формат", quality: "качество", count: "число результатов", duration: "длительность", resolution: "разрешение", grokMode: "вариант модели", seed: "seed" } as const;
       const changed = (Object.keys(labels) as Array<keyof typeof labels>).filter(key => next[key] !== draft[key]).map(key => labels[key]);
       setSwitchNotice(`Модель изменена. Материалы сохранены. Проверьте стоимость.${changed.length ? ` Обновлены несовместимые параметры: ${changed.join(", ")}.` : ""}`);
@@ -283,7 +288,7 @@ function GenerationScreen({
 
   return (
     <div className="apix-generation-layout grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
-      <section className="apix-generation-main grid min-w-0 gap-2.5">
+      <fieldset disabled={(preserveMedia || selectionExists) && (submitting || mediaUploading)} className="apix-generation-main grid min-w-0 gap-2.5">
         <div className="apix-generation-titlebar flex min-w-0 items-center justify-between gap-2 px-0.5">
           <div className="flex min-w-0 items-center gap-2">
             <span className="apix-generation-icon grid size-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><Icon className="size-4" /></span>
@@ -328,7 +333,6 @@ function GenerationScreen({
             {preserveMedia && mediaInspection.issues.length > 0 && <div className="ux2-inline-notice" data-testid="draft-media-conflicts" role="alert">
               <div className="grid gap-2"><strong>Материалы сохранены</strong>
                 {mediaInspection.issues.map(issue => <p key={issue.code}>{issue.message}</p>)}
-                <p>Запуск остановлен до исправления. Переключение модели само по себе ничего не удаляет.</p>
               </div>
             </div>}
 
@@ -380,7 +384,8 @@ function GenerationScreen({
                   </label>
                 </div>
 
-                {draft.referenceUrls.length ? (
+                {preserveMedia ? <ReferenceSelection draft={storedDraft} model={selectedModel} busy={submitting || mediaUploading}
+                  language={user.language} labelFor={shortUrlLabel} onChange={onChange} /> : draft.referenceUrls.length ? (
                   <div className="grid min-w-0 gap-1">
                     {draft.referenceUrls.map((url, index) => (
                       <div key={`${url}-${index}`} className="flex min-w-0 items-center gap-1 rounded-lg bg-background/70 px-2 py-1 text-[10px]">
@@ -398,9 +403,11 @@ function GenerationScreen({
                   <summary>Вставить ссылку вручную</summary>
                   <Textarea
                     className="min-h-14 font-mono text-base sm:text-xs"
-                    value={draft.referenceUrls.join("\n")}
+                    value={(preserveMedia ? allReferences.map(item => item.url) : draft.referenceUrls).join("\n")}
                     placeholder="Опционально: HTTPS-ссылки, по одной в строке"
-                    onChange={(event) => onChange({ referenceUrls: preserveMedia ? splitUrls(event.target.value) : splitUrls(event.target.value).slice(0, maxRefs) })}
+                    onChange={(event) => onChange(preserveMedia && selectionExists
+                      ? replaceReferenceMaterials(storedDraft, splitUrls(event.target.value))
+                      : { referenceUrls: preserveMedia ? splitUrls(event.target.value) : splitUrls(event.target.value).slice(0, maxRefs) })}
                   />
                 </details>
               </div>
@@ -586,7 +593,7 @@ function GenerationScreen({
             </LabeledChips>
           </CardContent>
         </Card>
-      </section>
+      </fieldset>
 
       <aside className="apix-launch-bar xl:sticky xl:top-16 xl:self-start">
         <Card className="apix-launch-card border-primary/25 bg-popover/95 shadow-xl">

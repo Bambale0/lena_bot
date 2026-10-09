@@ -1,3 +1,4 @@
+import { selectGenerationInputs } from "./reference-selection.ts";
 import type { GenerationDraft, ModelInfo } from "./types";
 
 export interface MediaConflict { code: string; message: string }
@@ -36,7 +37,8 @@ export function switchDraftModel(draft: GenerationDraft, model: ModelInfo): Gene
 }
 
 /** Shared by the form and command boundary. Does not change the draft or payload. */
-export function inspectDraftMedia(draft: GenerationDraft, model: ModelInfo | undefined): DraftMediaInspection {
+export function inspectDraftMedia(source: GenerationDraft, model: ModelInfo | undefined): DraftMediaInspection {
+  const draft = selectGenerationInputs(source);
   const issues: MediaConflict[] = [];
   if (!model) return { maxReferences: null, referenceInputsSupported: false, videoInputSupported: false,
     issues: [{ code: "model_unavailable", message: "Модель недоступна. Выберите доступную модель; материалы сохранены." }] };
@@ -50,6 +52,10 @@ export function inspectDraftMedia(draft: GenerationDraft, model: ModelInfo | und
     const combined = capacity(model.max_refs_with_video);
     maxReferences = combined === null || maxReferences === null ? null : Math.min(maxReferences, combined);
   }
+  if (source.referenceMaterials !== undefined && draft.referenceUrls.length === 0 && (
+    draft.kind === "motion" || model.requires_reference_images === true || (!modes.includes("text") && supportsPhotos)
+    || (draft.kind === "video" && draft.mode === "image" && model.auto_route_by_inputs !== true && !modes.includes("multimodal"))
+  )) issues.push({ code: "reference_required", message: "Для этого режима нужно включить хотя бы одно фото в запуск." });
   if (draft.referenceUrls.length) {
     // The ordinary video normalizer consumes image references only in image mode.
     // Input-routed/multimodal adapters explicitly advertise their different contract.
@@ -58,8 +64,8 @@ export function inspectDraftMedia(draft: GenerationDraft, model: ModelInfo | und
     if (supportsPhotos && !acceptsPhotosInMode) issues.push({ code: "reference_mode_unsupported", message: "Этот видеорежим не использует фото. Материалы сохранены: выберите режим «Фото» или совместимую модель." });
     if (maxReferences === null) issues.push({ code: "reference_capacity_unknown", message: "Лимит фото неизвестен. Выберите другую модель или обновите каталог." });
     else if (draft.referenceUrls.length > maxReferences) issues.push({ code: "reference_limit", message: maxReferences === 0
-      ? "Выбранная модель или сочетание входов не поддерживает эти фото. Смените модель или явно уберите фото."
-      : `Сохранено фото: ${draft.referenceUrls.length}; можно использовать: ${maxReferences}. Смените модель или явно уберите лишние фото.` });
+      ? "Выбранная модель или сочетание входов не поддерживает эти фото. Смените модель или исключите фото из запуска."
+      : `Сохранено фото: ${draft.referenceUrls.length}; можно использовать: ${maxReferences}. Смените модель или исключите лишние фото из запуска.` });
   }
   if (draft.videoUrl && !videoInputSupported) issues.push({ code: "video_unsupported", message: "Модель не принимает исходное видео. Оно сохранено: вернитесь к совместимой модели или явно уберите видео." });
   for (const [values, rawLimit, code, label] of [
