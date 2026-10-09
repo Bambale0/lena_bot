@@ -80,7 +80,6 @@ def test_seedance_25_edit_follows_source_video() -> None:
         prompt="Replace the sky in @Video 1 with a sunset",
         resolution="720p",
         video_urls=["https://cdn.example/source.mp4"],
-        image_urls=["https://cdn.example/look.jpg"],
     )
     assert payload["omni_reference_task_type"] == "edit"
     assert payload["reference_videos"][0]["url"].endswith("source.mp4")
