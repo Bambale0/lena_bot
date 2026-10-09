@@ -48,6 +48,9 @@ from api.seedance25_adapter import (
 from api.seedance25_adapter import (
     MODEL_KEY as SEEDANCE25_MODEL_KEY,
 )
+from api.seedance25_adapter import (
+    _control_payload as seedance25_control_payload,
+)
 from api.video_prompt_limits import (
     append_telegram_seedance_prompt_chunk,
     seedance_prompt_max_chars,
@@ -70,9 +73,21 @@ from bot.keyboards.models import (
 )
 from bot.keyboards.video_navigation import video_back_kb
 from bot.states import VideoGenFSM
+from bot.utils.feed_media import canonical_generation_result_url
 from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.feed_remix_prompt import (
+    FEED_REMIX_CONTEXT_KEY,
+    FeedRemixUnavailable,
+    build_feed_remix_prompt,
+    feed_remix_context,
+    feed_video_edit_prompt,
+    generation_prompt_is_protected,
+    legacy_feed_edit_unavailable,
+    supports_feed_source_media,
+    trusted_feed_prompt,
+)
 from core.gemini_omni import (
     GEMINI_OMNI_AUDIO_VOICES,
     GEMINI_OMNI_MAX_AUDIO_IDS,
@@ -81,6 +96,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_ids,
     normalize_gemini_omni_resolution,
     normalize_gemini_omni_seed,
+    validate_gemini_omni_media_slots,
 )
 from core.seedance_repeat_overrides import (
     build_seedance_content_edit_prompt,
@@ -569,6 +585,27 @@ def _url_list(value) -> list[str]:
     return []
 
 
+def _seedance_effective_video_refs(data: dict) -> list[str]:
+    _, extra_video_refs, _ = seedance25_control_payload(_url_list(data.get("audio_ids")))
+    return list(dict.fromkeys([*_url_list(data.get("reference_video_url")), *extra_video_refs]))
+
+
+async def _seedance_edit_duration_from_state(prompt: str, data: dict, *, force_edit: bool = False) -> int | None:
+    _, _, controls = seedance25_control_payload(_url_list(data.get("audio_ids")))
+    try:
+        return await seedance25_edit_billing_duration(
+            prompt, _seedance_effective_video_refs(data),
+            force_edit=force_edit or bool(controls.get("identity_transfer")),
+        )
+    except ValueError:
+        raise
+    except Exception as exc:
+        logger.warning("Seedance source preflight failed error_type=%s", type(exc).__name__)
+        raise ValueError(
+            "Не удалось проверить исходное видео. Поцелуи не списаны. Попробуй позже или загрузи ролик заново."
+        ) from exc
+
+
 def _first_url_value(inp: dict, keys: tuple[str, ...]):
     for key in keys:
         urls = _url_list(inp.get(key))
@@ -603,9 +640,83 @@ async def _external_source_feed_id(
     if not source_feed_gen_id:
         return None
     source = await repo.get_generation_by_id(session, source_feed_gen_id)
-    if source and getattr(source, "user_id", None) == getattr(db_user, "id", None):
+    if (source and getattr(source, "user_id", None) == getattr(db_user, "id", None)
+            and not generation_prompt_is_protected(source)):
         return None
     return source_feed_gen_id
+
+
+async def _prepare_feed_video_inputs(
+    *, session: AsyncSession, db_user: User, source_feed_gen_id: int | None,
+    model_key: str, prompt: str, image_url: str | list[str] | None, data: dict,
+    parent_generation_id: int | None = None,
+) -> tuple[str, str | list[str] | None, dict, int | None]:
+    source_feed_gen_id = await _external_source_feed_id(
+        session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+    )
+    if not source_feed_gen_id:
+        return prompt, image_url, data, None
+    source = await repo.get_public_feed_generation(session, source_feed_gen_id)
+    source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
+    source_url = canonical_generation_result_url(source) if source else None
+    refs = list(dict.fromkeys(_url_list(image_url)))
+    user_refs = any(url != source_url or source_type != "image" for url in refs)
+    source_videos = (
+        _seedance_effective_video_refs(data) if model_key == SEEDANCE25_MODEL_KEY
+        else list(dict.fromkeys(_url_list(data.get("reference_video_url"))))
+    )
+    personalized = bool(
+        prompt.strip() != str(getattr(source, "prompt", "") or "").strip()
+        or user_refs or data.get("audio_ids") or data.get("character_ids")
+        or (source_videos and (source_type != "video" or source_videos != [source_url]))
+        or data.get("seedance_repeat_editor") or data.get("flow_id") == "genjutsu_face_clothing"
+    )
+    if not personalized:
+        return prompt, image_url, data, source_feed_gen_id
+
+    caps = VIDEO_CAPS.get(model_key, {})
+    applicable = bool(source_url) and (
+        bool(caps.get("supports_video_input")) if source_type == "video"
+        else supports_feed_source_media(caps, source_type)
+    )
+    # Stored/reused prompts may include private author text. Only later
+    # user-authored edit controls may extend this public base.
+    previous = (
+        await repo.get_generation_by_id(session, parent_generation_id)
+        if parent_generation_id and parent_generation_id != source_feed_gen_id else None
+    )
+    safe_previous = trusted_feed_prompt(previous, user_id=db_user.id, source_generation_id=source_feed_gen_id)
+    if prompt.strip() != str(getattr(source, "prompt", "") or "").strip() and safe_previous is None:
+        raise legacy_feed_edit_unavailable()
+    public_base = build_feed_remix_prompt("", has_user_references=True, has_source_media=applicable)
+    prompt = safe_previous or public_base
+    if model_key == SEEDANCE25_MODEL_KEY and source_type == "video":
+        prompt = feed_video_edit_prompt(prompt)
+    data = {**data, FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, prompt)}
+    if source_type == "image":
+        refs = list(dict.fromkeys([source_url, *refs]))
+        max_refs = int(caps.get("max_refs", 1) or 1)
+        if len(refs) > max_refs:
+            raise FeedRemixUnavailable("Слишком много фото с учётом исходного поста. Выбери другую модель или убери лишние референсы.")
+        image_url = refs[0] if len(refs) == 1 else refs
+    else:
+        if source_videos and source_videos != [source_url]:
+            raise FeedRemixUnavailable("Для повтора нужен исходный ролик из ленты. Убери дополнительное видео.")
+        data = {**data, "reference_video_url": source_url}
+    max_refs = int(caps.get("max_refs", 1) or 1)
+    if len(refs) > max_refs:
+        raise FeedRemixUnavailable(f"Модель поддерживает до {max_refs} фото с учётом исходного поста.")
+    if model_key == GEMINI_OMNI_VIDEO_MODEL:
+        try:
+            characters = normalize_gemini_omni_ids(data.get("character_ids"), field_name="character_ids", max_items=GEMINI_OMNI_MAX_CHARACTER_IDS)
+            normalize_gemini_omni_ids(data.get("audio_ids"), field_name="audio_ids", max_items=GEMINI_OMNI_MAX_AUDIO_IDS)
+            validate_gemini_omni_media_slots(
+                image_count=len(refs), video_count=int(bool(data.get("reference_video_url"))),
+                character_count=len(characters),
+            )
+        except ValueError as exc:
+            raise FeedRemixUnavailable(str(exc)) from exc
+    return prompt, image_url, data, source_feed_gen_id
 
 
 async def _video_repeat_params_from_task(task_id: str | None) -> dict:
@@ -702,7 +813,9 @@ def _video_state_from_repeat_params(model_key: str, repeat_params: dict) -> dict
         image_url = None
 
     reference_video_url = repeat_params.get("reference_video_url")
-    if reference_video_url:
+    if isinstance(reference_video_url, list):
+        reference_video_url = _url_list(reference_video_url)
+    elif reference_video_url:
         reference_video_url = str(reference_video_url)
 
     caps = VIDEO_CAPS.get(model_key, {})
@@ -1120,7 +1233,7 @@ async def _handle_mode(
         if _is_feed_video_use(data):
             upload_text = (
                 f"✅ <b>{display_name}</b> · повтор по фото\n\n"
-                "🖼️ Загрузи своё фото/референс. Промпт из ленты применю скрыто, "
+                "🖼️ Загрузи своё фото/референс. Повтор создадим по опубликованному ролику, "
                 "а новый ролик соберу по твоему изображению."
             )
             if max_refs > 1:
@@ -1837,6 +1950,16 @@ async def _launch_video_generation_from_state(
     grok_mode: str = data.get("grok_mode", "normal")
     image_url = await _video_reference_image_url(bot, data)
 
+    try:
+        prompt, image_url, data, source_feed_gen_id = await _prepare_feed_video_inputs(
+            session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+            model_key=model_key, prompt=prompt, image_url=image_url, data=data,
+            parent_generation_id=parent_generation_id,
+        )
+    except FeedRemixUnavailable as exc:
+        await source_message.answer(str(exc), reply_markup=main_menu_kb())
+        return False
+
     content_edit = model_key == SEEDANCE25_MODEL_KEY and data.get("flow_id") == "genjutsu_face_clothing"
     seedance_kwargs = {}
     if content_edit:
@@ -1923,9 +2046,8 @@ async def _launch_video_generation_from_state(
 
     if model_key == SEEDANCE25_MODEL_KEY:
         try:
-            edit_billing_duration = await seedance25_edit_billing_duration(
-                prompt,
-                data.get("reference_video_url"),
+            edit_billing_duration = await _seedance_edit_duration_from_state(
+                prompt, data,
                 force_edit=bool(
                     content_edit or data.get("seedance_identity_transfer")
                     or data.get("seedance_repeat_editor")
@@ -1995,17 +2117,14 @@ async def _launch_video_generation_from_state(
         resolution=resolution,
         grok_mode=grok_mode,
     )
+    if source_feed_gen_id and FEED_REMIX_CONTEXT_KEY in data:
+        input_params[FEED_REMIX_CONTEXT_KEY] = feed_remix_context(source_feed_gen_id, prompt)
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
         await state.clear()
         return False
 
-    source_feed_gen_id = await _external_source_feed_id(
-        session=session,
-        db_user=db_user,
-        source_feed_gen_id=source_feed_gen_id,
-    )
     gen = await repo.create_generation(
         session,
         db_user.id,
@@ -2089,7 +2208,7 @@ async def _launch_video_generation_from_state(
             pass
         caption = "✅ <b>Видео готово!</b>" + provider_task_reference(result.task_id)
         if hidden_feed_prompt:
-            caption += "\n\nПромпт из ленты применён скрыто."
+            caption += "\n\nСоздано по посту из ленты. Промпт автора скрыт."
         else:
             caption += f"\n\n<i>{prompt[:200]}</i>"
         if summary != "по умолчанию":
@@ -2114,6 +2233,11 @@ async def _launch_video_generation_from_state(
             current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
             if current_status in {"done", "failed"}:
                 return
+            user_err = (
+                "Ошибка на стороне генератора"
+                if source_feed_gen_id or generation_prompt_is_protected(current)
+                else escape(err)
+            )
             _, refunded = await repo.fail_generation_and_refund(
                 bg_session,
                 gen_id,
@@ -2121,7 +2245,7 @@ async def _launch_video_generation_from_state(
                 refund_note="bot_video_poll",
             )
         await status_msg.edit_text(
-            f"❌ Ошибка: {err}\n💋 возвращены." + provider_task_reference(result.task_id),
+            f"❌ Ошибка: {user_err}\n💋 возвращены." + provider_task_reference(result.task_id),
             reply_markup=main_menu_kb(),
         )
 
@@ -2631,7 +2755,9 @@ async def cb_regen_video(
         image_url = None
 
     reference_video_url = repeat_params.get("reference_video_url")
-    if reference_video_url:
+    if isinstance(reference_video_url, list):
+        reference_video_url = _url_list(reference_video_url)
+    elif reference_video_url:
         reference_video_url = str(reference_video_url)
 
     caps = VIDEO_CAPS.get(model_key, {})
@@ -2672,6 +2798,31 @@ async def cb_regen_video(
         "seed": seed,
         "grok_mode": grok_mode,
     }
+    try:
+        repeat_prompt, image_url, repeat_data, source_feed_gen_id = await _prepare_feed_video_inputs(
+            session=session, db_user=db_user,
+            source_feed_gen_id=getattr(prev, "source_feed_gen_id", None),
+            model_key=model_key, prompt=prev.prompt, image_url=image_url, data=repeat_data,
+            parent_generation_id=prev.id,
+        )
+    except FeedRemixUnavailable as exc:
+        await call.answer(str(exc), show_alert=True)
+        return
+    reference_video_url = repeat_data.get("reference_video_url")
+    repeat_data = {**repeat_data, "image_url": image_url}
+    if model_key == SEEDANCE25_MODEL_KEY:
+        try:
+            edit_billing_duration = await _seedance_edit_duration_from_state(repeat_prompt, repeat_data)
+        except ValueError as exc:
+            await call.answer(str(exc), show_alert=True)
+            return
+        if edit_billing_duration is not None:
+            duration = edit_billing_duration
+            aspect_ratio = "adaptive"
+            repeat_data = {
+                **repeat_data, "duration": duration, "aspect_ratio": aspect_ratio,
+                "seedance_video_edit": True,
+            }
     input_params = {
         **repeat_data,
         "video_start": repeat_params.get("video_start"),
@@ -2695,18 +2846,13 @@ async def cb_regen_video(
         await call.answer("Недостаточно 💋", show_alert=True)
         return
 
-    source_feed_gen_id = await _external_source_feed_id(
-        session=session,
-        db_user=db_user,
-        source_feed_gen_id=getattr(prev, "source_feed_gen_id", None),
-    )
     await safe_answer_callback(call, "🔁 Запускаю ещё вариант")
     gen = await repo.create_generation(
         session,
         db_user.id,
         model_key,
         GenerationType.video,
-        prev.prompt,
+        repeat_prompt,
         credits,
         parent_generation_id=prev.id,
         source_feed_gen_id=source_feed_gen_id,
@@ -2725,7 +2871,7 @@ async def cb_regen_video(
     try:
         result = await video_service.generate_video(
             video_model,
-            prev.prompt,
+            repeat_prompt,
             image_url=image_url,
             duration=duration,
             aspect_ratio=aspect_ratio,
@@ -2773,7 +2919,7 @@ async def cb_regen_video(
             pass
         caption = "✅ <b>Видео готово!</b>" + provider_task_reference(result.task_id)
         if source_feed_gen_id:
-            caption += "\n\nПромпт из ленты применён скрыто."
+            caption += "\n\nСоздано по посту из ленты. Промпт автора скрыт."
         else:
             caption += f"\n\n<i>{prev.prompt[:200]}</i>"
         if summary != "по умолчанию":
@@ -2798,6 +2944,11 @@ async def cb_regen_video(
             current_status = getattr(getattr(current, "status", None), "value", getattr(current, "status", None))
             if current_status in {"done", "failed"}:
                 return
+            user_err = (
+                "Ошибка на стороне генератора"
+                if source_feed_gen_id or generation_prompt_is_protected(current)
+                else escape(err)
+            )
             _, refunded = await repo.fail_generation_and_refund(
                 bg_session,
                 gen_id,
@@ -2805,7 +2956,7 @@ async def cb_regen_video(
                 refund_note="bot_video_repeat_poll",
             )
         await status_msg.edit_text(
-            f"❌ Ошибка: {err}\n💋 возвращены." + provider_task_reference(result.task_id),
+            f"❌ Ошибка: {user_err}\n💋 возвращены." + provider_task_reference(result.task_id),
             reply_markup=main_menu_kb(),
         )
 

@@ -9,8 +9,9 @@ import type { FeedItem, GenerationTask, ModelInfo } from "@/lib/types";
 import { notifyHaptic, openExternalUrl } from "@/lib/telegram";
 import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
 import {
-  canReopenPayment, clearRepeatDraft, paymentFromResponse, paymentResolution, readRepeatDraft, saveRepeatDraft,
-  type PaymentProvider, type RepeatDraft, type RepeatPayment,
+  canReopenPayment, checkoutAmountLabel, checkoutOptions, checkoutProviderLabel, clearRepeatDraft,
+  paymentFromResponse, paymentResolution, readRepeatDraft, saveRepeatDraft,
+  type FeedCheckoutPlan, type PaymentProvider, type RepeatDraft, type RepeatPayment,
 } from "@/features/feed-repeat-payment";
 
 const FEED_REMIX_EVENT = "apix:open-feed-remix-runner";
@@ -30,9 +31,10 @@ type FeedCheckoutQuote = {
   balance_credits: number;
   deficit_credits: number;
   can_run: boolean;
-  recommended_plan?: { key: string; label: string; credits: number; price_rub: number } | null;
+  recommended_plan?: FeedCheckoutPlan | null;
+  source_video_edit?: boolean;
+  effective_duration_seconds?: number;
 };
-const ACCEPTED_PAYMENT_PROVIDERS: PaymentProvider[] = ["tbank", "crypto", "tribute", "lava"];
 
 function draftStorage(): Storage | null {
   try { return window.sessionStorage; } catch { return null; }
@@ -181,7 +183,7 @@ function FeedRemixRunnerPortal() {
   const openSequence = useRef(0);
   const paymentCheckInFlight = useRef(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
-  const [paymentMethods, setPaymentMethods] = useState<PaymentProvider[]>([]);
+  const [selectedPaymentProvider, setSelectedPaymentProvider] = useState<PaymentProvider | null>(null);
   const quoteRequestSequence = useRef(0);
   const launchInFlight = useRef(false);
   const paymentInFlight = useRef(false);
@@ -232,11 +234,14 @@ function FeedRemixRunnerPortal() {
   liveQuoteRequest.current = item && requestBody ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
   const quoteReady = Boolean(quote && quotedBody === requestBodyKey && !quoteBusy);
   const canLaunch = quoteReady && quote?.can_run === true;
+  const paymentOptions = checkoutOptions(quote?.recommended_plan);
+  const paymentOption = paymentOptions.find((option) => option.provider === selectedPaymentProvider) || paymentOptions[0];
 
   const resetForm = useCallback((nextItem: FeedItem | null = null, draft: RepeatDraft | null = null) => {
     setItem(nextItem);
     setPhase("idle");
     setError("");
+    setSelectedPaymentProvider(null);
     setReferences(draft?.references || []);
     setChangeRequest(draft?.changeRequest || "");
     setQuote(null);
@@ -395,17 +400,6 @@ function FeedRemixRunnerPortal() {
     return () => window.clearTimeout(timer);
   }, [item?.id, requestBodyKey, refreshQuote]);
 
-  useEffect(() => {
-    if (!item) return;
-    void apiJson<string[]>("/payment-methods")
-      .then((methods) => setPaymentMethods(
-        (Array.isArray(methods) ? methods : []).filter(
-          (method): method is PaymentProvider => ACCEPTED_PAYMENT_PROVIDERS.includes(method as PaymentProvider),
-        ),
-      ))
-      .catch(() => setPaymentMethods([]));
-  }, [item?.id]);
-
   const checkPayment = useCallback(async (quiet = false) => {
     const current = paymentRef.current;
     const scope = activeScope.current;
@@ -478,9 +472,9 @@ function FeedRemixRunnerPortal() {
 
   const payInline = useCallback(async () => {
     const plan = quote?.recommended_plan;
-    const provider = paymentMethods[0];
+    const provider = paymentOption?.provider;
     const scope = activeScope.current;
-    if (!plan || !provider || !scope || !draftSnapshot.current || busy || paymentBusy || paymentInFlight.current || paymentRef.current) return;
+    if (!quoteReady || quote?.can_run || !plan || !provider || !scope || !draftSnapshot.current || busy || paymentBusy || paymentInFlight.current || paymentRef.current) return;
     const pending: RepeatPayment = {
       startedAt: Date.now(), provider, planKey: plan.key, transactionId: null, checkoutUrl: null,
     };
@@ -531,7 +525,7 @@ function FeedRemixRunnerPortal() {
       paymentInFlight.current = false;
       if (activeScope.current === scope) setPaymentBusy(false);
     }
-  }, [busy, paymentBusy, paymentMethods, quote?.recommended_plan]);
+  }, [busy, paymentBusy, paymentOption?.provider, quote?.can_run, quote?.recommended_plan, quoteReady]);
 
   const reopenPayment = useCallback(() => {
     const current = paymentRef.current;
@@ -652,10 +646,26 @@ function FeedRemixRunnerPortal() {
               </div>
             </div>
           ) : quoteReady && !quote?.can_run && quote?.recommended_plan ? (
-            <Button className="min-h-11 w-full rounded-xl" disabled={busy || paymentBusy || !activeScope.current || !paymentMethods.length} onClick={() => void payInline()}>
-              {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {`Пополнить здесь · ${quote.recommended_plan.price_rub} ₽`}
-            </Button>
+            paymentOption ? <div className="grid gap-2">
+              <p className="text-xs text-muted-foreground">{quote.recommended_plan.label} · {quote.recommended_plan.credits} 💋</p>
+              {paymentOptions.length > 1 ? <label className="grid gap-1 text-xs font-semibold">
+                Способ оплаты
+                <select
+                  className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm"
+                  value={paymentOption.provider}
+                  disabled={busy || paymentBusy}
+                  onChange={(event) => setSelectedPaymentProvider(event.target.value as PaymentProvider)}
+                >
+                  {paymentOptions.map((option) => <option key={option.provider} value={option.provider}>
+                    {checkoutProviderLabel(option.provider)} · {checkoutAmountLabel(option)}
+                  </option>)}
+                </select>
+              </label> : <p className="text-xs text-muted-foreground">{checkoutProviderLabel(paymentOption.provider)}</p>}
+              <Button className="min-h-11 w-full rounded-xl" disabled={busy || paymentBusy || !activeScope.current} onClick={() => void payInline()}>
+                {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {`Пополнить здесь · ${checkoutAmountLabel(paymentOption)}`}
+              </Button>
+            </div> : <p className="text-xs text-destructive">Для этого пакета пока нет доступного способа оплаты.</p>
           ) : null}
           {!paymentWaiting && quoteReady && !quote?.can_run && !quote?.recommended_plan ? (
             <p className="text-xs text-destructive">Недостаточно 💋, активных пакетов пополнения пока нет.</p>
@@ -699,7 +709,7 @@ function FeedRemixRunnerPortal() {
               disabled={busy}
               onChange={(event) => setChangeRequest(event.target.value)}
             />
-            <span className="text-[11px] text-muted-foreground">Необязательно. Изменения применятся при первом запуске, промпт автора скрыт.</span>
+            <span className="text-[11px] text-muted-foreground">Необязательно. Со своим фото или изменениями повтор создаётся по опубликованному изображению или видео. Исходное фото занимает один слот референса. Промпт автора остаётся скрыт.</span>
           </label>
 
           <div className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
@@ -842,6 +852,7 @@ function FeedRemixRunnerPortal() {
                 </span>
               </div>
             ) : <span>{quoteBusy ? "Рассчитываем стоимость по тарифу…" : "Стоимость пока недоступна"}</span>}
+            {quoteReady && quote?.source_video_edit ? <p className="mt-2 text-muted-foreground">Редактирование исходного ролика: длительность и кадр берутся из источника. Для оплаты: {quote.effective_duration_seconds} сек.</p> : null}
             {paymentWaiting ? <p className="mt-2 text-muted-foreground">После оплаты баланс обновится здесь автоматически. Фото и настройки останутся на месте.</p> : null}
           </div>
           <p className={cn("rounded-xl border border-border bg-muted/45 px-3 py-2 text-xs text-muted-foreground", phase !== "idle" && "text-foreground")}>{phaseLabel}</p>

@@ -18,6 +18,7 @@ from bot.legal_offer import PUBLIC_OFFER_PAGES
 from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.feed_remix_prompt import generation_prompt_is_protected
 from db import repository as repo
 from db.models import GenerationType, ModelCost, User
 from db.repository import InsufficientReferralBalanceError
@@ -542,9 +543,11 @@ async def cb_history(
         status_icon = {"done": "✅", "pending": "⏳", "failed": "❌", "processing": "🔄"}.get(
             gen.status.value, "❓"
         )
+        prompt = str(gen.prompt or "")
+        preview = ("Промпт скрыт" if lang == "ru" else "Prompt hidden") if generation_prompt_is_protected(gen) else prompt[:60] + ("..." if len(prompt) > 60 else "")
         lines.append(
             f"{i}. {icon} {status_icon} <code>{escape(gen.model)}</code>\n"
-            f"   <i>{escape(gen.prompt[:60])}{'...' if len(gen.prompt) > 60 else ''}</i>\n"
+            f"   <i>{escape(preview)}</i>\n"
             f"   -{gen.credits_spent} 💋"
             + provider_task_reference(getattr(gen, "task_id", None), language=lang)
         )

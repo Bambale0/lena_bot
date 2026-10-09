@@ -211,6 +211,9 @@ class ImageSession(Base):
 
     base_prompt: Mapped[str | None] = mapped_column(Text)
     last_prompt: Mapped[str | None] = mapped_column(Text)
+    # NULL includes all historical sessions: absence of lineage is not proof
+    # that saved text belongs to the session owner. Set only at audited inputs.
+    prompt_provenance: Mapped[str | None] = mapped_column(String(32), nullable=True)
     reference_file_id: Mapped[str | None] = mapped_column(Text)
     reference_file_ids: Mapped[str | None] = mapped_column(Text)
     reference_url: Mapped[str | None] = mapped_column(Text)

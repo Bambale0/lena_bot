@@ -581,7 +581,7 @@ function capabilityLabel(value) {
 
 function statusLabel(value) {
   const source = String(value || "").toLowerCase();
-  if (source === "reconciliation_required") return "на проверке у поставщика";
+  if (source === "reconciliation_required") return "уточняем статус у поставщика";
   if (source === "processing") return "готовится";
   if (source === "queued") return "в очереди";
   if (source === "pending") return "ожидает";
@@ -3058,9 +3058,9 @@ function renderActiveImageSession() {
     return;
   }
   const refs = uniqueSafeUrls(session.reference_urls || session.referenceUrls || [session.reference_url, session.referenceUrl]);
-  const promptMeta = session.prompt_hidden || session.promptHidden
+  const promptMeta = session.prompt_unavailable_reason || (session.prompt_hidden || session.promptHidden
     ? "Промпт защищён правилами ленты"
-    : "Серия сохранена, текст не показываем на экране";
+    : "Серия сохранена, текст не показываем на экране");
   root.hidden = false;
   root.innerHTML = `
     <div>
@@ -3106,7 +3106,7 @@ function applyActiveImageSession() {
   setGenerationFlow(refs.length ? "reference" : "text", { updateRoute: true });
   updateGenerationEstimate();
   refreshCustomSelects();
-  toast("Активная серия применена.", "success");
+  toast(session.prompt_unavailable_reason || "Активная серия применена.", session.prompt_unavailable_reason ? "warning" : "success");
 }
 
 async function archiveActiveImageSession(sessionId) {
@@ -3248,7 +3248,7 @@ function generationStatusCopy(status) {
   if (value === "uploading") return "Загружаем референс";
   if (value === "created") return "Задача принята";
   if (value === "pending" || value === "queued") return "Ожидает свободный слот";
-  if (value === "reconciliation_required") return "Поставщик не подтвердил запуск. Кредиты удержаны; для отмены и возврата обратитесь в поддержку с ID задачи";
+  if (value === "reconciliation_required") return "Уточняем статус видео у поставщика. Проверка продолжается автоматически. Сообщим, когда получим результат или подтверждённую ошибку. Повторно запускать эту задачу не нужно. Кредиты пока удержаны";
   if (value === "processing" || value === "running") return "Модель создает результат";
   if (value === "done") return "Готово";
   if (value === "failed") return "Не получилось";

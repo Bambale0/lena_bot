@@ -60,7 +60,7 @@ def _text(data: dict[str, Any]) -> str:
     feed_repeat = data.get("feed_use_prompt") is not None
     title = "🔁 <b>Повтор из ленты</b>" if feed_repeat else "🎨 <b>Генерация по промпту</b>"
     note = (
-        "Промпт автора сохранён скрыто. Добавь свои фото-референсы."
+        "Повтор создадим по опубликованному изображению. Оно занимает ещё один слот референса. Добавь свои фото."
         if feed_repeat
         else "Добавь фото для лица, объекта, стиля или композиции."
     )
@@ -328,6 +328,11 @@ async def _run(
 ) -> None:
     data = await state.get_data()
     model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
+    source_feed_gen_id = marketplace._feed_use_source_id(data)
+    if data.get("feed_use_prompt") is not None and source_feed_gen_id is None:
+        await call.answer("Не удалось определить исходный пост. Открой его в ленте заново.", show_alert=True)
+        await state.clear()
+        return
     file_ids = list(data.get("prompt_multi_ref_file_ids") or [])
     max_refs = repeat_references._repeat_max_refs(model_key)
     file_ids = file_ids[:max_refs]
@@ -363,7 +368,6 @@ async def _run(
     aspect_ratio = _current_ratio(data, model_key)
     if feed_prompt is not None:
         prompt_text = str(feed_prompt)
-        source_feed_gen_id = data.get("feed_use_gen_id")
         image_session = await repo.create_image_session(
             session=session,
             user_id=db_user.id,
@@ -372,13 +376,13 @@ async def _run(
             aspect_ratio=aspect_ratio,
             quality=marketplace._default_quality_for_model(model_key),
             count=marketplace._default_count_for_model(model_key),
-            base_prompt=prompt_text,
+            base_prompt=None,
             reference_file_id=file_ids[0],
             reference_file_ids=file_ids,
             reference_url=None,
         )
         await state.clear()
-        await image_gen._launch_session_generation(
+        launched = await image_gen._launch_session_generation(
             source_message=call.message,  # type: ignore[arg-type]
             state=state,
             session=session,
@@ -392,7 +396,10 @@ async def _run(
             launching_text="⏳ <b>Запускаю повтор из ленты с референсами...</b>",
             queued_text="⏳ <b>Повтор из ленты запущен.</b> Результат придёт сюда автоматически.",
         )
-        await safe_answer_callback(call, f"Запущено · референсов {len(reference_urls)}")
+        if launched:
+            await safe_answer_callback(call, f"Запущено · референсов {len(reference_urls)}")
+        else:
+            await safe_answer_callback(call)
         return
 
     prompt_id = data.get("use_prompt_id")

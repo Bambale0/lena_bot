@@ -341,7 +341,7 @@ async def test_handle_omni_ids_input_rejects_multiple_audio_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cb_vpar_next_feed_repeat_launches_hidden_prompt() -> None:
+async def test_cb_vpar_next_feed_video_repeat_rejects_model_without_video_input() -> None:
     call = make_callback(data="vpar_next")
     status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
     call.message.answer = AsyncMock(return_value=status_msg)
@@ -371,6 +371,10 @@ async def test_cb_vpar_next_feed_repeat_launches_hidden_prompt() -> None:
         create_generation=AsyncMock(return_value=mock_gen),
         update_generation_task=AsyncMock(),
         get_generation_by_id=AsyncMock(return_value=SimpleNamespace(id=88, user_id=99)),
+        get_public_feed_generation=AsyncMock(return_value=SimpleNamespace(
+            id=88, user_id=99, gen_type=GenerationType.video, prompt="hidden source prompt",
+            result_url="https://cdn.test/source.mp4", result_urls=None,
+        )),
         fail_generation=AsyncMock(),
         add_credits=AsyncMock(),
     )
@@ -383,12 +387,12 @@ async def test_cb_vpar_next_feed_repeat_launches_hidden_prompt() -> None:
             )) as mock_video_service:
                 await video_gen.cb_vpar_next(call, mock_state, mock_session, mock_db_user, mock_bot)
 
-    assert repo_stub.create_generation.await_args.args[4] == "hidden source prompt"
-    assert repo_stub.create_generation.await_args.kwargs["source_feed_gen_id"] == 88
-    assert mock_video_service.generate_video.await_args.args[1] == "hidden source prompt"
-    assert mock_video_service.generate_video.await_args.kwargs["image_url"] == "https://cdn.test/ref.jpg"
+    repo_stub.spend_credits.assert_not_awaited()
+    repo_stub.create_generation.assert_not_awaited()
+    mock_video_service.generate_video.assert_not_awaited()
+    assert "исходное фото или видео" in call.message.answer.await_args.args[0]
     assert "hidden source prompt" not in call.message.answer.await_args.args[0]
-    mock_state.clear.assert_awaited_once()
+    mock_state.clear.assert_not_awaited()
 
 
 # ── handle_image_upload ───────────────────────────────────────────────────────

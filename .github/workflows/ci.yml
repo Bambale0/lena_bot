@@ -14,7 +14,24 @@ permissions:
 jobs:
   backend-quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: apix_session_migration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d apix_session_migration_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
+      TEST_RECONCILIATION_POSTGRES_DSN: "postgresql://postgres:postgres@127.0.0.1:5432/apix_session_migration_test"
+      APIX_TEST_NGINX_IMAGE: "nginx:alpine"
+      APIX_TEST_POSTGRES_URL: "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/apix_session_migration_test"
       BOT_TOKEN: "123456:ci-backend-quality"
       COMET_API_KEY: "ci-backend-quality"
       DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/ci"
@@ -35,6 +52,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Prepare canonical Nginx syntax test image
+        timeout-minutes: 3
+        run: docker pull nginx:alpine
+
       - name: Ruff maintained baseline
         run: |
           ruff check \
@@ -53,6 +74,8 @@ jobs:
             api/seedance_provider_routing.py \
             api/realtime.py \
             tests/test_seedance_uncertain_submission.py \
+            tests/test_seedance_postgres_admission.py \
+            tests/test_neironych_automatic_recovery.py \
             tests/test_neironych_video_poll_gate.py \
             core/neironych_image_reconcile_scheduler.py \
             core/neironych_video_reconcile_scheduler.py \
@@ -84,8 +107,25 @@ jobs:
             api/video_runtime_fixes.py \
             api/suno_full_service.py \
             api/video_prompt_service.py \
+            payments/checkout_options.py \
             api/video_service.py \
             core/trend_user_fields.py \
+            core/feed_remix_prompt.py \
+            api/repeat_runtime.py \
+            bot/handlers/repeat_safe.py \
+            bot/handlers/image_gen.py \
+            bot/handlers/feed.py \
+            bot/handlers/marketplace.py \
+            bot/handlers/repeat_reference_marketplace.py \
+            api/web/sessions.py \
+            api/web/schemas.py \
+            db/models.py \
+            db/repository.py \
+            db/migrations/versions/038_image_session_prompt_provenance.py \
+            bot/handlers/balance.py \
+            bot/handlers/repeat_references.py \
+            bot/ui/router.py \
+            main.py \
             core/trends.py \
             bot/handlers/gemini_omni_recovery.py \
             bot/handlers/gemini_omni_references.py \
@@ -123,9 +163,27 @@ jobs:
             tests/test_trend_personalization_fields.py \
             tests/test_video_gen.py \
             tests/test_video_prompt_service.py \
+            tests/test_video_prompt_fps.py \
             tests/test_video_prompt_surface.py \
+            tests/test_video_prompt_nginx_config.py \
             tests/test_webapp_routes.py \
             tests/test_feed_remix_prelaunch.py \
+            tests/test_feed_remix_prompt_security.py \
+            tests/test_seedance_feed_personalization.py \
+            tests/test_seedance_feed_bot.py \
+            tests/test_feed_repeat_snapshot_security.py \
+            tests/test_prompt_privacy.py \
+            tests/test_realtime.py \
+            tests/test_feed_session_prompt_security.py \
+            tests/test_image_session_prompt_provenance.py \
+            tests/test_image_session_provenance_migration.py \
+            tests/test_delivery_prompt_security.py \
+            tests/test_repeat_multiple_references.py \
+            tests/test_repeat_marketplace_multiple_references.py \
+            tests/test_feed.py \
+            tests/test_safe_image_repeat.py \
+            tests/test_repeat_callback_guard.py \
+            tests/test_feed_checkout_options.py \
             api/web/generations.py \
             bot/keyboards/feed.py \
             tests/test_kie_model_specs.py \
@@ -166,6 +224,8 @@ jobs:
             tests/test_neironych_video_notice_outbox.py \
             tests/test_neironych_video_poll_gate.py \
             tests/test_seedance_uncertain_submission.py \
+            tests/test_seedance_postgres_admission.py \
+            tests/test_neironych_automatic_recovery.py \
             tests/test_reconcile_video_delivery.py \
             tests/test_neironych_seedance_runtime.py \
             tests/test_neironych_seedance_admin.py \
@@ -184,6 +244,22 @@ jobs:
             tests/test_image_gen_references.py::test_launch_session_generation_unlimited_records_zero_credits \
             tests/test_webapp_routes.py::test_generate_image_unlimited_allows_zero_balance_and_records_zero_charge \
             tests/test_feed_remix_prelaunch.py \
+            tests/test_feed_remix_prompt_security.py \
+            tests/test_seedance_feed_personalization.py \
+            tests/test_seedance_feed_bot.py \
+            tests/test_feed_repeat_snapshot_security.py \
+            tests/test_prompt_privacy.py \
+            tests/test_realtime.py \
+            tests/test_feed_session_prompt_security.py \
+            tests/test_image_session_prompt_provenance.py \
+            tests/test_image_session_provenance_migration.py \
+            tests/test_delivery_prompt_security.py \
+            tests/test_repeat_multiple_references.py \
+            tests/test_repeat_marketplace_multiple_references.py \
+            tests/test_feed.py \
+            tests/test_safe_image_repeat.py \
+            tests/test_repeat_callback_guard.py \
+            tests/test_feed_checkout_options.py \
             tests/test_provider_contract_catalog.py \
             tests/test_public_files.py \
             tests/test_seedance25_identity_transfer.py \
@@ -193,7 +269,9 @@ jobs:
             tests/test_kie_model_specs.py \
             tests/test_runtime_reliability.py \
             tests/test_video_prompt_service.py \
-            tests/test_video_prompt_surface.py
+            tests/test_video_prompt_fps.py \
+            tests/test_video_prompt_surface.py \
+            tests/test_video_prompt_nginx_config.py
 
   bot-navigation:
     runs-on: ubuntu-latest

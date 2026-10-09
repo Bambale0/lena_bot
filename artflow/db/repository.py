@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from inspect import isawaitable
+from typing import Literal
 from urllib.parse import urlparse
 
 from sqlalchemy import Date, cast, delete, desc, func, or_, select, update
@@ -2208,7 +2209,16 @@ async def create_image_session(
     reference_file_ids: list[str] | None = None,
     reference_url: str | None = None,
     reference_urls: list[str] | None = None,
+    *,
+    prompt_provenance: Literal["user_supplied"] | None = None,
 ) -> ImageSession:
+    """Create a session without assuming ownership of copied prompt text.
+
+    Only audited server callers accepting the authenticated user's own text may
+    pass ``user_supplied``. Never copy this marker from request JSON, another
+    session, a feed/library source, or generation metadata. Unreviewed callers
+    remain unknown; protected generation lineage still overrides this marker.
+    """
     await archive_active_image_sessions(session, user_id)
 
     normalized_reference_file_ids = [item for item in (reference_file_ids or []) if item]
@@ -2234,6 +2244,7 @@ async def create_image_session(
         count=count,
         base_prompt=base_prompt,
         last_prompt=base_prompt,
+        prompt_provenance=prompt_provenance,
         reference_file_id=reference_file_id,
         reference_file_ids=json.dumps(normalized_reference_file_ids, ensure_ascii=True) if normalized_reference_file_ids else None,
         reference_url=reference_url,

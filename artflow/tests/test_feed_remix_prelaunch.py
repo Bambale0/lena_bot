@@ -61,13 +61,12 @@ async def test_feed_remix_quote_prices_variants_and_count_without_spending(clien
 
 
 @pytest.mark.asyncio
-async def test_remix_edit_instructions_append_to_hidden_author_prompt():
+async def test_remix_edit_instructions_exclude_hidden_author_prompt():
     prompt = miniapp_routes._build_feed_remix_prompt(
-        "secret author prompt", "заменить куртку на белую, лицо оставить"
+        "secret author prompt", "заменить куртку на белую, лицо оставить", has_source_media=True,
     )
-    assert "secret author prompt" in prompt
+    assert "secret author prompt" not in prompt
     assert "заменить куртку на белую, лицо оставить" in prompt
-    assert prompt.index("secret author prompt") < prompt.index("заменить куртку")
     assert miniapp_routes._build_feed_remix_prompt("secret author prompt", "") == "secret author prompt"
 
 
@@ -119,14 +118,14 @@ async def test_edit_is_applied_on_first_paid_image_repeat_without_revealing_auth
     assert response.json()["prompt_hidden"] is True
     assert response.json()["prompt"] == ""
     assert charge.await_args.kwargs["amount"] == 5.0
-    assert "secret creator instructions" in image_generate.await_args.args[1]
+    assert "secret creator instructions" not in image_generate.await_args.args[1]
     assert "Замени одежду на белый костюм" in image_generate.await_args.args[1]
     assert "Замени одежду" in save_session.await_args.kwargs["base_prompt"]
     assert save_gen.await_args.kwargs["source_feed_gen_id"] == 91
 
 
 @pytest.mark.asyncio
-async def test_video_post_uses_uploaded_image_not_mp4_as_reference_when_quoting(client, monkeypatch):
+async def test_video_post_personalization_requires_source_video_support_when_quoting(client, monkeypatch):
     from db.models import GenerationType
 
     source = SimpleNamespace(
@@ -147,9 +146,8 @@ async def test_video_post_uses_uploaded_image_not_mp4_as_reference_when_quoting(
         "video_url": "https://example.test/source.mp4", "resolution": "720p",
         "aspect_ratio": "9:16",
     })
-    assert response.status_code == 200, response.text
-    assert seen["image_url"] == "https://example.test/user.jpg"
-    assert "https://example.test/source.mp4" not in seen["reference_urls"]
+    assert response.status_code == 422, response.text
+    assert seen == {}
 
 
 
@@ -177,3 +175,89 @@ async def test_web_quote_proxy_requires_authenticated_user_without_invoicing():
         user=None,
     )
     assert result.status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,gen_type,refs,aspect_ratio,prompt,detail", [
+    ("midjourney-video", "video", [], None, "hidden", "requires a reference image"),
+    ("midjourney-video", "image", ["https://example.test/extra.png"], None, "hidden", "at most 1"),
+    ("midjourney-imagine", "image", ["https://example.test/extra.png"], None, "hidden", "at most 1"),
+    ("midjourney-blend", "image", [f"https://example.test/{i}.png" for i in range(5)], None, "hidden", "at most 5"),
+    ("midjourney-imagine", "image", [], "4:7", "hidden", "aspect ratio"),
+    ("midjourney-imagine", "image", [], None, "", "Prompt is required"),
+])
+async def test_midjourney_quote_and_submit_reject_same_invalid_inputs_before_charge(
+    client, monkeypatch, model, gen_type, refs, aspect_ratio, prompt, detail,
+):
+    source = SimpleNamespace(
+        id=88, model=model, gen_type=gen_type, prompt=prompt,
+        result_url=f"https://example.test/source.{'mp4' if gen_type == 'video' else 'png'}",
+        result_urls=None,
+    )
+    monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr(miniapp_routes.repo, "get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=5, is_active=True)))
+    monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
+    plans = AsyncMock(return_value=[])
+    charge = AsyncMock()
+    spend = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "get_active_price_plans", plans)
+    monkeypatch.setattr(miniapp_routes.repo, "charge_image_generation", charge)
+    monkeypatch.setattr(miniapp_routes.repo, "spend_credits", spend)
+    body = {"model": model, "reference_urls": refs, "aspect_ratio": aspect_ratio}
+    quote = await client.post("/api/v1/feed/88/remix/quote", json=body)
+    submit = await client.post("/api/v1/feed/88/remix", json=body)
+    assert quote.status_code == submit.status_code == 422, (quote.text, submit.text)
+    assert quote.json()["detail"] == submit.json()["detail"]
+    assert detail in quote.json()["detail"]
+    plans.assert_not_awaited()
+    charge.assert_not_awaited()
+    spend.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_midjourney_quote_deduplicates_source_and_primary_reference(client, monkeypatch):
+    source_url = "https://example.test/source.png"
+    source = SimpleNamespace(id=88, model="midjourney-imagine", gen_type="image", prompt="secret", result_url=source_url, result_urls=None)
+    monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr(miniapp_routes.repo, "get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=2, is_active=True)))
+    monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
+    quote = await client.post("/api/v1/feed/88/remix/quote", json={
+        "model": "midjourney-imagine", "image_url": source_url,
+        "source_image_url": source_url, "reference_urls": [source_url],
+    })
+    assert quote.status_code == 200, quote.text
+    assert quote.json()["cost_credits"] == 2
+
+
+@pytest.mark.asyncio
+async def test_public_feed_share_card_works_without_user_and_keeps_prompt_hidden(client, monkeypatch):
+    source = SimpleNamespace(
+        id=88, user_id=42, model="nano-banana-2", gen_type="image",
+        prompt="secret author prompt", result_url="https://example.test/source.png", result_urls=None,
+        likes_count=1, shares_count=2,
+    )
+    card = SimpleNamespace(generation=source, aspect_ratio="1:1", username="creator", full_name=None, remix_count=3)
+    monkeypatch.setattr(miniapp_routes.repo, "get_feed_generation_card", AsyncMock(return_value=card))
+    response = await client.get("/api/v1/public/feed/88")
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == 88
+    assert response.json()["is_mine"] is False
+    assert "secret author prompt" not in response.text
+    assert not response.json().get("prompt")
+
+
+@pytest.mark.asyncio
+async def test_image_quote_and_submit_reject_excess_refs_before_charge(client, monkeypatch):
+    source = SimpleNamespace(id=88, model="nano-banana-2", gen_type="image", prompt="secret", result_url="https://example.test/source.png", result_urls=None)
+    monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
+    charge = AsyncMock(return_value=SimpleNamespace(allowed=False))
+    monkeypatch.setattr(miniapp_routes.repo, "charge_image_generation", charge)
+    monkeypatch.setattr(miniapp_routes.repo, "resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=2, is_active=True)))
+    monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
+    monkeypatch.setattr(miniapp_routes.repo, "count_user_active_generations", AsyncMock(return_value=0))
+    body = {"model": "nano-banana-2", "reference_urls": [f"https://example.test/{i}.png" for i in range(5)]}
+    quote = await client.post("/api/v1/feed/88/remix/quote", json=body)
+    submit = await client.post("/api/v1/feed/88/remix", json=body)
+    assert quote.status_code == submit.status_code == 422
+    assert quote.json()["detail"] == submit.json()["detail"]
+    charge.assert_not_awaited()

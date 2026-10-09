@@ -1,4 +1,40 @@
 export type PaymentProvider = "tbank" | "crypto" | "tribute" | "lava";
+export type CheckoutPaymentOption = {
+  provider: PaymentProvider;
+  amount: number | null;
+  currency: "RUB" | "USDT" | "USD";
+};
+export type FeedCheckoutPlan = {
+  key: string;
+  label: string;
+  credits: number;
+  price_rub: number;
+  payment_options?: CheckoutPaymentOption[];
+};
+
+/** Missing or mismatched metadata must never fall back to a global provider. */
+export function checkoutOptions(plan: { payment_options?: unknown } | null | undefined): CheckoutPaymentOption[] {
+  if (!Array.isArray(plan?.payment_options)) return [];
+  const currencies = { tbank: "RUB", crypto: "USDT", tribute: "USD", lava: "RUB" };
+  return plan.payment_options.filter((value): value is CheckoutPaymentOption => {
+    if (!value || typeof value !== "object") return false;
+    const option = value as CheckoutPaymentOption;
+    if (typeof option.provider !== "string" || !Object.prototype.hasOwnProperty.call(currencies, option.provider)
+      || currencies[option.provider] !== option.currency) return false;
+    return (option.provider === "lava" && option.amount === null)
+      || (typeof option.amount === "number" && Number.isFinite(option.amount) && option.amount > 0);
+  });
+}
+
+export function checkoutAmountLabel(option: CheckoutPaymentOption): string {
+  const currency = option.currency === "RUB" ? "₽" : option.currency;
+  return option.amount === null ? `сумма в ${currency} на странице оплаты` : `${option.amount} ${currency}`;
+}
+
+export function checkoutProviderLabel(provider: PaymentProvider): string {
+  return { tbank: "Карта | СБП", crypto: "CryptoBot", tribute: "Tribute", lava: "Lava" }[provider];
+}
+
 export type RepeatPayment = {
   startedAt: number;
   provider: PaymentProvider | null;

@@ -226,6 +226,15 @@ def _default_count_for_model(model_key: str) -> int:
     return counts[0] if counts else 1
 
 
+def _feed_use_source_id(data: dict) -> int | None:
+    source_id = data.get("feed_use_gen_id")
+    # An absent or malformed source must never silently become a user-owned
+    # generation with the protected prompt from stale FSM state.
+    if isinstance(source_id, int) and not isinstance(source_id, bool) and source_id > 0:
+        return source_id
+    return None
+
+
 async def _launch_prompt_generation(
     *,
     call: CallbackQuery,
@@ -458,7 +467,8 @@ async def cb_prompt_pick_model(
             "🖼 <b>Твой референс</b>\n\n"
             "Отправь фото, по которому нужно повторить пост из ленты.\n"
             f"Можно отправить до <b>{max_refs}</b> фото — по одному или альбомом.\n"
-            "Промпт автора применю скрыто, а лицо/объект возьму из твоего фото."
+            "Сцену возьму из опубликованного изображения, а лицо/объект — из твоего фото. "
+            "Исходное изображение занимает ещё один слот референса."
         )
     else:
         text = (
@@ -577,6 +587,14 @@ async def fsm_prompt_use_reference(
 
     data = await state.get_data()
     model_key: str = data.get("use_model_key") or DEFAULT_PROMPT_MODEL
+    source_feed_gen_id = _feed_use_source_id(data)
+    if data.get("feed_use_prompt") is not None and source_feed_gen_id is None:
+        await message.answer(
+            "Не удалось определить исходный пост. Открой его в ленте заново.",
+            reply_markup=back_to_menu_kb(),
+        )
+        await state.clear()
+        return
 
     best = sorted(message.photo, key=lambda p: p.file_size or 0, reverse=True)  # type: ignore[union-attr]
     reference_url = await mirror_telegram_file(bot, best[0].file_id)
@@ -584,7 +602,6 @@ async def fsm_prompt_use_reference(
     # Feed use flow
     if data.get("feed_use_prompt") is not None:
         prompt_text: str = data["feed_use_prompt"]
-        source_feed_gen_id = data.get("feed_use_gen_id")
         mode = "image" if reference_url and _supports_img2img(model_key) else "text"
         model_cost = await repo.resolve_image_model_cost(
             session, model_key, quality=_default_quality_for_model(model_key),
@@ -608,7 +625,7 @@ async def fsm_prompt_use_reference(
             aspect_ratio=None,
             quality=_default_quality_for_model(model_key),
             count=_default_count_for_model(model_key),
-            base_prompt=prompt_text,
+            base_prompt=None,
             reference_file_id=None,
             reference_url=reference_url if mode == "image" else None,
         )

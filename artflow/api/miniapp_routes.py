@@ -95,6 +95,14 @@ from bot.utils.telegram_images import (
     send_original_document_to_chat,
 )
 from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
+from core.feed_remix_prompt import (
+    FEED_REMIX_CONTEXT_KEY,
+    FeedRemixUnavailable,
+    feed_remix_context,
+    feed_video_edit_prompt,
+    supports_feed_source_media,
+)
+from core.feed_remix_prompt import build_feed_remix_prompt as _build_feed_remix_prompt
 from core.gemini_omni import (
     GEMINI_OMNI_MAX_AUDIO_IDS,
     GEMINI_OMNI_MAX_CHARACTER_IDS,
@@ -130,6 +138,7 @@ from db.models import (
     WithdrawalStatus,
 )
 from db.session import get_session
+from payments.checkout_options import crypto_amount_usdt, payment_options_for_plan
 
 MUSIC_MODEL_KEY = "suno/v5.5"
 DEFAULT_MUSIC_CREDITS = 20
@@ -351,7 +360,7 @@ def _preview_media_url(url: str | None, gen_type: Any) -> str | None:
     return preview_public_image_url(url) or url
 
 
-def _feed_card_out(card: Any, user: User) -> dict:
+def _feed_card_out(card: Any, user: User | None) -> dict:
     generation = card.generation
     result_urls = _generation_result_urls(generation)
     gen_type = getattr(generation, "gen_type", "image")
@@ -368,7 +377,7 @@ def _feed_card_out(card: Any, user: User) -> dict:
         "aspect_ratio": card.aspect_ratio,
         "author": card.username or card.full_name or "anon",
         "author_photo_url": getattr(card, "author_photo_url", None),
-        "is_mine": generation.user_id == user.id,
+        "is_mine": user is not None and generation.user_id == user.id,
         "remixes": card.remix_count,
         "score": getattr(card, "score", 0),
     }
@@ -1034,10 +1043,10 @@ async def _notify_neironych_video_reconciliation_in_bot(*, user: User, gen) -> b
     if not tg_id:
         return False
     text = (
-        "⚠️ <b>Видео требует проверки у поставщика.</b>\n"
-        "Провайдер не подтвердил, принял ли запуск. Это не обычная очередь.\n"
-        "Повторно эту задачу не запускаем, чтобы не оплатить её дважды. "
-        "Кредиты пока удержаны; для отмены и возврата обратитесь в поддержку с ID задачи."
+        "🔄 <b>Уточняем статус видео у поставщика.</b>\n"
+        "Проверка продолжается автоматически. "
+        "Сообщим, когда получим результат или подтверждённую ошибку. "
+        "Повторно запускать эту задачу не нужно. Кредиты пока удержаны."
         + provider_task_reference(getattr(gen, "task_id", None))
     )
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -2320,7 +2329,9 @@ async def miniapp_video_prompt(
     user: User = Depends(get_miniapp_user),
 ):
     """Generate prompt from uploaded video for miniapp studio."""
-    data = await file.read()
+    # Multipart parsing has already spooled the upload. Bound this heap copy,
+    # including rejection; canonical ingress separately caps the body at 101 MiB.
+    data = await file.read(MAX_VIDEO_PROMPT_BYTES + 1)
     if not data:
         raise HTTPException(status_code=422, detail="Empty file")
     if len(data) > MAX_VIDEO_PROMPT_BYTES:
@@ -2590,7 +2601,7 @@ async def public_feed_post(
     card = await repo.get_feed_generation_card(session, gen_id, require_media=False)
     if card is None:
         raise HTTPException(status_code=404, detail="Public post not found")
-    return _feed_card_out(card, _anonymous_user())
+    return _feed_card_out(card, None)
 
 
 # ── image generation ──────────────────────────────────────────────────────────
@@ -2670,7 +2681,7 @@ async def create_image_generation(
             raise HTTPException(status_code=402, detail="Failed to spend credits")
         charged_credits = charge.charged_credits
         gen_prompt = user_prompt or f"blend:{len(all_refs)}"
-        image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None, reference_urls=all_refs)
+        image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=None if prompt_meta["hidden_prompt"] else gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None, reference_urls=all_refs, prompt_provenance="user_supplied" if body.prompt_id is None else None)
         gen = await repo.create_generation(session, user.id, body.model, GenerationType.image, gen_prompt, charged_credits, image_session_id=image_session.id, action_type=ImageGenerationAction.initial, input_params=prompt_meta)
         try:
             if body.model == "midjourney-imagine":
@@ -2684,7 +2695,7 @@ async def create_image_generation(
                 await repo.add_credits(session, user.id, charged_credits)
             raise HTTPException(status_code=502, detail="Generation service error")
         await repo.update_generation_task(session, gen.id, task_id_for_surface(task_id, surface))
-        await repo.update_image_session_last_prompt(session, image_session.id, gen_prompt)
+        await repo.update_image_session_last_prompt(session, image_session.id, None if prompt_meta["hidden_prompt"] else gen_prompt)
         await _mark_prompt_used_after_generation(
             session,
             prompt_id=getattr(prompt_source, "id", None),
@@ -2748,7 +2759,8 @@ async def create_image_generation(
         aspect_ratio=normalized_ratio,
         quality=normalized_quality,
         count=body.count,
-        base_prompt=user_prompt,
+        base_prompt=None if prompt_meta["hidden_prompt"] else user_prompt,
+        prompt_provenance="user_supplied" if body.prompt_id is None else None,
         reference_file_id=None,
         reference_url=all_refs[0] if all_refs else None,
         reference_urls=all_refs,
@@ -2841,7 +2853,7 @@ async def create_image_generation(
             **({"expected_task_id": task_id_for_surface(nexus_image_adapter.encode_submission_id(image_request_id), surface)}
                if image_request_id else {}),
         )
-    await repo.update_image_session_last_prompt(session, image_session.id, user_prompt)
+    await repo.update_image_session_last_prompt(session, image_session.id, None if prompt_meta["hidden_prompt"] else user_prompt)
     await _mark_prompt_used_after_generation(
         session,
         prompt_id=getattr(prompt_source, "id", None),
@@ -3499,13 +3511,124 @@ def _feed_source_reference_urls(source: Generation, source_image_url: str | None
     return _generation_result_urls(source)
 
 
-def _build_feed_remix_prompt(source_prompt: str, change_request: str) -> str:
-    """Keep the original author's prompt, adding only this repeat's optional edit."""
-    original = str(source_prompt or "").strip()
-    change = str(change_request or "").strip()
-    if not change:
-        return original
-    return f"{original}\n\nИзменения, которые запросил пользователь для повтора: {change}"
+def _prepare_feed_remix_inputs(
+    source: Generation, body: FeedRemixRequest,
+) -> tuple[str, list[str], FeedRemixRequest, bool]:
+    """Resolve the same confidentiality/media boundary for quote and submission."""
+    source_urls = _generation_result_urls(source)
+    source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
+    requested_refs = list(dict.fromkeys(_normalize_public_urls(
+        body.source_image_url, body.image_url, *(body.reference_urls or []),
+    )))
+    has_user_inputs = bool(
+        any(url not in source_urls or source_type != "image" for url in requested_refs)
+        or (body.video_url and (source_type != "video" or body.video_url not in source_urls))
+        or body.audio_ids or body.character_ids
+    )
+    personalized = bool(body.change_request.strip() or has_user_inputs)
+    if not personalized:
+        user_refs = _normalize_public_urls(body.image_url, *(body.reference_urls or []))
+        source_refs = _feed_source_reference_urls(source, body.source_image_url)
+        if body.model in IMAGE_CAPS:
+            refs = user_refs or source_refs
+        else:
+            refs = source_refs + user_refs
+        return _build_feed_remix_prompt(source.prompt, ""), list(dict.fromkeys(refs)), body, False
+
+    caps = (
+        IMAGE_CAPS.get(body.model) or VIDEO_CAPS.get(body.model)
+        or _MJ_IMAGE_CAPS.get(body.model) or _MJ_VIDEO_CAPS.get(body.model) or {}
+    )
+    source_url = (
+        body.source_image_url if source_type == "image" and body.source_image_url in source_urls
+        else source_urls[0] if source_urls else None
+    )
+    applicable = bool(source_url) and supports_feed_source_media(caps, source_type)
+    try:
+        prompt = _build_feed_remix_prompt(
+            "", body.change_request,
+            has_user_references=has_user_inputs, has_source_media=applicable,
+        )
+    except FeedRemixUnavailable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if body.model == "midjourney-blend" and body.change_request.strip():
+        raise HTTPException(status_code=422, detail="Blend does not support text edits; select an image edit model")
+
+    multimodal = bool(caps.get("auto_route_by_inputs") and "multimodal" in caps.get("modes", []))
+    if source_type == "image":
+        refs = list(dict.fromkeys([source_url, *requested_refs]))
+        body = body.model_copy(update={"mode": "multimodal" if multimodal else "image"})
+    else:
+        if body.video_url and body.video_url != source_url:
+            raise HTTPException(status_code=422, detail="A feed edit requires the original public video; remove the additional video")
+        refs = requested_refs
+        body = body.model_copy(update={"video_url": source_url, "mode": "multimodal" if multimodal else ("image" if refs else "video")})
+        if body.model == SEEDANCE25_MODEL_KEY:
+            prompt = feed_video_edit_prompt(prompt)
+    max_refs = int(caps.get("max_refs", 1) or 1)
+    if len(refs) > max_refs:
+        raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s), including the source post")
+    return prompt, refs, body, True
+
+
+
+async def _normalize_feed_video_inputs(
+    body: FeedRemixRequest, prompt: str, refs: list[str],
+) -> dict[str, Any]:
+    """Use the installed model normalizer and identical pre-charge edit billing."""
+    normalized = _normalize_video_request(
+        model_key=body.model, mode=body.mode, duration=body.duration,
+        aspect_ratio=body.aspect_ratio, resolution=body.resolution,
+        image_url=refs[0] if refs else None, reference_urls=refs[1:],
+        video_url=body.video_url, video_start=body.video_start, video_end=body.video_end,
+        audio_ids=body.audio_ids, character_ids=body.character_ids,
+        seed=body.seed, grok_mode=body.grok_mode,
+    )
+    if body.model == SEEDANCE25_MODEL_KEY:
+        identity_transfer = bool(seedance25_adapter._control_payload(
+            [str(item) for item in (normalized.get("audio_ids") or [])]
+        )[2].get("identity_transfer"))
+        try:
+            duration = await seedance25_edit_billing_duration(
+                prompt, normalized["reference_video_url"], force_edit=identity_transfer,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (OSError, RuntimeError) as exc:
+            logger.warning("Seedance feed source preflight unavailable: %s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Не удалось проверить исходное видео. Попробуй позже; поцелуи не списаны.") from exc
+        if duration is not None:
+            normalized.update(
+                duration=duration, billing_duration=duration, provider_duration=-1,
+                aspect_ratio="adaptive", seedance_video_edit=True,
+            )
+    return normalized
+
+
+def _normalize_feed_midjourney_request(
+    body: FeedRemixRequest, prompt: str, reference_urls: list[str],
+) -> dict[str, Any]:
+    """One validation path for read-only quote and paid submission."""
+    caps = (_MJ_VIDEO_CAPS if body.model in _MJ_VIDEO_MODELS else _MJ_IMAGE_CAPS).get(body.model, {})
+    refs = reference_urls
+    max_refs = int(caps.get("max_refs", 1) or 1)
+    if body.model == "midjourney-blend" and len(refs) < 2:
+        raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
+    if body.model in _MJ_VIDEO_MODELS and not refs:
+        raise HTTPException(status_code=422, detail="Midjourney Video requires a reference image")
+    if len(refs) > max_refs:
+        raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
+    ratio = None
+    if body.model in _MJ_STUDIO_IMAGE_MODELS:
+        ratio = _normalize_choice(body.aspect_ratio, caps.get("aspect_ratios", []), field_name="aspect ratio")
+    if body.model == "midjourney-imagine" and not prompt.strip():
+        raise HTTPException(status_code=422, detail="Prompt is required")
+    return {
+        "gen_type": "video" if body.model in _MJ_VIDEO_MODELS else "image",
+        "reference_urls": refs,
+        "aspect_ratio": ratio,
+        "motion": body.grok_mode if body.grok_mode in {"low", "high"} else "low",
+    }
 
 
 @router.post("/feed/{gen_id}/remix/quote")
@@ -3520,17 +3643,17 @@ async def quote_feed_remix(
     if source is None:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
-    user_refs = _normalize_public_urls(body.image_url, *(body.reference_urls or []))
-    source_refs = _feed_source_reference_urls(source, body.source_image_url)
-    repeat_refs = _normalize_public_urls(*(source_refs + user_refs))[:FEED_REMIX_MAX_REFS]
+    repeat_prompt, repeat_refs, body, _ = _prepare_feed_remix_inputs(source, body)
     gen_type: str
     count = 1
+    edit_quote = {}
 
     if body.model in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS):
         gen_type = "video" if body.model in _MJ_VIDEO_MODELS else "image"
         cost_row = await repo.get_model_cost(session, body.model)
-        if body.model == "midjourney-blend" and len(repeat_refs) < 2:
-            raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
+        _normalize_feed_midjourney_request(
+            body, repeat_prompt, repeat_refs,
+        )
     else:
         try:
             VideoModel(body.model)
@@ -3543,23 +3666,8 @@ async def quote_feed_remix(
                 raise HTTPException(status_code=422, detail="Unknown model") from exc
 
         if gen_type == "video":
-            video_refs = repeat_refs or user_refs or source_refs
-            normalized = _normalize_video_request(
-                model_key=body.model,
-                mode=body.mode,
-                duration=body.duration,
-                aspect_ratio=body.aspect_ratio,
-                resolution=body.resolution,
-                image_url=video_refs[0] if video_refs else None,
-                reference_urls=video_refs[1:],
-                video_url=body.video_url,
-                video_start=body.video_start,
-                video_end=body.video_end,
-                audio_ids=body.audio_ids,
-                character_ids=body.character_ids,
-                seed=body.seed,
-                grok_mode=body.grok_mode,
-            )
+            video_refs = repeat_refs
+            normalized = await _normalize_feed_video_inputs(body, repeat_prompt, video_refs)
             has_video_input = (
                 body.model == GEMINI_OMNI_VIDEO_MODEL
                 and bool(normalized["reference_video_url"])
@@ -3570,8 +3678,10 @@ async def quote_feed_remix(
                 resolution=normalized["resolution"],
             )
             count = int(normalized["duration"])
+            if normalized.get("seedance_video_edit"):
+                edit_quote = {"source_video_edit": True, "effective_duration_seconds": count}
         else:
-            image_refs = user_refs or repeat_refs or source_refs
+            image_refs = repeat_refs
             _, quality = _normalize_image_request(
                 model_key=body.model,
                 reference_urls=image_refs,
@@ -3606,13 +3716,18 @@ async def quote_feed_remix(
     plan = None
     if deficit:
         from api.trends_routes import _recommended_checkout_plan
-        recommended = _recommended_checkout_plan(await repo.get_active_price_plans(session), deficit)
+        purchasable_plans = [
+            candidate for candidate in await repo.get_active_price_plans(session)
+            if payment_options_for_plan(candidate)
+        ]
+        recommended = _recommended_checkout_plan(purchasable_plans, deficit)
         if recommended:
             plan = {
                 "key": str(recommended.key),
                 "label": str(recommended.label),
                 "credits": float(recommended.credits),
                 "price_rub": float(recommended.price_rub),
+                "payment_options": payment_options_for_plan(recommended),
             }
 
     logger.debug(
@@ -3627,6 +3742,7 @@ async def quote_feed_remix(
         "recommended_plan": plan,
         "model": body.model,
         "gen_type": gen_type,
+        **edit_quote,
     }
 
 
@@ -3639,17 +3755,16 @@ async def remix_feed_post(
     surface: str = "miniapp",
 ) -> GenerationOut:
     """
-    Start a generation using the hidden prompt of a public feed post.
-    The user chooses model/params; the original author's prompt is used silently.
+    Repeat a public post, or edit its public media without disclosing author text.
     """
     source = await repo.get_public_feed_generation(session, gen_id)
     if not source:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
-    repeat_prompt = _build_feed_remix_prompt(source.prompt, body.change_request)
-    user_refs = _normalize_public_urls(body.image_url, *(body.reference_urls or []))
-    source_refs = _feed_source_reference_urls(source, body.source_image_url)
-    repeat_refs = _normalize_public_urls(*(source_refs + user_refs))[:FEED_REMIX_MAX_REFS]
+    repeat_prompt, repeat_refs, body, personalized = _prepare_feed_remix_inputs(source, body)
+    feed_context = (
+        {FEED_REMIX_CONTEXT_KEY: feed_remix_context(gen_id, repeat_prompt)} if personalized else {}
+    )
 
     if body.model in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS):
         source_prompt = (repeat_prompt or "").strip()
@@ -3657,38 +3772,12 @@ async def remix_feed_post(
         if not model_cost or not getattr(model_cost, "is_active", True):
             raise HTTPException(status_code=422, detail="Model not available")
 
-        caps: dict[str, Any] = _MJ_IMAGE_CAPS.get(body.model, {})
-        gen_type = "video" if body.model in _MJ_VIDEO_MODELS else "image"
-        normalized_ratio: str | None = None
+        normalized_mj = _normalize_feed_midjourney_request(body, source_prompt, repeat_refs)
+        gen_type = normalized_mj["gen_type"]
+        normalized_ratio = normalized_mj["aspect_ratio"]
         normalized_quality = "basic"
-        refs: list[str] = []
-        motion_value = "low"
-
-        if body.model == "midjourney-imagine":
-            refs = repeat_refs or user_refs or source_refs
-            max_refs = int(caps.get("max_refs", 1) or 1)
-            if len(refs) > max_refs:
-                raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
-            normalized_ratio = _normalize_choice(body.aspect_ratio, caps.get("aspect_ratios", []), field_name="aspect ratio")
-            if not source_prompt:
-                raise HTTPException(status_code=422, detail="Prompt is required")
-        elif body.model == "midjourney-blend":
-            refs = repeat_refs or user_refs or source_refs
-            max_refs = int(caps.get("max_refs", 5) or 5)
-            if len(refs) < 2:
-                raise HTTPException(status_code=422, detail="Blend requires at least 2 reference images")
-            if len(refs) > max_refs:
-                raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
-            normalized_ratio = _normalize_choice(body.aspect_ratio, caps.get("aspect_ratios", []), field_name="aspect ratio")
-        else:
-            video_refs = repeat_refs or user_refs or source_refs
-            max_refs = int(_MJ_VIDEO_CAPS.get(body.model, {}).get("max_refs", 1) or 1)
-            if not video_refs:
-                raise HTTPException(status_code=422, detail="Midjourney Video requires a reference image")
-            if len(video_refs) > max_refs:
-                raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
-            refs = video_refs
-            motion_value = body.grok_mode if body.grok_mode in {"low", "high"} else "low"
+        refs = normalized_mj["reference_urls"]
+        motion_value = normalized_mj["motion"]
 
         nominal_credits = float(model_cost.credits)
         await _reconcile_user_active_generations(session, user.id)
@@ -3724,7 +3813,7 @@ async def remix_feed_post(
                 aspect_ratio=normalized_ratio,
                 quality=normalized_quality,
                 count=1,
-                base_prompt=source_prompt,
+                base_prompt=source_prompt if personalized else None,
                 reference_file_id=None,
                 reference_url=refs[0] if refs else None,
                 reference_urls=refs,
@@ -3740,6 +3829,7 @@ async def remix_feed_post(
             parent_generation_id=source.id if gen_type == "image" else None,
             action_type=ImageGenerationAction.remix if gen_type == "image" else None,
             source_feed_gen_id=gen_id,
+            input_params=feed_context or None,
         )
 
         try:
@@ -3769,7 +3859,7 @@ async def remix_feed_post(
         await session.refresh(gen)
         return _gen_out(gen)
 
-    # Use the source prompt but with the user-chosen model
+    # Use the isolated repeat/edit inputs with the user-chosen model.
     try:
         model = VideoModel(body.model)
         gen_type = "video"
@@ -3786,24 +3876,8 @@ async def remix_feed_post(
     normalized_quality = body.quality or "basic"
 
     if gen_type == "video":
-        video_refs = repeat_refs or user_refs or source_refs
-        fallback_image_url = video_refs[0] if video_refs else None
-        normalized_video = _normalize_video_request(
-            model_key=body.model,
-            mode=body.mode,
-            duration=body.duration,
-            aspect_ratio=body.aspect_ratio,
-            resolution=body.resolution,
-            image_url=fallback_image_url,
-            reference_urls=video_refs[1:],
-            video_url=body.video_url,
-            video_start=body.video_start,
-            video_end=body.video_end,
-            audio_ids=body.audio_ids,
-            character_ids=body.character_ids,
-            seed=body.seed,
-            grok_mode=body.grok_mode,
-        )
+        video_refs = repeat_refs
+        normalized_video = await _normalize_feed_video_inputs(body, repeat_prompt, video_refs)
         has_gemini_omni_video_input = (
             body.model == GEMINI_OMNI_VIDEO_MODEL
             and bool(normalized_video["reference_video_url"])
@@ -3815,7 +3889,7 @@ async def remix_feed_post(
             resolution=normalized_video["resolution"],
         )
     else:
-        image_refs = user_refs or repeat_refs or source_refs
+        image_refs = repeat_refs
         if image_refs:
             normalized_image_url = image_refs[0] if len(image_refs) == 1 else image_refs
         else:
@@ -3826,6 +3900,9 @@ async def remix_feed_post(
             aspect_ratio=body.aspect_ratio,
             quality=body.quality or "basic",
         )
+        max_refs = int(IMAGE_CAPS.get(body.model, {}).get("max_refs", FEED_REMIX_MAX_REFS) or FEED_REMIX_MAX_REFS)
+        if len(image_refs) > max_refs:
+            raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
         model_cost = await repo.resolve_image_model_cost(session, body.model, quality=normalized_quality)
 
     if not model_cost:
@@ -3879,7 +3956,7 @@ async def remix_feed_post(
             aspect_ratio=normalized_ratio,
             quality=normalized_quality,
             count=body.count,
-            base_prompt=repeat_prompt,
+            base_prompt=repeat_prompt if personalized else None,
             reference_url=normalized_image_url,
             reference_urls=image_refs,
         )
@@ -3894,7 +3971,7 @@ async def remix_feed_post(
         parent_generation_id=source.id if gen_type == "image" else None,
         action_type=ImageGenerationAction.remix if gen_type == "image" else None,
         source_feed_gen_id=gen_id,
-        input_params=normalized_video if gen_type == "video" else None,
+        input_params={**(normalized_video or {}), **feed_context} or None,
     )
     failed_generation_id = gen.id
     failed_user_id = user.id
@@ -4694,7 +4771,7 @@ async def list_plans(
             "price_rub": p.price_rub,
             "price_rub_display": f"{_fmt_amount(p.price_rub)}₽",
             "price_stars": _plan_stars_price(p),
-            "price_usdt": round(p.price_rub / 90, 2),  # approximate
+            "price_usdt": crypto_amount_usdt(p.price_rub),
             "price_tribute_usd": tribute.digital_product_price_usd(p.key),
         }
         for p in plans
@@ -4799,7 +4876,7 @@ async def topup_crypto(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    usdt_amount = round(plan.price_rub / 90, 2)
+    usdt_amount = crypto_amount_usdt(plan.price_rub)
     try:
         invoice = await crypto_create_invoice(
             credits=plan.credits,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 import re
 
@@ -31,11 +32,23 @@ from bot.utils.telegram_images import (
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
-from db.models import GenerationType, User
+from db.models import Generation, GenerationStatus, GenerationType, User
 from db.repository import FeedGenerationCard
 
 logger = logging.getLogger(__name__)
 router = Router(name="feed")
+
+
+def _owned_generation_prompt_is_visible(generation: Generation, user_id: int) -> bool:
+    if generation.user_id != user_id or getattr(generation, "source_feed_gen_id", None):
+        return False
+    params = getattr(generation, "input_params", None)
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except (TypeError, ValueError):
+            return False
+    return params is None or (isinstance(params, dict) and not params.get("hidden_prompt"))
 
 
 def _model_label(model_key: str) -> str:
@@ -406,7 +419,7 @@ async def cb_feed_use(
     state: FSMContext,
 ) -> None:
     gen_id = int(call.data.split(":")[2])
-    gen = await repo.get_generation_by_id(session, gen_id)
+    gen = await repo.get_public_feed_generation(session, gen_id)
     if not gen or not gen.prompt:
         await call.answer("Генерация не найдена", show_alert=True)
         return
@@ -426,7 +439,7 @@ async def cb_feed_use(
         await call.message.answer(  # type: ignore[union-attr]
             "🎬 <b>Повторить видео</b>\n\n"
             "Выбери видео-модель. Следующим шагом загрузи своё фото/референс — "
-            "по нему повторим ролик с промптом из ленты.",
+            "повтор создадим по опубликованному ролику. Нужна модель с поддержкой исходного видео.",
             reply_markup=video_models_kb(model_costs, "i2v"),
         )
         await safe_answer_callback(call)
@@ -442,7 +455,7 @@ async def cb_feed_use(
     await call.message.answer(  # type: ignore[union-attr]
         "🎨 <b>Повторить изображение</b>\n\n"
         "Выбери модель для работы по фото. Потом загрузи свой референс — "
-        "промпт автора применю скрыто.",
+        "повтор создадим по опубликованному изображению. Оно занимает один слот референса.",
         reply_markup=prompt_use_model_kb(gen_id, model_costs, reference_only=True),
     )
     await safe_answer_callback(call)
@@ -490,6 +503,9 @@ async def cb_feed_again(
         if isinstance(effective_reference_url, str) and effective_reference_url:
             reference_url = effective_reference_url
 
+    protected_source_id = getattr(gen, "source_feed_gen_id", None)
+    source_feed_gen_id = protected_source_id or (gen.id if gen.is_public_feed else None)
+    prompt_is_user_supplied = _owned_generation_prompt_is_visible(gen, db_user.id)
     image_session = await repo.create_image_session(
         session=session,
         user_id=db_user.id,
@@ -498,13 +514,12 @@ async def cb_feed_again(
         aspect_ratio=aspect_ratio,
         quality=quality,
         count=count,
-        base_prompt=gen.prompt,
+        base_prompt=gen.prompt if prompt_is_user_supplied else None,
+        prompt_provenance="user_supplied" if prompt_is_user_supplied else None,
         reference_file_id=reference_file_id,
         reference_file_ids=reference_file_ids,
         reference_url=reference_url if isinstance(reference_url, str) else None,
     )
-
-    source_feed_gen_id = gen.id if gen.is_public_feed else getattr(gen, "source_feed_gen_id", None)
 
     await state.set_state(ImageGenFSM.session_active)
     await state.update_data(
@@ -551,8 +566,16 @@ async def cb_feed_remix(
     from bot.keyboards.models import image_session_kb
 
     gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
-    gen = await repo.get_generation_by_id(session, gen_id)
-    if not gen or not gen.result_url:
+    gen = await repo.get_public_feed_generation(session, gen_id)
+    if gen is None:
+        own_gen = await repo.get_generation_by_id(session, gen_id)
+        if own_gen is not None and own_gen.user_id == db_user.id:
+            gen = own_gen
+    if (
+        not gen or not gen.result_url
+        or gen.gen_type != GenerationType.image
+        or gen.status != GenerationStatus.done
+    ):
         await call.answer("Результат для ремикса не найден", show_alert=True)
         return
 
@@ -560,7 +583,10 @@ async def cb_feed_remix(
         await call.answer("Эта модель не поддерживает ремикс по изображению", show_alert=True)
         return
 
-    await repo.archive_active_image_sessions(session, db_user.id)
+    source_feed_gen_id = getattr(gen, "source_feed_gen_id", None) or (
+        gen.id if gen.user_id != db_user.id else None
+    )
+    prompt_is_user_supplied = _owned_generation_prompt_is_visible(gen, db_user.id)
     image_session = await repo.create_image_session(
         session=session,
         user_id=db_user.id,
@@ -569,7 +595,8 @@ async def cb_feed_remix(
         aspect_ratio=getattr(gen, "aspect_ratio", None),
         quality=_default_quality_for_model(gen.model),
         count=_default_count_for_model(gen.model, 1),
-        base_prompt=gen.prompt,
+        base_prompt=gen.prompt if prompt_is_user_supplied else None,
+        prompt_provenance="user_supplied" if prompt_is_user_supplied else None,
         reference_file_id=None,
         reference_url=gen.result_url,
     )
@@ -587,7 +614,7 @@ async def cb_feed_remix(
         ref_file_ids=[],
         remix_mode=True,
         remix_parent_generation_id=gen.id,
-        source_feed_gen_id=gen.id,
+        source_feed_gen_id=source_feed_gen_id,
     )
 
     await call.message.answer(  # type: ignore[union-attr]

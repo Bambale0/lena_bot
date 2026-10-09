@@ -166,7 +166,8 @@ def install_repeat_runtime(repository: Any) -> None:
         source_feed_gen_id: int | None = None,
         input_params: dict | list | str | None = None,
     ):
-        payload = _json_dict(input_params)
+        explicit_payload = _json_dict(input_params)
+        payload = dict(explicit_payload)
         gen_type_value = str(getattr(gen_type, "value", gen_type) or "")
         context = current_repeat_launch_context()
 
@@ -199,6 +200,16 @@ def install_repeat_runtime(repository: Any) -> None:
                 payload.update(context.input_params_extra)
                 payload["cost"] = float(credits_spent or 0)
                 _merge_aliases(payload, public_task_id, *(context.input_params_extra.get("task_id_aliases") or []))
+
+            # The launch context was captured before feed isolation/normalization.
+            # Final call arguments and explicit snapshots are authoritative.
+            payload.update(explicit_payload)
+            payload["prompt"] = prompt
+            payload["source_feed_gen_id"] = source_feed_gen_id
+            payload["parent_generation_id"] = parent_generation_id
+            payload["hidden_prompt"] = bool(source_feed_gen_id) or bool(payload.get("hidden_prompt"))
+            if "feed_remix_context" not in explicit_payload:
+                payload.pop("feed_remix_context", None)
 
         return await original_create_generation(
             session,

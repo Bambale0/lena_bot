@@ -175,6 +175,7 @@ class Settings(BaseSettings):
     COMET_ASSISTANT_MODEL: str = "gpt-5.4"
     COMET_ASSISTANT_FALLBACK: str = "gpt-5.4-mini"
     COMET_VIDEO_PROMPT_MODEL: str = "qwen3.8-max"
+    COMET_VIDEO_PROMPT_FPS: float = Field(default=2.0, ge=0.1, le=10.0)
 
     # Feature flags
     SUBSCRIPTION_ENABLED: bool = False

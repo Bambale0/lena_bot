@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -38,6 +39,32 @@ class _FakeClient:
         if not self._responses:
             raise RuntimeError("no more fake responses")
         return self._responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_video_prompt_overall_deadline_stops_a_provider_that_keeps_reading(monkeypatch) -> None:
+    """The overall budget must end even when HTTPX's per-read timer would reset."""
+    deadlines = []
+
+    def immediate_timeout(seconds):
+        deadlines.append(seconds)
+        return asyncio.timeout(0)
+
+    class YieldingClient(_FakeClient):
+        async def post(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            await asyncio.sleep(0)
+            return _FakeResponse({"choices": [{"message": {"content": "late prompt"}}]})
+
+    client = YieldingClient([])
+    monkeypatch.setattr(video_prompt_service.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(video_prompt_service, "asyncio", SimpleNamespace(timeout=immediate_timeout), raising=False)
+
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="timed out"):
+        await video_prompt_service.generate_prompt_from_video_url("https://example.test/clip.mp4")
+
+    assert deadlines == [180.0]
+    assert len(client.calls) == 1  # A timed-out paid analysis is never retried.
 
 
 def test_video_prompt_instructions_are_reverse_prompt_focused() -> None:
@@ -92,7 +119,8 @@ async def test_generate_prompt_from_video_url_calls_comet_with_video_url(monkeyp
     assert payload["model"] == "qwen3.8-max"
     content = payload["messages"][1]["content"]
     assert content[0]["type"] == "video_url"
-    assert content[0]["video_url"] == {"url": "https://cdn.example.test/video.mp4", "fps": 3}
+    assert content[0]["video_url"] == {"url": "https://cdn.example.test/video.mp4"}
+    assert content[0]["fps"] == 3
     assert content[1]["type"] == "text"
 
 
@@ -109,6 +137,7 @@ async def test_generate_prompt_from_video_url_uses_assistant_fallback_model(monk
             COMET_API_KEY="test-comet",
             COMET_BASE_URL="https://api.cometapi.com/",
             COMET_VIDEO_PROMPT_MODEL="",
+            COMET_VIDEO_PROMPT_FPS=2.0,
             COMET_ASSISTANT_MODEL="qwen3.8-max",
         ),
     )
@@ -194,3 +223,44 @@ def test_video_prompt_preserves_valid_prompts_and_quoted_errors(text) -> None:
         "error": None,
         "choices": [{"finish_reason": "stop", "message": {"refusal": None, "content": text}}],
     }) == text
+
+
+@pytest.mark.parametrize("text", [
+    {"error": "private upstream details"},
+    ["private upstream details"],
+    500,
+    True,
+])
+def test_video_prompt_does_not_turn_non_text_content_into_a_prompt(text) -> None:
+    payload = {"choices": [{"message": {"content": [{"type": "text", "text": text}]}}]}
+
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="Video prompt") as error:
+        video_prompt_service._extract_chat_text(payload)
+
+    assert "private upstream details" not in str(error.value)
+
+
+@pytest.mark.parametrize("choices", [{}, {"message": {}}, "invalid", 1, [None], ["invalid"]])
+def test_video_prompt_rejects_malformed_choices_even_with_fallback_text(choices) -> None:
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="Video prompt"):
+        video_prompt_service._extract_chat_text({"choices": choices, "text": "private upstream details"})
+
+
+def test_video_prompt_extracts_only_text_from_content_blocks() -> None:
+    payload = {"choices": [{"message": {"content": [
+        {"type": "text", "text": "  Камера движется.  "},
+        {"type": "text", "text": {"error": "private upstream details"}},
+        {"type": "text", "text": ""},
+        {"type": "text", "text": "  Мягкий свет.  "},
+    ]}}]}
+
+    assert video_prompt_service._extract_chat_text(payload) == "Камера движется.\nМягкий свет."
+
+
+@pytest.mark.parametrize("choices", [None, []])
+@pytest.mark.parametrize("key", ["output_text", "text", "answer", "response"])
+def test_video_prompt_preserves_text_fallback_without_choices(choices, key) -> None:
+    assert video_prompt_service._extract_chat_text({
+        "choices": choices,
+        key: "  Камера движется.  ",
+    }) == "Камера движется."

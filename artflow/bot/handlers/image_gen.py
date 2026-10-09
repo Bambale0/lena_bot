@@ -45,6 +45,7 @@ from bot.keyboards.models import (
 )
 from bot.states import ImageGenFSM
 from bot.ui.router import render_screen
+from bot.utils.feed_media import canonical_generation_result_url
 from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_images import (
     send_image_group_to_message,
@@ -53,6 +54,16 @@ from bot.utils.telegram_images import (
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.feed_remix_prompt import (
+    FEED_REMIX_CONTEXT_KEY,
+    FeedRemixUnavailable,
+    build_feed_remix_prompt,
+    feed_remix_context,
+    generation_has_hidden_prompt_metadata,
+    generation_prompt_is_protected,
+    legacy_feed_edit_unavailable,
+    trusted_feed_prompt,
+)
 from core.provider_routing import get_nano21_route
 from db import repository as repo
 from db.models import GenerationType, ImageGenerationAction, ImageSession, User
@@ -413,7 +424,8 @@ async def _external_source_feed_id(
     if not source_feed_gen_id:
         return None
     source = await repo.get_generation_by_id(session, source_feed_gen_id)
-    if source and getattr(source, "user_id", None) == getattr(db_user, "id", None):
+    if (source and getattr(source, "user_id", None) == getattr(db_user, "id", None)
+            and not generation_prompt_is_protected(source)):
         return None
     return source_feed_gen_id
 
@@ -443,7 +455,7 @@ async def _source_feed_id_for_generation_or_state(
     generation_id: int | None,
     data: dict,
 ) -> int | None:
-    if not data.get("source_feed_gen_id") or not generation_id:
+    if not generation_id:
         return await _external_source_feed_id(
             session=session,
             db_user=db_user,
@@ -466,11 +478,14 @@ async def _generation_prompt_actions_allowed(
 ) -> bool:
     if not gen or getattr(gen, "user_id", None) != getattr(db_user, "id", None):
         return False
+    if generation_has_hidden_prompt_metadata(gen):
+        return False
     source_feed_gen_id = getattr(gen, "source_feed_gen_id", None)
     if not source_feed_gen_id:
         return True
     source = await repo.get_generation_by_id(session, source_feed_gen_id)
-    return bool(source and getattr(source, "user_id", None) == getattr(db_user, "id", None))
+    return bool(source and getattr(source, "user_id", None) == getattr(db_user, "id", None)
+                and not generation_prompt_is_protected(source))
 
 
 async def _generation_feed_publish_allowed(
@@ -782,6 +797,8 @@ def _repeat_setup_text(image_session: ImageSession, prompt: str, data: dict) -> 
     max_refs = int(caps.get("max_refs", 1) or 1)
     quality_label = _quality_label(image_session.model, image_session.quality) if caps.get("has_quality") else "фиксированное"
     ratio_label = image_session.aspect_ratio or "по умолчанию"
+    protected = bool(data.get("source_feed_gen_id") or data.get("pending_source_feed_gen_id"))
+    prompt_text = "Промпт автора скрыт" if protected else html.escape(prompt)
     return (
         "🔁 <b>Повтор генерации</b>\n\n"
         "Перед запуском можно добавить референсы и выбрать формат кадра.\n\n"
@@ -789,7 +806,7 @@ def _repeat_setup_text(image_session: ImageSession, prompt: str, data: dict) -> 
         f"Референсы: <b>{_repeat_reference_count(image_session, data)}/{max_refs}</b>\n"
         f"Формат: <b>{html.escape(str(ratio_label))}</b>\n"
         f"Качество: <b>{html.escape(str(quality_label))}</b>\n\n"
-        f"📝 <b>Промпт</b>\n{html.escape(prompt)}"
+        f"📝 <b>Промпт</b>\n{prompt_text}"
     )
 
 
@@ -851,6 +868,7 @@ async def _launch_session_generation(
     reference_url: str | list[str] | None,
     parent_generation_id: int | None,
     source_feed_gen_id: int | None = None,
+    feed_change_request: str | None = None,
     launching_text: str,
     queued_text: str,
 ) -> bool:
@@ -859,6 +877,54 @@ async def _launch_session_generation(
         db_user=db_user,
         source_feed_gen_id=source_feed_gen_id,
     )
+    feed_context = None
+    if source_feed_gen_id:
+        # Sessions can be serialized before any generation exists or finishes.
+        # Protected text belongs only to the provenance-guarded Generation row.
+        image_session.base_prompt = None
+        image_session.last_prompt = None
+        await session.commit()
+        # Legacy sessions can still contain the original private prompt. Remove
+        # it at the provider boundary whenever a reader adds text or references.
+        source = await repo.get_public_feed_generation(session, source_feed_gen_id)
+        source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
+        source_url = canonical_generation_result_url(source) if source_type == "image" else None
+        refs = [reference_url] if isinstance(reference_url, str) else list(reference_url or [])
+        refs = list(dict.fromkeys(url for url in refs if url))
+        personalized = bool(
+            action_type == ImageGenerationAction.remix or feed_change_request
+            or prompt.strip() != str(getattr(source, "prompt", "") or "").strip()
+            or any(url != source_url for url in refs)
+        )
+        if personalized:
+            try:
+                previous = (
+                    await repo.get_generation_by_id(session, parent_generation_id)
+                    if parent_generation_id and parent_generation_id != source_feed_gen_id else None
+                )
+                safe_previous = trusted_feed_prompt(
+                    previous, user_id=db_user.id, source_generation_id=source_feed_gen_id,
+                )
+                if feed_change_request is None and prompt.strip() != str(getattr(source, "prompt", "") or "").strip() and safe_previous is None:
+                    raise legacy_feed_edit_unavailable()
+                public_base = build_feed_remix_prompt(
+                    "", has_user_references=True,
+                    has_source_media=bool(source_url and _supports_img2img(image_session.model)),
+                )
+                prompt = safe_previous or public_base
+                if feed_change_request:
+                    prompt += "\n\n" + feed_change_request.strip()
+                feed_context = {FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, prompt)}
+                refs = list(dict.fromkeys([source_url, *refs]))
+                max_refs = int(IMAGE_CAPS.get(image_session.model, {}).get("max_refs", 1) or 1)
+                if len(refs) > max_refs:
+                    raise FeedRemixUnavailable(
+                        f"Модель поддерживает до {max_refs} фото, включая исходное фото из ленты. Выбери другую модель или убери лишние референсы."
+                    )
+            except FeedRemixUnavailable as exc:
+                await source_message.answer(str(exc), reply_markup=main_menu_kb())
+                return False
+            reference_url = refs[0] if len(refs) == 1 else refs
     normalized_count = _normalize_image_count(image_session.model, image_session.count)
     if normalized_count != image_session.count:
         image_session.count = normalized_count
@@ -933,9 +999,14 @@ async def _launch_session_generation(
         parent_generation_id=parent_generation_id,
         action_type=action_type,
         source_feed_gen_id=source_feed_gen_id,
+        input_params={
+            "reference_images": ([reference_url] if isinstance(reference_url, str) else list(reference_url or [])),
+            **(feed_context or {}),
+        },
     )
-    await repo.update_image_session_last_prompt(session, image_session.id, prompt)
-    image_session.last_prompt = prompt
+    session_prompt = prompt if not source_feed_gen_id or feed_context is not None else None
+    await repo.update_image_session_last_prompt(session, image_session.id, session_prompt)
+    image_session.last_prompt = session_prompt
 
     status_msg = await source_message.answer(launching_text)
     image_request_id = (
@@ -2398,6 +2469,7 @@ async def handle_session_prompt(
         db_user=db_user,
         image_session=image_session,
         prompt=prompt_for_generation,
+        feed_change_request=prompt_for_generation if source_feed_gen_id else None,
         action_type=ImageGenerationAction.remix if is_remix else ImageGenerationAction.initial,
         reference_url=reference_url,
         parent_generation_id=parent_id,

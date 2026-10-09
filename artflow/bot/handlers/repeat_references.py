@@ -336,10 +336,8 @@ async def _feed_again_interceptor(
     if getattr(generation, "image_session_id", None):
         source_session = await repo.get_image_session(session, generation.image_session_id, db_user.id)
 
-    source_feed_gen_id = (
-        int(generation.id)
-        if bool(getattr(generation, "is_public_feed", False))
-        else getattr(generation, "source_feed_gen_id", None)
+    source_feed_gen_id = getattr(generation, "source_feed_gen_id", None) or (
+        int(generation.id) if bool(getattr(generation, "is_public_feed", False)) else None
     )
     handled = await _begin_repeat_collection(
         call=call,
@@ -453,6 +451,18 @@ async def _repeat_refs_run(
         await state.clear()
         return
 
+    # Durable lineage takes precedence over missing or stale collection state.
+    protected_source_id = getattr(generation, "source_feed_gen_id", None)
+    source_feed_gen_id = protected_source_id or data.get("repeat_source_feed_gen_id")
+    if source_feed_gen_id == generation.id and not protected_source_id:
+        source_feed_gen_id = None
+    prompt = str(data.get("repeat_prompt") or generation.prompt or "")
+    prompt_is_user_supplied = (
+        not source_feed_gen_id
+        and feed._owned_generation_prompt_is_visible(generation, db_user.id)
+        and prompt == generation.prompt
+    )
+
     max_refs = int(data.get("repeat_max_refs") or 1)
     references = _url_list(data.get("repeat_base_reference_urls"))
     new_file_ids = list(data.get("repeat_new_reference_file_ids") or [])
@@ -493,12 +503,17 @@ async def _repeat_refs_run(
             aspect_ratio=aspect_ratio,
             quality=quality,
             count=int(data.get("repeat_count") or 1),
-            base_prompt=str(data.get("repeat_prompt") or generation.prompt or ""),
+            base_prompt=prompt if prompt_is_user_supplied else None,
+            prompt_provenance="user_supplied" if prompt_is_user_supplied else None,
             reference_file_id=combined_file_ids[0] if combined_file_ids else None,
             reference_file_ids=combined_file_ids or None,
             reference_url=data.get("repeat_source_reference_url"),
         )
     else:
+        if source_feed_gen_id:
+            image_session.base_prompt = None
+            image_session.last_prompt = None
+            image_session.prompt_provenance = None
         image_session.mode = target_mode
         image_session.aspect_ratio = aspect_ratio
         image_session.quality = quality
@@ -517,11 +532,11 @@ async def _repeat_refs_run(
         session=session,
         db_user=db_user,
         image_session=image_session,
-        prompt=str(data.get("repeat_prompt") or generation.prompt or ""),
+        prompt=prompt,
         action_type=ImageGenerationAction.repeat,
         reference_url=references or None,
         parent_generation_id=int(data.get("repeat_parent_generation_id") or generation.id),
-        source_feed_gen_id=data.get("repeat_source_feed_gen_id"),
+        source_feed_gen_id=source_feed_gen_id,
         launching_text="🔁 <b>Повторяю генерацию с референсами...</b>",
         queued_text="⏳ <b>Повтор запущен.</b> Результат придёт сюда автоматически.",
     )
