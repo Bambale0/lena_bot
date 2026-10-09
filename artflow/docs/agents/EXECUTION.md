@@ -1280,3 +1280,18 @@ Codex code/security review on `6c676a0` found three further P2 cases, reproduced
 3. Main ASGI lifespan created a lazy Redis client but could start the webhook/site even if its configured Redis endpoint was unreachable. It now performs a bounded PING against the exact configured Redis before Bot/Webhook creation and fails startup if unavailable (without leaking credentials). Unit regression probes success and connection failure; source contract ensures call precedes webhook.
 
 All recovery paths remain read-only provider GET/download plus atomic existing DB transitions. No additional paid provider submissions or price/configuration hardcoding.
+
+
+## Codex PR #204 readiness, fallback and old-row intent
+
+Code review on `be993ee` and its security review identified three additional P2 issues (plus duplicate security finding), all reproduced via red regressions:
+1. A terminal notice created for an **old** Neironych Telegram generation after its ID range had already been swept was absent from the Redis ZSET if the process crashed immediately after DB commit, or the immediate Telegram attempt failed. The video scheduler now writes a durable Redis ZSET intent (`ZADD NX`) **before** provider status/download and any terminal DB settlement. The notice sync retains IDs while generation is still processing (before the receipt exists), reschedules pending/sending based on DB backoff/lease, removes only terminal sent/dead/missing. Verified an injected post-commit crash and an in-progress intent test.
+2. Redis PING did not prove write/ACL capability: a read-only replica could accept users' paid submissions without any working Redis lease, due queue, Lua scripts. The required startup preflight now exercises a random ephemeral lock's SET NX, token Lua renew/unlock, the actual atomic due-ZSET/checkpoint script and ZRANGEBYSCORE/ZADD/ZREM. Both production `main.lifespan` and local polling-only entrypoints call the helper before Bot/webhook setup. Unit tests cover ready Redis, unreachability, read-only SET and ACL denied EVAL.
+3. A Telegram `send_video` hang could exhaust the outer notice timeout, preventing a successful direct-link fallback and eventually dead-lettering a paid finished video. Added typed configurable upload budget fraction 0.75 of the total, separately bounded link message in the remainder, retaining outer notice timeout/lease safety and durable DB receipt. Red-to-green timeout/fallback regression.
+
+No new provider POST, SQL migration, uncontrolled user credit change or manual production modifications.
+
+
+## Latest release preflight and legacy static warning
+
+A final production read-only/scratch-key Redis test using the **actual deployed `settings.REDIS_URL`** confirmed `PING`, temporary `SET NX`, token-checked Lua `EXPIRE`/unlock, atomic notice ZSET/checkpoint Lua, sorted-set range and writes. Scratch keys were deleted; no paid provider requests or ledger mutations. Ruff on all other changed files passes. An unrelated pre-existing `F821` at `api/miniapp_routes.py` public-post route calling undefined `_anonymous_user()` was reproduced verbatim on the untouched `main` deployment (`main` source line 2340 versus branch line 2545). Not altered in this scoped Seedance recovery PR; tracked separately as a legacy issue. Image/other-route legacy tests have documented baseline failures as above.

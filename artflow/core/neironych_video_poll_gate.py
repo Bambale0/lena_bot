@@ -32,19 +32,56 @@ def protect_neironych_video_poll_settlement() -> None:
 
 
 async def require_neironych_video_redis_ready(client) -> None:
-    """Verify the exact configured Redis connection before paid jobs can start.
+    """Fail closed unless the configured Redis permits all recovery commands.
 
-    aioredis.from_url is lazy: creating a client doesn't prove the lease
-    coordinator is reachable. Never log credentials or the full Redis URL.
+    Redis PING alone succeeds for read-only replicas and restricted ACL users.
+    Test lease acquisition/renewal/release and actual atomic notice queue Lua
+    on isolated ephemeral keys, never on a real user/generation record.
     """
+    from core.neironych_video_reconcile_scheduler import _TRACK_NOTICES_AND_CHECKPOINT_LUA
+
+    prefix = f"apix:neironych-recovery-probe:{uuid.uuid4().hex}"
+    lock_key, checkpoint_key, due_key = (
+        prefix + ":lock", prefix + ":cursor", prefix + ":due"
+    )
+    token = uuid.uuid4().hex
     try:
         if not await asyncio.wait_for(client.ping(), timeout=3.0):
             raise RuntimeError("Redis PING returned a negative response")
+        if not await client.set(lock_key, token, nx=True, ex=30):
+            raise RuntimeError("Redis temporary lease could not be acquired")
+        if int(await client.eval(_RENEW_IF_OWNED, 1, lock_key, token, 30)) != 1:
+            raise RuntimeError("Redis compare-and-renew Lua returned false")
+        if int(await client.eval(
+            _TRACK_NOTICES_AND_CHECKPOINT_LUA, 2,
+            checkpoint_key, due_key, "123", "1", token,
+        )) != 1:
+            raise RuntimeError("Redis notice tracking Lua returned false")
+        if await client.get(checkpoint_key) != "123":
+            raise RuntimeError("Redis did not persist the temporary checkpoint")
+        if token not in await client.zrangebyscore(due_key, "-inf", 2):
+            raise RuntimeError("Redis sorted-set notice discovery unavailable")
+        await client.zadd(due_key, {token: 3}, nx=True)
+        await client.zrem(due_key, token)
+        if int(await client.eval(_UNLOCK_IF_OWNED, 1, lock_key, token)) != 1:
+            raise RuntimeError("Redis compare-and-delete Lua returned false")
     except Exception as exc:
-        logger.critical("Neironych video recovery Redis preflight failed error=%s", type(exc).__name__)
+        logger.critical(
+            "Neironych video recovery Redis preflight failed error=%s",
+            type(exc).__name__,
+        )
         raise RuntimeError(
-            "Redis is required for durable Neironych Seedance video processing"
+            "Redis read-write Lua and sorted-set operations are required "
+            "for durable Neironych Seedance video processing"
         ) from exc
+    finally:
+        try:
+            await client.delete(lock_key, checkpoint_key, due_key)
+        except Exception as cleanup_exc:
+            logger.warning(
+                "Neironych Redis preflight temporary-key cleanup error=%s",
+                type(cleanup_exc).__name__,
+            )
 
 
 class NeironychVideoPollLeaseLost(RuntimeError):

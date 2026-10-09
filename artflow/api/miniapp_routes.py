@@ -906,13 +906,21 @@ async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> bool:
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    # A stalled upload must not exhaust the outbox attempt's entire timeout.
+    # Preserve a separate, bounded window for delivering the permanent URL.
+    total_budget = float(settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS)
+    video_budget = max(0.001, total_budget * settings.NEIRONYCH_VIDEO_TELEGRAM_UPLOAD_BUDGET_FRACTION)
+    link_budget = max(0.001, (total_budget - video_budget) * 0.8)
     try:
         try:
-            message = await delivery_bot.send_video(
-                chat_id=tg_id,
-                video=URLInputFile(result_url, filename=f"video_{gen.id}.mp4"),
-                caption=caption,
-                reply_markup=reply_markup,
+            message = await asyncio.wait_for(
+                delivery_bot.send_video(
+                    chat_id=tg_id,
+                    video=URLInputFile(result_url, filename=f"video_{gen.id}.mp4"),
+                    caption=caption,
+                    reply_markup=reply_markup,
+                ),
+                timeout=video_budget,
             )
             logger.info(
                 "Reconciled video delivered user=%s gen=%s message_id=%s",
@@ -930,14 +938,17 @@ async def _notify_reconciled_video_result_in_bot(*, user: User, gen) -> bool:
                 video_exc,
             )
 
-        message = await delivery_bot.send_message(
-            chat_id=tg_id,
-            text=(
-                f"{caption}\n\n"
-                "Telegram не принял ролик как видео. Вот прямая ссылка:\n"
-                f"{result_url}"
+        message = await asyncio.wait_for(
+            delivery_bot.send_message(
+                chat_id=tg_id,
+                text=(
+                    f"{caption}\n\n"
+                    "Telegram не принял ролик как видео. Вот прямая ссылка:\n"
+                    f"{result_url}"
+                ),
+                reply_markup=reply_markup,
             ),
-            reply_markup=reply_markup,
+            timeout=link_budget,
         )
         logger.info(
             "Reconciled video link fallback delivered user=%s gen=%s message_id=%s",

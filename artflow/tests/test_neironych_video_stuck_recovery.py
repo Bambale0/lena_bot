@@ -55,9 +55,10 @@ class _FakeNoticeCursorRedis:
         )
         return [str(gen_id) for _, gen_id in entries[start:][:num]]
 
-    async def zadd(self, key, scores):
+    async def zadd(self, key, scores, *, nx=False):
         for gen_id, due in scores.items():
-            self.scores[str(gen_id)] = float(due)
+            if not nx or str(gen_id) not in self.scores:
+                self.scores[str(gen_id)] = float(due)
         return len(scores)
 
     async def zrem(self, key, gen_id):
@@ -739,9 +740,51 @@ def test_polling_entry_rejects_memory_fallback_for_billable_neironych(monkeypatc
 async def test_recovery_redis_preflight_checks_exact_url_before_accepting_requests():
     from core.neironych_video_poll_gate import require_neironych_video_redis_ready
 
-    good = SimpleNamespace(ping=AsyncMock(return_value=True))
+    class WritableRedis:
+        def __init__(self):
+            self.calls = []
+            self.lock_token = None
+            self.checkpoint = None
+
+        async def ping(self):
+            self.calls.append("ping")
+            return True
+
+        async def set(self, key, token, *, nx, ex):
+            self.calls.append("set")
+            assert nx and ex > 0
+            self.lock_token = token
+            return True
+
+        async def eval(self, script, numkeys, *args):
+            self.calls.append("eval")
+            if numkeys == 2:
+                self.checkpoint = args[2]
+            return 1
+
+        async def get(self, key):
+            return self.checkpoint
+
+        async def zrangebyscore(self, *args):
+            return [self.lock_token]
+
+        async def zadd(self, *args, **kwargs):
+            self.calls.append("zadd")
+            return 0
+
+        async def zrem(self, *args):
+            self.calls.append("zrem")
+            return 1
+
+        async def delete(self, *args):
+            self.calls.append("delete")
+            return len(args)
+
+    good = WritableRedis()
     await require_neironych_video_redis_ready(good)
-    good.ping.assert_awaited_once()
+    assert good.calls.count("ping") == 1
+    assert good.calls.count("eval") == 3
+    assert "zadd" in good.calls and "zrem" in good.calls
 
     down = SimpleNamespace(ping=AsyncMock(side_effect=ConnectionError("unreachable")))
     with pytest.raises(RuntimeError, match="Redis"):
@@ -873,3 +916,117 @@ async def test_notice_atomic_cursor_unchanged_when_redis_tracking_fails(monkeypa
     assert await scheduler._load_notice_batch() == [77]
     assert "77" in redis.scores
     assert scheduler._notice_cursor.older_id == 500
+
+
+@pytest.mark.asyncio
+async def test_stalled_telegram_video_upload_still_sends_link_fallback(monkeypatch):
+    import asyncio
+
+    from core.config import settings
+
+    gen = _video()
+    gen.status = GenerationStatus.done
+    gen.result_url = "https://example.test/clip.mp4"
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS", 0.15)
+
+    stalled = asyncio.Event()
+
+    async def stuck_video(**_kwargs):
+        await stalled.wait()
+
+    bot = SimpleNamespace(
+        send_video=AsyncMock(side_effect=stuck_video),
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=88)),
+        session=SimpleNamespace(close=AsyncMock()),
+    )
+    monkeypatch.setattr(miniapp_routes, "Bot", lambda **kwargs: bot)
+
+    assert await asyncio.wait_for(
+        miniapp_routes._notify_reconciled_video_result_in_bot(
+            user=SimpleNamespace(tg_id=1234), gen=gen,
+        ),
+        timeout=0.25,
+    )
+    bot.send_video.assert_awaited_once()
+    bot.send_message.assert_awaited_once()
+    assert gen.result_url in bot.send_message.await_args.kwargs["text"]
+
+
+@pytest.mark.asyncio
+async def test_redis_ping_not_enough_when_endpoint_is_readonly():
+    from core.neironych_video_poll_gate import require_neironych_video_redis_ready
+
+    readonly = SimpleNamespace(
+        ping=AsyncMock(return_value=True),
+        set=AsyncMock(side_effect=PermissionError("READONLY")),
+    )
+    with pytest.raises(RuntimeError, match="Redis"):
+        await require_neironych_video_redis_ready(readonly)
+
+
+@pytest.mark.asyncio
+async def test_redis_preflight_rejects_acl_without_lua():
+    from core.neironych_video_poll_gate import require_neironych_video_redis_ready
+
+    acl = SimpleNamespace(
+        ping=AsyncMock(return_value=True),
+        set=AsyncMock(return_value=True),
+        eval=AsyncMock(side_effect=PermissionError("NOPERM eval")),
+        delete=AsyncMock(),
+    )
+    with pytest.raises(RuntimeError, match="Redis"):
+        await require_neironych_video_redis_ready(acl)
+
+
+@pytest.mark.asyncio
+async def test_active_old_video_persists_notice_intent_before_db_completion(monkeypatch):
+    import asyncio
+
+    from core import neironych_video_reconcile_scheduler as scheduler
+
+    video = _video(age_minutes=65)
+    video.id = 77
+    redis = _FakeNoticeCursorRedis()
+    monkeypatch.setattr(scheduler, "_notice_redis_client", lambda: redis)
+
+    class FakeSession:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): return False
+        async def commit(self): pass
+        async def rollback(self): pass
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=video))
+
+    async def after_provider_completed(_session, generation):
+        assert "77" in redis.scores, "intent must be durable BEFORE terminal DB commit"
+        generation.status = GenerationStatus.done
+        raise asyncio.CancelledError("crash immediately after DB commit")
+
+    monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", after_provider_completed)
+    with pytest.raises(asyncio.CancelledError):
+        await scheduler._process_active_video(video.id)
+    assert "77" in redis.scores, "pending notice must survive the crashed worker"
+
+
+@pytest.mark.asyncio
+async def test_video_notice_intent_waits_if_generation_still_processing(monkeypatch):
+    from core import neironych_video_reconcile_scheduler as scheduler
+
+    redis = _FakeNoticeCursorRedis()
+    redis.scores["77"] = 0
+    monkeypatch.setattr(scheduler, "_notice_redis_client", lambda: redis)
+
+    class FakeSession:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): return False
+        async def scalar(self, query):
+            return (
+                GenerationStatus.processing if "generations.status" in str(query)
+                else "{}"
+            )
+        async def rollback(self): pass
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
+    await scheduler._sync_notice_retry_schedule(77)
+    assert redis.scores["77"] > datetime.now(timezone.utc).timestamp()

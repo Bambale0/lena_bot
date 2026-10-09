@@ -32,6 +32,7 @@ from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.utils.dispatcher import create_dispatcher
 from core.config import settings
 from core.logger import setup_logging
+from core.neironych_video_poll_gate import require_neironych_video_redis_ready
 from core.neironych_video_reconcile_scheduler import run_neironych_video_reconcile_scheduler
 from db import repository as repo
 from db.referral_reward_policy import install_referral_reward_policy
@@ -102,6 +103,8 @@ async def main() -> None:
 
     storage, redis_client = await _make_storage()
     _require_neironych_recovery_redis(redis_client)
+    if redis_client is not None:
+        await require_neironych_video_redis_ready(redis_client)
 
     bot = Bot(
         token=settings.BOT_TOKEN,

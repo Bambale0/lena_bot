@@ -262,11 +262,16 @@ async def _sync_notice_retry_schedule(gen_id: int) -> None:
         input_params = await session.scalar(
             select(Generation.input_params).where(Generation.id == gen_id)
         )
+        params = repo.parse_input_params(input_params)
+        notice = params.get(repo.NEIRONYCH_VIDEO_NOTICE_KEY)
+        state = notice.get("state") if isinstance(notice, dict) else None
+        generation_status = None
+        if state is None:
+            generation_status = await session.scalar(
+                select(Generation.status).where(Generation.id == gen_id)
+            )
         await session.rollback()
 
-    params = repo.parse_input_params(input_params)
-    notice = params.get(repo.NEIRONYCH_VIDEO_NOTICE_KEY)
-    state = notice.get("state") if isinstance(notice, dict) else None
     now = datetime.now(timezone.utc).timestamp()
     due: float | None = None
     if state == "pending":
@@ -278,6 +283,10 @@ async def _sync_notice_retry_schedule(gen_id: int) -> None:
             max(now, (claimed + timedelta(seconds=settings.NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS)).timestamp())
             if claimed else now + settings.NEIRONYCH_VIDEO_RECONCILE_INTERVAL_SECONDS
         )
+    elif generation_status in (GenerationStatus.pending, GenerationStatus.processing):
+        # The intent may precede finish_generation's DB commit. Do not drop
+        # this old ID simply because the terminal outbox row is not ready yet.
+        due = now + settings.NEIRONYCH_VIDEO_RECONCILE_INTERVAL_SECONDS
 
     client = _notice_redis_client()
     try:
@@ -285,6 +294,25 @@ async def _sync_notice_retry_schedule(gen_id: int) -> None:
             await client.zrem(_notice_retry_queue_key(), str(gen_id))
         else:
             await client.zadd(_notice_retry_queue_key(), {str(gen_id): due})
+    finally:
+        await client.aclose()
+
+
+async def _track_active_video_notice_intent(gen_id: int) -> None:
+    """Remember an old task before it can commit a terminal Telegram notice.
+
+    Terminal DB transition may happen far behind the notice sweep checkpoint.
+    Tracking before the provider call also closes the crash window between a
+    committed result and the immediate Telegram delivery attempt.
+    """
+    client = _notice_redis_client()
+    try:
+        await client.zadd(
+            _notice_retry_queue_key(),
+            {str(gen_id): datetime.now(timezone.utc).timestamp()
+             + settings.NEIRONYCH_VIDEO_RECONCILE_INTERVAL_SECONDS},
+            nx=True,
+        )
     finally:
         await client.aclose()
 
@@ -304,6 +332,10 @@ async def _process_active_video(gen_id: int) -> bool:
         # potentially 250MB result download. Any terminal state re-check and
         # refund/finish acquires a fresh transaction with atomic row guards.
         await session.commit()
+        if task_id.startswith("neironych:"):
+            # If the app crashes after the terminal DB commit, this ID still
+            # reaches the notice worker even when it is far behind the sweep.
+            await _track_active_video_notice_intent(gen.id)
         age = (datetime.now(timezone.utc) - gen.created_at).total_seconds()
         if age >= settings.NEIRONYCH_VIDEO_ALERT_AGE_SECONDS:
             now = datetime.now(timezone.utc)

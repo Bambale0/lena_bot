@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE: int = Field(default=24, ge=1, le=200)
     NEIRONYCH_VIDEO_RECONCILE_CONCURRENCY: int = Field(default=4, ge=1, le=12)
     NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS: int = Field(default=240, ge=30, le=1800)
+    NEIRONYCH_VIDEO_TELEGRAM_UPLOAD_BUDGET_FRACTION: float = Field(default=0.75, ge=0.4, le=0.85)
     NEIRONYCH_VIDEO_POLL_LEASE_SECONDS: int = Field(default=600, ge=120, le=3600)
     NEIRONYCH_VIDEO_ALERT_AGE_SECONDS: int = Field(default=3600, ge=300, le=86400)
     NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS: int = Field(default=600, ge=60, le=3600)
