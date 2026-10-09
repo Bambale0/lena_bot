@@ -58,7 +58,17 @@ export function applyDraftPatch(draft: GenerationDraft, patch: Partial<Generatio
   if (draft.referenceMaterials === undefined || patch.referenceUrls === undefined) return merged;
   const items = referenceMaterials(draft);
   const parkedUrls = new Set(items.filter(item => !item.included).map(item => item.url));
-  const active = reconcile(items.filter(item => item.included), patch.referenceUrls.filter(url => !parkedUrls.has(url)), () => crypto.randomUUID());
+  const activeBefore = items.filter(item => item.included);
+  const availableDuplicates = new Map<string, number>();
+  for (const item of activeBefore) availableDuplicates.set(item.url, (availableDuplicates.get(item.url) || 0) + 1);
+  const requestedActive = patch.referenceUrls.filter(url => {
+    if (!parkedUrls.has(url)) return true;
+    const remaining = availableDuplicates.get(url) || 0;
+    if (!remaining) return false;
+    availableDuplicates.set(url, remaining - 1);
+    return true;
+  });
+  const active = reconcile(activeBefore, requestedActive, () => crypto.randomUUID());
   const retained: ReferenceMaterial[] = [];
   for (const item of items) {
     if (!item.included) retained.push(item);

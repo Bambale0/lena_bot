@@ -166,3 +166,11 @@ test("canonical quota failure reports false and does not overwrite the last full
   assert.equal(storage.getItem(v2key(7)), before);
   assert.deepEqual(JSON.parse(storage.getItem(draftStorageKey(7))!).drafts.image.referenceUrls, []);
 });
+
+
+test("legacy edits keep an already-active duplicate URL without reactivating its parked twin", () => {
+  const selected = setReferenceIncluded({ ...draft(), referenceUrls: [urls[0], urls[0]] }, "legacy-1", false);
+  const patched = applyDraftPatch(selected, { referenceUrls: [urls[0]], quality: "updated" });
+  assert.deepEqual(referenceMaterials(patched).map(item => [item.id, item.included]), [["legacy-0", true], ["legacy-1", false]]);
+  assert.deepEqual(selectGenerationInputs(patched).referenceUrls, [urls[0]]);
+});
