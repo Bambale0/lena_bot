@@ -18,3 +18,5 @@ One active vertical slice. E01.1 / #220 was delivered in #221. Current slice: [E
 | E08 | #217 | [[UX2-E08] Дизайн-система, доступность и реальный Telegram WebView](epics/E08.md) |
 | E09 | #218 | [[UX2-E09] Единый контракт возможностей, управляемая конфигурация и наблюдаемость](epics/E09.md) |
 | E10 | #219 | [[UX2-E10] Пользовательская проверка, управляемый пилот и выпуск UX2](epics/E10.md) |
+
+Current implementation slice: [E01.3 photo uploads](E01-3.md), issue #225. GitHub tracks live release status. Next prepared step: E01.4 / #226; no E01.4 implementation yet.

@@ -14,6 +14,7 @@ async function prepare(page: Page, allowed = true, light = false, extra: { owner
   await page.route("**/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/web/upload-media/policy") return route.fulfill({ json: { data: { image_max_bytes: 20 * 1024 * 1024, image_formats: ["jpeg", "png", "webp"] } } });
     if (route.request().method() !== "GET") throw new Error(`Unexpected write: ${path}`);
     if (path.endsWith("/auth/config")) return route.fulfill({ json: { bot_username: "test_bot" } });
     if (path === "/api/v1/me") return route.fulfill({ json: {

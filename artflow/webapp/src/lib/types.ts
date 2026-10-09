@@ -231,11 +231,27 @@ export interface BootstrapData {
   paymentMethods: string[];
 }
 
+export type PhotoUploadError = "network" | "timeout" | "empty_file" | "too_large" | "invalid_file"
+  | "invalid_response" | "policy_unavailable" | "source_required" | "rejected";
+export interface PhotoUploadState {
+  operationId: string;
+  status: "queued" | "uploading" | "error";
+  name: string;
+  size: number;
+  contentType: string;
+  error?: PhotoUploadError;
+}
+
 export interface ReferenceMaterial {
   /** Local draft identity, not a server asset id or authorization token. */
   id: string;
   url: string;
   included: boolean;
+  name?: string;
+  size?: number;
+  contentType?: string;
+  /** Pending replacements keep the previous url until their own success. */
+  upload?: PhotoUploadState;
 }
 
 export interface GenerationDraft {

@@ -272,11 +272,21 @@ export class MiniAppApi {
     });
   }
 
-  async uploadMedia(file: File): Promise<{ url: string; content_type?: string; size?: number }> {
+  async getPhotoUploadPolicy(signal?: AbortSignal): Promise<unknown> {
+    const response = await fetch("/api/web/upload-media/policy", {
+      cache: "no-store", signal, headers: { "X-Telegram-Init-Data": this.initData },
+    });
+    if (!response.ok) throw await readApiError(response);
+    const payload = asRecord(await response.json());
+    return payload.data || payload;
+  }
+
+  async uploadMedia(file: File, signal?: AbortSignal): Promise<{ url: string; kind?: string; content_type?: string; size?: number }> {
     const form = new FormData();
     form.append("file", file);
     const response = await fetch("/api/web/upload-media", {
       method: "POST",
+      signal,
       body: form,
       headers: { "X-Telegram-Init-Data": this.initData },
     });
@@ -285,6 +295,7 @@ export class MiniAppApi {
     const data = asRecord(payload.data || payload);
     return {
       url: String(data.url || ""),
+      kind: typeof data.kind === "string" ? data.kind : undefined,
       content_type: typeof data.content_type === "string" ? data.content_type : undefined,
       size: typeof data.size === "number" ? data.size : undefined,
     };

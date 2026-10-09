@@ -486,6 +486,17 @@ async def _save_uploaded_generation_media(file: UploadFile, user) -> dict | Resp
     return ok({"url": url, "kind": media_kind, "content_type": file.content_type, "size": len(data)})
 
 
+@router.get("/upload-media/policy")
+async def upload_media_policy(user=Depends(get_web_user_or_none)):
+    """Read-only upload limits shared with the existing server validator."""
+    if auth_error := _auth_required(user):
+        return auth_error
+    return ok({
+        "image_max_bytes": MAX_WEB_REFERENCE_IMAGE_BYTES,
+        "image_formats": ["jpeg", "png", "webp"],
+    })
+
+
 @router.post("/upload-media")
 async def upload_media(
     file: UploadFile = File(...),

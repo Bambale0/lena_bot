@@ -12,9 +12,11 @@ import { cn, formatCredits, modelSupports, splitUrls } from "@/lib/utils";
 import { inspectDraftMedia, switchDraftModel } from "@/lib/draft-media";
 import { referenceMaterials, replaceReferenceMaterials, selectGenerationInputs } from "@/lib/reference-selection";
 import { ReferenceSelection } from "@/components/reference-selection";
+import type { PhotoUploadControls } from "@/lib/photo-upload-queue";
 
 interface GenerationScreenProps {
   ux2?: boolean;
+  photoUploads?: PhotoUploadControls;
   kind: "image" | "video" | "motion";
   user: UserProfile;
   models: ModelInfo[];
@@ -137,6 +139,7 @@ function LabeledChips({ label, children }: { label: string; children: ReactNode 
 
 function GenerationScreen({
   ux2 = false,
+  photoUploads,
   kind,
   user,
   models,
@@ -288,7 +291,7 @@ function GenerationScreen({
 
   return (
     <div className="apix-generation-layout grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
-      <fieldset disabled={(preserveMedia || selectionExists) && (submitting || mediaUploading)} className="apix-generation-main grid min-w-0 gap-2.5">
+      <fieldset disabled={(preserveMedia || selectionExists) && (submitting || (mediaUploading && !photoUploads))} className="apix-generation-main grid min-w-0 gap-2.5">
         <div className="apix-generation-titlebar flex min-w-0 items-center justify-between gap-2 px-0.5">
           <div className="flex min-w-0 items-center gap-2">
             <span className="apix-generation-icon grid size-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><Icon className="size-4" /></span>
@@ -319,6 +322,7 @@ function GenerationScreen({
         <Card className="apix-generation-card min-w-0 overflow-hidden">
           <CardHeader className="apix-generation-card-header pb-2"><CardTitle>Модель и идея</CardTitle></CardHeader>
           <CardContent className="apix-generation-card-content grid min-w-0 gap-2.5">
+            <fieldset className="grid min-w-0 gap-2.5" disabled={preserveMedia && mediaUploading}>
             <label className="grid min-w-0 gap-1 text-xs font-medium">
               Модель
               <Select value={selectedModel?.key || ""} disabled={preserveMedia && (mediaUploading || submitting)} onChange={(event) => syncSelectedModel(event.target.value)}>
@@ -359,6 +363,8 @@ function GenerationScreen({
               {!draft.promptId ? <span className="text-[10px] text-muted-foreground">{draft.prompt.length.toLocaleString("ru-RU")} / {maxPromptLength.toLocaleString("ru-RU")}</span> : null}
             </label>
 
+            </fieldset>
+
             {showReferenceUploader ? (
               <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
                 <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -376,7 +382,8 @@ function GenerationScreen({
                       className="sr-only"
                       disabled={!remainingRefs || referenceUploading || (preserveMedia && !mediaInspection.referenceInputsSupported)}
                       onChange={(event) => {
-                        const files = Array.from(event.currentTarget.files || []).slice(0, remainingRefs);
+                        const selected = Array.from(event.currentTarget.files || []);
+                        const files = preserveMedia ? selected : selected.slice(0, remainingRefs);
                         event.currentTarget.value = "";
                         if (files.length) onUploadReferenceFiles(files);
                       }}
@@ -385,7 +392,7 @@ function GenerationScreen({
                 </div>
 
                 {preserveMedia ? <ReferenceSelection draft={storedDraft} model={selectedModel} busy={submitting || mediaUploading}
-                  language={user.language} labelFor={shortUrlLabel} onChange={onChange} /> : draft.referenceUrls.length ? (
+                  language={user.language} labelFor={shortUrlLabel} onChange={onChange} uploads={photoUploads} submitting={submitting} /> : draft.referenceUrls.length ? (
                   <div className="grid min-w-0 gap-1">
                     {draft.referenceUrls.map((url, index) => (
                       <div key={`${url}-${index}`} className="flex min-w-0 items-center gap-1 rounded-lg bg-background/70 px-2 py-1 text-[10px]">
@@ -403,7 +410,8 @@ function GenerationScreen({
                   <summary>Вставить ссылку вручную</summary>
                   <Textarea
                     className="min-h-14 font-mono text-base sm:text-xs"
-                    value={(preserveMedia ? allReferences.map(item => item.url) : draft.referenceUrls).join("\n")}
+                    disabled={preserveMedia && mediaUploading}
+                    value={(preserveMedia ? allReferences.map(item => item.url).filter(Boolean) : draft.referenceUrls).join("\n")}
                     placeholder="Опционально: HTTPS-ссылки, по одной в строке"
                     onChange={(event) => onChange(preserveMedia && selectionExists
                       ? replaceReferenceMaterials(storedDraft, splitUrls(event.target.value))
@@ -413,6 +421,7 @@ function GenerationScreen({
               </div>
             ) : null}
 
+            <fieldset disabled={preserveMedia && mediaUploading}>
             {showVideoUploader ? (
               <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
                 <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -461,12 +470,14 @@ function GenerationScreen({
                 </details>
               </div>
             ) : null}
+            </fieldset>
           </CardContent>
         </Card>
 
         <Card className="apix-generation-card min-w-0 overflow-hidden">
           <CardHeader className="apix-generation-card-header pb-2"><CardTitle>Параметры</CardTitle></CardHeader>
           <CardContent className="apix-generation-card-content grid min-w-0 gap-3">
+            <fieldset className="grid min-w-0 gap-3" disabled={preserveMedia && mediaUploading}>
             {ratios.length ? (
               <LabeledChips label="Формат">
                 {ratios.map((ratio) => (
@@ -591,6 +602,7 @@ function GenerationScreen({
                 <button key={count} type="button" className={cn(chipClass(taskCount === count), "min-w-8 shrink-0 px-2")} onClick={() => onChange({ taskCount: count })}>{count}</button>
               ))}
             </LabeledChips>
+            </fieldset>
           </CardContent>
         </Card>
       </fieldset>
