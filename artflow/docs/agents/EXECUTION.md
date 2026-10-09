@@ -1333,3 +1333,13 @@ Baseline: `427e57e9ea518a42be2bdd999791febe56f2db46` (origin/main), clean isolat
 ### Regression baseline exception
 
 Full `tests/test_keyboards_and_ui.py` includes two unrelated, pre-existing stale main-menu expectations (`test_main_menu_keyboard_keeps_core_buttons`, `test_main_menus_show_webapp_button_at_top`). Both were reproduced against untouched production `main` with exactly the same failed assertions and are not part of the maintained CI gate. No production/menu behavior or test was changed just to silence them.
+
+### Independent code review of 625040a
+
+Codex PR #205 code review raised two P2 findings; both were confirmed using additional RED cases before adjusting the service:
+- First-person Russian "Я не могу просмотреть видео..." and English "I cannot analyze... video not provided" were not rejected, still billing 3 credits. Added missing-input tests for both variants, including Markdown heading prefixes and source unavailability.
+- Overbroad "невозможно/не могу + видео/кадр anywhere" would reject valid video descriptions that merely cannot identify car make or a missing label in-frame. Added tests for normal, first-person and English scene ambiguities, including an absent label in a visible frame, and ensured they remain valid.
+- Minimal refined classifier: direct source-video absence prefixes plus explicit adjacency of source noun and media unavailability; no generic keyword conjunction based on unrelated scene details. Keeps shared provider/refund semantics unchanged.
+- Reconfirmed GREEN: 59 shared-service and 3-surface billing tests + Ruff. Exact SHA review and CI must be re-run after committing review changes.
+
+Deployment smoke check: import new shared service from running container (correct top-level fps 2.0), analyze the pre-existing synthetic red/blue test MP4 without a user debit, inspect safe log/prompt; verify 200 health, main SHA, container StartedAt. Cleanup only generated synthetic test media; no user media files.

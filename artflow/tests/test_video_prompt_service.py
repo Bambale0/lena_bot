@@ -221,6 +221,10 @@ def test_video_prompt_preserves_valid_prompts_and_quoted_errors(text) -> None:
     "**A. Ready-to-use prompt**\nНевозможно составить промпт: кадры не доступны.",
     "`A. Ready-to-use prompt`\nВидеоматериал отсутствует, пожалуйста, пришлите видео.",
     "К сожалению, видео не было прикреплено, поэтому я не могу составить промпт.",
+    "A. Ready-to-use prompt\nЯ не могу просмотреть видео, потому что оно не было прикреплено.",
+    "A. Ready-to-use prompt\nЯ не вижу видео: исходный файл недоступен для анализа.",
+    "I cannot analyze the video because the source video was not provided.",
+    "I can't see the video; no video was attached to the request.",
 ])
 def test_video_prompt_rejects_missing_video_completion(text):
     with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
@@ -233,6 +237,12 @@ def test_video_prompt_rejects_missing_video_completion(text):
     'Камера приближается к билборду с надписью «Видеоматериал отсутствует».',
     'В начале видео человек говорит: «Видео не видно», затем поворачивается к окну.',
     "A. Ready-to-use prompt — Покажи постер с текстом 'No video was attached'.",
+    "A. Ready-to-use prompt — Невозможно точно определить марку автомобиля в кадре, но камера плавно облетает автомобиль.",
+    "Не могу определить высоту здания в видеокадре. Камера медленно приближается.",
+    "Я не могу точно назвать год выпуска машины на видео, но её двери открываются.",
+    "A. Ready-to-use prompt — Unable to identify the model of the airplane in the video. The camera pans right.",
+    "A. Ready-to-use prompt — Невозможно определить предмет в кадре: на столе отсутствует этикетка, камера медленно вращается.",
+    "Я не могу прочитать надпись на видео, поскольку номер отсутствует, но ясно видно движение камеры.",
 ])
 def test_video_prompt_does_not_reject_missing_video_quotes_in_real_scene(text):
     assert video_prompt_service._validated_prompt_text(text) == text

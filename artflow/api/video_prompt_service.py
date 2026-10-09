@@ -120,19 +120,42 @@ def _missing_video_completion(text: str) -> bool:
         "please upload a video",
     )):
         return True
-    if opening.startswith(("к сожалению,", "извините,", "sorry,")):
-        explanation = opening.split(",", 1)[1].strip()
-        if any(term in explanation for term in ("видео", "видеоматериал", "кадр")) and any(
-            term in explanation for term in (
-                "не было прикреплено", "не прикреплено", "не загружено",
-                "не доступно", "недоступно", "отсутствует", "не поступило",
-            )
-        ):
+    # General refusals must contain affirmative evidence that the *source*
+    # media is unavailable. "Невозможно определить марку автомобиля в кадре"
+    # describes a visible scene and must remain a billable valid prompt.
+    if opening.startswith((
+        "невозможно ", "не могу ", "я не могу ", "я не вижу ",
+        "к сожалению,", "извините,", "sorry,",
+        "i cannot ", "i can't ", "unable to ",
+    )):
+        # Only a statement about an *unavailable input* counts. A missing
+        # label, license plate, person's identity or other scene detail does
+        # not mean the model was unable to see the provided footage.
+        if any(phrase in opening for phrase in (
+            "не могу просмотреть видео", "не могу увидеть видео",
+            "не вижу видео", "cannot see the video", "can't see the video",
+            "cannot access the video", "can't access the video",
+        )):
             return True
-    if opening.startswith(("невозможно ", "не могу ", "к сожалению, не могу ")) and any(
-        word in opening for word in ("видео", "видеоматериал", "кадр")
-    ):
-        return True
+        return bool(
+            re.search(
+                r"(?:видео|видеоматериал|кадры|исходный файл)"
+                r"(?:\s+или\s+кадры\s+из\s+него)?\s+"
+                r"(?:не\s+(?:(?:был[ои]|были)\s+)?"
+                r"(?:прикреплен\w*|прикреплён\w*|загружен\w*|"
+                r"предоставлен\w*|доступн\w*|видн\w*)|"
+                r"недоступ\w*|отсутству\w*)",
+                opening,
+            )
+            or re.search(
+                r"(?:source video|the video|video|footage|frames?|source file)\s+"
+                r"(?:(?:was|were|is|are)\s+)?"
+                r"(?:not\s+(?:provided|attached|available|accessible|visible)|"
+                r"missing|unavailable)",
+                opening,
+            )
+        )
+    return False
     return False
 
 
