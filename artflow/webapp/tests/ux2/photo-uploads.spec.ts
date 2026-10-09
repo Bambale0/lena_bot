@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlZ5xkAAAAASUVORK5CYII=", "base64");
+// Valid synthetic image for decoder and visual QA, not a user photograph.
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAGAAAACACAIAAAB7vvvtAAADF0lEQVR4nO2dPW4UQRSEe1dOyQlIkEXCJbgCCbcg8zmIcO4UiQQCDmBxBwvJsiXOwAUIGi3j3Zmpntev34+3vtCe6Z3+pqp3p9eSd78ffxWyzN77AqJDQQAKAlAQgIIAFASgIAAFASgIQEEACgJQEICCABQEuPC+AB3+3H46/eGLd1f9I++y7wfNqpnSqSl3xaCdxmNWyJogwbRlUcqdIANSCpK1RnZWPkE9a4rg3HyCjEkmqPMtSTBCMkH2UBCAggAUBKAgAAUBkgnq38HYOkIyQfbkE9QTIsG5+QQVqSNudwwh64ZZpfHBqqeVuRPUMvPON77cCTrAbzXcyF0xAygIQEEACgJQEICCABQEoCDAcEFX159Hv8RQxgqqdlI7YsUAAwVNg5M3RKME5TVyhF3FkiobImjJRUZHXKQB+oLWY5IuRMqC0s0f4lCxXBI1BbXPPJEjNUFB5nz97avugG7vYiOEVju6jnQEyWar60g9O5Xn+TlIUZaCoJ4gaIVoUHxKv6AIa/OsHS1l/hXrVDwuO5UuQVrxGRRDFXdyQWHLtekAiH/FKgLdo8tVEQpyj0+7nU6PURJUAkifRSJo3EwaR94aip4QbRbkfp9tlp4DgSpWWb8BYjviE7cJco+PPRsEmdlZeqHOcslOD1exyqkjlaVHMEirIN9yGS/MU4ImqIR5QGsSdLbxKS1/ae9r5/WrlyOG/fj+Q+ORcStWhtnZxO7m+5eVX/+4/Wl2KacMFfT28k3LYWsJesZ2Sil3D/cthwWtWIRyVRYFOcbHzE5LiMIlKE52KvOCfFcfS2CIZgSdQ7naCVQxLzvrIToW5BUf3+ysOHoi6HyWnnZCVCzC0rMUov+CzrNcEOcEhbIzG6J/grj6LLEvLNeE0xC5VSygnVn2LvGJbOcoRGDDzOYiAnLYTnOoWHw7U6wFZbFzuE5TQVnsTAnxqBGTejvtBGWMTzETlNTO3cO90b+uafwSKiBcgwAUBKAgAAUBKAhAQQAKAlAQgIIAFASgIAAFASgIQEEACgJQEICCABQEoCAABQEoCPAXcw8CIf4jKTgAAAAASUVORK5CYII=", "base64");
 const model = { key: "upload-image", display_name: "Upload image", modes: ["text", "image"], credits: 2,
   max_refs: 4, aspect_ratios: ["1:1"], counts: [1], quality_options: [{ value: "basic", label: "Обычное" }] };
 const file = (name: string) => ({ name, mimeType: "image/png", buffer: PNG });
@@ -207,4 +208,17 @@ test("broken thumbnail does not erase the uploaded original", async ({ page }) =
   expect((await canonical(page)).referenceMaterials[0].url).toBe("https://media.example.test/first.png");
   await page.getByRole("button",{name:"Открыть фото 1",exact:true}).click();
   await expect(page.getByText("Не удалось открыть превью. Файл сохранён в черновике.",{exact:true})).toBeVisible();
+});
+
+
+test("successful photo renders a decoded thumbnail and original", async ({ page }) => {
+  await prepare(page);
+  await picker(page).setInputFiles(file("first.png"));
+  await expect(submit(page)).toBeEnabled();
+  const image = page.getByRole("button", { name: "Открыть фото 1", exact: true }).locator("img");
+  await expect(image).toBeVisible();
+  expect(await image.evaluate(async (element: HTMLImageElement) => { try { await element.decode(); return element.naturalWidth > 0; } catch { return false; } })).toBe(true);
+  await page.getByRole("button", { name: "Открыть фото 1", exact: true }).click();
+  const original=page.getByRole("dialog").locator("img");
+  expect(await original.evaluate(async (element: HTMLImageElement) => { try { await element.decode(); return element.naturalWidth > 0; } catch { return false; } })).toBe(true);
 });
