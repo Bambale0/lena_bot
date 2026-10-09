@@ -54,9 +54,13 @@ async def neironych_route_paused(product_model: str) -> bool:
     key = _circuit_key(product_model)
     client = _redis_client()
     try:
-        return bool(await client.exists(key))
+        if await client.exists(key):
+            return True
     finally:
         await client.aclose()
+    # The review marker was committed before the best-effort Redis pause.
+    # A missing/expired/lost cache key must not reopen that known-bad route.
+    return await _db_has_unresolved_seedance(product_model)
 
 
 async def pause_neironych_route(product_model: str, request_id: str) -> None:
@@ -70,3 +74,25 @@ async def pause_neironych_route(product_model: str, request_id: str) -> None:
         )
     finally:
         await client.aclose()
+
+
+async def _db_has_unresolved_seedance(product_model: str) -> bool:
+    """Authoritative admission fallback; never send paid work on a DB failure."""
+    from sqlalchemy import or_, select
+
+    from db.models import Generation, GenerationStatus, GenerationType
+    from db.session import AsyncSessionLocal
+
+    review_marker = (
+        r'"neironych_video_reconciliation"\s*:\s*\{[^}]*'
+        r'"required"\s*:\s*true\b'
+    )
+    query = select(select(Generation.id).where(
+        Generation.model == product_model,
+        Generation.gen_type == GenerationType.video,
+        Generation.status.in_([GenerationStatus.pending, GenerationStatus.processing]),
+        or_(Generation.task_id.like("neironych:%"), Generation.task_id.like("web:neironych:%")),
+        Generation.input_params.op("~")(review_marker),
+    ).exists())
+    async with AsyncSessionLocal() as session:
+        return bool(await session.scalar(query))

@@ -15,7 +15,7 @@ import {
 import { demoFeed, demoImageModels, demoPlans, demoPrompts, demoUser, demoVideoModels } from "./demoData.js";
 
 const BUILD_ID = "20260801-apix-v4-clean-shell";
-const ACTIVE_STATUSES = new Set(["pending", "processing", "queued", "running"]);
+const ACTIVE_STATUSES = new Set(["pending", "processing", "queued", "running", "reconciliation_required"]);
 const FINISHED_STATUSES = new Set(["done", "completed", "success"]);
 const FAILED_STATUSES = new Set(["failed", "error", "cancelled"]);
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;

@@ -1552,6 +1552,33 @@ async def mark_neironych_video_reconciliation(
     return True
 
 
+async def current_neironych_review_notice(
+    session: AsyncSession, gen_id: int, token: str, *, expected_task_id: str,
+) -> Generation | None:
+    """Fresh token/status check immediately before a nonterminal user notice."""
+    gen = (await session.execute(
+        select(Generation).where(Generation.id == gen_id)
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if gen is None:
+        await session.commit()
+        return None
+    data = parse_input_params(gen.input_params).get(NEIRONYCH_VIDEO_NOTICE_KEY)
+    valid = (
+        gen.status in {GenerationStatus.pending, GenerationStatus.processing}
+        and gen.gen_type == GenerationType.video
+        and gen.task_id == expected_task_id
+        and isinstance(data, dict)
+        and data.get("kind") == "reconciliation"
+        and data.get("state") == "sending"
+        and data.get("token") == token
+    )
+    # Release the read transaction before network IO. Terminal commits after
+    # this point remain protected from an obsolete acknowledgement by token.
+    await session.commit()
+    return gen if valid else None
+
+
 async def claim_neironych_video_notice(
     session: AsyncSession, gen_id: int,
     *, lease_seconds: int | None = None,

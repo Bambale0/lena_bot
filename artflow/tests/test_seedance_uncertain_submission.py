@@ -252,6 +252,7 @@ async def test_circuit_is_model_scoped_and_bounded(monkeypatch):
             pass
 
     monkeypatch.setattr(circuit, "_redis_client", Redis)
+    monkeypatch.setattr(circuit, "_db_has_unresolved_seedance", AsyncMock(return_value=False))
     model = "bytedance/seedance-2-5"
     assert not await circuit.neironych_route_paused(model)
     await circuit.pause_neironych_route(model, "provider-id")
@@ -318,3 +319,173 @@ async def test_review_notice_text_does_not_claim_refund_or_provider_failure(monk
     assert "не подтвердил" in text and "удержаны" in text and "provider-id" in text
     assert "возвращено" not in text and "подтвердил ошибку" not in text
     bot.session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_missing_redis_pause_still_honors_durable_review_marker(monkeypatch):
+    from core import seedance_reconciliation as circuit
+
+    redis = SimpleNamespace(exists=AsyncMock(return_value=False), aclose=AsyncMock())
+    persisted = AsyncMock(return_value=True)
+    monkeypatch.setattr(circuit, "_redis_client", lambda: redis)
+    monkeypatch.setattr(circuit, "_db_has_unresolved_seedance", persisted, raising=False)
+    assert await circuit.neironych_route_paused("bytedance/seedance-2-5")
+    persisted.assert_awaited_once_with("bytedance/seedance-2-5")
+
+
+@pytest.mark.asyncio
+async def test_stale_review_claim_never_sends_after_terminal_completion(monkeypatch):
+    gen = generation()
+    claimed = SimpleNamespace(generation=gen, kind="reconciliation", token="old-token", attempt=1)
+    monkeypatch.setattr(repo, "claim_neironych_video_notice", AsyncMock(return_value=claimed))
+    monkeypatch.setattr(repo, "complete_neironych_video_notice", AsyncMock(return_value=False))
+
+    async def load_user(_session, _id):
+        gen.status = GenerationStatus.done
+        gen.input_params = json.dumps(
+            {"neironych_video_notice": {"kind": "done", "state": "pending"}}
+        )
+        return SimpleNamespace(tg_id=25)
+
+    monkeypatch.setattr(repo, "get_user_by_id", load_user)
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr(miniapp_routes, "_notify_neironych_video_reconciliation_in_bot", send)
+    assert not await miniapp_routes._deliver_pending_neironych_video_notice(
+        FakeSession(gen), gen.id
+    )
+    send.assert_not_awaited()
+
+
+def test_standalone_web_card_projects_durable_review_state():
+    from api.web.schemas import GenerationCard
+
+    gen = generation()
+    gen.input_params = json.dumps({"neironych_video_reconciliation": {"required": True}})
+    assert GenerationCard.from_generation(gen).status == "reconciliation_required"
+
+
+def test_v4_active_set_keeps_review_refreshable_until_terminal():
+    import re
+    import subprocess
+    from pathlib import Path
+
+    source = Path("webapp/src/apix/AppV4.jsx").read_text()
+    declaration = re.search(r"const ACTIVE_STATUSES = new Set\([^;]+;", source).group(0)
+    code = (
+        declaration
+        + "\nif (!ACTIVE_STATUSES.has('reconciliation_required') || ACTIVE_STATUSES.has('done') || ACTIVE_STATUSES.has('failed')) process.exit(1);"
+    )
+    result = subprocess.run(["node", "-e", code], capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+
+
+def test_standalone_site_understands_nonterminal_review_state():
+    from pathlib import Path
+
+    text = Path("landing/js/prototype-premium.js").read_text()
+    assert 'if (source === "reconciliation_required")' in text
+    assert 'if (value === "reconciliation_required")' in text
+    assert '"uploading", "reconciliation_required"' in text
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_query_requires_active_matching_provider_and_model(monkeypatch):
+    from core import seedance_reconciliation as circuit
+    from db import session as db_session
+
+    queries = []
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def scalar(self, query):
+            queries.append(query)
+            return True
+
+    monkeypatch.setattr(db_session, "AsyncSessionLocal", Session)
+    assert await circuit._db_has_unresolved_seedance("bytedance/seedance-2-5")
+    compiled = queries[0].compile()
+    assert "EXISTS" in str(compiled)
+    assert "generations.status IN" in str(compiled)
+    assert "generations.input_params ~" in str(compiled)
+    values = list(compiled.params.values())
+    assert "bytedance/seedance-2-5" in values
+    assert "neironych:%" in values and "web:neironych:%" in values
+    assert [GenerationStatus.pending, GenerationStatus.processing] in values
+
+
+@pytest.mark.asyncio
+async def test_db_failure_after_lost_redis_key_is_fail_closed(monkeypatch):
+    from core import seedance_reconciliation as circuit
+
+    client = SimpleNamespace(exists=AsyncMock(return_value=False), aclose=AsyncMock())
+    monkeypatch.setattr(circuit, "_redis_client", lambda: client)
+    monkeypatch.setattr(
+        circuit,
+        "_db_has_unresolved_seedance",
+        AsyncMock(side_effect=RuntimeError("database unavailable")),
+    )
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await circuit.neironych_route_paused("bytedance/seedance-2-5")
+    client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_review_claim_revalidation_accepts_only_own_active_token():
+    gen = generation()
+    gen.input_params = json.dumps(
+        {"neironych_video_notice": {"kind": "reconciliation", "state": "sending", "token": "valid"}}
+    )
+    db = FakeSession(gen)
+    assert (
+        await repo.current_neironych_review_notice(
+            db, gen.id, "valid", expected_task_id=gen.task_id
+        )
+        is gen
+    )
+    assert (
+        await repo.current_neironych_review_notice(
+            db, gen.id, "stale", expected_task_id=gen.task_id
+        )
+        is None
+    )
+    assert (
+        await repo.current_neironych_review_notice(
+            db, gen.id, "valid", expected_task_id="neironych:other"
+        )
+        is None
+    )
+    gen.status = GenerationStatus.failed
+    assert (
+        await repo.current_neironych_review_notice(
+            db, gen.id, "valid", expected_task_id=gen.task_id
+        )
+        is None
+    )
+
+
+def test_standalone_site_review_to_terminal_polling_predicate():
+    import re
+    import subprocess
+    from pathlib import Path
+
+    script = Path("landing/js/prototype-premium.js").read_text()
+    functions = []
+    for name in ("generationIsActive", "generationStatusCopy", "statusLabel"):
+        functions.append(
+            re.search(r"function " + name + r"\([^\n]*\) \{.*?\n\}", script, re.S).group(0)
+        )
+    checks = """
+    if (!generationIsActive('reconciliation_required')) process.exit(1);
+    if (generationIsActive('done') || generationIsActive('failed')) process.exit(2);
+    if (!generationStatusCopy('reconciliation_required').includes('не подтвердил')) process.exit(3);
+    if (!statusLabel('reconciliation_required').includes('проверке')) process.exit(4);
+    """
+    result = subprocess.run(
+        ["node", "-e", "\n".join(functions) + checks], capture_output=True, text=True, timeout=5
+    )
+    assert result.returncode == 0, result.stderr

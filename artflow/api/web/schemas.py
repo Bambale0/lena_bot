@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from api.public_files import preview_public_image_url, public_url_is_available
 from core.config import settings
+from core.seedance_reconciliation import public_generation_status
 
 
 def _is_previewable_image(url: str | None, gen_type: str | None = None) -> bool:
@@ -358,7 +359,7 @@ class GenerationCard(BaseModel):
             prompt="" if prompt_hidden else str(getattr(generation, "prompt", "") or ""),
             prompt_hidden=prompt_hidden,
             prompt_actions_allowed=not prompt_hidden,
-            status=enum_value(getattr(generation, "status", None)),
+            status=public_generation_status(generation),
             result_url=generation_result_url(generation),
             result_urls=generation_result_urls(generation),
             preview_url=generation_preview_url(generation),

@@ -1067,8 +1067,15 @@ async def _deliver_pending_neironych_video_notice(session: AsyncSession, gen_id:
                     user=user, gen=claim.generation,
                 )
             elif claim.kind == "reconciliation":
+                current = await repo.current_neironych_review_notice(
+                    session, gen_id, claim.token,
+                    expected_task_id=claim.generation.task_id,
+                )
+                if current is None:
+                    logger.info("Superseded Neironych review notice skipped gen=%s", gen_id)
+                    return False
                 send = _notify_neironych_video_reconciliation_in_bot(
-                    user=user, gen=claim.generation,
+                    user=user, gen=current,
                 )
             else:
                 send = _notify_reconciled_video_failure_in_bot(
