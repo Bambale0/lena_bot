@@ -151,6 +151,34 @@ def _missing_video_completion(text: str) -> bool:
     if source_missing_ru or source_missing_en:
         return True
 
+    # Some gateway refusals name the uploaded video first, then refer to
+    # that *source* as "it"/"оно" when explaining why it was unavailable.
+    # Require a failed video analysis/prompt action: an unidentified object
+    # whose properties were absent from scene metadata is not missing input.
+    analyzing_source = refusal_opening and any(
+        action in opening for action in (
+            "проанализир", "анализировать видео", "просмотреть видео",
+            "описать видео", "увидеть видео", "рассмотреть видео",
+            "составить промпт", "восстановить промпт",
+            "analyze", "analyse", "describe the video", "see the video",
+            "view the video", "generate a video prompt",
+            "generate a prompt from the video",
+        )
+    )
+    if analyzing_source and re.search(
+        r"(?:видео|видеоматериал|video|footage).{0,90}?"
+        r"(?:потому что|так как|because|since)\s+"
+        r"(?:оно|it)\s+"
+        r"(?:(?:не\s+(?:(?:был[ои]|были)\s+)?"
+        r"(?:прикреплен\w*|прикреплён\w*|предоставлен\w*|"
+        r"загружен\w*)|недоступ\w*)|"
+        r"(?:(?:was|is)\s+)?not\s+"
+        r"(?:provided|attached|available|accessible|uploaded)|"
+        r"unavailable)",
+        opening,
+    ):
+        return True
+
     # Handle pronoun references to the uploaded file and messages containing
     # an explicit instruction to re-upload rather than source-adjacent nouns.
     if refusal_opening and any(phrase in opening for phrase in (

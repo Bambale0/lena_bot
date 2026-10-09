@@ -230,6 +230,13 @@ def test_video_prompt_preserves_valid_prompts_and_quoted_errors(text) -> None:
     "Кадры не были предоставлены.",
     "The source video was not provided.",
     "A. Ready-to-use prompt\nВидео не поступило, загрузите исходный файл.",
+    "I cannot analyze the video because it was not provided.",
+    "I can't generate a video prompt because the video was missing from the request.",
+    "Я не могу составить промпт по видео, потому что оно не было прикреплено.",
+    "Я не могу проанализировать видео, потому что оно недоступно.",
+    "Я не могу описать видео, потому что оно не было прикреплено.",
+    "I cannot describe the video because it was not uploaded.",
+    "I cannot see the video because it was not provided.",
 ])
 def test_video_prompt_rejects_missing_video_completion(text):
     with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
@@ -251,6 +258,8 @@ def test_video_prompt_rejects_missing_video_completion(text):
     "Я не вижу видео на экране телевизора, только статичную заставку; камера следует за героем.",
     "I cannot see the video on the computer monitor in the scene; the screen is black while the camera pans.",
     "Видео не видно на экране телевизора, но камера снимает отражение в комнате.",
+    "I cannot identify the aircraft model in the video because it was not provided in the metadata.",
+    "Я не могу определить персонажа на видео, потому что его лицо закрыто капюшоном, а камера движется.",
 ])
 def test_video_prompt_does_not_reject_missing_video_quotes_in_real_scene(text):
     assert video_prompt_service._validated_prompt_text(text) == text
