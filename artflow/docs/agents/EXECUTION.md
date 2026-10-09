@@ -1261,3 +1261,12 @@ Additional Codex P2 findings on `1260a00` addressed before merge:
 ## Completion/receipt cancellation boundary
 
 Before release, an additional TDD regression reproduced an independent unsafe outer `asyncio.wait_for` wrapping the entire scheduler reconciliation and notification receipt. Even though provider polling and Telegram send were already independently bounded at 240 s, the redundant outer timer could cancel *irreversible* post-commit feed royalty/linked-session effects or the DB acknowledgement after Telegram accepted a message. Removed both redundant outer timers. Provider GET/download and Telegram send remain time-bounded inside their helpers. Two regressions prove the settlement/receipt work outlives the short provider timeout and finishes; this avoids silent partial settlement and needless redelivery.
+
+
+## Codex PR #204 fourth-round recovery
+
+Latest Codex reviewed `244c97b` and raised two P2 liveness concerns:
+- In-memory old-notice scan cursor resets at every restart, and scanning millions of IDs from zero can take many hours, repeatedly interrupted by daily deployment. **Fixed:** scan cursor is checkpointed after each bounded indexed scan in Redis (existing compose `redisdata` volume), restored from Redis every cycle; new TDD test explicitly discards the Python cursor between cycles and verifies Redis restarts from previous position. If Redis fails, defer the sweep rather than report nonexistent completion.
+- Polling-only mode fell back from Redis to MemoryStorage even while Neironych API credentials were configured, causing the now-unified Redis-guarded video worker to fail closed and potentially strand newly charged work. **Fixed:** fail polling startup before Bot creation when Neironych is enabled and Redis unavailable; KIE-only development can retain existing MemoryStorage fallback. Added negative/positive regression.
+
+No new SQL migrations or hardcoded prices, and no paid POST or manual credit writes.

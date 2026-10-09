@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+import redis.asyncio as aioredis
 from sqlalchemy import func, or_, select
 
 from api.neironych_seedance_runtime import PRODUCT_MODELS
@@ -132,7 +133,39 @@ async def _load_batch(query, cursor: _ScanCursor) -> list[int]:
 
 
 
+def _notice_checkpoint_key() -> str:
+    env = str(settings.ENV or "development").strip().lower()
+    return f"apix:neironych-video-notice-sweep:{env}:last-id"
+
+
 async def _load_notice_batch() -> list[int]:
+    """Persist historical scan progress outside the app process.
+
+    Redis has a dedicated compose volume. Retaining the last examined ID
+    makes pending/sending notifications discoverable across daily redeploys
+    without unbounded scans or a database schema migration. If Redis fails,
+    defer this iteration rather than repeatedly restarting the sweep.
+    """
+    client = aioredis.Redis.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,
+        socket_connect_timeout=1.5,
+        socket_timeout=2.0,
+        health_check_interval=30,
+        max_connections=3,
+    )
+    try:
+        checkpoint_key = _notice_checkpoint_key()
+        stored = await client.get(checkpoint_key)
+        _notice_cursor.older_id = max(0, int(stored or 0))
+        ids = await _load_notice_batch_at_cursor()
+        await client.set(checkpoint_key, str(_notice_cursor.older_id))
+        return ids
+    finally:
+        await client.aclose()
+
+
+async def _load_notice_batch_at_cursor() -> list[int]:
     """Bound regex work to indexed primary-key windows, even when outbox is empty.
 
     The recent lane notices new finished videos promptly; the sweep lane

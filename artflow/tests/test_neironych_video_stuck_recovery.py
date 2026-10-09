@@ -30,6 +30,21 @@ def _video(*, age_minutes=12):
     )
 
 
+class _FakeNoticeCursorRedis:
+    def __init__(self):
+        self.store = {}
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def set(self, key, value):
+        self.store[key] = str(value)
+        return True
+
+    async def aclose(self):
+        pass
+
+
 @pytest.mark.asyncio
 async def test_provider_http_timeout_does_not_refund(monkeypatch):
     gen = _video(age_minutes=150)
@@ -545,6 +560,10 @@ async def test_notice_scan_advances_over_empty_indexed_id_windows(monkeypatch):
     db = FakeSession()
     monkeypatch.setattr(scheduler, "AsyncSessionLocal", lambda: db)
     monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
+    redis_store = _FakeNoticeCursorRedis()
+    monkeypatch.setattr(
+        scheduler.aioredis.Redis, "from_url", lambda *args, **kwargs: redis_store
+    )
     monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE", 4)
     monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_NOTICE_SCAN_ID_SPAN", 1000, raising=False)
     assert await scheduler._load_notice_batch() == []
@@ -569,6 +588,10 @@ async def test_notice_scan_prioritizes_recent_ids_while_backfilling_old(monkeypa
 
     monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
     monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
+    redis_store = _FakeNoticeCursorRedis()
+    monkeypatch.setattr(
+        scheduler.aioredis.Redis, "from_url", lambda *args, **kwargs: redis_store
+    )
     monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE", 4)
     monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_NOTICE_SCAN_ID_SPAN", 5000, raising=False)
     found = await scheduler._load_notice_batch()
@@ -644,3 +667,58 @@ async def test_notice_worker_does_not_cancel_receipt_commit_after_telegram_sends
     monkeypatch.setattr(miniapp_routes, "_deliver_pending_neironych_video_notice", delivery)
     assert await asyncio.wait_for(scheduler._process_delivery_notice(789123), 0.2)
     assert recorded == [("telegram_accepted", 789123), ("db_receipt_saved", 789123)]
+
+
+@pytest.mark.asyncio
+async def test_notice_historical_cursor_survives_worker_restart(monkeypatch):
+    from core import neironych_video_reconcile_scheduler as scheduler
+    from core.config import settings
+
+    storage = {}
+
+    class FakeRedis:
+        async def get(self, key):
+            return storage.get(key)
+
+        async def set(self, key, value):
+            storage[key] = str(value)
+            return True
+
+        async def aclose(self):
+            pass
+
+    class EmptyRows:
+        def scalars(self):
+            return SimpleNamespace(all=lambda: [])
+
+    class FakeSession:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_): return False
+        async def scalar(self, _statement): return 10000
+        async def execute(self, _statement): return EmptyRows()
+        async def rollback(self): pass
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE", 4)
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_NOTICE_SCAN_ID_SPAN", 1000)
+    monkeypatch.setattr(scheduler.aioredis.Redis, "from_url", lambda *args, **kwargs: FakeRedis())
+    assert await scheduler._load_notice_batch() == []
+    assert scheduler._notice_cursor.older_id == 1000
+    assert list(storage.values()) == ["1000"]
+
+    # A deploy creates a fresh process-local cursor, but Redis survives.
+    monkeypatch.setattr(scheduler, "_notice_cursor", scheduler._ScanCursor())
+    assert await scheduler._load_notice_batch() == []
+    assert scheduler._notice_cursor.older_id == 2000
+    assert list(storage.values()) == ["2000"]
+
+
+def test_polling_entry_rejects_memory_fallback_for_billable_neironych(monkeypatch):
+    import run_polling
+    from core.config import settings
+
+    monkeypatch.setattr(settings, "NEIRONYCH_API_KEY", "test-key-only")
+    with pytest.raises(RuntimeError, match="Redis"):
+        run_polling._require_neironych_recovery_redis(None)
+    assert run_polling._require_neironych_recovery_redis(object()) is None

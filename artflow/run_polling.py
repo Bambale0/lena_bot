@@ -86,12 +86,22 @@ async def _make_throttling_middleware(redis_client: object | None):
     return NoopThrottle()
 
 
+def _require_neironych_recovery_redis(redis_client: object | None) -> None:
+    """Fail closed: paid Neironych videos cannot recover in MemoryStorage mode."""
+    if redis_client is None and settings.NEIRONYCH_API_KEY:
+        raise RuntimeError(
+            "Redis is required for Neironych Seedance video reconciliation in polling mode. "
+            "The bot must not accept paid Seedance requests without its durable recovery worker."
+        )
+
+
 async def main() -> None:
     setup_logging(logging.INFO)
     logger = logging.getLogger(__name__)
     logger.info("Starting APIX in POLLING mode")
 
     storage, redis_client = await _make_storage()
+    _require_neironych_recovery_redis(redis_client)
 
     bot = Bot(
         token=settings.BOT_TOKEN,
