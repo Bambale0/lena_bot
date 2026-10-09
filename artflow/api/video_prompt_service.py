@@ -114,6 +114,17 @@ def _missing_video_completion(text: str) -> bool:
     )):
         return True
 
+    # The absence of a moving picture *on a TV/monitor within the scene*
+    # does not say anything about the source file submitted for analysis.
+    if re.search(
+        r"(?:видео\s+(?:отсутству\w*|недоступ\w*)\s+"
+        r"(?:на|в)\s+(?:экране|мониторе|телевизоре)|"
+        r"video\s+(?:is\s+)?(?:missing|unavailable|not visible)\s+"
+        r"on\s+(?:the\s+)?(?:television|tv|monitor|screen))",
+        opening,
+    ):
+        return False
+
     # If a scene contains "Видеоматериал отсутствует" as a sign or caption,
     # it is not a statement about the input. Recognize these phrases only
     # when the provider's *answer* opens with an input noun or a refusal.
@@ -124,7 +135,10 @@ def _missing_video_completion(text: str) -> bool:
     ))
     source_opening = opening.startswith((
         "видео ", "видеоматериал ", "кадры ", "исходный файл ",
+        "исходное видео ", "входное видео ", "загруженное видео ",
+        "исходные кадры ", "прикреплённое видео ",
         "video ", "source video ", "the video ", "the source video ",
+        "source footage ", "the source footage ", "uploaded video ",
         "footage ", "frames ", "source file ", "no video ",
     ))
     if not (refusal_opening or source_opening):
@@ -133,7 +147,9 @@ def _missing_video_completion(text: str) -> bool:
     # A missing/blocked INPUT is different from an unidentified car model,
     # absent label, or invisible video *on a screen in the recorded scene*.
     source_missing_ru = re.search(
-        r"(?:видео|видеоматериал|кадры|исходный файл)"
+        r"(?:видео|видеоматериал|кадры|исходный файл|"
+        r"(?:исходн\w+|входн\w+|загруженн\w+|прикреплённ\w+)"
+        r"\s+(?:видео|кадры))"
         r"(?:\s+или\s+кадры\s+из\s+него)?\s+"
         r"(?:не\s+(?:(?:был[ои]|были)\s+)?"
         r"(?:прикреплен\w*|прикреплён\w*|загружен\w*|"

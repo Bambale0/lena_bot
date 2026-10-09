@@ -1357,3 +1357,11 @@ The classifier now requires evidence about the *input* source, not just words ab
 ### Security review: pronoun-linked missing upload (2026-10-09)
 
 Security review of a439639 found a P2 refund omission when first-person model refusal refers to uploaded video first, then its missing source by pronoun: `I cannot analyze the video because it was not provided`, `Я не могу составить промпт по видео, потому что оно не было прикреплено`. Reproduced RED; now recognizes explicit pronoun-linked attachment/availability failure when the refusal is about *analyzing, viewing, describing or generating a prompt from the source video*, while retaining proper success for scene-metadata / unidentified-aircraft cases that do not mean the input was absent. Extra red-to-green tests cover describe/see, uploaded and Russian `оно недоступно`. GREEN: 76 shared service + 3-surface money-path cases and Ruff. Security P2 remains subject to fresh review/CI on new exact SHA. No user-money action triggered during tests.
+
+
+### Code review of ea33ad5 (scene displays and adjectival source)
+
+Further Code Review P2s reproduced RED before code changes:
+- Valid scene: `Видео отсутствует на экране телевизора; камера приближается...` or English video missing on the TV in frame was incorrectly treated as source media missing. Classifier now excludes clearly **in-scene display** contexts (screen/TV/monitor) before considering source absence.
+- Explicit source missing: `Исходное видео отсутствует`, `Загруженное видео недоступно`, `Входное видео не было прикреплено`, `The source footage is missing` was not matched by restrictive source noun whitelist. Added source-modifier variants to both opening gate and adjacent absence regex.
+- Confirmed GREEN with all earlier finance and provider contract tests: 83 shared service/surface cases plus Ruff. No historical credit/balance writes, no UI changes. Fresh review/CI on new exact SHA required.
