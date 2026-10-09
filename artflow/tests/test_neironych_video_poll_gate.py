@@ -17,6 +17,7 @@ class FakeRedis:
     def __init__(self):
         self.entries: dict[str, str] = {}
         self.closes = 0
+        self.renewals = 0
 
     async def set(self, key, token, *, nx, ex):
         assert nx is True and ex > 240
@@ -25,12 +26,15 @@ class FakeRedis:
         self.entries[key] = token
         return True
 
-    async def eval(self, script, key_count, key, token):
+    async def eval(self, script, key_count, key, token, *args):
         assert key_count == 1
-        if self.entries.get(key) == token:
-            del self.entries[key]
+        if self.entries.get(key) != token:
+            return 0
+        if "EXPIRE" in script or "PEXPIRE" in script:
+            self.renewals += 1
             return 1
-        return 0
+        del self.entries[key]
+        return 1
 
     async def aclose(self):
         self.closes += 1
@@ -93,3 +97,65 @@ async def test_two_concurrent_calls_use_one_provider_poll(monkeypatch):
         release.set()
         await first
     assert not fake.entries
+
+
+@pytest.mark.asyncio
+async def test_bot_neironych_uses_durable_scheduler_not_foreground_timeout(monkeypatch):
+    from bot.handlers import video_gen
+
+    foreground = AsyncMock()
+    monkeypatch.setattr(video_gen.polling, "poll_until_done", foreground)
+    video_gen._start_video_polling(
+        SimpleNamespace(provider="neironych", task_id="neironych:task"),
+        AsyncMock(), AsyncMock(), AsyncMock(),
+    )
+    await asyncio.sleep(0)
+    foreground.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_bot_non_neironych_foreground_poll_is_unchanged(monkeypatch):
+    from bot.handlers import video_gen
+
+    foreground = AsyncMock()
+    monkeypatch.setattr(video_gen.polling, "poll_until_done", foreground)
+    video_gen._start_video_polling(
+        SimpleNamespace(provider="higgsfield", task_id="hf-task"),
+        AsyncMock(), AsyncMock(), AsyncMock(),
+    )
+    await asyncio.sleep(0.01)
+    foreground.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_lease_heartbeats_during_slow_storage_settlement(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(gate.aioredis.Redis, "from_url", lambda *a, **kw: fake)
+    monkeypatch.setattr(gate, "_poll_heartbeat_interval_seconds", lambda: 0.01, raising=False)
+    async with gate.neironych_video_poll_guard("neironych:slow-settlement") as acquired:
+        assert acquired
+        await asyncio.sleep(0.06)
+        assert fake.renewals >= 2, "Lease must be extended while provider/DB work continues"
+    assert not fake.entries
+
+
+@pytest.mark.asyncio
+async def test_lost_poll_lease_cancels_owner_before_more_provider_calls(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(gate.aioredis.Redis, "from_url", lambda *a, **kw: fake)
+    monkeypatch.setattr(gate, "_poll_heartbeat_interval_seconds", lambda: 0.01, raising=False)
+    ready = asyncio.Event()
+
+    async def poll_owner():
+        async with gate.neironych_video_poll_guard("neironych:interrupted") as acquired:
+            assert acquired
+            ready.set()
+            await asyncio.sleep(1)
+
+    owner = asyncio.create_task(poll_owner())
+    await asyncio.wait_for(ready.wait(), 0.5)
+    key = next(iter(fake.entries))
+    fake.entries[key] = "new-owner-token"
+    with pytest.raises(gate.NeironychVideoPollLeaseLost):
+        await asyncio.wait_for(owner, 0.3)
+    assert fake.entries[key] == "new-owner-token", "Old owner must not delete new lease"

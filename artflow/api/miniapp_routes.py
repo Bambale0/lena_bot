@@ -104,7 +104,10 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
-from core.neironych_video_poll_gate import neironych_video_poll_guard
+from core.neironych_video_poll_gate import (
+    NeironychVideoPollLeaseLost,
+    neironych_video_poll_guard,
+)
 from core.provider_routing import get_nano21_route
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
@@ -701,9 +704,13 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         and video_service.neironych_seedance_runtime.is_task_id(task_id)
     )
     if strict_neironych_video:
-        return await _reconcile_neironych_video_generation(
-            session, gen, task_id=task_id, stored_task_id=stored_task_id
-        )
+        try:
+            return await _reconcile_neironych_video_generation(
+                session, gen, task_id=task_id, stored_task_id=stored_task_id
+            )
+        except NeironychVideoPollLeaseLost:
+            logger.warning("Neironych video poll ownership lost gen=%s; retry later", gen.id)
+            return gen
 
     strict_nexus_image = (
         gen.gen_type == GenerationType.image
@@ -993,13 +1000,18 @@ async def _deliver_pending_neironych_video_notice(session: AsyncSession, gen_id:
         await session.commit()  # Do not keep a DB transaction open during Telegram I/O.
         if user is not None:
             if claim.kind == "done":
-                delivered = await _notify_reconciled_video_result_in_bot(
+                send = _notify_reconciled_video_result_in_bot(
                     user=user, gen=claim.generation,
                 )
             else:
-                delivered = await _notify_reconciled_video_failure_in_bot(
+                send = _notify_reconciled_video_failure_in_bot(
                     user=user, gen=claim.generation,
                 )
+            # The same bound applies to foreground/history and scheduler sends.
+            # It must be shorter than the validated notice lease.
+            delivered = await asyncio.wait_for(
+                send, timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
+            )
         else:
             logger.warning("Neironych video notice user missing gen=%s", gen_id)
     except asyncio.CancelledError:

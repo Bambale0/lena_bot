@@ -380,3 +380,55 @@ async def test_video_scheduler_releases_read_transaction_before_provider_poll(mo
     monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", fake_reconcile)
     assert await scheduler._process_active_video(row.id)
     assert events.index("commit") < events.index("provider_get")
+
+
+@pytest.mark.asyncio
+async def test_direct_notification_timeout_returns_unconfirmed_receipt(monkeypatch):
+    import asyncio
+
+    from core.config import settings
+
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS", 0.02)
+    gen = _video()
+    gen.status = GenerationStatus.done
+    gen.result_url = "https://example.test/result.mp4"
+    claim = SimpleNamespace(
+        kind="done", generation=gen, token="lease-1", attempt=1,
+    )
+    get_claim = AsyncMock(return_value=claim)
+    user = SimpleNamespace(id=gen.user_id, tg_id=42)
+    notice_done = AsyncMock(return_value=True)
+    monkeypatch.setattr(miniapp_routes.repo, "claim_neironych_video_notice", get_claim)
+    monkeypatch.setattr(miniapp_routes.repo, "get_user_by_id", AsyncMock(return_value=user))
+    monkeypatch.setattr(miniapp_routes.repo, "complete_neironych_video_notice", notice_done)
+    stalled = asyncio.Event()
+
+    async def slow_telegram(**kwargs):
+        await stalled.wait()
+        return True
+
+    mock_send = AsyncMock(side_effect=slow_telegram)
+    monkeypatch.setattr(miniapp_routes, "_notify_reconciled_video_result_in_bot", mock_send)
+    session = SimpleNamespace(commit=AsyncMock())
+    delivered = await asyncio.wait_for(
+        miniapp_routes._deliver_pending_neironych_video_notice(session, gen.id), 0.2
+    )
+    assert delivered is False
+    mock_send.assert_awaited_once()
+    notice_done.assert_awaited_once_with(session, gen.id, claim.token, delivered=False)
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_lost_provider_poll_ownership_defers_without_refund(monkeypatch):
+    from core.neironych_video_poll_gate import NeironychVideoPollLeaseLost
+
+    gen = _video(age_minutes=70)
+    monkeypatch.setattr(
+        miniapp_routes, "_reconcile_neironych_video_generation",
+        AsyncMock(side_effect=NeironychVideoPollLeaseLost("Redis owner changed")),
+    )
+    refund = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", refund)
+    assert await miniapp_routes._reconcile_generation_status(object(), gen) is gen
+    refund.assert_not_awaited()

@@ -1228,3 +1228,13 @@ Reviewer observed five P2 issues on `6ed8acf`. All five have dedicated reproduct
 5. **Concurrent user-history/scheduler polling**: new Redis NX/TTL task lease guards the *whole* provider GET + media download + settlement, from all entry points. It is released only by its unique claim token via Lua; unavailable Redis fails closed (no provider charge/refund mutation). Test uses concurrent callers and verifies provider poll only once.
 
 The original four top-level product paths remain shared: website and Mini App poll the generation and receive DB/refund state; Telegram subscribers additionally get success/failure notifications via durable outbox. No second paid POST, no migrations or changes to historical refunds. Independently await new exact SHA CI and code review before merge.
+
+
+## Codex PR #204 review round two (commit e20f0bb)
+
+Second Codex review discovered three new P2 issues (plus a redundant security finding), reproduced as red tests:
+1. Unbounded on-demand Telegram sends could outlive the DB delivery lease and generate a second message. **Fixed:** the outbox notification helper now applies the same `asyncio.wait_for` timeout regardless of caller; on timeout the receipt remains pending for bounded retry.
+2. Static Redis SET NX TTL could expire while the same task was finishing its DB settlement, permitting a duplicate provider download. **Fixed:** periodic token-checked atomic Redis lease renewal runs throughout status + download + settlement. Lost ownership cancels the polling attempt and is converted to a non-terminal retry outcome; one bad Redis renewal never takes down the scheduler.
+3. Existing Telegram bot foreground Seedance polling used `poll_until_done`, independent of the new Redis lease. It could race scheduled polling/download and refund after an ordinary elapsed timeout. **Fixed:** Telegram Neironych tasks are picked up exclusively by the new background scheduler and persistent notification outbox. Other video providers retain their foreground processing paths.
+
+Review regressions: actual bot video submission for Neironych starts no foreground polling while Higgsfield remains unchanged; 2-way Redis ownership with renewal, lost-owner cancellation/defer, successful token-only release; on-demand Telegram send timeout persists unconfirmed receipt for retry. No new paid submissions, schema changes or manual balance writes. PR review + exact SHA CI and production smoke still required.
