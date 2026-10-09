@@ -1,8 +1,11 @@
 """Production adapter from APIX Seedance product models to Neironych."""
 from __future__ import annotations
 
+import logging
 import tempfile
 import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +14,16 @@ from api.public_files import save_public_file
 from core.config import settings
 from core.neironych_seedance_contract import build_seedance_payload
 
+logger = logging.getLogger(__name__)
+
 TASK_PREFIX = "neironych:"
+
+
+@dataclass(slots=True)
+class SubmissionContext:
+    client_request_id: str
+    before_submit: Callable[[str, str], Awaitable[None]]
+    started: bool = False
 
 
 class NeironychVideoTaskFailed(RuntimeError):
@@ -137,6 +149,7 @@ async def generate_product_video(
     resolution: str | None = None,
     edit: bool = False,
     idempotency_key: str | None = None,
+    submission_context: SubmissionContext | None = None,
 ) -> str:
     provider_model, payload = build_product_payload(
         product_model=product_model,
@@ -155,6 +168,25 @@ async def generate_product_video(
             model=provider_model,
             payload=payload,
             idempotency_key=str(idempotency_key or uuid.uuid4()),
+            client_request_id=submission_context.client_request_id if submission_context else None,
+            before_submit=submission_context.before_submit if submission_context else None,
+        )
+    finally:
+        # Resource cleanup must not turn an accepted/unknown submission into
+        # a generic routing failure that could create a second paid job.
+        try:
+            await client.aclose()
+        except Exception:
+            logger.warning("Neironych submission client cleanup failed", exc_info=True)
+
+
+async def lookup_submission(
+    client_request_id: str, *, product_model: str, idempotency_key: str,
+) -> str | None:
+    client = _client()
+    try:
+        return await client.lookup_submission(
+            client_request_id, model=PRODUCT_MODELS[product_model], idempotency_key=idempotency_key,
         )
     finally:
         await client.aclose()

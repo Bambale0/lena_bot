@@ -63,6 +63,7 @@ from api.music_service import (
     normalize_music_model,
     upload_suno_voice_audio,
 )
+from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.public_files import (
     delete_public_file,
@@ -118,7 +119,15 @@ from core.neironych_video_poll_gate import (
     protect_neironych_video_poll_settlement,
 )
 from core.provider_routing import get_nano21_route
-from core.seedance_reconciliation import pause_neironych_route, public_generation_status
+from core.seedance_reconciliation import (
+    handle_submission_not_sent,
+    handle_submission_unknown,
+    make_submission_context,
+    pause_neironych_route,
+    persist_submission_result,
+    public_generation_status,
+    recover_submission_identity,
+)
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
 from db import repository as repo
@@ -699,6 +708,14 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
     age = now - created_at
 
     stored_task_id = (gen.task_id or '').strip()
+    if stored_task_id.startswith(("neironych-submit:", "web:neironych-submit:")):
+        gen = await recover_submission_identity(session, gen)
+        stored_task_id = (gen.task_id or "").strip()
+        if (gen.status not in {GenerationStatus.pending, GenerationStatus.processing}
+                or stored_task_id.startswith(("neironych-submit:", "web:neironych-submit:"))):
+            if stored_task_id.startswith("neironych-submit:"):
+                await _deliver_pending_neironych_video_notice(session, gen.id)
+            return gen
     if gen.gen_type == GenerationType.image:
         neironych_request_id = neironych_image_adapter.decode_task_id(stored_task_id)
         if neironych_request_id:
@@ -3062,6 +3079,7 @@ async def create_video_generation(
     )
     failed_generation_id = gen.id
     failed_user_id = user.id
+    submission_context = make_submission_context(session, gen.id, body.model, surface=surface)
 
     try:
         result = await video_service.generate_video(
@@ -3080,7 +3098,17 @@ async def create_video_generation(
             seed=normalized["seed"],
             callback_url=_kie_callback_url(),
             idempotency_key=f"apix-video-{gen.id}",
+            **({"neironych_submission": submission_context} if submission_context else {}),
         )
+    except NeironychPreSubmitFailure:
+        if await handle_submission_not_sent(session, failed_generation_id, submission_context):
+            raise HTTPException(status_code=503, detail="Video was not submitted; credits restored")
+        await session.refresh(gen)
+        return _gen_out(gen)
+    except NeironychSubmissionUnknown:
+        await handle_submission_unknown(session, failed_generation_id, submission_context)
+        await session.refresh(gen)
+        return _gen_out(gen)
     except Exception as exc:
         logger.error("miniapp video gen error user=%s: %s", user.id, exc)
         await session.rollback()
@@ -3088,7 +3116,23 @@ async def create_video_generation(
             await repo.add_credits(session, failed_user_id, total_credits)
         raise HTTPException(status_code=502, detail="Generation service error")
 
-    await repo.update_generation_task(session, gen.id, task_id_for_surface(result.task_id or "", surface))
+    if submission_context and submission_context.started:
+        try:
+            saved = await persist_submission_result(
+                session, gen.id, submission_context, result.task_id or "", surface=surface,
+            )
+        except Exception:
+            logger.warning("Seedance result identity persistence deferred gen=%s", failed_generation_id)
+            await handle_submission_unknown(session, failed_generation_id, submission_context)
+            saved = False
+        if not saved:
+            await session.refresh(gen)
+            return _gen_out(gen)
+    else:
+        await repo.update_generation_task(
+            session, gen.id, task_id_for_surface(result.task_id or "", surface),
+            **({"expected_task_id": ""} if submission_context else {}),
+        )
     await _mark_prompt_used_after_generation(
         session,
         prompt_id=getattr(prompt_source, "id", None),
@@ -3988,6 +4032,11 @@ async def remix_feed_post(
         else None
     )
 
+    submission_context = (
+        make_submission_context(session, gen.id, body.model, surface=surface)
+        if gen_type == "video" else None
+    )
+
     async def persist_remix_nexus_submission(request_id: str, snapshot: dict) -> None:
         saved = await repo.persist_nexus_image_submission(
             session, gen.id, task_id_for_surface(nexus_image_adapter.encode_submission_id(request_id), surface), snapshot
@@ -4025,6 +4074,7 @@ async def remix_feed_post(
                 seed=normalized_video["seed"],
                 callback_url=_kie_callback_url(),
                 idempotency_key=f"apix-video-{gen.id}",
+                **({"neironych_submission": submission_context} if submission_context else {}),
             )
         else:
             result = await image_service.generate_image(
@@ -4039,6 +4089,16 @@ async def remix_feed_post(
                 primary_provider=image_primary,
                 before_nexus_submit=persist_remix_nexus_submission,
             )
+    except NeironychPreSubmitFailure:
+        if await handle_submission_not_sent(session, failed_generation_id, submission_context):
+            raise HTTPException(status_code=503, detail="Video was not submitted; credits restored")
+        await session.refresh(gen)
+        return _gen_out(gen)
+    except NeironychSubmissionUnknown:
+        await handle_submission_unknown(session, failed_generation_id, submission_context)
+        await repo.increment_feed_share(session, gen_id)
+        await session.refresh(gen)
+        return _gen_out(gen)
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
         logger.warning(
             "Nexus remix awaiting reconciliation gen=%s idempotency_key=%s",
@@ -4069,11 +4129,24 @@ async def remix_feed_post(
                 result_urls=_generation_result_urls(gen),
                 surface=surface,
             )
+    elif submission_context and submission_context.started:
+        try:
+            saved = await persist_submission_result(
+                session, gen.id, submission_context, result.task_id or "", surface=surface,
+            )
+        except Exception:
+            logger.warning("Seedance remix identity persistence deferred gen=%s", failed_generation_id)
+            await handle_submission_unknown(session, failed_generation_id, submission_context)
+            saved = False
+        if not saved:
+            await session.refresh(gen)
+            return _gen_out(gen)
     else:
         await repo.update_generation_task(
             session, gen.id, task_id_for_surface(result.task_id or "", surface),
             **({"expected_task_id": task_id_for_surface(nexus_image_adapter.encode_submission_id(image_request_id), surface)}
                if image_request_id else {}),
+            **({"expected_task_id": ""} if submission_context else {}),
         )
     await repo.increment_feed_share(session, gen_id)
     await session.refresh(gen)

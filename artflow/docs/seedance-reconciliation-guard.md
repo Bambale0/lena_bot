@@ -21,3 +21,48 @@ Telegram receives one durable `reconciliation` notice per generation via the exi
 Dedicated runtime, routing, identity, idempotency, no-refund, notice-replacement and all-surface serialization tests live in `tests/test_seedance_uncertain_submission.py`. Browser smoke covers processing -> review -> completion and asserts no paid replay or false success toast. Existing Seedance/outbox/refund suites remain in CI.
 
 No SQL migration, price edits, key changes or manual ledger writes. Revert the PR via normal release path to roll back; private markers remain inert with old serialization. Circuit keys expire automatically. Never delete user generation rows to clear a hold.
+
+## Lost create responses (new submissions)
+
+New ordinary Seedance 2/2.5 attempts allocate a client UUID before dispatch. The
+validated Neironych request runs a one-shot repository callback immediately before
+POST. It commits the UUID, idempotency key, normalized-payload SHA-256, model and
+start time in existing generation JSON, with a reserved `neironych-submit:` local
+identity (`web:` remains preserved). This identity is never used as a provider ID.
+No migration or backfill is required; historical missing-ID rows are not modified.
+
+The client sends `X-Client-Request-Id` and the original `Idempotency-Key`. A lost
+response, malformed success, missing ID, unrecognized rejection or HTTP 5xx raises
+a typed ambiguous outcome. Neither primary nor fallback routing may turn that
+outcome into another paid POST or an ordinary refund. Existing task-identified
+uncertainty handling remains in force. Fallback remains available for validated
+local rejection or explicitly verified no-work admission error codes.
+
+An admission-persistence failure before POST is separately typed. Only a fresh
+locked active row with no identity, or this same attempt's local identity, can use
+the existing atomic failed/refund operation. An existing/superseded attempt is
+ambiguous, not refundable. `update_generation_task(expected_task_id="")` means
+compare-and-set only when the stored identity is NULL or empty; a KIE result may
+not overwrite a concurrent unknown/bound/terminal attempt.
+
+The existing scheduler and status read perform the documented authenticated GET
+`/api/v1/generations/by-client-request-id/<UUID>`. The response must match UUID,
+model and idempotency key before its real provider ID can be bound under an active
+row/expected-attempt lock. Then existing native video polling, single-winner
+completion/refund and delivery outbox apply. A late submit response cannot replace
+a task already recovered or finalized by another worker.
+
+A 404 is not proof that no job was accepted. Transport errors, 5xx, malformed or
+mismatched lookup responses keep the charge held and the visible nonterminal
+review state. The bounded scheduler retries read-only lookups at its existing
+configured cadence; it never retries POST. Existing overdue alerts expose cases
+that require operator investigation. Automatic completion requires authoritative
+provider evidence and is not guaranteed while the provider remains unavailable.
+Only confirmed terminal failure of the correctly identified native task allows
+refund. No historical balances or attempts are altered by this rollout.
+
+Contract source: https://api.xn--e1aikcel5c5a.online/docs (retrieved 2026-10-09).
+MockTransport and synthetic SQLite regressions cover accepted-then-lost responses,
+restart recovery, 404/5xx holds, identity mismatch, web suppression, pre-POST
+failure, duplicate/stale binding and exactly-once terminal settlement. These tests
+do not establish live provider availability or PostgreSQL concurrent-lock behavior.

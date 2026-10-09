@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
+from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from core.config import settings
 from core.seedance_reconciliation import neironych_route_paused
 
@@ -28,6 +29,8 @@ async def submit_seedance(
         return await kie()
     try:
         return await providers[primary]()
+    except (NeironychSubmissionUnknown, NeironychPreSubmitFailure):
+        raise
     except Exception as primary_exc:
         if secondary == "neironych" and await neironych_route_paused(product_model):
             logger.warning("Seedance fallback blocked by uncertain-submission circuit model=%s", product_model)
@@ -38,6 +41,8 @@ async def submit_seedance(
         )
         try:
             return await providers[secondary]()
+        except (NeironychSubmissionUnknown, NeironychPreSubmitFailure):
+            raise
         except Exception as fallback_exc:
             raise RuntimeError(
                 f"{product_model} failed via primary {primary} and {secondary} fallback: "

@@ -175,3 +175,175 @@ async def test_ambiguous_poll_neither_creates_nor_clears_uncertainty(recovery, r
     r.done.assert_not_awaited()
     r.failed.assert_not_awaited()
     r.client.create_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('lookup_result', [None, TimeoutError('synthetic GET failure'), 'discovered-id'])
+async def test_lost_response_identity_survives_restart_without_repost_or_refund(recovery, monkeypatch, lookup_result):
+    from core import seedance_reconciliation as recovery_core
+    request_id = 'c150cc69-0350-43aa-a4fc-a6b17388ec10'
+    r = recovery
+    monkeypatch.setattr(recovery_core, 'pause_neironych_route', AsyncMock())
+    lookup = AsyncMock(side_effect=lookup_result) if isinstance(lookup_result, Exception) else AsyncMock(return_value=lookup_result)
+    monkeypatch.setattr(neironych_seedance_runtime, 'lookup_submission', lookup)
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.task_id = None
+        await db.commit()
+        assert await repo.begin_seedance_submission(db, 73, request_id, 'synthetic-idem', 'a' * 64, product_model=gen.model)
+    # New engine/session simulates crash after durable marker, before response.
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        assert list((await db.execute(scheduler._eligible_video_query())).scalars()) == [73]
+        assert not await repo.begin_seedance_submission(db, 73, request_id, 'synthetic-idem', 'a' * 64, product_model=gen.model)
+        recovered = await recovery_core.recover_submission_identity(db, gen)
+        expected = 'neironych:discovered-id' if lookup_result == 'discovered-id' else 'neironych-submit:' + request_id
+        assert recovered.task_id == expected
+        assert db.sync.get(User, 42).credits == 100
+        assert list(db.sync.scalars(select(CreditLedgerEntry))) == []
+        assert public_generation_status(recovered) == ('processing' if lookup_result == 'discovered-id' else 'reconciliation_required')
+        # A late create response cannot supersede the already bound identity.
+        if lookup_result == 'discovered-id':
+            assert not await repo.bind_seedance_submission_task(db, 73, request_id, 'neironych:late-other')
+            assert not await repo.mark_seedance_submission_unknown(db, 73, request_id)
+    lookup.assert_awaited_once_with(request_id, product_model='bytedance/seedance-2-5', idempotency_key='synthetic-idem')
+    r.client.create_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lookup_race_with_terminal_commit_never_reopens_or_refunds(recovery, monkeypatch):
+    from core import seedance_reconciliation as recovery_core
+    r = recovery
+    request_id = 'c150cc69-0350-43aa-a4fc-a6b17388ec10'
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.task_id = None
+        await db.commit()
+        assert await repo.begin_seedance_submission(db, 73, request_id, 'synthetic-idem', 'a' * 64, product_model=gen.model)
+
+    async def found_after_terminal(*args, **kwargs):
+        with r.db() as other:
+            row = other.sync.get(Generation, 73)
+            row.status = GenerationStatus.done
+            row.task_id = 'neironych:already-finished'
+            await other.commit()
+        return 'late-result'
+
+    monkeypatch.setattr(neironych_seedance_runtime, 'lookup_submission', found_after_terminal)
+    with r.db() as db:
+        result = await recovery_core.recover_submission_identity(db, db.sync.get(Generation, 73))
+        assert result.status == GenerationStatus.done
+        assert result.task_id == 'neironych:already-finished'
+        assert db.sync.get(User, 42).credits == 100
+        assert list(db.sync.scalars(select(CreditLedgerEntry))) == []
+    r.client.create_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_new_submission_callback_commits_once_and_preserves_web_surface(recovery):
+    from api.neironych_seedance import NeironychSubmissionUnknown
+    from core import seedance_reconciliation as recovery_core
+    r = recovery
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.task_id = None
+        await db.commit()
+        context = recovery_core.make_submission_context(db, gen.id, gen.model, surface='web')
+        await context.before_submit('synthetic-idem', 'b' * 64)
+        assert context.started
+        with r.db() as check:
+            persisted = check.sync.get(Generation, 73)
+            assert persisted.task_id == 'web:neironych-submit:' + context.client_request_id
+        with pytest.raises(NeironychSubmissionUnknown):
+            await context.before_submit('synthetic-idem', 'b' * 64)
+        assert await recovery_core.persist_submission_result(db, 73, context, 'neironych:response', surface='web')
+        assert gen.task_id == 'web:neironych:response'
+
+
+@pytest.mark.asyncio
+async def test_failed_prepost_commit_does_not_allow_post_or_mark_context_started(recovery):
+    from core import seedance_reconciliation as recovery_core
+    r = recovery
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.task_id = None
+        await db.commit()
+        context = recovery_core.make_submission_context(db, gen.id, gen.model)
+        db.commit = AsyncMock(side_effect=RuntimeError('synthetic failed commit'))
+        with pytest.raises(RuntimeError, match='synthetic failed commit'):
+            await context.before_submit('synthetic-idem', 'b' * 64)
+        assert not context.started
+    with r.db() as check:
+        assert check.sync.get(Generation, 73).task_id is None
+    r.client.create_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('terminal', ['done', 'failed'])
+async def test_discovered_identity_uses_native_settlement_once(recovery, monkeypatch, terminal):
+    from core import seedance_reconciliation as recovery_core
+    r = recovery
+    request_id = 'c150cc69-0350-43aa-a4fc-a6b17388ec10'
+    lookup = AsyncMock(return_value='discovered-id')
+    monkeypatch.setattr(neironych_seedance_runtime, 'lookup_submission', lookup)
+    monkeypatch.setattr(recovery_core, 'pause_neironych_route', AsyncMock())
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.task_id = None
+        await db.commit()
+        assert await repo.begin_seedance_submission(db, 73, request_id, 'synthetic-idem', 'b' * 64, product_model=gen.model)
+    r.client.get_video.return_value = provider_status(terminal, 'confirmed failure' if terminal == 'failed' else '')
+    with r.db() as db:
+        result = await run_reconciler(db)
+        assert result.status.value == terminal
+        assert db.sync.get(User, 42).credits == (128 if terminal == 'failed' else 100)
+        assert len(list(db.sync.scalars(select(CreditLedgerEntry)))) == int(terminal == 'failed')
+    with r.db() as db:
+        assert (await run_reconciler(db)).status.value == terminal
+        assert not await repo.bind_seedance_submission_task(db, 73, request_id, 'neironych:late')
+        assert db.sync.get(User, 42).credits == (128 if terminal == 'failed' else 100)
+        assert len(list(db.sync.scalars(select(CreditLedgerEntry)))) == int(terminal == 'failed')
+    lookup.assert_awaited_once()
+    r.client.get_video.assert_awaited_once()
+    r.client.create_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unsubmitted_fallback_update_cannot_overwrite_durable_marker(recovery):
+    r = recovery
+    request_id = 'c150cc69-0350-43aa-a4fc-a6b17388ec10'
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.task_id = None
+        await db.commit()
+        assert await repo.begin_seedance_submission(db, 73, request_id, 'synthetic-idem', 'a' * 64, product_model=gen.model)
+        assert not await repo.update_generation_task(db, 73, 'kie:stale', expected_task_id='')
+        assert gen.task_id == 'neironych-submit:' + request_id
+        assert db.sync.get(User, 42).credits == 100
+        assert list(db.sync.scalars(select(CreditLedgerEntry))) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('marker_state', ['none', 'same', 'other', 'bound', 'done'])
+async def test_proven_prepost_failure_refunds_only_owned_unsubmitted_attempt(recovery, marker_state):
+    from core import seedance_reconciliation as recovery_core
+    r = recovery
+    request_id = 'c150cc69-0350-43aa-a4fc-a6b17388ec10'
+    context = SimpleNamespace(client_request_id=request_id, started=False)
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.task_id = None
+        await db.commit()
+        if marker_state != 'none':
+            owned_id = request_id if marker_state != 'other' else 'd150cc69-0350-43aa-a4fc-a6b17388ec10'
+            assert await repo.begin_seedance_submission(db, 73, owned_id, 'synthetic-idem', 'a' * 64, product_model=gen.model)
+        if marker_state == 'bound':
+            assert await repo.bind_seedance_submission_task(db, 73, request_id, 'neironych:paid')
+        if marker_state == 'done':
+            gen.status = GenerationStatus.done
+            await db.commit()
+        expected_refund = marker_state in {'none', 'same'}
+        assert await recovery_core.handle_submission_not_sent(db, 73, context) is expected_refund
+        assert not await recovery_core.handle_submission_not_sent(db, 73, context)
+        assert db.sync.get(User, 42).credits == (128 if expected_refund else 100)
+        assert len(list(db.sync.scalars(select(CreditLedgerEntry)))) == int(expected_refund)

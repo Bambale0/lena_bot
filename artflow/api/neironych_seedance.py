@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
+import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -39,6 +42,48 @@ class NeironychSeedanceError(RuntimeError):
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload
+
+
+class NeironychSubmissionUnknown(NeironychSeedanceError):
+    """A POST may have created paid work. Never submit through another provider."""
+
+    def __init__(self, client_request_id: str, idempotency_key: str) -> None:
+        self.client_request_id = client_request_id
+        self.idempotency_key = idempotency_key
+        super().__init__("Neironych video submission outcome is unknown; reconciliation required")
+
+
+class NeironychPreSubmitFailure(NeironychSeedanceError):
+    """This invocation did not POST; callers must lock and verify refund ownership."""
+
+    def __init__(self, client_request_id: str, idempotency_key: str) -> None:
+        self.client_request_id = client_request_id
+        self.idempotency_key = idempotency_key
+        super().__init__("Neironych video submission was not sent: durable admission failed")
+
+
+# Verified admission errors from Neironych inference/router.py, service.py and
+# api/dependencies.py. HTTP status alone is never evidence of no paid work.
+_DEFINITE_REJECTIONS = {
+    401: frozenset({"api_key_required", "invalid_api_key"}),
+    402: frozenset({"insufficient_balance"}),
+    403: frozenset({"partner_not_active"}),
+    404: frozenset({"model_not_available", "unknown_protocol"}),
+    409: frozenset({"capability_mismatch"}),
+    415: frozenset({"multipart_not_supported_for_protocol"}),
+    422: frozenset({"invalid_request_contract", "invalid_idempotency_key", "invalid_client_request_id"}),
+}
+
+
+def _definite_rejection(response: httpx.Response) -> bool:
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    # The verified admission path emits FastAPI detail strings, not arbitrary
+    # provider error/message bodies or HTML proxy responses.
+    code = body.get("detail") if isinstance(body, dict) else None
+    return isinstance(code, str) and code in _DEFINITE_REJECTIONS.get(response.status_code, ())
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,19 +201,6 @@ def _safe_error(response: httpx.Response) -> NeironychSeedanceError:
         status_code=response.status_code,
         payload=payload,
     )
-
-
-def _request_id(payload: Any) -> str:
-    if not isinstance(payload, dict):
-        return ""
-    for source in (payload, payload.get("data")):
-        if not isinstance(source, dict):
-            continue
-        for key in ("request_id", "id", "video_id"):
-            value = source.get(key)
-            if value:
-                return str(value).strip()
-    return ""
 
 
 def _status_source(payload: dict[str, Any]) -> dict[str, Any]:
@@ -362,6 +394,8 @@ class NeironychSeedanceClient:
         model: str,
         payload: dict[str, Any],
         idempotency_key: str,
+        client_request_id: str | None = None,
+        before_submit: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> str:
         try:
             canonical_model = canonical_seedance_model(model)
@@ -370,37 +404,85 @@ class NeironychSeedanceClient:
         idem = str(idempotency_key or "").strip()
         if not 8 <= len(idem) <= 160:
             raise NeironychSeedanceError("Idempotency-Key должен содержать 8–160 символов")
-
         try:
+            rid = str(uuid.UUID(client_request_id)) if client_request_id is not None else str(uuid.uuid4())
             body = normalize_seedance_request(canonical_model, payload)
-        except SeedanceContractError as exc:
+        except (ValueError, SeedanceContractError) as exc:
             raise NeironychSeedanceError(str(exc), status_code=422) from exc
         body["model"] = model
+        headers = {
+            **self._auth_headers(),
+            "Content-Type": "application/json",
+            "Idempotency-Key": idem,
+            "X-Client-Request-Id": rid,
+        }
+        payload_sha256 = hashlib.sha256(
+            json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        # Persist correlation before sending. No retries. A callback refusal may
+        # identify prior paid work; preserve Unknown rather than authorizing refund.
+        if before_submit is not None:
+            try:
+                await before_submit(idem, payload_sha256)
+            except NeironychSubmissionUnknown:
+                raise
+            except Exception as exc:
+                raise NeironychPreSubmitFailure(rid, idem) from exc
+        try:
+            response = await self._client.post("/v1/videos/generations", headers=headers, json=body)
+            if not response.is_success:
+                if _definite_rejection(response):
+                    raise _safe_error(response)
+                raise NeironychSubmissionUnknown(rid, idem)
+            response_payload = response.json()
+            if not isinstance(response_payload, dict):
+                raise ValueError("invalid response object")
+            # Native videos/generations returns request_id, optionally UUID echo.
+            request_id = response_payload.get("request_id")
+            if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", request_id):
+                raise ValueError("missing or invalid request_id")
+            if response_payload.get("client_request_id", rid) != rid:
+                raise ValueError("client request identity mismatch")
+            return request_id
+        except NeironychSeedanceError:
+            raise
+        except Exception as exc:
+            raise NeironychSubmissionUnknown(rid, idem) from exc
 
-        response = await self._client.post(
-            "/v1/videos/generations",
-            headers={
-                **self._auth_headers(),
-                "Content-Type": "application/json",
-                "Idempotency-Key": idem,
-            },
-            json=body,
-        )
-        if not response.is_success:
+    async def lookup_submission(
+        self, client_request_id: str, *, model: str, idempotency_key: str,
+    ) -> str | None:
+        """Read-only correlation lookup. Missing/unavailable is never terminal."""
+        rid = str(uuid.UUID(client_request_id))
+        try:
+            response = await self._client.get(
+                f"/api/v1/generations/by-client-request-id/{rid}", headers=self._auth_headers(),
+            )
+        except httpx.RequestError as exc:
+            raise NeironychSeedanceError("Neironych reconciliation unavailable") from exc
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
             raise _safe_error(response)
         try:
-            response_payload = response.json()
-        except json.JSONDecodeError as exc:
-            raise NeironychSeedanceError(
-                "Нейроныч API вернул некорректный JSON создания видео",
-                status_code=response.status_code,
-            ) from exc
-        request_id = _request_id(response_payload)
-        if not request_id:
-            raise NeironychSeedanceError(
-                "Нейроныч API принял запрос, но не вернул request_id"
-            )
-        return request_id
+            body = response.json()
+            if not isinstance(body, dict):
+                raise ValueError("invalid response object")
+            request_id = body.get("id")
+            if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", request_id):
+                raise ValueError("invalid generation id")
+            if body.get("client_request_id") != rid or body.get("model_slug") != model:
+                raise ValueError("generation identity mismatch")
+            if body.get("idempotency_key") != idempotency_key:
+                raise ValueError("generation idempotency mismatch")
+            if body.get("status") not in {
+                "completed", "failed", "cancelled", "timeout", "queued", "submitting",
+                "processing", "running", "reconciliation_required",
+            }:
+                raise ValueError("unknown generation status")
+            return request_id
+        except (ValueError, TypeError) as exc:
+            raise NeironychSeedanceError("Invalid Neironych reconciliation response") from exc
 
     async def get_video(self, request_id: str) -> VideoStatus:
         value = str(request_id or "").strip()

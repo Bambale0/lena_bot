@@ -11,7 +11,11 @@ import pytest
 from api import miniapp_routes, neironych_seedance_runtime, seedance_provider_routing
 from db import repository as repo
 from db.models import GenerationStatus, GenerationType
+from tests import test_feed_remix_prompt_security as launch_fixtures
 from tests.test_neironych_video_notice_outbox import FakeSession
+
+api_launch = launch_fixtures.api_launch
+video_launch = launch_fixtures.video_launch
 
 
 def generation():
@@ -499,3 +503,135 @@ def test_standalone_site_review_to_terminal_polling_predicate():
         ["node", "-e", "\n".join(functions) + checks], capture_output=True, text=True, timeout=5
     )
     assert result.returncode == 0, result.stderr
+
+@pytest.mark.asyncio
+async def test_durable_submission_is_single_use_and_late_results_cannot_clobber(monkeypatch):
+    gen = generation()
+    gen.task_id = None
+    session = FakeSession(gen)
+    monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
+    request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
+    assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
+    assert gen.task_id == 'neironych-submit:' + request_id
+    assert not await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
+    assert await repo.mark_seedance_submission_unknown(session, gen.id, request_id)
+    assert gen.credits_spent == 70
+    assert await repo.bind_seedance_submission_task(session, gen.id, request_id, 'neironych:found')
+    assert not await repo.mark_seedance_submission_unknown(session, gen.id, request_id)
+    assert not await repo.bind_seedance_submission_task(session, gen.id, request_id, 'neironych:late-other')
+    assert gen.task_id == 'neironych:found'
+
+@pytest.mark.asyncio
+async def test_terminal_submission_marker_is_never_overwritten(monkeypatch):
+    gen = generation()
+    gen.task_id = None
+    session = FakeSession(gen)
+    monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
+    request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
+    assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
+    gen.status = GenerationStatus.done
+    original = gen.input_params
+    assert not await repo.mark_seedance_submission_unknown(session, gen.id, request_id)
+    assert not await repo.bind_seedance_submission_task(session, gen.id, request_id, 'neironych:late')
+    assert gen.input_params == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["launch", "remix"])
+@pytest.mark.parametrize("surface", ["miniapp", "web"])
+@pytest.mark.parametrize("not_sent", [False, True])
+async def test_new_seedance_api_submission_outcome_handling(api_launch, monkeypatch, operation, surface, not_sent):
+    from fastapi import HTTPException
+
+    from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
+    from core.seedance_reconciliation import RECONCILIATION_KEY
+
+    route = api_launch.routes
+    model = "bytedance/seedance-2"
+    gen = api_launch.save.return_value
+    gen.model, gen.gen_type, gen.task_id = model, GenerationType.video, "neironych-submit:synthetic"
+    gen.input_params = "{}"
+    api_launch.source.gen_type = GenerationType.image
+    api_launch.source.model = model
+    context = SimpleNamespace(client_request_id="synthetic", started=True)
+    monkeypatch.setattr(route, "make_submission_context", lambda *_a, **_k: context)
+
+    async def hold(*_args):
+        gen.input_params = json.dumps({RECONCILIATION_KEY: {"required": True}})
+        return True
+
+    held = AsyncMock(side_effect=hold)
+    monkeypatch.setattr(route, "handle_submission_unknown", held)
+    fail, refund = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(route.repo, "fail_generation", fail)
+    monkeypatch.setattr(route.repo, "add_credits", refund)
+    no_post = AsyncMock(return_value=True)
+    monkeypatch.setattr(route, "handle_submission_not_sent", no_post)
+    error = NeironychPreSubmitFailure if not_sent else NeironychSubmissionUnknown
+    api_launch.generate.side_effect = error("synthetic", "apix-video-99")
+    if operation == "launch":
+        body = route.VideoGenRequest(model=model, prompt="synthetic scene", duration=5)
+        call = route.create_video_generation(body, api_launch.session, api_launch.user, surface)
+    else:
+        body = route.FeedRemixRequest(model=model, change_request="make the coat blue", duration=5)
+        call = route.remix_feed_post(77, body, api_launch.session, api_launch.user, surface)
+    if not_sent:
+        with pytest.raises(HTTPException) as raised:
+            await call
+        assert raised.value.status_code == 503
+        no_post.assert_awaited_once()
+        held.assert_not_awaited()
+    else:
+        result = await call
+        assert result.status == "reconciliation_required"
+        held.assert_awaited_once()
+        no_post.assert_not_awaited()
+    assert api_launch.generate.await_args.kwargs["neironych_submission"] is context
+    fail.assert_not_awaited()
+    refund.assert_not_awaited()
+    route.repo.update_generation_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["launch", "repeat"])
+@pytest.mark.parametrize("not_sent", [False, True])
+async def test_new_seedance_bot_submission_outcome_handling(video_launch, monkeypatch, operation, not_sent):
+    from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
+    from bot.handlers import video_gen
+
+    model = "bytedance/seedance-2"
+    fixture = video_launch
+    fixture.data.update(model_key=model, mode="text", image_url=None)
+    fixture.kwargs.update(source_feed_gen_id=None, hidden_feed_prompt=False, prompt="synthetic scene")
+    context = SimpleNamespace(client_request_id="synthetic", started=True)
+    monkeypatch.setattr(video_gen, "make_submission_context", lambda *_a, **_k: context)
+    held, shown = AsyncMock(return_value=True), AsyncMock()
+    monkeypatch.setattr(video_gen, "handle_submission_unknown", held)
+    monkeypatch.setattr(video_gen, "_show_video_submission_review", shown)
+    fixture.repo.fail_generation_and_refund = AsyncMock()
+    no_post = AsyncMock(return_value=True)
+    monkeypatch.setattr(video_gen, "handle_submission_not_sent", no_post)
+    error = NeironychPreSubmitFailure if not_sent else NeironychSubmissionUnknown
+    fixture.service.generate_video.side_effect = error("synthetic", "apix-video-99")
+    if operation == "launch":
+        assert await video_gen._launch_video_generation_from_state(**fixture.kwargs) is (not not_sent)
+    else:
+        previous = SimpleNamespace(id=88, user_id=42, prompt="synthetic scene", model=model,
+                                   source_feed_gen_id=None, input_params={})
+        fixture.repo.get_generation_by_id.return_value = previous
+        monkeypatch.setattr("bot.handlers.genjutsu_replace.restore_result", AsyncMock(return_value=False))
+        monkeypatch.setattr(video_gen, "_video_repeat_params_for_generation", AsyncMock(return_value=fixture.data))
+        call = SimpleNamespace(data="regen:video:88", answer=AsyncMock(), message=AsyncMock())
+        await video_gen.cb_regen_video(call, fixture.kwargs["session"], fixture.kwargs["state"],
+                                      fixture.kwargs["db_user"], fixture.kwargs["bot"])
+    assert fixture.service.generate_video.await_args.kwargs["neironych_submission"] is context
+    if not_sent:
+        no_post.assert_awaited_once()
+        held.assert_not_awaited()
+        shown.assert_not_awaited()
+    else:
+        no_post.assert_not_awaited()
+        held.assert_awaited_once()
+        shown.assert_awaited_once()
+    fixture.repo.fail_generation_and_refund.assert_not_awaited()
+    fixture.repo.update_generation_task.assert_not_awaited()
