@@ -98,11 +98,21 @@ def _missing_video_completion(text: str) -> bool:
     Quotes and descriptions of empty screens inside an actual video must stay
     valid prompts; their absence is an in-scene fact, not an upload failure.
     """
-    opening = " ".join(text.casefold().split())
+    # Build a validation-only view. Markdown is presentation, not evidence
+    # of success; preserve the original text when returning a valid prompt.
+    plain = text.casefold().translate(str.maketrans("", "", "`*_#"))
+    opening = " ".join(plain.split())
     opening = re.sub(
-        r"^[`*_#\s]*a\s*[.)]\s*ready-to-use prompt[`*_#\s:—–-]*",
-        "",
-        opening,
+        r"^a\s*[.)]\s*ready-to-use prompt[\s:—–-]*", "", opening,
+    )
+    # A quoted caption describes text inside the visible scene. Do not let
+    # it override source-absence checks, but retain every assertion outside
+    # the quote so a genuine missing-input refusal cannot hide behind one.
+    opening = re.sub(
+        r"(\b(?:надпись\w*|текст\w*|табличк\w*|caption|label|sign|inscription|text)"
+        r"(?:\s+(?:says|reads|reading))?\s*[:—–-]?\s*)"
+        r"(?:«[^»]*»|“[^”]*”|‘[^’]*’|\"[^\"]*\"|'[^']*')",
+        r"\1[scene-caption]", opening,
     )[:420]
 
     if opening.startswith((

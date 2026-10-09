@@ -295,3 +295,37 @@ def test_video_prompt_rejects_invalid_frame_rate(invalid):
         video_prompt_service._video_prompt_chat_messages(
             "https://cdn.example.test/movie.mp4", fps=invalid,
         )
+
+
+@pytest.mark.parametrize("heading", [
+    "A. **Ready-to-use prompt**", "**A**. Ready-to-use prompt",
+    "A. _Ready-to-use prompt_", "### A. **Ready-to-use prompt**",
+    "A. Ready-to-use **prompt**", "A. `Ready-to-use prompt`",
+])
+@pytest.mark.parametrize("failure", [
+    "Видео недоступно для анализа.",
+    "I cannot analyze the video because it was not provided.",
+])
+def test_missing_video_under_formatted_heading_is_not_billable(heading, failure):
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._validated_prompt_text(heading + "\n" + failure)
+
+
+@pytest.mark.parametrize("text", [
+    "Я не могу прочитать надпись «Исходное видео недоступно на мониторе»; камера приближается к экрану.",
+    'Я не могу прочитать надпись "Исходное видео недоступно на мониторе"; камера приближается к экрану.',
+    "I cannot read the caption ‘The source video is unavailable on the monitor’; the camera pans right.",
+    'I cannot read the label "The source video is unavailable"; the camera moves toward the display.',
+    "A. **Ready-to-use prompt**\nКамера приближается к табличке «Видео отсутствует».",
+])
+def test_quoted_source_labels_are_scene_content_not_provider_refusals(text):
+    assert video_prompt_service._validated_prompt_text(text) == text
+
+
+def test_scene_quote_does_not_hide_actual_source_refusal_outside_it():
+    text = (
+        'I cannot analyze the source video because the video was not provided. '
+        'The caption "some quoted scene label" is not a substitute for the video.'
+    )
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._validated_prompt_text(text)
