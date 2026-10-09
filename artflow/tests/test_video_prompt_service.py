@@ -242,6 +242,8 @@ def test_video_prompt_preserves_valid_prompts_and_quoted_errors(text) -> None:
     "Входное видео не было прикреплено к запросу.",
     "The source footage is missing; please attach a video.",
     "The source video is unavailable on the monitor, so I cannot analyze it.",
+    "I cannot analyze the source video because the video is unavailable on the monitor.",
+    "Я не могу проанализировать исходное видео: видео недоступно на мониторе.",
     "Исходное видео недоступно на мониторе, поэтому не могу проанализировать его.",
     "Загруженное видео отсутствует на экране, пришлите исходный файл для анализа.",
 ])

@@ -1369,3 +1369,7 @@ Further Code Review P2s reproduced RED before code changes:
 ### Resume verification: explicit source precedence
 
 2026-10-09: resumed at 3a584ca with the prior uncommitted fix intact. Re-ran 86 shared provider/surface tests, Ruff, compile and diff checks successfully. PRRT_kwDOSSmOms6qqGWm is fixed: explicit source/uploaded qualifiers override in-scene display exemption. No unrelated source or balances changed. Fresh exact-SHA CI and review required before normal auto-deploy.
+
+### Source-qualified refusal ordering (resume review)
+
+PRRT_kwDOSSmOms6qtsOY on 7b01f6b reproduced two further source-qualified refusals after a conversational preamble. Source qualification is now detected within a refusal opening before applying the in-scene display exception, reusing the same refusal predicate rather than creating another independent ordering rule. Exact English and Russian examples failed before this patch; normal quoted/on-screen scene cases remain in the regression suite. No tariff or ledger change.

@@ -117,12 +117,24 @@ def _missing_video_completion(text: str) -> bool:
     # Absence *on a TV/monitor in the recorded scene* is valid visual
     # content. Explicit "source/uploaded/input video" must override this
     # exception: those qualifiers refer to the file supplied for inference.
+    refusal_opening = opening.startswith((
+        "невозможно ", "не могу ", "я не могу ", "я не вижу ",
+        "к сожалению,", "извините,", "sorry,",
+        "i cannot ", "i can't ", "unable to ",
+    ))
     explicit_source_opening = opening.startswith((
         "исходное видео ", "входное видео ", "загруженное видео ",
         "исходные кадры ", "прикреплённое видео ", "исходный файл ",
         "source video ", "the source video ", "uploaded video ",
         "input video ", "source footage ", "the source footage ",
     ))
+    if refusal_opening and re.search(
+        r"(?:source|uploaded|input|provided)\s+(?:video|footage|file)|"
+        r"(?:исходн\w*|входн\w*|загруженн\w*|прикрепл[её]нн\w*)"
+        r"\s+(?:видео|кадры|файл)",
+        opening,
+    ):
+        explicit_source_opening = True
     if not explicit_source_opening and re.search(
         r"(?:видео\s+(?:отсутству\w*|недоступ\w*)\s+"
         r"(?:на|в)\s+(?:экране|мониторе|телевизоре)|"
@@ -135,11 +147,6 @@ def _missing_video_completion(text: str) -> bool:
     # If a scene contains "Видеоматериал отсутствует" as a sign or caption,
     # it is not a statement about the input. Recognize these phrases only
     # when the provider's *answer* opens with an input noun or a refusal.
-    refusal_opening = opening.startswith((
-        "невозможно ", "не могу ", "я не могу ", "я не вижу ",
-        "к сожалению,", "извините,", "sorry,",
-        "i cannot ", "i can't ", "unable to ",
-    ))
     source_opening = opening.startswith((
         "видео ", "видеоматериал ", "кадры ", "исходный файл ",
         "исходное видео ", "входное видео ", "загруженное видео ",
