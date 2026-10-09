@@ -212,3 +212,12 @@ def test_identity_transfer_rejects_user_prompt_that_expands_past_provider_limit(
 
     with pytest.raises(ValueError, match="30,000"):
         build_identity_transfer_prompt("x" * 30_000, image_count=3)
+
+
+@pytest.fixture(autouse=True)
+def isolate_seedance_admission(monkeypatch):
+    # These tests cover provider payloads, not live Redis coordination.
+    from unittest.mock import AsyncMock
+
+    from api import seedance_provider_routing
+    monkeypatch.setattr(seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False))

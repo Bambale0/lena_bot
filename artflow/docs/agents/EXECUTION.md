@@ -1373,3 +1373,35 @@ Further Code Review P2s reproduced RED before code changes:
 ### Source-qualified refusal ordering (resume review)
 
 PRRT_kwDOSSmOms6qtsOY on 7b01f6b reproduced two further source-qualified refusals after a conversational preamble. Source qualification is now detected within a refusal opening before applying the in-scene display exception, reusing the same refusal predicate rather than creating another independent ordering rule. Exact English and Russian examples failed before this patch; normal quoted/on-screen scene cases remain in the regression suite. No tariff or ledger change.
+
+
+
+## Seedance uncertainty circuit and explicit user review state (2026-10-09)
+
+Baseline main 427e57e. New isolated branch fix/apix-seedance-uncertain-routing-20261009.
+Read-only evidence: two APIX generations (identifiers and amounts redacted) remain processing for over two hours. Their matching upstream generations (identifiers redacted) are reconciliation_required with submission_outcome_unknown, no external task ID/polls. Worker logs show ArgoLink POST 503 for both. The API hides internal review status behind pending; APIX ignores its error and continues displaying normal processing. No completed output exists. Reconciler itself runs every 90s.
+
+Scope: typed nonterminal review outcome; persist manual-review marker and one durable notification (same outbox, no money mutation); expose reconciliation_required to site/Mini App/Telegram rather than claiming normal creation. Protect NEW requests from the known-uncertain Neironych model via a bounded, model/environment-scoped Redis circuit consulted BEFORE any paid submission. While paused, use existing KIE provider only, never resubmit the uncertain jobs or fall back into the paused route. Do not refund ambiguous provider expense or user balances without explicit financial authorization. Preserve existing per-generation atomic success/refund and final notice behavior.
+
+Acceptance: runtime raises typed review exception for exact pending+submission_outcome_unknown; normal pending/transport errors remain distinct. DB marker+review outbox written under expected-task/active-state row lock and only once; terminal transitions still replace review notice. Model-local circuit is refreshed while unresolved; default cooldown configured, no change to user tariffs. New-request routing selects KIE BEFORE any POST and fails closed if admission check cannot run; old job never retried. Browser labels review without success toast and supports later refresh; bot reports no receipt/possible charge honestly. Existing success/failure and no-double-refund regressions pass. Independent PR review, exact-SHA CI and normal auto-deploy, then read-only real-task verification required.
+
+Skills: repository systematic-debugging, test-driven-development and verification-before-completion; claw release-hardening; no schema/price/key change.
+Progress: [x] reproduction/trace and scope; [ ] RED tests; [ ] implementation; [ ] CI/review/deploy and live verification.
+
+### Verification progress
+- RED: five independent failures proved unknown provider status was ignored, paused route was still used/re-entered, review notice could not be claimed and public status stayed normal processing.
+- GREEN: 140 focused new/existing video tests and exact maintained backend CI gate (532 cases at this point) passed with intentionally unreachable Redis in the test environment. New module tests mock real Redis explicitly; no paid requests or user balance changes.
+- TypeScript typecheck and Vite build passed. Local browser execution is unavailable: installed Chromium cannot load libatk-1.0.so.0 on this production host; do not install OS packages into production just to satisfy a test. Added the real browser regression to the existing four-device CI suite, which installs required dependencies on its runner. Browser assertions still need CI verification.
+- Remaining: fresh full changed-file lint after test additions, PR review, exact-SHA CI and normal auto-deploy. Main remains unmodified.
+
+### Exact CI isolation correction (2f76219)
+
+GitHub navigation and provider-contract jobs failed because two more provider/Telegram test modules invoked the newly added Redis admission seam without mocking it: test_genjutsu_replace_bot (three scenarios) and test_provider_spec_p0 (same-model fallback). The complete CI trace shows localhost:6379 refused, not a provider payload or product failure. These modules now mock the external admission seam as other provider tests do; dedicated circuit/Redis-failure regressions remain real unit tests of that seam. Local tests passed before isolation because tests/conftest.py overwrites REDIS_URL with localhost:6379, where this host has Redis. Thus the earlier wording that an environment override forced Redis unavailable was inaccurate; use the dedicated failure-injection test as proof of fail-closed behavior and CI as proof no Redis service is needed. No production or financial behavior changed in this test-only correction.
+
+### Review of 2f76219 and corrective tests
+
+- P1 durable admission: a Redis write failure after DB review commit must not reopen new submissions. Admission now checks active model/provider-specific PostgreSQL review markers when the Redis key is absent; DB errors fail closed. Added lost-cache and database-query/exception regressions.
+- P2 notice ordering: nonterminal review notices now reload status and claim token immediately before send, suppressing a notice already replaced by terminal completion/refund. Red-to-green test simulates terminal completion after claim but before message send; stale acknowledgement cannot erase terminal notice.
+- P1 standalone website: GenerationCard now uses the same review projection as Mini App/realtime, and landing/js/prototype-premium.js labels the state, keeps it pollable and displays held-credit/support guidance. The original oversight was that site REST does not exclusively use the Mini App serializer.
+- P2 AppV4: its separate ACTIVE_STATUSES set now includes review so later terminal results refresh without reloading. Both standalone/V4 predicates have executable JavaScript regressions in addition to browser CI coverage for the modern UI.
+- P1 evidence privacy: customer generation identifiers and amounts introduced in this execution entry were redacted from the final tree. Delivery uses the mandatory squash merge; no force-push or rewriting protected main history was attempted. Actual IDs remain only in authorized operational systems/chat, not new source/test fixtures.

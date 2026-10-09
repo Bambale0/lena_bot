@@ -15,7 +15,7 @@ import {
 import { demoFeed, demoImageModels, demoPlans, demoPrompts, demoUser, demoVideoModels } from "./demoData.js";
 
 const BUILD_ID = "20260801-apix-v4-clean-shell";
-const ACTIVE_STATUSES = new Set(["pending", "processing", "queued", "running"]);
+const ACTIVE_STATUSES = new Set(["pending", "processing", "queued", "running", "reconciliation_required"]);
 const FINISHED_STATUSES = new Set(["done", "completed", "success"]);
 const FAILED_STATUSES = new Set(["failed", "error", "cancelled"]);
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
@@ -320,7 +320,8 @@ function Result({ result, onOpen, onPublish, onReuse }) {
   const status = String(result?.status || "pending").toLowerCase();
   const ready = FINISHED_STATUSES.has(status) || urls.length > 0;
   const failed = FAILED_STATUSES.has(status);
-  return <section className="v4Result"><div className="v4TitleRow"><h1>Результат</h1><span>{ready ? "готово" : failed ? "ошибка" : "в процессе"}</span></div><div className="v4ResultStage">{ready && src ? (playableVideo(src) ? <video src={src} controls playsInline /> : <img src={src} alt="" />) : <div className="v4Pending"><Icon name={failed ? "close" : "sparkle"} /><b>{failed ? "Не удалось" : "Генерация идёт"}</b><p>{failed ? result?.error || "Попробуй изменить параметры" : "Статус обновится автоматически"}</p></div>}</div><p className="v4ResultPrompt">{result?.prompt || "Готовая работа появится здесь."}</p><div className="v4ResultActions"><button type="button" onClick={() => onOpen(result)}>Открыть</button><button type="button" onClick={() => onReuse(result)}>Ещё вариант</button><button type="button" className="v4Primary" onClick={() => onPublish(result)}>В ленту</button></div></section>;
+  const reviewing = status === "reconciliation_required";
+  return <section className="v4Result"><div className="v4TitleRow"><h1>Результат</h1><span>{reviewing ? "на проверке у поставщика" : ready ? "готово" : failed ? "ошибка" : "в процессе"}</span></div><div className="v4ResultStage">{ready && src ? (playableVideo(src) ? <video src={src} controls playsInline /> : <img src={src} alt="" />) : <div className="v4Pending"><Icon name={failed ? "close" : "sparkle"} /><b>{reviewing ? "Требуется проверка запуска" : failed ? "Не удалось" : "Генерация идёт"}</b><p>{reviewing ? "Поставщик не подтвердил запуск. Для отмены и возврата обратитесь в поддержку с ID задачи." : failed ? result?.error || "Попробуй изменить параметры" : "Статус обновится автоматически"}</p></div>}</div><p className="v4ResultPrompt">{result?.prompt || "Готовая работа появится здесь."}</p><div className="v4ResultActions"><button type="button" onClick={() => onOpen(result)}>Открыть</button><button type="button" onClick={() => onReuse(result)}>Ещё вариант</button><button type="button" className="v4Primary" onClick={() => onPublish(result)}>В ленту</button></div></section>;
 }
 
 function Viewer({ item, onClose, onRemix, onShare }) {
