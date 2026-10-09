@@ -71,6 +71,7 @@ test("smaller capacity does not truncate inputs and blocks launch", async ({ pag
   await expect(page.getByText("second.png", { exact: true })).toBeVisible();
   await expect(submit(page)).toBeDisabled();
   await expect(page.getByTestId("draft-media-conflicts")).toContainText("Материалы сохранены");
+  await expect(page.getByTestId("draft-media-conflicts").locator("p")).toHaveCount(1);
   expect(posts).toHaveLength(0);
   await page.screenshot({ path: testInfo.outputPath("preserved-conflict.png"), animations: "disabled" });
   await page.reload(); await openEditor(page);

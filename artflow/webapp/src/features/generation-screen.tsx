@@ -333,7 +333,6 @@ function GenerationScreen({
             {preserveMedia && mediaInspection.issues.length > 0 && <div className="ux2-inline-notice" data-testid="draft-media-conflicts" role="alert">
               <div className="grid gap-2"><strong>Материалы сохранены</strong>
                 {mediaInspection.issues.map(issue => <p key={issue.code}>{issue.message}</p>)}
-                <p>Исключите лишние фото из запуска или смените настройки. Материалы останутся в черновике.</p>
               </div>
             </div>}
 
