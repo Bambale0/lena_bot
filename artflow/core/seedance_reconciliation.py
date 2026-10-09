@@ -85,7 +85,9 @@ async def _db_has_unresolved_seedance(product_model: str) -> bool:
 
     review_marker = (
         r'"neironych_video_reconciliation"\s*:\s*\{[^}]*'
-        r'"required"\s*:\s*true\b'
+        # PostgreSQL ARE uses \b for backspace, not Python's word boundary.
+        # A JSON boolean is followed by whitespace and a comma or closing brace.
+        r'"required"\s*:\s*true\s*[,}]'
     )
     query = select(select(Generation.id).where(
         Generation.model == product_model,

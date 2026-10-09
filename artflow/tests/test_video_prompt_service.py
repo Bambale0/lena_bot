@@ -329,3 +329,23 @@ def test_scene_quote_does_not_hide_actual_source_refusal_outside_it():
     )
     with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
         video_prompt_service._validated_prompt_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Я не могу прочитать «Исходное видео недоступно» на табличке; камера приближается.",
+    'I cannot read "The source video was not provided" on the sign; the camera pans right.',
+    "Я не могу прочитать «Исходное видео недоступно» на экране в кадре; камера приближается.",
+])
+def test_scene_quote_with_following_label_is_not_a_source_failure(text):
+    assert video_prompt_service._validated_prompt_text(text) == text
+
+
+@pytest.mark.parametrize("text", [
+    "Cannot analyze the video because it was not provided.",
+    "Can't analyze the video because it was not provided.",
+    "I can’t analyze the video because it was not provided.",
+    "I can’t analyze the source video: the video was not provided.",
+])
+def test_bare_and_typographic_refusals_trigger_refund(text):
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._validated_prompt_text(text)

@@ -113,7 +113,17 @@ def _missing_video_completion(text: str) -> bool:
         r"(?:\s+(?:says|reads|reading))?\s*[:—–-]?\s*)"
         r"(?:«[^»]*»|“[^”]*”|‘[^’]*’|\"[^\"]*\"|'[^']*')",
         r"\1[scene-caption]", opening,
-    )[:420]
+    )
+    # The scene label may follow its quoted content instead of preceding it.
+    opening = re.sub(
+        r"(?:«[^»]*»|“[^”]*”|‘[^’]*’|\"[^\"]*\"|'[^']*')"
+        r"(\s+(?:на|в|on|in)\s+(?:(?:a|the)\s+)?"
+        r"(?:табличк\w*|плакат\w*|экране|мониторе|"
+        r"sign|label|caption|screen|monitor|billboard)\b)",
+        r"[scene-caption]\1", opening,
+    )
+    # Normalize apostrophes in contractions, after preserving paired quotes.
+    opening = re.sub(r"(?<=\w)[’‘ʼ](?=\w)", "'", opening)[:420]
 
     if opening.startswith((
         "нет исходного видео",
@@ -130,7 +140,7 @@ def _missing_video_completion(text: str) -> bool:
     refusal_opening = opening.startswith((
         "невозможно ", "не могу ", "я не могу ", "я не вижу ",
         "к сожалению,", "извините,", "sorry,",
-        "i cannot ", "i can't ", "unable to ",
+        "i cannot ", "i can't ", "cannot ", "can't ", "unable to ",
     ))
     explicit_source_opening = opening.startswith((
         "исходное видео ", "входное видео ", "загруженное видео ",
