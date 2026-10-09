@@ -110,6 +110,7 @@ from core.neironych_video_poll_gate import (
     protect_neironych_video_poll_settlement,
 )
 from core.provider_routing import get_nano21_route
+from core.seedance_reconciliation import pause_neironych_route, public_generation_status
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
 from db import repository as repo
@@ -623,6 +624,18 @@ async def _reconcile_neironych_video_generation(
                 video_service.get_poll_fn("neironych")(task_id),
                 timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
             )
+        except video_service.neironych_seedance_runtime.NeironychVideoReconciliationRequired as exc:
+            if exc.request_id != video_service.neironych_seedance_runtime.decode_task_id(task_id):
+                logger.error("Neironych mismatched review identity gen=%s", gen.id)
+                return gen
+            # This is NOT a failed/free provider job. Do not refund/replay.
+            await repo.mark_neironych_video_reconciliation(
+                session, gen.id, expected_task_id=stored_task_id,
+            )
+            await pause_neironych_route(str(gen.model), exc.request_id)
+            if not is_web_task_id(stored_task_id):
+                await _deliver_pending_neironych_video_notice(session, gen.id)
+            return await repo.get_generation_by_id(session, gen.id)
         except video_service.neironych_seedance_runtime.NeironychVideoTaskFailed as exc:
             if exc.request_id != video_service.neironych_seedance_runtime.decode_task_id(task_id):
                 logger.error("Neironych mismatched terminal response gen=%s", gen.id)
@@ -1015,6 +1028,30 @@ async def _notify_reconciled_video_failure_in_bot(*, user: User, gen) -> bool:
         await bot.session.close()
 
 
+async def _notify_neironych_video_reconciliation_in_bot(*, user: User, gen) -> bool:
+    """Tell the user the real state without claiming success, failure or a refund."""
+    tg_id = getattr(user, "tg_id", None)
+    if not tg_id:
+        return False
+    text = (
+        "⚠️ <b>Видео требует проверки у поставщика.</b>\n"
+        "Провайдер не подтвердил, принял ли запуск. Это не обычная очередь.\n"
+        "Повторно эту задачу не запускаем, чтобы не оплатить её дважды. "
+        "Кредиты пока удержаны; для отмены и возврата обратитесь в поддержку с ID задачи."
+        + provider_task_reference(getattr(gen, "task_id", None))
+    )
+    bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    try:
+        message = await bot.send_message(chat_id=tg_id, text=text)
+        logger.info("Neironych review notice delivered gen=%s message_id=%s", gen.id, message.message_id)
+        return True
+    except Exception as exc:
+        logger.warning("Neironych review notice deferred gen=%s error=%s", gen.id, type(exc).__name__)
+        return False
+    finally:
+        await bot.session.close()
+
+
 async def _deliver_pending_neironych_video_notice(session: AsyncSession, gen_id: int) -> bool:
     """Claim + send + acknowledge the durable notice; no money or provider POST."""
     claim = await repo.claim_neironych_video_notice(session, gen_id)
@@ -1028,6 +1065,17 @@ async def _deliver_pending_neironych_video_notice(session: AsyncSession, gen_id:
             if claim.kind == "done":
                 send = _notify_reconciled_video_result_in_bot(
                     user=user, gen=claim.generation,
+                )
+            elif claim.kind == "reconciliation":
+                current = await repo.current_neironych_review_notice(
+                    session, gen_id, claim.token,
+                    expected_task_id=claim.generation.task_id,
+                )
+                if current is None:
+                    logger.info("Superseded Neironych review notice skipped gen=%s", gen_id)
+                    return False
+                send = _notify_neironych_video_reconciliation_in_bot(
+                    user=user, gen=current,
                 )
             else:
                 send = _notify_reconciled_video_failure_in_bot(
@@ -4873,7 +4921,7 @@ def _gen_out(gen) -> GenerationOut:
         prompt="" if prompt_hidden else (gen.prompt or ""),
         prompt_hidden=prompt_hidden,
         prompt_actions_allowed=not prompt_hidden,
-        status=gen.status.value,
+        status=public_generation_status(gen),
         result_url=_generation_primary_result_url(gen),
         preview_url=_preview_media_url(_generation_primary_result_url(gen), gen.gen_type),
         credits_spent=gen.credits_spent,

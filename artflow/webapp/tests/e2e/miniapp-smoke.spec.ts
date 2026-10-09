@@ -216,3 +216,34 @@ test("one-photo trend runner uploads and runs without exposing generation contro
   expect(runPayload).not.toHaveProperty("ratio");
   expect(runPayload).not.toHaveProperty("duration");
 });
+
+
+test("uncertain Seedance shows review, not fake success, and can recover", async ({ page }) => {
+  let status = "processing";
+  let submits = 0;
+  const task = () => ({
+    id: 731, model: "bytedance/seedance-2-5", gen_type: "video", status,
+    prompt: "test scene", credits_spent: 70, created_at: new Date().toISOString(),
+    result_url: status === "done" ? "https://example.test/completed.mp4" : null,
+  });
+  await page.route("**/api/v1/generations/731", route => route.fulfill({ json: task() }));
+  await page.route("**/api/v1/history?**", route => route.fulfill({ json: [task()] }));
+  await page.route("**/api/v1/generate/video", route => {
+    submits++;
+    return route.fulfill({ status: 500, json: { detail: "No paid replay expected" } });
+  });
+  await page.goto("/?tgWebAppData=test&task=731");
+  const dialog = page.getByRole("dialog", { name: /Задача #731/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Генерация ещё выполняется")).toBeVisible();
+  status = "reconciliation_required";
+  await dialog.getByRole("button", { name: /Обновить/ }).click();
+  await expect(dialog.getByText("На проверке у поставщика")).toBeVisible();
+  await expect(dialog.getByText(/Поставщик не подтвердил запуск/)).toBeVisible();
+  await expect(page.getByText("Результат готов", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Опубликовать/ })).toBeDisabled();
+  status = "done";
+  await dialog.getByRole("button", { name: /Обновить/ }).click();
+  await expect(dialog.getByText("Готово", { exact: true })).toBeVisible();
+  expect(submits).toBe(0);
+});

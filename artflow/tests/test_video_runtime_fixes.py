@@ -212,3 +212,12 @@ async def test_veo_reference_request_uses_documented_kie_fields_only(monkeypatch
     assert payload["aspect_ratio"] == "9:16"
     assert "duration" not in payload
     assert "resolution" not in payload
+
+
+@pytest.fixture(autouse=True)
+def isolate_seedance_admission(monkeypatch):
+    # These tests cover provider payloads, not live Redis coordination.
+    from unittest.mock import AsyncMock
+
+    from api import seedance_provider_routing
+    monkeypatch.setattr(seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False))

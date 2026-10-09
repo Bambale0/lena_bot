@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from core.config import settings
+from core.seedance_reconciliation import neironych_route_paused
 
 logger = logging.getLogger(__name__)
 Result = TypeVar("Result")
@@ -20,9 +21,17 @@ async def submit_seedance(
     primary = settings.SEEDANCE_PRIMARY_PROVIDER
     secondary = "neironych" if primary == "kieai" else "kieai"
     providers = {"kieai": kie, "neironych": neironych}
+    if primary == "neironych" and await neironych_route_paused(product_model):
+        # No Neironych request has been sent yet. A new KIE request is safe,
+        # unlike replaying a previously accepted-but-unconfirmed paid job.
+        logger.warning("Seedance new request routed to KIE: model=%s Neironych circuit open", product_model)
+        return await kie()
     try:
         return await providers[primary]()
     except Exception as primary_exc:
+        if secondary == "neironych" and await neironych_route_paused(product_model):
+            logger.warning("Seedance fallback blocked by uncertain-submission circuit model=%s", product_model)
+            raise
         logger.warning(
             "%s %s submission failed; falling back to %s: %s",
             product_model, primary, secondary, primary_exc,

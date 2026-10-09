@@ -581,6 +581,7 @@ function capabilityLabel(value) {
 
 function statusLabel(value) {
   const source = String(value || "").toLowerCase();
+  if (source === "reconciliation_required") return "на проверке у поставщика";
   if (source === "processing") return "готовится";
   if (source === "queued") return "в очереди";
   if (source === "pending") return "ожидает";
@@ -3239,7 +3240,7 @@ function renderLibrary() {
 }
 
 function generationIsActive(status) {
-  return ["pending", "processing", "queued", "running", "created", "uploading"].includes(String(status || "").toLowerCase());
+  return ["pending", "processing", "queued", "running", "created", "uploading", "reconciliation_required"].includes(String(status || "").toLowerCase());
 }
 
 function generationStatusCopy(status) {
@@ -3247,6 +3248,7 @@ function generationStatusCopy(status) {
   if (value === "uploading") return "Загружаем референс";
   if (value === "created") return "Задача принята";
   if (value === "pending" || value === "queued") return "Ожидает свободный слот";
+  if (value === "reconciliation_required") return "Поставщик не подтвердил запуск. Кредиты удержаны; для отмены и возврата обратитесь в поддержку с ID задачи";
   if (value === "processing" || value === "running") return "Модель создает результат";
   if (value === "done") return "Готово";
   if (value === "failed") return "Не получилось";
@@ -3259,6 +3261,7 @@ function generationProgressValue(item = {}) {
   if (status === "uploading") return 14;
   if (status === "created") return 22;
   if (status === "pending" || status === "queued") return 34;
+  if (status === "reconciliation_required") return 0;
   if (status === "processing" || status === "running") return 72;
   if (status === "done") return 100;
   if (status === "failed") return 100;
