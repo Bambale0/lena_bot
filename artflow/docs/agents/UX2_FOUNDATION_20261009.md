@@ -71,3 +71,10 @@ Draft PR is appropriate until exact-commit CI and screenshot review finish. No p
 - `npm audit` identified two inherited transitive build-tool advisories: GHSA-2v37-7h3g-55p8 (nanoid) and GHSA-68fv-2mgg-jv7q (source-map-js).
 - Targeted patch updates changed only their two lockfile records; no direct dependency version or application stack change. Audit then reported 0 vulnerabilities.
 - References: https://github.com/advisories/GHSA-2v37-7h3g-55p8 and https://github.com/advisories/GHSA-68fv-2mgg-jv7q .
+
+## Visual QA on exact-head CI artifacts
+- Commit 4c79678 passed all six CI checks, including 300 user journeys; production deploy correctly skipped for the PR.
+- Opened and inspected all 8 PNGs from artifact 11637842286 (CI 37973274524) in dark/light and short 320/430 viewports.
+- Visual review found inherited `max-height:680px` CSS hiding the header/balance. Added a RED browser regression, then restored a compact header in UX2 only. The regular UI is unchanged.
+- Made the UX2 bottom rail opaque (text behind it was visible), and used foreground color for the balance label. Screenshots now assert the selected destination and finish finite animations, avoiding mid-transition double highlights in captures.
+- Final screenshot/merge/deploy evidence will be added to PR208 after the new commit checks, without making claims about a run that has not finished.

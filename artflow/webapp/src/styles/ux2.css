@@ -5,15 +5,15 @@
   padding-inline: clamp(8px, 3vw, 20px);
   padding-top: max(8px, env(safe-area-inset-top), var(--tg-content-safe-area-inset-top, 0px));
 }
-.apix-shell[data-ui-version="2"] .apix-app-header { min-height: 52px; padding: 8px 4px; border: 0; background: transparent; box-shadow: none; }
-.apix-shell[data-ui-version="2"] .apix-balance-button { min-height: 44px; font-size: 14px; border-radius: 16px; }
+.apix-shell[data-ui-version="2"] .apix-app-header { display: grid; min-height: 52px; padding: 8px 4px; border: 0; background: transparent; box-shadow: none; }
+.apix-shell[data-ui-version="2"] .apix-balance-button { color: var(--foreground); min-height: 44px; font-size: 14px; border-radius: 16px; }
 .ux2-wordmark { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px; text-align: left; }
 .ux2-wordmark strong { font-size: 25px; letter-spacing: -.07em; font-weight: 800; }
 .ux2-wordmark span { font-size: 12px; color: var(--muted-foreground); }
 .apix-shell[data-ui-version="2"] .apix-bottom-nav {
   width: min(calc(100vw - 16px), 680px) !important;
   padding: 6px; border-radius: 22px;
-  background: var(--popover); border: 1px solid var(--border);
+  background: var(--background); border: 1px solid var(--border);
   box-shadow: 0 8px 30px rgb(0 0 0 / .18); backdrop-filter: none;
 }
 .apix-shell[data-ui-version="2"] .apix-nav-scroll { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; overflow: visible; }
@@ -70,3 +70,7 @@
 @media (min-width: 700px) { .ux2-create-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .ux2-works-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 360px) { .ux2-create-card { padding: 14px 12px; min-height: 176px; } .ux2-create-card strong { font-size: 16px; } .ux2-create-card > span:last-of-type { font-size: 13px; } .ux2-work-filters button { padding-inline: 10px; font-size: 13px; } }
 @media (prefers-reduced-motion: reduce) { .apix-shell[data-ui-version="2"] .animate-spin { animation: none; } }
+
+@media (max-height: 680px) {
+  .apix-shell[data-ui-version="2"] .apix-app-header { min-height: 48px; padding-block: 2px; }
+}

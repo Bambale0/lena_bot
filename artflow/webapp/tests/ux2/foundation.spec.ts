@@ -80,7 +80,8 @@ for (const light of [false, true]) {
     await page.goto("/?ux=2");
     await page.getByRole("tab", { name: "Создать", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Что создадим?" })).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath(`create-${light ? "light" : "dark"}.png`) });
+    await expect(page.getByRole("tab", { name: "Создать", exact: true })).toHaveAttribute("aria-selected", "true");
+    await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`create-${light ? "light" : "dark"}.png`) });
     await openPhoto(page);
     await page.evaluate(() => (window as any).__back?.());
     await expect(page.getByRole("heading", { name: "Что создадим?" })).toBeVisible();
@@ -93,7 +94,8 @@ for (const light of [false, true]) {
     await expect(page.getByRole("heading", { name: "Тренды", exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Работы", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Мои работы" })).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath(`works-${light ? "light" : "dark"}.png`) });
+    await expect(page.getByRole("tab", { name: "Работы", exact: true })).toHaveAttribute("aria-selected", "true");
+    await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`works-${light ? "light" : "dark"}.png`) });
     await page.getByRole("tab", { name: "Профиль", exact: true }).click();
     await page.getByRole("button", { name: "Настройки", exact: true }).click();
     await expect(page.getByRole("button", { name: "Вернуть обычный интерфейс" })).toBeVisible();
@@ -207,9 +209,10 @@ for (const width of [320, 430]) {
     for (const name of ["Создать", "Работы"]) {
       await page.getByRole("tab", { name, exact: true }).click();
       await expect(page.locator(".ux2-page")).toBeVisible();
+      await expect(page.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
       const sizes = await page.locator(".apix-shell > main").evaluate(node => ({ viewport: node.clientWidth, content: node.scrollWidth }));
       expect(sizes.content).toBeLessThanOrEqual(sizes.viewport);
-      await page.screenshot({ path: testInfo.outputPath(`${width}-${name === "Создать" ? "create" : "works"}.png`) });
+      await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`${width}-${name === "Создать" ? "create" : "works"}.png`) });
     }
   });
 }
@@ -251,3 +254,16 @@ for (const [kind, extension, tag] of [["video", "mp4", "video"], ["music", "mp3"
     await expect(dialog.locator(tag)).toHaveAttribute("controls", "");
   });
 }
+
+
+test("short screen keeps balance visible and the active destination unambiguous", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await prepare(page);
+  await page.goto("/?ux=2");
+  for (const name of ["Создать", "Работы", "Профиль"]) {
+    await page.getByRole("tab", { name, exact: true }).click();
+    await expect(page.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator('[role="tab"][aria-selected="true"]')).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Открыть баланс" })).toBeVisible();
+  }
+});
