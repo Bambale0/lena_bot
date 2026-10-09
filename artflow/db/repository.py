@@ -1690,7 +1690,7 @@ async def current_neironych_review_notice(
 
 async def claim_neironych_video_notice(
     session: AsyncSession, gen_id: int,
-    *, lease_seconds: int | None = None,
+    *, lease_seconds: int | None = None, expected_kind: str | None = None,
 ) -> NeironychVideoNoticeClaim | None:
     """Atomic Telegram notice lease. Only one worker may send at a time."""
     generation = (await session.execute(
@@ -1713,6 +1713,7 @@ async def claim_neironych_video_notice(
     state = data.get("state")
     if (
         kind not in {"done", "failed", "reconciliation"}
+        or (expected_kind is not None and kind != expected_kind)
         or not (kind == status or (kind == "reconciliation" and status in {"pending", "processing"}))
         or generation.gen_type != GenerationType.video
         or not str(generation.task_id or "").startswith(("neironych:", "neironych-submit:"))

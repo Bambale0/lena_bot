@@ -1330,3 +1330,30 @@ GitHub navigation and provider-contract jobs failed because two more provider/Te
 - P1 standalone website: GenerationCard now uses the same review projection as Mini App/realtime, and landing/js/prototype-premium.js labels the state, keeps it pollable and displays held-credit/support guidance. The original oversight was that site REST does not exclusively use the Mini App serializer.
 - P2 AppV4: its separate ACTIVE_STATUSES set now includes review so later terminal results refresh without reloading. Both standalone/V4 predicates have executable JavaScript regressions in addition to browser CI coverage for the modern UI.
 - P1 evidence privacy: customer generation identifiers and amounts introduced in this execution entry were redacted from the final tree. Delivery uses the mandatory squash merge; no force-push or rewriting protected main history was attempted. Actual IDs remain only in authorized operational systems/chat, not new source/test fixtures.
+
+## Seedance Neironych default and create-response recovery — 2026-10-09
+
+Supersedes the earlier temporary KIE-primary default record; explicit environment
+values still override the default. Ordinary Seedance 2/2.5 use Neironych first and
+KIE after definitive rejection. Fast/Mini remain unchanged.
+
+Baseline: a55e8e6; synchronized with main 77db6e18 (PR224), preserving its UX2
+changes. Delivery: PR223. Site, Mini App and Telegram share the same backend.
+
+New attempts durably record a correlation UUID before POST. Ambiguous responses
+hold credits and recover by authenticated read-only client-UUID lookup, without
+replay or speculative refund. Identity/model/key checks and atomic settlement
+protect late responses. Proven pre-POST failure refunds only the locked matching
+attempt. Foreground bot review edits share the durable notice claim/receipt with
+the scheduler; failed edits retain the outbox fallback.
+
+Verification uses mocked HTTP and isolated synthetic SQLite; exact-head required
+CI and independent code/security reviews precede normal protected merge and
+main autodeploy. No new migration, historical backfill, production DB operation,
+manual SSH operation or paid generation test. Final exact-SHA CI/deploy evidence
+is retained on PR223. See docs/seedance-reconciliation-guard.md for full semantics.
+
+Missing/unavailable provider evidence remains nonterminal, with bounded read-only
+checks and overdue review. KIE's separate inherited transport/refund behavior is
+outside this package. Existing server environment loading is not independently
+inspected; deploy and public health are verified through the standard pipeline.

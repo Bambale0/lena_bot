@@ -347,3 +347,87 @@ async def test_proven_prepost_failure_refunds_only_owned_unsubmitted_attempt(rec
         assert not await recovery_core.handle_submission_not_sent(db, 73, context)
         assert db.sync.get(User, 42).credits == (128 if expected_refund else 100)
         assert len(list(db.sync.scalars(select(CreditLedgerEntry)))) == int(expected_refund)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("edit_fails", [False, True])
+async def test_foreground_review_edit_shares_outbox_with_scheduler(recovery, monkeypatch, edit_fails):
+    from bot.handlers import video_gen
+    from core import seedance_reconciliation as recovery_core
+
+    r = recovery
+    request_id = "c150cc69-0350-43aa-a4fc-a6b17388ec10"
+    monkeypatch.setattr(recovery_core, "pause_neironych_route", AsyncMock())
+    message = SimpleNamespace(edit_text=AsyncMock(side_effect=RuntimeError("synthetic edit failure") if edit_fails else None))
+    state = AsyncMock()
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.task_id = None
+        await db.commit()
+        assert await repo.begin_seedance_submission(
+            db, 73, request_id, "synthetic-idem", "a" * 64, product_model=gen.model,
+        )
+        assert await repo.mark_seedance_submission_unknown(db, 73, request_id)
+        await video_gen._show_video_submission_review(message, state, db, 73)
+        notice = repo.parse_input_params(gen.input_params)[repo.NEIRONYCH_VIDEO_NOTICE_KEY]
+        assert notice["state"] == ("pending" if edit_fails else "sent")
+        if edit_fails:
+            params = repo.parse_input_params(gen.input_params)
+            params[repo.NEIRONYCH_VIDEO_NOTICE_KEY]["retry_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+            gen.input_params = json.dumps(params)
+            await db.commit()
+    message.edit_text.assert_awaited_once()
+    state.clear.assert_awaited_once()
+    # Restart the session as the scheduler would; the successful edit is final.
+    with r.db() as db:
+        assert await miniapp_routes._deliver_pending_neironych_video_notice(db, 73) is edit_fails
+        assert not await miniapp_routes._deliver_pending_neironych_video_notice(db, 73)
+        assert db.sync.get(User, 42).credits == 100
+        assert list(db.sync.scalars(select(CreditLedgerEntry))) == []
+    assert r.review.await_count == int(edit_fails)
+
+
+@pytest.mark.asyncio
+async def test_foreground_review_edit_does_not_race_scheduler_claim(recovery):
+    from bot.handlers import video_gen
+
+    r = recovery
+    request_id = "c150cc69-0350-43aa-a4fc-a6b17388ec10"
+    message, state = SimpleNamespace(edit_text=AsyncMock()), AsyncMock()
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.task_id = None
+        await db.commit()
+        assert await repo.begin_seedance_submission(
+            db, 73, request_id, "synthetic-idem", "a" * 64, product_model=gen.model,
+        )
+        assert await repo.mark_seedance_submission_unknown(db, 73, request_id)
+        scheduler_claim = await repo.claim_neironych_video_notice(db, 73)
+        assert scheduler_claim is not None
+        await video_gen._show_video_submission_review(message, state, db, 73)
+        message.edit_text.assert_not_awaited()
+        assert await repo.complete_neironych_video_notice(db, 73, scheduler_claim.token, delivered=True)
+        assert not await miniapp_routes._deliver_pending_neironych_video_notice(db, 73)
+    state.clear.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_foreground_review_edit_never_consumes_terminal_notice(recovery):
+    from bot.handlers import video_gen
+
+    r = recovery
+    message, state = SimpleNamespace(edit_text=AsyncMock()), AsyncMock()
+    with r.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.status = GenerationStatus.failed
+        params = repo.parse_input_params(gen.input_params)
+        params[repo.NEIRONYCH_VIDEO_NOTICE_KEY] = repo._new_neironych_video_notice("failed")
+        gen.input_params = json.dumps(params)
+        await db.commit()
+        before = gen.input_params
+        await video_gen._show_video_submission_review(message, state, db, 73)
+        assert gen.input_params == before
+        message.edit_text.assert_not_awaited()
+        assert await miniapp_routes._deliver_pending_neironych_video_notice(db, 73)
+    r.failed.assert_awaited_once()
+    state.clear.assert_awaited_once()

@@ -122,18 +122,45 @@ logger = logging.getLogger(__name__)
 router = Router(name="video_gen")
 
 
-async def _show_video_submission_review(status_msg: Message, state: FSMContext) -> None:
+async def _show_video_submission_review(
+    status_msg: Message, state: FSMContext, session: AsyncSession, gen_id: int,
+) -> None:
+    """Use the durable outbox claim for the foreground edit and scheduler alike."""
+    claim = None
+    delivered = False
     try:
-        await status_msg.edit_text(
-            "⏳ Подтверждение запуска видео пока не получено. "
-            "Автоматически проверяю ту же заявку, без повторного запуска. "
-            "💋 сохранены за этой задачей до подтверждённого результата. "
-            "Если проверка затянется, заявка останется на разборе.",
-            reply_markup=main_menu_kb(),
+        claim = await repo.claim_neironych_video_notice(session, gen_id, expected_kind="reconciliation")
+        if claim is None or claim.kind != "reconciliation":
+            return
+        current = await repo.current_neironych_review_notice(
+            session, gen_id, claim.token, expected_task_id=claim.generation.task_id,
         )
+        if current is None:
+            return
+        await asyncio.wait_for(
+            status_msg.edit_text(
+                "⏳ Подтверждение запуска видео пока не получено. "
+                "Автоматически проверяю ту же заявку, без повторного запуска. "
+                "💋 сохранены за этой задачей до подтверждённого результата. "
+                "Если проверка затянется, заявка останется на разборе.",
+                reply_markup=main_menu_kb(),
+            ),
+            timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
+        )
+        delivered = True
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         logger.warning("Could not update submission review acknowledgment error=%s", type(exc).__name__)
-    await state.clear()
+    finally:
+        if claim is not None:
+            try:
+                await repo.complete_neironych_video_notice(
+                    session, gen_id, claim.token, delivered=delivered,
+                )
+            except Exception as exc:
+                logger.warning("Could not persist review edit receipt gen=%s error=%s", gen_id, type(exc).__name__)
+        await state.clear()
 
 
 async def _show_video_task_started(status_msg: Message, task_id: str) -> None:
@@ -2307,11 +2334,11 @@ async def _launch_video_generation_from_state(
             )
             await state.clear()
         else:
-            await _show_video_submission_review(status_msg, state)
+            await _show_video_submission_review(status_msg, state, session, gen_id)
         return False
     except NeironychSubmissionUnknown:
         await handle_submission_unknown(session, gen_id, submission_context)
-        await _show_video_submission_review(status_msg, state)
+        await _show_video_submission_review(status_msg, state, session, gen_id)
         return True
     except Exception as e:
         if content_edit:
@@ -2343,7 +2370,7 @@ async def _launch_video_generation_from_state(
             await handle_submission_unknown(session, gen_id, submission_context)
             saved = False
         if not saved:
-            await _show_video_submission_review(status_msg, state)
+            await _show_video_submission_review(status_msg, state, session, gen_id)
             return True
     else:
         saved = await repo.update_generation_task(
@@ -2351,7 +2378,7 @@ async def _launch_video_generation_from_state(
             **({"expected_task_id": ""} if submission_context else {}),
         )
         if submission_context and saved is False:
-            await _show_video_submission_review(status_msg, state)
+            await _show_video_submission_review(status_msg, state, session, gen_id)
             return
     await _show_video_task_started(status_msg, result.task_id)
     poll_fn = video_service.get_poll_fn(result.provider)
@@ -3096,11 +3123,11 @@ async def cb_regen_video(
             )
             await state.clear()
         else:
-            await _show_video_submission_review(status_msg, state)
+            await _show_video_submission_review(status_msg, state, session, gen_id)
         return
     except NeironychSubmissionUnknown:
         await handle_submission_unknown(session, gen_id, submission_context)
-        await _show_video_submission_review(status_msg, state)
+        await _show_video_submission_review(status_msg, state, session, gen_id)
         return
     except Exception as exc:
         logger.error("Video regeneration error: %s", exc)
@@ -3128,7 +3155,7 @@ async def cb_regen_video(
             await handle_submission_unknown(session, gen_id, submission_context)
             saved = False
         if not saved:
-            await _show_video_submission_review(status_msg, state)
+            await _show_video_submission_review(status_msg, state, session, gen_id)
             return
     else:
         saved = await repo.update_generation_task(
@@ -3136,7 +3163,7 @@ async def cb_regen_video(
             **({"expected_task_id": ""} if submission_context else {}),
         )
         if submission_context and saved is False:
-            await _show_video_submission_review(status_msg, state)
+            await _show_video_submission_review(status_msg, state, session, gen_id)
             return
     await _show_video_task_started(status_msg, result.task_id)
     poll_fn = video_service.get_poll_fn(result.provider)
