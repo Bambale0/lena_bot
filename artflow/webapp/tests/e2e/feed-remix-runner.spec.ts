@@ -551,7 +551,7 @@ test("image personalization reserves a source slot before uploading photos", asy
   await dialog.locator("input[type=file]").setInputFiles([1, 2, 3].map(photo));
   await expect(dialog.getByLabel("Удалить референс")).toHaveCount(3);
   await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeDisabled();
-  await expect(dialog.getByLabel("Модель").locator('option[value="qwen/image-edit"]')).toBeDisabled();
+  await expect(dialog.getByLabel("Модель").locator('option[value="qwen/image-edit"]')).toHaveJSProperty("disabled", true);
   expect(uploads).toBe(3);
   expect(paidRequests).toBe(0);
 });
