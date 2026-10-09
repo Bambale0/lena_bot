@@ -75,6 +75,7 @@ async def test_generate_prompt_from_video_url_calls_comet_with_video_url(monkeyp
             COMET_API_KEY="test-comet",
             COMET_BASE_URL="https://api.cometapi.com",
             COMET_VIDEO_PROMPT_MODEL="qwen3.8-max",
+            COMET_VIDEO_PROMPT_FPS=2.0,
         ),
     )
 
@@ -92,7 +93,8 @@ async def test_generate_prompt_from_video_url_calls_comet_with_video_url(monkeyp
     assert payload["model"] == "qwen3.8-max"
     content = payload["messages"][1]["content"]
     assert content[0]["type"] == "video_url"
-    assert content[0]["video_url"] == {"url": "https://cdn.example.test/video.mp4", "fps": 3}
+    assert content[0]["video_url"] == {"url": "https://cdn.example.test/video.mp4"}
+    assert content[0]["fps"] == 3
     assert content[1]["type"] == "text"
 
 
@@ -110,6 +112,7 @@ async def test_generate_prompt_from_video_url_uses_assistant_fallback_model(monk
             COMET_BASE_URL="https://api.cometapi.com/",
             COMET_VIDEO_PROMPT_MODEL="",
             COMET_ASSISTANT_MODEL="qwen3.8-max",
+            COMET_VIDEO_PROMPT_FPS=2.0,
         ),
     )
 
@@ -117,6 +120,12 @@ async def test_generate_prompt_from_video_url_uses_assistant_fallback_model(monk
 
     assert result.text == "fallback prompt"
     assert fake_client.calls[0][1]["json"]["model"] == "qwen3.8-max"
+    video_part = fake_client.calls[0][1]["json"]["messages"][1]["content"][0]
+    assert video_part == {
+        "type": "video_url",
+        "video_url": {"url": "https://cdn.example.test/video.mp4"},
+        "fps": 2.0,
+    }
 
 
 def test_video_prompt_telegram_chunks_preserve_full_text() -> None:
@@ -194,3 +203,166 @@ def test_video_prompt_preserves_valid_prompts_and_quoted_errors(text) -> None:
         "error": None,
         "choices": [{"finish_reason": "stop", "message": {"refusal": None, "content": text}}],
     }) == text
+
+
+
+@pytest.mark.parametrize("text", [
+    (
+        "A. Ready-to-use prompt\n"
+        "Невозможно составить точный генерационный промпт, потому что видео или кадры из него "
+        "не были прикреплены / не доступны для анализа.\n"
+        "B. Что я увидел\nВидеоматериал отсутствует.\n"
+        "C. Неоднозначности\nНет исходного видео.\n"
+        "D. Audio note\nАудиодорожка не анализировалась."
+    ),
+    "Видео не видно / файл не прикреплён, поэтому кадры определить невозможно.",
+    "I cannot see the video. No video was attached to the request.",
+    "A. Ready-to-use prompt\nВидеоматериал отсутствует, пришлите видео.",
+    "**A. Ready-to-use prompt**\nНевозможно составить промпт: кадры не доступны.",
+    "`A. Ready-to-use prompt`\nВидеоматериал отсутствует, пожалуйста, пришлите видео.",
+    "К сожалению, видео не было прикреплено, поэтому я не могу составить промпт.",
+    "A. Ready-to-use prompt\nЯ не могу просмотреть видео, потому что оно не было прикреплено.",
+    "A. Ready-to-use prompt\nЯ не вижу видео: исходный файл недоступен для анализа.",
+    "I cannot analyze the video because the source video was not provided.",
+    "I can't see the video; no video was attached to the request.",
+    "Видео недоступно для анализа.",
+    "Видео отсутствует.",
+    "Кадры не были предоставлены.",
+    "The source video was not provided.",
+    "A. Ready-to-use prompt\nВидео не поступило, загрузите исходный файл.",
+    "I cannot analyze the video because it was not provided.",
+    "I can't generate a video prompt because the video was missing from the request.",
+    "Я не могу составить промпт по видео, потому что оно не было прикреплено.",
+    "Я не могу проанализировать видео, потому что оно недоступно.",
+    "Я не могу описать видео, потому что оно не было прикреплено.",
+    "I cannot describe the video because it was not uploaded.",
+    "I cannot see the video because it was not provided.",
+    "Исходное видео отсутствует, поэтому составить промпт невозможно.",
+    "Загруженное видео недоступно для анализа.",
+    "Входное видео не было прикреплено к запросу.",
+    "The source footage is missing; please attach a video.",
+    "The source video is unavailable on the monitor, so I cannot analyze it.",
+    "I cannot analyze the source video because the video is unavailable on the monitor.",
+    "Я не могу проанализировать исходное видео: видео недоступно на мониторе.",
+    "Исходное видео недоступно на мониторе, поэтому не могу проанализировать его.",
+    "Загруженное видео отсутствует на экране, пришлите исходный файл для анализа.",
+])
+def test_video_prompt_rejects_missing_video_completion(text):
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._extract_chat_text(
+            {"choices": [{"finish_reason": "stop", "message": {"content": text}}]}
+        )
+
+
+@pytest.mark.parametrize("text", [
+    'Камера приближается к билборду с надписью «Видеоматериал отсутствует».',
+    'В начале видео человек говорит: «Видео не видно», затем поворачивается к окну.',
+    "A. Ready-to-use prompt — Покажи постер с текстом 'No video was attached'.",
+    "A. Ready-to-use prompt — Невозможно точно определить марку автомобиля в кадре, но камера плавно облетает автомобиль.",
+    "Не могу определить высоту здания в видеокадре. Камера медленно приближается.",
+    "Я не могу точно назвать год выпуска машины на видео, но её двери открываются.",
+    "A. Ready-to-use prompt — Unable to identify the model of the airplane in the video. The camera pans right.",
+    "A. Ready-to-use prompt — Невозможно определить предмет в кадре: на столе отсутствует этикетка, камера медленно вращается.",
+    "Я не могу прочитать надпись на видео, поскольку номер отсутствует, но ясно видно движение камеры.",
+    "Я не вижу видео на экране телевизора, только статичную заставку; камера следует за героем.",
+    "I cannot see the video on the computer monitor in the scene; the screen is black while the camera pans.",
+    "Видео не видно на экране телевизора, но камера снимает отражение в комнате.",
+    "I cannot identify the aircraft model in the video because it was not provided in the metadata.",
+    "Я не могу определить персонажа на видео, потому что его лицо закрыто капюшоном, а камера движется.",
+    "Видео отсутствует на экране телевизора; камера приближается к пустому дисплею.",
+    "A. Ready-to-use prompt — Видео недоступно на мониторе в офисе, персонаж нажимает кнопку.",
+    "The video is missing on the television screen in the scene; camera pans right.",
+])
+def test_video_prompt_does_not_reject_missing_video_quotes_in_real_scene(text):
+    assert video_prompt_service._validated_prompt_text(text) == text
+
+
+def test_video_prompt_native_payload_always_supplies_frame_sampling():
+    item = video_prompt_service._video_prompt_chat_messages(
+        "https://cdn.example.test/clip.mp4", fps=2,
+    )[1]["content"][0]
+    assert item == {
+        "type": "video_url",
+        "video_url": {"url": "https://cdn.example.test/clip.mp4"},
+        "fps": 2,
+    }
+
+
+
+@pytest.mark.parametrize("invalid", [0, 0.09, 10.01, float("nan"), float("inf")])
+def test_video_prompt_rejects_invalid_frame_rate(invalid):
+    with pytest.raises(ValueError, match="FPS"):
+        video_prompt_service._video_prompt_chat_messages(
+            "https://cdn.example.test/movie.mp4", fps=invalid,
+        )
+
+
+@pytest.mark.parametrize("heading", [
+    "A. **Ready-to-use prompt**", "**A**. Ready-to-use prompt",
+    "A. _Ready-to-use prompt_", "### A. **Ready-to-use prompt**",
+    "A. Ready-to-use **prompt**", "A. `Ready-to-use prompt`",
+])
+@pytest.mark.parametrize("failure", [
+    "Видео недоступно для анализа.",
+    "I cannot analyze the video because it was not provided.",
+])
+def test_missing_video_under_formatted_heading_is_not_billable(heading, failure):
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._validated_prompt_text(heading + "\n" + failure)
+
+
+@pytest.mark.parametrize("text", [
+    "Я не могу прочитать надпись «Исходное видео недоступно на мониторе»; камера приближается к экрану.",
+    'Я не могу прочитать надпись "Исходное видео недоступно на мониторе"; камера приближается к экрану.',
+    "I cannot read the caption ‘The source video is unavailable on the monitor’; the camera pans right.",
+    'I cannot read the label "The source video is unavailable"; the camera moves toward the display.',
+    "A. **Ready-to-use prompt**\nКамера приближается к табличке «Видео отсутствует».",
+])
+def test_quoted_source_labels_are_scene_content_not_provider_refusals(text):
+    assert video_prompt_service._validated_prompt_text(text) == text
+
+
+def test_scene_quote_does_not_hide_actual_source_refusal_outside_it():
+    text = (
+        'I cannot analyze the source video because the video was not provided. '
+        'The caption "some quoted scene label" is not a substitute for the video.'
+    )
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._validated_prompt_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Я не могу прочитать «Исходное видео недоступно» на табличке; камера приближается.",
+    'I cannot read "The source video was not provided" on the sign; the camera pans right.',
+    "Я не могу прочитать «Исходное видео недоступно» на экране в кадре; камера приближается.",
+])
+def test_scene_quote_with_following_label_is_not_a_source_failure(text):
+    assert video_prompt_service._validated_prompt_text(text) == text
+
+
+@pytest.mark.parametrize("text", [
+    "Cannot analyze the video because it was not provided.",
+    "Can't analyze the video because it was not provided.",
+    "I can’t analyze the video because it was not provided.",
+    "I can’t analyze the source video: the video was not provided.",
+])
+def test_bare_and_typographic_refusals_trigger_refund(text):
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._validated_prompt_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    'I cannot analyze "the source video" on the monitor because it was not provided.',
+    'Я не могу проанализировать «исходное видео» на мониторе, потому что оно не было прикреплено.',
+])
+def test_quoted_source_reference_is_not_discarded_as_scene_caption(text):
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="video input"):
+        video_prompt_service._validated_prompt_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    'I cannot analyze the caption "the source video" because it was not provided with a translation; the camera pans right.',
+    'Я не могу проанализировать надпись «исходное видео», потому что оно не было прикреплено с переводом; камера приближается.',
+])
+def test_explicit_scene_label_takes_precedence_over_bare_source_quote(text):
+    assert video_prompt_service._validated_prompt_text(text) == text

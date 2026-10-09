@@ -1300,6 +1300,81 @@ A final production read-only/scratch-key Redis test using the **actual deployed 
 
 GitHub Actions backend-quality failed on exact `fb5f226` even though the on-host recovery suites passed. The action's failing `Pytest maintained PR gate` step listed precisely two failures: `test_video_scheduler_releases_read_transaction_before_provider_poll` and `test_scheduler_does_not_abort_post_commit_royalty_after_poll_deadline`. Their FakeSession stubs mocked the DB but not the newly introduced durable Redis intent call. CI has no Redis at localhost:6379, whereas the server workstation does, so their accidental integration dependency was invisible locally. Root-cause fix is test-only: those two tests mock the Redis intent seam `_track_active_video_notice_intent` and additionally assert it was invoked exactly once for the generation. Separate `test_active_old_video_persists_notice_intent_before_db_completion` continues to test actual Redis ZSET registration with a fake Redis. Targeted suite rerun under an intentionally unavailable `REDIS_URL=redis://127.0.0.1:1/0` now passes. All provider, finance and delivery semantics remain unchanged; do not start Redis in GitHub just to cover mock isolation.
 
+---
+## Video → prompt: Comet silently discarded video input (2026-10-09)
+
+Baseline: `427e57e9ea518a42be2bdd999791febe56f2db46` (origin/main), clean isolated worktree `fix/apix-video-prompt-visible-frames-20261009`.
+
+### Confirmed root cause (provider + code)
+- `api.video_prompt_service.generate_prompt_from_video_url` constructs a Qwen video message with `video_url` but no top-level `fps` when called by Telegram, Mini App, and website. Optional FPS, when provided, was put **inside** `video_url` instead of as a sibling of `video_url`.
+- Live CometAPI contract probes using a temporary **synthetic** 4-second red/blue MP4 served by `https://apixbotai.com/static/upload/...`: baseline exact payload returned 200 / "Видео не видно / файл не прикреплён" (480 tokens); adding top-level `fps:2` returned 200 / "Первый кадр — красный, последний — синий" (564 tokens); sending base64 JPEG image frames likewise correctly identified colors (471 tokens). User uploads, balances and source media were not touched by these probes.
+- Current `_validated_prompt_text` treats any nonblank free-form text except one exact English failure message as success; therefore a polite "no video" explanation was billed as valid completed analysis, not refunded. Shared bot/web/MiniApp spending occurs before provider I/O and refund executes only when an exception is raised.
+
+### Scope and acceptance
+1. Preserve Qwen/Comet configured model/provider, but send `video_url.url` plus top-level non-null `fps` on every call. Default video FPS is a typed runtime configuration setting (no changed tariff, no hardcoded model), and explicit override respects provider bounds.
+2. Validate unambiguously unusable responses that state no video/frames was received; raise typed `VideoPromptProviderError` with no provider raw payload in error/logs. Preserve legitimate scene descriptions quoting error-like text.
+3. Both /api/v1/video-prompt (Mini App), /api/web/video-prompt (site), Telegram `vid:video2prompt` reuse the shared service and existing single credit refund on failure. No double charge or automatic provider retry.
+4. RED → GREEN provider-contract tests, rejection/legitimate quote tests, financial settlement regressions on all three surfaces, CI and reviewed PR; then deploy via squash auto-merge only with exact SHA checks.
+5. Verify production via a controlled synthetic video to Comet (no user credit charge), runtime configuration, and a safe postdeploy billing/health smoke. No historical user refund unless exact affected operation can be attributed from durable records.
+
+### Risks
+- Aggregator may intermittently ignore media even with correct `fps`; reject text that clearly says media was absent and refund rather than trust HTTP 200. A second paid inference attempt must not be automatic.
+- Web/MiniApp accepts 100 MB, bot 20 MB, unchanged; local temporary public video uploads are deleted by current finally paths.
+- User's prior 3-credit result has no provided generation/ledger id. Avoid guessing recipient or refunding unrelated transactions.
+
+### Progress
+1. [x] Installed/updated Bambale0/claw, wondelai/skills and anthropics/skills; inspected repo `AGENTS.md`, README, Comet adapter and source/tests; applied systematic-debugging/TDD/verification instructions; reviewed Anthropic webapp-testing guidance (UI unchanged).
+2. [x] Original behavior reproduced against configured production model with synthetic MP4 and compared to correct top-level fps and image-frames alternatives.
+3. [x] RED regression tests: original missing-FPS/absent-media completion generated nine failing assertions (provider and all three billing surfaces); further Markdown/soft refusal variations generated three expected failures.
+4. [x] Minimal implementation: always set top-level `fps`, default via typed `COMET_VIDEO_PROMPT_FPS` (0.1–10, default 2.0); detect missing-video model responses at the opening of the reply, preserving valid prompt quotations. `VideoPromptProviderError` triggers existing refund handlers. GREEN: 49 tests in shared service and surface suites, Ruff and compile checks passed. Additional `test_public_files`, `test_photo_prompt_service`, `test_runtime_reliability`, `test_main_menu_contract`, and focused web HTTP tests passed (31 more tests).
+5. [ ] Independent review, exact-SHA GitHub CI, production smoke.
+
+
+### Regression baseline exception
+
+Full `tests/test_keyboards_and_ui.py` includes two unrelated, pre-existing stale main-menu expectations (`test_main_menu_keyboard_keeps_core_buttons`, `test_main_menus_show_webapp_button_at_top`). Both were reproduced against untouched production `main` with exactly the same failed assertions and are not part of the maintained CI gate. No production/menu behavior or test was changed just to silence them.
+
+### Independent code review of 625040a
+
+Codex PR #205 code review raised two P2 findings; both were confirmed using additional RED cases before adjusting the service:
+- First-person Russian "Я не могу просмотреть видео..." and English "I cannot analyze... video not provided" were not rejected, still billing 3 credits. Added missing-input tests for both variants, including Markdown heading prefixes and source unavailability.
+- Overbroad "невозможно/не могу + видео/кадр anywhere" would reject valid video descriptions that merely cannot identify car make or a missing label in-frame. Added tests for normal, first-person and English scene ambiguities, including an absent label in a visible frame, and ensured they remain valid.
+- Minimal refined classifier: direct source-video absence prefixes plus explicit adjacency of source noun and media unavailability; no generic keyword conjunction based on unrelated scene details. Keeps shared provider/refund semantics unchanged.
+- Reconfirmed GREEN: 59 shared-service and 3-surface billing tests + Ruff. Exact SHA review and CI must be re-run after committing review changes.
+
+Deployment smoke check: import new shared service from running container (correct top-level fps 2.0), analyze the pre-existing synthetic red/blue test MP4 without a user debit, inspect safe log/prompt; verify 200 health, main SHA, container StartedAt. Cleanup only generated synthetic test media; no user media files.
+
+
+### Independent review of a439639 (second iteration)
+
+Codex PR #205 found two additional P2 cases after first corrections, both reproduced RED before replacement of the classifier:
+- A phrase "Я не вижу видео на экране телевизора, только статичную заставку; камера..." describes an in-scene television, **not** missing source footage; substring-only visibility checks wrongly rejected billable valid prompts.
+- Definitively missing source responses without preamble (`Видео недоступно для анализа`, `Видео отсутствует`, `Кадры не были предоставлены`, `The source video was not provided`) slipped past preamble-only matching, accepting garbage as success and charging 3 credits.
+
+The classifier now requires evidence about the *input* source, not just words about camera/visible screen: source noun + adjacent availability verb, provider refusal plus a clear missing-attachment reason, or a short unequivocal no-source header. Media statements quoted inside an otherwise valid scene are not treated as refusals. All new RED examples plus prior regressions GREEN: 67 shared service and Telegram/MiniApp/web money tests. No pricing or provider routing change, no additional paid retries. Independent review + exact CI required again on final SHA.
+
+
+### Security review: pronoun-linked missing upload (2026-10-09)
+
+Security review of a439639 found a P2 refund omission when first-person model refusal refers to uploaded video first, then its missing source by pronoun: `I cannot analyze the video because it was not provided`, `Я не могу составить промпт по видео, потому что оно не было прикреплено`. Reproduced RED; now recognizes explicit pronoun-linked attachment/availability failure when the refusal is about *analyzing, viewing, describing or generating a prompt from the source video*, while retaining proper success for scene-metadata / unidentified-aircraft cases that do not mean the input was absent. Extra red-to-green tests cover describe/see, uploaded and Russian `оно недоступно`. GREEN: 76 shared service + 3-surface money-path cases and Ruff. Security P2 remains subject to fresh review/CI on new exact SHA. No user-money action triggered during tests.
+
+
+### Code review of ea33ad5 (scene displays and adjectival source)
+
+Further Code Review P2s reproduced RED before code changes:
+- Valid scene: `Видео отсутствует на экране телевизора; камера приближается...` or English video missing on the TV in frame was incorrectly treated as source media missing. Classifier now excludes clearly **in-scene display** contexts (screen/TV/monitor) before considering source absence.
+- Explicit source missing: `Исходное видео отсутствует`, `Загруженное видео недоступно`, `Входное видео не было прикреплено`, `The source footage is missing` was not matched by restrictive source noun whitelist. Added source-modifier variants to both opening gate and adjacent absence regex.
+- Confirmed GREEN with all earlier finance and provider contract tests: 83 shared service/surface cases plus Ruff. No historical credit/balance writes, no UI changes. Fresh review/CI on new exact SHA required.
+
+### Resume verification: explicit source precedence
+
+2026-10-09: resumed at 3a584ca with the prior uncommitted fix intact. Re-ran 86 shared provider/surface tests, Ruff, compile and diff checks successfully. PRRT_kwDOSSmOms6qqGWm is fixed: explicit source/uploaded qualifiers override in-scene display exemption. No unrelated source or balances changed. Fresh exact-SHA CI and review required before normal auto-deploy.
+
+### Source-qualified refusal ordering (resume review)
+
+PRRT_kwDOSSmOms6qtsOY on 7b01f6b reproduced two further source-qualified refusals after a conversational preamble. Source qualification is now detected within a refusal opening before applying the in-scene display exception, reusing the same refusal predicate rather than creating another independent ordering rule. Exact English and Russian examples failed before this patch; normal quoted/on-screen scene cases remain in the regression suite. No tariff or ledger change.
+
+
 
 ## Seedance uncertainty circuit and explicit user review state (2026-10-09)
 
@@ -1330,3 +1405,30 @@ GitHub navigation and provider-contract jobs failed because two more provider/Te
 - P1 standalone website: GenerationCard now uses the same review projection as Mini App/realtime, and landing/js/prototype-premium.js labels the state, keeps it pollable and displays held-credit/support guidance. The original oversight was that site REST does not exclusively use the Mini App serializer.
 - P2 AppV4: its separate ACTIVE_STATUSES set now includes review so later terminal results refresh without reloading. Both standalone/V4 predicates have executable JavaScript regressions in addition to browser CI coverage for the modern UI.
 - P1 evidence privacy: customer generation identifiers and amounts introduced in this execution entry were redacted from the final tree. Delivery uses the mandatory squash merge; no force-push or rewriting protected main history was attempted. Actual IDs remain only in authorized operational systems/chat, not new source/test fixtures.
+
+
+## Current resume: caption quoting and Markdown validation
+
+Resumed PR #205 after Seedance protection PR #206 merged. Kept both execution histories while merging current main; no rewrite/force-push. Two exact-head review defects remain: a caption quoted inside a visible scene can be misinterpreted as a missing source, and Markdown formatting inside section-A heading bypasses validation. Added fresh RED tests for six heading styles, Russian/English absent-input replies, four quoted-caption forms and a refusal outside quoted text. Fix scope: normalize presentation only for validation; omit explicitly quoted scene-caption content only from the validation view, never from delivered prompt text. Preserve single-charge/refund behavior across all surfaces. No paid video generation or user ledger writes during this task.
+
+### Current resume verification
+
+Both defects were observed failing before the patch: eight formatted-heading cases in the capped run and four quoted-caption cases. Markdown decoration is now removed only in a validation view; explicitly quoted caption/label/sign content is masked there, while the original successful prompt remains unchanged. Assertions outside the caption remain checked. Fresh focused service/surface plus Seedance-parity run: 132 passing cases; changed Python files pass Ruff and compile checks. The merged main baseline includes released PR #206. The complete maintained-gate script was not run locally in this resume because the tool rejected that invocation; the existing required GitHub Actions gate must provide full exact-SHA verification before merge. No user credit or provider-reserve changes in this patch.
+
+
+## Real PostgreSQL admission predicate regression discovered after release
+
+Production smoke on PR #206 exposed an actual dialect mismatch: a durable active review marker projected correctly to both public serializers, but `_db_has_unresolved_seedance` returned false. Isolated PostgreSQL SELECTs reproduced old-pattern=false and JSON-boolean-terminator=true, including a synthetic record. The Python-style word boundary at the end of the predicate means backspace in PostgreSQL ARE. Existing mocked-session tests did not execute the operator. Current Redis admission pause remains active; this defect affects fallback when the Redis key is absent. Added a mandatory PostgreSQL 16 CI service and nine real-operator cases against the exact bound production regex (true/false/string/invalid-prefix/absent-marker). No customer table writes, DDL or production schema changes. Production identifiers are not recorded here.
+
+### Final resume regressions
+
+The PostgreSQL predicate failed three true-marker cases and passed only negative cases before the one-line terminator correction; all nine cases now pass against the real deployed PostgreSQL engine using synthetic strings and the actual bound production predicate. No customer data changes. CI now runs those nine cases against an ephemeral PostgreSQL 16 service, so Python-regex semantics cannot hide this regression again. Latest PR #205 review also identified quoted captions followed by their label and bare/typographic English refusals. Seven new cases reproduced failures; quote masking now recognizes label context on either side, and apostrophe normalization/leading Cannot and Can't recognition only affect the validation view. Original successful output is unchanged. Fresh focused regression run: 139 cases pass; Ruff/compile and CI YAML validation pass. Await exact-SHA CI/review and public runtime smoke.
+
+### Source-reference quote regression
+
+The c7568c6 reviewer reproduced a new false success: a quoted bare source reference followed by a display location could be removed as if it were caption text. Two exact Russian/English cases failed before the fix. Bare source names in quotes are now normalized to the same unquoted validation antecedent before scene-caption masking; quoted descriptive captions remain scene text, and all successful prompt strings remain unchanged. Focused service/money/uncertain-submission checks pass (141 cases), with real-PostgreSQL predicate coverage unchanged. Required CI and exact-head independent review remain mandatory.
+
+
+## Resume after refund confirmation (2026-10-09)
+
+Production refund for the user-provided Seedance task was verified read-only against the authoritative single generation_refund ledger row; no second credit operation was attempted. PR #206 already deployed on main. PR #205 resumed at 44fa768 with two existing, uncommitted regression cases. They failed exactly as reviewer PRRT_kwDOSSmOms6qut9W described: normalization removed quotes around a bare source name before an explicit caption/label could be masked. Minimal fix reorders the already-existing two normalization stages: first mask explicitly labeled scene text, then retain unlabelled quoted source antecedents. This preserves true missing-input refunds and valid scene-caption completions without adding another semantic rule. All earlier tests retained. The same PR also contains the previously prepared real-PostgreSQL admission-predicate correction and its nine SQL-operator tests; exact CI and production checks are required before merging.

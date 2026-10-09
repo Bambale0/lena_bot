@@ -76,13 +76,25 @@ def test_telegram_bot_exposes_video_prompt_and_uses_configured_billing() -> None
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("surface", ["telegram", "miniapp", "web"])
-@pytest.mark.parametrize("failed", [True, False])
-async def test_video_prompt_provider_completion_settles_once(monkeypatch, surface, failed):
+@pytest.mark.parametrize("failed,missing_video", [
+    (True, False),
+    (False, False),
+    (True, True),
+])
+async def test_video_prompt_provider_completion_settles_once(
+    monkeypatch, surface, failed, missing_video,
+):
     failure = (
         "The request could not be completed. Please retry later, "
         "or reduce the request parameters/content."
     )
-    text = failure if failed else "Камера плавно движется вдоль берега."
+    missing = (
+        "A. Ready-to-use prompt\n"
+        "Невозможно составить точный генерационный промпт, потому что видео "
+        "не было прикреплено.\n"
+        "B. Что я увидел\nВидеоматериал отсутствует."
+    )
+    text = missing if missing_video else failure if failed else "Камера плавно движется вдоль берега."
     post = AsyncMock(return_value={"choices": [{"message": {"content": text}}]})
     monkeypatch.setattr(video_prompt_service, "_post_json", post)
     handler = telegram_video_prompt if surface == "telegram" else miniapp_routes
@@ -112,7 +124,7 @@ async def test_video_prompt_provider_completion_settles_once(monkeypatch, surfac
         sent = [call.args[0] for call in message.answer.await_args_list]
         if failed:
             assert not any("промпт готов" in item for item in sent)
-            assert all(failure not in item for item in sent)
+            assert all(failure not in item and missing not in item for item in sent)
             wait.edit_text.assert_awaited_once()
             state.clear.assert_not_awaited()
         else:

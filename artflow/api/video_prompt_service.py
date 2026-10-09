@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,15 +50,19 @@ class VideoPromptResult:
 
 
 def _video_prompt_chat_messages(video_url: str, *, fps: float | int | None = None) -> list[dict[str, Any]]:
+    # The Comet/Qwen gateway ignores video unless fps is a sibling of
+    # video_url, not nested inside video_url. Always send an explicit fps:
+    # the no-fps request returned HTTP 200 but the model saw no frames.
+    sample_fps = float(settings.COMET_VIDEO_PROMPT_FPS if fps is None else fps)
+    if not math.isfinite(sample_fps) or not 0.1 <= sample_fps <= 10:
+        raise ValueError("Video prompt FPS must be between 0.1 and 10")
     video_payload: dict[str, Any] = {"url": video_url}
-    if fps is not None:
-        video_payload["fps"] = fps
     return [
         {"role": "system", "content": [{"type": "text", "text": _VIDEO_SYSTEM_PROMPT}]},
         {
             "role": "user",
             "content": [
-                {"type": "video_url", "video_url": video_payload},
+                {"type": "video_url", "video_url": video_payload, "fps": sample_fps},
                 {"type": "text", "text": _VIDEO_PROMPT_REQUEST_TEXT},
             ],
         },
@@ -85,10 +91,181 @@ _PROVIDER_FAILURE_TEXT = (
 ).casefold()
 
 
+def _missing_video_completion(text: str) -> bool:
+    """Reject provider statements about a missing *source*, not missing scene details.
+
+    The reply can begin with a section-A label or a first-person refusal.
+    Quotes and descriptions of empty screens inside an actual video must stay
+    valid prompts; their absence is an in-scene fact, not an upload failure.
+    """
+    # Build a validation-only view. Markdown is presentation, not evidence
+    # of success; preserve the original text when returning a valid prompt.
+    plain = text.casefold().translate(str.maketrans("", "", "`*_#"))
+    opening = " ".join(plain.split())
+    opening = re.sub(
+        r"^a\s*[.)]\s*ready-to-use prompt[\s:—–-]*", "", opening,
+    )
+    # A quoted caption describes text inside the visible scene. Do not let
+    # it override source-absence checks, but retain every assertion outside
+    # the quote so a genuine missing-input refusal cannot hide behind one.
+    opening = re.sub(
+        r"(\b(?:надпись\w*|текст\w*|табличк\w*|caption|label|sign|inscription|text)"
+        r"(?:\s+(?:says|reads|reading))?\s*[:—–-]?\s*)"
+        r"(?:«[^»]*»|“[^”]*”|‘[^’]*’|\"[^\"]*\"|'[^']*')",
+        r"\1[scene-caption]", opening,
+    )
+    # After explicitly labeled captions have been masked, keep an unlabelled
+    # quoted source name as an antecedent for "it/оно was not provided".
+    # The order matters: a caption named "the source video" is scene content.
+    opening = re.sub(
+        r"[\"'«“‘]((?:the\s+)?(?:(?:source|input|uploaded|provided)\s+)?"
+        r"(?:video|footage|file)|(?:исходн\w*|входн\w*|загруженн\w*|"
+        r"прикрепл[её]нн\w*)\s+(?:видео|кадры|файл))[\"'»”’]",
+        r"\1", opening,
+    )
+    # The scene label may follow its quoted content instead of preceding it.
+    opening = re.sub(
+        r"(?:«[^»]*»|“[^”]*”|‘[^’]*’|\"[^\"]*\"|'[^']*')"
+        r"(\s+(?:на|в|on|in)\s+(?:(?:a|the)\s+)?"
+        r"(?:табличк\w*|плакат\w*|экране|мониторе|"
+        r"sign|label|caption|screen|monitor|billboard)\b)",
+        r"[scene-caption]\1", opening,
+    )
+    # Normalize apostrophes in contractions, after preserving paired quotes.
+    opening = re.sub(r"(?<=\w)[’‘ʼ](?=\w)", "'", opening)[:420]
+
+    if opening.startswith((
+        "нет исходного видео",
+        "please upload a video",
+        "no video was attached",
+        "no video was provided",
+        "no video is available",
+    )):
+        return True
+
+    # Absence *on a TV/monitor in the recorded scene* is valid visual
+    # content. Explicit "source/uploaded/input video" must override this
+    # exception: those qualifiers refer to the file supplied for inference.
+    refusal_opening = opening.startswith((
+        "невозможно ", "не могу ", "я не могу ", "я не вижу ",
+        "к сожалению,", "извините,", "sorry,",
+        "i cannot ", "i can't ", "cannot ", "can't ", "unable to ",
+    ))
+    explicit_source_opening = opening.startswith((
+        "исходное видео ", "входное видео ", "загруженное видео ",
+        "исходные кадры ", "прикреплённое видео ", "исходный файл ",
+        "source video ", "the source video ", "uploaded video ",
+        "input video ", "source footage ", "the source footage ",
+    ))
+    if refusal_opening and re.search(
+        r"(?:source|uploaded|input|provided)\s+(?:video|footage|file)|"
+        r"(?:исходн\w*|входн\w*|загруженн\w*|прикрепл[её]нн\w*)"
+        r"\s+(?:видео|кадры|файл)",
+        opening,
+    ):
+        explicit_source_opening = True
+    if not explicit_source_opening and re.search(
+        r"(?:видео\s+(?:отсутству\w*|недоступ\w*)\s+"
+        r"(?:на|в)\s+(?:экране|мониторе|телевизоре)|"
+        r"video\s+(?:is\s+)?(?:missing|unavailable|not visible)\s+"
+        r"on\s+(?:the\s+)?(?:television|tv|monitor|screen))",
+        opening,
+    ):
+        return False
+
+    # If a scene contains "Видеоматериал отсутствует" as a sign or caption,
+    # it is not a statement about the input. Recognize these phrases only
+    # when the provider's *answer* opens with an input noun or a refusal.
+    source_opening = opening.startswith((
+        "видео ", "видеоматериал ", "кадры ", "исходный файл ",
+        "исходное видео ", "входное видео ", "загруженное видео ",
+        "исходные кадры ", "прикреплённое видео ",
+        "video ", "source video ", "the video ", "the source video ",
+        "source footage ", "the source footage ", "uploaded video ",
+        "footage ", "frames ", "source file ", "no video ",
+    ))
+    if not (refusal_opening or source_opening):
+        return False
+
+    # A missing/blocked INPUT is different from an unidentified car model,
+    # absent label, or invisible video *on a screen in the recorded scene*.
+    source_missing_ru = re.search(
+        r"(?:видео|видеоматериал|кадры|исходный файл|"
+        r"(?:исходн\w+|входн\w+|загруженн\w+|прикреплённ\w+)"
+        r"\s+(?:видео|кадры))"
+        r"(?:\s+или\s+кадры\s+из\s+него)?\s+"
+        r"(?:не\s+(?:(?:был[ои]|были)\s+)?"
+        r"(?:прикреплен\w*|прикреплён\w*|загружен\w*|"
+        r"предоставлен\w*|доступн\w*|поступил\w*)|"
+        r"недоступ\w*|отсутству\w*)",
+        opening,
+    )
+    source_missing_en = re.search(
+        r"(?:source video|the video|video|footage|frames?|source file)\s+"
+        r"(?:(?:was|were|is|are)\s+)?"
+        r"(?:not\s+(?:provided|attached|available|accessible|received)|"
+        r"missing|unavailable)",
+        opening,
+    )
+    if source_missing_ru or source_missing_en:
+        return True
+
+    # Some gateway refusals name the uploaded video first, then refer to
+    # that *source* as "it"/"оно" when explaining why it was unavailable.
+    # Require a failed video analysis/prompt action: an unidentified object
+    # whose properties were absent from scene metadata is not missing input.
+    analyzing_source = refusal_opening and any(
+        action in opening for action in (
+            "проанализир", "анализировать видео", "просмотреть видео",
+            "описать видео", "увидеть видео", "рассмотреть видео",
+            "составить промпт", "восстановить промпт",
+            "analyze", "analyse", "describe the video", "see the video",
+            "view the video", "generate a video prompt",
+            "generate a prompt from the video",
+        )
+    )
+    if analyzing_source and re.search(
+        r"(?:видео|видеоматериал|video|footage).{0,90}?"
+        r"(?:потому что|так как|because|since)\s+"
+        r"(?:оно|it)\s+"
+        r"(?:(?:не\s+(?:(?:был[ои]|были)\s+)?"
+        r"(?:прикреплен\w*|прикреплён\w*|предоставлен\w*|"
+        r"загружен\w*)|недоступ\w*)|"
+        r"(?:(?:was|is)\s+)?not\s+"
+        r"(?:provided|attached|available|accessible|uploaded)|"
+        r"unavailable)",
+        opening,
+    ):
+        return True
+
+    # Handle pronoun references to the uploaded file and messages containing
+    # an explicit instruction to re-upload rather than source-adjacent nouns.
+    if refusal_opening and any(phrase in opening for phrase in (
+        "не могу просмотреть видео", "не могу увидеть видео",
+        "i cannot access the video", "i can't access the video",
+        "i cannot see the video", "i can't see the video",
+    )):
+        return any(phrase in opening for phrase in (
+            "не было прикреплено", "не было загружено",
+            "не предоставлено", "файл не прикреплен", "файл не прикреплён",
+            "was not attached", "wasn't attached", "was not provided",
+            "not provided", "no video", "not uploaded",
+        ))
+
+    if opening.startswith("видео не видно"):
+        return any(phrase in opening for phrase in (
+            "файл не прикреплен", "файл не прикреплён",
+            "загрузите видео", "пришлите видео",
+        ))
+    return False
+
+
 def _validated_prompt_text(text: str) -> str:
     clean = text.strip()
     if " ".join(clean.split()).casefold() == _PROVIDER_FAILURE_TEXT:
         raise VideoPromptProviderError("Video prompt provider returned a failure message")
+    if _missing_video_completion(clean):
+        raise VideoPromptProviderError("Video prompt provider could not access video input")
     return clean
 
 

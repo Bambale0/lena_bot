@@ -14,6 +14,20 @@ permissions:
 jobs:
   backend-quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       BOT_TOKEN: "123456:ci-backend-quality"
       COMET_API_KEY: "ci-backend-quality"
@@ -35,6 +49,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: PostgreSQL admission predicate regression
+        env:
+          TEST_RECONCILIATION_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/ci
+        run: pytest -q tests/test_seedance_postgres_admission.py
+
       - name: Ruff maintained baseline
         run: |
           ruff check \
@@ -53,6 +72,7 @@ jobs:
             api/seedance_provider_routing.py \
             api/realtime.py \
             tests/test_seedance_uncertain_submission.py \
+            tests/test_seedance_postgres_admission.py \
             tests/test_neironych_video_poll_gate.py \
             core/neironych_image_reconcile_scheduler.py \
             core/neironych_video_reconcile_scheduler.py \
