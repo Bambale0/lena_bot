@@ -4,7 +4,7 @@ Baseline: `d97184f4a9587a8237df6504de1fe58ff8142c22`. Source of current status: 
 
 Program: https://github.com/Bambale0/lena_bot/issues/209
 
-One active vertical slice. Initial slice: E01.1 / #220. Do not close the parent epic after one child is delivered.
+One active vertical slice. E01.1 / #220 was delivered in #221. Current slice: [E01.2 / #222](E01-2.md). GitHub issues hold the current verification/release status. Do not close the parent epic after one child is delivered.
 
 | Epic | Issue | Scope |
 | --- | --- | --- |

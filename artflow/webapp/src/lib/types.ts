@@ -231,6 +231,13 @@ export interface BootstrapData {
   paymentMethods: string[];
 }
 
+export interface ReferenceMaterial {
+  /** Local draft identity, not a server asset id or authorization token. */
+  id: string;
+  url: string;
+  included: boolean;
+}
+
 export interface GenerationDraft {
   kind: "image" | "video" | "motion";
   model: string;
@@ -245,6 +252,8 @@ export interface GenerationDraft {
   duration: number;
   resolution: string;
   referenceUrls: string[];
+  /** When present this is canonical; referenceUrls stays empty until projection. */
+  referenceMaterials?: ReferenceMaterial[];
   videoUrl: string;
   videoStart: number;
   videoEnd: number | null;
