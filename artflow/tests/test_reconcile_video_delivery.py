@@ -8,6 +8,17 @@ from api import miniapp_routes
 from db.models import GenerationStatus, GenerationType
 
 
+@pytest.fixture(autouse=True)
+def allow_test_neironych_poll_gate(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def gate(_task_id: str):
+        yield True
+
+    monkeypatch.setattr(miniapp_routes, "neironych_video_poll_guard", gate)
+
+
 def _video_generation(*, task_id: str = "neironych:req-123"):
     return SimpleNamespace(
         id=70001,

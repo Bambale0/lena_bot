@@ -180,3 +180,31 @@ async def test_terminal_refund_and_failure_notice_are_one_transaction(monkeypatc
         session, row.id, "repeat callback", video_notice_kind="failed"
     )) == (False, 0.0)
     assert recorded.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_permanent_delivery_failures_stop_at_dead_letter(monkeypatch):
+    from core.config import settings
+
+    monkeypatch.setattr(settings, "NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS", 2)
+    row = _row(kind="failed")
+    session = FakeSession(row)
+    for attempt in (1, 2):
+        claimed = await repo.claim_neironych_video_notice(session, row.id)
+        assert claimed and claimed.attempt == attempt
+        assert await repo.complete_neironych_video_notice(
+            session, row.id, claimed.token, delivered=False
+        )
+        status = json.loads(row.input_params)["neironych_video_notice"]
+        if attempt == 1:
+            assert status["state"] == "pending"
+            status["retry_at"] = (
+                datetime.now(timezone.utc) - timedelta(seconds=1)
+            ).isoformat()
+            params = json.loads(row.input_params)
+            params["neironych_video_notice"] = status
+            row.input_params = json.dumps(params)
+    status = json.loads(row.input_params)["neironych_video_notice"]
+    assert status["state"] == "dead_letter"
+    assert status["failed_at"]
+    assert await repo.claim_neironych_video_notice(session, row.id) is None

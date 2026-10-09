@@ -141,6 +141,11 @@ async def _process_active_video(gen_id: int) -> bool:
         task_id = str(gen.task_id or "")
         if not (task_id.startswith("neironych:") or task_id.startswith("web:neironych:")):
             return False
+        # Read-only ORM fields stay loaded with expire_on_commit=False. Drop
+        # PostgreSQL transaction/connection before the slow provider GET or
+        # potentially 250MB result download. Any terminal state re-check and
+        # refund/finish acquires a fresh transaction with atomic row guards.
+        await session.commit()
         age = (datetime.now(timezone.utc) - gen.created_at).total_seconds()
         if age >= settings.NEIRONYCH_VIDEO_ALERT_AGE_SECONDS:
             now = datetime.now(timezone.utc)

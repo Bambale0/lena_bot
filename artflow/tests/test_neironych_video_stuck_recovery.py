@@ -8,6 +8,17 @@ from api import miniapp_routes, neironych_seedance_runtime
 from db.models import GenerationStatus, GenerationType
 
 
+@pytest.fixture(autouse=True)
+def allow_test_neironych_poll_gate(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def gate(_task_id: str):
+        yield True
+
+    monkeypatch.setattr(miniapp_routes, "neironych_video_poll_guard", gate)
+
+
 def _video(*, age_minutes=12):
     return SimpleNamespace(
         id=789123, user_id=30, model="bytedance/seedance-2-5",
@@ -306,3 +317,66 @@ async def test_scheduler_bad_row_does_not_starve_other_generations():
         True, False, True,
     ]
     assert sorted(executed) == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_neironych_video_status_rejects_mismatched_provider_response_id():
+    import httpx
+
+    from api.neironych_seedance import NeironychSeedanceClient, NeironychSeedanceError
+
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={
+        "data": {"request_id": "another-task", "status": "failed", "error": "rejected"}
+    }))
+    async with httpx.AsyncClient(transport=transport, base_url="https://provider.example.test") as transport_client:
+        client = NeironychSeedanceClient(
+            "test-secret", "https://provider.example.test", client=transport_client
+        )
+        with pytest.raises(NeironychSeedanceError, match="request_id"):
+            await client.get_video("expected-task")
+
+
+def test_notice_lease_must_exceed_notification_timeout():
+    from pydantic import ValidationError
+
+    from core.config import Settings
+
+    with pytest.raises(ValidationError, match="NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS"):
+        Settings(
+            _env_file=None, BOT_TOKEN="123:unit", COMET_API_KEY="ci",
+            NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS=240,
+            NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS=120,
+        )
+
+
+@pytest.mark.asyncio
+async def test_video_scheduler_releases_read_transaction_before_provider_poll(monkeypatch):
+    from core import neironych_video_reconcile_scheduler as scheduler
+
+    events = []
+    row = _video()
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def commit(self):
+            events.append("commit")
+
+        async def rollback(self):
+            events.append("rollback")
+
+    fake = FakeSession()
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", lambda: fake)
+    monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=row))
+
+    async def fake_reconcile(_session, _generation):
+        events.append("provider_get")
+        assert "commit" in events
+        return row
+
+    monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", fake_reconcile)
+    assert await scheduler._process_active_video(row.id)
+    assert events.index("commit") < events.index("provider_get")

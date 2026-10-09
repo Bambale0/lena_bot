@@ -104,6 +104,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.neironych_video_poll_gate import neironych_video_poll_guard
 from core.provider_routing import get_nano21_route
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
@@ -594,6 +595,61 @@ async def _reconcile_neironych_image_generation(
     return gen
 
 
+async def _reconcile_neironych_video_generation(
+    session: AsyncSession, gen, *, task_id: str, stored_task_id: str,
+):
+    """Single-provider, single-poller settlement: no repeated paid submits."""
+    async with neironych_video_poll_guard(task_id) as acquired:
+        if not acquired:
+            # Another process/request owns the same video status/download.
+            return gen
+
+        try:
+            # Bound status GET and media download for both background and
+            # on-demand (history) callers. A timed-out GET never refunds.
+            result_url = await asyncio.wait_for(
+                video_service.get_poll_fn("neironych")(task_id),
+                timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
+            )
+        except video_service.neironych_seedance_runtime.NeironychVideoTaskFailed as exc:
+            if exc.request_id != video_service.neironych_seedance_runtime.decode_task_id(task_id):
+                logger.error("Neironych mismatched terminal response gen=%s", gen.id)
+                return gen
+            failed, refunded = await repo.fail_generation_and_refund(
+                session, gen.id, str(exc),
+                expected_task_id=stored_task_id,
+                refund_note="reconcile:neironych_provider_failed",
+                video_notice_kind="failed" if not is_web_task_id(stored_task_id) else None,
+            )
+            if failed and not is_web_task_id(stored_task_id):
+                # Notice is already durable in the refund transaction.
+                await _deliver_pending_neironych_video_notice(session, gen.id)
+            logger.info("Neironych confirmed failure gen=%s refunded=%s", gen.id, refunded)
+            return await repo.get_generation_by_id(session, gen.id)
+        except Exception as exc:
+            logger.warning(
+                "Neironych video poll deferred gen=%s provider_task=%s error=%s",
+                gen.id, task_id[:96], type(exc).__name__,
+            )
+            return gen
+
+        if not result_url:
+            return gen
+
+        finished = await repo.finish_generation(
+            session, gen.id, result_url,
+            expected_task_id=stored_task_id,
+            queue_neironych_video_notice=not is_web_task_id(stored_task_id),
+        )
+        if finished and gen.image_session_id:
+            await repo.update_image_session_last_result(
+                session, gen.image_session_id, result_url, gen.id
+            )
+        if finished and not is_web_task_id(stored_task_id):
+            await _deliver_pending_neironych_video_notice(session, finished.id)
+        return await repo.get_generation_by_id(session, gen.id)
+
+
 async def _reconcile_generation_status(session: AsyncSession, gen):
     if not gen or gen.status not in {GenerationStatus.pending, GenerationStatus.processing}:
         return gen
@@ -644,6 +700,11 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         gen.gen_type == GenerationType.video
         and video_service.neironych_seedance_runtime.is_task_id(task_id)
     )
+    if strict_neironych_video:
+        return await _reconcile_neironych_video_generation(
+            session, gen, task_id=task_id, stored_task_id=stored_task_id
+        )
+
     strict_nexus_image = (
         gen.gen_type == GenerationType.image
         and gen.model == 'nano-banana-2.1'
@@ -667,36 +728,12 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 result_url = await midjourney_service.poll_mj_video(task_id)
             elif gen.model in _VEO_MODEL_KEYS:
                 result_url = await video_service.poll_veo_status(task_id)
-            elif video_service.neironych_seedance_runtime.is_task_id(task_id):
-                result_url = await video_service.get_poll_fn("neironych")(task_id)
             else:
                 result_url = await video_service.poll_kieai_status(task_id)
         else:
             return gen
     except Exception as exc:
         logger.warning('Reconcile failed generation gen=%s task=%s error=%s', gen.id, task_id, type(exc).__name__)
-        if strict_neironych_video:
-            terminal_failure = isinstance(
-                exc, video_service.neironych_seedance_runtime.NeironychVideoTaskFailed
-            )
-            matches = (
-                terminal_failure
-                and exc.request_id == video_service.neironych_seedance_runtime.decode_task_id(task_id)
-            )
-            if not matches:
-                # Transport errors, HTTP 404/5xx and download failures do NOT
-                # prove that the already-paid upstream generation has failed.
-                return gen
-            failed, refunded = await repo.fail_generation_and_refund(
-                session, gen.id, str(exc),
-                expected_task_id=stored_task_id,
-                refund_note="reconcile:neironych_provider_failed",
-                video_notice_kind="failed" if not is_web_task_id(stored_task_id) else None,
-            )
-            if failed and not is_web_task_id(stored_task_id):
-                await _deliver_pending_neironych_video_notice(session, gen.id)
-            logger.info("Neironych confirmed failure gen=%s refunded=%s", gen.id, refunded)
-            return await repo.get_generation_by_id(session, gen.id)
         if strict_nexus_image:
             if (not isinstance(exc, nexus_image_adapter.NexusImageTaskFailed)
                     or exc.task_id != nexus_image_adapter.strip_nexus_task_id(task_id)):
@@ -723,14 +760,7 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 return gen
         finished = await repo.finish_generation(
             session, gen.id, result_url, result_urls=result_urls,
-            **(
-                {
-                    "expected_task_id": stored_task_id,
-                    "queue_neironych_video_notice": not is_web_task_id(stored_task_id),
-                }
-                if strict_neironych_video
-                else {"expected_task_id": stored_task_id} if strict_nexus_image else {}
-            ),
+            **({"expected_task_id": stored_task_id} if strict_nexus_image else {}),
         )
         if finished and gen.image_session_id:
             await repo.update_image_session_last_result(session, gen.image_session_id, result_url, gen.id)
@@ -751,18 +781,15 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             and gen.gen_type == GenerationType.video
             and not is_web_task_id(getattr(finished, "task_id", None))
         ):
-            if strict_neironych_video:
-                await _deliver_pending_neironych_video_notice(session, finished.id)
+            user = await repo.get_user_by_id(session, finished.user_id)
+            if user:
+                await _notify_reconciled_video_result_in_bot(user=user, gen=finished)
             else:
-                user = await repo.get_user_by_id(session, finished.user_id)
-                if user:
-                    await _notify_reconciled_video_result_in_bot(user=user, gen=finished)
-                else:
-                    logger.warning(
-                        "Reconciled video user not found gen=%s user_id=%s",
-                        finished.id,
-                        finished.user_id,
-                    )
+                logger.warning(
+                    "Reconciled video user not found gen=%s user_id=%s",
+                    finished.id,
+                    finished.user_id,
+                )
 
         return await repo.get_generation_by_id(session, gen.id)
 
@@ -770,9 +797,6 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         # A pending/unknown Nexus task is not proof that paid work failed.
         return gen
 
-    if strict_neironych_video:
-        # Slow or unknown is not failed; keep credits reserved until a definite result.
-        return gen
     if age >= STALE_GENERATION_TIMEOUT:
         logger.warning(
             'Marking stale generation with unfinished task as failed: gen=%s model=%s task=%s age=%s',

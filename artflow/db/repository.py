@@ -1600,13 +1600,25 @@ async def complete_neironych_video_notice(
         data["sent_at"] = now.isoformat()
         data.pop("retry_at", None)
     else:
-        attempts = min(max(int(data.get("attempts", 1) or 1), 1), 16)
-        backoff = min(
-            settings.NEIRONYCH_VIDEO_NOTICE_MAX_BACKOFF_SECONDS,
-            settings.NEIRONYCH_VIDEO_NOTICE_RETRY_SECONDS * (2 ** (attempts - 1)),
-        )
-        data["state"] = "pending"
-        data["retry_at"] = (now + timedelta(seconds=backoff)).isoformat()
+        attempts = max(int(data.get("attempts", 1) or 1), 1)
+        if attempts >= settings.NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS:
+            # Permanently blocked/deleted chats must not cause unbounded
+            # requests. Keep an operator-visible dead-letter record, with no
+            # further automatic Telegram sends.
+            data["state"] = "dead_letter"
+            data["failed_at"] = now.isoformat()
+            data.pop("retry_at", None)
+            logger.error(
+                "Neironych video Telegram notification dead-letter gen=%s attempts=%s",
+                gen_id, attempts,
+            )
+        else:
+            backoff = min(
+                settings.NEIRONYCH_VIDEO_NOTICE_MAX_BACKOFF_SECONDS,
+                settings.NEIRONYCH_VIDEO_NOTICE_RETRY_SECONDS * (2 ** min(attempts - 1, 16)),
+            )
+            data["state"] = "pending"
+            data["retry_at"] = (now + timedelta(seconds=backoff)).isoformat()
     params[NEIRONYCH_VIDEO_NOTICE_KEY] = data
     generation.input_params = json.dumps(params, ensure_ascii=False)
     await session.commit()

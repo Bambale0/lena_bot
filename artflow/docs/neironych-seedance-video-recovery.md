@@ -6,11 +6,12 @@ Incident basis: video `aeb56f5f-ddfd-42fe-baba-115372cbb1e4` remained `processin
 
 - Only product models `bytedance/seedance-2` and `bytedance/seedance-2-5` whose existing `task_id` identifies Neironych are polled. Read-only `GET /v1/videos/{request_id}`; when completed, download `GET /v1/videos/{request_id}/content` using the provider client and persist under APIX-owned public media. **No automated paid rerun or cross-provider fallback**.
 - Default interval is 90 seconds, minimum task age 30 seconds, max 24 video polls plus 24 notice retries per cycle, 4 concurrent requests per pool, 240-second per-task upper bound. The scheduler fairly revisits old tasks while checking new ones. Configuration is typed in `core/config.py` and can be overridden through deployment settings.
-- Provider status `failed`, `cancelled` or `expired` raises a typed terminal failure with matching request ID. `repo.fail_generation_and_refund` uses the existing locked, single-winner pending/processing→failed transition to credit the user's account once, and enqueues a failed Telegram notice in the *same database transaction*. A second simultaneous callback cannot refund twice.
+- Provider status `failed`, `cancelled` or `expired` raises a typed terminal failure only after validating any `request_id` returned in the JSON against the requested task UUID. A mismatched response cannot trigger a refund. `repo.fail_generation_and_refund` uses the existing locked, single-winner pending/processing→failed transition to credit the user's account once, and enqueues a failed Telegram notice in the *same database transaction*. A second simultaneous callback cannot refund twice.
 - Provider status `queued/processing/running`, timeout, HTTP 404/429/5xx, network error, malformed status, or a completed video whose file is temporarily unavailable does **not** authorize refund. Even after 20 minutes, the job stays active. Missing provider task IDs are reported as anomalies requiring manual reconciliation; no guess at the paid operation outcome.
 - Successful video: `repo.finish_generation` persists the durable result URL plus a `neironych_video_notice` pending receipt atomically; a single claim attempt sends it to the Telegram user, with direct MP4 first and Telegram link fallback.
 - Failure: Telegram user is told about the confirmed provider failure and the refund (only if the ledger marker says credits were returned). Public website tasks (`web:` prefix) do not receive unsolicited Telegram notifications. Site/Mini App/task history all read the same terminal status/credits from the shared DB.
-- If Telegram is unavailable, the notice remains in `generations.input_params` with an attempt counter and exponential backoff. A DB row lock, per-attempt UUID and 600-second lease prevent concurrent delivery workers from sending the same item. Retry after crash/restart if a claim lease expires. Successful delivery is marked `sent`.
+- If Telegram is unavailable, the notice remains in `generations.input_params` with an attempt counter and exponential backoff. A DB row lock, per-attempt UUID and 600-second lease prevent concurrent delivery workers from sending the same item. Retry after crash/restart if a claim lease expires. Successful delivery is marked `sent`. After 8 failed sends the notice becomes a `dead_letter` for operator investigation rather than retrying a blocked/deleted Telegram chat indefinitely.
+- Status GET and provider video download hold a short **Redis task lease**, shared by the scheduler and on-demand history endpoint. It prevents duplicate provider GET/250MB downloads from racing with the same task ID. PostgreSQL read transactions are committed before provider network calls; Redis outage defers polling instead of falsely refunding.
 - Delivery is **at least once**, not mathematically exactly once: if Telegram accepts a message and the process crashes before committing its receipt, one repeat is possible after the lease. No duplicate paid generations or credit adjustments are triggered by notice retries.
 
 ## Configuration
@@ -22,10 +23,12 @@ Incident basis: video `aeb56f5f-ddfd-42fe-baba-115372cbb1e4` remained `processin
 | `NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE` | 24 | IDs per query lane |
 | `NEIRONYCH_VIDEO_RECONCILE_CONCURRENCY` | 4 | Parallel upstream checks / Telegram retries |
 | `NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS` | 240 | Per video poll/download/notice timeout |
+| `NEIRONYCH_VIDEO_POLL_LEASE_SECONDS` | 600 | Redis single-poller lease (must exceed timeout plus safety margin) |
 | `NEIRONYCH_VIDEO_ALERT_AGE_SECONDS` | 3600 | Emit overdue warnings (no automatic refund) |
 | `NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS` | 600 | Retry abandoned claimed notification after lease |
 | `NEIRONYCH_VIDEO_NOTICE_RETRY_SECONDS` | 60 | First Telegram delivery retry delay |
 | `NEIRONYCH_VIDEO_NOTICE_MAX_BACKOFF_SECONDS` | 900 | Upper retry delay bound |
+| `NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS` | 8 | Limit sends before `dead_letter` (no more automatic retries) |
 
 No new migrations or business-price parameters. No secrets in logs or URLs returned by the new scheduler.
 

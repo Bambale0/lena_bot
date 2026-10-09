@@ -1216,3 +1216,15 @@ Baseline `02c807eb1b73e20dc3a0e2af2c76efa1b3e1f26d` (main after #200/#201); bran
 - Scheduler: 90s default periodic status GET and delivery scans; fair cursor, 24-task batches, 4 parallel bounded workers, 240s max task time. Malformed individual tasks do not block other work. Outages log oldest task IDs and status without exposing secrets/prompts.
 - PostgreSQL 16 read-only regexp selector tests: pending=true, sending=true, sent=false. This was tested using literal temporary SQL strings, not customer records or schema writes.
 - Deployment risk: no Alembic schema changes, no manual balance or task updates as part of PR. Roll back by reverting PR; records with pending delivery keys persist.
+
+## Codex PR #204 review remediation
+
+Reviewer observed five P2 issues on `6ed8acf`. All five have dedicated reproduction/regression checks:
+
+1. **Long PostgreSQL transactions while polling**: scheduler now commits read-only generation lookup before the provider call; SQL row locks are only acquired again during the short atomic settlement and durable notice claim. Test asserts `commit` occurs before provider GET.
+2. **Unbounded Telegram retries for blocked users**: `NEIRONYCH_VIDEO_NOTICE_MAX_ATTEMPTS=8`, then persisted `dead_letter` instead of endless re-sends. Test exercises both retry and terminal dead-letter states.
+3. **Foreign provider response UUID**: client validates any returned payload `request_id` against the queried one before interpreting terminal failure. Test simulates a failed status for a different UUID.
+4. **Lease-vs-timeout configuration**: Pydantic cross-validates notice and provider poll leases against the maximum configured video recovery timeout, with at least 30s margin; invalid configuration fails to start.
+5. **Concurrent user-history/scheduler polling**: new Redis NX/TTL task lease guards the *whole* provider GET + media download + settlement, from all entry points. It is released only by its unique claim token via Lua; unavailable Redis fails closed (no provider charge/refund mutation). Test uses concurrent callers and verifies provider poll only once.
+
+The original four top-level product paths remain shared: website and Mini App poll the generation and receive DB/refund state; Telegram subscribers additionally get success/failure notifications via durable outbox. No second paid POST, no migrations or changes to historical refunds. Independently await new exact SHA CI and code review before merge.
