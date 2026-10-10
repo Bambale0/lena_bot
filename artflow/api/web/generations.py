@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+import logging
 import mimetypes
+import time
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.miniapp_routes import (
@@ -17,6 +20,7 @@ from api.miniapp_routes import (
     PromptImproveRequest,
     TopupRequest,
     VideoGenRequest,
+    _is_admin_user,
     _is_supported_reference_image,
     _reconcile_user_active_generations,
     miniapp_improve_prompt,
@@ -102,6 +106,7 @@ from api.miniapp_routes import (
     verify_suno_voice as miniapp_verify_suno_voice,
 )
 from api.public_files import save_public_file
+from api.reference_availability import inspect_local_photo_reference
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import GenerationCard
 from db import repository as repo
@@ -495,6 +500,26 @@ async def upload_media_policy(user=Depends(get_web_user_or_none)):
         "image_max_bytes": MAX_WEB_REFERENCE_IMAGE_BYTES,
         "image_formats": ["jpeg", "png", "webp"],
     })
+
+
+class ReferenceCheckRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=4096)
+
+
+@router.post("/upload-media/check")
+async def check_reference_availability(body: ReferenceCheckRequest, user=Depends(get_web_user_or_none)):
+    """Inspect a known public upload; never fetch external URLs or renew access."""
+    if auth_error := _auth_required(user):
+        return auth_error
+    if not _is_admin_user(user):
+        return error_response(403, "Reference availability preview requires administrator access")
+    started = time.monotonic()
+    state = await asyncio.to_thread(inspect_local_photo_reference, body.url)
+    logging.getLogger(__name__).info(
+        "ux2_reference_check actor=%s state=%s elapsed_ms=%.1f",
+        user.id, state, (time.monotonic() - started) * 1000,
+    )
+    return ok({"status": state})
 
 
 @router.post("/upload-media")
