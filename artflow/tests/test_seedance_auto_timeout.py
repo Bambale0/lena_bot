@@ -611,3 +611,49 @@ async def test_completed_overdue_video_is_delivered_after_releasing_poll_lease(m
     assert await scheduler._expire_stuck_seedance_video(gen.id)
     deliver_mock.assert_awaited_once_with(gen.id)
     scheduler.repo.fail_generation_and_refund.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_active_overdue_filter_snapshots_real_orm_before_rollback(tmp_path, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from db.models import Base, Generation, User
+
+    engine = create_engine("sqlite:///" + str(tmp_path / "active-filter-orm.db"))
+    Base.metadata.create_all(engine, tables=[
+        User.__table__, Generation.__table__,
+    ])
+    with Session(engine) as db:
+        db.add(User(id=42, tg_id=4200, credits=100, referral_code="synthetic-filter"))
+        for gen_id, age in ((10501, 7200), (10502, 120)):
+            db.add(Generation(
+                id=gen_id, user_id=42, model="bytedance/seedance-2-5",
+                gen_type=GenerationType.video, status=GenerationStatus.processing,
+                task_id=f"neironych:synthetic-{gen_id}", input_params="{}",
+                prompt="synthetic", credits_spent=40,
+                created_at=datetime.now(timezone.utc) - timedelta(seconds=age),
+            ))
+        db.commit()
+
+    class RolledBackReadOnlySession:
+        def __init__(self):
+            self.db = Session(engine)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            self.db.close()
+
+        async def execute(self, query):
+            return self.db.execute(query)
+
+        async def rollback(self):
+            self.db.rollback()
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", RolledBackReadOnlySession)
+    try:
+        assert await scheduler._active_ids_not_expired([10501, 10502]) == [10502]
+    finally:
+        engine.dispose()
