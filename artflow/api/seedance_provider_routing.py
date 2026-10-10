@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
+from api.kieai_client import KieDefiniteRejection, KieSubmissionOutcomeUnknown
 from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from core.config import settings
 
@@ -27,16 +28,25 @@ async def submit_seedance(
     providers = {"kieai": kie, "neironych": neironych}
     try:
         return await providers[primary]()
-    except (NeironychSubmissionUnknown, NeironychPreSubmitFailure):
+    except (NeironychSubmissionUnknown, NeironychPreSubmitFailure,
+            KieSubmissionOutcomeUnknown):
         raise
     except Exception as primary_exc:
+        if primary == "kieai" and not isinstance(primary_exc, KieDefiniteRejection):
+            # A generic Kie failure may hide an accepted POST with a lost reply.
+            logger.warning(
+                "Seedance Kie submission unclassified; no second paid POST model=%s",
+                product_model,
+            )
+            raise
         logger.warning(
             "%s %s submission failed; falling back to %s: %s",
             product_model, primary, secondary, primary_exc,
         )
         try:
             return await providers[secondary]()
-        except (NeironychSubmissionUnknown, NeironychPreSubmitFailure):
+        except (NeironychSubmissionUnknown, NeironychPreSubmitFailure,
+                KieSubmissionOutcomeUnknown):
             raise
         except Exception as fallback_exc:
             raise RuntimeError(

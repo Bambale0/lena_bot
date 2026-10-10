@@ -60,6 +60,69 @@ async def close_client() -> None:
         await _upload_client.aclose()
 
 
+class KieSubmissionOutcomeUnknown(RuntimeError):
+    """A paid Kie createTask POST may have been accepted; never retry/fallback."""
+
+
+class KieDefiniteRejection(RuntimeError):
+    """Kie definitely rejected the request, with no paid generation created."""
+
+
+async def _create_task_once(payload: dict[str, Any]) -> dict[str, Any]:
+    """One paid POST only. No automatic replay without provider idempotency.
+
+    Kie does not document an idempotency contract for createTask. A 5xx,
+    timeout, connection loss, malformed success body, or missing taskId must
+    therefore be handled as *unknown acceptance*, not as authorization for
+    another provider POST.
+    """
+    path = "/api/v1/jobs/createTask"
+    try:
+        response = await get_client().post(path, json=payload)
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        await _maybe_alert_credit_issue(f"kie.ai POST {path}", exc.response.text)
+        if exc.response.status_code in (400, 401, 402, 403, 404, 422):
+            raise KieDefiniteRejection(
+                f"Kie createTask rejected with HTTP {exc.response.status_code}"
+            ) from exc
+        raise KieSubmissionOutcomeUnknown(
+            f"Kie createTask outcome uncertain (HTTP {exc.response.status_code})"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise KieSubmissionOutcomeUnknown(
+            "Kie createTask response unavailable; acceptance unknown"
+        ) from exc
+
+    try:
+        data = response.json()
+    except (ValueError, TypeError) as exc:
+        raise KieSubmissionOutcomeUnknown(
+            "Kie createTask response invalid; acceptance unknown"
+        ) from exc
+    if not isinstance(data, dict):
+        raise KieSubmissionOutcomeUnknown(
+            "Kie createTask response invalid; acceptance unknown"
+        )
+    await _maybe_alert_credit_issue(f"kie.ai POST {path}", data)
+    code = data.get("code")
+    if code not in (None, 200, "200"):
+        if str(code) in ("400", "401", "402", "403", "404", "422"):
+            raise KieDefiniteRejection(f"Kie createTask rejected with code {code}")
+        raise KieSubmissionOutcomeUnknown(
+            f"Kie createTask outcome uncertain (code {str(code)[:24]})"
+        )
+    fields = data.get("data")
+    task_id = (
+        fields.get("taskId") if isinstance(fields, dict) else data.get("taskId")
+    )
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise KieSubmissionOutcomeUnknown(
+            "Kie createTask accepted but task ID is missing or invalid"
+        )
+    return data
+
+
 async def _retry_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     client = get_client()
     for attempt in range(3):
@@ -198,7 +261,7 @@ async def create_task(
     request_payload = dict(payload)
     if callback_url:
         request_payload["callBackUrl"] = callback_url
-    return await _retry_post("/api/v1/jobs/createTask", request_payload)
+    return await _create_task_once(request_payload)
 
 
 async def get_task_status(task_id: str) -> dict[str, Any]:

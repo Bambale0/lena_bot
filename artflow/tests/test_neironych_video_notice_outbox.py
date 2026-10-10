@@ -166,6 +166,11 @@ async def test_terminal_refund_and_failure_notice_are_one_transaction(monkeypatc
         expected_task_id=row.task_id,
         refund_note="reconcile:neironych_provider_failed",
         video_notice_kind="failed",
+        provider_review={
+            "state": "pending",
+            "reason": "timeout_provider_unconfirmed",
+            "original_task_id": row.task_id,
+        },
     )
     assert success is True and credits == 42
     assert row.status == GenerationStatus.failed
@@ -173,6 +178,8 @@ async def test_terminal_refund_and_failure_notice_are_one_transaction(monkeypatc
     assert params["refund_applied"] is True
     assert params["neironych_video_notice"]["kind"] == "failed"
     assert params["neironych_video_notice"]["state"] == "pending"
+    assert params["seedance_refund_provider_review"]["state"] == "pending"
+    assert params["seedance_refund_provider_review"]["original_task_id"] == row.task_id
     assert recorded.await_count == 1
     assert recorded.await_args.kwargs["delta"] == 42
     session.commit.assert_awaited_once()

@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 ACTIVE_GENERATION_WINDOW = timedelta(minutes=45)
 EXPIRED_FEED_MEDIA_HOSTS = {"tempfile.aiquickdraw.com"}
 NEIRONYCH_VIDEO_NOTICE_KEY = "neironych_video_notice"
+SEEDANCE_REFUND_PROVIDER_REVIEW_KEY = "seedance_refund_provider_review"
 
 
 def _new_neironych_video_notice(kind: str) -> dict[str, object]:
@@ -1270,6 +1271,34 @@ def _active_seedance_submission(gen, client_request_id):
     return params
 
 
+async def _has_pending_refunded_seedance_review(
+    session: AsyncSession, user_id: int,
+) -> bool:
+    """User-scoped liability gate, never a model-wide circuit.
+
+    A refund on an accepted-but-uncertain supplier request restores customer
+    credits, while the upstream may still charge for it. Prevent *that same
+    account* from repeatedly recycling the refunded credits into new paid
+    Neironych submissions. Other users are unaffected.
+    """
+    from core.seedance_reconciliation import PRODUCT_MODELS
+
+    candidates = (await session.execute(
+        select(Generation.input_params).where(
+            Generation.user_id == user_id,
+            Generation.status == GenerationStatus.failed,
+            Generation.model.in_(tuple(PRODUCT_MODELS)),
+            Generation.input_params.like("%seedance_refund_provider_review%"),
+        )
+    )).scalars().all()
+    return any(
+        isinstance(review := parse_input_params(raw).get(
+            SEEDANCE_REFUND_PROVIDER_REVIEW_KEY
+        ), dict) and review.get("state") == "pending"
+        for raw in candidates
+    )
+
+
 async def begin_seedance_submission(
     session, gen_id: int, client_request_id: str, idempotency_key: str,
     payload_sha256: str, *, product_model: str, surface: str = "miniapp",
@@ -1290,6 +1319,11 @@ async def begin_seedance_submission(
             or gen.task_id or params.get(SEEDANCE_SUBMISSION_KEY)):
         await session.commit()
         return False
+    # This guard is scoped to the account, not to the model. It executes
+    # before the first paid provider POST and does not affect unrelated users.
+    if await _has_pending_refunded_seedance_review(session, gen.user_id):
+        raise ValueError("Prior refunded Seedance job still under supplier review")
+
     params[SEEDANCE_SUBMISSION_KEY] = {
         "client_request_id": client_request_id, "idempotency_key": idempotency_key,
         "payload_sha256": payload_sha256, "product_model": product_model,
@@ -1533,6 +1567,7 @@ async def fail_generation_and_refund(
     refund_note: str | None = None,
     expected_task_id: str | None = None,
     video_notice_kind: str | None = None,
+    provider_review: dict[str, object] | None = None,
 ) -> tuple[bool, float]:
     """Fail a pending/processing generation and return its credits in one commit.
 
@@ -1568,6 +1603,9 @@ async def fail_generation_and_refund(
         params["refund_note"] = refund_note[:160]
     if video_notice_kind:
         params[NEIRONYCH_VIDEO_NOTICE_KEY] = _new_neironych_video_notice(video_notice_kind)
+    if provider_review:
+        # Durable supplier review is committed with the user ledger transition.
+        params[SEEDANCE_REFUND_PROVIDER_REVIEW_KEY] = dict(provider_review)
     generation.input_params = json.dumps(params, ensure_ascii=False)
     generation.status = GenerationStatus.failed
     generation.error_msg = error

@@ -218,6 +218,7 @@ async def test_scheduler_checks_active_tasks_and_pending_telegram_notices(monkey
     from core import neironych_video_reconcile_scheduler as scheduler
 
     monkeypatch.setattr(scheduler, "_load_expired_seedance_batch", AsyncMock(return_value=[]))
+    monkeypatch.setattr(scheduler, "_run_refund_supplier_review_lane", AsyncMock(return_value=[]))
     monkeypatch.setattr(scheduler, "_load_batch", AsyncMock(return_value=[12, 14]))
     monkeypatch.setattr(scheduler, "_load_notice_batch", AsyncMock(return_value=[12, 19]))
     check = AsyncMock(return_value=True)
@@ -227,7 +228,7 @@ async def test_scheduler_checks_active_tasks_and_pending_telegram_notices(monkey
     monkeypatch.setattr(scheduler, "_count_missing_id_alerts", AsyncMock(return_value=0))
 
     result = await scheduler.reconcile_neironych_videos_once()
-    assert result == {"checked": 2, "expired": 0, "notices": 2, "sent": 1, "missing_ids": 0}
+    assert result == {"checked": 2, "expired": 0, "notices": 2, "sent": 1, "missing_ids": 0, "supplier_reviews": 0}
     assert check.await_count == 2
     assert send.await_count == 2
 

@@ -350,6 +350,53 @@ async def test_proven_prepost_failure_refunds_only_owned_unsubmitted_attempt(rec
 
 
 @pytest.mark.asyncio
+async def test_refunded_unknown_supplier_job_blocks_only_own_account_paid_submission(recovery):
+    from db import repository as repo
+
+    r = recovery
+    request_id = "c150cc69-0350-43aa-a4fc-a6b17388ec10"
+    with r.db() as db:
+        # A previous 1-hour refund must not be recycled into more charges at
+        # an upstream whose original task might still be paid/in progress.
+        previous = Generation(
+            id=111, user_id=42, model="bytedance/seedance-2-5",
+            gen_type=GenerationType.video, status=GenerationStatus.failed,
+            prompt="earlier video", task_id="neironych:unknown-original",
+            input_params=json.dumps({"seedance_refund_provider_review": {
+                "state": "pending", "original_task_id": "neironych:unknown-original",
+            }}), credits_spent=28,
+        )
+        db.add(previous)
+        current = db.sync.get(Generation, 73)
+        current.task_id = None
+        await db.commit()
+        with pytest.raises(ValueError, match="refunded Seedance"):
+            await repo.begin_seedance_submission(
+                db, current.id, request_id, "idem-guard", "a" * 64,
+                product_model=current.model,
+            )
+        # No paid Neironych request has been started.
+        assert current.task_id is None
+        assert repo.SEEDANCE_SUBMISSION_KEY not in repo.parse_input_params(current.input_params)
+        assert db.sync.get(User, 42).credits == 100
+
+        # Other customers remain unaffected, even for the SAME model.
+        db.add(User(id=55, tg_id=5500, credits=120, referral_code="other-user"))
+        other = Generation(
+            id=112, user_id=55, model=current.model,
+            gen_type=GenerationType.video, status=GenerationStatus.pending,
+            task_id=None, prompt="unrelated", input_params="{}", credits_spent=30,
+        )
+        db.add(other)
+        await db.commit()
+        assert await repo.begin_seedance_submission(
+            db, 112, request_id, "idem-other", "a" * 64,
+            product_model=other.model,
+        )
+        assert other.task_id == "neironych-submit:" + request_id
+
+
+@pytest.mark.asyncio
 async def test_foreground_review_is_silent_and_does_not_change_money(recovery, monkeypatch):
     from bot.handlers import video_gen
     from core import seedance_reconciliation as recovery_core

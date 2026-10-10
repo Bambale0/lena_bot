@@ -91,7 +91,8 @@ async def test_other_users_review_does_not_block_legitimate_primary_kie_fallback
         AsyncMock(return_value=True),
         raising=False,
     )
-    kie = AsyncMock(side_effect=RuntimeError("KIE down"))
+    from api.kieai_client import KieDefiniteRejection
+    kie = AsyncMock(side_effect=KieDefiniteRejection("KIE rejected before acceptance"))
     neiro = AsyncMock(return_value="neironych-ok")
     result = await seedance_provider_routing.submit_seedance(
         "bytedance/seedance-2-5", kie=kie, neironych=neiro
@@ -99,6 +100,33 @@ async def test_other_users_review_does_not_block_legitimate_primary_kie_fallback
     assert result == "neironych-ok"
     kie.assert_awaited_once()
     neiro.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_kie_response_loss_never_starts_a_second_paid_neironych_job(monkeypatch):
+    from api.kieai_client import KieSubmissionOutcomeUnknown
+
+    monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "kieai")
+    kie = AsyncMock(side_effect=KieSubmissionOutcomeUnknown("response lost"))
+    neironych = AsyncMock(return_value="should-never-submit")
+    with pytest.raises(KieSubmissionOutcomeUnknown):
+        await seedance_provider_routing.submit_seedance(
+            "bytedance/seedance-2-5", kie=kie, neironych=neironych,
+        )
+    kie.assert_awaited_once()
+    neironych.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_kie_generic_failure_does_not_authorize_second_provider_post(monkeypatch):
+    monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "kieai")
+    kie = AsyncMock(side_effect=RuntimeError("unknown KIE acceptance"))
+    neironych = AsyncMock(return_value="second-charge")
+    with pytest.raises(RuntimeError, match="unknown KIE acceptance"):
+        await seedance_provider_routing.submit_seedance(
+            "bytedance/seedance-2-5", kie=kie, neironych=neironych,
+        )
+    neironych.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -499,6 +527,7 @@ async def test_durable_submission_is_single_use_and_late_results_cannot_clobber(
     gen = generation()
     gen.task_id = None
     session = FakeSession(gen)
+    monkeypatch.setattr(repo, '_has_pending_refunded_seedance_review', AsyncMock(return_value=False))
     monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
     request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
     assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
@@ -516,6 +545,7 @@ async def test_terminal_submission_marker_is_never_overwritten(monkeypatch):
     gen = generation()
     gen.task_id = None
     session = FakeSession(gen)
+    monkeypatch.setattr(repo, '_has_pending_refunded_seedance_review', AsyncMock(return_value=False))
     monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
     request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
     assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
