@@ -261,7 +261,15 @@ async def create_task(
     request_payload = dict(payload)
     if callback_url:
         request_payload["callBackUrl"] = callback_url
-    return await _create_task_once(request_payload)
+    # Only Seedance currently durably pre-registers a signed callback and
+    # preserves unknown acceptance without restoring spendable credits.
+    # Keep other products on their existing submission contract until each
+    # obtains the same durable unknown-outcome reconciliation protocol.
+    from core.seedance_reconciliation import PRODUCT_MODELS
+
+    if request_payload.get("model") in PRODUCT_MODELS:
+        return await _create_task_once(request_payload)
+    return await _retry_post("/api/v1/jobs/createTask", request_payload)
 
 
 async def get_task_status(task_id: str) -> dict[str, Any]:
