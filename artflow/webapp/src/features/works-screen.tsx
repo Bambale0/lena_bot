@@ -52,9 +52,8 @@ function WorkTile({ task, model, en, onOpen }: { task: GenerationTask; model?: M
   useEffect(() => setBroken(false), [media]);
   const isVideo = task.gen_type === "video";
   const Icon = isVideo ? Film : ["music", "audio"].includes(task.gen_type) ? Music2 : ImageIcon;
-  const needsReview = task.status === "reconciliation_required";
-  const running = isPendingTask(task) && !needsReview;
-  const status = en ? (done(task) ? "Ready" : needsReview ? "Under provider review" : running ? "In progress" : task.status === "failed" ? "Error" : "Checking status") : generationStatusLabel(task.status);
+  const running = isPendingTask(task);
+  const status = en ? (done(task) ? "Ready" : running ? "In progress" : task.status === "failed" ? "Error" : "Checking status") : generationStatusLabel(task.status);
   const title = (!task.prompt_hidden && task.prompt_actions_allowed !== false && task.prompt?.trim()) || model?.display_name || (isVideo ? (en ? "Video" : "Видео") : (en ? "Work" : "Работа"));
   return <button type="button" className="ux2-work-tile apix-focus-ring" onClick={() => onOpen(task)} aria-label={`${title} — ${status}`}>
     <span className="ux2-work-preview">
@@ -62,7 +61,7 @@ function WorkTile({ task, model, en, onOpen }: { task: GenerationTask; model?: M
         ? <video src={media} muted playsInline preload="none" onError={() => setBroken(true)} />
         : <img src={media} alt="" loading="lazy" onError={() => setBroken(true)} />)
         : <Icon size={32} aria-hidden="true" />}
-      <span className="ux2-work-status" data-status={needsReview ? "review" : task.status === "failed" ? "failed" : done(task) ? "done" : "pending"}>
+      <span className="ux2-work-status" data-status={task.status === "failed" ? "failed" : done(task) ? "done" : "pending"}>
         {running && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}{status}
       </span>
     </span>

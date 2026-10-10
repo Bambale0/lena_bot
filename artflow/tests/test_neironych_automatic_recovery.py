@@ -114,7 +114,7 @@ async def test_uncertain_video_recovers_automatically_after_restart_exactly_once
         assert first.status == GenerationStatus.processing
         assert db.sync.get(User, 42).credits == 100
         assert list(db.sync.scalars(select(CreditLedgerEntry))) == []
-    r.review.assert_awaited_once()
+    r.review.assert_not_awaited()
 
     # Native pending without an error is not proof that submission recovered.
     r.client.get_video.return_value = provider_status()
@@ -125,7 +125,7 @@ async def test_uncertain_video_recovers_automatically_after_restart_exactly_once
         assert public_generation_status(pending) == "reconciliation_required"
         assert json.loads(pending.input_params)[RECONCILIATION_KEY]["required"] is True
         assert db.sync.get(User, 42).credits == 100
-    r.review.assert_awaited_once()
+    r.review.assert_not_awaited()
     r.pause.assert_awaited_once()
     r.done.assert_not_awaited()
     r.failed.assert_not_awaited()
@@ -171,7 +171,7 @@ async def test_ambiguous_poll_neither_creates_nor_clears_uncertainty(recovery, r
         assert db.sync.get(User, 42).credits == 100
         assert list(db.sync.scalars(select(CreditLedgerEntry))) == []
         assert list((await db.execute(scheduler._eligible_video_query())).scalars()) == [73]
-    assert r.review.await_count == int(already_uncertain)
+    r.review.assert_not_awaited()
     r.done.assert_not_awaited()
     r.failed.assert_not_awaited()
     r.client.create_video.assert_not_awaited()
@@ -350,15 +350,14 @@ async def test_proven_prepost_failure_refunds_only_owned_unsubmitted_attempt(rec
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("edit_fails", [False, True])
-async def test_foreground_review_edit_shares_outbox_with_scheduler(recovery, monkeypatch, edit_fails):
+async def test_foreground_review_is_silent_and_does_not_change_money(recovery, monkeypatch):
     from bot.handlers import video_gen
     from core import seedance_reconciliation as recovery_core
 
     r = recovery
     request_id = "c150cc69-0350-43aa-a4fc-a6b17388ec10"
     monkeypatch.setattr(recovery_core, "pause_neironych_route", AsyncMock())
-    message = SimpleNamespace(edit_text=AsyncMock(side_effect=RuntimeError("synthetic edit failure") if edit_fails else None))
+    message = SimpleNamespace(edit_text=AsyncMock())
     state = AsyncMock()
     with r.db() as db:
         gen = db.sync.get(Generation, 73)
@@ -370,44 +369,31 @@ async def test_foreground_review_edit_shares_outbox_with_scheduler(recovery, mon
         assert await repo.mark_seedance_submission_unknown(db, 73, request_id)
         await video_gen._show_video_submission_review(message, state, db, 73)
         notice = repo.parse_input_params(gen.input_params)[repo.NEIRONYCH_VIDEO_NOTICE_KEY]
-        assert notice["state"] == ("pending" if edit_fails else "sent")
-        if edit_fails:
-            params = repo.parse_input_params(gen.input_params)
-            params[repo.NEIRONYCH_VIDEO_NOTICE_KEY]["retry_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
-            gen.input_params = json.dumps(params)
-            await db.commit()
-    message.edit_text.assert_awaited_once()
+        assert notice["state"] == "suppressed" and notice["attempts"] == 0
+    message.edit_text.assert_not_awaited()
     state.clear.assert_awaited_once()
-    # Restart the session as the scheduler would; the successful edit is final.
     with r.db() as db:
-        assert await miniapp_routes._deliver_pending_neironych_video_notice(db, 73) is edit_fails
         assert not await miniapp_routes._deliver_pending_neironych_video_notice(db, 73)
         assert db.sync.get(User, 42).credits == 100
         assert list(db.sync.scalars(select(CreditLedgerEntry))) == []
-    assert r.review.await_count == int(edit_fails)
+    r.review.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_foreground_review_edit_does_not_race_scheduler_claim(recovery):
+async def test_foreground_review_does_not_touch_claimed_legacy_notice(recovery):
     from bot.handlers import video_gen
-
     r = recovery
-    request_id = "c150cc69-0350-43aa-a4fc-a6b17388ec10"
     message, state = SimpleNamespace(edit_text=AsyncMock()), AsyncMock()
     with r.db() as db:
         gen = db.sync.get(Generation, 73)
-        gen.task_id = None
+        gen.input_params = json.dumps({repo.NEIRONYCH_VIDEO_NOTICE_KEY: {
+            "kind": "reconciliation", "state": "sending", "token": "old-claim", "attempts": 1,
+        }})
         await db.commit()
-        assert await repo.begin_seedance_submission(
-            db, 73, request_id, "synthetic-idem", "a" * 64, product_model=gen.model,
-        )
-        assert await repo.mark_seedance_submission_unknown(db, 73, request_id)
-        scheduler_claim = await repo.claim_neironych_video_notice(db, 73)
-        assert scheduler_claim is not None
         await video_gen._show_video_submission_review(message, state, db, 73)
         message.edit_text.assert_not_awaited()
-        assert await repo.complete_neironych_video_notice(db, 73, scheduler_claim.token, delivered=True)
         assert not await miniapp_routes._deliver_pending_neironych_video_notice(db, 73)
+        assert repo.parse_input_params(gen.input_params)[repo.NEIRONYCH_VIDEO_NOTICE_KEY]["state"] == "suppressed"
     state.clear.assert_awaited_once()
 
 

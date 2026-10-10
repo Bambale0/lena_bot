@@ -120,14 +120,15 @@ test("ordinary prompt and format survive navigation and reload", async ({ page }
   expect(state.drafts.image.aspectRatio).toBe("9:16");
 });
 
-test("works distinguish provider review from failure without percentages", async ({ page }) => {
+test("works show neutral progress and distinguish actual failure without provider details", async ({ page }) => {
   await prepare(page);
   await page.goto("/?ux=2");
   await page.getByRole("tab", { name: "Работы", exact: true }).click();
   await expect(page.locator(".ux2-work-tile")).toHaveCount(3);
   await page.getByRole("button", { name: "В работе", exact: true }).click();
   await expect(page.locator(".ux2-work-tile")).toHaveCount(1);
-  await expect(page.locator(".ux2-work-tile")).toContainText("Уточняем статус у поставщика");
+  await expect(page.locator(".ux2-work-tile")).toContainText("Создаётся");
+  await expect(page.locator(".ux2-work-tile")).not.toContainText(/поставщик|провайдер|удержан|уточняем/i);
   await expect(page.locator(".ux2-work-tile")).not.toContainText("%");
   await page.getByRole("button", { name: "Ошибки", exact: true }).click();
   await expect(page.locator(".ux2-work-tile")).toHaveCount(1);
@@ -267,4 +268,27 @@ test("short screen keeps balance visible and the active destination unambiguous"
     await expect(page.locator('[role="tab"][aria-selected="true"]')).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Открыть баланс" })).toBeVisible();
   }
+});
+
+
+test("uncertain video detail waits silently then renders a confirmed error", async ({ page }) => {
+  await prepare(page);
+  let status = "reconciliation_required";
+  await page.route("**/api/v1/generations/102", route => route.fulfill({ json: {
+    id: 102, task_id: "fixture-102", model: "fixture-video", gen_type: "video",
+    status, created_at: "2026-10-09T11:00:00Z", credits_spent: 4,
+  } }));
+  await page.goto("/?ux=2");
+  await page.getByRole("tab", { name: "Работы", exact: true }).click();
+  await page.getByRole("button", { name: "В работе", exact: true }).click();
+  await page.locator(".ux2-work-tile").click();
+  const dialog = page.getByRole("dialog", { name: "Задача #102" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Задача принята. Результат появится здесь автоматически.");
+  await expect(dialog).not.toContainText(/поставщик|провайдер|удержан|уточняем/i);
+  status = "failed";
+  await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+  await expect(dialog).toContainText("Результат не создан");
+  await expect(dialog).toContainText("Ошибка");
+  await expect(dialog.getByRole("button", { name: "Обновить", exact: true })).toHaveCount(0);
 });

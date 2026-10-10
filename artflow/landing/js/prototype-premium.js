@@ -581,7 +581,7 @@ function capabilityLabel(value) {
 
 function statusLabel(value) {
   const source = String(value || "").toLowerCase();
-  if (source === "reconciliation_required") return "уточняем статус у поставщика";
+  if (source === "reconciliation_required") return "готовится";
   if (source === "processing") return "готовится";
   if (source === "queued") return "в очереди";
   if (source === "pending") return "ожидает";
@@ -3248,7 +3248,7 @@ function generationStatusCopy(status) {
   if (value === "uploading") return "Загружаем референс";
   if (value === "created") return "Задача принята";
   if (value === "pending" || value === "queued") return "Ожидает свободный слот";
-  if (value === "reconciliation_required") return "Уточняем статус видео у поставщика. Проверка продолжается автоматически. Сообщим, когда получим результат или подтверждённую ошибку. Повторно запускать эту задачу не нужно. Кредиты пока удержаны";
+  if (value === "reconciliation_required") return "Задача принята. Результат появится здесь автоматически.";
   if (value === "processing" || value === "running") return "Модель создает результат";
   if (value === "done") return "Готово";
   if (value === "failed") return "Не получилось";

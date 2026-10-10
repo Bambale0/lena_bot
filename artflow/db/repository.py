@@ -60,7 +60,10 @@ NEIRONYCH_VIDEO_NOTICE_KEY = "neironych_video_notice"
 def _new_neironych_video_notice(kind: str) -> dict[str, object]:
     if kind not in {"done", "failed", "reconciliation"}:
         raise ValueError("Unsupported video notice kind")
-    return {"kind": kind, "state": "pending", "attempts": 0}
+    # Recovery details belong in operations diagnostics, not in customer chats.
+    # Keep an explicit audit state; do not pretend an unsent notice was sent.
+    state = "suppressed" if kind == "reconciliation" else "pending"
+    return {"kind": kind, "state": state, "attempts": 0}
 
 
 
@@ -1628,7 +1631,7 @@ def _notice_timestamp(value: object) -> datetime | None:
 async def mark_neironych_video_reconciliation(
     session: AsyncSession, gen_id: int, *, expected_task_id: str,
 ) -> bool:
-    """Persist explicit provider uncertainty + one user notice, with no credit change."""
+    """Persist internal provider uncertainty, silently and with no credit change."""
     generation = (await session.execute(
         select(Generation).where(Generation.id == gen_id).with_for_update()
         .execution_options(populate_existing=True)
@@ -1688,6 +1691,38 @@ async def current_neironych_review_notice(
     return gen if valid else None
 
 
+def _suppress_neironych_review_notice(data: dict) -> None:
+    data["state"] = "suppressed"
+    data["suppressed_at"] = datetime.now(timezone.utc).isoformat()
+    for key in ("token", "claimed_at", "retry_at"):
+        data.pop(key, None)
+
+
+async def suppress_claimed_neironych_review_notice(
+    session: AsyncSession, gen_id: int, claim_token: str,
+) -> bool:
+    """Silence an already claimed review without clobbering a terminal notice."""
+    generation = (await session.execute(
+        select(Generation).where(Generation.id == gen_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if generation is None:
+        await session.commit()
+        return False
+    params = parse_input_params(generation.input_params)
+    data = params.get(NEIRONYCH_VIDEO_NOTICE_KEY)
+    if (not isinstance(data, dict) or data.get("kind") != "reconciliation"
+            or data.get("state") != "sending" or data.get("token") != claim_token):
+        await session.commit()
+        return False
+    _suppress_neironych_review_notice(data)
+    params[NEIRONYCH_VIDEO_NOTICE_KEY] = data
+    generation.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    logger.info("Claimed intermediate video notice suppressed gen=%s", gen_id)
+    return True
+
+
 async def claim_neironych_video_notice(
     session: AsyncSession, gen_id: int,
     *, lease_seconds: int | None = None, expected_kind: str | None = None,
@@ -1720,6 +1755,16 @@ async def claim_neironych_video_notice(
         or state not in {"pending", "sending"}
     ):
         await session.commit()
+        return None
+
+    if kind == "reconciliation":
+        # Retire legacy pending/sending review notices under the same lock as
+        # terminal transitions. No Telegram call or attempt increment occurs.
+        _suppress_neironych_review_notice(data)
+        params[NEIRONYCH_VIDEO_NOTICE_KEY] = data
+        generation.input_params = json.dumps(params, ensure_ascii=False)
+        await session.commit()
+        logger.info("Neironych intermediate video notice suppressed gen=%s", gen_id)
         return None
 
     now = datetime.now(timezone.utc)

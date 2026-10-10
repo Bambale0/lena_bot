@@ -59,7 +59,7 @@ export function formatRelativeDate(value?: string | null): string {
 export function generationStatusLabel(status: string): string {
   if (status === "done" || status === "completed") return "Готово";
   if (status === "failed") return "Ошибка";
-  if (status === "reconciliation_required") return "Уточняем статус у поставщика";
+  if (status === "reconciliation_required") return "Создаётся";
   if (status === "processing" || status === "running") return "Создаётся";
   if (status === "pending" || status === "queued" || status === "created") return "В очереди";
   return status || "В работе";
