@@ -166,12 +166,11 @@ async def test_suppressed_notice_keeps_active_result_recovery_intent(monkeypatch
         async def __aexit__(self, *_args):
             return False
 
-        async def scalar(self, statement):
-            if "generations.status" in str(statement):
-                return GenerationStatus.processing
-            return json.dumps({repo.NEIRONYCH_VIDEO_NOTICE_KEY: {
+        async def execute(self, statement):
+            raw = json.dumps({repo.NEIRONYCH_VIDEO_NOTICE_KEY: {
                 "kind": "reconciliation", "state": "suppressed", "attempts": 0,
             }})
+            return SimpleNamespace(one_or_none=lambda: (raw, GenerationStatus.processing))
 
         async def rollback(self):
             pass
@@ -183,3 +182,39 @@ async def test_suppressed_notice_keeps_active_result_recovery_intent(monkeypatch
     redis.zrem.assert_not_awaited()
     redis.zadd.assert_awaited_once()
     assert redis.zadd.await_args.args[1]["731"] > datetime.now(timezone.utc).timestamp()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_terminal_commit_cannot_mix_receipt_and_status_snapshots(monkeypatch):
+    from core import neironych_video_reconcile_scheduler as scheduler
+    suppressed = json.dumps({repo.NEIRONYCH_VIDEO_NOTICE_KEY: {
+        "kind": "reconciliation", "state": "suppressed", "attempts": 0,
+    }})
+    statements = []
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def scalar(self, statement):
+            # Reproduces a terminal commit between the old two SELECTs.
+            return GenerationStatus.done if "generations.status" in str(statement) else suppressed
+
+        async def execute(self, statement):
+            statements.append(str(statement))
+            return SimpleNamespace(one_or_none=lambda: (suppressed, GenerationStatus.processing))
+
+        async def rollback(self):
+            pass
+
+    redis = SimpleNamespace(zadd=AsyncMock(), zrem=AsyncMock(), aclose=AsyncMock())
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", Session)
+    monkeypatch.setattr(scheduler, "_notice_redis_client", lambda: redis)
+    await scheduler._sync_notice_retry_schedule(731)
+    redis.zrem.assert_not_awaited()
+    redis.zadd.assert_awaited_once()
+    assert len(statements) == 1
+    assert "generations.input_params" in statements[0] and "generations.status" in statements[0]

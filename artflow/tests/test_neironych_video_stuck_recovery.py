@@ -834,7 +834,8 @@ async def test_swept_old_notice_retries_on_due_time_without_cursor_wrap(monkeypa
     class DbSession:
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): return False
-        async def scalar(self, _sql): return json.dumps(notice)
+        async def execute(self, _sql):
+            return SimpleNamespace(one_or_none=lambda: (json.dumps(notice), GenerationStatus.done))
         async def rollback(self): pass
 
     monkeypatch.setattr(scheduler, "AsyncSessionLocal", DbSession)
@@ -860,8 +861,9 @@ async def test_notice_retry_queue_removes_sent_receipts(monkeypatch):
     class FakeSession:
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): return False
-        async def scalar(self, _sql):
-            return json.dumps({"neironych_video_notice": {"state": "sent"}})
+        async def execute(self, _sql):
+            raw = json.dumps({"neironych_video_notice": {"state": "sent"}})
+            return SimpleNamespace(one_or_none=lambda: (raw, GenerationStatus.done))
         async def rollback(self): pass
 
     monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
@@ -884,11 +886,12 @@ async def test_notice_retry_queue_respects_stale_sending_lease(monkeypatch):
     class FakeSession:
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): return False
-        async def scalar(self, _sql):
-            return json.dumps({"neironych_video_notice": {
+        async def execute(self, _sql):
+            raw = json.dumps({"neironych_video_notice": {
                 "state": "sending", "claimed_at": now.isoformat(),
                 "attempts": 1,
             }})
+            return SimpleNamespace(one_or_none=lambda: (raw, GenerationStatus.done))
         async def rollback(self): pass
 
     monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
@@ -1030,11 +1033,8 @@ async def test_video_notice_intent_waits_if_generation_still_processing(monkeypa
     class FakeSession:
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): return False
-        async def scalar(self, query):
-            return (
-                GenerationStatus.processing if "generations.status" in str(query)
-                else "{}"
-            )
+        async def execute(self, query):
+            return SimpleNamespace(one_or_none=lambda: ("{}", GenerationStatus.processing))
         async def rollback(self): pass
 
     monkeypatch.setattr(scheduler, "AsyncSessionLocal", FakeSession)
