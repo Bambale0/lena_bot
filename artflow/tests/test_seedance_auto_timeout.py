@@ -77,7 +77,9 @@ async def test_expired_job_gets_final_read_only_poll_then_atomic_refund(monkeypa
     monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=gen))
     monkeypatch.setattr(scheduler.repo, "fail_generation_and_refund", refunds)
     assert await scheduler._expire_stuck_seedance_video(gen.id)
-    result.assert_awaited_once_with(gen)
+    result.assert_awaited_once()
+    assert result.await_args.args[0].task_id == gen.task_id
+    assert result.await_args.args[0].input_params == {}
     assert refunds.await_args.kwargs["provider_review"]["state"] == "pending"
     assert refunds.await_args.args[1:3] == (gen.id, "Видео не удалось создать вовремя.")
     assert refunds.await_args.kwargs["expected_task_id"] == gen.task_id
@@ -506,3 +508,65 @@ async def test_supplier_review_expiry_escalates_for_administrator(monkeypatch):
     assert review["state"]=="needs_admin_resolution"
     assert review["escalated_at"]
     alert.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_real_sqlalchemy_rollback_cannot_refund_an_already_completed_remote_video(
+    tmp_path, monkeypatch,
+):
+    '''A real ORM rollback expires attributes; provider GET must get a snapshot.'''
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from db.models import Base, Generation, User
+
+    engine = create_engine("sqlite:///" + str(tmp_path / "detached-paid-video.db"))
+    Base.metadata.create_all(engine, tables=[User.__table__, Generation.__table__])
+    video_id = 10031
+    upstream = "neironych:synthetic-completed"
+    with Session(engine) as db:
+        db.add(User(id=42, tg_id=4200, credits=100, referral_code="synthetic-snapshot"))
+        db.add(Generation(
+            id=video_id, user_id=42, model="bytedance/seedance-2-5",
+            gen_type=GenerationType.video, status=GenerationStatus.processing,
+            task_id=upstream, input_params="{}", credits_spent=40,
+            prompt="synthetic red-blue clip",
+            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        ))
+        db.commit()
+
+    class ActualOrmTransaction:
+        def __init__(self):
+            self.db = Session(engine)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            self.db.close()
+
+        async def execute(self, statement):
+            return self.db.execute(statement)
+
+        async def rollback(self):
+            self.db.rollback()
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", ActualOrmTransaction)
+    final_get = AsyncMock()
+
+    async def verified_remote_completed(item):
+        # This access raises DetachedInstanceError with an expired ORM object.
+        assert item.task_id == upstream
+        assert item.input_params == {}
+        return "done", None
+
+    final_get.side_effect = verified_remote_completed
+    monkeypatch.setattr(scheduler, "_final_neironych_provider_status", final_get)
+    settle = AsyncMock(return_value=True)
+    monkeypatch.setattr(scheduler, "_settle_expired_seedance", settle)
+    try:
+        assert not await scheduler._expire_stuck_seedance_video(video_id)
+        final_get.assert_awaited_once()
+        settle.assert_not_awaited()
+    finally:
+        engine.dispose()

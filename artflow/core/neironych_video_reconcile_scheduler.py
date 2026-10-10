@@ -10,6 +10,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import redis.asyncio as aioredis
 from sqlalchemy import DateTime, cast, func, or_, select
@@ -275,12 +276,20 @@ async def _expire_stuck_seedance_video(gen_id: int) -> bool:
             if ((datetime.now(timezone.utc) - _seedance_started_at(current)).total_seconds()
                     < settings.SEEDANCE_AUTO_REFUND_SECONDS):
                 return False
+            # SQLAlchemy rollback expires mapped row attributes; after the
+            # session closes even reading task_id can fail. Capture detached
+            # immutable primitives BEFORE ending the read-only transaction.
+            snapshot = SimpleNamespace(
+                task_id=str(current.task_id or ""),
+                model=str(current.model),
+                input_params=repo.parse_input_params(current.input_params),
+            )
             await session.rollback()
 
         remote_state = "unknown"
         provider_id = None
         try:
-            remote_state, provider_id = await _final_neironych_provider_status(current)
+            remote_state, provider_id = await _final_neironych_provider_status(snapshot)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -295,7 +304,7 @@ async def _expire_stuck_seedance_video(gen_id: int) -> bool:
             return False
         if remote_state == "bound" and provider_id:
             async with AsyncSessionLocal() as session:
-                marker = repo.parse_input_params(current.input_params).get(
+                marker = repo.parse_input_params(snapshot.input_params).get(
                     repo.SEEDANCE_SUBMISSION_KEY
                 )
                 if isinstance(marker, dict):
@@ -333,7 +342,6 @@ async def _review_refunded_provider_task(gen_id: int) -> bool:
         await session.rollback()
 
     # The provider may discover a previously unbound submission much later.
-    from types import SimpleNamespace
     if previous_bound:
         task = ("web:" if task.startswith("web:") else "") + "neironych:" + previous_bound
     shadow = SimpleNamespace(task_id=task, model=model, input_params=params)
