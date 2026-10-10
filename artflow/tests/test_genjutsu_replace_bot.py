@@ -168,6 +168,11 @@ def billing(monkeypatch):
     monkeypatch.setattr(video_gen.repo, "spend_credits", spend)
     monkeypatch.setattr(video_gen.repo, "create_generation", create)
     monkeypatch.setattr(video_gen.repo, "update_generation_task", AsyncMock())
+    # No production DB row exists in this test fixture; the durable callback
+    # register operation is independently verified with persisted SQL tests.
+    monkeypatch.setattr(
+        video_gen.repo, "register_kie_video_callback", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(video_gen.repo, "fail_generation_and_refund", refund)
     return SimpleNamespace(spend=spend, create=create, refund=refund)
 

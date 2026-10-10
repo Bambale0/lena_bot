@@ -122,6 +122,9 @@ def video_launch(monkeypatch):
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=SimpleNamespace(id=99)),
         update_generation_task=AsyncMock(),
+        # Provider route tests use a fake DB session; durable callback binding
+        # is verified independently in test_kie_seedance_callback.
+        register_kie_video_callback=AsyncMock(return_value=True),
     )
     service = SimpleNamespace(
         generate_video=AsyncMock(return_value=SimpleNamespace(task_id="fake", provider="kieai", uses_webhook=True)),
