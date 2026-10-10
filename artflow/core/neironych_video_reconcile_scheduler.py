@@ -299,10 +299,11 @@ async def _expire_stuck_seedance_video(gen_id: int) -> bool:
             )
 
         if remote_state == "done":
-            # Completion with temporarily failed media retrieval is NOT a
-            # supplier failure. Defer compensation and retry delivery.
-            return False
-        if remote_state == "bound" and provider_id:
+            # This is a paid completed result, not a refund candidate.
+            # Delivery must happen AFTER the expiry lease is released so the
+            # normal reconciler can acquire its own poll/download lease.
+            pass
+        elif remote_state == "bound" and provider_id:
             async with AsyncSessionLocal() as session:
                 marker = repo.parse_input_params(snapshot.input_params).get(
                     repo.SEEDANCE_SUBMISSION_KEY
@@ -314,7 +315,12 @@ async def _expire_stuck_seedance_video(gen_id: int) -> bool:
                         task + "neironych:" + provider_id,
                     )
             return False
-        return await _settle_expired_seedance(gen_id, task_id, remote_state)
+        else:
+            return await _settle_expired_seedance(gen_id, task_id, remote_state)
+
+    # The active lane excludes overdue generations. Run delivery explicitly,
+    # without submitting any additional paid provider request.
+    return await _process_active_video(gen_id)
 
 
 async def _review_refunded_provider_task(gen_id: int) -> bool:
@@ -800,14 +806,16 @@ async def _active_ids_not_expired(ids: list[int]) -> list[int]:
         return []
     async with AsyncSessionLocal() as session:
         live = (await session.execute(select(Generation).where(Generation.id.in_(ids)))).scalars().all()
+        # Snapshot overdue IDs while the ORM rows are attached. A rollback
+        # expires attributes, and detached rows cannot be read safely later.
+        overdue = {
+            gen.id for gen in live
+            if gen.gen_type == GenerationType.video and gen.model in PRODUCT_MODELS
+            and str(gen.task_id or "").startswith(_NEIRONYCH_TASK_PREFIXES)
+            and (datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
+            >= settings.SEEDANCE_AUTO_REFUND_SECONDS
+        }
         await session.rollback()
-    overdue = {
-        gen.id for gen in live
-        if gen.gen_type == GenerationType.video and gen.model in PRODUCT_MODELS
-        and str(gen.task_id or "").startswith(_NEIRONYCH_TASK_PREFIXES)
-        and (datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
-        >= settings.SEEDANCE_AUTO_REFUND_SECONDS
-    }
     return [ident for ident in ids if ident not in overdue]
 
 
