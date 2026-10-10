@@ -205,3 +205,44 @@ async def test_terminal_signed_kie_callback_returns_loaded_generation_after_roll
     # Object is detached; webhook must still inspect its terminal status.
     assert result is not None
     assert result.status == GenerationStatus.failed
+
+
+@pytest.mark.parametrize(("payload", "expected"), [
+    ({"data": {"state": "processing"}}, None),
+    ({"data": {"state": "new_unrecognized_vendor_status"}, "code": 200}, None),
+    ({"data": {"state": "failed"}}, False),
+    ({"data": {"state": "completed"}}, True),
+    ({"data": {"state": "queued"}}, None),
+    ({"data": {"state": ""}}, None),
+])
+def test_late_kie_callback_requires_definitive_terminal_evidence(payload, expected):
+    from main import _late_kie_supplier_outcome
+
+    assert _late_kie_supplier_outcome(payload) is expected
+
+
+def test_refunded_kie_review_is_visible_in_authenticated_admin_queue():
+    from sqlalchemy.dialects import postgresql
+
+    from api.web.admin import _unsettled_seedance_supplier_reviews_query
+
+    query = _unsettled_seedance_supplier_reviews_query(100).compile(
+        dialect=postgresql.dialect()
+    )
+    assert "jsonb_extract_path_text" in str(query)
+    assert "remote_completed_pending_finance" in str(query.params)
+    assert "needs_admin_resolution" in str(query.params)
+
+
+@pytest.mark.asyncio
+async def test_supplier_review_list_denies_unauthenticated_requests():
+    from types import SimpleNamespace
+
+    from api.web.admin import admin_list_unsettled_seedance_supplier_reviews
+
+    session = SimpleNamespace(execute=AsyncMock(side_effect=AssertionError("unauthorized DB read")))
+    result = await admin_list_unsettled_seedance_supplier_reviews(
+        limit=20, session=session, user=None,
+    )
+    assert result.status_code in (401, 403)
+    session.execute.assert_not_awaited()
