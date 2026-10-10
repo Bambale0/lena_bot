@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.public_files import public_url_is_available
 from bot.keyboards.feed import empty_feed_kb, feed_card_kb
 from bot.keyboards.main_menu import back_to_menu_kb
-from bot.keyboards.models import IMAGE_CAPS, feed_video_models_kb
+from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS, feed_video_models_kb
 from bot.keyboards.prompts import prompt_use_model_kb
 from bot.states import ImageGenFSM, PromptUseFSM, VideoGenFSM
 from bot.utils.deep_links import build_start_payload
@@ -32,7 +32,11 @@ from bot.utils.telegram_images import (
     send_image_to_message,
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
-from core.feed_remix_prompt import original_feed_video_inputs, original_feed_video_references
+from core.feed_remix_prompt import (
+    original_feed_video_inputs,
+    original_feed_video_references,
+    supports_feed_source_media,
+)
 from db import repository as repo
 from db.models import Generation, GenerationStatus, GenerationType, User
 from db.repository import FeedGenerationCard
@@ -433,6 +437,8 @@ async def cb_feed_use(
         origin_videos = original_feed_video_references(gen)
         has_recipe = origin_videos is not None
         needs_video = bool(origin_videos) if has_recipe else True
+        creator_caps = VIDEO_CAPS.get(gen.model, {})
+        needs_photo = supports_feed_source_media(creator_caps, "image")
         original_inputs = original_feed_video_inputs(gen) or {}
         source_reference_video = (
             origin_videos[0] if origin_videos else None
@@ -445,10 +451,12 @@ async def cb_feed_use(
             feed_use_gen_type="video",
             feed_use_source_video_url=source_reference_video,
             feed_use_needs_video_reference=needs_video,
+            feed_use_requires_photo=needs_photo,
             feed_use_has_original_recipe=has_recipe,
             feed_use_original_duration=original_inputs.get("duration"),
             feed_use_original_resolution=original_inputs.get("resolution"),
             feed_use_original_aspect_ratio=original_inputs.get("aspect_ratio"),
+            feed_use_original_grok_mode=original_inputs.get("grok_mode") or original_inputs.get("mode"),
             source_feed_gen_id=gen_id,
             feed_force_reference=True,
         )
@@ -456,11 +464,15 @@ async def cb_feed_use(
             "🎬 <b>Повторить видео</b>\n\n"
             "Выбери модель автора, затем загрузи своё фото. Повтор выполнится с исходным промптом "
             "и параметрами автора, без подстановки готового видео."
-            if has_recipe and not needs_video
+            if has_recipe and not needs_video and needs_photo
+            else "Автор создавал это видео только по тексту. Повтор используeт его скрытый промпт, фото не требуется."
+            if has_recipe and not needs_video and not needs_photo
             else "Выбери видео-модель и добавь своё фото. Повтор использует исходный видео-референс автора."
             if has_recipe
             else "Выбери видео-модель и добавь своё фото для редактирования опубликованного ролика.",
-            reply_markup=feed_video_models_kb(model_costs, require_video=needs_video, original_model=gen.model) if has_recipe else feed_video_models_kb(model_costs),
+            reply_markup=feed_video_models_kb(
+                model_costs, require_video=needs_video, original_model=gen.model, allow_text_only=not needs_photo,
+            ) if has_recipe else feed_video_models_kb(model_costs),
         )
         await safe_answer_callback(call)
         return

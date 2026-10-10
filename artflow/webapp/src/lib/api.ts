@@ -121,6 +121,7 @@ function feedItemFromPublicPayload(payload: unknown): FeedItem | null {
     original_duration: typeof item.original_duration === "number" ? item.original_duration : null,
     original_aspect_ratio: typeof item.original_aspect_ratio === "string" ? item.original_aspect_ratio : null,
     original_resolution: typeof item.original_resolution === "string" ? item.original_resolution : null,
+    original_grok_mode: typeof item.original_grok_mode === "string" ? item.original_grok_mode : null,
     prompt: typeof item.prompt === "string" ? item.prompt : "",
     prompt_hidden: item.prompt_hidden === true || promptVisibility === "hidden",
     result_url: resultUrl || undefined,

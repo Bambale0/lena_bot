@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import { openFeedRemixRunner } from "./features/feed-remix-runner";
 
 const API_BASE = "/api/v1";
 const REALTIME_MAX_FAILURES = 5;
@@ -4102,6 +4103,22 @@ function App() {
   }
 
   function handleRemix(feedItem) {
+    if (feedItem.gen_type === "video" && typeof feedItem.source_has_video_reference === "boolean") {
+      // Supported ?legacy=1 surface must use the same creator-input replay
+      // as Mini App, never insert the rendered MP4 into the reference list.
+      void openFeedRemixRunner(feedItem).then((task) => {
+        setGeneration(task);
+        setPollId(task.id);
+        generationScreen.current = "studio";
+        setScreen("studio");
+        me.reload();
+      }).catch((err) => {
+        if (err?.message !== "Повтор отменён" && err?.message !== "Открыт новый повтор") {
+          setNotice({ type: "error", message: err?.message || "Не удалось повторить работу" });
+        }
+      });
+      return;
+    }
     const targetScreen = isMidjourneyModel(feedItem.model) ? "midjourney" : "studio";
     setRemixSource({
       gen_id: feedItem.id,

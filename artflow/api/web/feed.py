@@ -31,6 +31,7 @@ COMPACT_FEED_KEYS = {
     "original_duration",
     "original_aspect_ratio",
     "original_resolution",
+    "original_grok_mode",
     "result_url",
     "result_urls",
     "preview_url",

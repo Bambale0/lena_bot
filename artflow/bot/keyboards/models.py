@@ -948,16 +948,20 @@ def video_models_kb(
 
 
 def feed_video_models_kb(
-    model_costs: list[ModelCost], *, require_video: bool = True, original_model: str | None = None,
+    model_costs: list[ModelCost], *, require_video: bool = True,
+    original_model: str | None = None, allow_text_only: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Offer only compatible models; exact creator replay preserves its model."""
+    """Offer compatible author model even when a source had no image inputs."""
     from core.feed_remix_prompt import supports_feed_source_media
 
     source_type = "video" if require_video else "image"
     compatible = [
         cost for cost in model_costs
         if (original_model is None or cost.model_key == original_model)
-        and supports_feed_source_media(VIDEO_CAPS.get(cost.model_key, {}), source_type)
+        and (
+            supports_feed_source_media(VIDEO_CAPS.get(cost.model_key, {}), source_type)
+            or (allow_text_only and "text" in VIDEO_CAPS.get(cost.model_key, {}).get("modes", []))
+        )
     ]
     return video_models_kb(compatible)
 

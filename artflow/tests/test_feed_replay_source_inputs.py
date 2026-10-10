@@ -309,3 +309,88 @@ async def test_creator_photo_replay_provider_payload_has_no_video_input(api_laun
         assert payload["reference_images"] == [{"url": USER}]
         assert payload["prompt"] == PROMPT
     assert RESULT_MP4 not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_text_only_creator_video_can_replay_prompt_without_photo(api_launch):
+    model = "kling-2.6/text-to-video"
+    api_launch.source.gen_type = GenerationType.video
+    api_launch.source.model = model
+    api_launch.source.prompt = PROMPT
+    api_launch.source.result_url = RESULT_MP4
+    api_launch.source.input_params = {**origin(), "image_url": None}
+    body = api_launch.routes.FeedRemixRequest(model=model, mode="text")
+    await api_launch.routes.quote_feed_remix(77, body, api_launch.session, api_launch.user)
+    await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+    submitted = api_launch.generate.await_args
+    assert submitted.args[1] == PROMPT
+    assert submitted.kwargs["image_url"] is None
+    assert submitted.kwargs["reference_video_url"] is None
+    assert api_launch.save.await_args.kwargs["input_params"]["mode"] == "text"
+
+
+@pytest.mark.asyncio
+async def test_text_only_creator_video_rejects_viewer_photo(api_launch):
+    model = "kling-2.6/text-to-video"
+    api_launch.source.gen_type = GenerationType.video
+    api_launch.source.model = model
+    api_launch.source.input_params = {**origin(), "image_url": None}
+    body = api_launch.routes.FeedRemixRequest(model=model, image_url=USER)
+    with pytest.raises(HTTPException) as raised:
+        await api_launch.routes.quote_feed_remix(77, body, api_launch.session, api_launch.user)
+    assert raised.value.status_code == 422
+    api_launch.charge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_grok_replay_restores_creator_variant(api_launch):
+    model = "grok-imagine/image-to-video"
+    api_launch.source.gen_type = GenerationType.video
+    api_launch.source.model = model
+    api_launch.source.input_params = {**origin(), "grok_mode": "fun"}
+    body = api_launch.routes.FeedRemixRequest(model=model, image_url=USER, grok_mode="normal")
+    await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+    assert api_launch.generate.await_args.kwargs["grok_mode"] == "fun"
+
+
+@pytest.mark.asyncio
+async def test_telegram_exact_replay_rejects_extra_viewer_audio(video_launch):
+    video_launch.source.model = MODEL
+    video_launch.source.input_params = origin()
+    with pytest.raises(video_gen.FeedRemixUnavailable):
+        await video_gen._prepare_feed_video_inputs(
+            session=video_launch.kwargs["session"],
+            db_user=video_launch.kwargs["db_user"],
+            source_feed_gen_id=77,
+            model_key=MODEL,
+            prompt=video_launch.source.prompt,
+            image_url=USER,
+            data={**video_launch.data, "audio_ids": ["user-added-audio-id"]},
+        )
+
+
+@pytest.mark.asyncio
+async def test_telegram_text_only_feed_prepares_without_new_ref(video_launch):
+    model = "kling-2.6/text-to-video"
+    video_launch.source.model = model
+    video_launch.source.input_params = {**origin(), "image_url": None}
+    prompt, images, data, parent = await video_gen._prepare_feed_video_inputs(
+        session=video_launch.kwargs["session"],
+        db_user=video_launch.kwargs["db_user"],
+        source_feed_gen_id=77, model_key=model,
+        prompt=video_launch.source.prompt,
+        image_url=None, data=video_launch.data,
+    )
+    assert prompt == video_launch.source.prompt
+    assert images == []
+    assert data["mode"] == "text"
+    assert data["reference_video_url"] is None
+    assert parent == 77
+
+
+def test_old_legacy_surface_uses_same_safe_feed_recipe_runner():
+    from pathlib import Path
+    source = (Path(__file__).parent.parent / "webapp/src/main.jsx").read_text()
+    assert 'import { openFeedRemixRunner } from "./features/feed-remix-runner"' in source
+    assert 'typeof feedItem.source_has_video_reference === "boolean"' in source
+    assert 'openFeedRemixRunner(feedItem)' in source

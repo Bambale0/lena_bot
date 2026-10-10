@@ -393,6 +393,9 @@ def _feed_card_out(card: Any, user: User | None) -> dict:
         "original_duration": (creator_inputs or {}).get("duration"),
         "original_aspect_ratio": (creator_inputs or {}).get("aspect_ratio"),
         "original_resolution": (creator_inputs or {}).get("resolution"),
+        "original_grok_mode": (creator_inputs or {}).get("grok_mode") or (
+            (creator_inputs or {}).get("mode") if (creator_inputs or {}).get("mode") in {"fun", "normal", "spicy", "low", "high"} else None
+        ),
         "author": card.username or card.full_name or "anon",
         "author_photo_url": getattr(card, "author_photo_url", None),
         "is_mine": user is not None and generation.user_id == user.id,
@@ -3573,11 +3576,15 @@ def _prepare_feed_remix_inputs(
                 raise HTTPException(status_code=422, detail="Фото-референс не может быть видео")
             if body.video_url and body.video_url not in source_urls:
                 raise HTTPException(status_code=422, detail="Нельзя добавлять новый видео-референс к повтору из ленты")
-            if not requested_refs:
-                raise HTTPException(status_code=422, detail="Для повтора с исходным промптом загрузи своё фото")
             caps = VIDEO_CAPS.get(body.model, {})
-            if not supports_feed_source_media(caps, "image"):
-                raise HTTPException(status_code=422, detail="Модель не поддерживает фото-референсы")
+            supports_photo = supports_feed_source_media(caps, "image")
+            supports_text = "text" in caps.get("modes", [])
+            if not requested_refs and supports_photo:
+                raise HTTPException(status_code=422, detail="Для повтора с исходным промптом загрузи своё фото")
+            if requested_refs and not supports_photo:
+                raise HTTPException(status_code=422, detail="Модель автора не принимает фото. Доступен повтор по тексту.")
+            if not requested_refs and not supports_text and not original_videos:
+                raise HTTPException(status_code=422, detail="Для повтора нет совместимых входных референсов")
             if original_videos and not supports_feed_source_media(caps, "video"):
                 raise HTTPException(status_code=422, detail="Модель не поддерживает исходный видео-референс автора")
             if len(original_videos) > 1 and body.model != SEEDANCE25_MODEL_KEY:
@@ -3601,9 +3608,14 @@ def _prepare_feed_remix_inputs(
                 replay_settings["aspect_ratio"] = creator_inputs["aspect_ratio"]
             if isinstance(creator_inputs.get("resolution"), str) and creator_inputs["resolution"] in caps.get("resolutions", []):
                 replay_settings["resolution"] = creator_inputs["resolution"]
+            source_grok_mode = creator_inputs.get("grok_mode") or creator_inputs.get("mode")
+            if source_grok_mode in caps.get("mode_options", []):
+                replay_settings["grok_mode"] = source_grok_mode
             body = body.model_copy(update={
                 **replay_settings,
-                "mode": "multimodal" if multimodal else "image",
+                "mode": "multimodal" if multimodal and (requested_refs or original_videos) else (
+                    "image" if requested_refs else "video" if original_videos else "text"
+                ),
                 "video_url": video_url,
                 "video_start": 0,
                 "video_end": None,

@@ -110,6 +110,7 @@ export interface FeedItem {
   original_duration?: number | null;
   original_aspect_ratio?: string | null;
   original_resolution?: string | null;
+  original_grok_mode?: string | null;
   prompt?: string;
   prompt_hidden?: boolean;
   result_url?: string;

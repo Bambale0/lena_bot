@@ -198,9 +198,17 @@ function FeedRemixRunnerPortal() {
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
   const creatorRecipeReplay = sourceIsVideo && typeof item?.source_has_video_reference === "boolean";
   const needsOriginalVideo = sourceIsVideo && item?.source_has_video_reference !== false;
+  const creatorTextOnly = Boolean(
+    creatorRecipeReplay && selectedModel && !needsOriginalVideo
+    && !selectedModel.modes?.includes("image")
+    && !selectedModel.modes?.includes("multimodal")
+    && selectedModel.modes?.includes("text"),
+  );
   const userReferenceLimit = feedUserReferenceCapacity(selectedModel, sourceIsVideo, needsOriginalVideo);
   const referencesOverLimit = references.length > userReferenceLimit;
-  const referenceLimitMessage = creatorRecipeReplay
+  const referenceLimitMessage = creatorTextOnly
+    ? "Автор создал ролик без фото — эта модель принимает только текст. Повтор сохраняет исходный промпт."
+    : creatorRecipeReplay
     ? `Загрузи своё фото (до ${userReferenceLimit}). ${needsOriginalVideo ? "Будет использован только исходный видео-референс автора." : "Готовое видео автора не будет отправлено модели."}`
     : sourceIsVideo
       ? `Для этой модели можно добавить своих фото: ${userReferenceLimit}. Нужна поддержка исходного видео.`
@@ -215,10 +223,10 @@ function FeedRemixRunnerPortal() {
   const countOptions = selectedModel?.counts?.length ? selectedModel.counts : [1];
   const requestBody = useMemo(() => {
     if (!item || !selectedModel || referencesOverLimit) return null;
-    if (creatorRecipeReplay && (!references.length || selectedModel.key !== item.model)) return null;
+    if (creatorRecipeReplay && (selectedModel.key !== item.model || (creatorTextOnly ? references.length > 0 : references.length === 0))) return null;
     const sourceMedia = sourcePreview || "";
     const primaryUserReference = references[0] || "";
-    const chosenMode = bucket === "video" ? mode : "image";
+    const chosenMode = creatorTextOnly ? "text" : bucket === "video" ? mode : "image";
     return {
       model: selectedModel.key,
       change_request: creatorRecipeReplay ? "" : changeRequest.trim(),
@@ -237,11 +245,11 @@ function FeedRemixRunnerPortal() {
       audio_ids: [],
       character_ids: [],
       seed: null,
-      grok_mode: grokMode,
+      grok_mode: creatorRecipeReplay ? item.original_grok_mode ?? grokMode : grokMode,
       quality,
       count,
     };
-  }, [aspectRatio, bucket, changeRequest, count, creatorRecipeReplay, duration, grokMode, item, mode, quality, references, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
+  }, [aspectRatio, bucket, changeRequest, count, creatorRecipeReplay, creatorTextOnly, duration, grokMode, item, mode, quality, references, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
   const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
   const liveQuoteRequest = useRef<{ id: number; body: Record<string, unknown>; key: string } | null>(null);
   liveQuoteRequest.current = item && requestBody ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
@@ -272,6 +280,7 @@ function FeedRemixRunnerPortal() {
     setCount(draft?.count || 1);
     setDuration(sourceHasRecipe ? nextItem.original_duration || 5 : draft?.duration || 5);
     setResolution(sourceHasRecipe ? nextItem.original_resolution || "720p" : draft?.resolution || "720p");
+    setGrokMode(sourceHasRecipe ? nextItem.original_grok_mode || "normal" : draft?.grokMode || "normal");
     setGrokMode(draft?.grokMode || "normal");
   }, []);
 
@@ -724,9 +733,11 @@ function FeedRemixRunnerPortal() {
               <p className="truncate text-xs text-muted-foreground">{item.model}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {creatorRecipeReplay
-                  ? needsOriginalVideo
-                    ? "Применим исходный промпт автора и его входной видео-референс, если он был."
-                    : "Применим исходный промпт автора к твоему фото. Готовое видео автора не передаётся."
+                  ? creatorTextOnly
+                    ? "Повторим исходный текстовый запрос автора. Эта модель не поддерживает фото-референсы."
+                    : needsOriginalVideo
+                      ? "Применим исходный промпт автора и его входной видео-референс, если он был."
+                      : "Применим исходный промпт автора к твоему фото. Готовое видео автора не передаётся."
                   : "Исходная работа будет использована как основной референс."}
               </p>
             </div>
@@ -745,7 +756,9 @@ function FeedRemixRunnerPortal() {
             />
             <span className="text-[11px] text-muted-foreground">Необязательно. Со своим фото или изменениями повтор создаётся по опубликованному изображению или видео. Исходное фото занимает один слот референса. Промпт автора остаётся скрыт.</span>
           </label> : <p className="rounded-xl border border-primary/25 bg-primary/5 p-3 text-xs">
-            Это точный повтор авторской генерации: меняем только фото-референс, оригинальный промпт не раскрывается и не редактируется.
+            {creatorTextOnly
+              ? "Это повтор по исходному текстовому промпту автора без фото-референсов."
+              : "Это точный повтор авторской генерации: меняем только фото-референс, оригинальный промпт не раскрывается и не редактируется."}
           </p>}
 
           <div className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
@@ -889,7 +902,7 @@ function FeedRemixRunnerPortal() {
                   {quote?.can_run ? "Можно запускать" : `Не хватает ${quote?.deficit_credits} 💋`}
                 </span>
               </div>
-            ) : <span>{creatorRecipeReplay && !references.length ? "Добавь своё фото для расчёта стоимости." : quoteBusy ? "Рассчитываем стоимость по тарифу…" : "Стоимость пока недоступна"}</span>}
+            ) : <span>{creatorRecipeReplay && !creatorTextOnly && !references.length ? "Добавь своё фото для расчёта стоимости." : quoteBusy ? "Рассчитываем стоимость по тарифу…" : "Стоимость пока недоступна"}</span>}
             {quoteReady && quote?.source_video_edit ? <p className="mt-2 text-muted-foreground">Редактирование исходного ролика: длительность и кадр берутся из источника. Для оплаты: {quote.effective_duration_seconds} сек.</p> : null}
             {paymentWaiting ? <p className="mt-2 text-muted-foreground">После оплаты баланс обновится здесь автоматически. Фото и настройки останутся на месте.</p> : null}
           </div>

@@ -684,11 +684,14 @@ async def _prepare_feed_video_inputs(
         if original_videos is not None:
             if prompt.strip() != str(source.prompt or "").strip():
                 raise legacy_feed_edit_unavailable()
-            if not refs:
-                raise FeedRemixUnavailable("Для повтора загрузи своё фото-референс.")
             caps = VIDEO_CAPS.get(model_key, {})
-            if not supports_feed_source_media(caps, "image"):
-                raise FeedRemixUnavailable("Эта модель не поддерживает фото-референсы.")
+            supports_photo = supports_feed_source_media(caps, "image")
+            if not refs and supports_photo:
+                raise FeedRemixUnavailable("Для повтора загрузи своё фото-референс.")
+            if refs and not supports_photo:
+                raise FeedRemixUnavailable("Модель автора принимает только текст, без фото.")
+            if not supports_photo and not original_videos and "text" not in caps.get("modes", []):
+                raise FeedRemixUnavailable("Для повторной генерации нет совместимых входов.")
             if original_videos and not supports_feed_source_media(caps, "video"):
                 raise FeedRemixUnavailable("Эта модель не поддерживает исходные видео-референсы.")
             if len(original_videos) > 1 and model_key != SEEDANCE25_MODEL_KEY:
@@ -703,10 +706,13 @@ async def _prepare_feed_video_inputs(
             # outdated value; never permit a new unsolicited video in a replay.
             if any(url not in original_videos and url != source_url for url in submitted_videos):
                 raise FeedRemixUnavailable("В повторе нельзя добавлять новый видео-референс.")
-            audio_ids = [
+            viewer_audio = [
                 token for token in _url_list(data.get("audio_ids"))
                 if not token.startswith(f"{SEEDANCE25_CONTROL_PREFIX}video_ref=")
             ]
+            if viewer_audio or data.get("character_ids") or data.get("seed") is not None:
+                raise FeedRemixUnavailable("Точный повтор не принимает дополнительные аудио и персонажи.")
+            audio_ids: list[str] = []
             if len(original_videos) > 1:
                 audio_ids.extend(f"{SEEDANCE25_CONTROL_PREFIX}video_ref={url}" for url in original_videos[1:])
             data = {
@@ -714,14 +720,16 @@ async def _prepare_feed_video_inputs(
                 "reference_video_url": original_videos[0] if original_videos else None,
                 "feed_use_source_video_url": original_videos[0] if original_videos else None,
                 "audio_ids": audio_ids,
-                "mode": "multimodal" if caps.get("auto_route_by_inputs") else "image",
+                "mode": "multimodal" if caps.get("auto_route_by_inputs") and (refs or original_videos) else (
+                    "image" if refs else "video" if original_videos else "text"
+                ),
                 FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, source.prompt),
             }
             logger.info(
                 "feed_creator_replay source_gen=%s model=%s photo_refs=%s original_video_refs=%s",
                 source_feed_gen_id, model_key, len(refs), len(original_videos),
             )
-            return source.prompt, refs if model_key == SEEDANCE25_MODEL_KEY or len(refs) > 1 else refs[0], data, source_feed_gen_id
+            return source.prompt, refs if not refs or model_key == SEEDANCE25_MODEL_KEY or len(refs) > 1 else refs[0], data, source_feed_gen_id
     user_refs = any(url != source_url or source_type != "image" for url in refs)
     source_videos = (
         _seedance_effective_video_refs(data) if model_key == SEEDANCE25_MODEL_KEY
@@ -1225,7 +1233,13 @@ async def cb_video_model(
         if state_data.get("feed_use_has_original_recipe") and model_key != state_data.get("feed_use_model"):
             await call.answer("Точный повтор доступен только на модели автора.", show_alert=True)
             return
-        if not supports_feed_source_media(caps, required_kind):
+        allow_text_replay = (
+            state_data.get("feed_use_has_original_recipe")
+            and not state_data.get("feed_use_requires_photo", True)
+            and not state_data.get("feed_use_needs_video_reference", True)
+            and "text" in caps.get("modes", [])
+        )
+        if not supports_feed_source_media(caps, required_kind) and not allow_text_replay:
             hint = (
                 "Для этого повтора нужна модель с поддержкой исходного видео."
                 if required_kind == "video"
@@ -1246,6 +1260,8 @@ async def cb_video_model(
         input_ratio = state_data.get("feed_use_original_aspect_ratio")
         if input_ratio in caps.get("aspect_ratios", []):
             default_ratio = input_ratio
+    original_grok_mode = state_data.get("feed_use_original_grok_mode")
+    chosen_grok_mode = original_grok_mode if original_grok_mode in caps.get("mode_options", []) else "normal"
     model_cost = await _resolve_video_model_cost(
         session,
         model_key,
@@ -1269,7 +1285,7 @@ async def cb_video_model(
         duration=default_duration,
         aspect_ratio=default_ratio,
         resolution=default_resolution,
-        grok_mode="normal" if VIDEO_CAPS.get(model_key, {}).get("mode_options") else None,
+        grok_mode=chosen_grok_mode if caps.get("mode_options") else None,
     )
 
     caps = VIDEO_CAPS.get(model_key, {})
@@ -1281,7 +1297,8 @@ async def cb_video_model(
         mode = (
             "multimodal" if caps.get("auto_route_by_inputs") and "multimodal" in modes
             else "video" if state_data.get("feed_use_needs_video_reference", True)
-            else "image"
+            else "image" if state_data.get("feed_use_requires_photo", True)
+            else "text"
         )
         await state.update_data(
             mode=mode,

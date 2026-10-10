@@ -730,3 +730,61 @@ test("creator photo-to-video replay never sends rendered MP4 and keeps creator r
     video_url: null, duration: 10, aspect_ratio: "9:16", resolution: "720p",
   });
 });
+
+test("deep-linked older creator video retains photo-only recipe provenance", async ({ page }) => {
+  await mockMiniAppApi(page);
+  await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/web/feed/57213", (route) => route.fulfill({ json: {
+    id: 57213, model: "veo-3.1-fast", gen_type: "video",
+    prompt: "", prompt_hidden: true, source_has_video_reference: false,
+    original_duration: 10, original_aspect_ratio: "9:16", original_resolution: "720p",
+    result_url: "https://example.test/rendered.mp4", result_urls: ["https://example.test/rendered.mp4"],
+    author: "Artist Old Link", likes_count: 0, shares_count: 0, remixes: 0,
+  } }));
+  await page.goto("/?tgWebAppData=test&feed=57213");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Применим исходный промпт автора к твоему фото. Готовое видео автора не передаётся.")).toBeVisible();
+  await expect(dialog.getByLabel("Модель")).toBeDisabled();
+});
+
+test("text-only source video can replay author prompt without photos", async ({ page }) => {
+  await mockMiniAppApi(page);
+  const model = {
+    key: "kling-2.6/text-to-video", display_name: "Kling 2.6 Text",
+    modes: ["text"], credits: 12, durations: [5, 10],
+    aspect_ratios: ["16:9", "9:16"], resolutions: ["720p", "1080p"],
+  };
+  await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [{
+    id: 57218, model: model.key, gen_type: "video", prompt: "", prompt_hidden: true,
+    source_has_video_reference: false, original_duration: 10,
+    original_aspect_ratio: "9:16", original_resolution: "720p",
+    result_url: "https://example.test/text-source.mp4",
+    author: "Text Artist", likes_count: 0, shares_count: 0, remixes: 0,
+  }] }));
+  await page.route("**/api/v1/models/video", (route) => route.fulfill({ json: [model] }));
+  await page.route("**/api/v1/feed/57218/remix/quote", (route) => route.fulfill({ json: {
+    cost_credits: 12, balance_credits: 100, can_run: true, deficit_credits: 0,
+  } }));
+  let sent: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/feed/57218/remix", (route) => {
+    sent = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({ status: 202, json: {
+      id: 9206, model: model.key, gen_type: "video", status: "pending", prompt: "",
+      prompt_hidden: true, result_url: null, result_urls: [], credits_spent: 12,
+      created_at: new Date().toISOString(),
+    } });
+  });
+  await page.goto("/?tgWebAppData=test&feed=57218");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByText("Повторим исходный текстовый запрос автора. Эта модель не поддерживает фото-референсы.")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Добавить" })).toBeDisabled();
+  await expect(dialog.getByText("Стоимость: 12 💋").first()).toBeVisible();
+  await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+  await expect(page.getByRole("dialog", { name: /Задача #9206/ })).toBeVisible();
+  expect(sent).toMatchObject({
+    model: model.key, mode: "text", change_request: "",
+    image_url: null, reference_urls: [], video_url: null,
+    duration: 10, aspect_ratio: "9:16", resolution: "720p",
+  });
+});

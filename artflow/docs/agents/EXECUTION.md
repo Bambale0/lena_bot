@@ -1419,3 +1419,11 @@ Observed: published Seedance 2.5 job #57213 was created with a photo and a 5140-
 6. [ ] PR / green required GitHub checks / auto-merge / deploy verification. Local Playwright test is blocked by missing `libatk-1.0.so.0` on host; CI is the authoritative browser gate. No real paid generation was submitted.
 
 No new config or pricing keys. Trace source generation and input-media provenance without printing author prompts or reference URLs.
+
+## Codex review follow-up — creator input replay
+- Resolved known-provenance video from text-only models: original prompt + text mode, no mandatory photo and no rendered video. Original-model compatibility and no extra viewer image are enforced in both browser and bot.
+- Deep-link hydration in `src/lib/api.ts` preserves source-video provenance and original settings from `/api/web/feed/{id}`; added browser test for old shared posts outside the initial feed page.
+- `?legacy=1` original feed screen routes known creator-recipe videos through the shared modern safe runner, not the rendered-MP4 editor. Untouched legacy image/unknown snapshot paths keep prior behavior.
+- Restore original validated Grok mode (and safe read-only public Grok mode metadata) in quote, submission, Telegram FSM and browser settings.
+- Reject viewer audio/characters/seeds on Telegram exact replays before credits are charged; keep additional author video references only in their original validated form.
+- Verified 282 backend feed tests (2 unrelated existing baseline failures excluded), 105 JS units, Ruff clean, TypeScript check, Vite production build. CI browser/deploy checks still gate release.

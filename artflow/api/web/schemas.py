@@ -230,6 +230,7 @@ class FeedCard(BaseModel):
     original_duration: int | None = None
     original_aspect_ratio: str | None = None
     original_resolution: str | None = None
+    original_grok_mode: str | None = None
 
     @classmethod
     def from_feed_card(cls, card: Any) -> "FeedCard":
@@ -271,6 +272,9 @@ class FeedCard(BaseModel):
             original_duration=creator_inputs.get("duration"),
             original_aspect_ratio=creator_inputs.get("aspect_ratio"),
             original_resolution=creator_inputs.get("resolution"),
+            original_grok_mode=creator_inputs.get("grok_mode") or (
+                creator_inputs.get("mode") if creator_inputs.get("mode") in {"fun", "normal", "spicy", "low", "high"} else None
+            ),
         )
 
 
