@@ -1226,7 +1226,12 @@ async def cb_video_model(
             await call.answer("Точный повтор доступен только на модели автора.", show_alert=True)
             return
         if not supports_feed_source_media(caps, required_kind):
-            await call.answer("Для этого повтора модель не поддерживает исходные референсы.", show_alert=True)
+            hint = (
+                "Для этого повтора нужна модель с поддержкой исходного видео."
+                if required_kind == "video"
+                else "Для этого повтора нужна модель с поддержкой фото-референсов."
+            )
+            await call.answer(hint, show_alert=True)
             return
     default_duration = _DEFAULT_DURATION.get(model_key, 5)
     default_resolution = _DEFAULT_RES.get(model_key)
