@@ -280,7 +280,7 @@ def _image_review_text(
     mode_label = "img2img · по референсам" if has_reference else "text-to-image · с нуля"
     ratio = image_session.aspect_ratio or "auto"
     quality = _quality_label(image_session.model, image_session.quality)
-    return (
+    header = (
         "✅ <b>Проверь задачу</b>\n\n"
         f"🎨 <b>{html.escape(get_image_model_label(image_session.model))}</b>\n"
         f"🔀 Режим: <b>{mode_label}</b>\n"
@@ -288,8 +288,21 @@ def _image_review_text(
         f"💎 Качество: <b>{html.escape(str(quality))}</b>\n"
         f"🔢 Количество: <b>{image_session.count or 1}</b>\n"
         f"💋 Стоимость: <b>{credits:g}</b>\n\n"
-        f"📝 <b>Промпт</b>\n{html.escape(prompt)}"
+        "📝 <b>Промпт</b>\n"
     )
+    # Telegram allows 4096 displayed characters. Reserve room for markup,
+    # escaped entities and the preview notice; the FSM retains the full prompt.
+    budget = max(0, 3800 - len(header))
+    preview_parts: list[str] = []
+    for char in prompt:
+        escaped_char = html.escape(char)
+        if len(escaped_char) > budget:
+            break
+        preview_parts.append(escaped_char)
+        budget -= len(escaped_char)
+    shortened = len(preview_parts) < len(prompt)
+    preview = "".join(preview_parts)
+    return header + preview + ("\n\n… (полный промпт сохранён)" if shortened else "")
 
 
 def _normalize_session_quality(model_key: str, aspect_ratio: str | None, quality: str | None) -> str:
