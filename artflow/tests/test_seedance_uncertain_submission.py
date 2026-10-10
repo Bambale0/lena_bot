@@ -63,7 +63,7 @@ async def test_pending_unknown_submission_is_not_ordinary_processing(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_paused_neironych_route_uses_kie_before_any_neironych_post(monkeypatch):
+async def test_unrelated_uncertain_job_does_not_reroute_new_neironych_job(monkeypatch):
     monkeypatch.setattr(
         seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "neironych"
     )
@@ -76,13 +76,14 @@ async def test_paused_neironych_route_uses_kie_before_any_neironych_post(monkeyp
         kie=kie,
         neironych=neiro,
     )
-    assert result == "kie-ok"
-    kie.assert_awaited_once()
-    neiro.assert_not_awaited()
+    assert result == "wrong-paid-post"
+    neiro.assert_awaited_once()
+    kie.assert_not_awaited()
+    gate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_paused_route_never_falls_back_to_uncertain_provider(monkeypatch):
+async def test_other_users_review_does_not_block_legitimate_primary_kie_fallback(monkeypatch):
     monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "kieai")
     monkeypatch.setattr(
         seedance_provider_routing,
@@ -91,12 +92,13 @@ async def test_paused_route_never_falls_back_to_uncertain_provider(monkeypatch):
         raising=False,
     )
     kie = AsyncMock(side_effect=RuntimeError("KIE down"))
-    neiro = AsyncMock(return_value="duplicate-risk")
-    with pytest.raises(RuntimeError):
-        await seedance_provider_routing.submit_seedance(
-            "bytedance/seedance-2-5", kie=kie, neironych=neiro
-        )
-    neiro.assert_not_awaited()
+    neiro = AsyncMock(return_value="neironych-ok")
+    result = await seedance_provider_routing.submit_seedance(
+        "bytedance/seedance-2-5", kie=kie, neironych=neiro
+    )
+    assert result == "neironych-ok"
+    kie.assert_awaited_once()
+    neiro.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -212,7 +214,7 @@ async def test_review_path_marks_and_pauses_but_never_refunds_or_resubmits(monke
 
 
 @pytest.mark.asyncio
-async def test_inaccessible_admission_coordinator_blocks_all_paid_posts(monkeypatch):
+async def test_unrelated_admission_coordinator_outage_does_not_reroute_new_job(monkeypatch):
     monkeypatch.setattr(
         seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "neironych"
     )
@@ -220,15 +222,16 @@ async def test_inaccessible_admission_coordinator_blocks_all_paid_posts(monkeypa
         seedance_provider_routing,
         "neironych_route_paused",
         AsyncMock(side_effect=ConnectionError("Redis unavailable")),
+        raising=False,
     )
-    kie = AsyncMock()
-    neiro = AsyncMock()
-    with pytest.raises(ConnectionError):
-        await seedance_provider_routing.submit_seedance(
-            "bytedance/seedance-2-5", kie=kie, neironych=neiro
-        )
+    kie = AsyncMock(return_value="kie-ok")
+    neiro = AsyncMock(return_value="neironych-ok")
+    result = await seedance_provider_routing.submit_seedance(
+        "bytedance/seedance-2-5", kie=kie, neironych=neiro
+    )
+    assert result == "neironych-ok"
     kie.assert_not_awaited()
-    neiro.assert_not_awaited()
+    neiro.assert_awaited_once()
 
 
 @pytest.mark.asyncio

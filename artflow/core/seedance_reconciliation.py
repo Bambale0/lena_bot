@@ -1,7 +1,8 @@
-"""Nonterminal video review state and model-scoped admission circuit.
+"""Per-generation unknown-video state and legacy diagnostic incident markers.
 
-The circuit changes only NEW submissions. It never retries or refunds an
-already-paid ambiguous request. PostgreSQL remains the source of job state.
+The Redis/DB review markers are internal telemetry only. New paid submissions
+never consult them for provider routing; a separate scheduler expires each old
+generation individually using guarded refunds. No second paid POST is issued.
 """
 from __future__ import annotations
 
@@ -50,7 +51,7 @@ def _redis_client():
 
 
 async def neironych_route_paused(product_model: str) -> bool:
-    """Check before any provider POST; fail closed on inaccessible coordinator."""
+    """Legacy incident-state diagnostic; not used to route new paid requests."""
     key = _circuit_key(product_model)
     client = _redis_client()
     try:
@@ -64,7 +65,7 @@ async def neironych_route_paused(product_model: str) -> bool:
 
 
 async def pause_neironych_route(product_model: str, request_id: str) -> None:
-    """Refresh a bounded circuit while explicit unresolved submissions persist."""
+    """Record a bounded diagnostic marker for the ambiguous provider request."""
     key = _circuit_key(product_model)
     client = _redis_client()
     try:
@@ -77,7 +78,7 @@ async def pause_neironych_route(product_model: str, request_id: str) -> None:
 
 
 async def _db_has_unresolved_seedance(product_model: str) -> bool:
-    """Authoritative admission fallback; never send paid work on a DB failure."""
+    """Legacy diagnostic query, not an admission gate for other users."""
     from sqlalchemy import or_, select
 
     from db.models import Generation, GenerationStatus, GenerationType

@@ -249,14 +249,6 @@ async def test_seedance25_legacy_service_wrapper_uses_same_provider_order(monkey
         neironych.assert_not_awaited()
 
 
-@pytest.fixture(autouse=True)
-def isolate_seedance_admission(monkeypatch):
-    # These tests cover provider payloads, not live Redis coordination.
-    from unittest.mock import AsyncMock
-
-    from api import seedance_provider_routing
-    monkeypatch.setattr(seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False))
-
 
 @pytest.fixture
 def default_primary_mode(monkeypatch, kie_primary_mode):

@@ -1393,3 +1393,28 @@ Progress: [x] current repo/AGENTS/README, code, actual DB, notification and fron
 
 ### Independent review: atomic receipt/status snapshot
 Codex P1 PRRT_kwDOSSmOms6rC2fd identified a real READ COMMITTED race: the old receipt and the new terminal status could be read by separate SELECTs and cause removal of a newly needed Redis delivery intent. Added a failing regression that simulates that interleaving, then replaced the two reads with one SELECT of input_params + status. An active suppressed snapshot now stays queued and a terminal snapshot sees the corresponding pending receipt. Existing due-time/lease/terminal cleanup stubs were updated to the single-row query without changing their assertions. This does not mutate generation or ledger state.
+
+
+## 2026-10-10 — Seedance auto-close and no global provider circuit
+
+Baseline origin/main: e145252c8e33a964c2a61e0b2e3f7f1dd62fd018. Isolated worktree: fix/seedance-autoclose-no-global-circuit-20261010.
+
+### Confirmed cause and business requirement
+- One unresolved Neironych Seedance request set the model-wide Redis/DB admission gate and routed unrelated *new* customer work to Kie. A 30-minute Redis TTL persisted even after an operator refunded the original task.
+- The existing recovery scheduler polled results and emitted warnings after NEIRONYCH_VIDEO_ALERT_AGE_SECONDS, but **never transitioned an unconfirmed old job to failed**, even when it was over one hour old. The customer remained charged until support intervened.
+- User requested automatic closure/refunds instead of a global gate; preserve one-time paid submission, provider/financial reconciliation and no duplicate payouts.
+- Production preflight 2026-10-10 10:45 UTC: **zero Seedance active tasks older than one hour**; one young active task, no mass-refund blast radius at release.
+
+### Design
+- New config SEEDANCE_AUTO_REFUND_SECONDS defaults to 3600 (bounded 1800–86400).
+- Every video scheduler cycle processes a bounded oldest-first batch of overdue Neironych Seedance 2/2.5 jobs with task IDs or persisted submission IDs.
+- One final existing read-only provider poll is performed; if result already settled as done/failed, leave it intact. Otherwise use the repository's atomic fail_generation_and_refund with an exact expected_task_id, a safe customer error, ledger note identifying automatic timeout, and a terminal DB-outbox notification only on Telegram surfaces.
+- Supports previously unbound neironych-submit IDs; outbox scan must include them. Redis notification failures cannot block committed refunds, and the timeout phase runs **before** Redis-backed notice processing.
+- New unrelated tasks always try configured primary (Neironych in production). Unknown submissions and pre-submit durability errors **never** fallback/reissue the same paid generation. Ordinary errors may still follow separately configured provider fallback.
+- Leave upstream provider reserve and audit identity for independent reconciliation. No automatic supplier charge reversal, no user secrets in logs.
+
+### TDD and checks so far
+- RED witnessed for absent SEEDANCE_AUTO_REFUND_SECONDS, absent overdue query/processor and old route choosing Kie during another customer's pending review.
+- GREEN 103 focused tests across routing, timeout, existing video recovery and credit-ledger transactions; Ruff, compile, whitespace pending full final run.
+- Existing site/MiniApp and Telegram status updates use the shared generation row; timer uses terminal failed and existing outbox.
+- Still required: concurrent/late-result tests; exact CI, independent code/security review, deployment and production smoke verification.

@@ -313,16 +313,3 @@ async def test_veo_1080_uses_current_official_endpoint(monkeypatch) -> None:
 
     assert url == "https://cdn.example.test/1080.mp4"
     assert paths == ["/api/v1/veo/get-1080p-video?taskId=veo_source_task&index=0"]
-
-
-@pytest.fixture(autouse=True)
-def isolate_seedance_admission(monkeypatch):
-    # These provider/Telegram tests mock external IO. Redis admission has
-    # dedicated positive/negative tests in test_seedance_uncertain_submission.
-    from unittest.mock import AsyncMock
-
-    from api import seedance_provider_routing
-
-    monkeypatch.setattr(
-        seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False)
-    )

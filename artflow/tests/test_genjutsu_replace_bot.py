@@ -507,16 +507,3 @@ async def test_editor_unsupported_real_media_gets_hint_in_every_state(state, mon
     await editor.router.propagate_event("message", msg, state=state, raw_state=raw_state)
     answer.assert_awaited_once()
     assert await state.get_state() == raw_state
-
-
-@pytest.fixture(autouse=True)
-def isolate_seedance_admission(monkeypatch):
-    # These provider/Telegram tests mock external IO. Redis admission has
-    # dedicated positive/negative tests in test_seedance_uncertain_submission.
-    from unittest.mock import AsyncMock
-
-    from api import seedance_provider_routing
-
-    monkeypatch.setattr(
-        seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False)
-    )

@@ -236,3 +236,17 @@ async def test_expired_or_pending_notice_exhausted_attempts_cannot_reclaim(monke
     assert "token" not in saved
     assert "claimed_at" not in saved
     assert await repo.claim_neironych_video_notice(session, row.id) is None
+
+
+@pytest.mark.asyncio
+async def test_unbound_submission_timeout_receipt_is_claimable_and_idempotent():
+    row = _row(kind="failed")
+    row.task_id = "neironych-submit:request-before-provider-id"
+    session = FakeSession(row)
+    claim = await repo.claim_neironych_video_notice(session, row.id)
+    assert claim and claim.kind == "failed"
+    assert await repo.claim_neironych_video_notice(session, row.id) is None
+    assert await repo.complete_neironych_video_notice(
+        session, row.id, claim.token, delivered=True,
+    )
+    assert json.loads(row.input_params)["neironych_video_notice"]["state"] == "sent"
