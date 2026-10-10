@@ -21,6 +21,7 @@ os.environ["ENV"] = "test"
 os.environ["APIX_WEB_DEV_AUTH"] = "false"
 os.environ["TELEGRAM_STARS_ENABLED"] = "false"
 os.environ["KIE_WEBHOOK_SECRET"] = ""
+os.environ["KIE_WEBHOOK_HMAC_KEY"] = "test-only-dedicated-hmac-no-production-secrets"
 
 
 @pytest.fixture
