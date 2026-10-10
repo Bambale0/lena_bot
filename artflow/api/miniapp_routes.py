@@ -102,6 +102,8 @@ from core.feed_remix_prompt import (
     FeedRemixUnavailable,
     feed_remix_context,
     feed_video_edit_prompt,
+    original_feed_video_inputs,
+    original_feed_video_references,
     supports_feed_source_media,
 )
 from core.feed_remix_prompt import build_feed_remix_prompt as _build_feed_remix_prompt
@@ -375,6 +377,9 @@ def _feed_card_out(card: Any, user: User | None) -> dict:
     generation = card.generation
     result_urls = _generation_result_urls(generation)
     gen_type = getattr(generation, "gen_type", "image")
+    source_kind = getattr(gen_type, "value", gen_type)
+    replay_videos = original_feed_video_references(generation) if source_kind == "video" else None
+    creator_inputs = original_feed_video_inputs(generation) if replay_videos is not None else None
     return {
         "id": generation.id,
         "model": generation.model,
@@ -386,6 +391,13 @@ def _feed_card_out(card: Any, user: User | None) -> dict:
         "likes_count": generation.likes_count,
         "shares_count": generation.shares_count,
         "aspect_ratio": card.aspect_ratio,
+        "source_has_video_reference": bool(replay_videos) if replay_videos is not None else None,
+        "original_duration": (creator_inputs or {}).get("duration"),
+        "original_aspect_ratio": (creator_inputs or {}).get("aspect_ratio"),
+        "original_resolution": (creator_inputs or {}).get("resolution"),
+        "original_grok_mode": (creator_inputs or {}).get("grok_mode") or (
+            (creator_inputs or {}).get("mode") if (creator_inputs or {}).get("mode") in {"fun", "normal", "spicy", "low", "high"} else None
+        ),
         "author": card.username or card.full_name or "anon",
         "author_photo_url": getattr(card, "author_photo_url", None),
         "is_mine": user is not None and generation.user_id == user.id,
@@ -3557,6 +3569,75 @@ def _prepare_feed_remix_inputs(
     requested_refs = list(dict.fromkeys(_normalize_public_urls(
         body.source_image_url, body.image_url, *(body.reference_urls or []),
     )))
+    # A feed card is the rendered OUTPUT. Replaying a creator's video must
+    # use the source generation's INPUT recipe, not the published MP4.
+    if source_type == "video":
+        original_videos = original_feed_video_references(source)
+        if original_videos is not None:
+            if body.model not in VIDEO_CAPS or body.model != getattr(source, "model", None):
+                raise HTTPException(status_code=422, detail="Для точного повтора выбери модель автора")
+            if body.change_request.strip():
+                raise HTTPException(status_code=422, detail="Точный повтор использует промпт автора. Убери дополнительные инструкции.")
+            if body.audio_ids or body.character_ids or body.seed is not None:
+                raise HTTPException(status_code=422, detail="Точный повтор не принимает дополнительные аудио и управляющие референсы")
+            # Older clients may submit the public MP4 as if it were a photo.
+            if any(url in source_urls for url in requested_refs):
+                raise HTTPException(status_code=422, detail="Для повтора загрузи фото вместо готового видео автора")
+            if any(urlparse(url).path.lower().endswith((".mp4", ".webm", ".mov", ".m4v")) for url in requested_refs):
+                raise HTTPException(status_code=422, detail="Фото-референс не может быть видео")
+            if body.video_url and body.video_url not in source_urls:
+                raise HTTPException(status_code=422, detail="Нельзя добавлять новый видео-референс к повтору из ленты")
+            caps = VIDEO_CAPS.get(body.model, {})
+            supports_photo = supports_feed_source_media(caps, "image")
+            supports_text = "text" in caps.get("modes", [])
+            if not requested_refs and supports_photo:
+                raise HTTPException(status_code=422, detail="Для повтора с исходным промптом загрузи своё фото")
+            if requested_refs and not supports_photo:
+                raise HTTPException(status_code=422, detail="Модель автора не принимает фото. Доступен повтор по тексту.")
+            if not requested_refs and not supports_text and not original_videos:
+                raise HTTPException(status_code=422, detail="Для повтора нет совместимых входных референсов")
+            if original_videos and not supports_feed_source_media(caps, "video"):
+                raise HTTPException(status_code=422, detail="Модель не поддерживает исходный видео-референс автора")
+            if len(original_videos) > 1 and body.model != SEEDANCE25_MODEL_KEY:
+                raise HTTPException(status_code=422, detail="Модель не поддерживает несколько исходных видео")
+            limit = int(caps.get("max_refs", 1) or 1)
+            if original_videos and caps.get("max_refs_with_video") is not None:
+                limit = min(limit, int(caps["max_refs_with_video"]))
+            if len(requested_refs) > limit:
+                raise HTTPException(status_code=422, detail=f"Модель поддерживает до {limit} фото-референсов")
+            video_url = original_videos[0] if original_videos else None
+            extra_videos = [
+                f"__apix_seedance25:video_ref={url}" for url in original_videos[1:]
+            ]
+            multimodal = bool(caps.get("auto_route_by_inputs") and "multimodal" in caps.get("modes", []))
+            creator_inputs = original_feed_video_inputs(source) or {}
+            replay_settings = {}
+            source_duration = creator_inputs.get("duration")
+            if isinstance(source_duration, int) and not isinstance(source_duration, bool) and 2 <= source_duration <= 30:
+                replay_settings["duration"] = source_duration
+            if isinstance(creator_inputs.get("aspect_ratio"), str) and creator_inputs["aspect_ratio"] in caps.get("aspect_ratios", []):
+                replay_settings["aspect_ratio"] = creator_inputs["aspect_ratio"]
+            if isinstance(creator_inputs.get("resolution"), str) and creator_inputs["resolution"] in caps.get("resolutions", []):
+                replay_settings["resolution"] = creator_inputs["resolution"]
+            source_grok_mode = creator_inputs.get("grok_mode") or creator_inputs.get("mode")
+            if source_grok_mode in caps.get("mode_options", []):
+                replay_settings["grok_mode"] = source_grok_mode
+            body = body.model_copy(update={
+                **replay_settings,
+                "mode": "multimodal" if multimodal and (requested_refs or original_videos) else (
+                    "image" if requested_refs else "video" if original_videos else "text"
+                ),
+                "video_url": video_url,
+                "video_start": 0,
+                "video_end": None,
+                "audio_ids": [*body.audio_ids, *extra_videos],
+            })
+            logger.info(
+                "feed_creator_replay source_gen=%s model=%s photo_refs=%s original_video_refs=%s",
+                source.id, body.model, len(requested_refs), len(original_videos),
+            )
+            return str(source.prompt or "").strip(), requested_refs, body, True
+
     has_user_inputs = bool(
         any(url not in source_urls or source_type != "image" for url in requested_refs)
         or (body.video_url and (source_type != "video" or body.video_url not in source_urls))

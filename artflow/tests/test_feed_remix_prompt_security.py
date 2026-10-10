@@ -211,6 +211,9 @@ def api_launch(monkeypatch):
         "charge_image_generation": charge, "spend_credits": charge,
         "create_image_session": AsyncMock(return_value=SimpleNamespace(id=123)),
         "create_generation": save, "update_generation_task": AsyncMock(),
+        # This fixture simulates the API without a persistent SQL session.
+        # Durable Kie callback registration is covered by SQLite roundtrips.
+        "register_kie_video_callback": AsyncMock(return_value=True),
         "increment_feed_share": AsyncMock(),
     }.items():
         monkeypatch.setattr(miniapp_routes.repo, name, value)
