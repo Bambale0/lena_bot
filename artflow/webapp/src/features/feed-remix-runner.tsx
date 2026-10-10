@@ -196,11 +196,23 @@ function FeedRemixRunnerPortal() {
   const busy = opening || phase === "uploading" || phase === "generating" || modelsLoading;
   const sourcePreview = safeExternalUrl(firstMedia(item || {}));
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
-  const userReferenceLimit = feedUserReferenceCapacity(selectedModel, sourceIsVideo);
+  const creatorRecipeReplay = sourceIsVideo && typeof item?.source_has_video_reference === "boolean";
+  const needsOriginalVideo = sourceIsVideo && item?.source_has_video_reference !== false;
+  const creatorTextOnly = Boolean(
+    creatorRecipeReplay && selectedModel && !needsOriginalVideo
+    && !selectedModel.modes?.includes("image")
+    && !selectedModel.modes?.includes("multimodal")
+    && selectedModel.modes?.includes("text"),
+  );
+  const userReferenceLimit = feedUserReferenceCapacity(selectedModel, sourceIsVideo, needsOriginalVideo);
   const referencesOverLimit = references.length > userReferenceLimit;
-  const referenceLimitMessage = sourceIsVideo
-    ? `Для этой модели можно добавить своих фото: ${userReferenceLimit}. Нужна поддержка исходного видео.`
-    : `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`;
+  const referenceLimitMessage = creatorTextOnly
+    ? "Автор создал ролик без фото — эта модель принимает только текст. Повтор сохраняет исходный промпт."
+    : creatorRecipeReplay
+    ? `Загрузи своё фото (до ${userReferenceLimit}). ${needsOriginalVideo ? "Будет использован только исходный видео-референс автора." : "Готовое видео автора не будет отправлено модели."}`
+    : sourceIsVideo
+      ? `Для этой модели можно добавить своих фото: ${userReferenceLimit}. Нужна поддержка исходного видео.`
+      : `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`;
   const aspectRatios = modelAspectRatios(selectedModel);
   const durations = modelDurations(selectedModel);
   const durationIndex = Math.max(0, durations.indexOf(duration));
@@ -211,30 +223,33 @@ function FeedRemixRunnerPortal() {
   const countOptions = selectedModel?.counts?.length ? selectedModel.counts : [1];
   const requestBody = useMemo(() => {
     if (!item || !selectedModel || referencesOverLimit) return null;
+    if (creatorRecipeReplay && (selectedModel.key !== item.model || (creatorTextOnly ? references.length > 0 : references.length === 0))) return null;
     const sourceMedia = sourcePreview || "";
     const primaryUserReference = references[0] || "";
-    const chosenMode = bucket === "video" ? mode : "image";
+    const chosenMode = creatorTextOnly ? "text" : bucket === "video" ? mode : "image";
     return {
       model: selectedModel.key,
-      change_request: changeRequest.trim(),
+      change_request: creatorRecipeReplay ? "" : changeRequest.trim(),
       mode: chosenMode,
-      duration,
-      aspect_ratio: aspectRatio,
-      resolution,
+      duration: creatorRecipeReplay ? item.original_duration ?? duration : duration,
+      aspect_ratio: creatorRecipeReplay ? item.original_aspect_ratio ?? aspectRatio : aspectRatio,
+      resolution: creatorRecipeReplay ? item.original_resolution ?? resolution : resolution,
       image_url: primaryUserReference || (!sourceIsVideo ? sourceMedia || null : null),
       source_image_url: !sourceIsVideo ? sourceMedia || null : null,
       reference_urls: references,
-      video_url: sourceIsVideo && chosenMode === "video" ? sourceMedia || null : null,
+      // Server restores author-supplied video inputs from trusted provenance.
+      // Never treat a rendered feed MP4 as an original reference video.
+      video_url: creatorRecipeReplay ? null : sourceIsVideo && chosenMode === "video" ? sourceMedia || null : null,
       video_start: 0,
       video_end: null,
       audio_ids: [],
       character_ids: [],
       seed: null,
-      grok_mode: grokMode,
+      grok_mode: creatorRecipeReplay ? item.original_grok_mode ?? grokMode : grokMode,
       quality,
       count,
     };
-  }, [aspectRatio, bucket, changeRequest, count, duration, grokMode, item, mode, quality, references, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
+  }, [aspectRatio, bucket, changeRequest, count, creatorRecipeReplay, creatorTextOnly, duration, grokMode, item, mode, quality, references, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
   const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
   const liveQuoteRequest = useRef<{ id: number; body: Record<string, unknown>; key: string } | null>(null);
   liveQuoteRequest.current = item && requestBody ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
@@ -249,7 +264,8 @@ function FeedRemixRunnerPortal() {
     setError("");
     setSelectedPaymentProvider(null);
     setReferences(draft?.references || []);
-    setChangeRequest(draft?.changeRequest || "");
+    const sourceHasRecipe = nextItem && itemLooksVideo(nextItem) && typeof nextItem.source_has_video_reference === "boolean";
+    setChangeRequest(sourceHasRecipe ? "" : draft?.changeRequest || "");
     setQuote(null);
     setQuotedBody("");
     setQuoteBusy(false);
@@ -257,13 +273,14 @@ function FeedRemixRunnerPortal() {
     setPayment(paymentRef.current);
     setPaymentChecking(false);
     setPaymentBusy(false);
-    setModelKey(draft?.modelKey || nextItem?.model || "");
-    setMode(draft?.mode || (nextItem && itemLooksVideo(nextItem) ? "text" : "image"));
-    setAspectRatio(draft?.aspectRatio || nextItem?.aspect_ratio || "1:1");
+    setModelKey(sourceHasRecipe ? nextItem.model : draft?.modelKey || nextItem?.model || "");
+    setMode(sourceHasRecipe ? "image" : draft?.mode || (nextItem && itemLooksVideo(nextItem) ? "text" : "image"));
+    setAspectRatio(sourceHasRecipe ? nextItem.original_aspect_ratio || "9:16" : draft?.aspectRatio || nextItem?.aspect_ratio || "1:1");
     setQuality(draft?.quality || "basic");
     setCount(draft?.count || 1);
-    setDuration(draft?.duration || 5);
-    setResolution(draft?.resolution || "720p");
+    setDuration(sourceHasRecipe ? nextItem.original_duration || 5 : draft?.duration || 5);
+    setResolution(sourceHasRecipe ? nextItem.original_resolution || "720p" : draft?.resolution || "720p");
+    setGrokMode(sourceHasRecipe ? nextItem.original_grok_mode || "normal" : draft?.grokMode || "normal");
     setGrokMode(draft?.grokMode || "normal");
   }, []);
 
@@ -334,6 +351,12 @@ function FeedRemixRunnerPortal() {
 
   useEffect(() => {
     if (!item || !allModels.length) return;
+    if (itemLooksVideo(item) && typeof item.source_has_video_reference === "boolean") {
+      if (!allModels.some((model) => model.key === item.model)) {
+        setError("Модель автора сейчас недоступна. Точный повтор выполнить нельзя.");
+      }
+      return;
+    }
     if (modelKey && allModels.some((model) => model.key === modelKey)) return;
     const matchingKind = itemLooksVideo(item) ? videoModels : imageModels;
     const fallback = matchingKind.find((model) => model.key === item.model) || matchingKind[0];
@@ -347,6 +370,9 @@ function FeedRemixRunnerPortal() {
 
   useEffect(() => {
     if (!selectedModel) return;
+    // Exact replay keeps the creator's settings; do not silently downgrade an
+    // original 480p/10s request to the current UI's first available option.
+    if (creatorRecipeReplay) return;
     const nextRatios = modelAspectRatios(selectedModel);
     if (!nextRatios.includes(aspectRatio)) setAspectRatio(nextRatios[0] || "1:1");
     const nextDurations = modelDurations(selectedModel);
@@ -358,7 +384,7 @@ function FeedRemixRunnerPortal() {
     const nextCounts = selectedModel.counts || [1];
     if (!nextCounts.includes(count)) setCount(nextCounts[0] || 1);
     if (!modeOptions.includes(mode)) setMode(modeOptions[0] || "image");
-  }, [aspectRatio, count, duration, mode, modeOptions, quality, resolution, selectedModel]);
+  }, [aspectRatio, count, creatorRecipeReplay, duration, mode, modeOptions, quality, resolution, selectedModel]);
 
   // A quote is a read-only offer; it must match the exact payload ultimately
   // submitted. A changed duration/quality/photo invalidates the old price.
@@ -705,11 +731,19 @@ function FeedRemixRunnerPortal() {
             <div className="min-w-0 self-center">
               <p className="truncate font-semibold">{item.author || "Автор"}</p>
               <p className="truncate text-xs text-muted-foreground">{item.model}</p>
-              <p className="mt-1 text-xs text-muted-foreground">Исходная работа будет использована как основной референс.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {creatorRecipeReplay
+                  ? creatorTextOnly
+                    ? "Повторим исходный текстовый запрос автора. Эта модель не поддерживает фото-референсы."
+                    : needsOriginalVideo
+                      ? "Применим исходный промпт автора и его входной видео-референс, если он был."
+                      : "Применим исходный промпт автора к твоему фото. Готовое видео автора не передаётся."
+                  : "Исходная работа будет использована как основной референс."}
+              </p>
             </div>
           </div>
 
-          <label className="grid gap-1 rounded-xl border border-primary/25 bg-primary/5 p-3 text-sm">
+          {!creatorRecipeReplay ? <label className="grid gap-1 rounded-xl border border-primary/25 bg-primary/5 p-3 text-sm">
             <span className="font-semibold">Что изменить в образе</span>
             <textarea
               rows={2}
@@ -721,7 +755,11 @@ function FeedRemixRunnerPortal() {
               onChange={(event) => setChangeRequest(event.target.value)}
             />
             <span className="text-[11px] text-muted-foreground">Необязательно. Со своим фото или изменениями повтор создаётся по опубликованному изображению или видео. Исходное фото занимает один слот референса. Промпт автора остаётся скрыт.</span>
-          </label>
+          </label> : <p className="rounded-xl border border-primary/25 bg-primary/5 p-3 text-xs">
+            {creatorTextOnly
+              ? "Это повтор по исходному текстовому промпту автора без фото-референсов."
+              : "Это точный повтор авторской генерации: меняем только фото-референс, оригинальный промпт не раскрывается и не редактируется."}
+          </p>}
 
           <div className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
             <div className="flex items-center justify-between gap-2">
@@ -760,17 +798,17 @@ function FeedRemixRunnerPortal() {
 
           <label className="grid gap-1 text-xs font-semibold">
             Модель
-            <select className="min-h-11 rounded-xl border border-input bg-background px-3 text-sm" value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={busy || modelsLoading}>
+            <select className="min-h-11 rounded-xl border border-input bg-background px-3 text-sm" value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={busy || modelsLoading || creatorRecipeReplay}>
               {modelsLoading ? <option>Загружаем модели…</option> : null}
-              {imageModels.length ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo)}>{model.display_name}</option>)}</optgroup> : null}
-              {videoModels.length ? <optgroup label="Видео">{videoModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo)}>{model.display_name}</option>)}</optgroup> : null}
+              {imageModels.length && !creatorRecipeReplay ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo)}>{model.display_name}</option>)}</optgroup> : null}
+              {videoModels.length ? <optgroup label="Видео">{videoModels.map((model) => <option key={model.key} value={model.key} disabled={(creatorRecipeReplay && model.key !== item.model) || references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo)}>{model.display_name}</option>)}</optgroup> : null}
             </select>
           </label>
 
           <div className="grid grid-cols-2 gap-2">
             <label className="grid gap-1 text-xs font-semibold">
               Формат
-              <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)} disabled={busy}>
+              <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)} disabled={busy || creatorRecipeReplay}>
                 {aspectRatios.map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
               </select>
             </label>
@@ -785,7 +823,7 @@ function FeedRemixRunnerPortal() {
             ) : (
               <label className="grid gap-1 text-xs font-semibold">
                 Режим
-                <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={mode} onChange={(event) => setMode(event.target.value)} disabled={busy}>
+                <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={mode} onChange={(event) => setMode(event.target.value)} disabled={busy || creatorRecipeReplay}>
                   {modeOptions.map((value) => <option key={value} value={value}>{value}</option>)}
                 </select>
               </label>
@@ -812,7 +850,7 @@ function FeedRemixRunnerPortal() {
                   max={Math.max(0, durations.length - 1)}
                   step={1}
                   value={durationIndex}
-                  disabled={busy || durations.length <= 1}
+                  disabled={busy || creatorRecipeReplay || durations.length <= 1}
                   aria-label="Длительность видео в повторе"
                   aria-valuetext={`${selectedDuration} секунд`}
                   className="apix-focus-ring h-8 w-full cursor-pointer accent-primary disabled:cursor-default disabled:opacity-60"
@@ -830,7 +868,7 @@ function FeedRemixRunnerPortal() {
                         "apix-focus-ring rounded px-1 py-0.5 transition",
                         value === selectedDuration ? "font-semibold text-primary" : "hover:text-foreground",
                       )}
-                      disabled={busy}
+                      disabled={busy || creatorRecipeReplay}
                       onClick={() => setDuration(value)}
                     >
                       {value} сек
@@ -840,7 +878,7 @@ function FeedRemixRunnerPortal() {
               </div>
               <label className="grid gap-1 text-xs font-semibold">
                 Разрешение
-                <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={resolution} onChange={(event) => setResolution(event.target.value)} disabled={busy}>
+                <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={resolution} onChange={(event) => setResolution(event.target.value)} disabled={busy || creatorRecipeReplay}>
                   {resolutions.map((value) => <option key={value} value={value}>{value}</option>)}
                 </select>
               </label>
@@ -864,7 +902,7 @@ function FeedRemixRunnerPortal() {
                   {quote?.can_run ? "Можно запускать" : `Не хватает ${quote?.deficit_credits} 💋`}
                 </span>
               </div>
-            ) : <span>{quoteBusy ? "Рассчитываем стоимость по тарифу…" : "Стоимость пока недоступна"}</span>}
+            ) : <span>{creatorRecipeReplay && !creatorTextOnly && !references.length ? "Добавь своё фото для расчёта стоимости." : quoteBusy ? "Рассчитываем стоимость по тарифу…" : "Стоимость пока недоступна"}</span>}
             {quoteReady && quote?.source_video_edit ? <p className="mt-2 text-muted-foreground">Редактирование исходного ролика: длительность и кадр берутся из источника. Для оплаты: {quote.effective_duration_seconds} сек.</p> : null}
             {paymentWaiting ? <p className="mt-2 text-muted-foreground">После оплаты баланс обновится здесь автоматически. Фото и настройки останутся на месте.</p> : null}
           </div>

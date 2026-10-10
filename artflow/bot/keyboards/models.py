@@ -947,13 +947,21 @@ def video_models_kb(
     return builder.as_markup()
 
 
-def feed_video_models_kb(model_costs: list[ModelCost]) -> InlineKeyboardMarkup:
-    """Offer the same source-video capabilities validated by feed preflight."""
+def feed_video_models_kb(
+    model_costs: list[ModelCost], *, require_video: bool = True,
+    original_model: str | None = None, allow_text_only: bool = False,
+) -> InlineKeyboardMarkup:
+    """Offer compatible author model even when a source had no image inputs."""
     from core.feed_remix_prompt import supports_feed_source_media
 
+    source_type = "video" if require_video else "image"
     compatible = [
         cost for cost in model_costs
-        if supports_feed_source_media(VIDEO_CAPS.get(cost.model_key, {}), "video")
+        if (original_model is None or cost.model_key == original_model)
+        and (
+            supports_feed_source_media(VIDEO_CAPS.get(cost.model_key, {}), source_type)
+            or (allow_text_only and "text" in VIDEO_CAPS.get(cost.model_key, {}).get("modes", []))
+        )
     ]
     return video_models_kb(compatible)
 

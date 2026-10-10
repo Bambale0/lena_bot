@@ -241,10 +241,15 @@ def test_repeat_feed_uses_filters_safe_video_payload_and_normalized_media_urls()
     assert 'remixFeedItem(item)' in app
     # Repeat payload moved to the prelaunch runner, where user-selected media
     # and mode (not the source filename alone) determine safe video inputs.
-    assert 'const chosenMode = bucket === "video" ? mode : "image"' in runner
+    # Creator text-only videos must replay with text mode and no fake image/video inputs.
+    assert 'const chosenMode = creatorTextOnly ? "text" : bucket === "video" ? mode : "image"' in runner
+    assert 'source_has_video_reference' in runner
     assert 'image_url: primaryUserReference || (!sourceIsVideo ? sourceMedia || null : null)' in runner
     assert 'source_image_url: !sourceIsVideo ? sourceMedia || null : null' in runner
-    assert 'video_url: sourceIsVideo && chosenMode === "video" ? sourceMedia || null : null' in runner
+    # The historical editor may use published video, but a creator-input
+    # replay must never smuggle the rendered MP4 into provider video inputs.
+    assert 'video_url: creatorRecipeReplay ? null : sourceIsVideo && chosenMode === "video" ? sourceMedia || null : null' in runner
+    assert 'typeof item?.source_has_video_reference === "boolean"' in runner
     assert 'if (bucket === "video" && modeOptions.includes("image")) setMode("image")' in runner
     assert 'const task = await apiJson<GenerationTask>(`/feed/${item.id}/remix`' in runner
     assert 'const url = new URL(value, window.location.origin)' in utils

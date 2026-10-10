@@ -1393,3 +1393,37 @@ Progress: [x] current repo/AGENTS/README, code, actual DB, notification and fron
 
 ### Independent review: atomic receipt/status snapshot
 Codex P1 PRRT_kwDOSSmOms6rC2fd identified a real READ COMMITTED race: the old receipt and the new terminal status could be read by separate SELECTs and cause removal of a newly needed Redis delivery intent. Added a failing regression that simulates that interleaving, then replaced the two reads with one SELECT of input_params + status. An active suppressed snapshot now stays queued and a terminal snapshot sees the corresponding pending receipt. Existing due-time/lease/terminal cleanup stubs were updated to the single-row query without changing their assertions. This does not mutate generation or ledger state.
+
+---
+
+# Execution ledger — feed creator-input replay (2026-10-10)
+
+Baseline: `e145252`, fix branch `fix/feed-replay-source-inputs`; production `main` unchanged.
+Observed: published Seedance 2.5 job #57213 was created with a photo and a 5140-character prompt, but personalized job #57247 was sent a rendered video plus the reader photo and a 314-character generic edit prompt.
+
+## Outcome and acceptance
+- Repeat server-side creator prompt with new viewer image(s).
+- Never convert generated output MP4 into a reference video when it was not a creator input.
+- Reuse an original video reference only if it is present in the source task's stored input.
+- Secure prompt from user-visible API/Telegram output, copies, and history.
+- Same rule for site, Mini App and Telegram; quote and submission must agree.
+- Reject extra video inputs and unsupported/missing provenance before charging.
+- Preserve provider/model adapter routing and ledger/refund paths.
+
+## Plan and evidence
+1. [x] Preflight AGENTS, local skills, code paths, production provider and DB records.
+2. [x] Isolated branch/worktree; read-only production is kept untouched.
+3. [x] RED regression tests: video-output source with image-only original inputs wrongly sent generated MP4 / lost creator prompt. Both Python and Node tests reproduced the fault before change.
+4. [x] Author input-provenance resolver, server-side prompt/parameters recovery, Telegram picker and Mini App/site parity; no generated MP4 injection for sources with known provenance. Legacy sources with missing input snapshots still use the existing guarded compatibility flow.
+5. [x] Local regression: 14 provider + source tests, focused feed/Seedance suite; Ruff clean, Python compileall clean, TypeScript typecheck, Node unit 105/105, Vite production build pass. Two legacy feed tests and an unrelated web referral test fail identically at baseline; do not change them in this PR.
+6. [ ] PR / green required GitHub checks / auto-merge / deploy verification. Local Playwright test is blocked by missing `libatk-1.0.so.0` on host; CI is the authoritative browser gate. No real paid generation was submitted.
+
+No new config or pricing keys. Trace source generation and input-media provenance without printing author prompts or reference URLs.
+
+## Codex review follow-up — creator input replay
+- Resolved known-provenance video from text-only models: original prompt + text mode, no mandatory photo and no rendered video. Original-model compatibility and no extra viewer image are enforced in both browser and bot.
+- Deep-link hydration in `src/lib/api.ts` preserves source-video provenance and original settings from `/api/web/feed/{id}`; added browser test for old shared posts outside the initial feed page.
+- `?legacy=1` original feed screen routes known creator-recipe videos through the shared modern safe runner, not the rendered-MP4 editor. Untouched legacy image/unknown snapshot paths keep prior behavior.
+- Restore original validated Grok mode (and safe read-only public Grok mode metadata) in quote, submission, Telegram FSM and browser settings.
+- Reject viewer audio/characters/seeds on Telegram exact replays before credits are charged; keep additional author video references only in their original validated form.
+- Verified 282 backend feed tests (2 unrelated existing baseline failures excluded), 105 JS units, Ruff clean, TypeScript check, Vite production build. CI browser/deploy checks still gate release.
