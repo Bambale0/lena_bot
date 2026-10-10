@@ -720,7 +720,7 @@ test("creator photo-to-video replay never sends rendered MP4 and keeps creator r
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
   await expect(dialog.getByText("Реф #1")).toBeVisible();
-  await expect(dialog.getByText("Стоимость: 20 💋")).toBeVisible();
+  await expect(dialog.getByText("Стоимость: 20 💋").first()).toBeVisible();
   await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
   await expect(page.getByRole("dialog", { name: /Задача #9205/ })).toBeVisible();
   expect(sent).toMatchObject({
