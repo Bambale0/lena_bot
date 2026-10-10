@@ -570,3 +570,35 @@ async def test_real_sqlalchemy_rollback_cannot_refund_an_already_completed_remot
         settle.assert_not_awaited()
     finally:
         engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_completed_overdue_video_is_delivered_after_releasing_poll_lease(monkeypatch):
+    gen = _generation()
+    ownership = {"leased": False}
+
+    @asynccontextmanager
+    async def lease(_task):
+        ownership["leased"] = True
+        try:
+            yield True
+        finally:
+            ownership["leased"] = False
+
+    async def deliver(gen_id):
+        assert gen_id == gen.id
+        assert not ownership["leased"], "delivery must acquire its own poll lease"
+        return True
+
+    monkeypatch.setattr(scheduler, "neironych_video_poll_guard", lease)
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", _Session)
+    monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=gen))
+    monkeypatch.setattr(
+        scheduler, "_final_neironych_provider_status", AsyncMock(return_value=("done", None)),
+    )
+    deliver_mock = AsyncMock(side_effect=deliver)
+    monkeypatch.setattr(scheduler, "_process_active_video", deliver_mock)
+    monkeypatch.setattr(scheduler.repo, "fail_generation_and_refund", AsyncMock())
+    assert await scheduler._expire_stuck_seedance_video(gen.id)
+    deliver_mock.assert_awaited_once_with(gen.id)
+    scheduler.repo.fail_generation_and_refund.assert_not_awaited()
