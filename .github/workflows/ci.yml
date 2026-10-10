@@ -243,6 +243,7 @@ jobs:
             tests/test_miniapp_ux2_preview.py \
             tests/test_ux2_media_capabilities.py \
             tests/test_ux2_upload_policy.py \
+            tests/test_ux2_reference_availability.py \
             tests/test_repository_feed.py \
             tests/test_midjourney.py \
             tests/test_image_model_unlimited.py \

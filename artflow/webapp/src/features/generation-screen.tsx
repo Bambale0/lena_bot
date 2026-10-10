@@ -14,7 +14,10 @@ import { referenceMaterials, replaceReferenceMaterials, selectGenerationInputs }
 import { ReferenceSelection } from "@/components/reference-selection";
 import type { PhotoUploadControls } from "@/lib/photo-upload-queue";
 
+import type { ReferenceChecker } from "@/lib/reference-availability";
+
 interface GenerationScreenProps {
+  checkReference?: ReferenceChecker;
   ux2?: boolean;
   photoUploads?: PhotoUploadControls;
   kind: "image" | "video" | "motion";
@@ -138,6 +141,7 @@ function LabeledChips({ label, children }: { label: string; children: ReactNode 
 }
 
 function GenerationScreen({
+  checkReference,
   ux2 = false,
   photoUploads,
   kind,
@@ -392,7 +396,7 @@ function GenerationScreen({
                 </div>
 
                 {preserveMedia ? <ReferenceSelection draft={storedDraft} model={selectedModel} busy={submitting || mediaUploading}
-                  language={user.language} labelFor={shortUrlLabel} onChange={onChange} uploads={photoUploads} submitting={submitting} /> : draft.referenceUrls.length ? (
+                  checkReference={checkReference} language={user.language} labelFor={shortUrlLabel} onChange={onChange} uploads={photoUploads} submitting={submitting} /> : draft.referenceUrls.length ? (
                   <div className="grid min-w-0 gap-1">
                     {draft.referenceUrls.map((url, index) => (
                       <div key={`${url}-${index}`} className="flex min-w-0 items-center gap-1 rounded-lg bg-background/70 px-2 py-1 text-[10px]">
