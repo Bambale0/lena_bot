@@ -218,7 +218,7 @@ test("one-photo trend runner uploads and runs without exposing generation contro
 });
 
 
-test("uncertain Seedance shows automatic status checking and can recover", async ({ page }) => {
+test("Seedance recovery stays neutral and reaches ready without a paid replay", async ({ page }) => {
   let status = "processing";
   let submits = 0;
   const task = () => ({
@@ -238,10 +238,9 @@ test("uncertain Seedance shows automatic status checking and can recover", async
   await expect(dialog.getByText("Генерация ещё выполняется")).toBeVisible();
   status = "reconciliation_required";
   await dialog.getByRole("button", { name: /Обновить/ }).click();
-  await expect(dialog.getByText("Уточняем статус у поставщика")).toBeVisible();
-  await expect(dialog.getByText(/Проверка продолжается автоматически/)).toBeVisible();
-  await expect(dialog.getByText(/Повторно запускать эту задачу не нужно/)).toBeVisible();
-  await expect(dialog.getByText(/обратитесь в поддержку|требуется проверка/i)).toHaveCount(0);
+  await expect(dialog.getByText("Создаётся", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Задача принята. Результат появится здесь автоматически.")).toBeVisible();
+  await expect(dialog).not.toContainText(/поставщик|провайдер|удержан|уточняем|обратитесь в поддержку/i);
   await expect(page.getByText("Результат готов", { exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: /Опубликовать/ })).toBeDisabled();
   status = "done";

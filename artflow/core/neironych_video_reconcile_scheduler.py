@@ -268,7 +268,11 @@ async def _sync_notice_retry_schedule(gen_id: int) -> None:
         notice = params.get(repo.NEIRONYCH_VIDEO_NOTICE_KEY)
         state = notice.get("state") if isinstance(notice, dict) else None
         generation_status = None
-        if state is None:
+        if state is None or (
+            state == "suppressed" and notice.get("kind") == "reconciliation"
+        ):
+            # Silent progress is not a finished job. Retain the recovery
+            # intent until the actual terminal video/error receipt exists.
             generation_status = await session.scalar(
                 select(Generation.status).where(Generation.id == gen_id)
             )

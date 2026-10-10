@@ -151,3 +151,35 @@ def test_active_frontends_contain_no_intermediate_supplier_copy():
     for path in targets:
         text = Path(path).read_text()
         assert not re.search(r"Уточняем статус|уточняем статус|Кредиты пока удержаны|Under provider review", text), path
+
+
+@pytest.mark.asyncio
+async def test_suppressed_notice_keeps_active_result_recovery_intent(monkeypatch):
+    from datetime import datetime, timezone
+
+    from core import neironych_video_reconcile_scheduler as scheduler
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def scalar(self, statement):
+            if "generations.status" in str(statement):
+                return GenerationStatus.processing
+            return json.dumps({repo.NEIRONYCH_VIDEO_NOTICE_KEY: {
+                "kind": "reconciliation", "state": "suppressed", "attempts": 0,
+            }})
+
+        async def rollback(self):
+            pass
+
+    redis = SimpleNamespace(zadd=AsyncMock(), zrem=AsyncMock(), aclose=AsyncMock())
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", Session)
+    monkeypatch.setattr(scheduler, "_notice_redis_client", lambda: redis)
+    await scheduler._sync_notice_retry_schedule(731)
+    redis.zrem.assert_not_awaited()
+    redis.zadd.assert_awaited_once()
+    assert redis.zadd.await_args.args[1]["731"] > datetime.now(timezone.utc).timestamp()
