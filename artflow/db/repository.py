@@ -1315,6 +1315,11 @@ async def register_kie_video_callback(
     ):
         await session.rollback()
         return False
+    # The same customer must not recycle refunded supplier liability through
+    # a Kie-primary paid POST (Neironych already enforces this in its gate).
+    if await _has_pending_refunded_seedance_review(session, gen.user_id):
+        await session.rollback()
+        return False
     params = parse_input_params(gen.input_params)
     current = params.get(KIE_VIDEO_CALLBACK_KEY)
     if isinstance(current, dict) and current.get("generation_id") == gen_id:
@@ -1392,7 +1397,9 @@ async def bind_kie_video_callback(
         await session.rollback()
         return None
     if gen.status in (GenerationStatus.done, GenerationStatus.failed):
-        await session.rollback()
+        # rollback expires mapped columns even under expire_on_commit=False.
+        # The webhook still needs to read the terminal row after returning.
+        await session.commit()
         return gen
     current = str(gen.task_id or "")
     if current and not current.startswith((
