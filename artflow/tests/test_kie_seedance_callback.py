@@ -4,7 +4,8 @@ from api import miniapp_routes  # noqa: F401 - initialize application DB import 
 from core import kie_seedance_callback as c
 
 
-def test_signed_kie_callback_preserves_existing_auth_and_binds_one_generation():
+def test_signed_kie_callback_preserves_existing_auth_and_binds_one_generation(monkeypatch):
+    monkeypatch.setattr(c.settings, "KIE_WEBHOOK_HMAC_KEY", "synthetic-test-only-private-signing-key")
     url = c.callback_url_for_generation(
         "https://example.test/hooks/kie?secret=existing", 345,
     )
