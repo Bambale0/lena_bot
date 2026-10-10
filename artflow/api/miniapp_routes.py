@@ -1032,7 +1032,6 @@ async def _notify_reconciled_video_failure_in_bot(*, user: User, gen) -> bool:
     )
     text = (
         "❌ <b>Видео не удалось создать.</b>\n"
-        + "Провайдер подтвердил ошибку генерации.\n"
         + finance_text
         + provider_task_reference(getattr(gen, "task_id", None))
     )
@@ -1055,33 +1054,20 @@ async def _notify_reconciled_video_failure_in_bot(*, user: User, gen) -> bool:
 
 
 async def _notify_neironych_video_reconciliation_in_bot(*, user: User, gen) -> bool:
-    """Tell the user the real state without claiming success, failure or a refund."""
-    tg_id = getattr(user, "tg_id", None)
-    if not tg_id:
-        return False
-    text = (
-        "🔄 <b>Уточняем статус видео у поставщика.</b>\n"
-        "Проверка продолжается автоматически. "
-        "Сообщим, когда получим результат или подтверждённую ошибку. "
-        "Повторно запускать эту задачу не нужно. Кредиты пока удержаны."
-        + provider_task_reference(getattr(gen, "task_id", None))
-    )
-    bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    try:
-        message = await bot.send_message(chat_id=tg_id, text=text)
-        logger.info("Neironych review notice delivered gen=%s message_id=%s", gen.id, message.message_id)
-        return True
-    except Exception as exc:
-        logger.warning("Neironych review notice deferred gen=%s error=%s", gen.id, type(exc).__name__)
-        return False
-    finally:
-        await bot.session.close()
+    """Compatibility guard: intermediate recovery never sends a customer message."""
+    logger.debug("Skipped intermediate video notice gen=%s", getattr(gen, "id", None))
+    return False
 
 
 async def _deliver_pending_neironych_video_notice(session: AsyncSession, gen_id: int) -> bool:
     """Claim + send + acknowledge the durable notice; no money or provider POST."""
     claim = await repo.claim_neironych_video_notice(session, gen_id)
     if claim is None:
+        return False
+    if claim.kind == "reconciliation":
+        # Also guard legacy/in-flight claims before user lookup or Telegram IO.
+        # Suppression is token-checked, so a newly queued result is never lost.
+        await repo.suppress_claimed_neironych_review_notice(session, gen_id, claim.token)
         return False
     delivered = False
     try:
@@ -1091,17 +1077,6 @@ async def _deliver_pending_neironych_video_notice(session: AsyncSession, gen_id:
             if claim.kind == "done":
                 send = _notify_reconciled_video_result_in_bot(
                     user=user, gen=claim.generation,
-                )
-            elif claim.kind == "reconciliation":
-                current = await repo.current_neironych_review_notice(
-                    session, gen_id, claim.token,
-                    expected_task_id=claim.generation.task_id,
-                )
-                if current is None:
-                    logger.info("Superseded Neironych review notice skipped gen=%s", gen_id)
-                    return False
-                send = _notify_neironych_video_reconciliation_in_bot(
-                    user=user, gen=current,
                 )
             else:
                 send = _notify_reconciled_video_failure_in_bot(

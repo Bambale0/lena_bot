@@ -100,17 +100,15 @@ async def test_paused_route_never_falls_back_to_uncertain_provider(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_review_notice_is_claimed_once_without_changing_money():
+async def test_legacy_review_notice_is_suppressed_without_changing_money():
     gen = generation()
     gen.input_params = json.dumps(
         {"neironych_video_notice": {"kind": "reconciliation", "state": "pending", "attempts": 0}}
     )
     db = FakeSession(gen)
-    claim = await repo.claim_neironych_video_notice(db, gen.id)
-    assert claim is not None and claim.kind == "reconciliation"
-    assert gen.status == GenerationStatus.processing and gen.credits_spent == 70
     assert await repo.claim_neironych_video_notice(db, gen.id) is None
-    assert await repo.complete_neironych_video_notice(db, gen.id, claim.token, delivered=True)
+    assert gen.status == GenerationStatus.processing and gen.credits_spent == 70
+    assert json.loads(gen.input_params)["neironych_video_notice"]["state"] == "suppressed"
     assert await repo.claim_neironych_video_notice(db, gen.id) is None
 
 
@@ -137,15 +135,13 @@ async def test_review_marker_and_notice_are_idempotent_and_keep_balance(monkeypa
     first = json.loads(gen.input_params)
     assert first["neironych_video_reconciliation"]["required"] is True
     assert first["neironych_video_notice"]["kind"] == "reconciliation"
-    claim = await repo.claim_neironych_video_notice(db, gen.id)
-    assert claim
-    await repo.complete_neironych_video_notice(db, gen.id, claim.token, delivered=True)
+    assert await repo.claim_neironych_video_notice(db, gen.id) is None
     assert not await repo.mark_neironych_video_reconciliation(
         db, gen.id, expected_task_id=gen.task_id
     )
     after = json.loads(gen.input_params)
-    assert after["neironych_video_notice"]["state"] == "sent"
-    assert after["neironych_video_notice"]["attempts"] == 1
+    assert after["neironych_video_notice"]["state"] == "suppressed"
+    assert after["neironych_video_notice"]["attempts"] == 0
     assert gen.credits_spent == 70 and gen.status == GenerationStatus.processing
     assert "refund_applied" not in after
     publish.assert_awaited_once()
@@ -293,41 +289,34 @@ def test_review_ui_remains_nonterminal_and_is_not_success():
 @pytest.mark.asyncio
 async def test_terminal_notice_replaces_review_and_stale_ack_cannot_erase_it():
     gen = generation()
-    gen.input_params = json.dumps(
-        {"neironych_video_notice": repo._new_neironych_video_notice("reconciliation")}
-    )
+    # An old-version worker claimed this review before the silent policy.
+    gen.input_params = json.dumps({"neironych_video_notice": {
+        "kind": "reconciliation", "state": "sending", "token": "legacy-token", "attempts": 1,
+    }})
     db = FakeSession(gen)
-    old = await repo.claim_neironych_video_notice(db, gen.id)
-    assert old
     gen.status = GenerationStatus.done
     params = json.loads(gen.input_params)
     params["neironych_video_notice"] = repo._new_neironych_video_notice("done")
     gen.input_params = json.dumps(params)
-    assert not await repo.complete_neironych_video_notice(db, gen.id, old.token, delivered=True)
+    assert not await repo.complete_neironych_video_notice(db, gen.id, "legacy-token", delivered=True)
+    assert not await repo.suppress_claimed_neironych_review_notice(db, gen.id, "legacy-token")
     new = await repo.claim_neironych_video_notice(db, gen.id)
-    assert new and new.kind == "done" and new.token != old.token
+    assert new and new.kind == "done" and new.token != "legacy-token"
 
 
 @pytest.mark.asyncio
-async def test_review_notice_text_does_not_claim_refund_or_provider_failure(monkeypatch):
+async def test_intermediate_review_does_not_send_user_message(monkeypatch):
     gen = generation()
     bot = SimpleNamespace(
         send_message=AsyncMock(return_value=SimpleNamespace(message_id=812)),
         session=SimpleNamespace(close=AsyncMock()),
     )
     monkeypatch.setattr(miniapp_routes, "Bot", lambda **_: bot)
-    assert await miniapp_routes._notify_neironych_video_reconciliation_in_bot(
+    assert not await miniapp_routes._notify_neironych_video_reconciliation_in_bot(
         user=SimpleNamespace(tg_id=125), gen=gen
     )
-    text = bot.send_message.await_args.kwargs["text"]
-    assert "Уточняем статус видео у поставщика" in text
-    assert "Проверка продолжается автоматически" in text
-    assert "Сообщим, когда получим результат или подтверждённую ошибку" in text
-    assert "Повторно запускать эту задачу не нужно" in text
-    assert "удержаны" in text and "provider-id" in text
-    assert "возвращено" not in text and "подтвердил ошибку" not in text
-    assert "поддержк" not in text.lower() and "ручн" not in text.lower()
-    bot.session.close.assert_awaited_once()
+    bot.send_message.assert_not_awaited()
+    bot.session.close.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -492,12 +481,10 @@ def test_standalone_site_review_to_terminal_polling_predicate():
     if (!generationIsActive('reconciliation_required')) process.exit(1);
     if (generationIsActive('done') || generationIsActive('failed')) process.exit(2);
     const copy = generationStatusCopy('reconciliation_required');
-    if (!copy.includes('Проверка продолжается автоматически')) process.exit(3);
-    if (!statusLabel('reconciliation_required').includes('уточняем статус')) process.exit(4);
-    if (!copy.includes('Сообщим, когда получим результат или подтверждённую ошибку')) process.exit(5);
-    if (!copy.includes('Повторно запускать эту задачу не нужно')) process.exit(6);
-    if (!copy.includes('Кредиты пока удержаны')) process.exit(7);
-    if (/поддержк|ручн|возвращено/i.test(copy)) process.exit(8);
+    if (!copy.includes('Задача принята')) process.exit(3);
+    if (statusLabel('reconciliation_required') !== statusLabel('processing')) process.exit(4);
+    if (!copy.includes('Результат появится здесь автоматически')) process.exit(5);
+    if (/поставщик|провайдер|уточняем|удержан|поддержк|ручн|возвращено/i.test(copy)) process.exit(8);
     """
     result = subprocess.run(
         ["node", "-e", "\n".join(functions) + checks], capture_output=True, text=True, timeout=5

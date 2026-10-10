@@ -1357,3 +1357,39 @@ Missing/unavailable provider evidence remains nonterminal, with bounded read-onl
 checks and overdue review. KIE's separate inherited transport/refund behavior is
 outside this package. Existing server environment loading is not independently
 inspected; deploy and public health are verified through the standard pipeline.
+
+
+## Consumer video status privacy (2026-10-10)
+
+Baseline: `5523593bdf15eda6b05ff2af3f318c2c52a551a7`; branch `fix/apix-consumer-video-status-20261010`.
+
+User request: do not send end users intermediate supplier/reconciliation/held-credit messages. Show launch acknowledgement, then only finished video or a clear error. The attached Telegram example identifies one active request; its recovery and balance are not authorized for modification by this wording task.
+
+Confirmed root cause: `mark_neironych_video_reconciliation` creates a pending `reconciliation` Telegram outbox item and `_deliver_pending_neironych_video_notice` sends supplier detail via its dedicated helper. React Mini App, V4 legacy app and standalone landing duplicate the same technical explanation and separate review badge. This is not a provider outage fix or finance-policy change.
+
+Acceptance / scope:
+1. New reconciliation notices are explicitly suppressed (not falsely marked sent). Old pending/sending review outbox items are suppressed safely under existing row/token guards so restarts do not send them. Keep actual terminal success/error notices working.
+2. Reconciliation markers, provider polling, Redis circuit, no-paid-retry and atomic refunds stay unchanged. No automatic failure/refund based on unknown status, no DB schema migrations.
+3. Existing API machine status `reconciliation_required` remains backward compatible; all customer UI labels/messages map it to ordinary generation-in-progress. Technical detail remains in admin/runtime diagnostics.
+4. Final error message says only the video failed and the actual credited refund; no supplier claims. Existing initial accepted message and UUID remain.
+5. TDD: new silence/retry/race tests; update superseded UX assertions (not financial invariants); run backend maintained gate, frontend build and browser regression. PR, review, exact-SHA CI, native auto-merge, auto-deploy and production smoke.
+6. No notification campaign or direct edits to previously sent Telegram messages, no provider POST or user balance mutation. Read-only verification of the screenshot task only.
+
+Progress: [x] current repo/AGENTS/README, code, actual DB, notification and frontend paths inspected; [x] local TDD/systematic-debugging/verification playbooks read; [ ] failing regressions; [ ] minimal fix; [ ] verification/review/release.
+
+### Implementation and verification
+- New `reconciliation` notices use `suppressed`, with zero Telegram attempts; old pending/sending reviews are retired under existing row locks. An already-claimed stale review is suppressed only with its matching token, so a later `done`/`failed` outbox item is not consumed. Foreground uncertainty no longer edits the acknowledgement to supplier details. Terminal success/failure delivery, ledger updates, polling and source UUIDs remain unchanged.
+- Mini App (legacy and UX2), V4 and standalone site keep the machine review status pollable but show ordinary nonterminal labels with no supplier/credit-hold explanations. Failed video message reports only video failure and an actually recorded refund.
+- TDD: seven initial behavior regressions failed on main; after the fix 88 focused backend cases passed, including SQLite restart recovery with single terminal send/refund and no paid resubmission. Updated old message-specific assertions because the user explicitly replaced that UX policy, not to relax financial checks.
+- Frontend: all 93 unit tests pass; TypeScript check and Vite production build pass. Scanning built artifacts confirms obsolete supplier/held-credit copy is absent.
+- Local Playwright cannot launch Chromium because the host lacks libatk/libatspi/libXdamage/libasound. No system packages installed on production for this check. The two new/updated UX2 browser scenarios are included in the required GitHub webapp gate, which supplies browser dependencies. Test-only Playwright module resolution was isolated under the worktree; production dependencies untouched.
+- A full maintained-suite launcher call was blocked by tool safety and was not retried by an alternate mechanism; required GitHub CI remains the full-suite verification source. Focused backend and all frontend unit checks above executed successfully.
+- Read-only investigation of the screenshot task: the actual upstream generation has an initial failed attempt followed by a 503 on fallback submission, with no final media at investigation time. No cancellation, refund, new provider submission, or customer message was made during this task.
+- Required next gate: independent PR review, exact-SHA CI (including UX2 browser), protected auto-merge, production autodeploy and public health/runtime smoke.
+
+- Cross-surface audit also found an existing standard Mini App browser smoke asserting the old supplier text. Updated only those UX assertions to neutral waiting, retaining the existing processing -> review -> done transition, disabled premature publish, and zero paid replay assertions. The UX2 test covers review -> failed. GitHub now verifies both terminal paths on the same consumer policy.
+
+- Added a separate RED/GREEN recovery invariant: suppressing a progress receipt must not remove the active generation's durable terminal-delivery intent. The notice scheduler now checks DB generation state for suppressed reconciliation items and retains active intents until the real success/error receipt is created. No extra customer message or provider POST; this protects eventual delivery after a restart.
+
+### Independent review: atomic receipt/status snapshot
+Codex P1 PRRT_kwDOSSmOms6rC2fd identified a real READ COMMITTED race: the old receipt and the new terminal status could be read by separate SELECTs and cause removal of a newly needed Redis delivery intent. Added a failing regression that simulates that interleaving, then replaced the two reads with one SELECT of input_params + status. An active suppressed snapshot now stays queued and a terminal snapshot sees the corresponding pending receipt. Existing due-time/lease/terminal cleanup stubs were updated to the single-row query without changing their assertions. This does not mutate generation or ledger state.

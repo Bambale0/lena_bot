@@ -261,18 +261,17 @@ async def _sync_notice_retry_schedule(gen_id: int) -> None:
     return value of a network send.
     """
     async with AsyncSessionLocal() as session:
-        input_params = await session.scalar(
-            select(Generation.input_params).where(Generation.id == gen_id)
-        )
-        params = repo.parse_input_params(input_params)
-        notice = params.get(repo.NEIRONYCH_VIDEO_NOTICE_KEY)
-        state = notice.get("state") if isinstance(notice, dict) else None
-        generation_status = None
-        if state is None:
-            generation_status = await session.scalar(
-                select(Generation.status).where(Generation.id == gen_id)
-            )
+        # One statement is one snapshot even under READ COMMITTED. Reading
+        # a suppressed receipt and a later terminal status separately could
+        # incorrectly erase the recovery ID just after a pending result commits.
+        snapshot = (await session.execute(
+            select(Generation.input_params, Generation.status).where(Generation.id == gen_id)
+        )).one_or_none()
         await session.rollback()
+    input_params, generation_status = snapshot if snapshot is not None else (None, None)
+    params = repo.parse_input_params(input_params)
+    notice = params.get(repo.NEIRONYCH_VIDEO_NOTICE_KEY)
+    state = notice.get("state") if isinstance(notice, dict) else None
 
     now = datetime.now(timezone.utc).timestamp()
     due: float | None = None

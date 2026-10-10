@@ -125,42 +125,9 @@ router = Router(name="video_gen")
 async def _show_video_submission_review(
     status_msg: Message, state: FSMContext, session: AsyncSession, gen_id: int,
 ) -> None:
-    """Use the durable outbox claim for the foreground edit and scheduler alike."""
-    claim = None
-    delivered = False
-    try:
-        claim = await repo.claim_neironych_video_notice(session, gen_id, expected_kind="reconciliation")
-        if claim is None or claim.kind != "reconciliation":
-            return
-        current = await repo.current_neironych_review_notice(
-            session, gen_id, claim.token, expected_task_id=claim.generation.task_id,
-        )
-        if current is None:
-            return
-        await asyncio.wait_for(
-            status_msg.edit_text(
-                "⏳ Подтверждение запуска видео пока не получено. "
-                "Автоматически проверяю ту же заявку, без повторного запуска. "
-                "💋 сохранены за этой задачей до подтверждённого результата. "
-                "Если проверка затянется, заявка останется на разборе.",
-                reply_markup=main_menu_kb(),
-            ),
-            timeout=settings.NEIRONYCH_VIDEO_RECONCILE_TIMEOUT_SECONDS,
-        )
-        delivered = True
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        logger.warning("Could not update submission review acknowledgment error=%s", type(exc).__name__)
-    finally:
-        if claim is not None:
-            try:
-                await repo.complete_neironych_video_notice(
-                    session, gen_id, claim.token, delivered=delivered,
-                )
-            except Exception as exc:
-                logger.warning("Could not persist review edit receipt gen=%s error=%s", gen_id, type(exc).__name__)
-        await state.clear()
+    """Keep the launch acknowledgement while recovery runs without user chatter."""
+    logger.info("Video submission recovery continues silently gen=%s", gen_id)
+    await state.clear()
 
 
 async def _show_video_task_started(status_msg: Message, task_id: str) -> None:

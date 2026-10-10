@@ -108,7 +108,7 @@ function TaskDetailSheet({
           </div>
         ) : (
           <div className="grid min-h-32 place-items-center rounded-xl border border-dashed border-border bg-muted/40 text-center text-xs text-muted-foreground">
-            {task.status === "reconciliation_required" ? "Уточняем статус видео у поставщика. Проверка продолжается автоматически. Сообщим, когда получим результат или подтверждённую ошибку. Повторно запускать эту задачу не нужно. Кредиты пока удержаны." : task.status === "failed" ? "Результат не создан" : "Генерация ещё выполняется"}
+            {task.status === "reconciliation_required" ? "Задача принята. Результат появится здесь автоматически." : task.status === "failed" ? "Результат не создан" : "Генерация ещё выполняется"}
           </div>
         )}
 
