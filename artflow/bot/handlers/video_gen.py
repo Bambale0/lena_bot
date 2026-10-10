@@ -275,13 +275,19 @@ async def _send_video_with_fallback(
         )
         return
     except TelegramBadRequest as exc:
+        if "file is too big" in str(exc).lower():
+            logger.warning("Telegram video exceeds delivery limit; sending download link")
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"✅ Видео готово.\n\nСкачать видео: {video_url}",
+                reply_markup=reply_markup,
+                disable_web_page_preview=True,
+                parse_mode=None,
+            )
+            return
         if "failed to get HTTP URL content" not in str(exc):
             raise
-        logger.warning(
-            "Telegram failed to fetch video URL directly, falling back to local upload url=%s error=%s",
-            video_url,
-            exc,
-        )
+        logger.warning("Telegram could not fetch video URL; falling back to local upload error=%s", exc)
 
     tmp_file = None
     try:
@@ -313,16 +319,13 @@ async def _send_video_with_fallback(
             supports_streaming=True,
         )
     except Exception as exc:
-        logger.exception(
-            "Video fallback upload failed url=%s error=%s",
-            video_url,
-            exc,
-        )
+        logger.exception("Video fallback upload failed: %s", exc)
         await bot.send_message(
             chat_id=chat_id,
-            text=f"{caption}\n\nСкачать видео: {video_url}",
+            text=f"✅ Видео готово.\n\nСкачать видео: {video_url}",
             reply_markup=reply_markup,
             disable_web_page_preview=True,
+            parse_mode=None,
         )
     finally:
         if tmp_file and os.path.exists(tmp_file):
