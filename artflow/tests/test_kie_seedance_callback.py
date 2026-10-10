@@ -147,3 +147,57 @@ async def test_kie_late_callback_after_atomic_refund_requires_admin_settlement(k
         assert not await repo._has_pending_refunded_seedance_review(db, 42)
         assert session.get(User, 42).credits == 140
         assert len(list(session.scalars(select(CreditLedgerEntry)))) == 1
+
+
+def test_generation_callback_signing_ignores_exposed_url_secret(monkeypatch):
+    monkeypatch.setattr(c.settings, "KIE_WEBHOOK_SECRET", "visible-secret")
+    monkeypatch.setattr(c.settings, "KIE_WEBHOOK_HMAC_KEY", "private-supplier-hmac-key")
+    token = parse_qs(urlsplit(c.callback_url_for_generation(
+        "https://example.test/hooks/kie?secret=visible-secret", 345,
+    )).query)["apix_generation_sig"][0]
+    monkeypatch.setattr(c.settings, "KIE_WEBHOOK_SECRET", "attacker-knows-this")
+    assert c.verify_generation_signature(345, token)
+    monkeypatch.setattr(c.settings, "KIE_WEBHOOK_HMAC_KEY", "other-key")
+    assert not c.verify_generation_signature(345, token)
+
+
+def test_missing_dedicated_hmac_key_refuses_signatures(monkeypatch):
+    monkeypatch.setattr(c.settings, "KIE_WEBHOOK_SECRET", "url-exposed-value")
+    monkeypatch.setattr(c.settings, "KIE_WEBHOOK_HMAC_KEY", "")
+    with pytest.raises(ValueError, match="HMAC"):
+        c.callback_url_for_generation("https://example.test/hooks/kie", 345)
+    assert not c.verify_generation_signature(345, "0" * 64)
+
+
+@pytest.mark.asyncio
+async def test_kie_callback_registration_rejects_unresolved_supplier_liability(kie_transaction_db):
+    import json
+
+    with Session(kie_transaction_db, expire_on_commit=False) as session:
+        session.add(Generation(
+            id=74, user_id=42, model="bytedance/seedance-2-5",
+            gen_type=GenerationType.video, status=GenerationStatus.failed,
+            task_id="kie-submit:74", prompt="synthetic paid work", credits_spent=40,
+            input_params=json.dumps({
+                repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY: {"state": "needs_admin_resolution"},
+            }),
+        ))
+        session.commit()
+        assert not await repo.register_kie_video_callback(
+            LocalAsyncSession(session), 73, surface="miniapp",
+        )
+        assert repo.KIE_VIDEO_CALLBACK_KEY not in repo.parse_input_params(
+            session.get(Generation, 73).input_params,
+        )
+
+
+@pytest.mark.asyncio
+async def test_terminal_signed_kie_callback_returns_loaded_generation_after_rollback(kie_transaction_db):
+    with Session(kie_transaction_db, expire_on_commit=False) as session:
+        row = session.get(Generation, 73)
+        row.status = GenerationStatus.failed
+        session.commit()
+        result = await repo.bind_kie_video_callback(LocalAsyncSession(session), 73, "late-provider-id")
+    # Object is detached; webhook must still inspect its terminal status.
+    assert result is not None
+    assert result.status == GenerationStatus.failed
