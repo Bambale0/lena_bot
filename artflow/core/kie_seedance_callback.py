@@ -10,7 +10,10 @@ from core.config import settings
 
 
 def _mac(gen_id: int) -> str:
-    key = str(settings.KIE_WEBHOOK_SECRET or settings.BOT_TOKEN).encode("utf-8")
+    key = str(settings.KIE_WEBHOOK_HMAC_KEY or "").strip()
+    if not key:
+        raise ValueError("Dedicated Kie webhook HMAC key is not configured")
+    key = key.encode("utf-8")
     return hmac.new(key, f"seedance-kie-v1:{gen_id}".encode("ascii"), hashlib.sha256).hexdigest()
 
 
@@ -35,5 +38,7 @@ def verify_generation_signature(gen_id: int | None, signature: str | None) -> bo
     if not isinstance(gen_id, int) or gen_id <= 0:
         return False
     if not isinstance(signature, str) or len(signature) != 64:
+        return False
+    if not str(settings.KIE_WEBHOOK_HMAC_KEY or "").strip():
         return False
     return hmac.compare_digest(signature, _mac(gen_id))
