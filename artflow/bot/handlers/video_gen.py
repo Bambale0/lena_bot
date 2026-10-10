@@ -2369,8 +2369,10 @@ async def _launch_video_generation_from_state(
 
     submission_context = make_submission_context(session, gen_id, model_key, surface="telegram_bot")
     try:
-        if submission_context:
-            await repo.register_kie_video_callback(session, gen_id, surface="telegram_bot")
+        if submission_context and not await repo.register_kie_video_callback(
+            session, gen_id, surface="telegram_bot",
+        ):
+            raise RuntimeError("Video provider callback correlation could not be persisted")
         result = await video_service.generate_video(
             VideoModel(model_key),
             prompt,
@@ -3168,8 +3170,10 @@ async def cb_regen_video(
 
     submission_context = make_submission_context(session, gen_id, model_key, surface="telegram_bot")
     try:
-        if submission_context:
-            await repo.register_kie_video_callback(session, gen_id, surface="telegram_bot")
+        if submission_context and not await repo.register_kie_video_callback(
+            session, gen_id, surface="telegram_bot",
+        ):
+            raise RuntimeError("Video provider callback correlation could not be persisted")
         result = await video_service.generate_video(
             video_model,
             repeat_prompt,

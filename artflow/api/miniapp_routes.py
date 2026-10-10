@@ -3071,8 +3071,11 @@ async def create_video_generation(
     submission_context = make_submission_context(session, gen.id, body.model, surface=surface)
 
     try:
-        if submission_context:
-            await repo.register_kie_video_callback(session, gen.id, surface=surface)
+        if submission_context and not await repo.register_kie_video_callback(
+            session, gen.id, surface=surface,
+        ):
+            # A provider POST must never run without a durable callback identity.
+            raise RuntimeError("Video provider callback correlation could not be persisted")
         result = await video_service.generate_video(
             model,
             user_prompt,
@@ -4125,8 +4128,10 @@ async def remix_feed_post(
                 session, gen.id, task_id_for_surface(initial_identity, surface),
             )
         if gen_type == "video":
-            if submission_context:
-                await repo.register_kie_video_callback(session, gen.id, surface=surface)
+            if submission_context and not await repo.register_kie_video_callback(
+                session, gen.id, surface=surface,
+            ):
+                raise RuntimeError("Video provider callback correlation could not be persisted")
             result = await video_service.generate_video(
                 model,
                 repeat_prompt,

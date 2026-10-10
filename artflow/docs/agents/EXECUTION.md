@@ -1476,3 +1476,8 @@ No new config or pricing keys. Trace source generation and input-media provenanc
 - Restore original validated Grok mode (and safe read-only public Grok mode metadata) in quote, submission, Telegram FSM and browser settings.
 - Reject viewer audio/characters/seeds on Telegram exact replays before credits are charged; keep additional author video references only in their original validated form.
 - Verified 282 backend feed tests (2 unrelated existing baseline failures excluded), 105 JS units, Ruff clean, TypeScript check, Vite production build. CI browser/deploy checks still gate release.
+
+
+### Financial pre-submit fail-closed guard (2026-10-10)
+
+An additional self-audit on merged branch 7d657a1 found a real risk: register_kie_video_callback can legitimately return false (generation row no longer eligible, no durable callback identity), yet four launch routes ignored the result and still issued paid POST. Three regression tests first failed against original branch with visible provider calls despite registration refusal (MiniApp launch, remix, Telegram). All four launch paths now require a successful durable registration before provider call; refusal is a no-POST failure that uses guarded standard generation refund, not new provider POST. RED -> GREEN tests and all related Feed/Genjutsu/routes/Kie transaction cases passed; Ruff clean. This is a release-critical guard against lost Kie responses without recoverable callback identity. No production charges or direct financial writes during tests.

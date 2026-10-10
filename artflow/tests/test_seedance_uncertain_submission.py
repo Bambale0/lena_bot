@@ -660,3 +660,60 @@ async def test_new_seedance_bot_submission_outcome_handling(video_launch, monkey
         shown.assert_awaited_once()
     fixture.repo.fail_generation_and_refund.assert_not_awaited()
     fixture.repo.update_generation_task.assert_not_awaited()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["launch", "remix"])
+async def test_callback_registration_failure_never_starts_a_paid_seedance_post(
+    api_launch, monkeypatch, operation,
+):
+    from fastapi import HTTPException
+
+    routes = api_launch.routes
+    model = "bytedance/seedance-2"
+    api_launch.source.gen_type = GenerationType.image
+    api_launch.source.model = model
+    api_launch.save.return_value.model = model
+    api_launch.save.return_value.gen_type = GenerationType.video
+    monkeypatch.setattr(
+        routes, "make_submission_context",
+        lambda *_args, **_kwargs: SimpleNamespace(client_request_id="synthetic", started=False),
+    )
+    register = AsyncMock(return_value=False)
+    monkeypatch.setattr(routes.repo, "register_kie_video_callback", register)
+    monkeypatch.setattr(routes.repo, "fail_generation_and_refund", AsyncMock())
+    if operation == "launch":
+        body = routes.VideoGenRequest(model=model, prompt="Synthetic video input", duration=5)
+        call = routes.create_video_generation(
+            body, api_launch.session, api_launch.user, "miniapp",
+        )
+    else:
+        body = routes.FeedRemixRequest(model=model, change_request="make outfit blue", duration=5)
+        call = routes.remix_feed_post(
+            77, body, api_launch.session, api_launch.user, "miniapp",
+        )
+    with pytest.raises(HTTPException) as error:
+        await call
+    assert error.value.status_code == 502
+    register.assert_awaited_once()
+    api_launch.generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_refuses_paid_submit_when_callback_correlation_cannot_commit(
+    video_launch, monkeypatch,
+):
+    from bot.handlers import video_gen
+
+    fixture = video_launch
+    fixture.data.update(model_key="bytedance/seedance-2", mode="text", image_url=None)
+    fixture.kwargs.update(source_feed_gen_id=None, hidden_feed_prompt=False, prompt="synthetic")
+    monkeypatch.setattr(
+        video_gen, "make_submission_context",
+        lambda *_args, **_kwargs: SimpleNamespace(client_request_id="synthetic", started=False),
+    )
+    register = AsyncMock(return_value=False)
+    fixture.repo.register_kie_video_callback = register
+    fixture.repo.fail_generation_and_refund = AsyncMock(return_value=(True, 4.0))
+    assert await video_gen._launch_video_generation_from_state(**fixture.kwargs) is False
+    register.assert_awaited_once()
+    fixture.service.generate_video.assert_not_awaited()
