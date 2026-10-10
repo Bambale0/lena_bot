@@ -73,6 +73,30 @@ async def admin_set_nano21_provider(
     })
 
 
+class SupplierReviewResolutionRequest(BaseModel):
+    resolution: Literal["confirmed_not_accepted", "cost_reconciled"]
+    note: str = Field(..., min_length=12, max_length=500)
+
+
+@router.put("/admin/seedance/refund-supplier-review/{gen_id}")
+async def admin_resolve_refunded_seedance_supplier_review(
+    gen_id: int,
+    body: SupplierReviewResolutionRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    updated = await repo.resolve_refunded_seedance_provider_review(
+        session, gen_id, resolution=body.resolution,
+        admin_tg_id=int(user.tg_id), note=body.note,
+    )
+    if not updated:
+        return error_response(409, "No open supplier review for this generation")
+    return ok({"generation_id": gen_id, "review_state": "settled",
+               "customer_balance_unchanged": True})
+
+
 class AdminCreditAdjustmentRequest(BaseModel):
     amount: float = Field(..., ge=-100_000, le=100_000)
     note: str | None = Field(default=None, max_length=500)

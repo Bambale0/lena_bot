@@ -86,14 +86,17 @@ def _eligible_video_query():
 _NEIRONYCH_TASK_PREFIXES = (
     "neironych:", "web:neironych:",
     "neironych-submit:", "web:neironych-submit:",
+    "kie-submit:", "web:kie-submit:",
 )
 
 
 def _seedance_started_at(gen: Generation) -> datetime:
     """Refund timer is anchored to persisted paid submission, not preparation."""
-    marker = repo.parse_input_params(getattr(gen, "input_params", None)).get(
-        repo.SEEDANCE_SUBMISSION_KEY
-    )
+    params = repo.parse_input_params(getattr(gen, "input_params", None))
+    task = str(getattr(gen, "task_id", "") or "").removeprefix("web:")
+    marker = params.get(repo.KIE_VIDEO_SUBMISSION_KEY) if task.startswith(
+        "kie-submit:"
+    ) else params.get(repo.SEEDANCE_SUBMISSION_KEY)
     stamp = marker.get("started_at") if isinstance(marker, dict) else None
     if isinstance(stamp, str):
         try:
@@ -110,10 +113,18 @@ def _expired_seedance_query():
     cutoff = datetime.now(timezone.utc) - timedelta(
         seconds=settings.SEEDANCE_AUTO_REFUND_SECONDS
     )
-    submitted_at = func.jsonb_extract_path_text(
-        cast(Generation.input_params, JSONB), repo.SEEDANCE_SUBMISSION_KEY, "started_at"
+    params_json = cast(Generation.input_params, JSONB)
+    neironych_started = func.jsonb_extract_path_text(
+        params_json, repo.SEEDANCE_SUBMISSION_KEY, "started_at"
     )
-    started = func.coalesce(cast(submitted_at, DateTime(timezone=True)), Generation.created_at)
+    kie_started = func.jsonb_extract_path_text(
+        params_json, repo.KIE_VIDEO_SUBMISSION_KEY, "started_at"
+    )
+    started = func.coalesce(
+        cast(kie_started, DateTime(timezone=True)),
+        cast(neironych_started, DateTime(timezone=True)),
+        Generation.created_at,
+    )
     return select(Generation.id).where(
         Generation.gen_type == GenerationType.video,
         Generation.model.in_(tuple(PRODUCT_MODELS)),
@@ -140,6 +151,10 @@ async def _load_expired_seedance_batch() -> list[int]:
 async def _final_neironych_provider_status(gen: Generation) -> tuple[str, str | None]:
     """One bounded GET only: completed, failed, pending, unknown or newly bound."""
     task = str(gen.task_id or "").removeprefix("web:")
+    if task.startswith("kie-submit:"):
+        # Kie has not supplied a task ID, so no canonical GET is available.
+        # A signed webhook can still bind the original paid order later.
+        return "unknown", None
     if task.startswith("neironych-submit:"):
         marker = repo.parse_input_params(gen.input_params).get(repo.SEEDANCE_SUBMISSION_KEY)
         if not isinstance(marker, dict) or not marker.get("idempotency_key"):
@@ -194,7 +209,7 @@ async def _settle_expired_seedance(
             return False
         # The Redis lease may be lost after the DB settlement has begun.
         protect_neironych_video_poll_settlement()
-        telegram = task_id.startswith(("neironych:", "neironych-submit:"))
+        telegram = task_id.startswith(("neironych:", "neironych-submit:", "kie-submit:"))
         changed, credits = await repo.fail_generation_and_refund(
             session, gen_id, "Видео не удалось создать вовремя.",
             expected_task_id=task_id,
@@ -357,25 +372,36 @@ async def _review_refunded_provider_task(gen_id: int) -> bool:
         if discovered_id:
             marker["provider_task_id"] = discovered_id
         if status == "done":
-            marker["state"] = "remote_completed"
+            marker["state"] = "remote_completed_pending_finance"
             marker["reconciled_at"] = now.isoformat()
         elif status == "failed":
             marker["state"] = "remote_failed"
             marker["reconciled_at"] = now.isoformat()
+        # Unknown forever is not a silent lifetime block. Escalate after
+        # bounded checks, keep the account protected until an authorized
+        # operator confirms that the supplier liability is settled.
+        if (status in ("unknown", "pending") and
+                (int(marker["checks"]) >= settings.SEEDANCE_PROVIDER_REFUND_MAX_CHECKS or
+                 (now - repo._notice_timestamp(marker.get("refunded_at")) if
+                  repo._notice_timestamp(marker.get("refunded_at")) else timedelta()).total_seconds()
+                 >= settings.SEEDANCE_PROVIDER_REFUND_MAX_REVIEW_SECONDS)):
+            marker["state"] = "needs_admin_resolution"
+            marker["escalated_at"] = now.isoformat()
         metadata[repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY] = marker
         locked.input_params = json.dumps(metadata, ensure_ascii=False)
         await session.commit()
-    if status in ("done", "failed"):
+    if status in ("done", "failed") or marker.get("state") == "needs_admin_resolution":
         logger.warning(
-            "Seedance refunded provider task resolved gen=%s remote=%s; "
+            "Seedance refunded provider task resolved or escalated gen=%s remote=%s; "
             "customer_final_state_unchanged=true", gen_id, status,
         )
         try:
             await send_admin_alert_once(
                 alert_key=f"seedance-late-provider-result:{gen_id}:{status}",
                 title="Seedance: подтверждён исход после возврата",
-                message=f"APIX задача {gen_id}; Neironych статус {status}. "
-                        "Проверьте удержание и расход у поставщика. Баланс пользователя не менялся.",
+                message=f"APIX задача {gen_id}; Нейроныч статус {status}. "
+                        "Если задача не подтверждена или результат опоздал, проверьте закупочный расход и "
+                        "завершите сверку в защищённом admin API. Баланс пользователя не менялся.",
             )
         except Exception as exc:
             logger.warning("Seedance supplier alert deferred gen=%s error=%s",gen_id,type(exc).__name__)
@@ -390,6 +416,7 @@ def _eligible_notice_query():
         or_(
             Generation.task_id.like("neironych:%"),
             Generation.task_id.like("neironych-submit:%"),
+            Generation.task_id.like("kie-submit:%"),
         ),
         Generation.input_params.op("~")(_NOTICE_PENDING_REGEX),
     )
@@ -760,8 +787,26 @@ async def _run_expired_lane(stop: asyncio.Event | None) -> list[bool]:
     )
 
 
+async def _active_ids_not_expired(ids: list[int]) -> list[int]:
+    if not ids:
+        return []
+    async with AsyncSessionLocal() as session:
+        live = (await session.execute(select(Generation).where(Generation.id.in_(ids)))).scalars().all()
+        await session.rollback()
+    overdue = {
+        gen.id for gen in live
+        if gen.gen_type == GenerationType.video and gen.model in PRODUCT_MODELS
+        and str(gen.task_id or "").startswith(_NEIRONYCH_TASK_PREFIXES)
+        and (datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
+        >= settings.SEEDANCE_AUTO_REFUND_SECONDS
+    }
+    return [ident for ident in ids if ident not in overdue]
+
+
 async def _run_active_video_lane(stop: asyncio.Event | None) -> list[bool]:
     ids = await _load_batch(_eligible_video_query(), _video_cursor)
+    # Expired tasks have a dedicated lane; don't steal their provider lease.
+    ids = await _active_ids_not_expired(ids)
     return await _process_bounded_batch(ids, _process_active_video, stop)
 
 

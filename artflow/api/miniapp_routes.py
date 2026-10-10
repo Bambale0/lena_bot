@@ -39,6 +39,7 @@ from api.assistant_service import generate_assistant_reply, generate_prompt_mode
 from api.image_errors import image_generation_user_error
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_webhook import extract_error, extract_status
+from api.kieai_client import KieSubmissionOutcomeUnknown
 from api.midjourney_service import MJDimensions, MJVideoMotion
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_telegram_login_data
 from api.music_service import (
@@ -113,6 +114,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.kie_seedance_callback import callback_url_for_generation
 from core.neironych_video_poll_gate import (
     NeironychVideoPollLeaseLost,
     neironych_video_poll_guard,
@@ -3057,6 +3059,8 @@ async def create_video_generation(
     submission_context = make_submission_context(session, gen.id, body.model, surface=surface)
 
     try:
+        if submission_context:
+            await repo.register_kie_video_callback(session, gen.id, surface=surface)
         result = await video_service.generate_video(
             model,
             user_prompt,
@@ -3071,7 +3075,9 @@ async def create_video_generation(
             video_start=normalized["video_start"],
             video_end=normalized["video_end"],
             seed=normalized["seed"],
-            callback_url=_kie_callback_url(),
+            callback_url=callback_url_for_generation(
+                _kie_callback_url(), gen.id if submission_context else None,
+            ),
             idempotency_key=f"apix-video-{gen.id}",
             **({"neironych_submission": submission_context} if submission_context else {}),
         )
@@ -3082,6 +3088,11 @@ async def create_video_generation(
         return _gen_out(gen)
     except NeironychSubmissionUnknown:
         await handle_submission_unknown(session, failed_generation_id, submission_context)
+        await session.refresh(gen)
+        return _gen_out(gen)
+    except KieSubmissionOutcomeUnknown:
+        await session.rollback()
+        await repo.mark_kie_video_submission_unknown(session, failed_generation_id)
         await session.refresh(gen)
         return _gen_out(gen)
     except Exception as exc:
@@ -4033,6 +4044,8 @@ async def remix_feed_post(
                 session, gen.id, task_id_for_surface(initial_identity, surface),
             )
         if gen_type == "video":
+            if submission_context:
+                await repo.register_kie_video_callback(session, gen.id, surface=surface)
             result = await video_service.generate_video(
                 model,
                 repeat_prompt,
@@ -4047,7 +4060,9 @@ async def remix_feed_post(
                 video_start=normalized_video["video_start"],
                 video_end=normalized_video["video_end"],
                 seed=normalized_video["seed"],
-                callback_url=_kie_callback_url(),
+                callback_url=callback_url_for_generation(
+                    _kie_callback_url(), gen.id if submission_context else None,
+                ),
                 idempotency_key=f"apix-video-{gen.id}",
                 **({"neironych_submission": submission_context} if submission_context else {}),
             )
@@ -4071,6 +4086,12 @@ async def remix_feed_post(
         return _gen_out(gen)
     except NeironychSubmissionUnknown:
         await handle_submission_unknown(session, failed_generation_id, submission_context)
+        await repo.increment_feed_share(session, gen_id)
+        await session.refresh(gen)
+        return _gen_out(gen)
+    except KieSubmissionOutcomeUnknown:
+        await session.rollback()
+        await repo.mark_kie_video_submission_unknown(session, failed_generation_id)
         await repo.increment_feed_share(session, gen_id)
         await session.refresh(gen)
         return _gen_out(gen)

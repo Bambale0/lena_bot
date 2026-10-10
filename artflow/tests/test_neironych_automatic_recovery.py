@@ -35,6 +35,9 @@ class LocalSession:
     async def commit(self):
         self.sync.commit()
 
+    async def rollback(self):
+        self.sync.rollback()
+
     async def flush(self):
         self.sync.flush()
 
@@ -350,7 +353,10 @@ async def test_proven_prepost_failure_refunds_only_owned_unsubmitted_attempt(rec
 
 
 @pytest.mark.asyncio
-async def test_refunded_unknown_supplier_job_blocks_only_own_account_paid_submission(recovery):
+@pytest.mark.parametrize("review_state", ["pending", "remote_completed_pending_finance", "needs_admin_resolution"])
+async def test_refunded_unknown_supplier_job_blocks_only_own_account_paid_submission(
+    recovery, review_state,
+):
     from db import repository as repo
 
     r = recovery
@@ -363,7 +369,7 @@ async def test_refunded_unknown_supplier_job_blocks_only_own_account_paid_submis
             gen_type=GenerationType.video, status=GenerationStatus.failed,
             prompt="earlier video", task_id="neironych:unknown-original",
             input_params=json.dumps({"seedance_refund_provider_review": {
-                "state": "pending", "original_task_id": "neironych:unknown-original",
+                "state": review_state, "original_task_id": "neironych:unknown-original",
             }}), credits_spent=28,
         )
         db.add(previous)
@@ -394,6 +400,40 @@ async def test_refunded_unknown_supplier_job_blocks_only_own_account_paid_submis
             product_model=other.model,
         )
         assert other.task_id == "neironych-submit:" + request_id
+
+
+@pytest.mark.asyncio
+async def test_operator_settles_supplier_review_with_audit_but_without_wallet_mutation(recovery):
+    from db import repository as repo
+    with recovery.db() as db:
+        gen = db.sync.get(Generation, 73)
+        gen.status = GenerationStatus.failed
+        gen.input_params = json.dumps({
+            "refund_applied": True,
+            "seedance_refund_provider_review": {
+                "state": "needs_admin_resolution",
+                "original_task_id": gen.task_id,
+                "checks": 96,
+            },
+        })
+        await db.commit()
+        before=db.sync.get(User,42).credits
+        assert await repo.resolve_refunded_seedance_provider_review(
+            db, 73, resolution="confirmed_not_accepted",
+            admin_tg_id=339795159,
+            note="Confirmed in upstream ArgoLink audit: no task was created.",
+        )
+        after=repo.parse_input_params(gen.input_params)["seedance_refund_provider_review"]
+        assert after["state"]=="settled"
+        assert after["resolution"]=="confirmed_not_accepted"
+        assert after["resolved_by_admin_tg_id"]==339795159
+        assert after["resolved_at"] and after["resolution_note"]
+        assert db.sync.get(User,42).credits==before
+        assert not await repo._has_pending_refunded_seedance_review(db,42)
+        assert not await repo.resolve_refunded_seedance_provider_review(
+            db,73,resolution="confirmed_not_accepted",
+            admin_tg_id=339795159,note="The same admin operation repeated.",
+        )
 
 
 @pytest.mark.asyncio

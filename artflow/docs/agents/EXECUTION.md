@@ -1431,3 +1431,14 @@ Initial exact-SHA GitHub backend, navigation, provider and Playwright checks wer
 - Uses the existing typed environment refund deadline and validation. An admin-editable DB control-plane deadline remains a separate follow-up enhancement; changing the configured SLA still requires deployment. No changes to pricing or purchasing are part of this patch.
 
 New/updated tests cover: lost Kie response/5xx with exactly one provider POST, safe definite-rejection fallback, invalid/missing Kie task ID, real-DB-independent supplier audit in refund transaction, lease contention, late provider completion without balance change, short final GET, submit-start clock, pending and 503 before and after deadline, no starvation of Telegram, per-account liability gate and unaffected unrelated user. All review findings must be rechecked against the updated SHA; no user credit/debit, provider paid POST, or production deployment was done while preparing these tests.
+
+
+### Continuation: Kie correlation and current main reconciliation (2026-10-10)
+
+PR #235 code/security review on 47633a9 found financial issues: Kie 5xx/lost submit results needed persisted callback linking; late-completed provider reviews needed to remain blocked pending supplier-cost settlement; expiry and normal polling needed independent claims; indefinite supplier reviews needed bounded operator escalation; SQLAlchemy expired rows needed snapshots before read-only transactions end. First fixes committed as 47633a9; further source/test fixes staged here.
+
+- Kie callback obtains per-generation HMAC parameters before its one-shot paid POST. Missing createTask response never authorizes another provider POST or speculative refund; the unknown submission is durably marked kie-submit plus generation ID and can be correlated by a signed webhook.
+- Customer deadline refund is atomic. Late provider callback only updates supplier review metadata. Completed provider charges remain blocked for that specific customer until authenticated admin settlement; unrelated users are not blocked.
+- Provider audits have maximum checks/age; indeterminate results escalate to operators and do not self-clear; completed remote video does not authorize refund; Redis failures do not invalidate durable refund/outbox.
+- 150 focused service/finance/reconciliation tests were green. Two new SQLite durable roundtrips validate Kie unknown->bound and Kie refund->late provider completion->admin settlement; four Kie callback tests green. Legacy API/bot test fakes updated for new persisted registration. Ruff and compilation green after fixing accidental escaped newline in Telegram import.
+- CI now includes new timeout and Kie callback regression files. Main advanced by #237; reconcile via ordinary merge in feature branch, rerun exact-SHA CI and review before protected squash deployment. No production customer money was changed during tests.

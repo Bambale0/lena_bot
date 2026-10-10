@@ -218,6 +218,7 @@ async def test_scheduler_checks_active_tasks_and_pending_telegram_notices(monkey
     from core import neironych_video_reconcile_scheduler as scheduler
 
     monkeypatch.setattr(scheduler, "_load_expired_seedance_batch", AsyncMock(return_value=[]))
+    monkeypatch.setattr(scheduler, "_active_ids_not_expired", AsyncMock(side_effect=lambda ids: ids))
     monkeypatch.setattr(scheduler, "_run_refund_supplier_review_lane", AsyncMock(return_value=[]))
     monkeypatch.setattr(scheduler, "_load_batch", AsyncMock(return_value=[12, 14]))
     monkeypatch.setattr(scheduler, "_load_notice_batch", AsyncMock(return_value=[12, 19]))

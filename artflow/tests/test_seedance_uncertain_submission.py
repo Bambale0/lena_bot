@@ -575,6 +575,10 @@ async def test_new_seedance_api_submission_outcome_handling(api_launch, monkeypa
     api_launch.source.model = model
     context = SimpleNamespace(client_request_id="synthetic", started=True)
     monkeypatch.setattr(route, "make_submission_context", lambda *_a, **_k: context)
+    # The fake session contains no PostgreSQL rows; exercise persistence in
+    # repository-specific tests and keep this API test about exception routing.
+    register_callback = AsyncMock(return_value=True)
+    monkeypatch.setattr(route.repo, "register_kie_video_callback", register_callback)
 
     async def hold(*_args):
         gen.input_params = json.dumps({RECONCILIATION_KEY: {"required": True}})
@@ -629,6 +633,7 @@ async def test_new_seedance_bot_submission_outcome_handling(video_launch, monkey
     monkeypatch.setattr(video_gen, "handle_submission_unknown", held)
     monkeypatch.setattr(video_gen, "_show_video_submission_review", shown)
     fixture.repo.fail_generation_and_refund = AsyncMock()
+    fixture.repo.register_kie_video_callback = AsyncMock(return_value=True)
     no_post = AsyncMock(return_value=True)
     monkeypatch.setattr(video_gen, "handle_submission_not_sent", no_post)
     error = NeironychPreSubmitFailure if not_sent else NeironychSubmissionUnknown

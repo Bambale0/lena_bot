@@ -106,6 +106,7 @@ from core.broadcast_scheduler import run_broadcast_scheduler
 from core.config import settings
 from core.db_backup_scheduler import run_database_backup_scheduler
 from core.feed_remix_prompt import generation_prompt_is_protected
+from core.kie_seedance_callback import verify_generation_signature
 from core.logger import setup_logging
 from core.music_reconcile_scheduler import run_music_reconcile_scheduler
 from core.neironych_image_reconcile_scheduler import run_neironych_image_reconcile_scheduler
@@ -1687,8 +1688,13 @@ async def kie_webhook(
     nexus_request_id: str | None = None,
     nexus_signature: str | None = None,
     x_kie_webhook_secret: str | None = Header(default=None, alias="X-KIE-Webhook-Secret"),
+    apix_generation_id: int | None = None,
+    apix_generation_sig: str | None = None,
 ) -> dict:
     _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
+    if apix_generation_id is not None or apix_generation_sig is not None:
+        if not verify_generation_signature(apix_generation_id, apix_generation_sig):
+            raise HTTPException(status_code=403, detail="Invalid video generation correlation")
 
     payload = await request.json()
     task_id = extract_task_id(payload)
@@ -1728,6 +1734,10 @@ async def kie_webhook(
             gen = await repo.get_generation_by_task_id(session, _web_task_lookup_id(task_id))
         if not gen and provider == "nexus" and nexus_request_id:
             gen = await _recover_nexus_submission(session, nexus_request_id, lookup_task_id)
+        if not gen and apix_generation_id is not None and apix_generation_sig:
+            # The signed URL was minted before Kie's paid POST; it survives
+            # lost submit replies, process crashes and callback race ordering.
+            gen = await repo.bind_kie_video_callback(session, apix_generation_id, task_id)
         if not gen:
             logger.warning("KIE webhook for unknown task_id=%s lookup_task_id=%s", task_id, lookup_task_id)
             return {"ok": True}
@@ -1738,8 +1748,21 @@ async def kie_webhook(
             if snapshot.get("request_id") != nexus_request_id:
                 raise HTTPException(status_code=409, detail="Nexus submission correlation mismatch")
 
-        # Idempotency: if already finished, acknowledge duplicate callback.
+        # Idempotency: final customer status/balance must never be changed.
+        # Signed late Kie callbacks instead update the supplier liability
+        # review marker for operator reconciliation.
         if gen.status.value in {"done", "failed"}:
+            if (gen.status.value == "failed" and apix_generation_id == gen.id
+                    and apix_generation_sig and not is_processing(payload)):
+                recorded = await repo.record_late_kie_video_callback(
+                    session, gen.id, task_id, succeeded=is_success(payload),
+                )
+                if recorded:
+                    logger.warning(
+                        "Kie late provider outcome recorded after refund gen=%s "
+                        "state=%s customer_balance_unchanged=true",
+                        gen.id, "done" if is_success(payload) else "failed",
+                    )
             return {"ok": True}
 
         user = await repo.get_user_by_id(session, gen.user_id)

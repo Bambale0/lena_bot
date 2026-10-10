@@ -387,7 +387,7 @@ async def test_post_refund_supplier_review_records_late_completion_without_chang
     monkeypatch.setattr(scheduler.repo, "fail_generation_and_refund", no_refund)
     assert await scheduler._review_refunded_provider_task(gen.id)
     marker=json.loads(gen.input_params)["seedance_refund_provider_review"]
-    assert marker["state"]=="remote_completed"
+    assert marker["state"]=="remote_completed_pending_finance"
     assert marker["checks"]==1 and marker["reconciled_at"]
     assert commits==[True] and gen.status==GenerationStatus.failed
     assert json.loads(gen.input_params)["refund_applied"] is True
@@ -460,3 +460,49 @@ async def test_slow_expiry_lane_does_not_starve_notice_lane(monkeypatch):
     summary = await task
     assert summary["expired"] == 1
     assert summary["sent"] == 1
+
+
+
+@pytest.mark.asyncio
+async def test_regular_video_lane_does_not_contend_for_expired_seedance_lease(monkeypatch):
+    gen=_generation(age_seconds=4000)
+    class Session(_Session):
+        async def execute(self,_stmt):
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [gen]))
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", Session)
+    monkeypatch.setattr(scheduler, "_load_batch", AsyncMock(return_value=[gen.id]))
+    processor=AsyncMock(return_value=True)
+    monkeypatch.setattr(scheduler, "_process_active_video", processor)
+    assert await scheduler._run_active_video_lane(None)==[]
+    processor.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_supplier_review_expiry_escalates_for_administrator(monkeypatch):
+    import json
+
+    gen = _generation(status=GenerationStatus.failed)
+    gen.input_params = json.dumps({
+        "refund_applied": True,
+        "seedance_refund_provider_review": {
+            "state": "pending",
+            "original_task_id": gen.task_id,
+            "refunded_at": (datetime.now(timezone.utc)-timedelta(hours=25)).isoformat(),
+            "next_check_at": (datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat(),
+            "checks": 95,
+        },
+    })
+    class Session(_Session):
+        async def execute(self, _statement):
+            return SimpleNamespace(scalar_one_or_none=lambda: gen)
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", Session)
+    monkeypatch.setattr(scheduler.repo,"get_generation_by_id", AsyncMock(return_value=gen))
+    monkeypatch.setattr(scheduler,"_final_neironych_provider_status",
+                        AsyncMock(return_value=("unknown",None)))
+    alert=AsyncMock(return_value=True)
+    monkeypatch.setattr(scheduler,"send_admin_alert_once",alert)
+    assert await scheduler._review_refunded_provider_task(gen.id)
+    review=json.loads(gen.input_params)["seedance_refund_provider_review"]
+    assert review["state"]=="needs_admin_resolution"
+    assert review["escalated_at"]
+    alert.assert_awaited_once()
