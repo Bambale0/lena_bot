@@ -19,4 +19,11 @@ One active vertical slice. E01.1 / #220 was delivered in #221. Current slice: [E
 | E09 | #218 | [[UX2-E09] Единый контракт возможностей, управляемая конфигурация и наблюдаемость](epics/E09.md) |
 | E10 | #219 | [[UX2-E10] Пользовательская проверка, управляемый пилот и выпуск UX2](epics/E10.md) |
 
-Current implementation slice: [E01.3 photo uploads](E01-3.md), issue #225. GitHub tracks live release status. Next prepared step: E01.4 / #226; no E01.4 implementation yet.
+## E01 status at this revision (2026-10-10)
+
+- Completed: E01.1 #220; E01.2 #222; E01.3 #225; E01.4.1 #229 (PR #231).
+- Contract-only work: [E01.4.2 owner-bound media](E01-4-2.md), issue #232.
+- Architectural decision: [ADR-UX2-001](../adr/ADR-UX2-001-owned-media.md).
+- Execution plan: [owned media registry implementation](../superpowers/plans/2026-10-10-owned-media-registry.md).
+- E01.4 #226 and E01 #210 remain open. GitHub issues remain authoritative for current state.
+- This revision changes documentation only: no new ownership backend, migration or URL renewal is deployed.
