@@ -195,6 +195,9 @@ async def test_kie_callback_registration_rejects_unresolved_supplier_liability(k
 @pytest.mark.asyncio
 async def test_terminal_signed_kie_callback_returns_loaded_generation_after_rollback(kie_transaction_db):
     with Session(kie_transaction_db, expire_on_commit=False) as session:
+        assert await repo.register_kie_video_callback(
+            LocalAsyncSession(session), 73, surface="miniapp",
+        )
         row = session.get(Generation, 73)
         row.status = GenerationStatus.failed
         session.commit()
