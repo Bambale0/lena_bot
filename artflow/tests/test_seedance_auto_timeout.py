@@ -99,7 +99,10 @@ async def test_expiry_does_not_refund_video_completed_by_final_poll(monkeypatch)
     monkeypatch.setattr(scheduler, "_final_neironych_provider_status", complete)
     monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=gen))
     monkeypatch.setattr(scheduler.repo, "fail_generation_and_refund", refunds)
-    assert not await scheduler._expire_stuck_seedance_video(gen.id)
+    delivery = AsyncMock(return_value=True)
+    monkeypatch.setattr(scheduler, "_process_active_video", delivery)
+    assert await scheduler._expire_stuck_seedance_video(gen.id)
+    delivery.assert_awaited_once_with(gen.id)
     refunds.assert_not_awaited()
 
 
