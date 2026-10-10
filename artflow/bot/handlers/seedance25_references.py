@@ -245,9 +245,9 @@ async def _enter_seedance25_flow(
     await state.update_data(
         model_key=MODEL_KEY,
         credits=float(model_cost.credits),
-        duration=5,
-        aspect_ratio="adaptive",
-        resolution="720p",
+        duration=old.get("feed_use_original_duration") or 5,
+        aspect_ratio=old.get("feed_use_original_aspect_ratio") or "adaptive",
+        resolution=old.get("feed_use_original_resolution") or "720p",
         mode="multimodal" if old.get("feed_use_source_video_url") else "text",
         image_url=None,
         image_file_id=None,

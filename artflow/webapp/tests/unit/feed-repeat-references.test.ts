@@ -28,3 +28,8 @@ test("provider shared-media quota limits photos beside a source video", () => {
   assert.equal(feedUserReferenceCapacity({ ...model, max_refs_with_video: 99 }, true), 7);
   assert.equal(feedUserReferenceCapacity({ ...model, max_refs_with_video: -1 }, true), 0);
 });
+
+test("a video rendered from creator photo must not demand video-input support", () => {
+  assert.equal(feedUserReferenceCapacity({ max_refs: 4, supports_video_input: false }, true, false), 4);
+  assert.equal(feedUserReferenceCapacity({ max_refs: 1, supports_video_input: false }, true, false), 1);
+});

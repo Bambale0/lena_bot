@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.public_files import (
-    local_upload_path_from_url,
     mirror_url,
     preview_public_image_url,
     public_url_is_available,
@@ -28,6 +27,10 @@ COMPACT_FEED_KEYS = {
     "remix_count",
     "shares",
     "aspect_ratio",
+    "source_has_video_reference",
+    "original_duration",
+    "original_aspect_ratio",
+    "original_resolution",
     "result_url",
     "result_urls",
     "preview_url",

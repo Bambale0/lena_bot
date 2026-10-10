@@ -106,6 +106,10 @@ export interface FeedItem {
   id: number;
   model: string;
   gen_type?: string;
+  source_has_video_reference?: boolean | null;
+  original_duration?: number | null;
+  original_aspect_ratio?: string | null;
+  original_resolution?: string | null;
   prompt?: string;
   prompt_hidden?: boolean;
   result_url?: string;

@@ -8,7 +8,12 @@ from pydantic import BaseModel, Field
 
 from api.public_files import preview_public_image_url, public_url_is_available
 from core.config import settings
-from core.feed_remix_prompt import generation_prompt_is_protected, generation_public_error
+from core.feed_remix_prompt import (
+    generation_prompt_is_protected,
+    generation_public_error,
+    original_feed_video_inputs,
+    original_feed_video_references,
+)
 from core.seedance_reconciliation import public_generation_status
 
 
@@ -221,6 +226,10 @@ class FeedCard(BaseModel):
     created_at: str
     can_remix: bool = True
     can_use_reference: bool = False
+    source_has_video_reference: bool | None = None
+    original_duration: int | None = None
+    original_aspect_ratio: str | None = None
+    original_resolution: str | None = None
 
     @classmethod
     def from_feed_card(cls, card: Any) -> "FeedCard":
@@ -229,6 +238,8 @@ class FeedCard(BaseModel):
         full_name = getattr(card, "full_name", None)
         author = f"@{username}" if username else (full_name or "anon")
         gen_type = enum_value(getattr(generation, "gen_type", None), "image")
+        origin_videos = original_feed_video_references(generation) if gen_type == "video" else None
+        creator_inputs = original_feed_video_inputs(generation) if origin_videos is not None else {}
         result_urls = generation_result_urls(generation)
         result_url = generation_result_url(generation) or ""
         reference_urls = json_url_list(getattr(card, "reference_urls", None))
@@ -256,6 +267,10 @@ class FeedCard(BaseModel):
             created_at=iso_datetime(getattr(generation, "created_at", None)),
             can_remix=bool(result_url),
             can_use_reference=gen_type == "image" and bool(result_url),
+            source_has_video_reference=bool(origin_videos) if origin_videos is not None else None,
+            original_duration=creator_inputs.get("duration"),
+            original_aspect_ratio=creator_inputs.get("aspect_ratio"),
+            original_resolution=creator_inputs.get("resolution"),
         )
 
 

@@ -1393,3 +1393,29 @@ Progress: [x] current repo/AGENTS/README, code, actual DB, notification and fron
 
 ### Independent review: atomic receipt/status snapshot
 Codex P1 PRRT_kwDOSSmOms6rC2fd identified a real READ COMMITTED race: the old receipt and the new terminal status could be read by separate SELECTs and cause removal of a newly needed Redis delivery intent. Added a failing regression that simulates that interleaving, then replaced the two reads with one SELECT of input_params + status. An active suppressed snapshot now stays queued and a terminal snapshot sees the corresponding pending receipt. Existing due-time/lease/terminal cleanup stubs were updated to the single-row query without changing their assertions. This does not mutate generation or ledger state.
+
+---
+
+# Execution ledger — feed creator-input replay (2026-10-10)
+
+Baseline: `e145252`, fix branch `fix/feed-replay-source-inputs`; production `main` unchanged.
+Observed: published Seedance 2.5 job #57213 was created with a photo and a 5140-character prompt, but personalized job #57247 was sent a rendered video plus the reader photo and a 314-character generic edit prompt.
+
+## Outcome and acceptance
+- Repeat server-side creator prompt with new viewer image(s).
+- Never convert generated output MP4 into a reference video when it was not a creator input.
+- Reuse an original video reference only if it is present in the source task's stored input.
+- Secure prompt from user-visible API/Telegram output, copies, and history.
+- Same rule for site, Mini App and Telegram; quote and submission must agree.
+- Reject extra video inputs and unsupported/missing provenance before charging.
+- Preserve provider/model adapter routing and ledger/refund paths.
+
+## Plan and evidence
+1. [x] Preflight AGENTS, local skills, code paths, production provider and DB records.
+2. [x] Isolated branch/worktree; read-only production is kept untouched.
+3. [x] RED regression tests: video-output source with image-only original inputs wrongly sent generated MP4 / lost creator prompt. Both Python and Node tests reproduced the fault before change.
+4. [x] Author input-provenance resolver, server-side prompt/parameters recovery, Telegram picker and Mini App/site parity; no generated MP4 injection for sources with known provenance. Legacy sources with missing input snapshots still use the existing guarded compatibility flow.
+5. [x] Local regression: 14 provider + source tests, focused feed/Seedance suite; Ruff clean, Python compileall clean, TypeScript typecheck, Node unit 105/105, Vite production build pass. Two legacy feed tests and an unrelated web referral test fail identically at baseline; do not change them in this PR.
+6. [ ] PR / green required GitHub checks / auto-merge / deploy verification. Local Playwright test is blocked by missing `libatk-1.0.so.0` on host; CI is the authoritative browser gate. No real paid generation was submitted.
+
+No new config or pricing keys. Trace source generation and input-media provenance without printing author prompts or reference URLs.

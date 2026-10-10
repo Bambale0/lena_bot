@@ -38,6 +38,46 @@ def build_feed_remix_prompt(
     return f"{prompt}\n\n{change}" if change else prompt
 
 
+def original_feed_video_inputs(source) -> dict | None:
+    """Return a stored creator input snapshot or None for unknown provenance."""
+    import json
+
+    params = getattr(source, "input_params", None)
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(params, dict):
+        return None
+    if "reference_video_url" not in params and "reference_video_urls" not in params:
+        return None
+    return params
+
+
+def original_feed_video_references(source) -> list[str] | None:
+    """Read *author input* video refs, never the public rendered MP4.
+
+    None is unknown provenance. [] is a verified image/text-to-video source.
+    """
+    params = original_feed_video_inputs(source)
+    if params is None:
+        return None
+    urls: list[str] = []
+    for key in ("reference_video_url", "reference_video_urls"):
+        raw = params.get(key)
+        candidates = raw if isinstance(raw, list) else [raw]
+        urls.extend(value.strip() for value in candidates if isinstance(value, str) and value.strip())
+
+    # Seedance can store additional original video inputs in control tokens.
+    for value in params.get("audio_ids") or []:
+        if isinstance(value, str) and value.startswith("__apix_seedance25:video_ref="):
+            url = value.partition("=")[2].strip()
+            if url:
+                urls.append(url)
+    return list(dict.fromkeys(urls))
+
+
 FEED_REMIX_CONTEXT_KEY = "feed_remix_context"
 
 

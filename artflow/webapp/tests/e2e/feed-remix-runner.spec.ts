@@ -672,3 +672,61 @@ test("payment notification leaves underlying controls clickable while visible", 
   await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
   expect(state.topups).toBe(1);
 });
+
+test("creator photo-to-video replay never sends rendered MP4 and keeps creator recipe", async ({ page }) => {
+  await mockMiniAppApi(page);
+  const model = {
+    key: "veo-3.1-fast", display_name: "Veo 3.1 Fast",
+    credits: 20, modes: ["text", "image", "video"],
+    aspect_ratios: ["16:9", "9:16"], durations: [5, 10],
+    resolutions: ["720p", "1080p"],
+    max_refs: 1, supports_video_input: true,
+  };
+  await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [{
+    id: 57213, model: model.key, gen_type: "video",
+    prompt: "", prompt_hidden: true,
+    source_has_video_reference: false,
+    original_duration: 10, original_aspect_ratio: "9:16", original_resolution: "720p",
+    result_url: "https://example.test/rendered.mp4",
+    result_urls: ["https://example.test/rendered.mp4"],
+    preview_url: "https://example.test/rendered.mp4",
+    author: "Artist Replay", is_mine: false,
+    likes_count: 0, shares_count: 0, remixes: 0, aspect_ratio: "9:16",
+  }] }));
+  await page.route("**/api/v1/models/video", (route) => route.fulfill({ json: [model] }));
+  await page.route("**/api/v1/feed/57213/remix/quote", (route) => route.fulfill({ json: {
+    cost_credits: 20, balance_credits: 100,
+    can_run: true, deficit_credits: 0, recommended_plan: null,
+  } }));
+  let sent: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/feed/57213/remix", (route) => {
+    sent = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({ status: 202, json: {
+      id: 9205, model: model.key, gen_type: "video",
+      prompt: "", prompt_hidden: true,
+      status: "pending", result_url: null, result_urls: [],
+      credits_spent: 20, created_at: new Date().toISOString(),
+    } });
+  });
+
+  await page.goto("/?tgWebAppData=test&feed=57213");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Применим исходный промпт автора к твоему фото. Готовое видео автора не передаётся.")).toBeVisible();
+  await expect(dialog.getByLabel("Что изменить в образе")).toHaveCount(0);
+  await expect(dialog.getByLabel("Модель")).toBeDisabled();
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "face.jpg", mimeType: "image/jpeg",
+    buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+  await expect(dialog.getByText("Реф #1")).toBeVisible();
+  await expect(dialog.getByText("Стоимость: 20 💋")).toBeVisible();
+  await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+  await expect(page.getByRole("dialog", { name: /Задача #9205/ })).toBeVisible();
+  expect(sent).toMatchObject({
+    model: model.key, change_request: "",
+    image_url: "https://example.test/uploaded-ref.png",
+    reference_urls: ["https://example.test/uploaded-ref.png"],
+    video_url: null, duration: 10, aspect_ratio: "9:16", resolution: "720p",
+  });
+});
