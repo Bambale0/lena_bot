@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import Date, case, cast, desc, func, or_, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.web.auth import web_referral_link
@@ -76,6 +77,58 @@ async def admin_set_nano21_provider(
 class SupplierReviewResolutionRequest(BaseModel):
     resolution: Literal["confirmed_not_accepted", "cost_reconciled"]
     note: str = Field(..., min_length=12, max_length=500)
+
+
+def _unsettled_seedance_supplier_reviews_query(limit: int):
+    # Durable, authenticated queue: late completed callbacks may arrive after
+    # the scheduler has stopped polling the original refunded generation.
+    state = func.jsonb_extract_path_text(
+        cast(Generation.input_params, JSONB),
+        repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY, "state",
+    )
+    return (select(
+        Generation.id, Generation.user_id, Generation.model,
+        Generation.input_params,
+    ).where(
+        Generation.status == GenerationStatus.failed,
+        Generation.gen_type == GenerationType.video,
+        state.in_((
+            "pending", "remote_completed_pending_finance", "needs_admin_resolution",
+        )),
+    ).order_by(Generation.id.asc()).limit(limit))
+
+
+@router.get("/admin/seedance/refund-supplier-reviews")
+async def admin_list_unsettled_seedance_supplier_reviews(
+    limit: int = Query(default=100, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    records = (await session.execute(
+        _unsettled_seedance_supplier_reviews_query(limit)
+    )).all()
+    items = []
+    for gen_id, user_id, model, raw_params in records:
+        marker = repo.parse_input_params(raw_params).get(
+            repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY
+        )
+        if not isinstance(marker, dict):
+            continue
+        items.append({
+            "generation_id": gen_id,
+            "user_id": user_id,
+            "model": model,
+            "state": marker.get("state"),
+            "original_task_id": marker.get("original_task_id"),
+            "provider_task_id": marker.get("provider_task_id"),
+            "refunded_at": marker.get("refunded_at"),
+            "last_provider_status": marker.get("last_provider_status"),
+            "next_check_at": marker.get("next_check_at"),
+            "checks": marker.get("checks"),
+        })
+    return ok({"items": items, "count": len(items)})
 
 
 @router.put("/admin/seedance/refund-supplier-review/{gen_id}")
