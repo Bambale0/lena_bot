@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from api import neironych_seedance_runtime, seedance25_adapter, video_service
+from api.kieai_client import KieDefiniteRejection
 from api.video_runtime_fixes import install_video_runtime_fixes
 from core.config import Settings, settings
 
@@ -47,7 +48,7 @@ async def test_seedance2_uses_kie_primary_and_does_not_call_neironych(monkeypatc
 
 @pytest.mark.asyncio
 async def test_seedance2_falls_back_to_neironych_when_kie_fails(monkeypatch) -> None:
-    kie = AsyncMock(side_effect=RuntimeError("kie unavailable"))
+    kie = AsyncMock(side_effect=KieDefiniteRejection("Kie definitely rejected request"))
     neironych = AsyncMock(return_value="neur-123")
     monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", neironych)
     monkeypatch.setattr(video_service.kieai_client, "create_task", kie)
@@ -93,7 +94,7 @@ async def test_seedance25_uses_kie_primary_and_does_not_call_neironych(monkeypat
 @pytest.mark.asyncio
 async def test_seedance25_falls_back_to_neironych_when_kie_fails(monkeypatch) -> None:
     install_video_runtime_fixes()
-    kie = AsyncMock(side_effect=RuntimeError("kie unavailable"))
+    kie = AsyncMock(side_effect=KieDefiniteRejection("Kie definitely rejected request"))
     neironych = AsyncMock(return_value="neur-25")
     monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", neironych)
     monkeypatch.setattr(video_service.kieai_client, "create_task", kie)
@@ -158,13 +159,12 @@ async def test_seedance_reports_both_submission_failures(monkeypatch, model_key)
     monkeypatch.setattr(video_service.kieai_client, "create_task", kie)
     monkeypatch.setattr(neironych_seedance_runtime, "generate_product_video", neironych)
 
-    with pytest.raises(RuntimeError, match="primary kieai and neironych fallback") as error:
+    with pytest.raises(RuntimeError, match="kie unavailable"):
         await video_service.generate_video(video_service.VideoModel(model_key), "animate")
 
-    assert "kie unavailable" in str(error.value)
-    assert "neironych unavailable" in str(error.value)
     kie.assert_awaited_once()
-    neironych.assert_awaited_once()
+    # Kie response code 503 could mean accepted-but-unconfirmed; no paid fallback.
+    neironych.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -225,7 +225,7 @@ async def test_seedance25_kie_primary_preserves_media_roles_and_callback(monkeyp
 @pytest.mark.parametrize("kie_fails", [False, True])
 async def test_seedance25_legacy_service_wrapper_uses_same_provider_order(monkeypatch, kie_fails):
     kie = AsyncMock(
-        side_effect=RuntimeError("kie unavailable") if kie_fails else None,
+        side_effect=KieDefiniteRejection("Kie definitely rejected request") if kie_fails else None,
         return_value={"code": 200, "data": {"taskId": "kie-legacy"}},
     )
     neironych = AsyncMock(return_value="neur-legacy")
@@ -248,14 +248,6 @@ async def test_seedance25_legacy_service_wrapper_uses_same_provider_order(monkey
     else:
         neironych.assert_not_awaited()
 
-
-@pytest.fixture(autouse=True)
-def isolate_seedance_admission(monkeypatch):
-    # These tests cover provider payloads, not live Redis coordination.
-    from unittest.mock import AsyncMock
-
-    from api import seedance_provider_routing
-    monkeypatch.setattr(seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False))
 
 
 @pytest.fixture
@@ -340,7 +332,7 @@ async def test_ambiguous_submission_never_reposts_or_falls_back(monkeypatch, out
     rid = '11111111-1111-4111-8111-111111111111'
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url='https://example.test') as http:
         client = NeironychSeedanceClient('test-key', 'https://example.test', client=http)
-        kie = AsyncMock(side_effect=RuntimeError('KIE rejected'))
+        kie = AsyncMock(side_effect=KieDefiniteRejection('KIE rejected before paid acceptance'))
         async def submit():
             return await client.create_video(model='seedance-2.0', payload={'prompt': 'animate', 'duration': 5, 'resolution': '720p'},
                                              idempotency_key='apix-video-42', client_request_id=rid)
@@ -483,7 +475,7 @@ async def test_failed_presubmit_never_posts_or_falls_back(monkeypatch, intention
         async def submit():
             return await client.create_video(model='seedance-2.0', payload={'prompt': 'animate', 'duration': 5, 'resolution': '720p'},
                                              client_request_id=rid, idempotency_key=key, before_submit=before)
-        kie = AsyncMock(side_effect=RuntimeError('KIE rejected'))
+        kie = AsyncMock(side_effect=KieDefiniteRejection('KIE rejected before paid acceptance'))
         expected = NeironychSubmissionUnknown if intentional_unknown else NeironychPreSubmitFailure
         with pytest.raises(expected) as error:
             await submit_seedance('bytedance/seedance-2', kie=kie, neironych=submit)

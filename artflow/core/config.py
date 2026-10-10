@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     NEIRONYCH_VIDEO_TELEGRAM_UPLOAD_BUDGET_FRACTION: float = Field(default=0.75, ge=0.4, le=0.85)
     NEIRONYCH_VIDEO_POLL_LEASE_SECONDS: int = Field(default=600, ge=120, le=3600)
     NEIRONYCH_VIDEO_ALERT_AGE_SECONDS: int = Field(default=3600, ge=300, le=86400)
+    # Deadline for a single paid Neironych Seedance request, independent of
+    # other users' provider routes. The scheduler refunds after one final GET.
+    SEEDANCE_AUTO_REFUND_SECONDS: int = Field(default=3600, ge=1800, le=86400)
+    SEEDANCE_FINAL_STATUS_TIMEOUT_SECONDS: int = Field(default=12, ge=3, le=30)
+    SEEDANCE_PROVIDER_REFUND_REVIEW_INTERVAL_SECONDS: int = Field(default=900, ge=60, le=86400)
+    SEEDANCE_PROVIDER_REFUND_MAX_CHECKS: int = Field(default=96, ge=3, le=10000)
+    SEEDANCE_PROVIDER_REFUND_MAX_REVIEW_SECONDS: int = Field(default=86400, ge=3600, le=604800)
     NEIRONYCH_VIDEO_NOTICE_LEASE_SECONDS: int = Field(default=600, ge=60, le=3600)
     NEIRONYCH_VIDEO_NOTICE_RETRY_SECONDS: int = Field(default=60, ge=15, le=3600)
     NEIRONYCH_VIDEO_NOTICE_MAX_BACKOFF_SECONDS: int = Field(default=900, ge=60, le=86400)

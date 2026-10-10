@@ -43,6 +43,7 @@ from api.genjutsu_adapter import (
 from api.genjutsu_adapter import (
     resolve_source_duration_seconds as resolve_genjutsu_source_duration,
 )
+from api.kieai_client import KieSubmissionOutcomeUnknown
 from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from api.public_files import mirror_telegram_file
 from api.seedance25_adapter import (
@@ -103,6 +104,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.kie_seedance_callback import callback_url_for_generation
 from core.seedance_reconciliation import (
     handle_submission_not_sent,
     handle_submission_unknown,
@@ -2367,6 +2369,10 @@ async def _launch_video_generation_from_state(
 
     submission_context = make_submission_context(session, gen_id, model_key, surface="telegram_bot")
     try:
+        if submission_context and not await repo.register_kie_video_callback(
+            session, gen_id, surface="telegram_bot",
+        ):
+            raise RuntimeError("Video provider callback correlation could not be persisted")
         result = await video_service.generate_video(
             VideoModel(model_key),
             prompt,
@@ -2381,7 +2387,9 @@ async def _launch_video_generation_from_state(
             video_start=data.get("video_clip_start"),
             video_end=data.get("video_clip_end"),
             seed=data.get("seed"),
-            callback_url=_kie_callback_url(),
+            callback_url=callback_url_for_generation(
+                _kie_callback_url(), gen_id if submission_context else None,
+            ),
             idempotency_key=f"apix-video-{gen_id}",
             **({"neironych_submission": submission_context} if submission_context else {}),
             **seedance_kwargs,
@@ -2398,6 +2406,11 @@ async def _launch_video_generation_from_state(
         return False
     except NeironychSubmissionUnknown:
         await handle_submission_unknown(session, gen_id, submission_context)
+        await _show_video_submission_review(status_msg, state, session, gen_id)
+        return True
+    except KieSubmissionOutcomeUnknown:
+        await session.rollback()
+        await repo.mark_kie_video_submission_unknown(session, gen_id)
         await _show_video_submission_review(status_msg, state, session, gen_id)
         return True
     except Exception as e:
@@ -3157,6 +3170,10 @@ async def cb_regen_video(
 
     submission_context = make_submission_context(session, gen_id, model_key, surface="telegram_bot")
     try:
+        if submission_context and not await repo.register_kie_video_callback(
+            session, gen_id, surface="telegram_bot",
+        ):
+            raise RuntimeError("Video provider callback correlation could not be persisted")
         result = await video_service.generate_video(
             video_model,
             repeat_prompt,
@@ -3171,7 +3188,9 @@ async def cb_regen_video(
             video_start=repeat_params.get("video_start"),
             video_end=repeat_params.get("video_end"),
             seed=seed,
-            callback_url=_kie_callback_url(),
+            callback_url=callback_url_for_generation(
+                _kie_callback_url(), gen_id if submission_context else None,
+            ),
             idempotency_key=f"apix-video-{gen_id}",
             **({"neironych_submission": submission_context} if submission_context else {}),
         )
@@ -3187,6 +3206,11 @@ async def cb_regen_video(
         return
     except NeironychSubmissionUnknown:
         await handle_submission_unknown(session, gen_id, submission_context)
+        await _show_video_submission_review(status_msg, state, session, gen_id)
+        return
+    except KieSubmissionOutcomeUnknown:
+        await session.rollback()
+        await repo.mark_kie_video_submission_unknown(session, gen_id)
         await _show_video_submission_review(status_msg, state, session, gen_id)
         return
     except Exception as exc:

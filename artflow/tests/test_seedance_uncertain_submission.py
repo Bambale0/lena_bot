@@ -63,7 +63,7 @@ async def test_pending_unknown_submission_is_not_ordinary_processing(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_paused_neironych_route_uses_kie_before_any_neironych_post(monkeypatch):
+async def test_unrelated_uncertain_job_does_not_reroute_new_neironych_job(monkeypatch):
     monkeypatch.setattr(
         seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "neironych"
     )
@@ -76,13 +76,14 @@ async def test_paused_neironych_route_uses_kie_before_any_neironych_post(monkeyp
         kie=kie,
         neironych=neiro,
     )
-    assert result == "kie-ok"
-    kie.assert_awaited_once()
-    neiro.assert_not_awaited()
+    assert result == "wrong-paid-post"
+    neiro.assert_awaited_once()
+    kie.assert_not_awaited()
+    gate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_paused_route_never_falls_back_to_uncertain_provider(monkeypatch):
+async def test_other_users_review_does_not_block_legitimate_primary_kie_fallback(monkeypatch):
     monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "kieai")
     monkeypatch.setattr(
         seedance_provider_routing,
@@ -90,13 +91,42 @@ async def test_paused_route_never_falls_back_to_uncertain_provider(monkeypatch):
         AsyncMock(return_value=True),
         raising=False,
     )
-    kie = AsyncMock(side_effect=RuntimeError("KIE down"))
-    neiro = AsyncMock(return_value="duplicate-risk")
-    with pytest.raises(RuntimeError):
+    from api.kieai_client import KieDefiniteRejection
+    kie = AsyncMock(side_effect=KieDefiniteRejection("KIE rejected before acceptance"))
+    neiro = AsyncMock(return_value="neironych-ok")
+    result = await seedance_provider_routing.submit_seedance(
+        "bytedance/seedance-2-5", kie=kie, neironych=neiro
+    )
+    assert result == "neironych-ok"
+    kie.assert_awaited_once()
+    neiro.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_kie_response_loss_never_starts_a_second_paid_neironych_job(monkeypatch):
+    from api.kieai_client import KieSubmissionOutcomeUnknown
+
+    monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "kieai")
+    kie = AsyncMock(side_effect=KieSubmissionOutcomeUnknown("response lost"))
+    neironych = AsyncMock(return_value="should-never-submit")
+    with pytest.raises(KieSubmissionOutcomeUnknown):
         await seedance_provider_routing.submit_seedance(
-            "bytedance/seedance-2-5", kie=kie, neironych=neiro
+            "bytedance/seedance-2-5", kie=kie, neironych=neironych,
         )
-    neiro.assert_not_awaited()
+    kie.assert_awaited_once()
+    neironych.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_kie_generic_failure_does_not_authorize_second_provider_post(monkeypatch):
+    monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "kieai")
+    kie = AsyncMock(side_effect=RuntimeError("unknown KIE acceptance"))
+    neironych = AsyncMock(return_value="second-charge")
+    with pytest.raises(RuntimeError, match="unknown KIE acceptance"):
+        await seedance_provider_routing.submit_seedance(
+            "bytedance/seedance-2-5", kie=kie, neironych=neironych,
+        )
+    neironych.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -212,7 +242,7 @@ async def test_review_path_marks_and_pauses_but_never_refunds_or_resubmits(monke
 
 
 @pytest.mark.asyncio
-async def test_inaccessible_admission_coordinator_blocks_all_paid_posts(monkeypatch):
+async def test_unrelated_admission_coordinator_outage_does_not_reroute_new_job(monkeypatch):
     monkeypatch.setattr(
         seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "neironych"
     )
@@ -220,15 +250,16 @@ async def test_inaccessible_admission_coordinator_blocks_all_paid_posts(monkeypa
         seedance_provider_routing,
         "neironych_route_paused",
         AsyncMock(side_effect=ConnectionError("Redis unavailable")),
+        raising=False,
     )
-    kie = AsyncMock()
-    neiro = AsyncMock()
-    with pytest.raises(ConnectionError):
-        await seedance_provider_routing.submit_seedance(
-            "bytedance/seedance-2-5", kie=kie, neironych=neiro
-        )
+    kie = AsyncMock(return_value="kie-ok")
+    neiro = AsyncMock(return_value="neironych-ok")
+    result = await seedance_provider_routing.submit_seedance(
+        "bytedance/seedance-2-5", kie=kie, neironych=neiro
+    )
+    assert result == "neironych-ok"
     kie.assert_not_awaited()
-    neiro.assert_not_awaited()
+    neiro.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -496,6 +527,7 @@ async def test_durable_submission_is_single_use_and_late_results_cannot_clobber(
     gen = generation()
     gen.task_id = None
     session = FakeSession(gen)
+    monkeypatch.setattr(repo, '_has_pending_refunded_seedance_review', AsyncMock(return_value=False))
     monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
     request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
     assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
@@ -513,6 +545,7 @@ async def test_terminal_submission_marker_is_never_overwritten(monkeypatch):
     gen = generation()
     gen.task_id = None
     session = FakeSession(gen)
+    monkeypatch.setattr(repo, '_has_pending_refunded_seedance_review', AsyncMock(return_value=False))
     monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
     request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
     assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
@@ -542,6 +575,10 @@ async def test_new_seedance_api_submission_outcome_handling(api_launch, monkeypa
     api_launch.source.model = model
     context = SimpleNamespace(client_request_id="synthetic", started=True)
     monkeypatch.setattr(route, "make_submission_context", lambda *_a, **_k: context)
+    # The fake session contains no PostgreSQL rows; exercise persistence in
+    # repository-specific tests and keep this API test about exception routing.
+    register_callback = AsyncMock(return_value=True)
+    monkeypatch.setattr(route.repo, "register_kie_video_callback", register_callback)
 
     async def hold(*_args):
         gen.input_params = json.dumps({RECONCILIATION_KEY: {"required": True}})
@@ -596,6 +633,7 @@ async def test_new_seedance_bot_submission_outcome_handling(video_launch, monkey
     monkeypatch.setattr(video_gen, "handle_submission_unknown", held)
     monkeypatch.setattr(video_gen, "_show_video_submission_review", shown)
     fixture.repo.fail_generation_and_refund = AsyncMock()
+    fixture.repo.register_kie_video_callback = AsyncMock(return_value=True)
     no_post = AsyncMock(return_value=True)
     monkeypatch.setattr(video_gen, "handle_submission_not_sent", no_post)
     error = NeironychPreSubmitFailure if not_sent else NeironychSubmissionUnknown
@@ -622,3 +660,60 @@ async def test_new_seedance_bot_submission_outcome_handling(video_launch, monkey
         shown.assert_awaited_once()
     fixture.repo.fail_generation_and_refund.assert_not_awaited()
     fixture.repo.update_generation_task.assert_not_awaited()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["launch", "remix"])
+async def test_callback_registration_failure_never_starts_a_paid_seedance_post(
+    api_launch, monkeypatch, operation,
+):
+    from fastapi import HTTPException
+
+    routes = api_launch.routes
+    model = "bytedance/seedance-2"
+    api_launch.source.gen_type = GenerationType.image
+    api_launch.source.model = model
+    api_launch.save.return_value.model = model
+    api_launch.save.return_value.gen_type = GenerationType.video
+    monkeypatch.setattr(
+        routes, "make_submission_context",
+        lambda *_args, **_kwargs: SimpleNamespace(client_request_id="synthetic", started=False),
+    )
+    register = AsyncMock(return_value=False)
+    monkeypatch.setattr(routes.repo, "register_kie_video_callback", register)
+    monkeypatch.setattr(routes.repo, "fail_generation_and_refund", AsyncMock())
+    if operation == "launch":
+        body = routes.VideoGenRequest(model=model, prompt="Synthetic video input", duration=5)
+        call = routes.create_video_generation(
+            body, api_launch.session, api_launch.user, "miniapp",
+        )
+    else:
+        body = routes.FeedRemixRequest(model=model, change_request="make outfit blue", duration=5)
+        call = routes.remix_feed_post(
+            77, body, api_launch.session, api_launch.user, "miniapp",
+        )
+    with pytest.raises(HTTPException) as error:
+        await call
+    assert error.value.status_code == 502
+    register.assert_awaited_once()
+    api_launch.generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_refuses_paid_submit_when_callback_correlation_cannot_commit(
+    video_launch, monkeypatch,
+):
+    from bot.handlers import video_gen
+
+    fixture = video_launch
+    fixture.data.update(model_key="bytedance/seedance-2", mode="text", image_url=None)
+    fixture.kwargs.update(source_feed_gen_id=None, hidden_feed_prompt=False, prompt="synthetic")
+    monkeypatch.setattr(
+        video_gen, "make_submission_context",
+        lambda *_args, **_kwargs: SimpleNamespace(client_request_id="synthetic", started=False),
+    )
+    register = AsyncMock(return_value=False)
+    fixture.repo.register_kie_video_callback = register
+    fixture.repo.fail_generation_and_refund = AsyncMock(return_value=(True, 4.0))
+    assert await video_gen._launch_video_generation_from_state(**fixture.kwargs) is False
+    register.assert_awaited_once()
+    fixture.service.generate_video.assert_not_awaited()

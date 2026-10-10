@@ -168,6 +168,11 @@ def billing(monkeypatch):
     monkeypatch.setattr(video_gen.repo, "spend_credits", spend)
     monkeypatch.setattr(video_gen.repo, "create_generation", create)
     monkeypatch.setattr(video_gen.repo, "update_generation_task", AsyncMock())
+    # No production DB row exists in this test fixture; the durable callback
+    # register operation is independently verified with persisted SQL tests.
+    monkeypatch.setattr(
+        video_gen.repo, "register_kie_video_callback", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(video_gen.repo, "fail_generation_and_refund", refund)
     return SimpleNamespace(spend=spend, create=create, refund=refund)
 
@@ -507,16 +512,3 @@ async def test_editor_unsupported_real_media_gets_hint_in_every_state(state, mon
     await editor.router.propagate_event("message", msg, state=state, raw_state=raw_state)
     answer.assert_awaited_once()
     assert await state.get_state() == raw_state
-
-
-@pytest.fixture(autouse=True)
-def isolate_seedance_admission(monkeypatch):
-    # These provider/Telegram tests mock external IO. Redis admission has
-    # dedicated positive/negative tests in test_seedance_uncertain_submission.
-    from unittest.mock import AsyncMock
-
-    from api import seedance_provider_routing
-
-    monkeypatch.setattr(
-        seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False)
-    )

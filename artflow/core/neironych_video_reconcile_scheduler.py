@@ -6,20 +6,33 @@ DB transitions and Telegram notice claims remain guarded by repository locks.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import redis.asyncio as aioredis
-from sqlalchemy import func, or_, select
+from sqlalchemy import DateTime, cast, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 
+from api import neironych_seedance_runtime
 from api.neironych_seedance_runtime import PRODUCT_MODELS
+from core.admin_alerts import send_admin_alert_once
 from core.config import settings
+from core.neironych_video_poll_gate import (
+    neironych_video_poll_guard,
+    protect_neironych_video_poll_settlement,
+)
 from db import repository as repo
 from db.models import Generation, GenerationStatus, GenerationType
 from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+
+_PROVIDER_REVIEW_PENDING_REGEX = (
+    r'"seedance_refund_provider_review"\s*:\s*\{[^}]*"state"\s*:\s*"pending"'
+)
 
 _NOTICE_PENDING_REGEX = (
     r'"neironych_video_notice"\s*:\s*\{[^}]*"state"\s*:\s*"(pending|sending)"'
@@ -46,6 +59,7 @@ class _ScanCursor:
 
 _video_cursor = _ScanCursor()
 _notice_cursor = _ScanCursor()
+_refund_review_cursor = _ScanCursor()
 _last_overdue_warning: dict[int, datetime] = {}
 _last_missing_id_warning: datetime | None = None
 
@@ -68,12 +82,356 @@ def _eligible_video_query():
     )
 
 
+# A timeout is about a *single paid task*, not a global model circuit. The
+# deadline includes both bound and unbound persisted Neironych submissions.
+_NEIRONYCH_TASK_PREFIXES = (
+    "neironych:", "web:neironych:",
+    "neironych-submit:", "web:neironych-submit:",
+    "kie-submit:", "web:kie-submit:",
+)
+
+
+def _seedance_started_at(gen: Generation) -> datetime:
+    """Refund timer is anchored to persisted paid submission, not preparation."""
+    params = repo.parse_input_params(getattr(gen, "input_params", None))
+    task = str(getattr(gen, "task_id", "") or "").removeprefix("web:")
+    marker = params.get(repo.KIE_VIDEO_SUBMISSION_KEY) if task.startswith(
+        "kie-submit:"
+    ) else params.get(repo.SEEDANCE_SUBMISSION_KEY)
+    stamp = marker.get("started_at") if isinstance(marker, dict) else None
+    if isinstance(stamp, str):
+        try:
+            value = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            if value.tzinfo is not None:
+                return value.astimezone(timezone.utc)
+        except ValueError:
+            pass
+    created = gen.created_at
+    return created if created.tzinfo else created.replace(tzinfo=timezone.utc)
+
+
+def _expired_seedance_query():
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        seconds=settings.SEEDANCE_AUTO_REFUND_SECONDS
+    )
+    params_json = cast(Generation.input_params, JSONB)
+    neironych_started = func.jsonb_extract_path_text(
+        params_json, repo.SEEDANCE_SUBMISSION_KEY, "started_at"
+    )
+    kie_started = func.jsonb_extract_path_text(
+        params_json, repo.KIE_VIDEO_SUBMISSION_KEY, "started_at"
+    )
+    started = func.coalesce(
+        cast(kie_started, DateTime(timezone=True)),
+        cast(neironych_started, DateTime(timezone=True)),
+        Generation.created_at,
+    )
+    return select(Generation.id).where(
+        Generation.gen_type == GenerationType.video,
+        Generation.model.in_(tuple(PRODUCT_MODELS)),
+        Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
+        or_(*(Generation.task_id.like(prefix + "%")
+              for prefix in _NEIRONYCH_TASK_PREFIXES)),
+        started <= cutoff,
+    )
+
+
+async def _load_expired_seedance_batch() -> list[int]:
+    # Oldest-first, bounded and self-draining: terminal rows disappear from
+    # this query. It must not depend on Redis notice queues or provider health.
+    async with AsyncSessionLocal() as session:
+        ids = list((await session.execute(
+            _expired_seedance_query()
+            .order_by(Generation.created_at.asc(), Generation.id.asc())
+            .limit(settings.NEIRONYCH_VIDEO_RECONCILE_BATCH_SIZE)
+        )).scalars().all())
+        await session.rollback()
+    return ids
+
+
+async def _final_neironych_provider_status(gen: Generation) -> tuple[str, str | None]:
+    """One bounded GET only: completed, failed, pending, unknown or newly bound."""
+    task = str(gen.task_id or "").removeprefix("web:")
+    if task.startswith("kie-submit:"):
+        # Kie has not supplied a task ID, so no canonical GET is available.
+        # A signed webhook can still bind the original paid order later.
+        return "unknown", None
+    if task.startswith("neironych-submit:"):
+        marker = repo.parse_input_params(gen.input_params).get(repo.SEEDANCE_SUBMISSION_KEY)
+        if not isinstance(marker, dict) or not marker.get("idempotency_key"):
+            return "unknown", None
+        provider_id = await asyncio.wait_for(
+            neironych_seedance_runtime.lookup_submission(
+                marker["client_request_id"], product_model=gen.model,
+                idempotency_key=marker["idempotency_key"],
+            ), timeout=settings.SEEDANCE_FINAL_STATUS_TIMEOUT_SECONDS,
+        )
+        return ("bound", str(provider_id)) if provider_id else ("unknown", None)
+    if not neironych_seedance_runtime.is_task_id(task):
+        return "unknown", None
+    client = neironych_seedance_runtime._client()
+    try:
+        remote = await asyncio.wait_for(
+            client.get_video(neironych_seedance_runtime.decode_task_id(task)),
+            timeout=settings.SEEDANCE_FINAL_STATUS_TIMEOUT_SECONDS,
+        )
+    finally:
+        await client.aclose()
+    if remote.done:
+        return "done", None
+    if remote.failed:
+        return "failed", None
+    return "pending", None
+
+
+async def _settle_expired_seedance(
+    gen_id: int, task_id: str, remote_state: str,
+) -> bool:
+    now = datetime.now(timezone.utc)
+    review: dict[str, object] | None = None
+    if remote_state != "failed":
+        # Atomic with the refund; still exists after an app restart.
+        review = {
+            "state": "pending", "reason": "timeout_provider_unconfirmed",
+            "original_task_id": task_id,
+            "refunded_at": now.isoformat(),
+            "next_check_at": now.isoformat(),
+            "last_provider_status": remote_state,
+            "checks": 0,
+        }
+    async with AsyncSessionLocal() as session:
+        gen = await repo.get_generation_by_id(session, gen_id)
+        if (gen is None or gen.status not in (
+                GenerationStatus.pending, GenerationStatus.processing)
+                or str(gen.task_id or "") != task_id):
+            return False
+        if ((datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
+                < settings.SEEDANCE_AUTO_REFUND_SECONDS):
+            return False
+        # The Redis lease may be lost after the DB settlement has begun.
+        protect_neironych_video_poll_settlement()
+        telegram = task_id.startswith(("neironych:", "neironych-submit:", "kie-submit:"))
+        changed, credits = await repo.fail_generation_and_refund(
+            session, gen_id, "Видео не удалось создать вовремя.",
+            expected_task_id=task_id,
+            refund_note=("seedance:auto_timeout:provider_failed" if remote_state == "failed"
+                         else "seedance:auto_timeout:provider_review_pending"),
+            video_notice_kind="failed" if telegram else None,
+            provider_review=review,
+        )
+    if changed:
+        logger.warning(
+            "Seedance auto-timeout gen=%s remote=%s refunded=%s review_pending=%s",
+            gen_id, remote_state, credits, bool(review),
+        )
+        if telegram:
+            try:
+                await _track_active_video_notice_intent(gen_id)
+            except Exception as exc:
+                logger.warning(
+                    "Seedance timeout notice retry deferred gen=%s error=%s",
+                    gen_id, type(exc).__name__,
+                )
+    return changed
+
+
+def _provider_refund_review_query():
+    """Durable audit lane for paid upstream tasks after customer refunds."""
+    return select(Generation.id).where(
+        Generation.gen_type == GenerationType.video,
+        Generation.model.in_(tuple(PRODUCT_MODELS)),
+        Generation.status == GenerationStatus.failed,
+        Generation.input_params.op("~")(_PROVIDER_REVIEW_PENDING_REGEX),
+    )
+
+
+async def _expire_stuck_seedance_video(gen_id: int) -> bool:
+    """Use the same per-provider-task lock as ordinary media delivery."""
+    async with AsyncSessionLocal() as session:
+        gen = await repo.get_generation_by_id(session, gen_id)
+        if (gen is None or gen.status not in (
+                GenerationStatus.pending, GenerationStatus.processing)
+                or gen.gen_type != GenerationType.video
+                or gen.model not in PRODUCT_MODELS):
+            return False
+        task_id = str(gen.task_id or "")
+        if not task_id.startswith(_NEIRONYCH_TASK_PREFIXES):
+            return False
+        if ((datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
+                < settings.SEEDANCE_AUTO_REFUND_SECONDS):
+            return False
+        await session.rollback()
+
+    # A completed video being downloaded elsewhere owns this same key.
+    async with neironych_video_poll_guard(task_id.removeprefix("web:")) as claimed:
+        if not claimed:
+            logger.info("Seedance timeout deferred, poll already owns gen=%s", gen_id)
+            return False
+        async with AsyncSessionLocal() as session:
+            current = await repo.get_generation_by_id(session, gen_id)
+            if (current is None or current.status not in (
+                    GenerationStatus.pending, GenerationStatus.processing)
+                    or str(current.task_id or "") != task_id):
+                return False
+            if ((datetime.now(timezone.utc) - _seedance_started_at(current)).total_seconds()
+                    < settings.SEEDANCE_AUTO_REFUND_SECONDS):
+                return False
+            # SQLAlchemy rollback expires mapped row attributes; after the
+            # session closes even reading task_id can fail. Capture detached
+            # immutable primitives BEFORE ending the read-only transaction.
+            snapshot = SimpleNamespace(
+                task_id=str(current.task_id or ""),
+                model=str(current.model),
+                input_params=repo.parse_input_params(current.input_params),
+            )
+            await session.rollback()
+
+        remote_state = "unknown"
+        provider_id = None
+        try:
+            remote_state, provider_id = await _final_neironych_provider_status(snapshot)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Seedance final status deferred gen=%s reason=%s",
+                gen_id, type(exc).__name__,
+            )
+
+        if remote_state == "done":
+            # This is a paid completed result, not a refund candidate.
+            # Delivery must happen AFTER the expiry lease is released so the
+            # normal reconciler can acquire its own poll/download lease.
+            pass
+        elif remote_state == "bound" and provider_id:
+            async with AsyncSessionLocal() as session:
+                marker = repo.parse_input_params(snapshot.input_params).get(
+                    repo.SEEDANCE_SUBMISSION_KEY
+                )
+                if isinstance(marker, dict):
+                    task = ("web:" if task_id.startswith("web:") else "")
+                    await repo.bind_seedance_submission_task(
+                        session, gen_id, marker["client_request_id"],
+                        task + "neironych:" + provider_id,
+                    )
+            return False
+        else:
+            return await _settle_expired_seedance(gen_id, task_id, remote_state)
+
+    # The active lane excludes overdue generations. Run delivery explicitly,
+    # without submitting any additional paid provider request.
+    return await _process_active_video(gen_id)
+
+
+async def _review_refunded_provider_task(gen_id: int) -> bool:
+    """Continue read-only supplier reconciliation after customer settlement.
+
+    The customer is already final/refunded. Late completion updates only this
+    internal supplier audit marker, never the customer's wallet or video state.
+    """
+    async with AsyncSessionLocal() as session:
+        gen = await repo.get_generation_by_id(session, gen_id)
+        if gen is None or gen.status != GenerationStatus.failed:
+            return False
+        review = repo.parse_input_params(gen.input_params).get(
+            repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY
+        )
+        if not isinstance(review, dict) or review.get("state") != "pending":
+            return False
+        due = repo._notice_timestamp(review.get("next_check_at"))
+        if due is not None and due > datetime.now(timezone.utc):
+            return False
+        task = str(review.get("original_task_id") or gen.task_id or "")
+        previous_bound = str(review.get("provider_task_id") or "")
+        model = gen.model
+        params = gen.input_params
+        await session.rollback()
+
+    # The provider may discover a previously unbound submission much later.
+    if previous_bound:
+        task = ("web:" if task.startswith("web:") else "") + "neironych:" + previous_bound
+    shadow = SimpleNamespace(task_id=task, model=model, input_params=params)
+    status = "unknown"
+    discovered_id: str | None = None
+    try:
+        status, discovered_id = await _final_neironych_provider_status(shadow)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Seedance refunded supplier review delayed gen=%s error=%s",
+            gen_id, type(exc).__name__,
+        )
+
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as session:
+        locked = (await session.execute(
+            select(Generation).where(Generation.id == gen_id).with_for_update()
+            .execution_options(populate_existing=True)
+        )).scalar_one_or_none()
+        if locked is None or locked.status != GenerationStatus.failed:
+            await session.rollback()
+            return False
+        metadata = repo.parse_input_params(locked.input_params)
+        marker = metadata.get(repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY)
+        if not isinstance(marker, dict) or marker.get("state") != "pending":
+            await session.rollback()
+            return False
+        marker["checks"] = int(marker.get("checks") or 0) + 1
+        marker["last_checked_at"] = now.isoformat()
+        marker["last_provider_status"] = status
+        marker["next_check_at"] = (
+            now + timedelta(seconds=settings.SEEDANCE_PROVIDER_REFUND_REVIEW_INTERVAL_SECONDS)
+        ).isoformat()
+        if discovered_id:
+            marker["provider_task_id"] = discovered_id
+        if status == "done":
+            marker["state"] = "remote_completed_pending_finance"
+            marker["reconciled_at"] = now.isoformat()
+        elif status == "failed":
+            marker["state"] = "remote_failed"
+            marker["reconciled_at"] = now.isoformat()
+        # Unknown forever is not a silent lifetime block. Escalate after
+        # bounded checks, keep the account protected until an authorized
+        # operator confirms that the supplier liability is settled.
+        if (status in ("unknown", "pending") and
+                (int(marker["checks"]) >= settings.SEEDANCE_PROVIDER_REFUND_MAX_CHECKS or
+                 (now - repo._notice_timestamp(marker.get("refunded_at")) if
+                  repo._notice_timestamp(marker.get("refunded_at")) else timedelta()).total_seconds()
+                 >= settings.SEEDANCE_PROVIDER_REFUND_MAX_REVIEW_SECONDS)):
+            marker["state"] = "needs_admin_resolution"
+            marker["escalated_at"] = now.isoformat()
+        metadata[repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY] = marker
+        locked.input_params = json.dumps(metadata, ensure_ascii=False)
+        await session.commit()
+    if status in ("done", "failed") or marker.get("state") == "needs_admin_resolution":
+        logger.warning(
+            "Seedance refunded provider task resolved or escalated gen=%s remote=%s; "
+            "customer_final_state_unchanged=true", gen_id, status,
+        )
+        try:
+            await send_admin_alert_once(
+                alert_key=f"seedance-late-provider-result:{gen_id}:{status}",
+                title="Seedance: подтверждён исход после возврата",
+                message=f"APIX задача {gen_id}; Нейроныч статус {status}. "
+                        "Если задача не подтверждена или результат опоздал, проверьте закупочный расход и "
+                        "завершите сверку в защищённом admin API. Баланс пользователя не менялся.",
+            )
+        except Exception as exc:
+            logger.warning("Seedance supplier alert deferred gen=%s error=%s",gen_id,type(exc).__name__)
+    return True
+
+
 def _eligible_notice_query():
     return select(Generation.id).where(
         Generation.gen_type == GenerationType.video,
         Generation.model.in_(tuple(PRODUCT_MODELS)),
         Generation.status.in_((GenerationStatus.done, GenerationStatus.failed)),
-        Generation.task_id.like("neironych:%"),
+        or_(
+            Generation.task_id.like("neironych:%"),
+            Generation.task_id.like("neironych-submit:%"),
+            Generation.task_id.like("kie-submit:%"),
+        ),
         Generation.input_params.op("~")(_NOTICE_PENDING_REGEX),
     )
 
@@ -437,13 +795,62 @@ async def _process_bounded_batch(ids: list[int], action, stop: asyncio.Event | N
     return list(await asyncio.gather(*(process(gen_id) for gen_id in ids)))
 
 
+async def _run_expired_lane(stop: asyncio.Event | None) -> list[bool]:
+    return await _process_bounded_batch(
+        await _load_expired_seedance_batch(), _expire_stuck_seedance_video, stop
+    )
+
+
+async def _active_ids_not_expired(ids: list[int]) -> list[int]:
+    if not ids:
+        return []
+    async with AsyncSessionLocal() as session:
+        live = (await session.execute(select(Generation).where(Generation.id.in_(ids)))).scalars().all()
+        # Snapshot overdue IDs while the ORM rows are attached. A rollback
+        # expires attributes, and detached rows cannot be read safely later.
+        overdue = {
+            gen.id for gen in live
+            if gen.gen_type == GenerationType.video and gen.model in PRODUCT_MODELS
+            and str(gen.task_id or "").startswith(_NEIRONYCH_TASK_PREFIXES)
+            and (datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
+            >= settings.SEEDANCE_AUTO_REFUND_SECONDS
+        }
+        await session.rollback()
+    return [ident for ident in ids if ident not in overdue]
+
+
+async def _run_active_video_lane(stop: asyncio.Event | None) -> list[bool]:
+    ids = await _load_batch(_eligible_video_query(), _video_cursor)
+    # Expired tasks have a dedicated lane; don't steal their provider lease.
+    ids = await _active_ids_not_expired(ids)
+    return await _process_bounded_batch(ids, _process_active_video, stop)
+
+
+async def _run_notices_lane(stop: asyncio.Event | None) -> list[bool]:
+    try:
+        ids = await _load_notice_batch()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        # Outbox is committed in Postgres; temporary Redis notice downtime
+        # must not prevent expired tasks from being safely settled.
+        logger.warning("Neironych notice queue unavailable error=%s", type(exc).__name__)
+        return []
+    return await _process_bounded_batch(ids, _process_delivery_notice, stop)
+
+
+async def _run_refund_supplier_review_lane(stop: asyncio.Event | None) -> list[bool]:
+    ids = await _load_batch(_provider_refund_review_query(), _refund_review_cursor)
+    return await _process_bounded_batch(ids, _review_refunded_provider_task, stop)
+
+
 async def reconcile_neironych_videos_once(stop: asyncio.Event | None = None) -> dict[str, int]:
-    """Bounded video polling and notice retries operate concurrently."""
-    video_ids = await _load_batch(_eligible_video_query(), _video_cursor)
-    notice_ids = await _load_notice_batch()
-    video_results, notice_results = await asyncio.gather(
-        _process_bounded_batch(video_ids, _process_active_video, stop),
-        _process_bounded_batch(notice_ids, _process_delivery_notice, stop),
+    """Independent bounded lanes; slow GETs never starve Telegram delivery."""
+    expired, video_results, notice_results, supplier_reviews = await asyncio.gather(
+        _run_expired_lane(stop),
+        _run_active_video_lane(stop),
+        _run_notices_lane(stop),
+        _run_refund_supplier_review_lane(stop),
     )
     checked = len(video_results)
     notices = len(notice_results)
@@ -460,7 +867,14 @@ async def reconcile_neironych_videos_once(stop: asyncio.Event | None = None) -> 
             logger.warning("Seedance submitted video missing provider task ID count=%s", missing)
     else:
         _last_missing_id_warning = None
-    return {"checked": checked, "notices": notices, "sent": notice_sent, "missing_ids": missing}
+    return {
+        "checked": checked,
+        "expired": sum(bool(result) for result in expired),
+        "notices": notices,
+        "sent": notice_sent,
+        "missing_ids": missing,
+        "supplier_reviews": sum(bool(result) for result in supplier_reviews),
+    }
 
 
 async def run_neironych_video_reconcile_scheduler(stop: asyncio.Event) -> None:

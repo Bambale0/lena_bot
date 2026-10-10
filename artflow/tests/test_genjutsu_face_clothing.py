@@ -249,12 +249,3 @@ def test_clothing_photo_without_text_explicitly_requests_outfit_replacement():
 
     prompt = build_seedance_content_edit_prompt(build_seedance_reference_plan([], "shirt"), {})
     assert "Replace the main person's outfit using @Image1" in prompt
-
-
-@pytest.fixture(autouse=True)
-def isolate_seedance_admission(monkeypatch):
-    # These tests cover provider payloads, not live Redis coordination.
-    from unittest.mock import AsyncMock
-
-    from api import seedance_provider_routing
-    monkeypatch.setattr(seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False))

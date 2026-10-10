@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 ACTIVE_GENERATION_WINDOW = timedelta(minutes=45)
 EXPIRED_FEED_MEDIA_HOSTS = {"tempfile.aiquickdraw.com"}
 NEIRONYCH_VIDEO_NOTICE_KEY = "neironych_video_notice"
+SEEDANCE_REFUND_PROVIDER_REVIEW_KEY = "seedance_refund_provider_review"
 
 
 def _new_neironych_video_notice(kind: str) -> dict[str, object]:
@@ -1270,6 +1271,224 @@ def _active_seedance_submission(gen, client_request_id):
     return params
 
 
+async def _has_pending_refunded_seedance_review(
+    session: AsyncSession, user_id: int,
+) -> bool:
+    """User-scoped liability gate, never a model-wide circuit.
+
+    A refund on an accepted-but-uncertain supplier request restores customer
+    credits, while the upstream may still charge for it. Prevent *that same
+    account* from repeatedly recycling the refunded credits into new paid
+    Neironych submissions. Other users are unaffected.
+    """
+    from core.seedance_reconciliation import PRODUCT_MODELS
+
+    candidates = (await session.execute(
+        select(Generation.input_params).where(
+            Generation.user_id == user_id,
+            Generation.status == GenerationStatus.failed,
+            Generation.model.in_(tuple(PRODUCT_MODELS)),
+            Generation.input_params.like("%seedance_refund_provider_review%"),
+        )
+    )).scalars().all()
+    return any(
+        isinstance(review := parse_input_params(raw).get(
+            SEEDANCE_REFUND_PROVIDER_REVIEW_KEY
+        ), dict) and review.get("state") in {
+            "pending", "remote_completed_pending_finance", "needs_admin_resolution",
+        }
+        for raw in candidates
+    )
+
+
+KIE_VIDEO_CALLBACK_KEY = "kie_video_callback"
+KIE_VIDEO_SUBMISSION_KEY = "kie_video_submission"
+
+
+async def register_kie_video_callback(
+    session: AsyncSession, gen_id: int, *, surface: str,
+) -> bool:
+    """Persist signed callback correlation before provider POST can occur."""
+    gen = await _locked_seedance_generation(session, gen_id)
+    if gen is None or gen.status not in (
+        GenerationStatus.pending, GenerationStatus.processing
+    ):
+        await session.rollback()
+        return False
+    # The same customer must not recycle refunded supplier liability through
+    # a Kie-primary paid POST (Neironych already enforces this in its gate).
+    if await _has_pending_refunded_seedance_review(session, gen.user_id):
+        await session.rollback()
+        return False
+    params = parse_input_params(gen.input_params)
+    current = params.get(KIE_VIDEO_CALLBACK_KEY)
+    if isinstance(current, dict) and current.get("generation_id") == gen_id:
+        await session.rollback()
+        return True
+    params[KIE_VIDEO_CALLBACK_KEY] = {
+        "generation_id": gen_id, "surface": surface,
+        "registered_at": datetime.now(timezone.utc).isoformat(),
+    }
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    return True
+
+
+async def mark_kie_video_submission_unknown(
+    session: AsyncSession, gen_id: int,
+) -> bool:
+    """Never refund a Kie createTask with unknown acceptance."""
+    gen = await _locked_seedance_generation(session, gen_id)
+    if gen is None or gen.status not in (
+        GenerationStatus.pending, GenerationStatus.processing
+    ):
+        await session.rollback()
+        return False
+    params = parse_input_params(gen.input_params)
+    info = params.get(KIE_VIDEO_CALLBACK_KEY)
+    if not isinstance(info, dict) or info.get("generation_id") != gen_id:
+        await session.rollback()
+        return False
+    current = str(gen.task_id or "")
+    if current and not current.startswith((
+        "neironych-submit:", "web:neironych-submit:",
+        "kie-submit:", "web:kie-submit:",
+    )):
+        # A signed webhook already bound the task. Never overwrite it.
+        await session.rollback()
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    params[KIE_VIDEO_SUBMISSION_KEY] = {
+        "state": "submission_unknown", "started_at": now,
+        "correlation_id": gen_id,
+    }
+    prior = params.get(SEEDANCE_SUBMISSION_KEY)
+    if isinstance(prior, dict) and prior.get("state") == "submitting":
+        prior["state"] = "definite_rejected_fallback_kie"
+    gen.task_id = ("web:" if info.get("surface") == "web" else "") + (
+        f"kie-submit:{gen_id}"
+    )
+    gen.status = GenerationStatus.processing
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    await _publish_generation_update(gen)
+    return True
+
+
+async def bind_kie_video_callback(
+    session: AsyncSession, gen_id: int, provider_task_id: str,
+) -> Generation | None:
+    """Bind only a server-signed Kie callback to its originally paid order."""
+    from core.seedance_reconciliation import PRODUCT_MODELS
+
+    task = str(provider_task_id or "").strip()
+    if not task or len(task) > 180:
+        return None
+    gen = (await session.execute(
+        select(Generation).where(Generation.id == gen_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if gen is None or gen.gen_type != GenerationType.video or gen.model not in PRODUCT_MODELS:
+        await session.rollback()
+        return None
+    params = parse_input_params(gen.input_params)
+    callback = params.get(KIE_VIDEO_CALLBACK_KEY)
+    if not isinstance(callback, dict) or callback.get("generation_id") != gen_id:
+        await session.rollback()
+        return None
+    if gen.status in (GenerationStatus.done, GenerationStatus.failed):
+        # rollback expires mapped columns even under expire_on_commit=False.
+        # The webhook still needs to read the terminal row after returning.
+        await session.commit()
+        return gen
+    current = str(gen.task_id or "")
+    if current and not current.startswith((
+        "neironych-submit:", "web:neironych-submit:",
+        "kie-submit:", "web:kie-submit:",
+    )):
+        await session.rollback()
+        return None
+    bound = ("web:" if callback.get("surface") == "web" else "") + task
+    gen.task_id = bound
+    gen.status = GenerationStatus.processing
+    entry = params.get(KIE_VIDEO_SUBMISSION_KEY)
+    entry = entry if isinstance(entry, dict) else {}
+    entry.update({"state": "bound", "provider_task_id": task})
+    params[KIE_VIDEO_SUBMISSION_KEY] = entry
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    await _publish_generation_update(gen)
+    return gen
+
+
+async def record_late_kie_video_callback(
+    session: AsyncSession, gen_id: int, provider_task_id: str, *, succeeded: bool,
+) -> bool:
+    """Ledger-neutral late Kie result, after the user's SLA refund committed."""
+    gen = (await session.execute(
+        select(Generation).where(Generation.id == gen_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if gen is None or gen.status != GenerationStatus.failed:
+        await session.rollback()
+        return False
+    params = parse_input_params(gen.input_params)
+    review = params.get(SEEDANCE_REFUND_PROVIDER_REVIEW_KEY)
+    if not isinstance(review, dict) or review.get("state") not in {
+        "pending", "needs_admin_resolution",
+    } or not str(review.get("original_task_id") or "").removeprefix("web:").startswith(
+        "kie-submit:"
+    ):
+        await session.rollback()
+        return False
+    review["provider_task_id"] = str(provider_task_id)
+    review["last_provider_status"] = "done" if succeeded else "failed"
+    review["state"] = "remote_completed_pending_finance" if succeeded else "remote_failed"
+    review["reconciled_at"] = datetime.now(timezone.utc).isoformat()
+    params[SEEDANCE_REFUND_PROVIDER_REVIEW_KEY] = review
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    return True
+
+
+async def resolve_refunded_seedance_provider_review(
+    session: AsyncSession, gen_id: int, *,
+    resolution: str, admin_tg_id: int, note: str,
+) -> bool:
+    """Operator-only vendor liability settlement; never touches user credits.
+
+    Only the authenticated web admin route can call this. A valid explanation
+    and actor are recorded durably with the original provider UUID and refund.
+    """
+    if resolution not in {"confirmed_not_accepted", "cost_reconciled"}:
+        raise ValueError("Invalid supplier reconciliation resolution")
+    if not admin_tg_id or len(note.strip()) < 12:
+        raise ValueError("Supplier review resolution requires an actor and evidence")
+    row = (await session.execute(
+        select(Generation).where(Generation.id == gen_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if row is None or row.status != GenerationStatus.failed:
+        await session.rollback()
+        return False
+    params = parse_input_params(row.input_params)
+    review = params.get(SEEDANCE_REFUND_PROVIDER_REVIEW_KEY)
+    if (not isinstance(review, dict) or review.get("state") not in {
+        "pending", "remote_completed_pending_finance", "needs_admin_resolution",
+    }):
+        await session.rollback()
+        return False
+    review["state"] = "settled"
+    review["resolution"] = resolution
+    review["resolved_by_admin_tg_id"] = int(admin_tg_id)
+    review["resolved_at"] = datetime.now(timezone.utc).isoformat()
+    review["resolution_note"] = note.strip()
+    params[SEEDANCE_REFUND_PROVIDER_REVIEW_KEY] = review
+    row.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    return True
+
+
 async def begin_seedance_submission(
     session, gen_id: int, client_request_id: str, idempotency_key: str,
     payload_sha256: str, *, product_model: str, surface: str = "miniapp",
@@ -1290,6 +1509,11 @@ async def begin_seedance_submission(
             or gen.task_id or params.get(SEEDANCE_SUBMISSION_KEY)):
         await session.commit()
         return False
+    # This guard is scoped to the account, not to the model. It executes
+    # before the first paid provider POST and does not affect unrelated users.
+    if await _has_pending_refunded_seedance_review(session, gen.user_id):
+        raise ValueError("Prior refunded Seedance job still under supplier review")
+
     params[SEEDANCE_SUBMISSION_KEY] = {
         "client_request_id": client_request_id, "idempotency_key": idempotency_key,
         "payload_sha256": payload_sha256, "product_model": product_model,
@@ -1533,6 +1757,7 @@ async def fail_generation_and_refund(
     refund_note: str | None = None,
     expected_task_id: str | None = None,
     video_notice_kind: str | None = None,
+    provider_review: dict[str, object] | None = None,
 ) -> tuple[bool, float]:
     """Fail a pending/processing generation and return its credits in one commit.
 
@@ -1568,6 +1793,9 @@ async def fail_generation_and_refund(
         params["refund_note"] = refund_note[:160]
     if video_notice_kind:
         params[NEIRONYCH_VIDEO_NOTICE_KEY] = _new_neironych_video_notice(video_notice_kind)
+    if provider_review:
+        # Durable supplier review is committed with the user ledger transition.
+        params[SEEDANCE_REFUND_PROVIDER_REVIEW_KEY] = dict(provider_review)
     generation.input_params = json.dumps(params, ensure_ascii=False)
     generation.status = GenerationStatus.failed
     generation.error_msg = error
@@ -1751,7 +1979,7 @@ async def claim_neironych_video_notice(
         or (expected_kind is not None and kind != expected_kind)
         or not (kind == status or (kind == "reconciliation" and status in {"pending", "processing"}))
         or generation.gen_type != GenerationType.video
-        or not str(generation.task_id or "").startswith(("neironych:", "neironych-submit:"))
+        or not str(generation.task_id or "").startswith(("neironych:", "neironych-submit:", "kie-submit:"))
         or state not in {"pending", "sending"}
     ):
         await session.commit()

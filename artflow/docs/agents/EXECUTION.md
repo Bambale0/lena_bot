@@ -1394,6 +1394,55 @@ Progress: [x] current repo/AGENTS/README, code, actual DB, notification and fron
 ### Independent review: atomic receipt/status snapshot
 Codex P1 PRRT_kwDOSSmOms6rC2fd identified a real READ COMMITTED race: the old receipt and the new terminal status could be read by separate SELECTs and cause removal of a newly needed Redis delivery intent. Added a failing regression that simulates that interleaving, then replaced the two reads with one SELECT of input_params + status. An active suppressed snapshot now stays queued and a terminal snapshot sees the corresponding pending receipt. Existing due-time/lease/terminal cleanup stubs were updated to the single-row query without changing their assertions. This does not mutate generation or ledger state.
 
+
+## 2026-10-10 — Seedance auto-close and no global provider circuit
+
+Baseline origin/main: e145252c8e33a964c2a61e0b2e3f7f1dd62fd018. Isolated worktree: fix/seedance-autoclose-no-global-circuit-20261010.
+
+### Confirmed cause and business requirement
+- One unresolved Neironych Seedance request set the model-wide Redis/DB admission gate and routed unrelated *new* customer work to Kie. A 30-minute Redis TTL persisted even after an operator refunded the original task.
+- The existing recovery scheduler polled results and emitted warnings after NEIRONYCH_VIDEO_ALERT_AGE_SECONDS, but **never transitioned an unconfirmed old job to failed**, even when it was over one hour old. The customer remained charged until support intervened.
+- User requested automatic closure/refunds instead of a global gate; preserve one-time paid submission, provider/financial reconciliation and no duplicate payouts.
+- Production preflight 2026-10-10 10:45 UTC: **zero Seedance active tasks older than one hour**; one young active task, no mass-refund blast radius at release.
+
+### Design
+- New config SEEDANCE_AUTO_REFUND_SECONDS defaults to 3600 (bounded 1800–86400).
+- Every video scheduler cycle processes a bounded oldest-first batch of overdue Neironych Seedance 2/2.5 jobs with task IDs or persisted submission IDs.
+- One final existing read-only provider poll is performed; if result already settled as done/failed, leave it intact. Otherwise use the repository's atomic fail_generation_and_refund with an exact expected_task_id, a safe customer error, ledger note identifying automatic timeout, and a terminal DB-outbox notification only on Telegram surfaces.
+- Supports previously unbound neironych-submit IDs; outbox scan must include them. Redis notification failures cannot block committed refunds, and the timeout phase runs **before** Redis-backed notice processing.
+- New unrelated tasks always try configured primary (Neironych in production). Unknown submissions and pre-submit durability errors **never** fallback/reissue the same paid generation. Ordinary errors may still follow separately configured provider fallback.
+- Leave upstream provider reserve and audit identity for independent reconciliation. No automatic supplier charge reversal, no user secrets in logs.
+
+### TDD and checks so far
+- RED witnessed for absent SEEDANCE_AUTO_REFUND_SECONDS, absent overdue query/processor and old route choosing Kie during another customer's pending review.
+- GREEN 103 focused tests across routing, timeout, existing video recovery and credit-ledger transactions; Ruff, compile, whitespace pending full final run.
+- Existing site/MiniApp and Telegram status updates use the shared generation row; timer uses terminal failed and existing outbox.
+- Still required: concurrent/late-result tests; exact CI, independent code/security review, deployment and production smoke verification.
+
+### Review-driven hardening of PR #235 (second commit)
+
+Initial exact-SHA GitHub backend, navigation, provider and Playwright checks were green on da43ed8. Independent Code/Security Review raised eight P1/P2 issues. Before any merge, the implementation now:
+- Uses a guarded **single Kie createTask POST**, and an explicit KieSubmissionOutcomeUnknown for HTTP 5xx, transport loss, invalid response and missing taskId. No provider retries/fallback for unknown outcomes. KieDefiniteRejection alone allows safe fallback when Kie is primary. Other Kie endpoints were not altered.
+- Starts the 60-minute provider clock at the durable Neironych submission marker started_at rather than before reference upload. The SQL selector uses a correctly cast coalesced PostgreSQL timestamp; EXPLAIN ANALYZE passed on real production PostgreSQL read-only without customer data changes.
+- Claims the **same Redis video poll lease** as customer history and media download, then runs a bounded read-only provider GET/identity lookup. If lock is busy or provider says completed (even when downloading is broken), it defers refund. If identity becomes bound, it saves that ID rather than refunding. Terminal failed is eligible for fail+refund. Pending/unknown after deadline may receive a provider-uncertain SLA compensation.
+- Saves a durable seedance_refund_provider_review marker **in the same DB commit** as the user credits and ledger when upstream remains uncertain. An independent, bounded post-refund read-only checker carries it through restart, records late done/failed in audit (never mutating final user balance), and alerts administrators on conclusive supplier state.
+- Runs deadline, normal downloads, Telegram outbox, and supplier review lanes concurrently. A broken Redis notice-queue accelerator does not block the credit settlement; delivery notice is still in the transactionally committed database outbox.
+- Prevents credit recycling with a user-scoped liability gate: while an account has an outstanding supplier review on a refunded Seedance task, it cannot issue further paid Neironych Seedance POSTs. Other accounts are entirely unaffected. A rejected pre-submit command refunds the charged new customer generation via the existing no-POST path.
+- Uses the existing typed environment refund deadline and validation. An admin-editable DB control-plane deadline remains a separate follow-up enhancement; changing the configured SLA still requires deployment. No changes to pricing or purchasing are part of this patch.
+
+New/updated tests cover: lost Kie response/5xx with exactly one provider POST, safe definite-rejection fallback, invalid/missing Kie task ID, real-DB-independent supplier audit in refund transaction, lease contention, late provider completion without balance change, short final GET, submit-start clock, pending and 503 before and after deadline, no starvation of Telegram, per-account liability gate and unaffected unrelated user. All review findings must be rechecked against the updated SHA; no user credit/debit, provider paid POST, or production deployment was done while preparing these tests.
+
+
+### Continuation: Kie correlation and current main reconciliation (2026-10-10)
+
+PR #235 code/security review on 47633a9 found financial issues: Kie 5xx/lost submit results needed persisted callback linking; late-completed provider reviews needed to remain blocked pending supplier-cost settlement; expiry and normal polling needed independent claims; indefinite supplier reviews needed bounded operator escalation; SQLAlchemy expired rows needed snapshots before read-only transactions end. First fixes committed as 47633a9; further source/test fixes staged here.
+
+- Kie callback obtains per-generation HMAC parameters before its one-shot paid POST. Missing createTask response never authorizes another provider POST or speculative refund; the unknown submission is durably marked kie-submit plus generation ID and can be correlated by a signed webhook.
+- Customer deadline refund is atomic. Late provider callback only updates supplier review metadata. Completed provider charges remain blocked for that specific customer until authenticated admin settlement; unrelated users are not blocked.
+- Provider audits have maximum checks/age; indeterminate results escalate to operators and do not self-clear; completed remote video does not authorize refund; Redis failures do not invalidate durable refund/outbox.
+- 150 focused service/finance/reconciliation tests were green. Two new SQLite durable roundtrips validate Kie unknown->bound and Kie refund->late provider completion->admin settlement; four Kie callback tests green. Legacy API/bot test fakes updated for new persisted registration. Ruff and compilation green after fixing accidental escaped newline in Telegram import.
+- CI now includes new timeout and Kie callback regression files. Main advanced by #237; reconcile via ordinary merge in feature branch, rerun exact-SHA CI and review before protected squash deployment. No production customer money was changed during tests.
+
 ---
 
 # Execution ledger — feed creator-input replay (2026-10-10)
@@ -1427,3 +1476,13 @@ No new config or pricing keys. Trace source generation and input-media provenanc
 - Restore original validated Grok mode (and safe read-only public Grok mode metadata) in quote, submission, Telegram FSM and browser settings.
 - Reject viewer audio/characters/seeds on Telegram exact replays before credits are charged; keep additional author video references only in their original validated form.
 - Verified 282 backend feed tests (2 unrelated existing baseline failures excluded), 105 JS units, Ruff clean, TypeScript check, Vite production build. CI browser/deploy checks still gate release.
+
+
+### Financial pre-submit fail-closed guard (2026-10-10)
+
+An additional self-audit on merged branch 7d657a1 found a real risk: register_kie_video_callback can legitimately return false (generation row no longer eligible, no durable callback identity), yet four launch routes ignored the result and still issued paid POST. Three regression tests first failed against original branch with visible provider calls despite registration refusal (MiniApp launch, remix, Telegram). All four launch paths now require a successful durable registration before provider call; refusal is a no-POST failure that uses guarded standard generation refund, not new provider POST. RED -> GREEN tests and all related Feed/Genjutsu/routes/Kie transaction cases passed; Ruff clean. This is a release-critical guard against lost Kie responses without recoverable callback identity. No production charges or direct financial writes during tests.
+
+
+### Real SQLAlchemy rollback detachment P2 guard
+
+The previous Security Review warned that the final provider GET after a session.rollback might use a detached expired ORM generation. An actual SQLite SQLAlchemy Session reproduction confirmed this exact failure: reading task_id after the second rollback raises DetachedInstanceError, which the existing error catch interpreted as unknown provider outcome and would wrongly refund a remotely completed paid video. The new integration regression was RED (log: Seedance final status deferred reason=DetachedInstanceError, returned refunded); fix materializes task ID, model and copied decoded input params as a simple immutable-value snapshot BEFORE rollback. Provider GET and read-only submission binding use only the snapshot; the fresh row/ledger settlement remains separately locked and guarded by task ID. New test GREEN and all 166+ targeted finance/recovery tests GREEN; Ruff/compilation clean. No actual production ledger entries modified for this validation.

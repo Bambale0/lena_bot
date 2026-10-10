@@ -118,7 +118,6 @@ async def test_generate_video_skips_comet_fallback_for_kie_validation_error(monk
     async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
         raise RuntimeError("KIE.AI video createTask failed: 422 Image aspect ratio must be between 1:2.5 and 2.5:1")
 
-    monkeypatch.setattr(seedance_provider_routing, "neironych_route_paused", AsyncMock(return_value=False))
     monkeypatch.setattr(
         neironych_seedance_runtime, "generate_product_video",
         AsyncMock(side_effect=RuntimeError("neironych unavailable")),

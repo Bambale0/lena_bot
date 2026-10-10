@@ -166,6 +166,11 @@ async def test_terminal_refund_and_failure_notice_are_one_transaction(monkeypatc
         expected_task_id=row.task_id,
         refund_note="reconcile:neironych_provider_failed",
         video_notice_kind="failed",
+        provider_review={
+            "state": "pending",
+            "reason": "timeout_provider_unconfirmed",
+            "original_task_id": row.task_id,
+        },
     )
     assert success is True and credits == 42
     assert row.status == GenerationStatus.failed
@@ -173,6 +178,8 @@ async def test_terminal_refund_and_failure_notice_are_one_transaction(monkeypatc
     assert params["refund_applied"] is True
     assert params["neironych_video_notice"]["kind"] == "failed"
     assert params["neironych_video_notice"]["state"] == "pending"
+    assert params["seedance_refund_provider_review"]["state"] == "pending"
+    assert params["seedance_refund_provider_review"]["original_task_id"] == row.task_id
     assert recorded.await_count == 1
     assert recorded.await_args.kwargs["delta"] == 42
     session.commit.assert_awaited_once()
@@ -236,3 +243,17 @@ async def test_expired_or_pending_notice_exhausted_attempts_cannot_reclaim(monke
     assert "token" not in saved
     assert "claimed_at" not in saved
     assert await repo.claim_neironych_video_notice(session, row.id) is None
+
+
+@pytest.mark.asyncio
+async def test_unbound_submission_timeout_receipt_is_claimable_and_idempotent():
+    row = _row(kind="failed")
+    row.task_id = "neironych-submit:request-before-provider-id"
+    session = FakeSession(row)
+    claim = await repo.claim_neironych_video_notice(session, row.id)
+    assert claim and claim.kind == "failed"
+    assert await repo.claim_neironych_video_notice(session, row.id) is None
+    assert await repo.complete_neironych_video_notice(
+        session, row.id, claim.token, delivered=True,
+    )
+    assert json.loads(row.input_params)["neironych_video_notice"]["state"] == "sent"

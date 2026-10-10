@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -126,3 +127,59 @@ async def test_maybe_alert_credit_issue_calls_admin_alert_once(monkeypatch) -> N
     assert kwargs["alert_key"] == "provider-credits:kie.ai POST /api/v1/jobs/createTask"
     assert "закончились кредиты" in kwargs["title"].lower()
     assert "insufficient credits" in kwargs["message"].lower()
+
+@pytest.mark.asyncio
+async def test_create_task_post_http_503_is_one_shot_with_unknown_outcome(monkeypatch):
+    import httpx
+
+    from api import kieai_client
+
+    request = httpx.Request("POST", "https://test.example/api/v1/jobs/createTask")
+    response = httpx.Response(503, request=request)
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    monkeypatch.setattr(kieai_client, "get_client", lambda: client)
+    with pytest.raises(kieai_client.KieSubmissionOutcomeUnknown):
+        await kieai_client.create_task({"model": "bytedance/seedance-2-5"})
+    client.post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_task_lost_response_is_one_shot_with_unknown_outcome(monkeypatch):
+    import httpx
+
+    from api import kieai_client
+
+    client = SimpleNamespace(post=AsyncMock(side_effect=httpx.ReadTimeout("lost reply")))
+    monkeypatch.setattr(kieai_client, "get_client", lambda: client)
+    with pytest.raises(kieai_client.KieSubmissionOutcomeUnknown):
+        await kieai_client.create_task({"model": "bytedance/seedance-2"})
+    client.post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_task_http_422_is_definite_rejection(monkeypatch):
+    import httpx
+
+    from api import kieai_client
+
+    request = httpx.Request("POST", "https://test.example/api/v1/jobs/createTask")
+    response = httpx.Response(422, json={"code":422}, request=request)
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    monkeypatch.setattr(kieai_client, "get_client", lambda: client)
+    with pytest.raises(kieai_client.KieDefiniteRejection):
+        await kieai_client.create_task({"model": "bytedance/seedance-2"})
+    client.post.assert_awaited_once()
+
+
+
+@pytest.mark.asyncio
+async def test_create_task_success_without_task_id_is_not_safe_to_retry(monkeypatch):
+    import httpx
+
+    request = httpx.Request("POST", "https://test.example/api/v1/jobs/createTask")
+    response = httpx.Response(200, json={"code": 200, "data": {}}, request=request)
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    monkeypatch.setattr(kieai_client, "get_client", lambda: client)
+    with pytest.raises(kieai_client.KieSubmissionOutcomeUnknown):
+        await kieai_client.create_task({"model": "bytedance/seedance-2"})
+    client.post.assert_awaited_once()

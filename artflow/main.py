@@ -44,6 +44,7 @@ from api.comet_client import close_client, get_client
 from api.kie_webhook import (
     extract_error,
     extract_result_urls,
+    extract_status,
     extract_task_id,
     is_processing,
     is_success,
@@ -102,10 +103,12 @@ from bot.utils.telegram_images import (
     send_original_document_to_chat,
 )
 from bot.utils.telegram_ui import is_benign_telegram_error
+from core.admin_alerts import send_admin_alert_once
 from core.broadcast_scheduler import run_broadcast_scheduler
 from core.config import settings
 from core.db_backup_scheduler import run_database_backup_scheduler
 from core.feed_remix_prompt import generation_prompt_is_protected
+from core.kie_seedance_callback import verify_generation_signature
 from core.logger import setup_logging
 from core.music_reconcile_scheduler import run_music_reconcile_scheduler
 from core.neironych_image_reconcile_scheduler import run_neironych_image_reconcile_scheduler
@@ -1678,6 +1681,15 @@ async def _recover_nexus_submission(session, request_id: str, task_id: str):
     return await repo.get_generation_by_id(session, gen.id)
 
 
+def _late_kie_supplier_outcome(payload: dict) -> bool | None:
+    """Do not treat an unknown provider callback as proof of no supplier cost."""
+    if is_success(payload):
+        return True
+    if extract_status(payload) in {"fail", "failed", "error"}:
+        return False
+    return None
+
+
 @app.post(settings.KIE_WEBHOOK_PATH)
 async def kie_webhook(
     request: Request,
@@ -1687,8 +1699,13 @@ async def kie_webhook(
     nexus_request_id: str | None = None,
     nexus_signature: str | None = None,
     x_kie_webhook_secret: str | None = Header(default=None, alias="X-KIE-Webhook-Secret"),
+    apix_generation_id: int | None = None,
+    apix_generation_sig: str | None = None,
 ) -> dict:
     _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
+    if apix_generation_id is not None or apix_generation_sig is not None:
+        if not verify_generation_signature(apix_generation_id, apix_generation_sig):
+            raise HTTPException(status_code=403, detail="Invalid video generation correlation")
 
     payload = await request.json()
     task_id = extract_task_id(payload)
@@ -1728,6 +1745,10 @@ async def kie_webhook(
             gen = await repo.get_generation_by_task_id(session, _web_task_lookup_id(task_id))
         if not gen and provider == "nexus" and nexus_request_id:
             gen = await _recover_nexus_submission(session, nexus_request_id, lookup_task_id)
+        if not gen and apix_generation_id is not None and apix_generation_sig:
+            # The signed URL was minted before Kie's paid POST; it survives
+            # lost submit replies, process crashes and callback race ordering.
+            gen = await repo.bind_kie_video_callback(session, apix_generation_id, task_id)
         if not gen:
             logger.warning("KIE webhook for unknown task_id=%s lookup_task_id=%s", task_id, lookup_task_id)
             return {"ok": True}
@@ -1738,8 +1759,38 @@ async def kie_webhook(
             if snapshot.get("request_id") != nexus_request_id:
                 raise HTTPException(status_code=409, detail="Nexus submission correlation mismatch")
 
-        # Idempotency: if already finished, acknowledge duplicate callback.
+        # Idempotency: final customer status/balance must never be changed.
+        # Signed late Kie callbacks instead update the supplier liability
+        # review marker for operator reconciliation.
         if gen.status.value in {"done", "failed"}:
+            late_outcome = _late_kie_supplier_outcome(payload)
+            if (gen.status.value == "failed" and apix_generation_id == gen.id
+                    and apix_generation_sig and late_outcome is not None):
+                recorded = await repo.record_late_kie_video_callback(
+                    session, gen.id, task_id, succeeded=late_outcome,
+                )
+                if recorded:
+                    logger.warning(
+                        "Kie late provider outcome recorded after refund gen=%s "
+                        "state=%s customer_balance_unchanged=true",
+                        gen.id, "done" if late_outcome else "failed",
+                    )
+                    if late_outcome:
+                        # Supplier review stays open until authorized financial
+                        # settlement. The authenticated admin queue is durable.
+                        try:
+                            await send_admin_alert_once(
+                                alert_key=f"seedance-kie-late-finance:{gen.id}",
+                                title="Seedance: результат Kie после возврата",
+                                message=f"APIX генерация {gen.id}: поставщик завершил "
+                                        "задачу после возврата. Проверьте расход и "
+                                        "разрешите задолженность через admin API.",
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Kie late supplier admin alert deferred gen=%s error=%s",
+                                gen.id, type(exc).__name__,
+                            )
             return {"ok": True}
 
         user = await repo.get_user_by_id(session, gen.user_id)
