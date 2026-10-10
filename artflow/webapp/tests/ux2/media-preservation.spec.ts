@@ -24,6 +24,7 @@ async function prepare(page: Page, enabled = true) {
   await page.route("https://media.example.test/**", route => route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlZ5xkAAAAASUVORK5CYII=", "base64") }));
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/web/upload-media/check") return route.fulfill({ json: { ok: true, data: { status: "available" } } });
     if (path === "/api/web/upload-media/policy") return route.fulfill({ json: { data: { image_max_bytes: 20 * 1024 * 1024, image_formats: ["jpeg", "png", "webp"] } } });
     if (path === "/api/v1/me") return route.fulfill({ json: { id: 7, tg_id: 123, credits: 100, language: "ru", full_name: "Test", miniapp_ux2_available: enabled } });
     if (path === "/api/v1/models/image") return route.fulfill({ json: images });

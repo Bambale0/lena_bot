@@ -6,11 +6,14 @@ import { inspectDraftMedia } from "@/lib/draft-media";
 import { photoUploadMessage, safePhotoUrl } from "@/lib/photo-upload";
 import { deleteReferenceMaterial, referenceMaterials, setReferenceIncluded } from "@/lib/reference-selection";
 import { Sheet } from "@/components/ui/sheet";
+import type { ReferenceChecker } from "@/lib/reference-availability";
+import { ReferenceAvailabilityNotice } from "./reference-availability";
 
 interface ReferenceSelectionProps {
   draft: GenerationDraft; model?: ModelInfo; busy: boolean; submitting?: boolean;
   language?: string; labelFor: (url: string) => string; onChange: (patch: Partial<GenerationDraft>) => void;
   uploads?: PhotoUploadControls;
+  checkReference?: ReferenceChecker;
 }
 function fileSize(size?: number): string {
   if (size === undefined) return "";
@@ -38,7 +41,7 @@ function PhotoViewer({ source, name, en }: { source: string; name: string; en: b
     : <p className="ux2-inline-notice" role="status">{en ? "Preview could not be opened. The file is kept in your draft." : "Не удалось открыть превью. Файл сохранён в черновике."}</p>;
 }
 
-export function ReferenceSelection({ draft, model, busy, submitting = false, language, labelFor, onChange, uploads }: ReferenceSelectionProps) {
+export function ReferenceSelection({ draft, model, busy, submitting = false, language, labelFor, onChange, uploads, checkReference }: ReferenceSelectionProps) {
   const en = language === "en";
   const items = referenceMaterials(draft);
   const [viewId, setViewId] = useState<string | null>(null);
@@ -94,6 +97,7 @@ export function ReferenceSelection({ draft, model, busy, submitting = false, lan
               onClick={() => { if (!busy) uploads ? uploads.remove(item.id) : onChange(deleteReferenceMaterial(draft, item.id)); }}><X size={16} aria-hidden="true" />{en ? "Delete" : "Удалить"}</button>
           </>}
         </div>
+        {checkReference && item.url && !item.upload && <ReferenceAvailabilityNotice key={`${item.id}:${item.url}`} url={item.url} check={checkReference} busy={busy} en={en} />}
         {stage === "error" && <p className="ux2-photo-error" role="status">{photoUploadMessage(!hasSource ? "source_required" : item.upload?.error, en)}{replacement ? (en ? " The original is kept until you confirm the replacement." : " Предыдущее фото сохранено.") : ""}</p>}
         {conflict && <p id={reasonId} className="ux2-reference-reason">{en ? "This photo cannot be included with the current model, mode or limit. Check upload and settings." : "Сейчас включить нельзя: проверьте загрузку, модель, режим и лимит фото."}</p>}
       </div>;

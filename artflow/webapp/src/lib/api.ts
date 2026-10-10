@@ -272,6 +272,17 @@ export class MiniAppApi {
     });
   }
 
+  async checkReferenceAvailability(url: string, signal?: AbortSignal): Promise<unknown> {
+    const response = await fetch("/api/web/upload-media/check", {
+      method: "POST", cache: "no-store", signal,
+      headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": this.initData },
+      body: JSON.stringify({ url }),
+    });
+    if (!response.ok) throw await readApiError(response);
+    const payload = asRecord(await response.json());
+    return payload.data || payload;
+  }
+
   async getPhotoUploadPolicy(signal?: AbortSignal): Promise<unknown> {
     const response = await fetch("/api/web/upload-media/policy", {
       cache: "no-store", signal, headers: { "X-Telegram-Init-Data": this.initData },

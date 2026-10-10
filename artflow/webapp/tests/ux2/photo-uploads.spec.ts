@@ -20,6 +20,7 @@ async function prepare(page: Page, options: { light?: boolean } = {}) {
   await page.route("https://media.example.test/**", route => route.fulfill(state.brokenPreview ? { status: 404, body: "missing" } : { contentType: "image/png", body: PNG }));
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/web/upload-media/check") return route.fulfill({ json: { ok: true, data: { status: "available" } } });
     if (path === "/api/v1/me") return route.fulfill({ json: { id: state.owner, tg_id: 123, credits: 100, language: "ru", miniapp_ux2_available: true } });
     if (path === "/api/v1/models/image") return route.fulfill({ json: [model] });
     if (path === "/api/v1/models/video") return route.fulfill({ json: [] });

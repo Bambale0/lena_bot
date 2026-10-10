@@ -111,3 +111,8 @@
 .ux2-photo-row[data-upload-state="error"] { border-color: var(--destructive); }
 .ux2-photo-original { display: block; max-height: 65dvh; width: 100%; object-fit: contain; }
 @media (max-width: 360px) { .ux2-reference-row.ux2-photo-row { grid-template-columns: 64px minmax(0, 1fr); gap: 8px; padding: 10px; } .ux2-reference-preview { width: 64px; height: 76px; } }
+
+.ux2-reference-availability { grid-column: 1 / -1; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
+.ux2-reference-availability button { min-height: 44px; padding: 6px 10px; margin-top: 4px; border: 1px solid var(--border); border-radius: 10px; }
+.ux2-reference-availability[data-reference-availability="missing"],
+.ux2-reference-availability[data-reference-availability="forbidden"] { color: var(--foreground); }
