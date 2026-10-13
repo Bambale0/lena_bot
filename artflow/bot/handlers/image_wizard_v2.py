@@ -39,11 +39,9 @@ def _quality_label(model_key: str, quality: str | None) -> str:
 
 
 def _reference_count_from_state(data: dict) -> int:
-    refs = [item for item in list(data.get("ref_file_ids", []) or []) if item]
-    image_file_id = data.get("image_file_id")
-    if image_file_id and image_file_id not in refs:
-        refs.insert(0, image_file_id)
-    return len(refs)
+    from bot.handlers.image_gen import _state_reference_count
+
+    return _state_reference_count(data)
 
 
 def _default_quality_for_model(model_key: str) -> str:
@@ -65,23 +63,31 @@ def _default_aspect_ratio_for_model(model_key: str, mode: str | None) -> str:
 
 
 def _reference_payload_from_state(data: dict, *, max_refs: int, supports_refs: bool) -> dict[str, object]:
+    from bot.handlers.image_gen import (
+        _state_reference_file_ids,
+        _state_reference_url,
+        _state_reference_urls,
+    )
+
     if not supports_refs:
         return {
             "image_file_id": None,
             "ref_file_ids": [],
+            "reference_urls": [],
             "remix_reference_url": None,
         }
 
-    refs = [str(item) for item in list(data.get("carryover_ref_file_ids") or data.get("ref_file_ids") or []) if item]
-    image_file_id = data.get("carryover_image_file_id") or data.get("image_file_id")
-    if image_file_id and image_file_id not in refs:
-        refs.insert(0, str(image_file_id))
-    refs = refs[:max_refs]
+    refs = list(dict.fromkeys(_state_reference_file_ids(data)))
+    urls = _state_reference_urls(data)
+    scalar = _state_reference_url(data)
+    if scalar and scalar not in urls:
+        urls.insert(0, scalar)
 
     return {
         "image_file_id": refs[0] if refs else None,
         "ref_file_ids": refs,
-        "remix_reference_url": data.get("carryover_reference_url") or data.get("remix_reference_url"),
+        "reference_urls": urls,
+        "remix_reference_url": scalar,
     }
 
 
@@ -93,6 +99,7 @@ def _default_mode_for_model(model_key: str, data: dict, reference_payload: dict[
         reference_payload.get("ref_file_ids")
         or reference_payload.get("image_file_id")
         or reference_payload.get("remix_reference_url")
+        or reference_payload.get("reference_urls")
     )
     if carryover_mode in modes:
         return str(carryover_mode)
@@ -104,6 +111,8 @@ def _default_mode_for_model(model_key: str, data: dict, reference_payload: dict[
 
 
 def _sync_active_session_state(image_session: ImageSession) -> dict:
+    from bot.handlers.image_gen import _stored_reference_file_ids, _stored_reference_urls
+
     return {
         "image_session_id": image_session.id,
         "model_key": image_session.model,
@@ -117,6 +126,8 @@ def _sync_active_session_state(image_session: ImageSession) -> dict:
         "count": image_session.count,
         "image_count": image_session.count,
         "image_file_id": image_session.reference_file_id,
+        "ref_file_ids": _stored_reference_file_ids(image_session),
+        "reference_urls": _stored_reference_urls(image_session),
     }
 
 
@@ -243,8 +254,12 @@ async def open_model_composer_for_selection(
     caps = IMAGE_CAPS.get(model_key, {})
     modes = list(caps.get("modes") or ["text"])
     max_refs = int(caps.get("max_refs") or 10)
-    supports_refs = "image" in modes
+    supports_refs = "image" in modes and not (forced_mode == "text" and forced_mode in modes)
     reference_payload = _reference_payload_from_state(data, max_refs=max_refs, supports_refs=supports_refs)
+    from bot.handlers.image_gen import _accept_reference_candidate
+
+    if await _accept_reference_candidate(call, getattr(call, "bot", None), reference_payload, max_refs) is None:
+        return False
     mode = forced_mode if forced_mode in modes else _default_mode_for_model(model_key, data, reference_payload)
     aspect_ratio = _default_aspect_ratio_for_model(model_key, mode)
 
@@ -264,6 +279,11 @@ async def open_model_composer_for_selection(
         "source_feed_gen_id": None,
         "image_prompt_enhance": True,
         "image_params_changed": False,
+        "reference_url": None,
+        "carryover_reference_urls": [],
+        "carryover_reference_url": None,
+        "carryover_ref_file_ids": [],
+        "carryover_image_file_id": None,
         **reference_payload,
     }
     await state.update_data(**updates)

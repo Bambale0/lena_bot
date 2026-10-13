@@ -143,12 +143,15 @@ async def test_rejected_feed_reference_never_persists_or_serializes_author_promp
         for base, last in feed_launch.session.persisted_prompts
     )
     active = await web_sessions.active_image_session(feed_launch.session, feed_launch.user)
-    if entrypoint == "multi" and failure == "reference_limit":
-        # Capacity now rejects before a session exists, which also closes the
-        # intermediate-persistence window this regression protects.
+    if entrypoint == "multi":
+        # Capacity and unavailable public media reject before a session exists,
+        # closing the intermediate-persistence window this regression protects.
         assert active["data"] is None
         assert feed_launch.session.sync.scalars(select(ImageSession)).all() == []
-        feed_launch.mirror.assert_not_awaited()
+        if failure == "reference_limit":
+            feed_launch.mirror.assert_not_awaited()
+        else:
+            feed_launch.mirror.assert_awaited_once()
         assert feed_launch.call.answer.await_args.kwargs["show_alert"] is True
         return
     assert active["data"]["base_prompt"] is None
@@ -435,13 +438,30 @@ async def test_repeat_reference_constructor_uses_durable_protection_before_rejec
 
     feed_launch.charge.assert_not_awaited()
     feed_launch.generate.assert_not_awaited()
-    assert all(
-        SECRET not in (base or "") and SECRET not in (last or "")
-        for base, last in feed_launch.session.persisted_prompts
+    # Rejection is now atomic: do not create, archive, scrub or otherwise write
+    # a session. Any already-existing legacy secret still must be masked.
+    assert feed_launch.session.persisted_prompts == []
+    stored = feed_launch.session.sync.scalars(select(ImageSession)).all()
+    active = await web_sessions.active_image_session(feed_launch.session, feed_launch.user)
+    if not reuse:
+        assert stored == []
+        assert active["data"] is None
+        return
+    assert stored == [image_session]
+    assert image_session.base_prompt == SECRET
+    assert image_session.last_prompt == SECRET
+    assert image_session.status == ImageSessionStatus.active
+    for field in ("base_prompt", "last_prompt"):
+        assert active["data"][field] is None
+    assert active["data"]["prompt_hidden"] is True
+    assert active["data"]["prompt_actions_allowed"] is False
+    archived = await web_sessions.archive_image_session(
+        image_session.id, feed_launch.session, feed_launch.user,
     )
-    stored = feed_launch.session.sync.scalars(select(ImageSession)).one()
-    assert stored.base_prompt is None
-    assert stored.last_prompt is None
+    assert archived["data"]["base_prompt"] is None
+    assert archived["data"]["last_prompt"] is None
+    assert archived["data"]["prompt_hidden"] is True
+    assert archived["data"]["prompt_actions_allowed"] is False
 
 
 @pytest.mark.asyncio

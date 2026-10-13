@@ -44,6 +44,7 @@ export type RepeatPayment = {
 };
 export type RepeatDraft = {
   savedAt: number;
+  sourceMediaUrl?: string;
   references: string[];
   changeRequest: string;
   modelKey: string;
@@ -88,6 +89,7 @@ function cleanDraft(value: unknown): RepeatDraft | null {
   } : null;
   return {
     savedAt: saved.savedAt,
+    sourceMediaUrl: typeof saved.sourceMediaUrl === "string" ? saved.sourceMediaUrl : undefined,
     references: Array.isArray(saved.references)
       ? saved.references.filter((value): value is string => typeof value === "string" && value.startsWith("https://")) : [],
     changeRequest: typeof saved.changeRequest === "string" ? saved.changeRequest.slice(0, 800) : "",

@@ -35,6 +35,7 @@ from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.feed_remix_prompt import (
     original_feed_video_inputs,
     original_feed_video_references,
+    owned_generation_prompt_is_visible,
     supports_feed_source_media,
 )
 from db import repository as repo
@@ -46,15 +47,7 @@ router = Router(name="feed")
 
 
 def _owned_generation_prompt_is_visible(generation: Generation, user_id: int) -> bool:
-    if generation.user_id != user_id or getattr(generation, "source_feed_gen_id", None):
-        return False
-    params = getattr(generation, "input_params", None)
-    if isinstance(params, str):
-        try:
-            params = json.loads(params)
-        except (TypeError, ValueError):
-            return False
-    return params is None or (isinstance(params, dict) and not params.get("hidden_prompt"))
+    return owned_generation_prompt_is_visible(generation, user_id)
 
 
 def _model_label(model_key: str) -> str:
@@ -502,9 +495,14 @@ async def cb_feed_again(
     state: FSMContext,
     bot: Bot,
 ) -> None:
-    import json
 
-    from bot.handlers.image_gen import _launch_session_generation, _session_reference_url
+    from bot.handlers.image_gen import (
+        ImageReferenceUnavailable,
+        _accept_generation_reference_candidate,
+        _launch_session_generation,
+        _session_reference_url,
+        _stored_reference_urls,
+    )
     from db.models import ImageGenerationAction
 
     gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
@@ -530,13 +528,25 @@ async def cb_feed_again(
             reference_file_ids = []
     reference_url = source_session.reference_url if source_session else None
     effective_reference_url = None
-    if source_session and mode == "image":
-        effective_reference_url = await _session_reference_url(bot, source_session, prefer_last_result=False)
+    if source_session:
+        try:
+            effective_reference_url = await _session_reference_url(bot, source_session, prefer_last_result=False)
+        except ImageReferenceUnavailable as exc:
+            await call.answer(str(exc), show_alert=True)
+            return
+        if effective_reference_url:
+            mode = "image"
         if isinstance(effective_reference_url, str) and effective_reference_url:
             reference_url = effective_reference_url
 
     protected_source_id = getattr(gen, "source_feed_gen_id", None)
     source_feed_gen_id = protected_source_id or (gen.id if gen.is_public_feed else None)
+    if not await _accept_generation_reference_candidate(
+        call, bot, session=session, db_user=db_user, model_key=gen.model,
+        reference_url=effective_reference_url, source_feed_gen_id=source_feed_gen_id,
+        parent_generation_id=gen.id,
+    ):
+        return
     prompt_is_user_supplied = _owned_generation_prompt_is_visible(gen, db_user.id)
     image_session = await repo.create_image_session(
         session=session,
@@ -551,6 +561,7 @@ async def cb_feed_again(
         reference_file_id=reference_file_id,
         reference_file_ids=reference_file_ids,
         reference_url=reference_url if isinstance(reference_url, str) else None,
+        reference_urls=_stored_reference_urls(source_session) if source_session else None,
     )
 
     await state.set_state(ImageGenFSM.session_active)
@@ -633,6 +644,7 @@ async def cb_feed_remix(
         reference_url=gen.result_url,
     )
 
+    await state.clear()
     await state.set_state(ImageGenFSM.session_active)
     await state.update_data(
         image_session_id=image_session.id,
@@ -644,6 +656,8 @@ async def cb_feed_remix(
         count=image_session.count,
         image_file_id=None,
         ref_file_ids=[],
+        reference_urls=[gen.result_url],
+        remix_reference_url=gen.result_url,
         remix_mode=True,
         remix_parent_generation_id=gen.id,
         source_feed_gen_id=source_feed_gen_id,
@@ -660,7 +674,6 @@ async def cb_feed_remix(
 
 @router.callback_query(F.data.startswith("feed:publish:"))
 async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_user: User, bot: Bot | None = None) -> None:
-    import json
 
     from api.public_files import mirror_url
 

@@ -244,7 +244,11 @@ async def _prepare_repeat(
         return
 
     payload = parse_input_params(getattr(generation, "input_params", None))
-    snapshot, _ = await _source_session_snapshot(session, bot, generation, payload)
+    try:
+        snapshot, _ = await _source_session_snapshot(session, bot, generation, payload)
+    except image_gen.ImageReferenceUnavailable:
+        await safe_answer_callback(call, "Не удалось подготовить сохранённые фото. Попробуй ещё раз.", show_alert=True)
+        return
     model_key = str(snapshot["model_key"])
     available_refs, missing_refs = available_reference_images(_unique_urls(snapshot.get("reference_images")))
 
@@ -320,8 +324,9 @@ async def confirm_repeat(
             return
 
         references, missing = available_reference_images(_unique_urls(data.get("repeat_reference_images")))
-        if missing:
-            await state.update_data(repeat_reference_images=references, repeat_missing_references=missing)
+        if missing or _unique_urls(data.get("repeat_missing_references")):
+            await call.message.answer("❌ Часть сохранённых фото недоступна. Добавьте фото заново перед повтором.")  # type: ignore[union-attr]
+            return
         if data.get("repeat_reference_required") and not references:
             await call.message.answer("❌ Для этой модели сначала отправьте фото.")  # type: ignore[union-attr]
             return
@@ -372,6 +377,14 @@ async def confirm_repeat(
         else:
             metadata["reference_images"] = logical_refs
 
+        # A restored snapshot may exceed today's model cap. Include any public
+        # source image that the shared launch will add before archiving a series.
+        if not await image_gen._accept_generation_reference_candidate(
+            call.message, bot, session=session, db_user=db_user, model_key=model_key,
+            reference_url=provider_refs, source_feed_gen_id=source_feed_gen_id,
+            parent_generation_id=source_id,
+        ):
+            return
         image_session = await repo.create_image_session(
             session=session,
             user_id=db_user.id,
@@ -492,10 +505,8 @@ async def add_repeat_refs(call: CallbackQuery, state: FSMContext) -> None:
 async def collect_repeat_ref(message: Message, state: FSMContext, bot: Bot) -> None:
     data = await state.get_data()
     references = _unique_urls(data.get("repeat_reference_images"))
-    max_refs = int(data.get("repeat_max_refs") or 1)
-    if len(references) >= max_refs:
-        await message.answer("Лимит референсов для этой модели уже достигнут.", reply_markup=_confirmation_keyboard(data))
-        return
+    model_key = str(data.get("repeat_model_key") or "")
+    max_refs = _max_refs(model_key) if model_key else int(data.get("repeat_max_refs") or 1)
     best = max(message.photo, key=lambda item: item.file_size or 0)  # type: ignore[arg-type]
     url = await image_gen._telegram_file_url(bot, best.file_id)
     if not url:
@@ -503,6 +514,10 @@ async def collect_repeat_ref(message: Message, state: FSMContext, bot: Bot) -> N
         return
     if url not in references:
         references.append(url)
+    if await image_gen._accept_reference_candidate(
+        message, bot, {"reference_urls": references}, max_refs,
+    ) is None:
+        return
 
     update: dict[str, Any] = {"repeat_reference_images": references, "repeat_missing_references": []}
     if data.get("repeat_is_pinterest"):

@@ -164,7 +164,11 @@ async def test_confirm_launches_once_and_carries_repeat_parent_metadata() -> Non
         captured["context"] = current_repeat_launch_context()
         return True
 
-    with patch.object(repeat_safe.repo, "get_generation_by_id", AsyncMock(return_value=source)), patch.object(
+    with patch.object(repeat_safe.repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: source if gid == 42 else _image_source(
+            id=100, source_feed_gen_id=None, input_params=None,
+        )
+    )), patch.object(
         repeat_safe, "find_repeat_by_confirm_key", AsyncMock(return_value=None)
     ), patch.object(repeat_safe.repo, "create_image_session", AsyncMock(return_value=image_session)), patch.object(
         repeat_safe.image_gen, "_launch_session_generation", AsyncMock(side_effect=launch)

@@ -6,8 +6,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.miniapp_routes import _MJ_IMAGE_CAPS
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import ImageSessionCard, ImageSessionCreateRequest
+from bot.keyboards.models import IMAGE_CAPS
 from core.feed_remix_prompt import generation_prompt_is_protected
 from db import repository as repo
 from db.models import Generation, ImageSessionStatus
@@ -48,17 +50,28 @@ async def create_image_session(
 ):
     if user is None:
         return error_response(401, "Authentication required")
+    model = body.model.strip()
+    reference_urls = list(dict.fromkeys(
+        value.strip() for value in [body.reference_url, *body.reference_urls]
+        if value and value.strip()
+    ))
+    caps = IMAGE_CAPS.get(model) or _MJ_IMAGE_CAPS.get(model, {})
+    max_refs = int(caps.get("max_refs", 1) or 1)
+    # The repository archives the previous active series, so validate first.
+    # Empty draft sessions remain valid even for reference-required models.
+    if len(reference_urls) > max_refs:
+        return error_response(422, f"Model supports at most {max_refs} reference image(s)")
     image_session = await repo.create_image_session(
         session=session,
         user_id=user.id,
-        model=body.model.strip(),
+        model=model,
         mode=body.mode.strip(),
         aspect_ratio=(body.aspect_ratio or "").strip() or None,
         quality=body.quality.strip(),
         count=body.count,
         base_prompt=(body.base_prompt or "").strip() or None,
-        reference_url=(body.reference_url or "").strip() or None,
-        reference_urls=[item.strip() for item in body.reference_urls if item and item.strip()],
+        reference_url=reference_urls[0] if reference_urls else None,
+        reference_urls=reference_urls,
         # This endpoint creates solely from the authenticated user's input.
         # The request schema intentionally has no prompt_provenance field.
         prompt_provenance="user_supplied",

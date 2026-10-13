@@ -12,6 +12,58 @@ from db.session import get_session
 from main import app
 
 
+@pytest.mark.asyncio
+async def test_deep_link_feed_lookup_uses_list_representation_for_quote(client, monkeypatch):
+    source = SimpleNamespace(
+        id=88, user_id=99, model="nano-banana-2", gen_type="image",
+        prompt="private creator prompt", result_url="https://public.example/first.jpg",
+        result_urls='["https://public.example/first.jpg", "https://public.example/second.jpg"]',
+        likes_count=0, shares_count=0,
+    )
+    card = SimpleNamespace(
+        generation=source, username="artist", full_name=None,
+        aspect_ratio="1:1", remix_count=0,
+    )
+    lookup = AsyncMock(return_value=card)
+    monkeypatch.setattr(miniapp_routes.repo, "get_feed_generation_card", lookup)
+    monkeypatch.setattr(miniapp_routes.repo, "get_feed_generations", AsyncMock(return_value=[card]))
+    monkeypatch.setattr(miniapp_routes.settings, "WEB_PUBLIC_URL", "https://apixbotai.com")
+    listing = await client.get("/api/v1/feed")
+    hydrated = await client.get("/api/v1/feed/88")
+    assert hydrated.status_code == 200, hydrated.text
+    assert hydrated.json() == listing.json()[0]
+    payload = hydrated.json()
+    from bot.utils.feed_media import feed_source_output_id
+
+    assert payload["preview_urls"] == [
+        f"/api/v1/feed/88/preview.webp?index={index}&output_id={feed_source_output_id(source, url)}"
+        for index, url in enumerate(["https://public.example/first.jpg", "https://public.example/second.jpg"])
+    ]
+    assert "private creator prompt" not in hydrated.text
+    lookup.assert_awaited_once()
+    assert lookup.await_args.args[1] == 88
+    assert lookup.await_args.kwargs == {"require_media": False}
+    selected_preview = "https://apixbotai.com" + payload["preview_urls"][1]
+    body = miniapp_routes.FeedRemixRequest(
+        model="nano-banana-2", image_url=selected_preview, source_image_url=selected_preview,
+    )
+    prompt, refs, _, personalized, own_recipe = miniapp_routes._prepare_feed_remix_inputs(source, body)
+    assert refs == ["https://public.example/second.jpg"]
+    assert prompt == "private creator prompt"
+    assert personalized is False
+    assert own_recipe is False
+
+
+@pytest.mark.asyncio
+async def test_deep_link_feed_lookup_does_not_fall_back_to_private_generation(client, monkeypatch):
+    monkeypatch.setattr(miniapp_routes.repo, "get_feed_generation_card", AsyncMock(return_value=None))
+    private_lookup = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", private_lookup)
+    response = await client.get("/api/v1/feed/88")
+    assert response.status_code == 404
+    private_lookup.assert_not_awaited()
+
+
 @pytest.fixture
 async def client():
     async def session_override():
@@ -261,3 +313,13 @@ async def test_image_quote_and_submit_reject_excess_refs_before_charge(client, m
     assert quote.status_code == submit.status_code == 422
     assert quote.json()["detail"] == submit.json()["detail"]
     charge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deep_link_feed_lookup_requires_authentication(client, monkeypatch):
+    lookup = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "get_feed_generation_card", lookup)
+    app.dependency_overrides.pop(get_miniapp_user)
+    response = await client.get("/api/v1/feed/88")
+    assert response.status_code == 401
+    lookup.assert_not_awaited()

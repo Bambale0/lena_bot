@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -97,15 +95,11 @@ def render_active_image_session(
     ratio = _pretty_ratio(image_session.aspect_ratio)
     count = image_session.count or 1
 
-    reference_count = 0
-    if image_session.reference_file_ids:
-        try:
-            reference_count = len([item for item in json.loads(image_session.reference_file_ids) if item])
-        except (TypeError, ValueError):
-            reference_count = 0
+    from bot.handlers.image_gen import _repeat_reference_count
 
-    if reference_count == 0 and (image_session.reference_url or image_session.reference_file_id):
-        reference_count = 1
+    # Count stored attachments without network I/O. Cross-kind aliases are
+    # deduplicated separately at admission/provider boundaries, not by the UI.
+    reference_count = _repeat_reference_count(image_session, {})
 
     reference_label = f"{reference_count} шт" if reference_count else "нет"
     model_label = _pretty_image_model(image_session.model)

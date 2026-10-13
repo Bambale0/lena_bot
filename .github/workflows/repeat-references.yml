@@ -21,6 +21,7 @@ on:
       - "artflow/tests/test_repeat_marketplace_multiple_references.py"
       - "artflow/tests/test_image_model_selection_contract.py"
       - "artflow/tests/test_safe_image_repeat.py"
+      - "artflow/tests/test_restored_repeat_reference_limits.py"
       - "artflow/tests/test_safe_repeat_ui.py"
       - "artflow/tests/test_pinterest_reference_contract.py"
       - ".github/workflows/repeat-references.yml"
@@ -62,6 +63,7 @@ jobs:
             tests/test_repeat_callback_guard.py \
             tests/test_repeat_lookup_db_ids.py \
             tests/test_safe_image_repeat.py \
+            tests/test_restored_repeat_reference_limits.py \
             tests/test_safe_repeat_ui.py \
             tests/test_pinterest_reference_contract.py \
             tests/test_repeat_multiple_references.py \
@@ -87,6 +89,7 @@ jobs:
             tests/test_repeat_callback_guard.py \
             tests/test_repeat_lookup_db_ids.py \
             tests/test_safe_image_repeat.py \
+            tests/test_restored_repeat_reference_limits.py \
             tests/test_safe_repeat_ui.py \
             tests/test_pinterest_reference_contract.py \
             tests/test_repeat_multiple_references.py \
@@ -127,6 +130,7 @@ jobs:
             tests/test_repeat_callback_guard.py \
             tests/test_repeat_lookup_db_ids.py \
             tests/test_safe_image_repeat.py \
+            tests/test_restored_repeat_reference_limits.py \
             tests/test_safe_repeat_ui.py \
             tests/test_pinterest_reference_contract.py \
             tests/test_repeat_multiple_references.py \

@@ -66,7 +66,9 @@ def test_repeat_screen_text_shows_selected_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_feed_repeat_collects_first_photo_without_starting_generation() -> None:
+async def test_feed_repeat_collects_first_photo_without_starting_generation(monkeypatch) -> None:
+    monkeypatch.setattr(repeat_reference_marketplace.image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
+    monkeypatch.setattr(repeat_reference_marketplace.repo, "get_public_feed_generation", AsyncMock(return_value=None))
     state = FakeState(
         {
             "feed_use_prompt": "hidden feed prompt",
@@ -137,7 +139,10 @@ async def test_single_ref_model_uses_legacy_flow() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_feed_repeat_passes_all_reference_urls() -> None:
+async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch) -> None:
+    monkeypatch.setattr(repeat_reference_marketplace.repo, "get_public_feed_generation", AsyncMock(return_value=SimpleNamespace(
+        id=77, gen_type="image", result_url="https://example.test/source.jpg", result_urls=None,
+    )))
     state = FakeState(
         {
             "feed_use_prompt": "hidden feed prompt",
@@ -204,3 +209,45 @@ async def test_run_feed_repeat_passes_all_reference_urls() -> None:
         "https://example.test/2.jpg",
         "https://example.test/3.jpg",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["nano-banana-pro", "nano-banana-2"])
+@pytest.mark.parametrize("available", [False, True])
+async def test_marketplace_run_checks_canonical_source_before_session_or_state_mutation(monkeypatch, model, available):
+    from db.models import GenerationType
+
+    source_url = "https://example.test/expired-source.jpg"
+    source = SimpleNamespace(id=77, gen_type=GenerationType.image, result_url=source_url, result_urls=None)
+    data = {
+        "feed_use_prompt": "hidden feed prompt", "feed_use_gen_id": 77,
+        "use_model_key": model, "prompt_multi_ref_file_ids": ["identity-file"],
+        "image_session_id": 123,
+    }
+    state = FakeState(data)
+    state.state = "previous-accepted-state"
+    source_lookup = AsyncMock(return_value=source)
+    create = AsyncMock(return_value=SimpleNamespace(id=456))
+    archive = AsyncMock()
+    launch = AsyncMock(return_value=True)
+    monkeypatch.setattr(repeat_reference_marketplace.repo, "get_public_feed_generation", source_lookup)
+    monkeypatch.setattr(repeat_reference_marketplace.image_gen, "canonical_generation_result_url", lambda _source: source_url)
+    monkeypatch.setattr(repeat_reference_marketplace, "public_url_is_available", lambda url: available if url == source_url else True, raising=False)
+    monkeypatch.setattr(repeat_reference_marketplace, "mirror_telegram_file", AsyncMock(return_value="https://example.test/identity.jpg"))
+    monkeypatch.setattr(repeat_reference_marketplace.repo, "create_image_session", create)
+    monkeypatch.setattr(repeat_reference_marketplace.repo, "archive_active_image_sessions", archive)
+    monkeypatch.setattr(repeat_reference_marketplace.repo, "resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=2)))
+    monkeypatch.setattr(image_gen, "_launch_session_generation", launch)
+    call = SimpleNamespace(message=SimpleNamespace(answer=AsyncMock()), answer=AsyncMock())
+    await repeat_reference_marketplace._run(call, AsyncMock(), SimpleNamespace(id=42, credits=100), state, AsyncMock())
+    if available:
+        create.assert_awaited_once()
+        launch.assert_awaited_once()
+        assert launch.await_args.kwargs["reference_url"] == ["https://example.test/identity.jpg"]
+    else:
+        create.assert_not_awaited()
+        archive.assert_not_awaited()
+        launch.assert_not_awaited()
+        assert state.data == data
+        assert state.state == "previous-accepted-state"
+        assert call.answer.await_args.kwargs["show_alert"] is True

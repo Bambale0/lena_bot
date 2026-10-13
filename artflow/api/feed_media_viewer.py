@@ -7,6 +7,7 @@ from typing import Any
 from fastapi.responses import RedirectResponse
 
 from api.public_files import local_upload_path_from_url, mirror_url, preview_public_image_url
+from bot.utils.feed_media import feed_source_output_id
 
 FEED_TILE_MAX_SIZE = 480
 FEED_TILE_QUALITY = 72
@@ -61,12 +62,15 @@ async def _render_webp(
     index: int,
     max_size: int,
     quality: int,
+    output_id: str | None = None,
 ):
     urls = _generation_urls(routes, generation)
-    if index >= len(urls):
+    if output_id is not None:
+        source_url = next((url for url in urls if feed_source_output_id(generation, url) == output_id), None)
+    else:
+        source_url = urls[index] if index < len(urls) else None
+    if source_url is None:
         raise routes.HTTPException(status_code=404, detail="Изображение не найдено")
-
-    source_url = urls[index]
     mirrored_url = await mirror_url(source_url, subdir="feed")
     local_source = mirrored_url or source_url
     webp_url = preview_public_image_url(
@@ -109,8 +113,8 @@ def install_feed_media_viewer(routes: Any) -> None:
 
         source_urls = _generation_urls(routes, generation)
         preview_urls = [
-            f"/api/v1/feed/{generation.id}/preview.webp?index={index}"
-            for index in range(len(source_urls))
+            f"/api/v1/feed/{generation.id}/preview.webp?index={index}&output_id={feed_source_output_id(generation, url)}"
+            for index, url in enumerate(source_urls)
         ]
         payload["preview_url"] = preview_urls[0] if preview_urls else ""
         payload["preview_urls"] = preview_urls
@@ -128,6 +132,7 @@ def install_feed_media_viewer(routes: Any) -> None:
     async def feed_preview_webp(
         generation_id: int,
         index: int = routes.Query(0, ge=0, le=3),
+        output_id: str | None = None,
         session=routes.Depends(routes.get_session),
     ):
         result = await session.execute(
@@ -145,6 +150,7 @@ def install_feed_media_viewer(routes: Any) -> None:
             routes,
             generation,
             index=index,
+            output_id=output_id,
             max_size=FEED_TILE_MAX_SIZE,
             quality=FEED_TILE_QUALITY,
         )
@@ -153,6 +159,7 @@ def install_feed_media_viewer(routes: Any) -> None:
     async def feed_display_webp(
         generation_id: int,
         index: int = routes.Query(0, ge=0, le=3),
+        output_id: str | None = None,
         session=routes.Depends(routes.get_session),
     ):
         result = await session.execute(
@@ -170,6 +177,7 @@ def install_feed_media_viewer(routes: Any) -> None:
             routes,
             generation,
             index=index,
+            output_id=output_id,
             max_size=FEED_VIEW_MAX_SIZE,
             quality=FEED_VIEW_QUALITY,
         )

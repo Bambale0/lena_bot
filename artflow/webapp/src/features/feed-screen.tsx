@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -40,7 +41,7 @@ interface FeedScreenProps {
   onRefresh: () => void;
   onLoadMore?: () => void;
   onLike: (item: FeedItem) => void;
-  onRemix: (item: FeedItem) => void;
+  onRemix: (item: FeedItem, sourceMediaUrl?: string) => void;
 }
 
 interface MediaViewerState {
@@ -507,7 +508,7 @@ function FeedScreen({
                         </button>
                       </div>
 
-                      <div className="absolute inset-x-0 bottom-0 z-20 grid gap-1.5 px-2 pb-2 pt-10 text-white">
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 grid gap-1.5 px-2 pb-2 pt-10 text-white">
                         <div className="flex items-center justify-between gap-1">
                           <span className="flex min-w-0 items-center gap-1.5">
                             <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-white/20">
@@ -526,11 +527,11 @@ function FeedScreen({
                           <span className="min-w-0 max-w-full justify-self-start truncate rounded-full bg-black/35 px-2 py-1 text-[8px] text-white/85 backdrop-blur">{item.model}</span>
                           <button
                             type="button"
-                            className="apix-focus-ring inline-flex min-h-7 w-full min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full bg-primary/95 px-2 text-[9px] font-bold leading-none text-primary-foreground shadow-md shadow-black/20 active:scale-[0.98] disabled:opacity-75"
+                            className="apix-focus-ring pointer-events-auto inline-flex min-h-7 w-full min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full bg-primary/95 px-2 text-[9px] font-bold leading-none text-primary-foreground shadow-md shadow-black/20 active:scale-[0.98] disabled:opacity-75"
                             disabled={remixing}
                             onClick={(event) => {
                               event.stopPropagation();
-                              onRemix(item);
+                              onRemix(item, firstMedia(item));
                             }}
                           >
                             <Repeat2 className={cn("size-3 shrink-0", remixing && "animate-spin")} />
@@ -577,7 +578,11 @@ function FeedScreen({
         />
       )}
 
-      <MediaViewer viewer={viewer} onClose={() => setViewer(null)} onChangeIndex={(index) => setViewer((current) => current ? { ...current, index } : current)} onRemix={(item) => onRemix(item)} remixingId={remixingId} />
+      {/* Escape the feed's containing block; keep gallery above navigation and below sheets. */}
+      {viewer ? createPortal(
+        <MediaViewer viewer={viewer} onClose={() => setViewer(null)} onChangeIndex={(index) => setViewer((current) => current ? { ...current, index } : current)} onRemix={onRemix} remixingId={remixingId} />,
+        document.body,
+      ) : null}
     </div>
   );
 }
@@ -661,7 +666,7 @@ function MediaViewer({
   viewer: MediaViewerState | null;
   onClose: () => void;
   onChangeIndex: (index: number) => void;
-  onRemix: (item: FeedItem) => void;
+  onRemix: (item: FeedItem, sourceMediaUrl?: string) => void;
   remixingId: number | null;
 }) {
   if (!viewer) return null;
@@ -672,7 +677,7 @@ function MediaViewer({
   const remixing = remixingId === viewer.item.id;
 
   return (
-    <div className="apix-media-viewer fixed inset-0 z-[80] grid bg-black/92 text-white backdrop-blur-xl" role="dialog" aria-modal="true">
+    <div className="apix-media-viewer fixed inset-0 z-[1100] grid bg-black/92 text-white backdrop-blur-xl" role="dialog" aria-modal="true">
       <button type="button" className="absolute inset-0 cursor-zoom-out" aria-label="Закрыть просмотр" onClick={onClose} />
       <div className="relative z-10 grid min-h-0 grid-rows-[auto_1fr_auto] p-2 pt-[max(8px,env(safe-area-inset-top))]">
         <div className="flex items-center justify-between gap-2 rounded-2xl bg-white/8 px-2 py-1.5 backdrop-blur">
@@ -717,7 +722,7 @@ function MediaViewer({
               ))}
             </div>
           ) : null}
-          <Button className="min-h-10 rounded-xl" disabled={remixing} onClick={() => onRemix(viewer.item)}>
+          <Button className="min-h-10 rounded-xl" disabled={remixing} onClick={() => onRemix(viewer.item, url)}>
             <Repeat2 className={cn("size-4", remixing && "animate-spin")} /> {remixing ? "Запуск повтора" : "Повторить эту работу"}
           </Button>
         </div>

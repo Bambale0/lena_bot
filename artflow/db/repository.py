@@ -2693,13 +2693,19 @@ async def update_image_session_references(
     image_session_id: int,
     reference_file_ids: list[str],
     mode: str | None = None,
+    *,
+    reference_urls: list[str] | None = None,
 ) -> None:
     normalized_reference_file_ids = [item for item in reference_file_ids if item]
+    normalized_reference_urls = list(dict.fromkeys(
+        item.strip() for item in (reference_urls or []) if isinstance(item, str) and item.strip()
+    ))
     lead_reference_file_id = normalized_reference_file_ids[0] if normalized_reference_file_ids else None
     values = {
         "reference_file_id": lead_reference_file_id,
         "reference_file_ids": json.dumps(normalized_reference_file_ids, ensure_ascii=True) if normalized_reference_file_ids else None,
-        "reference_url": None,
+        "reference_url": normalized_reference_urls[0] if normalized_reference_urls else None,
+        "reference_urls": json.dumps(normalized_reference_urls, ensure_ascii=True) if normalized_reference_urls else None,
         "updated_at": func.now(),
     }
     if mode:

@@ -281,3 +281,153 @@ async def test_unauthenticated_http_requests_cannot_read_or_mutate_sessions(loca
     assert saved.status == ImageSessionStatus.active
     assert local_session.sync.scalars(select(ImageSession)).all() == [saved]
     assert local_session.sync.scalars(select(Generation)).all() == []
+
+
+@pytest.fixture
+async def authenticated_session_client(local_session):
+    app = FastAPI()
+    app.include_router(web_sessions.router, prefix="/api/web")
+
+    async def isolated_session():
+        yield local_session
+
+    app.dependency_overrides[web_sessions.get_session] = isolated_session
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test",
+        headers={"X-Web-Auth-Token": create_web_auth_token(4200)},
+    ) as client:
+        yield client
+
+
+@pytest.mark.parametrize("model,limit", [
+    ("nano-banana-pro", 4),
+    ("nano-banana-pro-vip", 14),
+    ("qwen/image-edit", 1),
+    ("midjourney-blend", 5),
+])
+@pytest.mark.parametrize("layout", ["plural_only", "extra_scalar"])
+async def test_session_reference_limit_refuses_before_archiving_existing_series(
+    local_session, authenticated_session_client, model, limit, layout,
+):
+    saved = await _legacy_session(local_session, provenance="user_supplied")
+    foreign = await _legacy_session(local_session, user_id=99)
+    saved.reference_urls = json.dumps([saved.reference_url, "https://example.test/old-second.jpg"])
+    await local_session.commit()
+    original = {column.name: getattr(saved, column.name) for column in ImageSession.__table__.columns}
+    refs = [f"https://example.test/new-{index}.jpg" for index in range(limit + 1)]
+    body = {
+        "model": f" {model} ", "mode": "image", "base_prompt": OWN_PROMPT,
+        "reference_urls": refs if layout == "plural_only" else refs[1:],
+    }
+    if layout == "extra_scalar":
+        body["reference_url"] = f" {refs[0]} "
+
+    response = await authenticated_session_client.post("/api/web/image-sessions", json=body)
+
+    assert response.status_code == 422, response.text
+    assert str(limit) in response.json()["error"]
+    await local_session.refresh(saved)
+    assert {column.name: getattr(saved, column.name) for column in ImageSession.__table__.columns} == original
+    assert foreign.status == ImageSessionStatus.active
+    assert local_session.sync.scalars(select(ImageSession)).all() == [saved, foreign]
+    active = await authenticated_session_client.get("/api/web/image-sessions/active")
+    assert active.json()["data"]["id"] == saved.id
+    assert active.json()["data"]["reference_urls"] == json.loads(saved.reference_urls)
+    assert local_session.sync.get(User, 42).credits == 100
+    assert local_session.sync.scalars(select(Generation)).all() == []
+
+
+@pytest.mark.parametrize("model,limit", [
+    ("nano-banana-pro", 4),
+    ("nano-banana-pro-vip", 14),
+    ("qwen/image-edit", 1),
+    ("midjourney-blend", 5),
+])
+async def test_session_reference_limit_counts_unique_trimmed_inputs_and_preserves_order(
+    local_session, authenticated_session_client, model, limit,
+):
+    saved = await _legacy_session(local_session)
+    refs = [f"https://example.test/new-{index}.jpg" for index in range(limit)]
+    response = await authenticated_session_client.post("/api/web/image-sessions", json={
+        "model": model, "mode": "image", "base_prompt": OWN_PROMPT,
+        "reference_url": f" {refs[0]} ",
+        "reference_urls": [f" {refs[0]} ", *refs, "", "  "],
+    })
+
+    assert response.status_code == 200, response.text
+    payload = response.json()["data"]
+    assert payload["reference_url"] == refs[0]
+    assert payload["reference_urls"] == refs
+    assert payload["base_prompt"] == OWN_PROMPT
+    created = local_session.sync.get(ImageSession, payload["id"])
+    assert created.model == model
+    assert json.loads(created.reference_urls) == refs
+    assert created.status == ImageSessionStatus.active
+    assert saved.status == ImageSessionStatus.archived
+    assert local_session.sync.get(User, 42).credits == 100
+    assert local_session.sync.scalars(select(Generation)).all() == []
+
+
+@pytest.mark.parametrize("references,expected", [
+    ({"reference_url": " https://example.test/legacy.jpg "}, ["https://example.test/legacy.jpg"]),
+    ({}, []),
+    ({"reference_url": "  ", "reference_urls": ["", "  "]}, []),
+])
+async def test_session_reference_guard_preserves_scalar_input_and_empty_edit_drafts(
+    local_session, authenticated_session_client, references, expected,
+):
+    response = await authenticated_session_client.post("/api/web/image-sessions", json={
+        "model": "gpt-image-2-image-to-image", "mode": "image", "base_prompt": OWN_PROMPT,
+        **references,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["reference_urls"] == expected
+    assert response.json()["data"]["reference_url"] == (expected[0] if expected else None)
+    assert local_session.sync.get(User, 42).credits == 100
+    assert local_session.sync.scalars(select(Generation)).all() == []
+
+
+@pytest.mark.parametrize("duplicate_lead", [False, True])
+async def test_legacy_saved_scalar_plural_row_matches_owner_restore_and_provider(local_session, monkeypatch, duplicate_lead):
+    from unittest.mock import AsyncMock
+
+    import httpx
+
+    from api import image_service, nexus_image_adapter
+    from api.nexusapi_client import NexusApiClient
+    from api.repeat_runtime import _urls_from_image_session
+    from bot.handlers import image_gen
+
+    refs = [f"https://example.test/legacy-{i}.jpg" for i in range(3)]
+    row = ImageSession(
+        user_id=42, model="nano-banana-pro", mode="image", aspect_ratio="9:16", quality="2K", count=1,
+        base_prompt=OWN_PROMPT, last_prompt=OWN_PROMPT, prompt_provenance="user_supplied",
+        reference_url=refs[0], reference_urls=json.dumps(refs if duplicate_lead else refs[1:]),
+        status=ImageSessionStatus.active,
+    )
+    # Save the independent legacy/imported columns directly: today's constructor
+    # already normalizes this shape and would mask the reader regression.
+    local_session.add(row)
+    await local_session.commit()
+    stored = await repo.get_image_session(local_session, row.id, 42)
+    owner = local_session.sync.get(User, 42)
+    restored = await web_sessions.active_image_session(local_session, owner)
+    assert restored["data"]["reference_urls"] == refs
+    assert _urls_from_image_session(stored) == refs
+    assert await repo.get_image_session(local_session, row.id, 99) is None
+    posts = []
+
+    def capture(request):
+        assert request.method == "POST"
+        assert str(request.url) == "https://nexus.test/generate"
+        posts.append(json.loads(request.content))
+        return httpx.Response(200, json={"task_id": "synthetic-task", "status": "pending"})
+
+    async with httpx.AsyncClient(base_url="https://nexus.test", transport=httpx.MockTransport(capture)) as http:
+        client = NexusApiClient(api_key="synthetic-test-only", base_url="https://nexus.test", client=http)
+        monkeypatch.setattr(nexus_image_adapter, "NexusApiClient", lambda: client)
+        resolved = await image_gen._session_reference_url(AsyncMock(), stored)
+        await image_service.generate_image(image_service.ImageModel.NANO_BANANA_PRO, OWN_PROMPT, image_url=resolved)
+    assert posts[0]["params"]["image_urls"] == refs
+    assert local_session.sync.get(User, 42).credits == 100
+    assert local_session.sync.scalars(select(Generation)).all() == []

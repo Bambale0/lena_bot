@@ -22,6 +22,8 @@ from core.gemini_omni import (
     validate_gemini_omni_media_slots,
 )
 
+SEEDANCE_MINI_MAX_IMAGE_REFS = 9
+
 
 class KieMediaType(StrEnum):
     IMAGE = "image"
@@ -33,6 +35,7 @@ class KieReferenceType(StrEnum):
     SINGLE = "single"
     LIST = "list"
     FIRST_LAST = "first_last"
+    SEEDANCE_MINI = "seedance_mini"
     KLING_MOTION = "kling_motion"
     GEMINI_OMNI = "gemini_omni"
 
@@ -562,12 +565,11 @@ VIDEO_SPECS: dict[str, KieModelSpec] = {
         reference_type=KieReferenceType.LIST,
         param_builder=_seedance_params,
     ),
-        "bytedance/seedance-2-mini": KieModelSpec(
+    "bytedance/seedance-2-mini": KieModelSpec(
         model="bytedance/seedance-2-mini",
         media_type=KieMediaType.VIDEO,
         supported_modes=("text", "image"),
-        reference_field="first_frame_url",
-        reference_type=KieReferenceType.FIRST_LAST,
+        reference_type=KieReferenceType.SEEDANCE_MINI,
         param_builder=_seedance_mini_params,
     ),
 "grok-imagine/text-to-video": KieModelSpec(
@@ -720,6 +722,27 @@ def build_kie_input(
     elif spec.reference_type == KieReferenceType.LIST and spec.reference_field:
         if urls:
             inp[spec.reference_field] = urls
+    elif spec.reference_type == KieReferenceType.SEEDANCE_MINI:
+        # A lone image keeps the existing first-frame behavior. Multiple images,
+        # or an image alongside video/audio, use the mutually exclusive reference
+        # scenario instead: https://docs.kie.ai/market/bytedance/seedance-2-mini
+        if len(urls) > SEEDANCE_MINI_MAX_IMAGE_REFS:
+            raise ValueError(f"Seedance Mini supports at most {SEEDANCE_MINI_MAX_IMAGE_REFS} reference images")
+        multimodal = len(urls) > 1 or bool(
+            inp.get("reference_video_urls") or inp.get("reference_audio_urls")
+        )
+        last_frame = p.get("last_frame_url")
+        if last_frame and multimodal:
+            raise ValueError("Seedance frame-to-video and multimodal references are mutually exclusive")
+        if last_frame and not urls:
+            raise ValueError("Seedance last_frame_url requires a first-frame image")
+        if urls:
+            if multimodal:
+                inp["reference_image_urls"] = urls
+            else:
+                inp["first_frame_url"] = urls[0]
+        if last_frame:
+            inp["last_frame_url"] = last_frame
     elif spec.reference_type == KieReferenceType.FIRST_LAST:
         if spec.reference_field == "image_urls":
             image_urls = list(urls)

@@ -12,9 +12,105 @@ class FeedRemixUnavailable(ValueError):
     """A personalized repeat cannot be grounded in applicable public media."""
 
 
+_LEGACY_SOURCE_FIRST_PROMPT = (
+    "Edit the supplied public source media. Preserve its visible composition, "
+    "style and scene except for the requested changes. "
+    "The source is the first image or the source video. "
+    "Use additional references for the user's appearance or object."
+)
+_USER_FIRST_SOURCE_LAST_PROMPT = (
+    "Edit the supplied public source media. Preserve its visible composition, "
+    "style and scene except for the requested changes. "
+    "The source is the final image or the source video. "
+    "Use preceding image references for the user's appearance or object."
+)
+FEED_REMIX_CONTEXT_VERSION = 2
+FEED_IMAGE_REMIX_CONTEXT_VERSION = 3
+
+_IMAGE_IDENTITY_ROLES = (
+    "All images preceding the final image are the user's identity references. "
+    "Use ALL of them as the EXCLUSIVE source of the user's face and identity. "
+    "The final image is public scene reference only: use its style, theme, setting and lighting. "
+    "Do not copy, retain, average or blend the author's face or identity from the final image. "
+    "The user's identity takes priority over resemblance to the source scene."
+)
+_IMAGE_VARIATION_PROMPT = (
+    "Create a new image inspired by the public scene. "
+    "Use a new pose, framing and composition unless the user's requested changes specify otherwise. "
+    + _IMAGE_IDENTITY_ROLES
+)
+_IMAGE_SCENE_VARIATION_PROMPT = (
+    "Create a new image inspired by the final public scene image: its style, theme, setting and lighting. "
+    "Use a new pose, framing and composition unless the user's requested changes specify otherwise. "
+    "No separate user identity references are supplied."
+)
+_IMAGE_EDIT_PROMPT = (
+    "Edit the public scene image. Preserve its composition except for the requested changes. "
+    + _IMAGE_IDENTITY_ROLES
+)
+_IMAGE_SCENE_EDIT_PROMPT = (
+    "Edit the final public scene image. Preserve its composition and subjects except for the requested changes. "
+    "No separate user identity references are supplied."
+)
+_IMAGE_HEADERS = {
+    "variation": _IMAGE_VARIATION_PROMPT,
+    "scene_variation": _IMAGE_SCENE_VARIATION_PROMPT,
+    "identity_edit": _IMAGE_EDIT_PROMPT,
+    "scene_edit": _IMAGE_SCENE_EDIT_PROMPT,
+}
+
+
+def owned_generation_prompt_is_visible(generation, user_id: int) -> bool:
+    """Affirmative recipe permission; malformed metadata never grants access."""
+    import json
+
+    if (generation is None or getattr(generation, "user_id", None) != user_id
+            or getattr(generation, "source_feed_gen_id", None)):
+        return False
+    params = getattr(generation, "input_params", None)
+    if params is None:
+        return True
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except (TypeError, ValueError):
+            return False
+    return isinstance(params, dict) and not params.get("hidden_prompt")
+
+
+def build_feed_image_prompt(
+    change_request: str = "", *, has_user_references: bool, has_source_media: bool,
+    fixed_composition: bool = False,
+) -> str:
+    """Image-only semantic roles; the provider has no pixel-level identity guarantee."""
+    if not has_source_media:
+        raise FeedRemixUnavailable("Для повтора нужно доступное исходное фото из ленты.")
+    if fixed_composition:
+        header = _IMAGE_EDIT_PROMPT if has_user_references else _IMAGE_SCENE_EDIT_PROMPT
+    else:
+        header = _IMAGE_VARIATION_PROMPT if has_user_references else _IMAGE_SCENE_VARIATION_PROMPT
+    change = str(change_request or "").strip()
+    return f"{header}\n\n{change}" if change else header
+
+
+def build_owned_feed_image_prompt(source_prompt: str, change_request: str, *, has_user_references: bool) -> str:
+    """Only callers with affirmative server-authenticated recipe permission may use this."""
+    prompt = str(source_prompt or "").strip()
+    if has_user_references:
+        prompt += (
+            "\n\nAll supplied images are the user's identity references. "
+            "Use ALL of them as the EXCLUSIVE source of face and identity. "
+            "The user's identity takes priority over any person described in the scenario."
+        )
+    change = str(change_request or "").strip()
+    return f"{prompt}\n\n{change}" if change else prompt
+
+
+
 def order_feed_image_references(
     source_url: str | None,
     requested_refs: list[str],
+    *, source_urls: list[str] | None = None,
 ) -> list[str]:
     """Put reader-owned identity refs before the public scene reference.
 
@@ -23,10 +119,11 @@ def order_feed_image_references(
     must not displace a reader's uploaded appearance from that position.
     """
     source = str(source_url or "").strip()
+    known_sources = set(source_urls or []) | {source}
     user_refs = [
         str(url).strip()
         for url in requested_refs
-        if str(url or "").strip() and str(url).strip() != source
+        if str(url or "").strip() and str(url).strip() not in known_sources
     ]
     return list(dict.fromkeys([*user_refs, *([source] if source else [])]))
 
@@ -48,12 +145,7 @@ def build_feed_remix_prompt(
 
     # Never include source_prompt in this branch, including as a quoted string,
     # hidden system instruction, translated summary, or delimiter-wrapped text.
-    prompt = (
-        "Edit the supplied public source media. Preserve its visible composition, "
-        "style and scene except for the requested changes. "
-        "The source is the final image or the source video. "
-        "Use preceding image references for the user's appearance or object."
-    )
+    prompt = _USER_FIRST_SOURCE_LAST_PROMPT
     return f"{prompt}\n\n{change}" if change else prompt
 
 
@@ -102,10 +194,45 @@ FEED_REMIX_CONTEXT_KEY = "feed_remix_context"
 
 def feed_remix_context(source_generation_id: int, safe_prompt: str) -> dict:
     """Call only after the prompt has been rebuilt without protected author text."""
-    return {"version": 1, "source_generation_id": source_generation_id, "prompt": safe_prompt}
+    return {
+        "version": FEED_REMIX_CONTEXT_VERSION,
+        "source_generation_id": source_generation_id,
+        "prompt": safe_prompt,
+    }
 
 
-def trusted_feed_prompt(generation, *, user_id: int, source_generation_id: int) -> str | None:
+def feed_image_remix_context(
+    source_generation_id: int, safe_prompt: str, *, source_image_url: str | None = None,
+    scene_generation_id: int | None = None,
+) -> dict:
+    for family, header in _IMAGE_HEADERS.items():
+        if safe_prompt == header or safe_prompt.startswith(header + "\n\n"):
+            return {
+                "version": FEED_IMAGE_REMIX_CONTEXT_VERSION,
+                "source_generation_id": source_generation_id,
+                "prompt": safe_prompt,
+                "header_family": family,
+                **({
+                    "source_image_url": source_image_url,
+                    "scene_generation_id": scene_generation_id or source_generation_id,
+                } if source_image_url else {}),
+            }
+    return feed_remix_context(source_generation_id, safe_prompt)
+
+
+def _migrate_trusted_feed_prompt(version: int, prompt: str) -> str:
+    """Align authenticated v1 prompts with the v2 user-first reference order."""
+    if version != 1:
+        return prompt
+    if prompt == _LEGACY_SOURCE_FIRST_PROMPT:
+        return _USER_FIRST_SOURCE_LAST_PROMPT
+    legacy_prefix = f"{_LEGACY_SOURCE_FIRST_PROMPT}\n"
+    if prompt.startswith(legacy_prefix):
+        return f"{_USER_FIRST_SOURCE_LAST_PROMPT}\n{prompt[len(legacy_prefix):]}"
+    return prompt
+
+
+def _trusted_feed_context(generation, *, user_id: int, source_generation_id: int) -> dict | None:
     """Read server-written provenance bound to this owner, lineage and prompt."""
     import json
 
@@ -125,14 +252,70 @@ def trusted_feed_prompt(generation, *, user_id: int, source_generation_id: int) 
     if not isinstance(context, dict):
         return None
     prompt = context.get("prompt")
+    version = context.get("version")
     if (
-        context.get("version") != 1
+        type(version) is not int
+        or version not in (1, FEED_REMIX_CONTEXT_VERSION, FEED_IMAGE_REMIX_CONTEXT_VERSION)
+        or type(context.get("source_generation_id")) is not int
         or context.get("source_generation_id") != source_generation_id
         or not isinstance(prompt, str) or not prompt.strip()
         or prompt != getattr(generation, "prompt", None)
     ):
         return None
+    if version == FEED_IMAGE_REMIX_CONTEXT_VERSION:
+        family = context.get("header_family")
+        header = _IMAGE_HEADERS.get(family) if isinstance(family, str) else None
+        if header is None or not (prompt == header or prompt.startswith(header + "\n\n")):
+            return None
+        if "source_image_url" in context and (
+            not isinstance(context["source_image_url"], str) or not context["source_image_url"].strip()
+            or type(context.get("scene_generation_id")) is not int
+            or context["scene_generation_id"] <= 0
+        ):
+            return None
+    return context
+
+
+def trusted_feed_prompt(generation, *, user_id: int, source_generation_id: int) -> str | None:
+    """Existing video context behavior; image v3 must not enter the video path."""
+    context = _trusted_feed_context(generation, user_id=user_id, source_generation_id=source_generation_id)
+    if context is None or context["version"] == FEED_IMAGE_REMIX_CONTEXT_VERSION:
+        return None
+    return _migrate_trusted_feed_prompt(context["version"], context["prompt"])
+
+
+def trusted_feed_image_prompt(
+    generation, *, user_id: int, source_generation_id: int,
+    has_user_references: bool, fixed_composition: bool = False,
+) -> str | None:
+    """Replace only a complete known machine header; preserve suffix bytes exactly."""
+    context = _trusted_feed_context(generation, user_id=user_id, source_generation_id=source_generation_id)
+    if context is None:
+        return None
+    prompt = context["prompt"]
+    known_headers = (
+        [_IMAGE_HEADERS[context["header_family"]]]
+        if context["version"] == FEED_IMAGE_REMIX_CONTEXT_VERSION
+        else [_LEGACY_SOURCE_FIRST_PROMPT, _USER_FIRST_SOURCE_LAST_PROMPT]
+    )
+    for header in known_headers:
+        if prompt == header or prompt.startswith(header + "\n\n"):
+            current_header = build_feed_image_prompt(
+                has_user_references=has_user_references, has_source_media=True,
+                fixed_composition=fixed_composition,
+            )
+            return current_header + prompt[len(header):]
     return prompt
+
+
+def trusted_feed_image_scene(
+    generation, *, user_id: int, source_generation_id: int,
+) -> tuple[int, str] | None:
+    """Read scene provenance; callers must authenticate and validate that scene row."""
+    context = _trusted_feed_context(generation, user_id=user_id, source_generation_id=source_generation_id)
+    if context is None or context["version"] != FEED_IMAGE_REMIX_CONTEXT_VERSION or "source_image_url" not in context:
+        return None
+    return context["scene_generation_id"], context["source_image_url"]
 
 
 def legacy_feed_edit_unavailable() -> FeedRemixUnavailable:

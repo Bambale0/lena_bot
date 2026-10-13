@@ -441,12 +441,16 @@ async def _launch_in_session(
     from bot.handlers import image_gen as legacy_image_gen
 
     data = await state.get_data()
-    reference_url = await legacy_image_gen._session_reference_url(
-        bot,
-        image_session,
-        prefer_last_result=False,
-        state=state,
-    )
+    try:
+        reference_url = await legacy_image_gen._session_reference_url(
+            bot,
+            image_session,
+            prefer_last_result=False,
+            state=state,
+        )
+    except legacy_image_gen.ImageReferenceUnavailable as exc:
+        await source_message.answer(str(exc))
+        return
     current_mode = str(getattr(image_session, "mode", None) or "text")
     current_mode = await legacy_image_gen._promote_reference_mode_if_needed(
         session=session,

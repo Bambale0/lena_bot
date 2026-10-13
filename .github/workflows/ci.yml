@@ -141,6 +141,8 @@ jobs:
             bot/handlers/video_prompt.py \
             bot/handlers/video_gen.py \
             bot/utils/generation_reference.py \
+            bot/utils/feed_media.py \
+            api/feed_media_viewer.py \
             tests/test_generation_task_reference.py \
             bot/handlers/video_references.py \
             scripts/check_provider_contract_coverage.py \
@@ -154,6 +156,9 @@ jobs:
             tests/test_admin_main_menu.py \
             tests/test_nexusapi_client.py \
             tests/test_nexus_image_migration.py \
+            tests/test_nano_banana_pro_reference_transport.py \
+            tests/test_feed_repeat_identity_contract.py \
+            tests/test_feed_output_binding.py \
             tests/test_nexus_admin_pricing.py \
             tests/test_referral_commission_defaults.py \
             tests/test_stars_payment.py \
@@ -179,6 +184,7 @@ jobs:
             tests/test_bot_prompt_and_regen_confirmation.py \
             tests/test_feed_picker_reference_limits.py \
             tests/test_feed_repeat_snapshot_security.py \
+            tests/test_feed_input_reference_privacy.py \
             tests/test_prompt_privacy.py \
             tests/test_realtime.py \
             tests/test_feed_session_prompt_security.py \
@@ -189,6 +195,7 @@ jobs:
             tests/test_repeat_marketplace_multiple_references.py \
             tests/test_feed.py \
             tests/test_safe_image_repeat.py \
+            tests/test_restored_repeat_reference_limits.py \
             tests/test_repeat_callback_guard.py \
             tests/test_feed_checkout_options.py \
             api/web/generations.py \
@@ -223,6 +230,9 @@ jobs:
             tests/test_admin_main_menu.py \
             tests/test_nexusapi_client.py \
             tests/test_nexus_image_migration.py \
+            tests/test_nano_banana_pro_reference_transport.py \
+            tests/test_feed_repeat_identity_contract.py \
+            tests/test_feed_output_binding.py \
             tests/test_nano_banana21_routing.py \
             tests/test_nano_banana21_control_plane.py \
             tests/test_nano_banana21_recovery.py \
@@ -265,6 +275,7 @@ jobs:
             tests/test_bot_prompt_and_regen_confirmation.py \
             tests/test_feed_picker_reference_limits.py \
             tests/test_feed_repeat_snapshot_security.py \
+            tests/test_feed_input_reference_privacy.py \
             tests/test_prompt_privacy.py \
             tests/test_realtime.py \
             tests/test_feed_session_prompt_security.py \
@@ -275,6 +286,7 @@ jobs:
             tests/test_repeat_marketplace_multiple_references.py \
             tests/test_feed.py \
             tests/test_safe_image_repeat.py \
+            tests/test_restored_repeat_reference_limits.py \
             tests/test_repeat_callback_guard.py \
             tests/test_feed_checkout_options.py \
             tests/test_provider_contract_catalog.py \

@@ -130,6 +130,8 @@ async def test_begin_repeat_preserves_original_refs_and_waits_for_user() -> None
             call=call,
             state=state,
             bot=AsyncMock(),
+            session=AsyncMock(),
+            db_user=SimpleNamespace(id=42),
             generation=generation,
             source_session=source_session,
             reuse_session=True,
@@ -178,7 +180,9 @@ async def test_repeat_ratio_can_be_changed_before_launch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_collect_repeat_photos_appends_until_provider_limit() -> None:
+async def test_collect_repeat_photos_appends_until_provider_limit(monkeypatch) -> None:
+    monkeypatch.setattr(repeat_references.image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
+    monkeypatch.setitem(repeat_references.IMAGE_CAPS, "test/multi-ref", {"max_refs": 3})
     state = FakeState(
         {
             "repeat_base_reference_urls": ["https://example.test/original.jpg"],
@@ -197,23 +201,24 @@ async def test_collect_repeat_photos_appends_until_provider_limit() -> None:
     )
 
     with patch.object(repeat_references.image_gen, "get_image_model_label", return_value="Test Model"):
-        await repeat_references._collect_repeat_reference(message, state)
+        await repeat_references._collect_repeat_reference(message, state, AsyncMock(), SimpleNamespace(id=42), AsyncMock())
 
     assert state.data["repeat_new_reference_file_ids"] == ["new-ref-1"]
     message.answer.assert_awaited_once()
 
     message.photo = [SimpleNamespace(file_id="new-ref-2", file_size=100)]
     with patch.object(repeat_references.image_gen, "get_image_model_label", return_value="Test Model"):
-        await repeat_references._collect_repeat_reference(message, state)
+        await repeat_references._collect_repeat_reference(message, state, AsyncMock(), SimpleNamespace(id=42), AsyncMock())
     assert state.data["repeat_new_reference_file_ids"] == ["new-ref-1", "new-ref-2"]
 
     message.photo = [SimpleNamespace(file_id="overflow", file_size=100)]
-    await repeat_references._collect_repeat_reference(message, state)
+    await repeat_references._collect_repeat_reference(message, state, AsyncMock(), SimpleNamespace(id=42), AsyncMock())
     assert state.data["repeat_new_reference_file_ids"] == ["new-ref-1", "new-ref-2"]
 
 
 @pytest.mark.asyncio
-async def test_run_repeat_combines_original_and_new_references() -> None:
+async def test_run_repeat_combines_original_and_new_references(monkeypatch) -> None:
+    monkeypatch.setitem(repeat_references.IMAGE_CAPS, "test/multi-ref", {"max_refs": 5})
     state = FakeState(
         {
             "repeat_generation_id": 77,
@@ -244,7 +249,9 @@ async def test_run_repeat_combines_original_and_new_references() -> None:
     with patch.object(
         repeat_references.repo,
         "get_generation_by_id",
-        AsyncMock(return_value=generation),
+        AsyncMock(side_effect=lambda _session, gen_id: generation if gen_id == 77 else SimpleNamespace(
+            id=500, user_id=42, source_feed_gen_id=None, input_params=None,
+        )),
     ), patch.object(
         repeat_references.repo,
         "create_image_session",

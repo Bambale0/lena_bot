@@ -85,7 +85,7 @@ def test_shared_feed_link_hydrates_the_exact_generation_before_rendering_feed() 
     assert 'startTarget?.kind === "feed"' in api
     assert "const requestedFeedId = Number(startTarget.value)" in api
     assert "await this.getPublicFeedItem(requestedFeedId, signal)" in api
-    assert "fetch(`/api/web/feed/${id}`" in api
+    assert "this.request<unknown>(`/feed/${id}`, {}, signal)" in api
     assert "feed = [exactItem, ...feed.filter((item) => item.id !== exactItem.id)]" in api
     assert "feed = [alreadyLoaded, ...feed.filter((item) => item.id !== requestedFeedId)]" in api
 
