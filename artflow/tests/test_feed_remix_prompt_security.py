@@ -51,7 +51,7 @@ async def test_bot_uploaded_reference_never_sees_hidden_author_prompt(image_laun
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
     submitted = image_launch.generate.await_args
     assert SECRET not in submitted.args[1]
-    assert submitted.kwargs["image_url"] == [SOURCE_IMAGE, USER_IMAGE]
+    assert submitted.kwargs["image_url"] == [USER_IMAGE, SOURCE_IMAGE]
     assert SECRET not in image_launch.repo.create_generation.await_args.args[4]
 
 
@@ -245,7 +245,8 @@ async def test_api_user_inputs_never_reach_model_with_author_secret(api_launch, 
     assert SECRET not in api_launch.generate.await_args.args[1]
     assert SECRET not in api_launch.save.await_args.args[4]
     refs = api_launch.generate.await_args.kwargs["image_url"]
-    assert (refs if isinstance(refs, list) else [refs])[0] == SOURCE_IMAGE
+    expected = [SOURCE_IMAGE] if "change_request" in inputs else [USER_IMAGE, SOURCE_IMAGE]
+    assert (refs if isinstance(refs, list) else [refs]) == expected
 
 
 @pytest.mark.asyncio
@@ -338,6 +339,37 @@ def test_personalized_prompt_is_independent_of_author_secret(change, has_refs):
     second = build_feed_remix_prompt("different-private-prompt", change, has_user_references=has_refs, has_source_media=True)
     assert first == second
     assert SECRET not in first
+
+
+def test_personalized_image_prompt_matches_identity_then_scene_reference_order():
+    from core.feed_remix_prompt import build_feed_remix_prompt
+
+    prompt = build_feed_remix_prompt(SECRET, has_user_references=True, has_source_media=True)
+    assert "final image" in prompt
+    assert "preceding image references" in prompt
+    assert SECRET not in prompt
+
+
+def test_feed_image_reference_order_preserves_multiple_user_photos_and_source_scene():
+    from core.feed_remix_prompt import order_feed_image_references
+
+    assert order_feed_image_references(
+        SOURCE_IMAGE,
+        [USER_IMAGE, "https://example.test/user-two.jpg", USER_IMAGE, SOURCE_IMAGE],
+    ) == [USER_IMAGE, "https://example.test/user-two.jpg", SOURCE_IMAGE]
+    assert order_feed_image_references(SOURCE_IMAGE, []) == [SOURCE_IMAGE]
+
+
+def test_feed_image_reference_order_is_request_scoped_when_switching_source():
+    from core.feed_remix_prompt import order_feed_image_references
+
+    assert order_feed_image_references("https://example.test/first-scene.jpg", [USER_IMAGE]) == [
+        USER_IMAGE,
+        "https://example.test/first-scene.jpg",
+    ]
+    assert order_feed_image_references("https://example.test/second-scene.jpg", []) == [
+        "https://example.test/second-scene.jpg",
+    ]
 
 
 @pytest.mark.parametrize("change,has_refs", [("change clothes", False), ("", True)])

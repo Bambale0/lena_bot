@@ -63,6 +63,7 @@ from core.feed_remix_prompt import (
     generation_has_hidden_prompt_metadata,
     generation_prompt_is_protected,
     legacy_feed_edit_unavailable,
+    order_feed_image_references,
     trusted_feed_prompt,
 )
 from core.provider_routing import get_nano21_route
@@ -955,7 +956,7 @@ async def _launch_session_generation(
                 if feed_change_request:
                     prompt += "\n\n" + feed_change_request.strip()
                 feed_context = {FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, prompt)}
-                refs = list(dict.fromkeys([source_url, *refs]))
+                refs = order_feed_image_references(source_url, refs)
                 max_refs = int(IMAGE_CAPS.get(image_session.model, {}).get("max_refs", 1) or 1)
                 if len(refs) > max_refs:
                     raise FeedRemixUnavailable(

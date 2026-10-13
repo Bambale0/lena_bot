@@ -135,7 +135,7 @@ async def test_seedance_feed_source_image_uses_multimodal_without_author_text(
     if personalization == "text":
         assert "make the coat blue" in submitted.args[1]
     assert video_gen._url_list(submitted.kwargs["image_url"]) == (
-        [SOURCE_IMAGE, USER_IMAGE] if personalization == "photo" else [SOURCE_IMAGE]
+        [USER_IMAGE, SOURCE_IMAGE] if personalization == "photo" else [SOURCE_IMAGE]
     )
     assert not seedance25_adapter.is_explicit_video_edit_prompt(submitted.args[1])
     assert submitted.kwargs["reference_video_url"] is None
