@@ -293,6 +293,22 @@ def test_build_kie_input_seedance_multiref_keeps_reference_image_urls_without_al
     assert "reference_image_url" not in inp
 
 
+def test_build_kie_input_seedance_mini_serializes_only_the_first_frame_reference() -> None:
+    resolved_model, inp = build_kie_input(
+        model="bytedance/seedance-2-mini",
+        prompt="Animate this scene",
+        reference_urls=[
+            "https://example.test/user-face.jpg",
+            "https://example.test/public-feed-scene.jpg",
+        ],
+        params={"duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
+    )
+
+    assert resolved_model == "bytedance/seedance-2-mini"
+    assert inp["first_frame_url"] == "https://example.test/user-face.jpg"
+    assert "https://example.test/public-feed-scene.jpg" not in inp.values()
+
+
 def test_build_kie_input_happyhorse_multiref_keeps_image_url_alias() -> None:
     resolved_model, inp = build_kie_input(
         model="happyhorse/image-to-video",

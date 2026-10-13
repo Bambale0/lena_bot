@@ -12,6 +12,21 @@ class FeedRemixUnavailable(ValueError):
     """A personalized repeat cannot be grounded in applicable public media."""
 
 
+_LEGACY_SOURCE_FIRST_PROMPT = (
+    "Edit the supplied public source media. Preserve its visible composition, "
+    "style and scene except for the requested changes. "
+    "The source is the first image or the source video. "
+    "Use additional references for the user's appearance or object."
+)
+_USER_FIRST_SOURCE_LAST_PROMPT = (
+    "Edit the supplied public source media. Preserve its visible composition, "
+    "style and scene except for the requested changes. "
+    "The source is the final image or the source video. "
+    "Use preceding image references for the user's appearance or object."
+)
+FEED_REMIX_CONTEXT_VERSION = 2
+
+
 def order_feed_image_references(
     source_url: str | None,
     requested_refs: list[str],
@@ -48,12 +63,7 @@ def build_feed_remix_prompt(
 
     # Never include source_prompt in this branch, including as a quoted string,
     # hidden system instruction, translated summary, or delimiter-wrapped text.
-    prompt = (
-        "Edit the supplied public source media. Preserve its visible composition, "
-        "style and scene except for the requested changes. "
-        "The source is the final image or the source video. "
-        "Use preceding image references for the user's appearance or object."
-    )
+    prompt = _USER_FIRST_SOURCE_LAST_PROMPT
     return f"{prompt}\n\n{change}" if change else prompt
 
 
@@ -102,7 +112,23 @@ FEED_REMIX_CONTEXT_KEY = "feed_remix_context"
 
 def feed_remix_context(source_generation_id: int, safe_prompt: str) -> dict:
     """Call only after the prompt has been rebuilt without protected author text."""
-    return {"version": 1, "source_generation_id": source_generation_id, "prompt": safe_prompt}
+    return {
+        "version": FEED_REMIX_CONTEXT_VERSION,
+        "source_generation_id": source_generation_id,
+        "prompt": safe_prompt,
+    }
+
+
+def _migrate_trusted_feed_prompt(version: int, prompt: str) -> str:
+    """Align authenticated v1 prompts with the v2 user-first reference order."""
+    if version != 1:
+        return prompt
+    if prompt == _LEGACY_SOURCE_FIRST_PROMPT:
+        return _USER_FIRST_SOURCE_LAST_PROMPT
+    legacy_prefix = f"{_LEGACY_SOURCE_FIRST_PROMPT}\n"
+    if prompt.startswith(legacy_prefix):
+        return f"{_USER_FIRST_SOURCE_LAST_PROMPT}\n{prompt[len(legacy_prefix):]}"
+    return prompt
 
 
 def trusted_feed_prompt(generation, *, user_id: int, source_generation_id: int) -> str | None:
@@ -125,14 +151,15 @@ def trusted_feed_prompt(generation, *, user_id: int, source_generation_id: int) 
     if not isinstance(context, dict):
         return None
     prompt = context.get("prompt")
+    version = context.get("version")
     if (
-        context.get("version") != 1
+        version not in (1, FEED_REMIX_CONTEXT_VERSION)
         or context.get("source_generation_id") != source_generation_id
         or not isinstance(prompt, str) or not prompt.strip()
         or prompt != getattr(generation, "prompt", None)
     ):
         return None
-    return prompt
+    return _migrate_trusted_feed_prompt(version, prompt)
 
 
 def legacy_feed_edit_unavailable() -> FeedRemixUnavailable:

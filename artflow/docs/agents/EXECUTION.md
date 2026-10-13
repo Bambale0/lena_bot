@@ -1505,3 +1505,21 @@ Baseline: `8f5d381a059b64fff609945d0d5d1c50466e4117`; local branch `fix/feed-rem
 - The broader Telegram reference module passed `42` tests and retained one unrelated failure in `test_model_selection_opens_task_first_composer_for_any_model`; the identical missing-`db_user` failure was reproduced on a clean detached `8f5d381a` baseline.
 - Ruff and compileall passed on all changed Python implementation/test files. The focused `134`-test acceptance run had no failures; one existing AsyncMock coroutine warning remains in the ordinary-generation test. The first PR CI run exposed one additional maintained Seedance test that still asserted source-first ordering; its expectation was updated to the same user-first contract and the complete file passed locally before republishing.
 - Independent review has no remaining blocking findings after the Telegram video parity fix; final multi-reference test recheck and publication are still pending. No merge, deploy, secret, pricing, balance or historical ledger mutation was performed.
+
+
+## 2026-10-13 - Feed repeat provider-contract follow-up
+
+Baseline: deployed `main` `df57408517d7dc2dcdd5fc155a2de18fac23d709`; branch `fix/feed-repeat-provider-contracts`. No paid provider call or direct production access is permitted.
+
+### Confirmed post-release defects
+- KIE declares `bytedance/seedance-2-mini` as a `FIRST_LAST`/`first_frame_url` model and serializes only the first supplied image. Its shared UI capability incorrectly allowed nine image references. A personalized feed repeat therefore reached the Telegram/Mini App launch path as `[user image, public source]`, while the paid payload retained only the user image and discarded the scene source.
+- Feed remix context remained at version 1 after the reference-role contract changed. A real legacy v1-shaped synthetic generation carried the authenticated old prompt text saying the source was the first image; Telegram regeneration reused it with the new user-first/source-last list.
+
+### Safe correction and evidence
+1. [x] RED: Telegram Seedance Mini photo repeat proceeded to charge/provider; Mini App also accepted it. Provider contract fixture demonstrated that only `urls[0]` becomes `first_frame_url`.
+2. [x] RED: Telegram regeneration of a stored v1 source-first prompt retained the contradictory instruction.
+3. [x] GREEN: expose Seedance Mini's actual one-image limit (`max_refs=1`). Personalized feed requests requiring both identity and scene now fail before charge/provider submission on Telegram and Mini App; source-only/text-only image repeats remain supported.
+4. [x] GREEN: write new trusted contexts as v2; authenticate legacy v1 against owner, lineage and stored prompt, then migrate only the exact historical source-first base while preserving its user-authored suffix. The next generation persists v2.
+5. [x] Focused provider/feed suite green: 162 tests across security, Telegram/API Seedance repeats, KIE serialization and snapshot preservation.
+6. [x] Ruff and compileall clean. The complete maintained pytest gate passed locally with UTF-8 after deselecting only two Linux-specific checks that this Windows host cannot execute (symlink privilege and missing OpenSSL); GitHub CI remains authoritative for both. Existing AsyncMock coroutine warnings remain unchanged.
+7. [ ] Independent review and exact-SHA PR CI. No schema/migration, config, price, balance or retention change.

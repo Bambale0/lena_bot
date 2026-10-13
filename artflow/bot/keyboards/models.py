@@ -144,7 +144,10 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
         "has_resolution": True,
         "resolutions": ["480p", "720p"],
-        "max_refs": 9,
+        # KIE exposes only first_frame_url for this model. A personalized feed
+        # repeat needs both the user's reference and the public source scene,
+        # so reject that unsupported combination before charging.
+        "max_refs": 1,
         "billing_mode": "per_second",
     },
     "grok-imagine/text-to-video": {

@@ -449,7 +449,7 @@ async def test_api_personalized_repeat_persists_safe_prompt_context(api_launch):
     body = api_launch.routes.FeedRemixRequest(model="nano-banana-2", change_request="make the coat white")
     await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
     context = (api_launch.save.await_args.kwargs.get("input_params") or {}).get("feed_remix_context")
-    assert context == {"version": 1, "source_generation_id": 77, "prompt": api_launch.generate.await_args.args[1]}
+    assert context == {"version": 2, "source_generation_id": 77, "prompt": api_launch.generate.await_args.args[1]}
     assert SECRET not in context["prompt"]
 
 
@@ -473,6 +473,100 @@ async def test_bot_video_regeneration_preserves_safe_prompt_from_api(video_launc
     assert video_launch.repo.create_generation.await_args.kwargs["input_params"]["feed_remix_context"]["prompt"] == safe_prompt
 
 
+@pytest.mark.asyncio
+async def test_bot_video_regeneration_migrates_legacy_source_first_context(video_launch, monkeypatch):
+    import json
+
+    old_base = (
+        "Edit the supplied public source media. Preserve its visible composition, "
+        "style and scene except for the requested changes. "
+        "The source is the first image or the source video. "
+        "Use additional references for the user's appearance or object."
+    )
+    old_prompt = f"{old_base}\n\nmake the coat white"
+    previous = SimpleNamespace(
+        id=88, user_id=42, prompt=old_prompt, source_feed_gen_id=77,
+        model="bytedance/seedance-2",
+        input_params=json.dumps({
+            "feed_remix_context": {
+                "version": 1, "source_generation_id": 77, "prompt": old_prompt,
+            },
+        }),
+    )
+    video_launch.source.gen_type = GenerationType.image
+    video_launch.source.result_url = SOURCE_IMAGE
+    video_launch.repo.get_generation_by_id = AsyncMock(
+        side_effect=lambda _session, gen_id: previous if gen_id == 88 else video_launch.source,
+    )
+    monkeypatch.setattr("bot.handlers.genjutsu_replace.restore_result", AsyncMock(return_value=False))
+    monkeypatch.setattr(video_gen, "_video_repeat_params_for_generation", AsyncMock(return_value={
+        "image_url": USER_IMAGE, "duration": 5, "resolution": "720p", "aspect_ratio": "16:9",
+    }))
+
+    call = SimpleNamespace(data="regen:video:88", answer=AsyncMock(), message=AsyncMock())
+    await video_gen.cb_regen_video(
+        call, video_launch.kwargs["session"], video_launch.kwargs["state"],
+        video_launch.kwargs["db_user"], video_launch.kwargs["bot"],
+    )
+
+    submitted = video_launch.service.generate_video.await_args
+    assert submitted is not None
+    assert "The source is the final image or the source video." in submitted.args[1]
+    assert "The source is the first image" not in submitted.args[1]
+    assert "make the coat white" in submitted.args[1]
+    assert video_gen._url_list(submitted.kwargs["image_url"]) == [USER_IMAGE, SOURCE_IMAGE]
+    saved_context = video_launch.repo.create_generation.await_args.kwargs["input_params"]["feed_remix_context"]
+    assert saved_context["version"] == 2
+    assert saved_context["prompt"] == submitted.args[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["launch", "regen"])
+async def test_bot_seedance_mini_feed_photo_repeat_rejected_before_charge(
+    video_launch, monkeypatch, operation,
+):
+    video_launch.source.gen_type = GenerationType.image
+    video_launch.source.result_url = SOURCE_IMAGE
+    video_launch.data.update(model_key="bytedance/seedance-2-mini", mode="image")
+
+    if operation == "launch":
+        assert await video_gen._launch_video_generation_from_state(**video_launch.kwargs) is False
+    else:
+        previous = SimpleNamespace(
+            id=88, user_id=42, prompt=SECRET, source_feed_gen_id=77,
+            model="bytedance/seedance-2-mini", input_params={},
+        )
+        video_launch.repo.get_generation_by_id = AsyncMock(
+            side_effect=lambda _session, gen_id: previous if gen_id == 88 else video_launch.source,
+        )
+        monkeypatch.setattr("bot.handlers.genjutsu_replace.restore_result", AsyncMock(return_value=False))
+        monkeypatch.setattr(video_gen, "_video_repeat_params_for_generation", AsyncMock(return_value={
+            "image_url": USER_IMAGE, "duration": 5, "resolution": "720p", "aspect_ratio": "16:9",
+        }))
+        call = SimpleNamespace(data="regen:video:88", answer=AsyncMock(), message=AsyncMock())
+        await video_gen.cb_regen_video(
+            call, video_launch.kwargs["session"], video_launch.kwargs["state"],
+            video_launch.kwargs["db_user"], video_launch.kwargs["bot"],
+        )
+
+    video_launch.repo.spend_credits.assert_not_awaited()
+    video_launch.service.generate_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_seedance_mini_feed_photo_repeat_rejected_before_charge(api_launch):
+    body = api_launch.routes.FeedRemixRequest(
+        model="bytedance/seedance-2-mini", image_url=USER_IMAGE,
+    )
+
+    with pytest.raises(api_launch.routes.HTTPException) as exc_info:
+        await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+
+    assert exc_info.value.status_code == 422
+    api_launch.charge.assert_not_awaited()
+    api_launch.generate.assert_not_awaited()
+
+
 @pytest.mark.parametrize("change", ["user", "lineage", "version", "prompt", "json"])
 def test_trusted_context_rejects_wrong_owner_lineage_or_modified_prompt(change):
     from core.feed_remix_prompt import feed_remix_context, trusted_feed_prompt
@@ -484,7 +578,7 @@ def test_trusted_context_rejects_wrong_owner_lineage_or_modified_prompt(change):
     elif change == "lineage":
         generation.source_feed_gen_id = 88
     elif change == "version":
-        generation.input_params["feed_remix_context"]["version"] = 2
+        generation.input_params["feed_remix_context"]["version"] = 3
     elif change == "prompt":
         generation.prompt = SECRET
     else:
