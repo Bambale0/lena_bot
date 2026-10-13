@@ -508,7 +508,7 @@ function FeedScreen({
                         </button>
                       </div>
 
-                      <div className="absolute inset-x-0 bottom-0 z-20 grid gap-1.5 px-2 pb-2 pt-10 text-white">
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 grid gap-1.5 px-2 pb-2 pt-10 text-white">
                         <div className="flex items-center justify-between gap-1">
                           <span className="flex min-w-0 items-center gap-1.5">
                             <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-white/20">
@@ -527,7 +527,7 @@ function FeedScreen({
                           <span className="min-w-0 max-w-full justify-self-start truncate rounded-full bg-black/35 px-2 py-1 text-[8px] text-white/85 backdrop-blur">{item.model}</span>
                           <button
                             type="button"
-                            className="apix-focus-ring inline-flex min-h-7 w-full min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full bg-primary/95 px-2 text-[9px] font-bold leading-none text-primary-foreground shadow-md shadow-black/20 active:scale-[0.98] disabled:opacity-75"
+                            className="apix-focus-ring pointer-events-auto inline-flex min-h-7 w-full min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full bg-primary/95 px-2 text-[9px] font-bold leading-none text-primary-foreground shadow-md shadow-black/20 active:scale-[0.98] disabled:opacity-75"
                             disabled={remixing}
                             onClick={(event) => {
                               event.stopPropagation();

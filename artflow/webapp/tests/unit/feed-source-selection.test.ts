@@ -185,7 +185,7 @@ test("all shared-link journey fixtures satisfy the production v1 hydration clien
   await assert.rejects(client.getPublicFeedItem(99999), (error: any) => error.status === 404);
 });
 
-test("opening and closing the gallery mounts its overlay at document body", (t) => {
+test("card decoration passes pointer input to the gallery while actions stay independent", (t) => {
   const body = { nodeType: 1 };
   const previousWindow = globalThis.window, previousDocument = globalThis.document;
   Object.defineProperty(globalThis, "window", { configurable: true, writable: true, value: { location: { origin: "https://apix.example" } } });
@@ -207,13 +207,28 @@ test("opening and closing the gallery mounts its overlay at document body", (t) 
     "@/components/ui/button": { Button: "button" }, "@/components/ui/card": { Card: "card" },
     "@/features/trend-runner": {}, "@/lib/telegram": {}, "@/lib/utils": utils,
   });
+  const item = { id: 201, gen_type: "image", model: "nano-banana-2", author: "Artist QA", preview_url: "https://example.test/source.png" };
+  let repeated: unknown[] = [], liked: unknown;
   const render = () => { stateIndex = 0; return FeedScreen({
-    items: [{ id: 201, gen_type: "image", preview_url: "https://example.test/source.png" }],
-    source: "recent", loading: false, onSourceChange() {}, onRefresh() {}, onLike() {}, onRemix() {},
+    items: [item],
+    source: "recent", loading: false, onSourceChange() {}, onRefresh() {},
+    onLike(value: unknown) { liked = value; }, onRemix(...values: unknown[]) { repeated = values; },
   }); };
   const portal = (tree: any) => descendants(tree).find(node => (node as any).containerInfo === body) as any;
   const initial = render();
   assert.equal(portal(initial), undefined);
+  const footer = descendants(initial).find(node => node.type === "div"
+    && node.props?.className?.includes("bottom-0") && textOf(node).includes("Artist QA"))!;
+  assert.ok(footer.props!.className.split(" ").includes("pointer-events-none"), "Decorative metadata must not intercept cover taps");
+  const repeat = descendants(footer).find(node => node.type === "button")!;
+  assert.ok(repeat.props!.className.split(" ").includes("pointer-events-auto"), "Repeat must remain clickable inside the transparent footer");
+  const event = { stopPropagation() {} };
+  repeat.props!.onClick(event);
+  assert.deepEqual(repeated, [item, item.preview_url]);
+  assert.equal(portal(render()), undefined, "Repeat must not open the gallery");
+  descendants(initial).find(node => node.props?.["aria-label"] === "Лайк")!.props!.onClick(event);
+  assert.equal(liked, item);
+  assert.equal(portal(render()), undefined, "Like must not open the gallery");
   descendants(initial).find(node => node.props?.["aria-label"] === "Открыть внутри приложения")!.props!.onClick();
   const opened = portal(render());
   assert.ok(opened, "Gallery must escape feed/main containing and stacking contexts");
