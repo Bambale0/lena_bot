@@ -420,7 +420,7 @@ async def test_pro_existing_mixed_session_keeps_public_and_telegram_refs_through
     state, data = mutable_state()
     call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock())
     handled = await repeat_references._begin_repeat_collection(
-        call=call, state=state, bot=AsyncMock(), generation=launch.generation,
+        call=call, state=state, bot=AsyncMock(), session=launch.session, db_user=launch.user, generation=launch.generation,
         source_session=old, reuse_session=reuse, source_feed_gen_id=77 if protected else None,
     )
     assert handled is True
@@ -434,7 +434,7 @@ async def test_pro_existing_mixed_session_keeps_public_and_telegram_refs_through
     # Re-enter the real collection flow using the newly persisted session.
     monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=copied))
     await repeat_references._begin_repeat_collection(
-        call=call, state=state, bot=AsyncMock(), generation=launch.generation,
+        call=call, state=state, bot=AsyncMock(), session=launch.session, db_user=launch.user, generation=launch.generation,
         source_session=copied, reuse_session=True, source_feed_gen_id=77 if protected else None,
     )
     await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
@@ -490,7 +490,7 @@ async def test_pro_existing_mixed_overflow_never_truncates_before_paid_post(loca
     state, data = mutable_state()
     call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock())
     await repeat_references._begin_repeat_collection(
-        call=call, state=state, bot=AsyncMock(), generation=launch.generation,
+        call=call, state=state, bot=AsyncMock(), session=launch.session, db_user=launch.user, generation=launch.generation,
         source_session=old, reuse_session=False, source_feed_gen_id=None,
     )
     assert len(data["repeat_base_reference_urls"]) == 5
@@ -973,7 +973,7 @@ async def test_alias_file_references_survive_legacy_repeat_persistence(local_lau
         current = source or launch.created_sessions[-1]
         monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=current))
         await repeat_references._begin_repeat_collection(
-            call=call, state=state, bot=AsyncMock(), generation=launch.generation,
+            call=call, state=state, bot=AsyncMock(), session=launch.session, db_user=launch.user, generation=launch.generation,
             source_session=current, reuse_session=False, source_feed_gen_id=None,
         )
         await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
@@ -1263,7 +1263,7 @@ async def test_unavailable_saved_photo_never_launches_surviving_subset(local_lau
         )
     elif entrypoint == "legacy_collect":
         await repeat_references._begin_repeat_collection(
-            call=call, state=state, bot=call.bot, generation=launch.generation,
+            call=call, state=state, bot=call.bot, session=launch.session, db_user=launch.user, generation=launch.generation,
             source_session=current, reuse_session=False, source_feed_gen_id=None,
         )
     else:

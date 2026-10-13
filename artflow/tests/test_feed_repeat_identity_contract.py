@@ -791,7 +791,7 @@ async def test_legacy_alias_selection_cannot_shift_after_gallery_expiry(local_la
         assert_variation(wire[0]["body"]["params"]["prompt"])
 
 
-@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("model", [*MODELS, "midjourney-imagine", "midjourney-blend"])
 @pytest.mark.parametrize("permission", ["own", "foreign", "hidden", "derived", "malformed"])
 @pytest.mark.parametrize("personalized", [False, True])
 async def test_http_own_recipe_result_keeps_share_and_session_provenance_without_prompt_leak(local_launch, wire, monkeypatch, model, permission, personalized):
@@ -807,6 +807,13 @@ async def test_http_own_recipe_result_keeps_share_and_session_provenance_without
     launch.source.source_feed_gen_id = 55 if permission == "derived" else None
     launch.source.input_params = {"hidden_prompt": True} if permission == "hidden" else "bad-json" if permission == "malformed" else None
     generated = launch.generation
+    submitted = AsyncMock(return_value="synthetic-midjourney-task")
+    if model == "midjourney-blend":
+        launch.source.result_urls = json.dumps([SOURCE, OTHER_SOURCE])
+        monkeypatch.setattr(miniapp_routes.midjourney_service, "blend", submitted)
+        monkeypatch.setattr(miniapp_routes, "_data_uri_from_url", AsyncMock(side_effect=lambda url: "data:" + url))
+    elif model == "midjourney-imagine":
+        monkeypatch.setattr(miniapp_routes.midjourney_service, "imagine", submitted)
 
     async def persist(*args, **kwargs):
         generated.prompt = args[4]
@@ -829,9 +836,16 @@ async def test_http_own_recipe_result_keeps_share_and_session_provenance_without
     app.dependency_overrides[get_session] = lambda: launch.session
     app.dependency_overrides[get_miniapp_user] = lambda: launch.user
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/api/v1/feed/77/remix", json={
-            "model": model, **({"image_url": REFS[0], "change_request": "make the coat blue"} if personalized else {}),
-        })
+        edits = {}
+        if personalized:
+            if model == "midjourney-blend":
+                edits = {"reference_urls": REFS[:2]}
+            elif model == "midjourney-imagine" and permission != "own":
+                # Imagine has one photo slot, already occupied by the protected scene.
+                edits = {"change_request": "make the coat blue"}
+            else:
+                edits = {"image_url": REFS[0], "change_request": "make the coat blue"}
+        response = await client.post("/api/v1/feed/77/remix", json={"model": model, **edits})
         assert response.status_code == 202, response.text
         owned = permission == "own"
         # Established HTTP transport policy hides ALL stored prompts, even the owner's.
@@ -844,13 +858,17 @@ async def test_http_own_recipe_result_keeps_share_and_session_provenance_without
         if owned:
             assert OWN_RECIPE in generated.prompt
             assert current.base_prompt == generated.prompt
-            if personalized:
+            if edits.get("change_request"):
                 assert "make the coat blue" in generated.prompt
+            if personalized:
+                expected_refs = REFS[:2] if model == "midjourney-blend" else REFS[:1]
+                assert json.loads(current.reference_urls) == expected_refs
             assert prompt_core.FEED_REMIX_CONTEXT_KEY not in (generated.input_params or {})
         else:
             assert response.json()["prompt"] == ""
             if personalized:
-                assert SECRET not in str(wire[0]["body"])
+                payload = submitted.await_args if model.startswith("midjourney-") else wire[0]["body"]
+                assert SECRET not in str(payload)
         generated.status = GenerationStatus.done
         generated.result_url = "https://example.test/new-result.jpg"
         shared = await client.post("/api/v1/generations/99/share")
@@ -901,3 +919,31 @@ async def test_marketplace_source_admission_preserves_real_session_and_provider_
         repo.create_generation.assert_not_awaited()
         assert live == data
         assert wire == []
+
+
+@pytest.mark.parametrize("model,count,owns_source", [
+    ("midjourney-imagine", 2, True),
+    ("midjourney-imagine", 1, False),
+    ("midjourney-blend", 1, True),
+    ("midjourney-blend", 6, True),
+    ("midjourney-blend", 5, False),
+])
+async def test_midjourney_own_recipe_preserves_reference_caps_before_charge(local_launch, monkeypatch, model, count, owns_source):
+    launch = local_launch
+    launch.source.user_id = launch.user.id if owns_source else 100
+    body = miniapp_routes.FeedRemixRequest(
+        model=model, reference_urls=[f"https://example.test/user-{i}.jpg" for i in range(count)],
+    )
+    imagine = AsyncMock(side_effect=AssertionError("Rejected input must never submit"))
+    blend = AsyncMock(side_effect=AssertionError("Rejected input must never submit"))
+    monkeypatch.setattr(miniapp_routes.midjourney_service, "imagine", imagine)
+    monkeypatch.setattr(miniapp_routes.midjourney_service, "blend", blend)
+    for handler in [miniapp_routes.quote_feed_remix, miniapp_routes.remix_feed_post]:
+        with pytest.raises(HTTPException) as error:
+            await handler(77, body, session=launch.session, user=launch.user)
+        assert error.value.status_code == 422
+    repo.charge_image_generation.assert_not_awaited()
+    repo.create_generation.assert_not_awaited()
+    assert launch.created_sessions == []
+    imagine.assert_not_awaited()
+    blend.assert_not_awaited()

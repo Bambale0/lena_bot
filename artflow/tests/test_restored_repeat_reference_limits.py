@@ -320,7 +320,7 @@ async def test_legacy_collector_rejects_fourth_user_photo_with_protected_source(
     state = RepeatState()
     call = callback("img_session:repeat:99")
     await repeat_references._begin_repeat_collection(
-        call=call, state=state, bot=call.bot, generation=runtime.generation,
+        call=call, state=state, bot=call.bot, session=runtime.session, db_user=runtime.user, generation=runtime.generation,
         source_session=runtime.active, reuse_session=True, source_feed_gen_id=77,
     )
     await state.update_data(repeat_source_feed_gen_id=source_in_state)
@@ -410,7 +410,7 @@ async def test_legacy_collector_preserves_canonical_source_union_on_first_and_ne
     call = callback("img_session:repeat:99")
     call.message = SimpleNamespace(answer=AsyncMock())
     await repeat_references._begin_repeat_collection(
-        call=call, state=state, bot=call.bot, generation=runtime.generation,
+        call=call, state=state, bot=call.bot, session=runtime.session, db_user=runtime.user, generation=runtime.generation,
         source_session=runtime.active, reuse_session=False, source_feed_gen_id=77,
     )
     message = SimpleNamespace(photo=[SimpleNamespace(file_id="new-user-file", file_size=10)], answer=AsyncMock())
@@ -635,7 +635,7 @@ async def test_repeat_open_resolution_failure_keeps_previous_series_and_state(re
         await repeat_safe.open_repeat(call, runtime.session, state, runtime.user, call.bot)
     else:
         handled = await repeat_references._begin_repeat_collection(
-            call=call, state=state, bot=call.bot, generation=runtime.generation,
+            call=call, state=state, bot=call.bot, session=runtime.session, db_user=runtime.user, generation=runtime.generation,
             source_session=runtime.active, reuse_session=True, source_feed_gen_id=None,
         )
         assert handled is True
@@ -643,6 +643,127 @@ async def test_repeat_open_resolution_failure_keeps_previous_series_and_state(re
     assert runtime.active.status == ImageSessionStatus.active
     assert runtime.created == []
     runtime.session.commit.assert_not_awaited()
+    repo.archive_active_image_sessions.assert_not_awaited()
+    repo.charge_image_generation.assert_not_awaited()
+    runtime.provider.assert_not_awaited()
+
+
+@pytest.mark.parametrize("model", ["nano-banana-pro", "nano-banana-2", "seedream/4.5-edit"])
+@pytest.mark.parametrize("available", [False, True])
+@pytest.mark.parametrize("bound_alias", [False, True])
+async def test_clear_repeat_keeps_only_available_protected_scene(repeat_runtime, monkeypatch, model, available, bound_alias):
+    from bot.handlers import repeat_references
+
+    runtime = repeat_runtime
+    runtime.generation.model = model
+    runtime.generation.source_feed_gen_id = 77
+    from core.feed_remix_prompt import (
+        FEED_REMIX_CONTEXT_KEY,
+        build_feed_image_prompt,
+        feed_image_remix_context,
+    )
+
+    runtime.generation.prompt = build_feed_image_prompt(has_user_references=True, has_source_media=True)
+    selected = "https://example.test/second-scene.jpg"
+    runtime.generation.input_params = {FEED_REMIX_CONTEXT_KEY: feed_image_remix_context(
+        77, runtime.generation.prompt, source_image_url=selected,
+    )}
+    runtime.source.result_urls = json.dumps([SOURCE, selected])
+    source_refs = [selected]
+    if bound_alias:
+        from bot.utils.feed_media import feed_source_output_id
+        from core.config import settings
+
+        monkeypatch.setattr(settings, "WEB_PUBLIC_URL", "https://app.example.test")
+        source_refs = [selected, f"https://app.example.test/api/v1/feed/77/display.webp?index=1&output_id={feed_source_output_id(runtime.source, selected)}"]
+    state = RepeatState({
+        "repeat_generation_id": 99, "repeat_parent_generation_id": 99,
+        "repeat_source_feed_gen_id": 77, "repeat_model_key": model,
+        "repeat_prompt": runtime.generation.prompt,
+        "repeat_max_refs": repeat_references._repeat_max_refs(model),
+        "repeat_reference_required": image_gen._requires_reference_image(model),
+        "repeat_base_reference_urls": [REFS[0], *source_refs],
+        "repeat_new_reference_file_ids": ["new-user-photo"],
+        "repeat_source_reference_file_ids": ["old-user-photo"],
+        "repeat_source_reference_url": REFS[0], "repeat_mode": "image",
+    })
+    before = dict(state.data)
+    monkeypatch.setattr(repeat_references, "public_url_is_available", lambda url: available if url == selected else True)
+    call = callback("repeat_refs:clear")
+    handler = next(item for router in image_gen.router.chain_tail for item in router.callback_query.handlers if item.callback is repeat_references._repeat_refs_clear)
+    await handler.call(call, state=state, session=runtime.session, db_user=runtime.user, bot=call.bot)
+
+    if not available:
+        assert state.data == before
+        runtime.provider.assert_not_awaited()
+        repo.archive_active_image_sessions.assert_not_awaited()
+        repo.charge_image_generation.assert_not_awaited()
+        return
+    assert state.data["repeat_reference_count"] == 1
+    assert state.data["repeat_base_reference_urls"] == [selected]
+    assert state.data["repeat_new_reference_file_ids"] == []
+    assert state.data["repeat_source_reference_file_ids"] == []
+    buttons = call.message.answer.await_args.kwargs["reply_markup"].inline_keyboard
+    assert any(button.callback_data == "repeat_refs:run" for row in buttons for button in row)
+    await repeat_references._repeat_refs_run(call, runtime.session, state, runtime.user, call.bot)
+    runtime.provider.assert_awaited_once()
+    assert runtime.provider.await_args.kwargs["image_url"] == selected
+    prompt = runtime.provider.await_args.args[1]
+    assert "EXCLUSIVE source" not in prompt
+    assert runtime.source.prompt not in prompt
+    assert runtime.created[-1].mode == "image"
+
+
+@pytest.mark.parametrize("model", ["nano-banana-pro", "seedream/4.5-edit"])
+@pytest.mark.parametrize("protected", [False, True])
+async def test_run_repeat_required_reference_uses_actual_source_candidate(repeat_runtime, model, protected):
+    from bot.handlers import repeat_references
+
+    runtime = repeat_runtime
+    runtime.generation.model = model
+    runtime.generation.source_feed_gen_id = 77 if protected else None
+    runtime.generation.prompt = runtime.source.prompt if protected else "my visible prompt"
+    state = RepeatState({
+        "repeat_generation_id": 99, "repeat_parent_generation_id": 99,
+        "repeat_model_key": model, "repeat_base_reference_urls": [],
+        "repeat_new_reference_file_ids": [], "repeat_mode": "text",
+        "repeat_reference_required": image_gen._requires_reference_image(model),
+    })
+    call = callback("repeat_refs:run")
+    await repeat_references._repeat_refs_run(call, runtime.session, state, runtime.user, call.bot)
+    if not protected and image_gen._requires_reference_image(model):
+        assert runtime.created == []
+        runtime.provider.assert_not_awaited()
+        repo.charge_image_generation.assert_not_awaited()
+    else:
+        runtime.provider.assert_awaited_once()
+        assert runtime.provider.await_args.kwargs["image_url"] == ([SOURCE] if protected else None)
+        assert runtime.created[-1].mode == ("image" if protected else "text")
+
+
+@pytest.mark.parametrize("available", [False, True])
+async def test_repeat_collection_initial_count_includes_protected_scene(repeat_runtime, monkeypatch, available):
+    from bot.handlers import repeat_references
+
+    runtime = repeat_runtime
+    runtime.generation.model = "seedream/4.5-edit"
+    runtime.generation.source_feed_gen_id = 77
+    runtime.generation.prompt = runtime.source.prompt
+    runtime.generation.image_session_id = runtime.active.id
+    runtime.active.reference_urls = None
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=runtime.active))
+    monkeypatch.setattr(repeat_references, "public_url_is_available", lambda url: available)
+    state = RepeatState({"image_session_id": runtime.active.id, "accepted": "previous state"})
+    before = dict(state.data)
+    call = callback("regen:image:99")
+    await repeat_references._regen_repeat_interceptor(call, runtime.session, state, runtime.user, call.bot)
+    if available:
+        assert state.data["repeat_reference_count"] == 1
+        buttons = call.message.answer.await_args.kwargs["reply_markup"].inline_keyboard
+        assert any(button.callback_data == "repeat_refs:run" for row in buttons for button in row)
+    else:
+        assert state.data == before
+    assert runtime.created == []
     repo.archive_active_image_sessions.assert_not_awaited()
     repo.charge_image_generation.assert_not_awaited()
     runtime.provider.assert_not_awaited()

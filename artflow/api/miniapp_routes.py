@@ -3698,7 +3698,7 @@ def _prepare_feed_remix_inputs(
             )
             return str(source.prompt or "").strip(), requested_refs, body, True, False
 
-    image_repeat = source_type == "image" and body.model in IMAGE_CAPS
+    image_repeat = source_type == "image" and body.model in (IMAGE_CAPS.keys() | _MJ_STUDIO_IMAGE_MODELS)
     own_recipe = image_repeat and user_id is not None and owned_generation_prompt_is_visible(source, user_id)
     identity_refs = feed_identity_references(source, requested_refs) if image_repeat else requested_refs
     has_user_inputs = bool(
@@ -3732,7 +3732,7 @@ def _prepare_feed_remix_inputs(
         else source_urls[0] if source_urls else None
     )
     applicable = bool(source_url) and supports_feed_source_media(caps, source_type)
-    if source_type == "image" and body.model in IMAGE_CAPS and any(not public_url_is_available(url) for url in identity_refs):
+    if image_repeat and any(not public_url_is_available(url) for url in identity_refs):
         raise HTTPException(status_code=422, detail="Часть твоих фото недоступна. Загрузи их заново; поцелуи не списаны.")
     try:
         if image_repeat and own_recipe:

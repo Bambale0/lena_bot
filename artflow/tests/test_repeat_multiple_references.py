@@ -130,6 +130,8 @@ async def test_begin_repeat_preserves_original_refs_and_waits_for_user() -> None
             call=call,
             state=state,
             bot=AsyncMock(),
+            session=AsyncMock(),
+            db_user=SimpleNamespace(id=42),
             generation=generation,
             source_session=source_session,
             reuse_session=True,

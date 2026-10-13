@@ -159,14 +159,31 @@ test("runner open event restores selected source and explicit selection wins bef
   item.preview_url = one;
   item.preview_urls = [one];
   assert.equal((await open()).source_image_url, zero);
-  const pending = { startedAt: Date.now(), provider: "tbank" as const, planKey: "starter", transactionId: 701, checkoutUrl: null };
-  payment.saveRepeatDraft(storage, 1, 201, { ...draft, sourceMediaUrl: "", references: ["https://example.test/user.jpg"], payment: pending });
-  body = await open();
-  assert.equal(body.source_image_url, null, "An old draft without a scene cannot acquire today's first output");
-  assert.match(textOf(rendered.props.footer), /Выберите фото заново в ленте/);
-  assert.deepEqual(body.reference_urls, ["https://example.test/user.jpg"]);
-  assert.deepEqual(payment.readRepeatDraft(storage, 1, 201)?.payment, pending);
-  assert.equal((await open(one)).source_image_url, one, "A fresh gallery click repairs a missing legacy selection");
+  const pending = { startedAt: Date.now(), provider: "tbank" as const, planKey: "starter", transactionId: 701, checkoutUrl: "https://pay.example.test/original" };
+  const { restoreLegacySceneOnNextDocument } = loadProduction("../e2e/feed-remix-runner.spec.ts", {
+    "@playwright/test": { test() {}, expect: {} },
+  }, "\nexports.restoreLegacySceneOnNextDocument = restoreLegacySceneOnNextDocument;");
+  for (const missing of [false, true]) {
+    let initializeDocument = () => {};
+    const page = {
+      evaluate: async (fn: (arg: boolean) => void, arg: boolean) => fn(arg),
+      addInitScript: async (fn: (arg: boolean) => void, arg: boolean) => { initializeDocument = () => fn(arg); },
+    };
+    const liveDraft = { ...draft, references: ["https://example.test/user.jpg"], payment: pending };
+    payment.saveRepeatDraft(storage, 1, 201, liveDraft);
+    await restoreLegacySceneOnNextDocument(page, missing);
+    // A pending response/autosave from the old document can still save its valid binding.
+    payment.saveRepeatDraft(storage, 1, 201, liveDraft);
+    initializeDocument();
+    body = await open();
+    const legacySource = missing ? "" : one.split("&output_id=")[0];
+    assert.equal(body.source_image_url, legacySource || null, "The new document must actually restore the intended legacy fixture");
+    if (missing) assert.match(textOf(rendered.props.footer), /Выберите фото заново в ленте/);
+    assert.deepEqual(body.reference_urls, ["https://example.test/user.jpg"]);
+    assert.deepEqual(payment.readRepeatDraft(storage, 1, 201)?.payment, pending);
+    assert.equal(payment.readRepeatDraft(storage, 1, 201)?.sourceMediaUrl, legacySource);
+    assert.equal((await open(one)).source_image_url, one, "A fresh gallery click repairs the legacy selection");
+  }
 });
 
 test("all shared-link journey fixtures satisfy the production v1 hydration client", async (t) => {

@@ -4,6 +4,17 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 const boundPreview = (index: number, output = index) =>
   `/api/v1/feed/201/preview.webp?index=${index}&output_id=${["a", "b", "c"][output].repeat(64)}`;
 
+async function restoreLegacySceneOnNextDocument(page: Page, missing: boolean) {
+  // Seed the old-client draft before the new document starts. Mutating storage
+  // in the live runner races its invoice response and correct autosave behavior.
+  await page.addInitScript((missing) => {
+    const key = "apix:feed-repeat-draft:v2:1:201";
+    const old = JSON.parse(window.sessionStorage.getItem(key)!);
+    old.sourceMediaUrl = missing ? "" : old.sourceMediaUrl.split("&output_id=")[0];
+    window.sessionStorage.setItem(key, JSON.stringify(old));
+  }, missing);
+}
+
 const user = {
   id: 1,
   tg_id: 123,
@@ -982,6 +993,12 @@ for (const restored of ["available", "expired", "legacy", "missing", "default"] 
     await dialog.getByLabel("Что изменить в образе").fill("Белый костюм");
     await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
     await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+    // Pending UI appears before the invoice response. The restoration fixture
+    // requires the actual same-checkout receipt, not the pre-response marker.
+    await expect.poll(() => page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem("apix:feed-repeat-draft:v2:1:201")!).payment,
+    )).toMatchObject({ transactionId: 701, checkoutUrl: "https://pay.example.test/original" });
+    await expect(dialog.getByRole("button", { name: "Открыть эту оплату", exact: true })).toBeEnabled();
     const selected = new URL(boundPreview(restored === "default" ? 0 : 1), page.url()).href;
     const saved = await page.evaluate(() => JSON.parse(sessionStorage.getItem("apix:feed-repeat-draft:v2:1:201")!));
     expect(saved.sourceMediaUrl).toBe(selected);
@@ -993,12 +1010,9 @@ for (const restored of ["available", "expired", "legacy", "missing", "default"] 
       previews = [boundPreview(0, 2)];
       available.delete("b".repeat(64));
     }
-    if (restored === "legacy" || restored === "missing") await page.evaluate((missing) => {
-      const key = "apix:feed-repeat-draft:v2:1:201";
-      const old = JSON.parse(sessionStorage.getItem(key)!);
-      old.sourceMediaUrl = missing ? "" : old.sourceMediaUrl.split("&output_id=")[0];
-      sessionStorage.setItem(key, JSON.stringify(old));
-    }, restored === "missing");
+    if (restored === "legacy" || restored === "missing") {
+      await restoreLegacySceneOnNextDocument(page, restored === "missing");
+    }
     quoteBodies.length = 0;
     await page.goto("/?tgWebAppData=test&remix=201");
     await expect(dialog).toBeVisible();
@@ -1006,6 +1020,10 @@ for (const restored of ["available", "expired", "legacy", "missing", "default"] 
     await expect(dialog.getByText("Реф #1")).toBeVisible();
     await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
     const restoredSource = restored === "legacy" ? selected.split("&output_id=")[0] : selected;
+    const restoredDraft = await page.evaluate(() => JSON.parse(sessionStorage.getItem("apix:feed-repeat-draft:v2:1:201")!));
+    expect(restoredDraft.sourceMediaUrl).toBe(restored === "missing" ? "" : restoredSource);
+    expect(restoredDraft.references).toEqual(saved.references);
+    expect(restoredDraft.payment).toEqual(saved.payment);
     if (restored !== "missing") await expect.poll(() => quoteBodies.some(body => body.source_image_url === restoredSource)).toBe(true);
     else expect(quoteBodies).toEqual([]);
     if (restored !== "available") {

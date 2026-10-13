@@ -188,14 +188,14 @@ async def _resolve_base_reference_urls(bot: Bot, image_session: Any | None) -> l
 
 async def _repeat_provider_reference_urls(
     *, session: AsyncSession, db_user: User, source_feed_gen_id: int | None,
-    reference_urls: list[str],
+    reference_urls: list[str], retain_user_references: bool = True,
 ) -> list[str] | None:
     """Count the same public source used at launch, failing closed if it is gone."""
     external_source_id = await image_gen._external_source_feed_id(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
     )
     if not external_source_id:
-        return reference_urls
+        return reference_urls if retain_user_references else []
     source = await repo.get_public_feed_generation(session, external_source_id)
     if _generation_type_value(source) != GenerationType.image.value:
         return None
@@ -203,7 +203,7 @@ async def _repeat_provider_reference_urls(
     if not source_url or not public_url_is_available(source_url):
         return None
     return image_gen.order_feed_image_references(
-        source_url, image_gen.feed_identity_references(source, reference_urls),
+        source_url, image_gen.feed_identity_references(source, reference_urls) if retain_user_references else [],
     )
 
 
@@ -212,6 +212,8 @@ async def _begin_repeat_collection(
     call: CallbackQuery,
     state: FSMContext,
     bot: Bot,
+    session: AsyncSession,
+    db_user: User,
     generation: Any,
     source_session: Any | None,
     reuse_session: bool,
@@ -230,6 +232,14 @@ async def _begin_repeat_collection(
     except image_gen.ImageReferenceUnavailable:
         await safe_answer_callback(call, "Не удалось подготовить сохранённые фото. Попробуй ещё раз.", show_alert=True)
         return True
+    provider_refs = await _repeat_provider_reference_urls(
+        session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+        reference_urls=base_urls,
+    )
+    if provider_refs is None:
+        await safe_answer_callback(call, "Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)
+        return True
+    total = len(provider_refs)
     source_file_ids = _source_reference_file_ids(source_session)
 
     await state.clear()
@@ -242,7 +252,7 @@ async def _begin_repeat_collection(
         repeat_max_refs=max_refs,
         repeat_reference_required=image_gen._requires_reference_image(model_key),
         repeat_base_reference_urls=base_urls,
-        repeat_reference_count=len(base_urls),
+        repeat_reference_count=total,
         repeat_new_reference_file_ids=[],
         repeat_source_reference_file_ids=source_file_ids,
         repeat_source_reference_url=(
@@ -268,7 +278,6 @@ async def _begin_repeat_collection(
         ),
     )
     data = await state.get_data()
-    total = len(base_urls)
     await call.message.answer(  # type: ignore[union-attr]
         _repeat_refs_text(data),
         reply_markup=_repeat_keyboard_from_data(data, total=total, added=0),
@@ -313,6 +322,8 @@ async def _session_repeat_interceptor(
         call=call,
         state=state,
         bot=bot,
+        session=session,
+        db_user=db_user,
         generation=target_generation,
         source_session=image_session,
         reuse_session=True,
@@ -347,6 +358,8 @@ async def _regen_repeat_interceptor(
         call=call,
         state=state,
         bot=bot,
+        session=session,
+        db_user=db_user,
         generation=generation,
         source_session=source_session,
         reuse_session=False,
@@ -380,6 +393,8 @@ async def _feed_again_interceptor(
         call=call,
         state=state,
         bot=bot,
+        session=session,
+        db_user=db_user,
         generation=generation,
         source_session=source_session,
         reuse_session=False,
@@ -477,11 +492,28 @@ async def _repeat_refs_ratio(call: CallbackQuery, state: FSMContext) -> None:
     await safe_answer_callback(call, f"Формат: {ratio}")
 
 
-async def _repeat_refs_clear(call: CallbackQuery, state: FSMContext) -> None:
+async def _repeat_refs_clear(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User,
+) -> None:
     data = await state.get_data()
+    generation = await repo.get_generation_by_id(session, int(data.get("repeat_generation_id") or 0))
+    if not generation or getattr(generation, "user_id", None) != db_user.id:
+        await safe_answer_callback(call, "Генерация не найдена", show_alert=True)
+        return
+    source_feed_gen_id = getattr(generation, "source_feed_gen_id", None) or data.get("repeat_source_feed_gen_id")
+    # Clearing removes user identity photos, never the required public scene.
+    provider_refs = await _repeat_provider_reference_urls(
+        session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+        reference_urls=_url_list(data.get("repeat_base_reference_urls")),
+        retain_user_references=False,
+    )
+    if provider_refs is None:
+        await safe_answer_callback(call, "Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)
+        return
+    total = len(provider_refs)
     await state.update_data(
-        repeat_base_reference_urls=[],
-        repeat_reference_count=0,
+        repeat_base_reference_urls=provider_refs,
+        repeat_reference_count=total,
         repeat_new_reference_file_ids=[],
         repeat_source_reference_file_ids=[],
         repeat_source_reference_url=None,
@@ -489,7 +521,7 @@ async def _repeat_refs_clear(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     await call.message.answer(  # type: ignore[union-attr]
         _repeat_refs_text(data),
-        reply_markup=_repeat_keyboard_from_data(data, total=0, added=0),
+        reply_markup=_repeat_keyboard_from_data(data, total=total, added=0),
     )
     await safe_answer_callback(call, "Референсы очищены")
 
@@ -558,7 +590,7 @@ async def _repeat_refs_run(
     ) is None:
         return
 
-    if data.get("repeat_reference_required") and not references:
+    if image_gen._requires_reference_image(model_key) and not candidate_refs:
         await call.answer("Для этой модели нужен хотя бы один референс", show_alert=True)
         return
 
@@ -577,11 +609,11 @@ async def _repeat_refs_run(
     persist_as_urls = bool(data.get("repeat_source_reference_url")) or (
         len(_url_list(data.get("repeat_base_reference_urls")))
         > len(data.get("repeat_source_reference_file_ids") or [])
-    ) or not combined_file_ids
+    ) or not combined_file_ids or candidate_refs != references
     stored_file_ids = [] if persist_as_urls else combined_file_ids
-    stored_urls = references if persist_as_urls else []
+    stored_urls = candidate_refs if persist_as_urls else []
 
-    target_mode = "image" if references else str(data.get("repeat_mode") or "text")
+    target_mode = "image" if candidate_refs else str(data.get("repeat_mode") or "text")
     aspect_ratio = str(data.get("repeat_aspect_ratio") or "9:16")
     quality = image_gen._normalize_session_quality(
         str(data.get("repeat_model_key") or generation.model),
@@ -627,14 +659,14 @@ async def _repeat_refs_run(
         image_session=image_session,
         prompt=prompt,
         action_type=ImageGenerationAction.repeat,
-        reference_url=references or None,
+        reference_url=candidate_refs or None,
         parent_generation_id=int(data.get("repeat_parent_generation_id") or generation.id),
         source_feed_gen_id=source_feed_gen_id,
         launching_text="🔁 <b>Повторяю генерацию с референсами...</b>",
         queued_text="⏳ <b>Повтор запущен.</b> Результат придёт сюда автоматически.",
     )
     if launched:
-        await safe_answer_callback(call, f"Запущено · референсов {len(references)}")
+        await safe_answer_callback(call, f"Запущено · референсов {len(candidate_refs)}")
 
 
 def _register_front(observer: Any, callback: Any, *filters: Any) -> None:
