@@ -14,7 +14,7 @@ function loadProduction(path: string, dependencies: Record<string, unknown>, exp
   new Function("exports", "require", compiled + expose)(module.exports, (name: string) => {
     if (name in dependencies) return dependencies[name];
     if (name === "lucide-react") return new Proxy({}, { get: (_, name) => String(name) });
-    if (name === "react" || name === "react/jsx-runtime") return require(name);
+    if (name === "react" || name === "react/jsx-runtime" || name === "react-dom") return require(name);
     throw new Error(`Unexpected component dependency: ${name}`);
   });
   return module.exports;
@@ -149,4 +149,75 @@ test("runner open event restores selected source and explicit selection wins bef
   assert.equal(body.source_image_url, one);
   assert.equal(body.image_url, "https://example.test/user.jpg");
   assert.deepEqual(body.reference_urls, ["https://example.test/user.jpg"]);
+});
+
+test("all shared-link journey fixtures satisfy the production v1 hydration client", async (t) => {
+  const playwrightTest = Object.assign(() => undefined, { describe: (_name: string, run: () => void) => run() });
+  const { mockMiniApp } = loadProduction("../user-journeys/user-journeys-300.spec.ts", {
+    "@playwright/test": { test: playwrightTest, expect: {} },
+  }, "\nexports.mockMiniApp = mockMiniApp;");
+  const routes = new Map<string, (route: any) => Promise<unknown>>();
+  const publicFeed = Object.fromEntries(Array.from({ length: 25 }, (_, index) => {
+    const id = 5001 + index;
+    return [id, { id, author: `Target ${index + 1}`, result_urls: [`https://example.test/canonical-${index + 1}.png`] }];
+  }));
+  await mockMiniApp({ addInitScript: async () => {}, route: async (pattern: string, handler: any) => { routes.set(pattern, handler); } }, { publicFeed });
+  const { MiniAppApi } = loadProduction("../../src/lib/api.ts", {
+    "@/lib/utils": utils, "@/lib/telegram": {}, "@/features/feed-remix-runner": {},
+  });
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    let response: Response | undefined;
+    const path = String(url);
+    assert.ok(path.startsWith("/api/v1/feed/"));
+    await routes.get("**/api/v1/**")!({
+      request: () => ({ url: () => `https://apix.example${path}`, method: () => init?.method || "GET" }),
+      fulfill: async (result: any) => { response = Response.json(result.json, { status: result.status || 200 }); },
+    });
+    assert.ok(response);
+    return response;
+  });
+  const client = new MiniAppApi("fixture");
+  for (let seed = 1; seed <= 25; seed++) {
+    const item = await client.getPublicFeedItem(5000 + seed);
+    assert.equal(item.author, `Target ${seed}`);
+    assert.deepEqual(item.result_urls, [`https://example.test/canonical-${seed}.png`]);
+  }
+  await assert.rejects(client.getPublicFeedItem(99999), (error: any) => error.status === 404);
+});
+
+test("opening and closing the gallery mounts its overlay at document body", (t) => {
+  const body = { nodeType: 1 };
+  const previousWindow = globalThis.window, previousDocument = globalThis.document;
+  Object.defineProperty(globalThis, "window", { configurable: true, writable: true, value: { location: { origin: "https://apix.example" } } });
+  Object.defineProperty(globalThis, "document", { configurable: true, writable: true, value: { body } });
+  t.after(() => {
+    if (previousWindow) globalThis.window = previousWindow; else delete (globalThis as any).window;
+    if (previousDocument) globalThis.document = previousDocument; else delete (globalThis as any).document;
+  });
+  const states: any[] = [];
+  let stateIndex = 0;
+  const react = {
+    useState(initial: unknown) { const index = stateIndex++; if (!(index in states)) states[index] = initial;
+      return [states[index], (value: any) => { states[index] = typeof value === "function" ? value(states[index]) : value; }]; },
+    useMemo: (fn: () => unknown) => fn(), useCallback: (fn: unknown) => fn,
+    useEffect() {}, useRef: (value: unknown) => ({ current: value }),
+  };
+  const { FeedScreen } = loadProduction("../../src/features/feed-screen.tsx", {
+    react, "react-dom": require("react-dom"), "sonner": {}, "@/components/ui/badge": { Badge: "badge" },
+    "@/components/ui/button": { Button: "button" }, "@/components/ui/card": { Card: "card" },
+    "@/features/trend-runner": {}, "@/lib/telegram": {}, "@/lib/utils": utils,
+  });
+  const render = () => { stateIndex = 0; return FeedScreen({
+    items: [{ id: 201, gen_type: "image", preview_url: "https://example.test/source.png" }],
+    source: "recent", loading: false, onSourceChange() {}, onRefresh() {}, onLike() {}, onRemix() {},
+  }); };
+  const portal = (tree: any) => descendants(tree).find(node => (node as any).containerInfo === body) as any;
+  const initial = render();
+  assert.equal(portal(initial), undefined);
+  descendants(initial).find(node => node.props?.["aria-label"] === "Открыть внутри приложения")!.props!.onClick();
+  const opened = portal(render());
+  assert.ok(opened, "Gallery must escape feed/main containing and stacking contexts");
+  assert.equal(opened.$$typeof, Symbol.for("react.portal"));
+  opened.children.props.onClose();
+  assert.equal(portal(render()), undefined);
 });

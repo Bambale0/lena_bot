@@ -58,8 +58,10 @@ const feedItems = [
   },
 ];
 
-async function mockMiniAppApi(page: Page, withTelegram = true) {
-  if (withTelegram) await page.addInitScript(() => {
+async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = false) {
+  if (withTelegram) await page.addInitScript((nativeBack) => {
+    const backHandlers = new Set<() => void>();
+    if (nativeBack) window.addEventListener("apix:test-back", () => backHandlers.forEach(handler => handler()));
     window.Telegram = {
       WebApp: {
         initData: "test",
@@ -70,9 +72,14 @@ async function mockMiniAppApi(page: Page, withTelegram = true) {
         HapticFeedback: { impactOccurred: () => undefined, notificationOccurred: () => undefined },
         openLink: () => undefined,
         openInvoice: () => undefined,
+        BackButton: nativeBack ? {
+          show: () => undefined, hide: () => undefined,
+          onClick: (handler: () => void) => { backHandlers.add(handler); },
+          offClick: (handler: () => void) => { backHandlers.delete(handler); },
+        } : undefined,
       },
     } as typeof window.Telegram;
-  });
+  }, nativeBack);
 
   await page.route("https://example.test/source.png", (route) => route.fulfill({
     contentType: "image/png",
@@ -790,6 +797,16 @@ test("text-only source video can replay author prompt without photos", async ({ 
 });
 
 
+async function expectViewerRepeatIsReachable(page: Page) {
+  const repeat = page.locator(".apix-media-viewer").getByRole("button", { name: "Повторить эту работу" });
+  await expect(repeat).toBeVisible();
+  await expect.poll(() => repeat.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const hit = element.ownerDocument.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return Boolean(hit && element.contains(hit));
+  }), { message: "Gallery repeat must receive clicks above the bottom navigation" }).toBe(true);
+}
+
 for (const surface of ["telegram", "browser"] as const) {
   test(`${surface} gallery repeat keeps selected second result through quote and submit`, async ({ page }) => {
     await mockMiniAppApi(page, surface === "telegram");
@@ -817,6 +834,7 @@ for (const surface of ["telegram", "browser"] as const) {
     await expect(viewer).toBeVisible();
     await viewer.getByRole("button", { name: "Следующее фото" }).click();
     await expect(viewer.locator("img")).toHaveAttribute("src", new RegExp("index=1$"));
+    await expectViewerRepeatIsReachable(page);
     await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
     const dialog = page.getByRole("dialog", { name: "Повторить работу" });
     await expect(dialog).toBeVisible();
@@ -871,6 +889,7 @@ test("selected result survives checkout reload and a fresh gallery selection win
   await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
   const viewer = page.locator(".apix-media-viewer");
   await viewer.getByRole("button", { name: "Следующее фото" }).click();
+  await expectViewerRepeatIsReachable(page);
   await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
@@ -881,9 +900,38 @@ test("selected result survives checkout reload and a fresh gallery selection win
   await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
   await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
   await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
+  await expectViewerRepeatIsReachable(page);
   await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
   await expect(dialog.locator("img").first()).toHaveAttribute("src", new RegExp("index=0$"));
   await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
   expect(state.topups).toBe(1);
+  expect(submissions).toBe(0);
+});
+
+
+test("gallery portal closes with Escape and native Back dismisses the repeat sheet first", async ({ page }) => {
+  await mockMiniAppApi(page, true, true);
+  // Keep this deterministic native BackButton fixture from being replaced by
+  // the live SDK; no external Telegram session is part of this test.
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
+  let submissions = 0;
+  await page.route("**/api/v1/feed/201/remix", route => { submissions++; return route.abort(); });
+  await page.goto("/?tgWebAppData=test");
+  const open = page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first();
+  const viewer = page.locator(".apix-media-viewer");
+  await open.click();
+  await expectViewerRepeatIsReachable(page);
+  await page.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
+  await open.click();
+  await expectViewerRepeatIsReachable(page);
+  await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+  await page.evaluate(() => window.dispatchEvent(new Event("apix:test-back")));
+  await expect(dialog).toHaveCount(0);
+  await expect(viewer).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("apix:test-back")));
+  await expect(viewer).toHaveCount(0);
   expect(submissions).toBe(0);
 });

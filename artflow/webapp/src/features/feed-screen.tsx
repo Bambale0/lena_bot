@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -577,7 +578,11 @@ function FeedScreen({
         />
       )}
 
-      <MediaViewer viewer={viewer} onClose={() => setViewer(null)} onChangeIndex={(index) => setViewer((current) => current ? { ...current, index } : current)} onRemix={onRemix} remixingId={remixingId} />
+      {/* Escape the feed's containing block; keep gallery above navigation and below sheets. */}
+      {viewer ? createPortal(
+        <MediaViewer viewer={viewer} onClose={() => setViewer(null)} onChangeIndex={(index) => setViewer((current) => current ? { ...current, index } : current)} onRemix={onRemix} remixingId={remixingId} />,
+        document.body,
+      ) : null}
     </div>
   );
 }
@@ -672,7 +677,7 @@ function MediaViewer({
   const remixing = remixingId === viewer.item.id;
 
   return (
-    <div className="apix-media-viewer fixed inset-0 z-[80] grid bg-black/92 text-white backdrop-blur-xl" role="dialog" aria-modal="true">
+    <div className="apix-media-viewer fixed inset-0 z-[1100] grid bg-black/92 text-white backdrop-blur-xl" role="dialog" aria-modal="true">
       <button type="button" className="absolute inset-0 cursor-zoom-out" aria-label="Закрыть просмотр" onClick={onClose} />
       <div className="relative z-10 grid min-h-0 grid-rows-[auto_1fr_auto] p-2 pt-[max(8px,env(safe-area-inset-top))]">
         <div className="flex items-center justify-between gap-2 rounded-2xl bg-white/8 px-2 py-1.5 backdrop-blur">
