@@ -90,6 +90,7 @@ from core.feed_remix_prompt import (
     feed_video_edit_prompt,
     generation_prompt_is_protected,
     legacy_feed_edit_unavailable,
+    order_feed_image_references,
     original_feed_video_references,
     supports_feed_source_media,
     trusted_feed_prompt,
@@ -769,7 +770,7 @@ async def _prepare_feed_video_inputs(
         prompt = feed_video_edit_prompt(prompt)
     data = {**data, FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, prompt)}
     if source_type == "image":
-        refs = list(dict.fromkeys([source_url, *refs]))
+        refs = order_feed_image_references(source_url, refs)
         max_refs = int(caps.get("max_refs", 1) or 1)
         if len(refs) > max_refs:
             raise FeedRemixUnavailable("Слишком много фото с учётом исходного поста. Выбери другую модель или убери лишние референсы.")

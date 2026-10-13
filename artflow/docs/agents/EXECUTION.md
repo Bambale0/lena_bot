@@ -1486,3 +1486,22 @@ An additional self-audit on merged branch 7d657a1 found a real risk: register_ki
 ### Real SQLAlchemy rollback detachment P2 guard
 
 The previous Security Review warned that the final provider GET after a session.rollback might use a detached expired ORM generation. An actual SQLite SQLAlchemy Session reproduction confirmed this exact failure: reading task_id after the second rollback raises DetachedInstanceError, which the existing error catch interpreted as unknown provider outcome and would wrongly refund a remotely completed paid video. The new integration regression was RED (log: Seedance final status deferred reason=DetachedInstanceError, returned refunded); fix materializes task ID, model and copied decoded input params as a simple immutable-value snapshot BEFORE rollback. Provider GET and read-only submission binding use only the snapshot; the fresh row/ledger settlement remains separately locked and guarded by task ID. New test GREEN and all 166+ targeted finance/recovery tests GREEN; Ruff/compilation clean. No actual production ledger entries modified for this validation.
+
+
+## 2026-10-13 - Feed photo repeat identity-reference priority
+
+Baseline: `8f5d381a059b64fff609945d0d5d1c50466e4117`; local branch `fix/feed-remix-user-reference-priority`. Production and paid provider APIs were not accessed.
+
+### Confirmed defect and narrow fix
+- Mini App `_prepare_feed_remix_inputs` and Telegram `_launch_session_generation` both submitted a personalized image repeat as public source image first, followed by the reader's uploaded identity references. The image service and Nexus/KIE adapters preserve this list order.
+- A synthetic Telegram regression reproduced the old order before the change. The exact user report still cannot be correlated to a specific generation without its link/ID, so this records a confirmed orchestration defect rather than claiming provider-specific causality.
+- Added one shared ordering boundary: direct reader references remain in their original order and are deduplicated, then the public feed source is appended as scene/style context. A plain repeat with no reader image still submits only the source image.
+- Updated the isolated personalized prompt contract to describe the final image as the public source and preceding images as user appearance/object references. Hidden author text remains excluded on personalized paths.
+
+### Verification
+- `58` feed prompt/security tests passed after RED/GREEN.
+- Independent review found and closed a Telegram image-source-to-video parity gap: that path now uses the same user-first/source-last helper and its launch/regenerate regressions are green.
+- `134` focused tests passed across feed security, quote/prelaunch, Seedance API/Telegram image-video repeats, ordinary multi-reference generation and the existing Pinterest identity-before-scene provider contract. Direct tests cover multiple user photos, stable deduplication, source-only repeats, request-scoped source switching and prompt Image-role wording. The ordinary generation test confirms its user-supplied order remains unchanged.
+- The broader Telegram reference module passed `42` tests and retained one unrelated failure in `test_model_selection_opens_task_first_composer_for_any_model`; the identical missing-`db_user` failure was reproduced on a clean detached `8f5d381a` baseline.
+- Ruff and compileall passed on all changed Python implementation/test files. The focused `134`-test acceptance run had no failures; one existing AsyncMock coroutine warning remains in the ordinary-generation test. The first PR CI run exposed one additional maintained Seedance test that still asserted source-first ordering; its expectation was updated to the same user-first contract and the complete file passed locally before republishing.
+- Independent review has no remaining blocking findings after the Telegram video parity fix; final multi-reference test recheck and publication are still pending. No merge, deploy, secret, pricing, balance or historical ledger mutation was performed.

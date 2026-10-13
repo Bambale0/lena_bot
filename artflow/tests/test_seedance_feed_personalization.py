@@ -49,7 +49,7 @@ async def test_seedance_personalization_keeps_source_and_isolates_author(seedanc
     submitted = seedance_api.generate.await_args
     assert SECRET not in submitted.args[1]
     assert "make the coat blue" in submitted.args[1] if inputs.get("change_request") else True
-    expected_refs = ([SOURCE_IMAGE] if source_kind == "image" else []) + ([USER_IMAGE] if inputs.get("image_url") else [])
+    expected_refs = ([USER_IMAGE] if inputs.get("image_url") else []) + ([SOURCE_IMAGE] if source_kind == "image" else [])
     assert (submitted.kwargs["image_url"] or []) == expected_refs
     assert submitted.kwargs["reference_video_url"] == ([SOURCE_VIDEO] if source_kind == "video" else None)
     assert submitted.kwargs["grok_mode"] == "multimodal"

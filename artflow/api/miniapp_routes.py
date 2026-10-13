@@ -102,6 +102,7 @@ from core.feed_remix_prompt import (
     FeedRemixUnavailable,
     feed_remix_context,
     feed_video_edit_prompt,
+    order_feed_image_references,
     original_feed_video_inputs,
     original_feed_video_references,
     supports_feed_source_media,
@@ -3677,7 +3678,7 @@ def _prepare_feed_remix_inputs(
 
     multimodal = bool(caps.get("auto_route_by_inputs") and "multimodal" in caps.get("modes", []))
     if source_type == "image":
-        refs = list(dict.fromkeys([source_url, *requested_refs]))
+        refs = order_feed_image_references(source_url, requested_refs)
         body = body.model_copy(update={"mode": "multimodal" if multimodal else "image"})
     else:
         if body.video_url and body.video_url != source_url:

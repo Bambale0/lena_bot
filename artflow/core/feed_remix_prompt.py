@@ -12,6 +12,25 @@ class FeedRemixUnavailable(ValueError):
     """A personalized repeat cannot be grounded in applicable public media."""
 
 
+def order_feed_image_references(
+    source_url: str | None,
+    requested_refs: list[str],
+) -> list[str]:
+    """Put reader-owned identity refs before the public scene reference.
+
+    Image providers preserve reference order and commonly give the first image
+    the strongest identity role.  A feed card is scene/style context, so it
+    must not displace a reader's uploaded appearance from that position.
+    """
+    source = str(source_url or "").strip()
+    user_refs = [
+        str(url).strip()
+        for url in requested_refs
+        if str(url or "").strip() and str(url).strip() != source
+    ]
+    return list(dict.fromkeys([*user_refs, *([source] if source else [])]))
+
+
 def build_feed_remix_prompt(
     source_prompt: str,
     change_request: str = "",
@@ -32,8 +51,8 @@ def build_feed_remix_prompt(
     prompt = (
         "Edit the supplied public source media. Preserve its visible composition, "
         "style and scene except for the requested changes. "
-        "The source is the first image or the source video. "
-        "Use additional references for the user's appearance or object."
+        "The source is the final image or the source video. "
+        "Use preceding image references for the user's appearance or object."
     )
     return f"{prompt}\n\n{change}" if change else prompt
 
