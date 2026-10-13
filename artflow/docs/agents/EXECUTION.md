@@ -1505,3 +1505,33 @@ Baseline: `8f5d381a059b64fff609945d0d5d1c50466e4117`; local branch `fix/feed-rem
 - The broader Telegram reference module passed `42` tests and retained one unrelated failure in `test_model_selection_opens_task_first_composer_for_any_model`; the identical missing-`db_user` failure was reproduced on a clean detached `8f5d381a` baseline.
 - Ruff and compileall passed on all changed Python implementation/test files. The focused `134`-test acceptance run had no failures; one existing AsyncMock coroutine warning remains in the ordinary-generation test. The first PR CI run exposed one additional maintained Seedance test that still asserted source-first ordering; its expectation was updated to the same user-first contract and the complete file passed locally before republishing.
 - Independent review has no remaining blocking findings after the Telegram video parity fix; final multi-reference test recheck and publication are still pending. No merge, deploy, secret, pricing, balance or historical ledger mutation was performed.
+
+
+## 2026-10-13 - Feed preview alias reference deduplication
+
+Baseline: released `origin/main` at `df57408517d7dc2dcdd5fc155a2de18fac23d709`; isolated branch `fix/feed-preview-alias-dedup`. Production checkout, Docker, paid providers and customer records were not accessed.
+
+### Confirmed defect and boundary
+- The supplied Nano Banana request contained the original feed image, the public WebP preview route for that same feed image, and one user upload. Visual inspection of the three currently public resources confirmed that the first two are the same scene at different resolutions; none of the three currently resolves to a blank or center-dot placeholder.
+- The browser correctly uses the lightweight preview in the feed card, but also sent that URL as `source_image_url`. The server compared URLs literally, classified the preview as a user reference, and submitted both preview and original to the provider. String/hash deduplication cannot detect this semantic alias.
+- The server now maps only an exact preview/display route for the same feed generation, trusted `WEB_PUBLIC_URL` origin and valid media index back to the generation's canonical result URL. Foreign origins, other generation IDs, extra query fields and invalid indexes remain untrusted references. Both personalized and plain repeats use the canonical source.
+- The generic upload endpoint currently validates authentication, byte limits, MIME/magic format and non-empty data, but does not define minimum dimensions or low-information/blank-image rejection. The supplied user upload is a decodable collage, not a placeholder. Rejecting visually sparse images needs a separate product rule and false-positive policy; none is invented here.
+
+### Verification so far
+- RED reproduced the exact three-reference provider list; GREEN submits only user upload then canonical source.
+- Four targeted alias/security tests and all `65` tests in `test_feed_remix_prompt_security.py` pass. The broader feed quote/replay/Seedance set passes `137` tests across five modules.
+- Ruff and source syntax compilation pass for the changed implementation and tests. Bytecode output into the read-only checkout was unavailable, so compilation used Python's in-memory `compile()` boundary.
+- Independent review found a multi-result defect before publication: an alias for `index=1` was deduplicated but source selection still fell back to result zero. Source selection now uses the canonical alias index, with an end-to-end personalized provider-payload regression proving that only the user image and selected result are submitted.
+- Remaining release gates: broader focused suite, compile check, independent review, exact-SHA CI, and explicit approval before merge/deploy.
+
+### Cloud continuation and final local verification
+- Continued on an isolated cloud checkout at the same baseline, branch `fix/feed-preview-alias-cloud`; the transferred patch SHA-256 was verified before application. Existing unrelated checkouts were left unchanged.
+- Independent review reproduced an additional plain-repeat case from the real frontend: it submits the same preview in both `source_image_url` and `image_url`. The plain-repeat branch now canonicalizes its image/reference inputs too, before deduplication. Regression coverage includes both raw input fields and the Midjourney video submission boundary.
+- Quote and submit were exercised with the canonical source, its preview alias, and a user reference under a two-image cap; both use the same two effective references, and personalized submission excludes the author prompt.
+- Malformed oversized feed IDs now remain untrusted without throwing; canonicalization follows the preview/display endpoints' existing index range of 0–3. Added negative coverage for alternate scheme/port, fragments, duplicate/invalid indexes and oversized IDs.
+- RED/GREEN evidence: the frontend-shaped plain repeat failed by submitting the preview; the oversized-ID and out-of-viewer-range tests failed before their guards. All pass after the fixes.
+- Final focused run: `158 passed` across prompt security, prelaunch, Seedance feed personalization/bot, snapshot security and media fallback. Maintained backend pytest gate: `1204 passed`, `12 skipped`, no failures (JUnit: 1216 tests). Skips require the dedicated PostgreSQL service (10) or the pre-pulled Nginx image (2); these remain mandatory in GitHub CI. Existing AsyncMock/dependency warnings remain visible.
+- Ruff, Python compileall and `git diff --check` passed. Independent final review ran `88` relevant tests and found no remaining actionable issues.
+- Parity: site delegates to the same quote/submit endpoints as Mini App; Telegram uses canonical stored source references and its existing feed regressions pass. No frontend behavior or Telegram payload contract was changed.
+- Guides used: repository `.clinerules` debugging/review/verification, `Bambale0/skills` diagnosing-bugs/TDD/code-review, `Bambale0/claw` test and security checklists, `wondelai/skills` legacy-code guidance; Anthropic webapp testing guidance was inspected. Tool repositories were cloned into the permitted cloud workspace rather than `/root`.
+- No schema, migration, price, balance, provider credential, paid request or production change. Exact-SHA CI, publication and release remain pending authorization; local tests are not a deployment claim.

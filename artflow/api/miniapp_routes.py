@@ -12,7 +12,7 @@ import re
 import socket
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 import httpx
 from aiogram import Bot
@@ -3557,11 +3557,63 @@ def _feed_source_reference_urls(source: Generation, source_image_url: str | None
     """Never feed an MP4 from the source post into an image-reference slot."""
     explicit_image = _normalize_public_urls(source_image_url)
     if explicit_image:
-        return explicit_image
+        source_urls = _generation_result_urls(source)
+        return [
+            _canonical_feed_source_reference(source, url, source_urls)
+            for url in explicit_image
+        ]
     gen_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
     if gen_type == GenerationType.video.value:
         return []
     return _generation_result_urls(source)
+
+
+def _canonical_feed_source_reference(
+    source: Generation,
+    url: str,
+    source_urls: list[str],
+) -> str:
+    """Map this feed post's trusted preview route back to its original media."""
+    if url in source_urls:
+        return url
+
+    source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
+    if source_type != GenerationType.image.value:
+        return url
+
+    parsed = urlparse(url)
+    public_base = urlparse(str(getattr(settings, "WEB_PUBLIC_URL", "") or ""))
+    try:
+        parsed_port = parsed.port
+        public_port = public_base.port
+    except ValueError:
+        return url
+    if (
+        parsed.scheme.lower() != public_base.scheme.lower()
+        or parsed.hostname != public_base.hostname
+        or parsed_port != public_port
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        return url
+
+    match = re.fullmatch(r"/api/v1/feed/(\d+)/(?:preview|display)\.webp", parsed.path)
+    if match is None:
+        return url
+
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if set(query) != {"index"} or len(query["index"]) != 1:
+        return url
+    try:
+        source_id = int(match.group(1))
+        index = int(query["index"][0])
+    except ValueError:
+        return url
+    # The feed viewer exposes only the first four result images (index 0..3).
+    if source_id != source.id or index < 0 or index >= min(len(source_urls), 4):
+        return url
+    return source_urls[index]
 
 
 def _prepare_feed_remix_inputs(
@@ -3570,9 +3622,12 @@ def _prepare_feed_remix_inputs(
     """Resolve the same confidentiality/media boundary for quote and submission."""
     source_urls = _generation_result_urls(source)
     source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
-    requested_refs = list(dict.fromkeys(_normalize_public_urls(
-        body.source_image_url, body.image_url, *(body.reference_urls or []),
-    )))
+    requested_refs = list(dict.fromkeys(
+        _canonical_feed_source_reference(source, url, source_urls)
+        for url in _normalize_public_urls(
+            body.source_image_url, body.image_url, *(body.reference_urls or []),
+        )
+    ))
     # A feed card is the rendered OUTPUT. Replaying a creator's video must
     # use the source generation's INPUT recipe, not the published MP4.
     if source_type == "video":
@@ -3649,7 +3704,10 @@ def _prepare_feed_remix_inputs(
     )
     personalized = bool(body.change_request.strip() or has_user_inputs)
     if not personalized:
-        user_refs = _normalize_public_urls(body.image_url, *(body.reference_urls or []))
+        user_refs = [
+            _canonical_feed_source_reference(source, url, source_urls)
+            for url in _normalize_public_urls(body.image_url, *(body.reference_urls or []))
+        ]
         source_refs = _feed_source_reference_urls(source, body.source_image_url)
         if body.model in IMAGE_CAPS:
             refs = user_refs or source_refs
@@ -3661,8 +3719,12 @@ def _prepare_feed_remix_inputs(
         IMAGE_CAPS.get(body.model) or VIDEO_CAPS.get(body.model)
         or _MJ_IMAGE_CAPS.get(body.model) or _MJ_VIDEO_CAPS.get(body.model) or {}
     )
+    explicit_source_url = (
+        _canonical_feed_source_reference(source, body.source_image_url, source_urls)
+        if body.source_image_url else None
+    )
     source_url = (
-        body.source_image_url if source_type == "image" and body.source_image_url in source_urls
+        explicit_source_url if source_type == "image" and explicit_source_url in source_urls
         else source_urls[0] if source_urls else None
     )
     applicable = bool(source_url) and supports_feed_source_media(caps, source_type)

@@ -192,6 +192,7 @@ def api_launch(monkeypatch):
     from api import miniapp_routes
     from db.models import GenerationStatus
 
+    monkeypatch.setattr(miniapp_routes.settings, "WEB_PUBLIC_URL", "https://apixbotai.com")
     source = SimpleNamespace(
         id=77, user_id=99, gen_type=GenerationType.image, prompt=SECRET,
         result_url=SOURCE_IMAGE, result_urls=None,
@@ -287,6 +288,136 @@ async def test_api_plain_repeat_with_known_source_urls_keeps_secret(api_launch):
     await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
     assert api_launch.generate.await_args.args[1] == SECRET
     assert api_launch.generate.await_args.kwargs["image_url"] == SOURCE_IMAGE
+
+
+@pytest.mark.asyncio
+async def test_api_feed_preview_alias_is_not_sent_as_a_second_source_reference(api_launch):
+    preview_alias = "https://apixbotai.com/api/v1/feed/77/preview.webp?index=0"
+    body = api_launch.routes.FeedRemixRequest(
+        model="nano-banana-2",
+        mode="image",
+        image_url=USER_IMAGE,
+        source_image_url=preview_alias,
+        reference_urls=[USER_IMAGE],
+    )
+
+    await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+
+    assert api_launch.generate.await_args.kwargs["image_url"] == [USER_IMAGE, SOURCE_IMAGE]
+
+
+@pytest.mark.asyncio
+async def test_api_preview_alias_quote_and_submit_share_canonical_reference_limit(api_launch, monkeypatch):
+    monkeypatch.setitem(api_launch.routes.IMAGE_CAPS, "nano-banana-2", {
+        **api_launch.routes.IMAGE_CAPS["nano-banana-2"], "max_refs": 2,
+    })
+    body = api_launch.routes.FeedRemixRequest(
+        model="nano-banana-2", mode="image", image_url=USER_IMAGE,
+        source_image_url=SOURCE_IMAGE,
+        reference_urls=["https://apixbotai.com/api/v1/feed/77/preview.webp?index=0", USER_IMAGE],
+    )
+
+    quote = await api_launch.routes.quote_feed_remix(77, body, api_launch.session, api_launch.user)
+    assert quote["can_run"] is True
+    api_launch.charge.assert_not_awaited()
+    api_launch.generate.assert_not_awaited()
+
+    await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+    assert api_launch.charge.await_args.kwargs["amount"] == quote["cost_credits"]
+    assert api_launch.generate.await_args.kwargs["image_url"] == [USER_IMAGE, SOURCE_IMAGE]
+    assert SECRET not in api_launch.generate.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_api_feed_preview_alias_keeps_selected_multi_result_source(api_launch):
+    api_launch.source.result_url = None
+    api_launch.source.result_urls = (
+        '["https://example.test/first.jpg", "https://example.test/second.jpg"]'
+    )
+    body = api_launch.routes.FeedRemixRequest(
+        model="nano-banana-2",
+        mode="image",
+        image_url=USER_IMAGE,
+        source_image_url="https://apixbotai.com/api/v1/feed/77/preview.webp?index=1",
+    )
+
+    await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+
+    assert api_launch.generate.await_args.kwargs["image_url"] == [
+        USER_IMAGE,
+        "https://example.test/second.jpg",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra_refs", [
+    {},
+    {"image_url": "https://apixbotai.com/api/v1/feed/77/display.webp?index=0"},
+    {"reference_urls": ["https://apixbotai.com/api/v1/feed/77/display.webp?index=0"]},
+])
+async def test_api_plain_repeat_resolves_feed_preview_alias_to_original(api_launch, extra_refs):
+    body = api_launch.routes.FeedRemixRequest(
+        model="nano-banana-2",
+        mode="image",
+        source_image_url="https://apixbotai.com/api/v1/feed/77/display.webp?index=0",
+        **extra_refs,
+    )
+
+    await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+
+    assert api_launch.generate.await_args.args[1] == SECRET
+    assert api_launch.generate.await_args.kwargs["image_url"] == SOURCE_IMAGE
+
+
+@pytest.mark.asyncio
+async def test_api_plain_midjourney_video_repeat_deduplicates_preview_alias(api_launch, monkeypatch):
+    submit_video = AsyncMock(return_value="fake-midjourney-video")
+    monkeypatch.setattr(api_launch.routes.midjourney_service, "submit_video", submit_video)
+    preview_alias = "https://apixbotai.com/api/v1/feed/77/preview.webp?index=0"
+    body = api_launch.routes.FeedRemixRequest(
+        model="midjourney-video", mode="image",
+        image_url=preview_alias, source_image_url=preview_alias,
+    )
+
+    await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+
+    assert submit_video.await_args.kwargs["image"] == SOURCE_IMAGE
+    assert submit_video.await_args.kwargs["prompt"] == SECRET
+
+
+def test_feed_preview_alias_only_trusts_same_origin_post_and_valid_index(api_launch):
+    source = api_launch.source
+    source.result_url = None
+    source.result_urls = '["https://example.test/first.jpg", "https://example.test/second.jpg"]'
+    source_urls = api_launch.routes._generation_result_urls(source)
+
+    valid = "https://apixbotai.com/api/v1/feed/77/preview.webp?index=1"
+    assert api_launch.routes._canonical_feed_source_reference(source, valid, source_urls) == source_urls[1]
+
+    for untrusted in (
+        "https://evil.example/api/v1/feed/77/preview.webp?index=1",
+        "http://apixbotai.com/api/v1/feed/77/preview.webp?index=1",
+        "https://apixbotai.com:8443/api/v1/feed/77/preview.webp?index=1",
+        "https://apixbotai.com/api/v1/feed/78/preview.webp?index=1",
+        "https://apixbotai.com/api/v1/feed/77/preview.webp?index=-1",
+        "https://apixbotai.com/api/v1/feed/77/preview.webp?index=2",
+        "https://apixbotai.com/api/v1/feed/77/preview.webp?index=invalid",
+        "https://apixbotai.com/api/v1/feed/77/preview.webp?index=0&index=1",
+        "https://apixbotai.com/api/v1/feed/77/preview.webp?index=1&next=evil",
+        "https://apixbotai.com/api/v1/feed/77/preview.webp?index=1#fragment",
+        "https://attacker@apixbotai.com/api/v1/feed/77/preview.webp?index=1",
+        "https://apixbotai.com/api/v1/feed/" + "9" * 5000 + "/preview.webp?index=1",
+    ):
+        assert api_launch.routes._canonical_feed_source_reference(source, untrusted, source_urls) == untrusted
+
+
+def test_feed_preview_alias_cannot_exceed_viewer_index_limit(api_launch):
+    source_urls = [f"https://example.test/result-{index}.jpg" for index in range(5)]
+    nonexistent_preview = "https://apixbotai.com/api/v1/feed/77/preview.webp?index=4"
+
+    assert api_launch.routes._canonical_feed_source_reference(
+        api_launch.source, nonexistent_preview, source_urls,
+    ) == nonexistent_preview
 
 
 @pytest.mark.asyncio
