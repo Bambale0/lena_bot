@@ -2700,6 +2700,7 @@ async def update_image_session_references(
         "reference_file_id": lead_reference_file_id,
         "reference_file_ids": json.dumps(normalized_reference_file_ids, ensure_ascii=True) if normalized_reference_file_ids else None,
         "reference_url": None,
+        "reference_urls": None,
         "updated_at": func.now(),
     }
     if mode:

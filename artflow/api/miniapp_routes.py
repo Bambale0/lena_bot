@@ -2633,7 +2633,9 @@ async def create_image_generation(
     Returns immediately with `status: pending` and the generation `id`.
     Poll `GET /api/v1/generations/{id}` until `status` is `done` or `failed`.
     """
-    all_refs = _normalize_public_urls(body.reference_url, *body.reference_urls)
+    # Browser clients repeat the lead URL in the plural list. Count each image
+    # once before validation and persist the same ordered set sent upstream.
+    all_refs = list(dict.fromkeys(_normalize_public_urls(body.reference_url, *body.reference_urls)))
     user_prompt = body.prompt
     prompt_source = None
     if body.prompt_id is not None:

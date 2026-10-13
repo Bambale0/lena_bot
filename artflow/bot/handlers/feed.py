@@ -504,7 +504,11 @@ async def cb_feed_again(
 ) -> None:
     import json
 
-    from bot.handlers.image_gen import _launch_session_generation, _session_reference_url
+    from bot.handlers.image_gen import (
+        _launch_session_generation,
+        _session_reference_url,
+        _stored_reference_urls,
+    )
     from db.models import ImageGenerationAction
 
     gen_id = int(call.data.split(":")[2])  # type: ignore[union-attr]
@@ -551,6 +555,7 @@ async def cb_feed_again(
         reference_file_id=reference_file_id,
         reference_file_ids=reference_file_ids,
         reference_url=reference_url if isinstance(reference_url, str) else None,
+        reference_urls=_stored_reference_urls(source_session) if source_session else None,
     )
 
     await state.set_state(ImageGenFSM.session_active)

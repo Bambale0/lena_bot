@@ -376,6 +376,23 @@ def _stored_reference_file_ids(image_session: ImageSession) -> list[str]:
     return [item for item in parsed if isinstance(item, str) and item]
 
 
+def _stored_reference_urls(image_session: ImageSession) -> list[str]:
+    """Read the complete web/Mini App reference set, with legacy scalar fallback."""
+    raw = getattr(image_session, "reference_urls", None)
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        parsed = None
+    refs = list(dict.fromkeys(
+        item.strip() for item in (parsed if isinstance(parsed, list) else [])
+        if isinstance(item, str) and item.strip()
+    ))
+    if refs:
+        return refs
+    scalar = getattr(image_session, "reference_url", None)
+    return [scalar] if isinstance(scalar, str) and scalar else []
+
+
 def _state_reference_file_ids(data: dict) -> list[str]:
     ref_file_ids = [item for item in list(data.get("ref_file_ids", []) or []) if item]
     image_file_id = data.get("image_file_id")
@@ -410,6 +427,15 @@ def _active_reference_file_ids(image_session: ImageSession, data: dict) -> list[
     return refs
 
 
+def _state_reference_urls(data: dict) -> list[str]:
+    if _state_reference_file_ids(data):
+        return []  # A newly uploaded Telegram set replaces carried public URLs.
+    raw = data.get("reference_urls", data.get("carryover_reference_urls", []))
+    if not isinstance(raw, list):
+        return []
+    return list(dict.fromkeys(item.strip() for item in raw if isinstance(item, str) and item.strip()))
+
+
 def _state_reference_url(data: dict) -> str | None:
     for key in ("remix_reference_url", "carryover_reference_url", "reference_url"):
         value = data.get(key)
@@ -419,14 +445,14 @@ def _state_reference_url(data: dict) -> str | None:
 
 
 def _state_has_reference(data: dict) -> bool:
-    return bool(_state_reference_file_ids(data) or _state_reference_url(data))
+    return bool(_state_reference_file_ids(data) or _state_reference_urls(data) or _state_reference_url(data))
 
 
 def _session_has_stored_reference(image_session: ImageSession) -> bool:
     return bool(
         _stored_reference_file_ids(image_session)
         or getattr(image_session, "reference_file_id", None)
-        or getattr(image_session, "reference_url", None)
+        or _stored_reference_urls(image_session)
     )
 
 
@@ -570,9 +596,9 @@ async def _session_reference_url(
     if reference_file_id:
         return await _telegram_file_url(bot, reference_file_id)
 
-    reference_url = getattr(image_session, "reference_url", None)
-    if reference_url:
-        return reference_url
+    reference_urls = _stored_reference_urls(image_session)
+    if reference_urls:
+        return reference_urls[0] if len(reference_urls) == 1 else reference_urls
 
     return None
 
@@ -624,6 +650,12 @@ async def _sync_state_with_image_session(state: FSMContext, image_session: Image
         image_mode=image_session.mode,
         image_file_id=image_session.reference_file_id,
         ref_file_ids=_stored_reference_file_ids(image_session),
+        reference_urls=_stored_reference_urls(image_session),
+        reference_url=next(iter(_stored_reference_urls(image_session)), None),
+        carryover_reference_urls=[],
+        carryover_reference_url=None,
+        carryover_ref_file_ids=[],
+        carryover_image_file_id=None,
         remix_mode=False,
         remix_parent_generation_id=None,
         remix_reference_url=None,
@@ -714,6 +746,7 @@ async def _ensure_active_image_session_from_state(
         reference_file_id=data.get("image_file_id"),
         reference_file_ids=_state_reference_file_ids(data) if mode == "image" else None,
         reference_url=_state_reference_url(data) if mode == "image" else None,
+        reference_urls=_state_reference_urls(data) if mode == "image" else None,
     )
     await state.update_data(image_session_id=image_session.id, count=count, image_count=count)
     return image_session
@@ -808,7 +841,7 @@ def _session_count_choices_kb(image_session: ImageSession) -> InlineKeyboardMark
 
 
 def _repeat_reference_count(image_session: ImageSession, data: dict) -> int:
-    return len(_active_reference_file_ids(image_session, data))
+    return len(_active_reference_file_ids(image_session, data) or _stored_reference_urls(image_session))
 
 
 def _apply_default_repeat_ratio(image_session: ImageSession, data: dict) -> bool:
@@ -1271,7 +1304,7 @@ _NANA_BANANO_MODEL_LABELS = {
 
 
 def _nana_banano_ref_count(data: dict) -> int:
-    return len(_state_reference_file_ids(data))
+    return len(_state_reference_file_ids(data) or _state_reference_urls(data))
 
 
 def _image_model_key(model_key: str | ImageModel) -> str:
@@ -1353,6 +1386,10 @@ async def _show_nana_banano_flow(
         updates.update(
             image_file_id=None,
             ref_file_ids=[],
+            reference_urls=[],
+            carryover_reference_urls=[],
+            reference_url=None,
+            carryover_reference_url=None,
             remix_reference_url=None,
         )
     await state.update_data(**updates)
@@ -1697,7 +1734,7 @@ async def cb_image_model(
         modes = list(caps.get("modes") or ["text"])
         has_references = bool(
             _active_reference_file_ids(image_session, data)
-            or image_session.reference_url
+            or _stored_reference_urls(image_session)
             or image_session.last_result_url
         )
         if has_references and "image" in modes:
@@ -2060,7 +2097,11 @@ async def cb_image_reference_skip(
         await call.answer("Для этой модели референс обязателен", show_alert=True)
         return
 
-    await state.update_data(mode="text", image_mode="text", image_file_id=None, ref_file_ids=[])
+    await state.update_data(
+        mode="text", image_mode="text", image_file_id=None, ref_file_ids=[],
+        reference_urls=[], reference_url=None, carryover_reference_urls=[],
+        carryover_reference_url=None, remix_reference_url=None,
+    )
     from bot.handlers.image_wizard_v2 import open_model_composer_for_selection
 
     await open_model_composer_for_selection(
@@ -2578,6 +2619,7 @@ async def handle_session_photo(
     image_session.reference_file_id = reference_file_ids[0] if reference_file_ids else None
     image_session.reference_file_ids = json.dumps(reference_file_ids, ensure_ascii=True) if reference_file_ids else None
     image_session.reference_url = None
+    image_session.reference_urls = None
     await state.update_data(
         image_file_id=reference_file_ids[0] if reference_file_ids else None,
         ref_file_ids=reference_file_ids,
@@ -2670,6 +2712,10 @@ async def cb_image_session_remix(
         image_mode="image",
         image_file_id=None,
         ref_file_ids=[],
+        reference_urls=[],
+        carryover_reference_urls=[],
+        reference_url=None,
+        carryover_reference_url=None,
         remix_mode=True,
         remix_parent_generation_id=parent_id or image_session.last_generation_id,
         remix_reference_url=remix_reference_url,
@@ -2771,6 +2817,10 @@ async def cb_image_style_choice(
         image_mode="image",
         image_file_id=None,
         ref_file_ids=[],
+        reference_urls=[],
+        carryover_reference_urls=[],
+        reference_url=None,
+        carryover_reference_url=None,
         remix_mode=True,
         remix_parent_generation_id=parent_id or gen_id or image_session.last_generation_id,
         remix_reference_url=result_url,
@@ -3152,6 +3202,10 @@ async def cb_image_session_animate(
         grok_mode=grok_mode,
         image_file_id=None,
         ref_file_ids=[],
+        reference_urls=[],
+        carryover_reference_urls=[],
+        reference_url=None,
+        carryover_reference_url=None,
         image_url=result_url,
         reference_video_url=None,
         motion_step=None,
@@ -3381,12 +3435,14 @@ async def cb_image_settings_model(
     carryover_ref_file_ids: list[str] = []
     carryover_image_file_id: str | None = None
     carryover_reference_url: str | None = None
+    carryover_reference_urls: list[str] = []
     carryover_mode: str | None = None
 
     if image_session:
         carryover_ref_file_ids = _stored_reference_file_ids(image_session)
         carryover_image_file_id = image_session.reference_file_id or (carryover_ref_file_ids[0] if carryover_ref_file_ids else None)
-        carryover_reference_url = image_session.reference_url or image_session.last_result_url
+        carryover_reference_urls = _stored_reference_urls(image_session)
+        carryover_reference_url = (carryover_reference_urls[0] if carryover_reference_urls else None) or image_session.last_result_url
         if carryover_ref_file_ids or carryover_image_file_id or carryover_reference_url:
             carryover_mode = "image"
         elif image_session.mode:
@@ -3399,6 +3455,7 @@ async def cb_image_settings_model(
         carryover_image_file_id=carryover_image_file_id,
         carryover_ref_file_ids=carryover_ref_file_ids,
         carryover_reference_url=carryover_reference_url,
+        carryover_reference_urls=carryover_reference_urls,
     )
     await _open_image_model_select(call, session, state, db_user)
     await safe_answer_callback(call)
@@ -3530,6 +3587,7 @@ async def _image_session_for_result_action(
         reference_file_id=prev_session.reference_file_id if prev_session else None,
         reference_file_ids=_stored_reference_file_ids(prev_session) if prev_session else None,
         reference_url=prev_session.reference_url if prev_session else None,
+        reference_urls=_stored_reference_urls(prev_session) if prev_session else None,
     )
     return image_session
 
@@ -3631,6 +3689,7 @@ async def cb_regen_image(
         reference_file_id=prev_session.reference_file_id if prev_session else None,
         reference_file_ids=_stored_reference_file_ids(prev_session) if prev_session else None,
         reference_url=prev_session.reference_url if prev_session else None,
+        reference_urls=_stored_reference_urls(prev_session) if prev_session else None,
     )
     reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False)
     await _launch_session_generation(

@@ -7,6 +7,7 @@ before the credit-consuming provider request starts.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from aiogram import Bot, F
@@ -492,6 +493,15 @@ async def _repeat_refs_run(
         if file_id not in combined_file_ids:
             combined_file_ids.append(file_id)
     combined_file_ids = combined_file_ids[:max_refs]
+    # Public and mixed URL/file sets must remain complete on later repeats.
+    # Mirrored Telegram URLs are durable; use one ordered URL set for mixed input
+    # so the file-ID resolver cannot shadow the original public references.
+    persist_as_urls = bool(data.get("repeat_source_reference_url")) or (
+        len(_url_list(data.get("repeat_base_reference_urls")))
+        > len(data.get("repeat_source_reference_file_ids") or [])
+    ) or not combined_file_ids
+    stored_file_ids = [] if persist_as_urls else combined_file_ids
+    stored_urls = references if persist_as_urls else []
 
     target_mode = "image" if references else str(data.get("repeat_mode") or "text")
     aspect_ratio = str(data.get("repeat_aspect_ratio") or "9:16")
@@ -511,9 +521,10 @@ async def _repeat_refs_run(
             count=int(data.get("repeat_count") or 1),
             base_prompt=prompt if prompt_is_user_supplied else None,
             prompt_provenance="user_supplied" if prompt_is_user_supplied else None,
-            reference_file_id=combined_file_ids[0] if combined_file_ids else None,
-            reference_file_ids=combined_file_ids or None,
-            reference_url=data.get("repeat_source_reference_url"),
+            reference_file_id=stored_file_ids[0] if stored_file_ids else None,
+            reference_file_ids=stored_file_ids or None,
+            reference_url=stored_urls[0] if stored_urls else None,
+            reference_urls=stored_urls,
         )
     else:
         if source_feed_gen_id:
@@ -523,12 +534,10 @@ async def _repeat_refs_run(
         image_session.mode = target_mode
         image_session.aspect_ratio = aspect_ratio
         image_session.quality = quality
-        # Persist newly added Telegram references when the original set is also
-        # Telegram-backed. Mixed external URL + Telegram input is still passed
-        # exactly for this run without flattening the external reference.
-        if combined_file_ids and not data.get("repeat_source_reference_url"):
-            image_session.reference_file_id = combined_file_ids[0]
-            image_session.reference_file_ids = __import__("json").dumps(combined_file_ids, ensure_ascii=True)
+        image_session.reference_file_id = stored_file_ids[0] if stored_file_ids else None
+        image_session.reference_file_ids = json.dumps(stored_file_ids) if stored_file_ids else None
+        image_session.reference_url = stored_urls[0] if stored_urls else None
+        image_session.reference_urls = json.dumps(stored_urls) if stored_urls else None
         await session.commit()
 
     await state.set_state(image_gen.ImageGenFSM.session_active)

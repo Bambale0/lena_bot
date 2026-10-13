@@ -43,7 +43,9 @@ def _reference_count_from_state(data: dict) -> int:
     image_file_id = data.get("image_file_id")
     if image_file_id and image_file_id not in refs:
         refs.insert(0, image_file_id)
-    return len(refs)
+    from bot.handlers.image_gen import _state_reference_urls
+
+    return len(refs or _state_reference_urls(data))
 
 
 def _default_quality_for_model(model_key: str) -> str:
@@ -65,10 +67,13 @@ def _default_aspect_ratio_for_model(model_key: str, mode: str | None) -> str:
 
 
 def _reference_payload_from_state(data: dict, *, max_refs: int, supports_refs: bool) -> dict[str, object]:
+    from bot.handlers.image_gen import _state_reference_urls
+
     if not supports_refs:
         return {
             "image_file_id": None,
             "ref_file_ids": [],
+            "reference_urls": [],
             "remix_reference_url": None,
         }
 
@@ -81,6 +86,7 @@ def _reference_payload_from_state(data: dict, *, max_refs: int, supports_refs: b
     return {
         "image_file_id": refs[0] if refs else None,
         "ref_file_ids": refs,
+        "reference_urls": [] if refs else _state_reference_urls(data),
         "remix_reference_url": data.get("carryover_reference_url") or data.get("remix_reference_url"),
     }
 
@@ -93,6 +99,7 @@ def _default_mode_for_model(model_key: str, data: dict, reference_payload: dict[
         reference_payload.get("ref_file_ids")
         or reference_payload.get("image_file_id")
         or reference_payload.get("remix_reference_url")
+        or reference_payload.get("reference_urls")
     )
     if carryover_mode in modes:
         return str(carryover_mode)
@@ -245,6 +252,12 @@ async def open_model_composer_for_selection(
     max_refs = int(caps.get("max_refs") or 10)
     supports_refs = "image" in modes
     reference_payload = _reference_payload_from_state(data, max_refs=max_refs, supports_refs=supports_refs)
+    if len(reference_payload.get("reference_urls") or []) > max_refs:
+        await safe_answer_callback(
+            call, f"Эта модель принимает до {max_refs} фото. Убери лишние референсы или выбери другую модель.",
+            show_alert=True,
+        )
+        return False
     mode = forced_mode if forced_mode in modes else _default_mode_for_model(model_key, data, reference_payload)
     aspect_ratio = _default_aspect_ratio_for_model(model_key, mode)
 
@@ -264,6 +277,11 @@ async def open_model_composer_for_selection(
         "source_feed_gen_id": None,
         "image_prompt_enhance": True,
         "image_params_changed": False,
+        "reference_url": None,
+        "carryover_reference_urls": [],
+        "carryover_reference_url": None,
+        "carryover_ref_file_ids": [],
+        "carryover_image_file_id": None,
         **reference_payload,
     }
     await state.update_data(**updates)
