@@ -76,6 +76,7 @@ def local_launch(monkeypatch):
     monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
     monkeypatch.setattr(image_gen, "safe_answer_callback", AsyncMock())
     session = AsyncMock()
+    session.execute = AsyncMock(return_value=SimpleNamespace(all=lambda: []))
     session.add = MagicMock(side_effect=created_sessions.append)
 
     async def refresh(obj):
@@ -493,3 +494,345 @@ async def test_pro_existing_mixed_overflow_never_truncates_before_paid_post(loca
     await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
     assert nexus_posts == []
     repo.charge_image_generation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("selected_model", ["nano-banana-pro", "nano-banana-2"])
+async def test_actual_model_reselection_preserves_mixed_refs_through_review_post(
+    local_launch, nexus_posts, monkeypatch, selected_model,
+):
+    from bot.handlers import image_wizard_v2
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS[:2], reference_file_ids=["file-3", "file-4"],
+    )
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(old, None)))
+    monkeypatch.setattr(image_gen, "_open_image_model_select", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=None))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: {"file-3": REFS[2], "file-4": SOURCE}[fid],
+    ))
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data=f"img_model:{selected_model}")
+    await image_gen.cb_image_settings_model(call, launch.session, state, launch.user)
+    await image_gen.cb_image_model(call, state, launch.session, launch.user)
+    await image_gen.handle_prompt(
+        SimpleNamespace(text="own prompt", caption=None, answer=AsyncMock()),
+        state, launch.session, launch.user, AsyncMock(),
+    )
+    # Reuse the actual session just created by handle_prompt for review submission.
+    current = launch.created_sessions[-1]
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=current))
+    await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
+    assert nexus_posts[0]["params"]["model_name"] == selected_model
+    assert nexus_posts[0]["params"]["image_urls"] == REFS + [SOURCE]
+    assert json.loads(current.reference_urls) == REFS[:2]
+
+
+@pytest.mark.parametrize("entrypoint", ["active_prompt", "active_repeat"])
+async def test_actual_active_launch_rejects_mixed_overflow_before_accounting(
+    local_launch, nexus_posts, monkeypatch, entrypoint,
+):
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS, reference_file_ids=["extra-1", "extra-2"],
+    )
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(old, None)))
+    monkeypatch.setattr(repo, "fail_generation_and_refund", AsyncMock(return_value=(True, 4)))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg",
+    ))
+    state, _ = mutable_state({"pending_image_prompt": "own prompt"})
+    if entrypoint == "active_prompt":
+        await image_gen.handle_session_prompt(
+            SimpleNamespace(text="own prompt", answer=AsyncMock()), state,
+            launch.session, launch.user, AsyncMock(),
+        )
+    else:
+        await image_gen.cb_image_repeat_launch(
+            SimpleNamespace(message=AsyncMock(), answer=AsyncMock()), launch.session,
+            state, launch.user, AsyncMock(),
+        )
+    assert nexus_posts == []
+    repo.charge_image_generation.assert_not_awaited()
+    repo.create_generation.assert_not_awaited()
+    repo.fail_generation_and_refund.assert_not_awaited()
+
+
+@pytest.mark.parametrize("public_refs", [[], REFS[:2]])
+async def test_reopening_active_composer_keeps_complete_reference_set(local_launch, nexus_posts, monkeypatch, public_refs):
+    from bot.handlers import image_wizard_v2
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=public_refs, reference_file_id="file-3", reference_file_ids=["file-3", "file-4"],
+    )
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_wizard_v2, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr("bot.ui.router.render_screen", AsyncMock(return_value=SimpleNamespace(text="active", reply_markup=None)))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: {"file-3": REFS[2], "file-4": SOURCE}[fid],
+    ))
+    state, _ = mutable_state()
+    await image_wizard_v2.open_image_composer(
+        SimpleNamespace(message=AsyncMock(), answer=AsyncMock()), state, launch.session, launch.user,
+    )
+    await image_gen.handle_session_prompt(
+        SimpleNamespace(text="own prompt", answer=AsyncMock()), state, launch.session, launch.user, AsyncMock(),
+    )
+    assert nexus_posts[0]["params"]["image_urls"] == public_refs + [REFS[2], SOURCE]
+
+
+@pytest.mark.parametrize("alias", [False, True])
+async def test_actual_model_selection_validates_resolved_mixed_cap_without_truncation(local_launch, nexus_posts, monkeypatch, alias):
+    from bot.handlers import image_wizard_v2
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro-vip", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS, reference_file_id="file-a", reference_file_ids=["file-a", "file-b"],
+    )
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(old, None)))
+    monkeypatch.setattr(image_gen, "_open_image_model_select", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=None))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: {
+            "file-a": REFS[0] if alias else "https://example.test/distinct-fifth.jpg", "file-b": SOURCE,
+        }[fid],
+    ))
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data="img_model:nano-banana-pro", bot=AsyncMock())
+    await image_gen.cb_image_settings_model(call, launch.session, state, launch.user)
+    await image_gen.cb_image_model(call, state, launch.session, launch.user)
+    if not alias:
+        assert data.get("model_key") != "nano-banana-pro"
+        assert data["carryover_reference_urls"] == REFS
+        assert data["carryover_ref_file_ids"] == ["file-a", "file-b"]
+        assert len(launch.created_sessions) == 1
+        repo.charge_image_generation.assert_not_awaited()
+        assert nexus_posts == []
+        return
+    assert data["model_key"] == "nano-banana-pro"
+    await image_gen.handle_prompt(
+        SimpleNamespace(text="own prompt", caption=None, answer=AsyncMock()),
+        state, launch.session, launch.user, call.bot,
+    )
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=launch.created_sessions[-1]))
+    await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
+    assert nexus_posts[0]["params"]["image_urls"] == REFS + [SOURCE]
+    repo.charge_image_generation.assert_awaited_once()
+
+
+@pytest.mark.parametrize("existing_files", [[], ["file-3"]])
+async def test_active_photo_add_preserves_public_and_file_inputs(local_launch, nexus_posts, monkeypatch, existing_files):
+    from bot.handlers import image_wizard_v2
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS[:2], reference_file_id=existing_files[0] if existing_files else None,
+        reference_file_ids=existing_files,
+    )
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_wizard_v2, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr("bot.ui.router.render_screen", AsyncMock(return_value=SimpleNamespace(text="active", reply_markup=None)))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: {"file-3": REFS[2], "new-file": SOURCE}[fid],
+    ))
+    state, _ = mutable_state()
+    await image_wizard_v2.open_image_composer(
+        SimpleNamespace(message=AsyncMock(), answer=AsyncMock()), state, launch.session, launch.user,
+    )
+    await image_gen.handle_session_photo(
+        SimpleNamespace(photo=[SimpleNamespace(file_id="new-file", file_size=100)], answer=AsyncMock()),
+        state, launch.session, launch.user,
+    )
+    values = launch.session.execute.await_args.args[0].compile().params
+    assert json.loads(values["reference_urls"]) == REFS[:2]
+    assert json.loads(values["reference_file_ids"]) == existing_files + ["new-file"]
+    await image_gen.handle_session_prompt(
+        SimpleNamespace(text="own prompt", answer=AsyncMock()), state, launch.session, launch.user, AsyncMock(),
+    )
+    assert nexus_posts[0]["params"]["image_urls"] == REFS[:2] + ([REFS[2]] if existing_files else []) + [SOURCE]
+
+
+@pytest.mark.parametrize("entrypoint", ["remix", "style"])
+async def test_explicit_remix_photo_replaces_result_and_original_inputs(local_launch, nexus_posts, monkeypatch, entrypoint):
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS[:2], reference_file_id="file-3", reference_file_ids=["file-3"],
+    )
+    old.last_result_url = SOURCE
+    old.last_generation_id = launch.generation.id
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(old, old.last_generation_id)))
+    monkeypatch.setattr(image_gen, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[2]))
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data="img_session:remix:99")
+    if entrypoint == "remix":
+        await image_gen.cb_image_session_remix(call, launch.session, state, launch.user)
+    else:
+        call.data = "img_style:clothes:99"
+        await image_gen.cb_image_style_choice(call, launch.session, state, launch.user)
+    await image_gen.handle_session_photo(
+        SimpleNamespace(photo=[SimpleNamespace(file_id="replacement", file_size=100)], answer=AsyncMock()),
+        state, launch.session, launch.user,
+    )
+    await image_gen.handle_session_prompt(
+        SimpleNamespace(text="own edit", answer=AsyncMock()), state, launch.session, launch.user, AsyncMock(),
+    )
+    assert nexus_posts[0]["params"]["image_urls"] == [REFS[2]]
+    assert "own edit" in nexus_posts[0]["params"]["prompt"]
+    assert SECRET not in nexus_posts[0]["params"]["prompt"]
+    assert json.loads(old.reference_file_ids) == ["replacement"]
+
+
+@pytest.mark.parametrize("setting", ["ratio", "quality", "banana_model"])
+async def test_actual_composer_settings_preserve_mixed_refs_on_session_recreation(local_launch, nexus_posts, monkeypatch, setting):
+    from bot.handlers import image_wizard_v2
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS[:2], reference_file_id="file-3", reference_file_ids=["file-3", "file-4"],
+    )
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_wizard_v2, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr(image_gen, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr("bot.ui.router.render_screen", AsyncMock(return_value=SimpleNamespace(text="active", reply_markup=None)))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: {"file-3": REFS[2], "file-4": SOURCE}[fid],
+    ))
+    state, _ = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data=None)
+    await image_wizard_v2.open_image_composer(call, state, launch.session, launch.user)
+    if setting == "ratio":
+        call.data = "img_v2:ratio:set:3:4"
+        await image_wizard_v2.set_default_ratio(call, state)
+    elif setting == "quality":
+        call.data = "img_v2:quality:set:4K"
+        await image_wizard_v2.set_default_quality(call, state)
+    else:
+        call.data = "img_nb:model:nano-banana-pro"
+        await image_gen.cb_nana_banano_model(call, state, launch.session, launch.user)
+    await image_gen.handle_prompt(
+        SimpleNamespace(text="own prompt", caption=None, answer=AsyncMock()),
+        state, launch.session, launch.user, AsyncMock(),
+    )
+    current = launch.created_sessions[-1]
+    assert current is not old
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=current))
+    await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
+    assert nexus_posts[0]["params"]["image_urls"] == REFS + [SOURCE]
+
+
+@pytest.mark.parametrize("alias", [False, True])
+async def test_active_photo_add_checks_complete_deduplicated_cap(local_launch, nexus_posts, monkeypatch, alias):
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS, reference_file_id="saved", reference_file_ids=["saved"],
+    )
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(old, None)))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: {"saved": SOURCE, "new": REFS[0] if alias else "https://example.test/fifth.jpg"}[fid],
+    ))
+    state, _ = mutable_state()
+    message = SimpleNamespace(
+        photo=[SimpleNamespace(file_id="new", file_size=100)], answer=AsyncMock(), bot=AsyncMock(),
+    )
+    await image_gen.handle_session_photo(message, state, launch.session, launch.user)
+    assert json.loads(old.reference_file_ids) == (["saved", "new"] if alias else ["saved"])
+    assert json.loads(old.reference_urls) == REFS
+    if not alias:
+        launch.session.execute.assert_not_awaited()
+        return
+    assert "4/4" in message.answer.await_args.args[0]
+    await image_gen.handle_session_prompt(
+        SimpleNamespace(text="own prompt", answer=AsyncMock()), state, launch.session, launch.user, AsyncMock(),
+    )
+    assert nexus_posts[0]["params"]["image_urls"] == REFS + [SOURCE]
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+async def test_shared_launch_boundary_validates_deduplicated_refs_before_accounting(local_launch, nexus_posts, overflow):
+    from db.models import ImageGenerationAction
+
+    launch = local_launch
+    current = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1, "own prompt",
+    )
+    refs = [f" {REFS[0]} ", *REFS, SOURCE]
+    if overflow:
+        refs.append("https://example.test/fifth.jpg")
+    state, _ = mutable_state()
+    started = await image_gen._launch_session_generation(
+        source_message=AsyncMock(), state=state, session=launch.session, db_user=launch.user,
+        image_session=current, prompt="own prompt", action_type=ImageGenerationAction.initial,
+        reference_url=refs, parent_generation_id=None, launching_text="Starting", queued_text="Queued",
+    )
+    assert started is not overflow
+    if overflow:
+        assert nexus_posts == []
+        repo.charge_image_generation.assert_not_awaited()
+        repo.create_generation.assert_not_awaited()
+    else:
+        assert nexus_posts[0]["params"]["image_urls"] == REFS + [SOURCE]
+        repo.charge_image_generation.assert_awaited_once()
+
+
+@pytest.mark.parametrize("input_count", [0, 2, 4])
+async def test_completed_session_model_selection_only_falls_back_to_result_without_inputs(local_launch, nexus_posts, monkeypatch, input_count):
+    from bot.handlers import image_wizard_v2
+
+    launch = local_launch
+    file_ids = ["file-1", "file-2", "file-3", "file-4"][:input_count]
+    result_url = "https://example.test/completed-output.jpg"
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image" if input_count else "text", "9:16", "2K", 1,
+        "own prompt", reference_file_id=file_ids[0] if file_ids else None, reference_file_ids=file_ids,
+    )
+    old.last_result_url = result_url
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_gen, "_open_image_model_select", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: dict(zip(file_ids, REFS + [SOURCE], strict=False))[fid],
+    ))
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data="img_model:nano-banana-pro", bot=AsyncMock())
+    await image_gen.cb_image_settings_model(call, launch.session, state, launch.user)
+    await image_gen.cb_image_model(call, state, launch.session, launch.user)
+    assert data.get("model_key") == "nano-banana-pro"
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=None))
+    await image_gen.handle_prompt(
+        SimpleNamespace(text="own prompt", caption=None, answer=AsyncMock()),
+        state, launch.session, launch.user, call.bot,
+    )
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=launch.created_sessions[-1]))
+    await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
+    expected = (REFS + [SOURCE])[:input_count] if input_count else [result_url]
+    assert nexus_posts[0]["params"]["image_urls"] == expected
+    current = launch.created_sessions[-1]
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=current))
+    monkeypatch.setattr("bot.ui.router.render_screen", AsyncMock(return_value=SimpleNamespace(text="active", reply_markup=None)))
+    await image_wizard_v2.open_image_composer(call, state, launch.session, launch.user)
+    await image_gen.handle_session_prompt(
+        SimpleNamespace(text="own prompt", answer=AsyncMock()), state, launch.session, launch.user, call.bot,
+    )
+    assert nexus_posts[1]["params"]["image_urls"] == expected

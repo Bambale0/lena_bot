@@ -39,13 +39,9 @@ def _quality_label(model_key: str, quality: str | None) -> str:
 
 
 def _reference_count_from_state(data: dict) -> int:
-    refs = [item for item in list(data.get("ref_file_ids", []) or []) if item]
-    image_file_id = data.get("image_file_id")
-    if image_file_id and image_file_id not in refs:
-        refs.insert(0, image_file_id)
-    from bot.handlers.image_gen import _state_reference_urls
+    from bot.handlers.image_gen import _state_reference_count
 
-    return len(refs or _state_reference_urls(data))
+    return _state_reference_count(data)
 
 
 def _default_quality_for_model(model_key: str) -> str:
@@ -81,12 +77,12 @@ def _reference_payload_from_state(data: dict, *, max_refs: int, supports_refs: b
     image_file_id = data.get("carryover_image_file_id") or data.get("image_file_id")
     if image_file_id and image_file_id not in refs:
         refs.insert(0, str(image_file_id))
-    refs = refs[:max_refs]
+    refs = list(dict.fromkeys(refs))
 
     return {
         "image_file_id": refs[0] if refs else None,
         "ref_file_ids": refs,
-        "reference_urls": [] if refs else _state_reference_urls(data),
+        "reference_urls": _state_reference_urls(data),
         "remix_reference_url": data.get("carryover_reference_url") or data.get("remix_reference_url"),
     }
 
@@ -111,6 +107,8 @@ def _default_mode_for_model(model_key: str, data: dict, reference_payload: dict[
 
 
 def _sync_active_session_state(image_session: ImageSession) -> dict:
+    from bot.handlers.image_gen import _stored_reference_file_ids, _stored_reference_urls
+
     return {
         "image_session_id": image_session.id,
         "model_key": image_session.model,
@@ -124,6 +122,8 @@ def _sync_active_session_state(image_session: ImageSession) -> dict:
         "count": image_session.count,
         "image_count": image_session.count,
         "image_file_id": image_session.reference_file_id,
+        "ref_file_ids": _stored_reference_file_ids(image_session),
+        "reference_urls": _stored_reference_urls(image_session),
     }
 
 
@@ -252,7 +252,30 @@ async def open_model_composer_for_selection(
     max_refs = int(caps.get("max_refs") or 10)
     supports_refs = "image" in modes
     reference_payload = _reference_payload_from_state(data, max_refs=max_refs, supports_refs=supports_refs)
-    if len(reference_payload.get("reference_urls") or []) > max_refs:
+    reference_count = _reference_count_from_state(reference_payload)
+    if reference_count > max_refs and reference_payload["ref_file_ids"] and (
+        reference_payload["reference_urls"] or reference_payload["remix_reference_url"]
+    ):
+        # A persisted public URL may mirror one of the Telegram files. Resolve
+        # mixed sets before rejecting a model by an upper-bound slot count.
+        from bot.handlers.image_gen import _telegram_file_url
+
+        resolved = list(reference_payload["reference_urls"])
+        scalar = reference_payload["remix_reference_url"]
+        if scalar and scalar not in resolved:
+            resolved.append(scalar)
+        try:
+            for file_id in reference_payload["ref_file_ids"]:
+                url = await _telegram_file_url(call.bot, file_id)
+                if not url:
+                    raise ValueError("Missing mirrored reference")
+                if url not in resolved:
+                    resolved.append(url)
+        except Exception:
+            await safe_answer_callback(call, "Не удалось проверить фото. Попробуй выбрать модель ещё раз.", show_alert=True)
+            return False
+        reference_count = len(resolved)
+    if reference_count > max_refs:
         await safe_answer_callback(
             call, f"Эта модель принимает до {max_refs} фото. Убери лишние референсы или выбери другую модель.",
             show_alert=True,

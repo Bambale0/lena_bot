@@ -428,8 +428,6 @@ def _active_reference_file_ids(image_session: ImageSession, data: dict) -> list[
 
 
 def _state_reference_urls(data: dict) -> list[str]:
-    if _state_reference_file_ids(data):
-        return []  # A newly uploaded Telegram set replaces carried public URLs.
     raw = data.get("reference_urls", data.get("carryover_reference_urls", []))
     if not isinstance(raw, list):
         return []
@@ -442,6 +440,14 @@ def _state_reference_url(data: dict) -> str | None:
         if isinstance(value, str) and value:
             return value
     return None
+
+
+def _state_reference_count(data: dict) -> int:
+    urls = _state_reference_urls(data)
+    scalar = _state_reference_url(data)
+    if scalar and scalar not in urls:
+        urls.append(scalar)
+    return len(set(_state_reference_file_ids(data))) + len(urls)
 
 
 def _state_has_reference(data: dict) -> bool:
@@ -580,7 +586,9 @@ async def _session_reference_url(
         if state_file_ids:
             # An unchanged FSM copy is still the persisted mixed set. A newly
             # selected Telegram set intentionally replaces carried public URLs.
-            if state_file_ids != stored_file_ids:
+            if "reference_urls" in data:
+                urls = _state_reference_urls(data)
+            elif state_file_ids != stored_file_ids:
                 urls = []
             file_ids = state_file_ids
 
@@ -831,7 +839,7 @@ def _session_count_choices_kb(image_session: ImageSession) -> InlineKeyboardMark
 
 
 def _repeat_reference_count(image_session: ImageSession, data: dict) -> int:
-    return len(_active_reference_file_ids(image_session, data) or _stored_reference_urls(image_session))
+    return len(_active_reference_file_ids(image_session, data)) + len(_stored_reference_urls(image_session))
 
 
 def _apply_default_repeat_ratio(image_session: ImageSession, data: dict) -> bool:
@@ -989,6 +997,19 @@ async def _launch_session_generation(
                 await source_message.answer(str(exc), reply_markup=main_menu_kb())
                 return False
             reference_url = refs[0] if len(refs) == 1 else refs
+    # Validate the exact deduplicated set before creating or charging any task.
+    # Every Telegram image launch (including legacy/review/repeat) crosses here.
+    refs = [reference_url] if isinstance(reference_url, str) else list(reference_url or [])
+    refs = list(dict.fromkeys(url.strip() for url in refs if isinstance(url, str) and url.strip()))
+    max_refs = int(IMAGE_CAPS.get(image_session.model, {}).get("max_refs", 1) or 1)
+    if len(refs) > max_refs:
+        await source_message.answer(
+            f"Модель поддерживает до {max_refs} фото. Убери лишние референсы или выбери другую модель.",
+            reply_markup=image_session_kb(parent_generation_id, allow_publish=not bool(source_feed_gen_id)),
+        )
+        return False
+    reference_url = refs[0] if isinstance(reference_url, str) and refs else refs or None
+
     normalized_count = _normalize_image_count(image_session.model, image_session.count)
     if normalized_count != image_session.count:
         image_session.count = normalized_count
@@ -1294,7 +1315,7 @@ _NANA_BANANO_MODEL_LABELS = {
 
 
 def _nana_banano_ref_count(data: dict) -> int:
-    return len(_state_reference_file_ids(data) or _state_reference_urls(data))
+    return _state_reference_count(data)
 
 
 def _image_model_key(model_key: str | ImageModel) -> str:
@@ -2512,7 +2533,7 @@ async def handle_session_prompt(
         reference_url = await _session_reference_url(
             bot,
             image_session,
-            prefer_last_result=is_remix,
+            prefer_last_result=is_remix and not _state_reference_file_ids(data),
             state=state,
         )
 
@@ -2587,10 +2608,27 @@ async def handle_session_photo(
     file_id = best[0].file_id
     data = await state.get_data()
     max_refs = int(IMAGE_CAPS.get(image_session.model, {}).get("max_refs", 1) or 1)
-    existing = _active_reference_file_ids(image_session, data)
-    if max_refs > 1:
+    replacing = bool(data.get("remix_mode")) or max_refs == 1
+    existing = [] if replacing else _active_reference_file_ids(image_session, data)
+    public_refs = [] if replacing else _stored_reference_urls(image_session)
+    reference_count = len(public_refs) + len(existing)
+    if not replacing:
         if file_id not in existing:
-            if len(existing) >= max_refs:
+            reference_count += 1
+            if public_refs and reference_count > max_refs:
+                # Public URLs and Telegram IDs can alias the same input. Resolve
+                # only this ambiguous limit check, before mutating the series.
+                try:
+                    resolved = await _session_reference_url(message.bot, image_session, state=state)
+                    urls = [resolved] if isinstance(resolved, str) else list(resolved or [])
+                    new_url = await _telegram_file_url(message.bot, file_id)
+                    if not new_url:
+                        raise ValueError("unresolved reference")
+                    reference_count = len(dict.fromkeys([*urls, new_url]))
+                except Exception:
+                    await message.answer("Не удалось проверить референсы. Попробуй отправить фото ещё раз.")
+                    return
+            if reference_count > max_refs:
                 await message.answer(
                     f"У этой модели максимум {max_refs} референсов. Напиши промпт или начни новую серию.",
                     reply_markup=image_session_kb(
@@ -2604,22 +2642,30 @@ async def handle_session_photo(
     else:
         reference_file_ids = [file_id]
 
-    await repo.update_image_session_references(session, image_session.id, reference_file_ids, mode="image")
+    reference_kwargs = {"reference_urls": public_refs} if public_refs else {}
+    await repo.update_image_session_references(
+        session, image_session.id, reference_file_ids, mode="image", **reference_kwargs,
+    )
     image_session.mode = "image"
     image_session.reference_file_id = reference_file_ids[0] if reference_file_ids else None
     image_session.reference_file_ids = json.dumps(reference_file_ids, ensure_ascii=True) if reference_file_ids else None
-    image_session.reference_url = None
-    image_session.reference_urls = None
+    image_session.reference_url = public_refs[0] if public_refs else None
+    image_session.reference_urls = json.dumps(public_refs, ensure_ascii=True) if public_refs else None
     await state.update_data(
         image_file_id=reference_file_ids[0] if reference_file_ids else None,
         ref_file_ids=reference_file_ids,
+        reference_urls=public_refs,
+        reference_url=None,
+        carryover_reference_urls=[],
+        carryover_reference_url=None,
+        remix_reference_url=None,
         image_session_id=image_session.id,
         mode="image",
         image_mode="image",
     )
     label = (
-        f"✅ Референс {len(reference_file_ids)}/{max_refs} добавлен для активной серии."
-        if max_refs > 1
+        f"✅ Референс {reference_count}/{max_refs} добавлен для активной серии."
+        if not replacing
         else "✅ Новый референс сохранён для активной серии."
     )
     source_feed_gen_id = await _source_feed_id_for_generation_or_state(
@@ -3432,7 +3478,10 @@ async def cb_image_settings_model(
         carryover_ref_file_ids = _stored_reference_file_ids(image_session)
         carryover_image_file_id = image_session.reference_file_id or (carryover_ref_file_ids[0] if carryover_ref_file_ids else None)
         carryover_reference_urls = _stored_reference_urls(image_session)
-        carryover_reference_url = (carryover_reference_urls[0] if carryover_reference_urls else None) or image_session.last_result_url
+        if carryover_reference_urls:
+            carryover_reference_url = carryover_reference_urls[0]
+        elif not carryover_ref_file_ids and not carryover_image_file_id:
+            carryover_reference_url = image_session.last_result_url
         if carryover_ref_file_ids or carryover_image_file_id or carryover_reference_url:
             carryover_mode = "image"
         elif image_session.mode:

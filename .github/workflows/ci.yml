@@ -180,6 +180,7 @@ jobs:
             tests/test_bot_prompt_and_regen_confirmation.py \
             tests/test_feed_picker_reference_limits.py \
             tests/test_feed_repeat_snapshot_security.py \
+            tests/test_feed_input_reference_privacy.py \
             tests/test_prompt_privacy.py \
             tests/test_realtime.py \
             tests/test_feed_session_prompt_security.py \
@@ -267,6 +268,7 @@ jobs:
             tests/test_bot_prompt_and_regen_confirmation.py \
             tests/test_feed_picker_reference_limits.py \
             tests/test_feed_repeat_snapshot_security.py \
+            tests/test_feed_input_reference_privacy.py \
             tests/test_prompt_privacy.py \
             tests/test_realtime.py \
             tests/test_feed_session_prompt_security.py \

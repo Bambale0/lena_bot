@@ -205,6 +205,7 @@ class PricePlanCard(BaseModel):
 
 
 class FeedCard(BaseModel):
+    """Public output media only; input references stay in owner session/history cards."""
     id: int
     type: str = "image"
     result_url: str
@@ -221,8 +222,6 @@ class FeedCard(BaseModel):
     shares: int
     aspect_ratio: str | None = None
     quality: str | None = None
-    reference_url: str | None = None
-    reference_urls: list[str] = Field(default_factory=list)
     created_at: str
     can_remix: bool = True
     can_use_reference: bool = False
@@ -243,10 +242,6 @@ class FeedCard(BaseModel):
         creator_inputs = original_feed_video_inputs(generation) if origin_videos is not None else {}
         result_urls = generation_result_urls(generation)
         result_url = generation_result_url(generation) or ""
-        reference_urls = json_url_list(getattr(card, "reference_urls", None))
-        reference_url = getattr(card, "reference_url", None)
-        if reference_url and reference_url not in reference_urls:
-            reference_urls.insert(0, str(reference_url))
         return cls(
             id=int(getattr(generation, "id", 0)),
             type=gen_type,
@@ -263,8 +258,6 @@ class FeedCard(BaseModel):
             shares=int(getattr(generation, "shares_count", 0) or 0),
             aspect_ratio=getattr(card, "aspect_ratio", None),
             quality=getattr(card, "quality", None),
-            reference_url=reference_urls[0] if reference_urls else None,
-            reference_urls=reference_urls,
             created_at=iso_datetime(getattr(generation, "created_at", None)),
             can_remix=bool(result_url),
             can_use_reference=gen_type == "image" and bool(result_url),
