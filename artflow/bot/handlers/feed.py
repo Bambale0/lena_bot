@@ -35,6 +35,7 @@ from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.feed_remix_prompt import (
     original_feed_video_inputs,
     original_feed_video_references,
+    owned_generation_prompt_is_visible,
     supports_feed_source_media,
 )
 from db import repository as repo
@@ -46,15 +47,7 @@ router = Router(name="feed")
 
 
 def _owned_generation_prompt_is_visible(generation: Generation, user_id: int) -> bool:
-    if generation.user_id != user_id or getattr(generation, "source_feed_gen_id", None):
-        return False
-    params = getattr(generation, "input_params", None)
-    if isinstance(params, str):
-        try:
-            params = json.loads(params)
-        except (TypeError, ValueError):
-            return False
-    return params is None or (isinstance(params, dict) and not params.get("hidden_prompt"))
+    return owned_generation_prompt_is_visible(generation, user_id)
 
 
 def _model_label(model_key: str) -> str:
@@ -502,7 +495,6 @@ async def cb_feed_again(
     state: FSMContext,
     bot: Bot,
 ) -> None:
-    import json
 
     from bot.handlers.image_gen import (
         ImageReferenceUnavailable,
@@ -552,6 +544,7 @@ async def cb_feed_again(
     if not await _accept_generation_reference_candidate(
         call, bot, session=session, db_user=db_user, model_key=gen.model,
         reference_url=effective_reference_url, source_feed_gen_id=source_feed_gen_id,
+        parent_generation_id=gen.id,
     ):
         return
     prompt_is_user_supplied = _owned_generation_prompt_is_visible(gen, db_user.id)
@@ -681,7 +674,6 @@ async def cb_feed_remix(
 
 @router.callback_query(F.data.startswith("feed:publish:"))
 async def cb_publish_generation(call: CallbackQuery, session: AsyncSession, db_user: User, bot: Bot | None = None) -> None:
-    import json
 
     from api.public_files import mirror_url
 

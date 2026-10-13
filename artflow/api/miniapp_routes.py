@@ -90,6 +90,7 @@ from bot.keyboards.models import (
     image_session_kb,
 )
 from bot.utils.deep_links import build_start_payload
+from bot.utils.feed_media import canonical_feed_source_reference, feed_identity_references
 from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_images import (
     send_image_group_to_chat,
@@ -100,11 +101,15 @@ from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
+    build_feed_image_prompt,
+    build_owned_feed_image_prompt,
+    feed_image_remix_context,
     feed_remix_context,
     feed_video_edit_prompt,
     order_feed_image_references,
     original_feed_video_inputs,
     original_feed_video_references,
+    owned_generation_prompt_is_visible,
     supports_feed_source_media,
 )
 from core.feed_remix_prompt import build_feed_remix_prompt as _build_feed_remix_prompt
@@ -3509,6 +3514,19 @@ async def get_feed(
     return [_feed_card_out(c, user) for c in cards]
 
 
+@router.get("/feed/{gen_id}")
+async def get_feed_item(
+    gen_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Hydrate shared posts with the same media and privacy contract as the list."""
+    card = await repo.get_feed_generation_card(session, gen_id, require_media=False)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return _feed_card_out(card, user)
+
+
 @router.post("/generations/{gen_id}/share", status_code=200)
 async def share_generation(
     gen_id: int,
@@ -3559,22 +3577,33 @@ def _feed_source_reference_urls(source: Generation, source_image_url: str | None
     """Never feed an MP4 from the source post into an image-reference slot."""
     explicit_image = _normalize_public_urls(source_image_url)
     if explicit_image:
-        return explicit_image
+        source_urls = _generation_result_urls(source)
+        return [
+            _canonical_feed_source_reference(source, url, source_urls)
+            for url in explicit_image
+        ]
     gen_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
     if gen_type == GenerationType.video.value:
         return []
     return _generation_result_urls(source)
 
 
+def _canonical_feed_source_reference(source: Generation, url: str, source_urls: list[str]) -> str:
+    return canonical_feed_source_reference(source, url, source_urls)
+
+
 def _prepare_feed_remix_inputs(
-    source: Generation, body: FeedRemixRequest,
+    source: Generation, body: FeedRemixRequest, *, user_id: int | None = None,
 ) -> tuple[str, list[str], FeedRemixRequest, bool]:
     """Resolve the same confidentiality/media boundary for quote and submission."""
     source_urls = _generation_result_urls(source)
     source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
-    requested_refs = list(dict.fromkeys(_normalize_public_urls(
-        body.source_image_url, body.image_url, *(body.reference_urls or []),
-    )))
+    requested_refs = list(dict.fromkeys(
+        _canonical_feed_source_reference(source, url, source_urls)
+        for url in _normalize_public_urls(
+            body.source_image_url, body.image_url, *(body.reference_urls or []),
+        )
+    ))
     # A feed card is the rendered OUTPUT. Replaying a creator's video must
     # use the source generation's INPUT recipe, not the published MP4.
     if source_type == "video":
@@ -3644,14 +3673,19 @@ def _prepare_feed_remix_inputs(
             )
             return str(source.prompt or "").strip(), requested_refs, body, True
 
+    image_repeat = source_type == "image" and body.model in IMAGE_CAPS
+    identity_refs = feed_identity_references(source, requested_refs) if image_repeat else requested_refs
     has_user_inputs = bool(
-        any(url not in source_urls or source_type != "image" for url in requested_refs)
+        (bool(identity_refs) if image_repeat else any(url not in source_urls or source_type != "image" for url in requested_refs))
         or (body.video_url and (source_type != "video" or body.video_url not in source_urls))
         or body.audio_ids or body.character_ids
     )
     personalized = bool(body.change_request.strip() or has_user_inputs)
     if not personalized:
-        user_refs = _normalize_public_urls(body.image_url, *(body.reference_urls or []))
+        user_refs = [
+            _canonical_feed_source_reference(source, url, source_urls)
+            for url in _normalize_public_urls(body.image_url, *(body.reference_urls or []))
+        ]
         source_refs = _feed_source_reference_urls(source, body.source_image_url)
         if body.model in IMAGE_CAPS:
             refs = user_refs or source_refs
@@ -3663,16 +3697,32 @@ def _prepare_feed_remix_inputs(
         IMAGE_CAPS.get(body.model) or VIDEO_CAPS.get(body.model)
         or _MJ_IMAGE_CAPS.get(body.model) or _MJ_VIDEO_CAPS.get(body.model) or {}
     )
+    explicit_source_url = (
+        _canonical_feed_source_reference(source, body.source_image_url, source_urls)
+        if body.source_image_url else None
+    )
     source_url = (
-        body.source_image_url if source_type == "image" and body.source_image_url in source_urls
+        explicit_source_url if source_type == "image" and explicit_source_url in source_urls
         else source_urls[0] if source_urls else None
     )
     applicable = bool(source_url) and supports_feed_source_media(caps, source_type)
+    if source_type == "image" and body.model in IMAGE_CAPS and any(not public_url_is_available(url) for url in identity_refs):
+        raise HTTPException(status_code=422, detail="Часть твоих фото недоступна. Загрузи их заново; поцелуи не списаны.")
+    own_recipe = source_type == "image" and user_id is not None and owned_generation_prompt_is_visible(source, user_id)
     try:
-        prompt = _build_feed_remix_prompt(
-            "", body.change_request,
-            has_user_references=has_user_inputs, has_source_media=applicable,
-        )
+        if image_repeat and own_recipe:
+            if identity_refs and not supports_feed_source_media(caps, "image"):
+                raise FeedRemixUnavailable("Модель не поддерживает фото-референсы.")
+            prompt = build_owned_feed_image_prompt(source.prompt, body.change_request, has_user_references=bool(identity_refs))
+        elif image_repeat:
+            prompt = build_feed_image_prompt(
+                body.change_request, has_user_references=bool(identity_refs), has_source_media=applicable,
+            )
+        else:
+            prompt = _build_feed_remix_prompt(
+                "", body.change_request,
+                has_user_references=has_user_inputs, has_source_media=applicable,
+            )
     except FeedRemixUnavailable as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.model == "midjourney-blend" and body.change_request.strip():
@@ -3680,7 +3730,7 @@ def _prepare_feed_remix_inputs(
 
     multimodal = bool(caps.get("auto_route_by_inputs") and "multimodal" in caps.get("modes", []))
     if source_type == "image":
-        refs = order_feed_image_references(source_url, requested_refs)
+        refs = identity_refs if image_repeat and own_recipe and identity_refs else order_feed_image_references(source_url, identity_refs)
         body = body.model_copy(update={"mode": "multimodal" if multimodal else "image"})
     else:
         if body.video_url and body.video_url != source_url:
@@ -3767,7 +3817,7 @@ async def quote_feed_remix(
     if source is None:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
-    repeat_prompt, repeat_refs, body, _ = _prepare_feed_remix_inputs(source, body)
+    repeat_prompt, repeat_refs, body, _ = _prepare_feed_remix_inputs(source, body, user_id=user.id)
     gen_type: str
     count = 1
     edit_quote = {}
@@ -3885,9 +3935,13 @@ async def remix_feed_post(
     if not source:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
-    repeat_prompt, repeat_refs, body, personalized = _prepare_feed_remix_inputs(source, body)
+    repeat_prompt, repeat_refs, body, personalized = _prepare_feed_remix_inputs(source, body, user_id=user.id)
     feed_context = (
-        {FEED_REMIX_CONTEXT_KEY: feed_remix_context(gen_id, repeat_prompt)} if personalized else {}
+        {FEED_REMIX_CONTEXT_KEY: (
+            feed_image_remix_context(gen_id, repeat_prompt, source_image_url=repeat_refs[-1] if repeat_refs else None)
+            if body.model in IMAGE_CAPS and getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None)) == "image"
+            else feed_remix_context(gen_id, repeat_prompt)
+        )} if personalized else {}
     )
 
     if body.model in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS):

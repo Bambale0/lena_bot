@@ -385,3 +385,49 @@ async def test_session_reference_guard_preserves_scalar_input_and_empty_edit_dra
     assert response.json()["data"]["reference_url"] == (expected[0] if expected else None)
     assert local_session.sync.get(User, 42).credits == 100
     assert local_session.sync.scalars(select(Generation)).all() == []
+
+
+@pytest.mark.parametrize("duplicate_lead", [False, True])
+async def test_legacy_saved_scalar_plural_row_matches_owner_restore_and_provider(local_session, monkeypatch, duplicate_lead):
+    from unittest.mock import AsyncMock
+
+    import httpx
+
+    from api import image_service, nexus_image_adapter
+    from api.nexusapi_client import NexusApiClient
+    from api.repeat_runtime import _urls_from_image_session
+    from bot.handlers import image_gen
+
+    refs = [f"https://example.test/legacy-{i}.jpg" for i in range(3)]
+    row = ImageSession(
+        user_id=42, model="nano-banana-pro", mode="image", aspect_ratio="9:16", quality="2K", count=1,
+        base_prompt=OWN_PROMPT, last_prompt=OWN_PROMPT, prompt_provenance="user_supplied",
+        reference_url=refs[0], reference_urls=json.dumps(refs if duplicate_lead else refs[1:]),
+        status=ImageSessionStatus.active,
+    )
+    # Save the independent legacy/imported columns directly: today's constructor
+    # already normalizes this shape and would mask the reader regression.
+    local_session.add(row)
+    await local_session.commit()
+    stored = await repo.get_image_session(local_session, row.id, 42)
+    owner = local_session.sync.get(User, 42)
+    restored = await web_sessions.active_image_session(local_session, owner)
+    assert restored["data"]["reference_urls"] == refs
+    assert _urls_from_image_session(stored) == refs
+    assert await repo.get_image_session(local_session, row.id, 99) is None
+    posts = []
+
+    def capture(request):
+        assert request.method == "POST"
+        assert str(request.url) == "https://nexus.test/generate"
+        posts.append(json.loads(request.content))
+        return httpx.Response(200, json={"task_id": "synthetic-task", "status": "pending"})
+
+    async with httpx.AsyncClient(base_url="https://nexus.test", transport=httpx.MockTransport(capture)) as http:
+        client = NexusApiClient(api_key="synthetic-test-only", base_url="https://nexus.test", client=http)
+        monkeypatch.setattr(nexus_image_adapter, "NexusApiClient", lambda: client)
+        resolved = await image_gen._session_reference_url(AsyncMock(), stored)
+        await image_service.generate_image(image_service.ImageModel.NANO_BANANA_PRO, OWN_PROMPT, image_url=resolved)
+    assert posts[0]["params"]["image_urls"] == refs
+    assert local_session.sync.get(User, 42).credits == 100
+    assert local_session.sync.scalars(select(Generation)).all() == []

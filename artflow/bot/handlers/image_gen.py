@@ -24,7 +24,11 @@ from api.image_errors import telegram_image_error_text
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
 from api.photo_prompt_service import generate_prompt_from_photo
-from api.public_files import local_upload_path_from_url, mirror_telegram_file
+from api.public_files import (
+    local_upload_path_from_url,
+    mirror_telegram_file,
+    public_url_is_available,
+)
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
 from bot.keyboards.models import (
     IMAGE_CAPS,
@@ -46,7 +50,12 @@ from bot.keyboards.models import (
 )
 from bot.states import ImageGenFSM
 from bot.ui.router import render_screen
-from bot.utils.feed_media import canonical_generation_result_url
+from bot.utils.feed_media import (
+    canonical_generation_result_url,
+    feed_identity_references,
+    generation_result_reference_urls,
+    selected_feed_source_url,
+)
 from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_images import (
     send_image_group_to_message,
@@ -58,13 +67,16 @@ from core.config import settings
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
-    build_feed_remix_prompt,
-    feed_remix_context,
+    build_feed_image_prompt,
+    build_owned_feed_image_prompt,
+    feed_image_remix_context,
     generation_has_hidden_prompt_metadata,
     generation_prompt_is_protected,
     legacy_feed_edit_unavailable,
     order_feed_image_references,
-    trusted_feed_prompt,
+    owned_generation_prompt_is_visible,
+    trusted_feed_image_prompt,
+    trusted_feed_image_scene,
 )
 from core.provider_routing import get_nano21_route
 from db import repository as repo
@@ -366,14 +378,20 @@ async def _resolve_image_session(
 
 
 def _stored_reference_file_ids(image_session: ImageSession) -> list[str]:
-    raw_reference_file_ids = getattr(image_session, "reference_file_ids", None)
-    if not raw_reference_file_ids:
-        return []
+    raw = getattr(image_session, "reference_file_ids", None)
     try:
-        parsed = json.loads(raw_reference_file_ids)
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
     except (TypeError, ValueError):
-        return []
-    return [item for item in parsed if isinstance(item, str) and item]
+        parsed = None
+    refs = list(dict.fromkeys(
+        item.strip() for item in (parsed if isinstance(parsed, list) else [])
+        if isinstance(item, str) and item.strip()
+    ))
+    scalar = getattr(image_session, "reference_file_id", None)
+    scalar = scalar.strip() if isinstance(scalar, str) else ""
+    if scalar and scalar not in refs:
+        refs.insert(0, scalar)
+    return refs
 
 
 def _stored_reference_urls(image_session: ImageSession) -> list[str]:
@@ -387,10 +405,11 @@ def _stored_reference_urls(image_session: ImageSession) -> list[str]:
         item.strip() for item in (parsed if isinstance(parsed, list) else [])
         if isinstance(item, str) and item.strip()
     ))
-    if refs:
-        return refs
     scalar = getattr(image_session, "reference_url", None)
-    return [scalar] if isinstance(scalar, str) and scalar else []
+    scalar = scalar.strip() if isinstance(scalar, str) else ""
+    if scalar and scalar not in refs:
+        refs.insert(0, scalar)
+    return refs
 
 
 def _state_reference_file_ids(data: dict) -> list[str]:
@@ -490,13 +509,36 @@ async def _accept_reference_candidate(
     return count
 
 
-async def _accept_model_reference_candidate(call: CallbackQuery, data: dict, model_key: str) -> int | None:
+async def _accept_model_reference_candidate(
+    call: CallbackQuery, data: dict, model_key: str, *, intended_mode: str | None = None,
+) -> int | None:
     from bot.handlers.image_wizard_v2 import _reference_payload_from_state
 
-    caps = IMAGE_CAPS.get(model_key, {})
+    if model_key not in IMAGE_CAPS:
+        await safe_answer_callback(call, "Модель недоступна", show_alert=True)
+        return None
+    caps = IMAGE_CAPS[model_key]
     max_refs = int(caps.get("max_refs", 0) or 0)
-    payload = _reference_payload_from_state(data, max_refs=max_refs, supports_refs=True)
+    supports_refs = _supports_img2img(model_key) and intended_mode != "text"
+    payload = _reference_payload_from_state(data, max_refs=max_refs, supports_refs=supports_refs)
     return await _accept_reference_candidate(call, getattr(call, "bot", None), payload, max_refs)
+
+
+async def _accept_model_reference_transition(
+    call: CallbackQuery, state: FSMContext, model_key: str, *, intended_mode: str | None = None,
+) -> int | None:
+    data = await state.get_data()
+    count = await _accept_model_reference_candidate(call, data, model_key, intended_mode=intended_mode)
+    if count is not None and (intended_mode == "text" or not _supports_img2img(model_key)):
+        # Match the composer reset: an explicit text transition starts without
+        # inputs, while the old persisted series remains available separately.
+        await state.update_data(
+            image_file_id=None, ref_file_ids=[], reference_url=None, reference_urls=[],
+            carryover_image_file_id=None, carryover_ref_file_ids=[],
+            carryover_reference_url=None, carryover_reference_urls=[], carryover_mode=None,
+            remix_reference_url=None, pending_reference_url=None, mode="text", image_mode="text",
+        )
+    return count
 
 
 def _state_has_reference(data: dict) -> bool:
@@ -520,26 +562,74 @@ async def _external_source_feed_id(
     if not source_feed_gen_id:
         return None
     source = await repo.get_generation_by_id(session, source_feed_gen_id)
-    if (source and getattr(source, "user_id", None) == getattr(db_user, "id", None)
-            and not generation_prompt_is_protected(source)):
+    if (source is not None and getattr(source, "id", None) == source_feed_gen_id
+            and owned_generation_prompt_is_visible(source, db_user.id)):
         return None
     return source_feed_gen_id
+
+
+async def _resolve_feed_image_scene(
+    *, session: AsyncSession, db_user: User, source, references: list[str],
+    previous=None, edit_parent=None,
+) -> tuple[object, str, list[str]]:
+    """One exact scene/identity union for admission and the paid launch boundary."""
+    scene = edit_parent or source
+    selected = selected_feed_source_url(scene, references)
+    saved = trusted_feed_image_scene(previous, user_id=db_user.id, source_generation_id=source.id)
+    if edit_parent is None and saved is not None:
+        scene_id, selected = saved
+        if scene_id != source.id:
+            scene = await repo.get_generation_by_id(session, scene_id)
+            if scene is None or getattr(scene, "id", None) != scene_id:
+                raise legacy_feed_edit_unavailable()
+            if getattr(scene, "user_id", None) != db_user.id:
+                scene = await repo.get_public_feed_generation(session, scene_id)
+            if (scene is None or getattr(scene, "id", None) != scene_id
+                    or getattr(scene, "source_feed_gen_id", None) != source.id):
+                raise legacy_feed_edit_unavailable()
+    scene_type = getattr(getattr(scene, "gen_type", None), "value", getattr(scene, "gen_type", None))
+    if (scene_type != "image" or selected not in generation_result_reference_urls(scene)
+            or not selected or not public_url_is_available(selected)):
+        raise FeedRemixUnavailable("Выбранное исходное фото из ленты больше недоступно; поцелуи не списаны.")
+    identities = feed_identity_references(scene, feed_identity_references(source, references))
+    if any(not public_url_is_available(url) for url in identities):
+        raise FeedRemixUnavailable("Часть твоих фото недоступна. Загрузи их заново; поцелуи не списаны.")
+    return scene, selected, identities
 
 
 async def _accept_generation_reference_candidate(
     source: Message | CallbackQuery, bot: Bot, *, session: AsyncSession, db_user: User,
     model_key: str, reference_url: str | list[str] | None, source_feed_gen_id: int | None = None,
+    parent_generation_id: int | None = None,
 ) -> bool:
     """Validate the provider union before replacing an existing image series."""
     refs = [reference_url] if isinstance(reference_url, str) else list(reference_url or [])
-    external_source_id = await _external_source_feed_id(
-        session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+    own_source = await repo.get_generation_by_id(session, source_feed_gen_id) if source_feed_gen_id else None
+    own_recipe = (
+        own_source is not None and getattr(own_source, "id", None) == source_feed_gen_id
+        and owned_generation_prompt_is_visible(own_source, db_user.id)
     )
-    if external_source_id and _supports_img2img(model_key):
-        feed_source = await repo.get_public_feed_generation(session, external_source_id)
-        source_type = getattr(getattr(feed_source, "gen_type", None), "value", getattr(feed_source, "gen_type", None))
-        if source_type == GenerationType.image.value:
-            refs = order_feed_image_references(canonical_generation_result_url(feed_source), refs)
+    external_source_id = None if own_recipe else source_feed_gen_id
+    if own_recipe:
+        refs = feed_identity_references(own_source, refs) or refs
+    try:
+        if external_source_id and _supports_img2img(model_key):
+            feed_source = await repo.get_public_feed_generation(session, external_source_id)
+            if feed_source is None or getattr(feed_source, "id", None) != external_source_id:
+                raise legacy_feed_edit_unavailable()
+            previous = await repo.get_generation_by_id(session, parent_generation_id) if parent_generation_id else None
+            _, selected, identities = await _resolve_feed_image_scene(
+                session=session, db_user=db_user, source=feed_source, references=refs, previous=previous,
+            )
+            refs = order_feed_image_references(selected, identities)
+        if any(not public_url_is_available(url) for url in refs):
+            raise FeedRemixUnavailable("Часть сохранённых фото недоступна. Загрузи их заново; поцелуи не списаны.")
+    except FeedRemixUnavailable as exc:
+        if getattr(source, "message", None) is not None:
+            await safe_answer_callback(source, str(exc), show_alert=True)
+        else:
+            await source.answer(str(exc))
+        return False
     max_refs = int(IMAGE_CAPS.get(model_key, {}).get("max_refs", 0) or 0)
     return await _accept_reference_candidate(source, bot, {"reference_urls": refs}, max_refs) is not None
 
@@ -655,6 +745,12 @@ async def _session_reference_url(
             # selected Telegram set intentionally replaces carried public URLs.
             if "reference_urls" in data:
                 urls = _state_reference_urls(data)
+                # Legacy FSM snapshots also kept the lead URL separately.
+                # Only merge their canonical scalar, never stale carryover.
+                scalar = data.get("reference_url")
+                scalar = scalar.strip() if isinstance(scalar, str) else ""
+                if scalar and scalar not in urls:
+                    urls.insert(0, scalar)
             elif state_file_ids != stored_file_ids:
                 urls = []
             file_ids = state_file_ids
@@ -1029,6 +1125,43 @@ def _repeat_quality_choices_kb(image_session: ImageSession) -> InlineKeyboardMar
     return builder.as_markup()
 
 
+async def _current_feed_image_edit_parent(
+    *, session: AsyncSession, state: FSMContext, db_user: User,
+    image_session: ImageSession, parent_generation_id: int | None,
+    action_type: ImageGenerationAction, source_feed_gen_id: int,
+):
+    """Intent comes only from a current, owned explicit Telegram edit flow."""
+    data = await state.get_data()
+    if (
+        action_type != ImageGenerationAction.remix or not isinstance(data, dict)
+        or data.get("remix_mode") is not True
+        or getattr(image_session, "user_id", None) != db_user.id
+        or data.get("image_session_id") != image_session.id
+        or not parent_generation_id
+        or data.get("remix_parent_generation_id") != parent_generation_id
+    ):
+        return None
+    parent = await repo.get_generation_by_id(session, parent_generation_id)
+    if parent is None or getattr(parent, "id", None) != parent_generation_id:
+        return None
+    if getattr(parent, "user_id", None) != db_user.id:
+        parent = await repo.get_public_feed_generation(session, parent_generation_id)
+        if parent is None or getattr(parent, "id", None) != parent_generation_id:
+            return None
+    if parent_generation_id != source_feed_gen_id and getattr(parent, "source_feed_gen_id", None) != source_feed_gen_id:
+        return None
+    source_type = getattr(getattr(parent, "gen_type", None), "value", getattr(parent, "gen_type", None))
+    if source_type != "image" or not canonical_generation_result_url(parent):
+        return None
+    if (
+        getattr(parent, "image_session_id", None) != image_session.id
+        and getattr(image_session, "last_generation_id", None) != parent_generation_id
+        and not set(_stored_reference_urls(image_session)).intersection(generation_result_reference_urls(parent))
+    ):
+        return None
+    return parent
+
+
 async def _launch_session_generation(
     *,
     source_message: Message,
@@ -1045,30 +1178,68 @@ async def _launch_session_generation(
     launching_text: str,
     queued_text: str,
 ) -> bool:
-    source_feed_gen_id = await _external_source_feed_id(
-        session=session,
-        db_user=db_user,
-        source_feed_gen_id=source_feed_gen_id,
+    # Resolve permission from the authenticated actor and actual source row.
+    requested_source = await repo.get_generation_by_id(session, source_feed_gen_id) if source_feed_gen_id else None
+    own_recipe = (
+        requested_source is not None and getattr(requested_source, "id", None) == source_feed_gen_id
+        and owned_generation_prompt_is_visible(requested_source, db_user.id)
     )
+    original_source_id = source_feed_gen_id
+    source_feed_gen_id = None if own_recipe else source_feed_gen_id
     feed_context = None
+    edit_parent = await _current_feed_image_edit_parent(
+        session=session, state=state, db_user=db_user, image_session=image_session,
+        parent_generation_id=parent_generation_id, action_type=action_type,
+        source_feed_gen_id=original_source_id,
+    ) if original_source_id else None
+    if own_recipe and original_source_id:
+        refs = [reference_url] if isinstance(reference_url, str) else list(reference_url or [])
+        identity_refs = feed_identity_references(requested_source, refs)
+        if any(not public_url_is_available(url) for url in identity_refs):
+            await source_message.answer("Часть твоих фото недоступна. Загрузи их заново; поцелуи не списаны.")
+            return False
+        if edit_parent is None and (identity_refs or feed_change_request):
+            # Visible own recipe is authorized; no finished face competes with the user's photos.
+            previous = (
+                await repo.get_generation_by_id(session, parent_generation_id)
+                if parent_generation_id and parent_generation_id != original_source_id else None
+            )
+            safe_previous = trusted_feed_image_prompt(
+                previous, user_id=db_user.id, source_generation_id=original_source_id,
+                has_user_references=bool(identity_refs),
+            )
+            if (previous is not None and safe_previous is None and feed_change_request is None
+                    and prompt.strip() != str(requested_source.prompt or "").strip()):
+                await source_message.answer(str(legacy_feed_edit_unavailable()), reply_markup=main_menu_kb())
+                return False
+            if safe_previous is not None:
+                prompt = safe_previous
+                if feed_change_request:
+                    prompt += "\n\n" + feed_change_request.strip()
+            else:
+                prompt = build_owned_feed_image_prompt(
+                    requested_source.prompt, feed_change_request or "", has_user_references=bool(identity_refs),
+                )
+            if identity_refs:
+                reference_url = identity_refs
     if source_feed_gen_id:
-        # Sessions can be serialized before any generation exists or finishes.
-        # Protected text belongs only to the provenance-guarded Generation row.
         image_session.base_prompt = None
         image_session.last_prompt = None
         image_session.prompt_provenance = None
         await session.commit()
-        # Legacy sessions can still contain the original private prompt. Remove
-        # it at the provider boundary whenever a reader adds text or references.
         source = await repo.get_public_feed_generation(session, source_feed_gen_id)
         source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
-        source_url = canonical_generation_result_url(source) if source_type == "image" else None
         refs = [reference_url] if isinstance(reference_url, str) else list(reference_url or [])
-        refs = list(dict.fromkeys(url for url in refs if url))
+        source_url = selected_feed_source_url(source, refs) if source_type == "image" else None
+        identity_refs = feed_identity_references(source, refs)
+        fixed_composition = edit_parent is not None
+        if fixed_composition:
+            source_url = canonical_generation_result_url(edit_parent)
+            identity_refs = feed_identity_references(edit_parent, identity_refs)
         personalized = bool(
             action_type == ImageGenerationAction.remix or feed_change_request
             or prompt.strip() != str(getattr(source, "prompt", "") or "").strip()
-            or any(url != source_url for url in refs)
+            or identity_refs
         )
         if personalized:
             try:
@@ -1076,20 +1247,31 @@ async def _launch_session_generation(
                     await repo.get_generation_by_id(session, parent_generation_id)
                     if parent_generation_id and parent_generation_id != source_feed_gen_id else None
                 )
-                safe_previous = trusted_feed_prompt(
+                if source is None or getattr(source, "id", None) != source_feed_gen_id:
+                    raise legacy_feed_edit_unavailable()
+                scene, source_url, identity_refs = await _resolve_feed_image_scene(
+                    session=session, db_user=db_user, source=source, references=refs,
+                    previous=previous, edit_parent=edit_parent,
+                )
+                safe_previous = trusted_feed_image_prompt(
                     previous, user_id=db_user.id, source_generation_id=source_feed_gen_id,
+                    has_user_references=bool(identity_refs), fixed_composition=fixed_composition,
                 )
                 if feed_change_request is None and prompt.strip() != str(getattr(source, "prompt", "") or "").strip() and safe_previous is None:
                     raise legacy_feed_edit_unavailable()
-                public_base = build_feed_remix_prompt(
-                    "", has_user_references=True,
-                    has_source_media=bool(source_url and _supports_img2img(image_session.model)),
+                public_base = build_feed_image_prompt(
+                    has_user_references=bool(identity_refs), fixed_composition=fixed_composition,
+                    has_source_media=bool(source_url and public_url_is_available(source_url) and _supports_img2img(image_session.model)),
                 )
+                if any(not public_url_is_available(url) for url in identity_refs):
+                    raise FeedRemixUnavailable("Часть твоих фото недоступна. Загрузи их заново; поцелуи не списаны.")
                 prompt = safe_previous or public_base
                 if feed_change_request:
                     prompt += "\n\n" + feed_change_request.strip()
-                feed_context = {FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, prompt)}
-                refs = order_feed_image_references(source_url, refs)
+                feed_context = {FEED_REMIX_CONTEXT_KEY: feed_image_remix_context(
+                    source_feed_gen_id, prompt, source_image_url=source_url, scene_generation_id=scene.id,
+                )}
+                refs = order_feed_image_references(source_url, identity_refs)
                 max_refs = int(IMAGE_CAPS.get(image_session.model, {}).get("max_refs", 1) or 1)
                 if len(refs) > max_refs:
                     raise FeedRemixUnavailable(
@@ -1684,9 +1866,7 @@ async def cb_nana_banano_refs_hint(call: CallbackQuery, state: FSMContext) -> No
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:mode:"))
 async def cb_image_dynamic_mode(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
-        return
-    await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
+    # Opening a mode picker consumes no references and changes no selection.
     await safe_edit_message(
         call.message,
         "🔀 <b>Выбери режим модели</b>",
@@ -1699,7 +1879,7 @@ async def cb_image_dynamic_mode(call: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:ratio:"))
 async def cb_image_dynamic_ratio(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+    if await _accept_model_reference_transition(call, state, model_key) is None:
         return
     await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
     await safe_edit_message(
@@ -1714,7 +1894,7 @@ async def cb_image_dynamic_ratio(call: CallbackQuery, state: FSMContext) -> None
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:quality:"))
 async def cb_image_dynamic_quality(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+    if await _accept_model_reference_transition(call, state, model_key) is None:
         return
     await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
     await safe_edit_message(
@@ -1729,7 +1909,7 @@ async def cb_image_dynamic_quality(call: CallbackQuery, state: FSMContext) -> No
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:count:"))
 async def cb_image_dynamic_count(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+    if await _accept_model_reference_transition(call, state, model_key) is None:
         return
     await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
     await safe_edit_message(
@@ -1744,7 +1924,7 @@ async def cb_image_dynamic_count(call: CallbackQuery, state: FSMContext) -> None
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:enhance:"))
 async def cb_image_dynamic_enhance(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+    if await _accept_model_reference_transition(call, state, model_key) is None:
         return
     data = await state.get_data()
     mode = data.get("image_mode") or data.get("mode")
@@ -1768,7 +1948,7 @@ async def cb_image_dynamic_enhance(call: CallbackQuery, state: FSMContext) -> No
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:reference:"))
 async def cb_image_dynamic_reference(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+    if await _accept_model_reference_transition(call, state, model_key) is None:
         return
     await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
     await safe_edit_message(
@@ -1784,7 +1964,7 @@ async def cb_image_dynamic_reference(call: CallbackQuery, state: FSMContext) -> 
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:continue:"))
 async def cb_image_dynamic_continue(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+    if await _accept_model_reference_transition(call, state, model_key) is None:
         return
     data = await state.get_data()
     caps = IMAGE_CAPS.get(model_key, {})
@@ -1950,7 +2130,10 @@ async def cb_image_model(
 @router.callback_query(ImageGenFSM.mode_select, F.data.startswith("img_mode:"))
 async def cb_image_mode(call: CallbackQuery, state: FSMContext) -> None:
     _, mode, model_key = call.data.split(":", 2)
-    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+    if mode not in IMAGE_CAPS.get(model_key, {}).get("modes", ["text"]):
+        await call.answer("Этот режим недоступен для модели", show_alert=True)
+        return
+    if await _accept_model_reference_transition(call, state, model_key, intended_mode=mode) is None:
         return
 
     await state.update_data(
@@ -3809,6 +3992,7 @@ async def _image_session_for_result_action(
     if not await _accept_generation_reference_candidate(
         call, getattr(call, "bot", None), session=session, db_user=db_user, model_key=gen.model,
         reference_url=reference_url, source_feed_gen_id=getattr(gen, "source_feed_gen_id", None),
+        parent_generation_id=gen.id,
     ):
         return None
     image_session = await repo.create_image_session(
@@ -3928,6 +4112,7 @@ async def cb_regen_image(
     if not await _accept_generation_reference_candidate(
         call, bot, session=session, db_user=db_user, model_key=prev.model,
         reference_url=reference_url, source_feed_gen_id=getattr(prev, "source_feed_gen_id", None),
+        parent_generation_id=prev.id,
     ):
         return
     image_session = await repo.create_image_session(

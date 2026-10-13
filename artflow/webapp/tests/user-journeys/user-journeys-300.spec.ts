@@ -253,13 +253,6 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
       await route.fulfill({ json: { data: { url: uploadUrl, kind: "image", content_type: "image/jpeg", size: 4 } } });
       return;
     }
-    const feedMatch = path.match(/^\/api\/web\/feed\/(\d+)$/);
-    if (feedMatch) {
-      const id = Number(feedMatch[1]);
-      const item = publicFeed[id];
-      await route.fulfill(item ? { json: { data: item } } : { status: 404, json: { detail: "Not found" } });
-      return;
-    }
     const publishMatch = path.match(/^\/api\/web\/feed\/generations\/(\d+)\/publish$/);
     if (publishMatch) {
       await route.fulfill({ json: { data: { is_public_feed: true, link: `https://t.me/apix_ai_bot?start=feed_${publishMatch[1]}` } } });
@@ -293,6 +286,12 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
       const source = url.searchParams.get("source") || "recent";
       captures.feedSources?.push(source);
       return route.fulfill({ json: feedBySource[source] || feed });
+    }
+
+    const feedMatch = path.match(/^\/api\/v1\/feed\/(\d+)$/);
+    if (feedMatch && method === "GET") {
+      const item = publicFeed[Number(feedMatch[1])];
+      return route.fulfill(item ? { json: item } : { status: 404, json: { detail: "Not found" } });
     }
 
     const likeMatch = path.match(/^\/api\/v1\/feed\/(\d+)\/like$/);

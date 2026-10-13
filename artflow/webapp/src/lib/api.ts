@@ -158,12 +158,8 @@ export class MiniAppApi {
   }
 
   async getPublicFeedItem(id: number, signal?: AbortSignal): Promise<FeedItem> {
-    const response = await fetch(`/api/web/feed/${id}`, {
-      signal,
-      headers: { "X-Telegram-Init-Data": this.initData },
-    });
-    if (!response.ok) throw await readApiError(response);
-    const item = feedItemFromPublicPayload(await response.json());
+    // Shared links must use the same owned preview routes as ordinary cards.
+    const item = feedItemFromPublicPayload(await this.request<unknown>(`/feed/${id}`, {}, signal));
     if (!item) throw new ApiError("Работа ленты не найдена", 404, "FEED_ITEM_NOT_FOUND");
     return item;
   }
@@ -325,8 +321,8 @@ export class MiniAppApi {
     return this.request<{ likes_count?: number }>(`/feed/${id}/like`, { method: "POST", body: "{}" });
   }
 
-  remixFeedItem(item: FeedItem): Promise<GenerationTask> {
-    return openFeedRemixRunner(item);
+  remixFeedItem(item: FeedItem, sourceMediaUrl?: string): Promise<GenerationTask> {
+    return openFeedRemixRunner(item, sourceMediaUrl);
   }
 
   remixFeed(id: number, body: Record<string, unknown>): Promise<GenerationTask> {

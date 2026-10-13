@@ -17,6 +17,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.public_files import public_url_is_available
+
 # Import the existing routers and handlers first. New handlers are then inserted
 # at the beginning of their observer lists, so the old one-click repeat remains
 # the fallback for single-reference/text-only models.
@@ -182,6 +184,27 @@ async def _resolve_base_reference_urls(bot: Bot, image_session: Any | None) -> l
         state=None,
     )
     return _url_list(value)
+
+
+async def _repeat_provider_reference_urls(
+    *, session: AsyncSession, db_user: User, source_feed_gen_id: int | None,
+    reference_urls: list[str],
+) -> list[str] | None:
+    """Count the same public source used at launch, failing closed if it is gone."""
+    external_source_id = await image_gen._external_source_feed_id(
+        session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+    )
+    if not external_source_id:
+        return reference_urls
+    source = await repo.get_public_feed_generation(session, external_source_id)
+    if _generation_type_value(source) != GenerationType.image.value:
+        return None
+    source_url = image_gen.selected_feed_source_url(source, reference_urls)
+    if not source_url or not public_url_is_available(source_url):
+        return None
+    return image_gen.order_feed_image_references(
+        source_url, image_gen.feed_identity_references(source, reference_urls),
+    )
 
 
 async def _begin_repeat_collection(
@@ -366,7 +389,13 @@ async def _feed_again_interceptor(
         await feed.cb_feed_again(call, session, db_user, state, bot)
 
 
-async def _collect_repeat_reference(message: Message, state: FSMContext) -> None:
+async def _collect_repeat_reference(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User,
+    bot: Bot,
+) -> None:
     data = await state.get_data()
     model_key = str(data.get("repeat_model_key") or "")
     max_refs = _repeat_max_refs(model_key) if model_key else int(data.get("repeat_max_refs") or 1)
@@ -377,9 +406,35 @@ async def _collect_repeat_reference(message: Message, state: FSMContext) -> None
     file_id = best[0].file_id
     if file_id not in new_file_ids:
         new_file_ids.append(file_id)
+    candidate_urls = list(base_urls)
+    try:
+        for candidate_file_id in new_file_ids:
+            url = str(await image_gen._telegram_file_url(bot, candidate_file_id) or "").strip()
+            if not url:
+                raise image_gen.ImageReferenceUnavailable()
+            if url not in candidate_urls:
+                candidate_urls.append(url)
+    except Exception:
+        await message.answer("Не удалось проверить фото. Попробуй ещё раз.")
+        return
+    source_feed_gen_id = data.get("repeat_source_feed_gen_id")
+    generation_id = int(data.get("repeat_generation_id") or 0)
+    if generation_id:
+        generation = await repo.get_generation_by_id(session, generation_id)
+        if not generation or getattr(generation, "user_id", None) != db_user.id:
+            await message.answer("Генерация не найдена")
+            return
+        # Do not let stale collection state remove protected source lineage.
+        source_feed_gen_id = getattr(generation, "source_feed_gen_id", None) or source_feed_gen_id
+    candidate_urls = await _repeat_provider_reference_urls(
+        session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+        reference_urls=candidate_urls,
+    )
+    if candidate_urls is None:
+        await message.answer("Исходное фото из ленты недоступно. Выбери другую публикацию.")
+        return
     total = await image_gen._accept_reference_candidate(
-        message, getattr(message, "bot", None),
-        {"reference_urls": base_urls, "ref_file_ids": new_file_ids}, max_refs,
+        message, bot, {"reference_urls": candidate_urls}, max_refs,
     )
     if total is None:
         return
@@ -491,15 +546,13 @@ async def _repeat_refs_run(
             return
         if url not in references:
             references.append(url)
-    candidate_refs = list(references)
-    external_source_id = await image_gen._external_source_feed_id(
+    candidate_refs = await _repeat_provider_reference_urls(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+        reference_urls=references,
     )
-    if external_source_id:
-        source = await repo.get_public_feed_generation(session, external_source_id)
-        if _generation_type_value(source) == GenerationType.image.value:
-            source_url = image_gen.canonical_generation_result_url(source)
-            candidate_refs = image_gen.order_feed_image_references(source_url, candidate_refs)
+    if candidate_refs is None:
+        await safe_answer_callback(call, "Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)
+        return
     if await image_gen._accept_reference_candidate(
         call, bot, {"reference_urls": candidate_refs}, max_refs,
     ) is None:

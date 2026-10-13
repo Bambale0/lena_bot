@@ -379,18 +379,11 @@ async def confirm_repeat(
 
         # A restored snapshot may exceed today's model cap. Include any public
         # source image that the shared launch will add before archiving a series.
-        candidate_refs = list(provider_refs)
-        external_source_id = await image_gen._external_source_feed_id(
-            session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
-        )
-        if external_source_id:
-            feed_source = await repo.get_public_feed_generation(session, external_source_id)
-            if _is_image(feed_source):
-                source_url = image_gen.canonical_generation_result_url(feed_source)
-                candidate_refs = image_gen.order_feed_image_references(source_url, candidate_refs)
-        if await image_gen._accept_reference_candidate(
-            call, bot, {"reference_urls": candidate_refs}, _max_refs(model_key),
-        ) is None:
+        if not await image_gen._accept_generation_reference_candidate(
+            call.message, bot, session=session, db_user=db_user, model_key=model_key,
+            reference_url=provider_refs, source_feed_gen_id=source_feed_gen_id,
+            parent_generation_id=source_id,
+        ):
             return
         image_session = await repo.create_image_session(
             session=session,

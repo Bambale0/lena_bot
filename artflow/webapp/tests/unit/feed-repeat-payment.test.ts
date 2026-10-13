@@ -157,3 +157,12 @@ test("all valid model references survive ordinary and pending-payment draft rest
     }
   }
 });
+
+test("selected gallery result survives actor-scoped pending-payment recovery", () => {
+  const storage = memoryStorage();
+  const sourceMediaUrl = "https://apix.example/api/v1/feed/201/preview.webp?index=1";
+  saveRepeatDraft(storage, 7, 201, { ...draft, sourceMediaUrl, payment: pending });
+  assert.equal(readRepeatDraft(storage, 7, 201, 1000 + 48 * 60 * 60 * 1000)?.sourceMediaUrl, sourceMediaUrl);
+  assert.equal(readRepeatDraft(storage, 8, 201, 1001), null);
+  assert.equal(readRepeatDraft(storage, 7, 202, 1001), null);
+});

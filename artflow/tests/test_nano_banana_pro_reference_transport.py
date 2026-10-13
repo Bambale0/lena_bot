@@ -1567,3 +1567,247 @@ async def test_text_only_protected_exact_repeat_does_not_count_unconsumed_source
     assert "image_urls" not in image_provider_posts[0]["input"]
     assert launch.created_sessions[-1].base_prompt is None
     assert SECRET not in str(call.message.answer.call_args_list)
+
+
+@pytest.mark.parametrize("entrypoint", ["active", "regen", "feed_again", "safe_repeat", "model_switch", "legacy_state"])
+@pytest.mark.parametrize("duplicate_lead", [False, True])
+async def test_legacy_scalar_and_plural_refs_keep_lead_through_real_routes(local_launch, nexus_posts, monkeypatch, entrypoint, duplicate_lead):
+    from api.repeat_runtime import _urls_from_image_session
+    from bot.handlers import feed, image_wizard_v2, repeat_safe
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1, "own prompt",
+    )
+    # Legacy/imported row shape: lead scalar is independent of plural extras.
+    old.reference_url = REFS[0]
+    old.reference_urls = json.dumps(REFS if duplicate_lead else REFS[1:])
+    launch.generation.image_session_id = old.id
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_gen, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_gen, "_open_image_model_select", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr(repeat_safe, "get_repeat_task_by_any_id", AsyncMock(return_value=launch.generation))
+    monkeypatch.setattr(repeat_safe, "find_repeat_by_confirm_key", AsyncMock(return_value=None))
+    monkeypatch.setattr(repeat_safe, "_is_admin", lambda _user: False)
+    state, data = mutable_state()
+    call = SimpleNamespace(data="regen:image:99", message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock(), from_user=SimpleNamespace(id=777))
+    assert _urls_from_image_session(old) == REFS
+    if entrypoint == "active":
+        await image_gen._sync_state_with_image_session(state, old)
+        await image_gen.handle_session_prompt(SimpleNamespace(text="own prompt", answer=AsyncMock()), state, launch.session, launch.user, call.bot)
+    elif entrypoint == "regen":
+        await image_gen.cb_regen_image(call, launch.session, state, launch.user, call.bot)
+    elif entrypoint == "feed_again":
+        call.data = "feed:again:99"
+        await feed.cb_feed_again(call, launch.session, launch.user, state, call.bot)
+    elif entrypoint == "safe_repeat":
+        call.data = "repeat_image_img_99"
+        await repeat_safe.open_repeat(call, launch.session, state, launch.user, call.bot)
+        assert data["repeat_reference_images"] == REFS
+        await repeat_safe.confirm_repeat(call, launch.session, state, launch.user, call.bot)
+    else:
+        if entrypoint == "model_switch":
+            await image_gen._sync_state_with_image_session(state, old)
+            await image_gen.cb_image_settings_model(call, launch.session, state, launch.user)
+        else:
+            await state.update_data(model_key="nano-banana-pro", mode="image", reference_url=REFS[0], reference_urls=REFS[1:])
+        await image_wizard_v2.open_model_composer_for_selection(call, state, launch.session, "nano-banana-pro")
+        await image_gen.handle_prompt(SimpleNamespace(text="own prompt", caption=None, answer=AsyncMock()), state, launch.session, launch.user, call.bot)
+        await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
+    assert nexus_posts[-1]["params"]["image_urls"] == REFS
+    current = launch.created_sessions[-1]
+    resolved = await image_gen._session_reference_url(call.bot, current)
+    await image_service.generate_image(ImageModel.NANO_BANANA_PRO, "next own prompt", image_url=resolved)
+    assert nexus_posts[-1]["params"]["image_urls"] == REFS
+
+
+@pytest.mark.parametrize("entrypoint", ["dynamic", "repeat_model", "composer", "mode", "forced_composer"])
+async def test_explicit_text_transition_ignores_refs_through_provider_payload(local_launch, image_provider_posts, monkeypatch, entrypoint):
+    from bot.handlers import image_wizard_v2
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1, "own prompt",
+        reference_urls=REFS, reference_file_id="stale", reference_file_ids=["stale"],
+    )
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_gen, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_answer_callback", AsyncMock())
+    mirror = AsyncMock(side_effect=AssertionError("Text transition must not resolve unused references"))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", mirror)
+    state, data = mutable_state()
+    await image_gen._sync_state_with_image_session(state, old)
+    model = "nano-banana-pro" if entrypoint in {"mode", "forced_composer"} else "google/nano-banana"
+    call = SimpleNamespace(data=f"img_dyn:continue:{model}", message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+    if entrypoint == "dynamic":
+        await image_gen.cb_image_dynamic_continue(call, state)
+    elif entrypoint == "repeat_model":
+        await state.update_data(repeat_model_select=True)
+        call.data = f"img_model:{model}"
+        await image_gen.cb_image_model(call, state, launch.session, launch.user)
+    elif entrypoint == "mode":
+        call.data = f"img_mode:text:{model}"
+        await image_gen.cb_image_mode(call, state)
+    else:
+        await image_wizard_v2.open_model_composer_for_selection(call, state, launch.session, model, forced_mode="text" if entrypoint == "forced_composer" else None)
+    assert data["model_key"] == model
+    assert data["image_mode"] == "text"
+    mirror.assert_not_awaited()
+    await image_gen.handle_prompt(SimpleNamespace(text="own text-only prompt", caption=None, answer=AsyncMock()), state, launch.session, launch.user, call.bot)
+    await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
+    mirror.assert_not_awaited()
+    inp = image_provider_posts[-1]["params"] if model == "nano-banana-pro" else image_provider_posts[-1]["input"]
+    assert not inp.get("image_urls")
+    assert not inp.get("image_url")
+    current = launch.created_sessions[-1]
+    assert current.mode == "text"
+    if current is not old:
+        assert not current.reference_file_ids
+        assert not current.reference_url
+        assert not current.reference_urls
+
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=current))
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=current))
+    await image_gen.cb_image_repeat_launch(call, launch.session, state, launch.user, call.bot)
+    mirror.assert_not_awaited()
+    repeated = image_provider_posts[-1]["params"] if model == "nano-banana-pro" else image_provider_posts[-1]["input"]
+    assert not repeated.get("image_urls")
+    assert not repeated.get("image_url")
+
+
+async def test_mode_picker_allows_text_escape_without_mutating_or_resolving_refs(local_launch, image_provider_posts, monkeypatch):
+    launch = local_launch
+    state, data = mutable_state({
+        "model_key": "nano-banana-pro-vip", "image_model": "nano-banana-pro-vip", "image_session_id": 88,
+        "mode": "image", "image_mode": "image", "ref_file_ids": [f"missing-{i}" for i in range(5)],
+        "reference_urls": REFS, "carryover_reference_urls": [SOURCE],
+    })
+    before = json.loads(json.dumps(data))
+    mirror = AsyncMock(side_effect=AssertionError("Mode navigation must not resolve files"))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", mirror)
+    edit = AsyncMock()
+    monkeypatch.setattr(image_gen, "safe_edit_message", edit)
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=None))
+    call = SimpleNamespace(data="img_dyn:mode:nano-banana-pro", message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+    await image_gen.cb_image_dynamic_mode(call, state)
+    assert data == before
+    edit.assert_awaited_once()
+    mirror.assert_not_awaited()
+    call.data = "img_mode:text:nano-banana-pro"
+    await image_gen.cb_image_mode(call, state)
+    await image_gen.handle_prompt(SimpleNamespace(text="own text prompt", caption=None, answer=AsyncMock()), state, launch.session, launch.user, call.bot)
+    await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
+    mirror.assert_not_awaited()
+    assert not image_provider_posts[0]["params"].get("image_urls")
+
+
+@pytest.mark.parametrize("entrypoint", ["active", "repeat"])
+async def test_legacy_mixed_matching_fsm_keeps_scalar_lead_with_telegram_file(local_launch, nexus_posts, monkeypatch, entrypoint):
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1, "own prompt",
+        reference_file_id="saved", reference_file_ids=["saved"],
+    )
+    old.reference_url = REFS[0]
+    old.reference_urls = json.dumps(REFS[1:])
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=SOURCE))
+    state, _ = mutable_state({
+        "image_session_id": old.id, "model_key": old.model, "mode": "image", "image_mode": "image",
+        "reference_url": REFS[0], "reference_urls": REFS[1:], "image_file_id": "saved", "ref_file_ids": ["saved"],
+    })
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+    if entrypoint == "active":
+        await image_gen.handle_session_prompt(SimpleNamespace(text="own prompt", answer=AsyncMock()), state, launch.session, launch.user, call.bot)
+    else:
+        await image_gen.cb_image_repeat_launch(call, launch.session, state, launch.user, call.bot)
+    assert nexus_posts[0]["params"]["image_urls"] == REFS + [SOURCE]
+    await image_gen.cb_image_repeat_launch(call, launch.session, state, launch.user, call.bot)
+    assert nexus_posts[1]["params"]["image_urls"] == REFS + [SOURCE]
+
+
+@pytest.mark.parametrize("entrypoint", ["active", "repeat", "repeat_unbound", "regen", "model_switch"])
+@pytest.mark.parametrize("with_public", [False, True])
+async def test_legacy_file_id_scalar_plural_union_survives_matching_state_and_repeat(local_launch, nexus_posts, monkeypatch, entrypoint, with_public):
+    from bot.handlers import image_wizard_v2
+
+    launch = local_launch
+    public = [SOURCE] if with_public else []
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1, "own prompt",
+        reference_urls=public,
+    )
+    old.reference_file_id = "lead"
+    old.reference_file_ids = json.dumps(["second", "third"])
+    launch.generation.image_session_id = old.id
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_gen, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_gen, "_open_image_model_select", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_edit_message", AsyncMock())
+    monkeypatch.setattr(image_wizard_v2, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: dict(zip(["lead", "second", "third"], REFS))[fid]))
+    state, _ = mutable_state({
+        "image_session_id": old.id, "model_key": old.model, "mode": "image", "image_mode": "image",
+        "reference_urls": public, "image_file_id": "lead", "ref_file_ids": ["second", "third"],
+    })
+    if entrypoint == "repeat_unbound":
+        await state.clear()
+        await state.update_data(image_session_id=old.id)
+    call = SimpleNamespace(data="regen:image:99", message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+    if entrypoint == "active":
+        await image_gen.handle_session_prompt(SimpleNamespace(text="own prompt", answer=AsyncMock()), state, launch.session, launch.user, call.bot)
+    elif entrypoint in {"repeat", "repeat_unbound"}:
+        await image_gen.cb_image_repeat_launch(call, launch.session, state, launch.user, call.bot)
+    elif entrypoint == "regen":
+        await image_gen.cb_regen_image(call, launch.session, state, launch.user, call.bot)
+    else:
+        await image_gen.cb_image_settings_model(call, launch.session, state, launch.user)
+        await image_wizard_v2.open_model_composer_for_selection(call, state, launch.session, "nano-banana-pro")
+        await image_gen.handle_prompt(SimpleNamespace(text="own prompt", caption=None, answer=AsyncMock()), state, launch.session, launch.user, call.bot)
+        await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
+    assert nexus_posts[0]["params"]["image_urls"] == public + REFS
+    current = launch.created_sessions[-1]
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=current))
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=current))
+    await image_gen._sync_state_with_image_session(state, current)
+    await image_gen.cb_image_repeat_launch(call, launch.session, state, launch.user, call.bot)
+    assert nexus_posts[1]["params"]["image_urls"] == public + REFS
+
+
+@pytest.mark.parametrize("entrypoint", ["dynamic", "mode", "repeat_model"])
+async def test_unknown_model_cannot_clear_inputs_as_text_transition(local_launch, monkeypatch, entrypoint):
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1, "own prompt", reference_urls=REFS,
+    )
+    state, data = mutable_state()
+    await image_gen._sync_state_with_image_session(state, old)
+    if entrypoint == "repeat_model":
+        await state.update_data(repeat_model_select=True)
+    before = json.loads(json.dumps(data))
+    mirror = AsyncMock(side_effect=AssertionError("Unknown target must not resolve references"))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", mirror)
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    launch.session.commit.reset_mock()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+    if entrypoint == "dynamic":
+        call.data = "img_dyn:continue:removed-model"
+        await image_gen.cb_image_dynamic_continue(call, state)
+    elif entrypoint == "mode":
+        call.data = "img_mode:text:removed-model"
+        await image_gen.cb_image_mode(call, state)
+    else:
+        call.data = "img_model:removed-model"
+        await image_gen.cb_image_model(call, state, launch.session, launch.user)
+    assert data == before
+    assert old.model == "nano-banana-pro"
+    assert json.loads(old.reference_urls) == REFS
+    launch.session.commit.assert_not_awaited()
+    mirror.assert_not_awaited()

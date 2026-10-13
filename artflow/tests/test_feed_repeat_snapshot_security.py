@@ -76,7 +76,8 @@ async def test_repeat_user_edit_has_explicit_current_message_provenance():
 
 
 @pytest.mark.asyncio
-async def test_confirm_forwards_explicit_user_edit_and_creates_no_secret_session(monkeypatch):
+@pytest.mark.parametrize("source_available", [True, False])
+async def test_confirm_forwards_explicit_user_edit_and_creates_no_secret_session(monkeypatch, source_available):
     source = SimpleNamespace(id=42, user_id=5, gen_type=GenerationType.image, model="nano-banana-2", prompt=SECRET, source_feed_gen_id=77)
     state = State(
         repeat_source_generation_id=42, repeat_raw_task_id="42", repeat_confirm_key="safe-key",
@@ -87,11 +88,22 @@ async def test_confirm_forwards_explicit_user_edit_and_creates_no_secret_session
     launch = AsyncMock(return_value=True)
     monkeypatch.setattr(repeat_safe.repo, "get_generation_by_id", AsyncMock(return_value=source))
     monkeypatch.setattr(repeat_safe.repo, "create_image_session", create_session)
-    monkeypatch.setattr(repeat_safe.repo, "get_public_feed_generation", AsyncMock(return_value=None))
+    public_source = SimpleNamespace(
+        id=77, user_id=99, gen_type=GenerationType.image, prompt=SECRET,
+        result_url="https://example.test/source.jpg", result_urls=None,
+    )
+    monkeypatch.setattr(repeat_safe.repo, "get_public_feed_generation", AsyncMock(
+        return_value=public_source if source_available else None,
+    ))
     monkeypatch.setattr(repeat_safe, "find_repeat_by_confirm_key", AsyncMock(return_value=None))
     monkeypatch.setattr(repeat_safe.image_gen, "_launch_session_generation", launch)
     call = SimpleNamespace(data="repeat_run_confirm_42", from_user=SimpleNamespace(id=777), answer=AsyncMock(), message=SimpleNamespace(answer=AsyncMock()))
     await repeat_safe.confirm_repeat(call, AsyncMock(), state, SimpleNamespace(id=5, tg_id=777), AsyncMock())
+    if not source_available:
+        create_session.assert_not_awaited()
+        launch.assert_not_awaited()
+        assert state.data["repeat_feed_change_request"] == "make the coat white"
+        return
     assert create_session.await_args.kwargs["base_prompt"] is None
     assert launch.await_args.kwargs["feed_change_request"] == "make the coat white"
     assert launch.await_args.kwargs["source_feed_gen_id"] == 77

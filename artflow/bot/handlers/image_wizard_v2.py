@@ -63,7 +63,11 @@ def _default_aspect_ratio_for_model(model_key: str, mode: str | None) -> str:
 
 
 def _reference_payload_from_state(data: dict, *, max_refs: int, supports_refs: bool) -> dict[str, object]:
-    from bot.handlers.image_gen import _state_reference_file_ids, _state_reference_urls
+    from bot.handlers.image_gen import (
+        _state_reference_file_ids,
+        _state_reference_url,
+        _state_reference_urls,
+    )
 
     if not supports_refs:
         return {
@@ -74,12 +78,16 @@ def _reference_payload_from_state(data: dict, *, max_refs: int, supports_refs: b
         }
 
     refs = list(dict.fromkeys(_state_reference_file_ids(data)))
+    urls = _state_reference_urls(data)
+    scalar = _state_reference_url(data)
+    if scalar and scalar not in urls:
+        urls.insert(0, scalar)
 
     return {
         "image_file_id": refs[0] if refs else None,
         "ref_file_ids": refs,
-        "reference_urls": _state_reference_urls(data),
-        "remix_reference_url": data.get("carryover_reference_url") or data.get("remix_reference_url"),
+        "reference_urls": urls,
+        "remix_reference_url": scalar,
     }
 
 
@@ -246,7 +254,7 @@ async def open_model_composer_for_selection(
     caps = IMAGE_CAPS.get(model_key, {})
     modes = list(caps.get("modes") or ["text"])
     max_refs = int(caps.get("max_refs") or 10)
-    supports_refs = "image" in modes
+    supports_refs = "image" in modes and not (forced_mode == "text" and forced_mode in modes)
     reference_payload = _reference_payload_from_state(data, max_refs=max_refs, supports_refs=supports_refs)
     from bot.handlers.image_gen import _accept_reference_candidate
 

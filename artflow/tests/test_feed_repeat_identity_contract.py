@@ -1,0 +1,791 @@
+"""Identity-role acceptance contracts, never a claim of visual face fidelity.
+
+Repository/accounting fakes are shared; real handlers, image_service and Nexus
+HTTP serialization run against synthetic URLs and an in-memory MockTransport.
+"""
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import httpx
+import pytest
+from fastapi import HTTPException
+
+from api import image_service, miniapp_routes, nexus_image_adapter
+from api.nexusapi_client import NexusApiClient
+from api.repeat_runtime import current_repeat_launch_context
+from bot.handlers import feed, image_gen, repeat_safe
+from bot.utils import feed_media
+from core import feed_remix_prompt as prompt_core
+from db import repository as repo
+from db.models import ImageGenerationAction
+from tests import test_nano_banana_pro_reference_transport as reference_fixtures
+from tests.test_nano_banana_pro_reference_transport import (
+    REFS,
+    SECRET,
+    SOURCE,
+    mutable_state,
+)
+
+local_launch = reference_fixtures.local_launch
+MODELS = ["nano-banana-pro", "nano-banana-2"]
+OTHER_SOURCE = "https://example.test/other-public-scene.jpg"
+OWN_RECIPE = "My visible recipe: watercolor street portrait"
+SUFFIX = "\n\nПальто синее 🧥\n\nKeep this line.  \n\t"
+
+
+@pytest.fixture
+async def wire(monkeypatch):
+    posts = []
+
+    def capture(request):
+        assert request.method == "POST"
+        assert str(request.url) == "https://nexus.test/generate"
+        posts.append({"body": json.loads(request.content), "key": request.headers["Idempotency-Key"]})
+        return httpx.Response(200, json={"task_id": f"synthetic-{len(posts)}", "status": "pending"})
+
+    async with httpx.AsyncClient(
+        base_url="https://nexus.test", transport=httpx.MockTransport(capture),
+    ) as http:
+        client = NexusApiClient(api_key="synthetic-test-only", base_url="https://nexus.test", client=http)
+        monkeypatch.setattr(nexus_image_adapter, "NexusApiClient", lambda: client)
+        for module, method in [
+            (image_service.kieai_client, "create_task"),
+            (image_service.comet_fallback, "generate_image"),
+            (image_service.neironych_image_adapter, "generate_nano_banana21_image"),
+        ]:
+            monkeypatch.setattr(module, method, AsyncMock(side_effect=AssertionError("No external provider calls")))
+        yield posts
+
+
+def assert_identity_roles(prompt):
+    assert "EXCLUSIVE source" in prompt
+    assert "user's face and identity" in prompt
+    assert "final image is public scene reference only" in prompt
+    assert "Do not copy, retain, average or blend the author's face" in prompt
+    assert "user's identity takes priority" in prompt
+    assert SECRET not in prompt
+
+
+def assert_variation(prompt):
+    assert_identity_roles(prompt)
+    assert "new pose, framing and composition" in prompt
+    assert "Preserve its visible composition" not in prompt
+    assert "Preserve its composition" not in prompt
+
+
+def previous_generation(prompt, *, version=2, **extra):
+    context = {"version": version, "source_generation_id": 77, "prompt": prompt}
+    return SimpleNamespace(
+        id=88, user_id=42, source_feed_gen_id=77, prompt=prompt,
+        input_params={prompt_core.FEED_REMIX_CONTEXT_KEY: context}, **extra,
+    )
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+async def test_fresh_feed_repeat_sends_identity_contract_to_real_provider(local_launch, wire, model, surface):
+    result = await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(
+            model=model, image_url=REFS[0], reference_urls=REFS[1:], mode="image",
+            change_request="make the coat blue", quality="2K",
+        ), session=local_launch.session, user=local_launch.user, surface=surface,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["model_name"] == model
+    assert params["image_urls"] == REFS + [SOURCE]
+    assert_variation(params["prompt"])
+    assert params["prompt"].endswith("make the coat blue")
+    assert SECRET not in str(result)
+    context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
+    assert context["version"] == 3
+    assert context["prompt"] == params["prompt"]
+
+
+@pytest.mark.parametrize("model", MODELS)
+async def test_all_public_gallery_aliases_are_excluded_from_identity_roles(local_launch, wire, monkeypatch, model):
+    monkeypatch.setattr(miniapp_routes.settings, "WEB_PUBLIC_URL", "https://app.example.test")
+    local_launch.source.result_urls = json.dumps([SOURCE, OTHER_SOURCE])
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(
+            model=model, image_url=REFS[0],
+            source_image_url="https://app.example.test/api/v1/feed/77/display.webp?index=1",
+            reference_urls=[SOURCE, "https://app.example.test/api/v1/feed/77/preview.webp?index=0", REFS[1], OTHER_SOURCE],
+        ), session=local_launch.session, user=local_launch.user,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == REFS[:2] + [OTHER_SOURCE]
+    assert_variation(params["prompt"])
+
+
+@pytest.mark.parametrize("model", MODELS)
+async def test_personalized_repeat_overflow_fails_before_charge(local_launch, wire, model):
+    with pytest.raises(HTTPException) as error:
+        await miniapp_routes.remix_feed_post(
+            77, miniapp_routes.FeedRemixRequest(
+                model=model, reference_urls=[*REFS, "https://example.test/fourth-person.jpg"],
+                change_request="blue coat", mode="image",
+            ), session=local_launch.session, user=local_launch.user,
+        )
+    assert error.value.status_code == 422
+    assert wire == []
+    repo.charge_image_generation.assert_not_awaited()
+    repo.create_generation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("references", [[], [SOURCE]])
+async def test_change_only_repeat_does_not_invent_identity_or_force_fixed_composition(local_launch, wire, model, references):
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(
+            model=model, reference_urls=references, change_request="make the coat blue", mode="image",
+        ), session=local_launch.session, user=local_launch.user,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == [SOURCE]
+    assert "new pose, framing and composition" in params["prompt"]
+    assert "EXCLUSIVE source" not in params["prompt"]
+    assert "Preserve its visible composition" not in params["prompt"]
+    assert SECRET not in params["prompt"]
+
+
+@pytest.mark.parametrize("model", MODELS)
+async def test_unavailable_supplied_identity_fails_without_scene_only_fallback(local_launch, wire, monkeypatch, model):
+    monkeypatch.setattr(miniapp_routes, "public_url_is_available", lambda url: url != REFS[1])
+    with pytest.raises(HTTPException) as error:
+        await miniapp_routes.remix_feed_post(
+            77, miniapp_routes.FeedRemixRequest(model=model, reference_urls=REFS[:2]),
+            session=local_launch.session, user=local_launch.user,
+        )
+    assert error.value.status_code == 422
+    assert wire == []
+    repo.charge_image_generation.assert_not_awaited()
+    repo.create_generation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("metadata", [None, {"hidden_prompt": False}, '{"hidden_prompt": false}'])
+async def test_own_visible_recipe_uses_user_identity_without_finished_author_image(local_launch, wire, model, metadata):
+    local_launch.source.user_id = local_launch.user.id
+    local_launch.source.prompt = OWN_RECIPE
+    local_launch.source.source_feed_gen_id = None
+    local_launch.source.input_params = metadata
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(
+            model=model, image_url=REFS[0], reference_urls=[SOURCE], change_request="make the coat blue",
+        ), session=local_launch.session, user=local_launch.user,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == REFS[:1]
+    assert OWN_RECIPE in params["prompt"]
+    assert "EXCLUSIVE source" in params["prompt"]
+    assert "make the coat blue" in params["prompt"]
+
+
+@pytest.mark.parametrize("metadata,lineage", [
+    ({"hidden_prompt": True}, None), ({"hidden_prompt": False}, 55), (None, 55),
+    ("malformed-json", None), (["not-an-object"], None), ("null", None),
+    ("[]", None), ("false", None), (False, None),
+])
+async def test_owner_hidden_or_derivative_recipe_never_enters_personalized_request(local_launch, wire, metadata, lineage):
+    local_launch.source.user_id = local_launch.user.id
+    local_launch.source.source_feed_gen_id = lineage
+    local_launch.source.input_params = metadata
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(model="nano-banana-pro", image_url=REFS[0]),
+        session=local_launch.session, user=local_launch.user,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == [REFS[0], SOURCE]
+    assert_variation(params["prompt"])
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("references", [REFS[:1], REFS, [REFS[2]]])
+@pytest.mark.parametrize("selected_source", [SOURCE, OTHER_SOURCE])
+async def test_fresh_web_result_repeated_in_telegram_rebuilds_current_reference_roles(
+    local_launch, wire, monkeypatch, model, references, selected_source,
+):
+    launch = local_launch
+    launch.source.result_urls = json.dumps([SOURCE, OTHER_SOURCE])
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(
+            model=model, image_url=REFS[0], change_request="blue coat", source_image_url=selected_source,
+        ),
+        session=launch.session, user=launch.user, surface="web",
+    )
+    saved = repo.create_generation.await_args
+    launch.generation.prompt = saved.args[4]
+    launch.generation.input_params = saved.kwargs["input_params"]
+    launch.generation.source_feed_gen_id = 77
+    launch.generation.model = model
+    image_session = launch.created_sessions[-1]
+    image_session.reference_url = references[0]
+    image_session.reference_urls = json.dumps(references + [selected_source])
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: launch.source if gid == 77 else launch.generation,
+    ))
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(image_session, 99)))
+    state, _ = mutable_state({
+        "pending_image_prompt": launch.generation.prompt,
+        "pending_parent_generation_id": 99, "pending_source_feed_gen_id": 77,
+        "image_session_id": image_session.id,
+    })
+    await image_gen.cb_image_repeat_launch(
+        SimpleNamespace(message=AsyncMock(), answer=AsyncMock()),
+        launch.session, state, launch.user, AsyncMock(),
+    )
+    assert len(wire) == 2
+    params = wire[-1]["body"]["params"]
+    assert params["model_name"] == model
+    assert params["image_urls"] == references + [selected_source]
+    assert_variation(params["prompt"])
+    assert params["prompt"].endswith("blue coat")
+    assert wire[0]["key"] != wire[1]["key"]
+    assert "seed" not in params
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("version", [1, 2])
+async def test_trusted_legacy_next_repeat_upgrades_actual_provider_payload(local_launch, wire, monkeypatch, model, version):
+    header = prompt_core._LEGACY_SOURCE_FIRST_PROMPT if version == 1 else prompt_core._USER_FIRST_SOURCE_LAST_PROMPT
+    previous = previous_generation(header + "\n\nmake the coat blue", version=version)
+    image_session = await repo.create_image_session(
+        local_launch.session, local_launch.user.id, model, "image", "1:1", "2K", 1,
+        None, reference_urls=REFS[:2] + [SOURCE],
+    )
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: local_launch.source if gid == 77 else previous,
+    ))
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(image_session, 88)))
+    state, _ = mutable_state({
+        "pending_image_prompt": previous.prompt, "pending_parent_generation_id": 88,
+        "pending_source_feed_gen_id": 77, "image_session_id": image_session.id,
+    })
+    await image_gen.cb_image_repeat_launch(
+        SimpleNamespace(message=AsyncMock(), answer=AsyncMock()),
+        local_launch.session, state, local_launch.user, AsyncMock(),
+    )
+    assert len(wire) == 1
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == REFS[:2] + [SOURCE]
+    assert_variation(params["prompt"])
+    assert params["prompt"].endswith("\n\nmake the coat blue")
+    assert repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]["version"] == 3
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("intent", ["current", "stale_session", "stale_parent", "foreign_session", "string_flag", "action_only", "repeat"])
+async def test_only_bound_current_explicit_edit_can_preserve_composition(local_launch, wire, monkeypatch, model, intent):
+    image_session = await repo.create_image_session(
+        local_launch.session, local_launch.user.id, model, "image", "1:1", "2K", 1,
+        None, reference_urls=[REFS[0], SOURCE],
+    )
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(return_value=local_launch.source))
+    data = {"remix_mode": True, "image_session_id": image_session.id, "remix_parent_generation_id": 77}
+    if intent == "stale_session":
+        data["image_session_id"] += 100
+    elif intent == "stale_parent":
+        data["remix_parent_generation_id"] = 123
+    elif intent == "foreign_session":
+        image_session.user_id = 9
+    elif intent == "string_flag":
+        data["remix_mode"] = "true"
+    elif intent == "action_only":
+        data = {}
+    state, _ = mutable_state(data)
+    assert await image_gen._launch_session_generation(
+        source_message=AsyncMock(), state=state, session=local_launch.session, db_user=local_launch.user,
+        image_session=image_session, prompt=SECRET,
+        action_type=ImageGenerationAction.repeat if intent == "repeat" else ImageGenerationAction.remix,
+        reference_url=[REFS[0], SOURCE], parent_generation_id=77, source_feed_gen_id=77,
+        feed_change_request="change my hair color", launching_text="launch", queued_text="queued",
+    )
+    prompt = wire[0]["body"]["params"]["prompt"]
+    assert_identity_roles(prompt)
+    assert "change my hair color" in prompt
+    if intent == "current":
+        assert "Preserve its composition" in prompt
+        assert "new pose, framing and composition" not in prompt
+    else:
+        assert_variation(prompt)
+
+
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("suffix", ["", SUFFIX])
+def test_known_legacy_header_migration_preserves_suffix_bytes(version, suffix):
+    header = prompt_core._LEGACY_SOURCE_FIRST_PROMPT if version == 1 else prompt_core._USER_FIRST_SOURCE_LAST_PROMPT
+    migrated = prompt_core.trusted_feed_image_prompt(
+        previous_generation(header + suffix, version=version), user_id=42,
+        source_generation_id=77, has_user_references=True,
+    )
+    assert_variation(migrated)
+    assert migrated.partition("\n\n")[2] == suffix.removeprefix("\n\n")
+    assert migrated.endswith(suffix)
+
+
+@pytest.mark.parametrize("suffix", ["\nuser suffix", "garbage", " \n\nuser suffix"])
+def test_partial_generic_header_is_not_rewritten(suffix):
+    original = prompt_core._USER_FIRST_SOURCE_LAST_PROMPT + suffix
+    assert prompt_core.trusted_feed_image_prompt(
+        previous_generation(original), user_id=42, source_generation_id=77, has_user_references=True,
+    ) == original
+
+
+def test_unknown_authenticated_text_is_preserved_verbatim():
+    original = "Verified user-authored variation text" + SUFFIX
+    assert prompt_core.trusted_feed_image_prompt(
+        previous_generation(original), user_id=42, source_generation_id=77, has_user_references=True,
+    ) == original
+
+
+@pytest.mark.parametrize("tamper", ["owner", "lineage", "source", "prompt", "metadata", "context", True, False, 1.0, "2", 99])
+def test_context_tampering_fails_closed_before_prompt_migration(tamper):
+    saved = previous_generation(prompt_core._USER_FIRST_SOURCE_LAST_PROMPT + SUFFIX)
+    context = saved.input_params[prompt_core.FEED_REMIX_CONTEXT_KEY]
+    if tamper == "owner":
+        saved.user_id = 9
+    elif tamper == "lineage":
+        saved.source_feed_gen_id = 55
+    elif tamper == "source":
+        context["source_generation_id"] = 55
+    elif tamper == "prompt":
+        saved.prompt += "tampered"
+    elif tamper == "metadata":
+        saved.input_params = "not-json"
+    elif tamper == "context":
+        saved.input_params[prompt_core.FEED_REMIX_CONTEXT_KEY] = []
+    else:
+        context["version"] = tamper
+    assert prompt_core.trusted_feed_image_prompt(
+        saved, user_id=42, source_generation_id=77, has_user_references=True,
+    ) is None
+
+
+def test_v3_current_relative_roles_survive_removal_and_readdition():
+    original = prompt_core.build_feed_image_prompt(has_user_references=True, has_source_media=True) + SUFFIX
+    saved = previous_generation(original)
+    saved.input_params[prompt_core.FEED_REMIX_CONTEXT_KEY] = prompt_core.feed_image_remix_context(77, original)
+    without_identity = prompt_core.trusted_feed_image_prompt(
+        saved, user_id=42, source_generation_id=77, has_user_references=False,
+    )
+    assert "EXCLUSIVE source" not in without_identity
+    assert "new pose, framing and composition" in without_identity
+    assert without_identity.endswith(SUFFIX)
+    saved.prompt = without_identity
+    saved.input_params[prompt_core.FEED_REMIX_CONTEXT_KEY] = prompt_core.feed_image_remix_context(77, without_identity)
+    restored = prompt_core.trusted_feed_image_prompt(
+        saved, user_id=42, source_generation_id=77, has_user_references=True,
+    )
+    assert_variation(restored)
+    assert "All images preceding the final image" in restored
+    assert restored.endswith(SUFFIX)
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_image_semantics_do_not_change_legacy_video_migration(version):
+    header = prompt_core._LEGACY_SOURCE_FIRST_PROMPT if version == 1 else prompt_core._USER_FIRST_SOURCE_LAST_PROMPT
+    saved = previous_generation(header + SUFFIX, version=version)
+    video_prompt = prompt_core.trusted_feed_prompt(saved, user_id=42, source_generation_id=77)
+    assert video_prompt == prompt_core._USER_FIRST_SOURCE_LAST_PROMPT + SUFFIX
+    assert "Preserve its visible composition" in video_prompt
+    assert "new pose" not in video_prompt
+
+
+@pytest.mark.parametrize("family", [[], {}, True, "unknown", "scene_edit"])
+def test_v3_malformed_or_mismatched_header_family_fails_closed(family):
+    prompt = prompt_core.build_feed_image_prompt(has_user_references=True, has_source_media=True)
+    saved = previous_generation(prompt)
+    context = prompt_core.feed_image_remix_context(77, prompt)
+    context["header_family"] = family
+    saved.input_params[prompt_core.FEED_REMIX_CONTEXT_KEY] = context
+    assert prompt_core.trusted_feed_image_prompt(
+        saved, user_id=42, source_generation_id=77, has_user_references=True,
+    ) is None
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("edit_prompt", [False, True])
+async def test_safe_repeat_same_confirm_submits_once_but_new_repeat_is_fresh(
+    local_launch, wire, monkeypatch, model, edit_prompt,
+):
+    """The repository fake models durable confirm lookup, not provider dedupe."""
+    launch = local_launch
+    original = launch.generation
+    original.model = model
+    original.image_session_id = None
+    original.source_feed_gen_id = 77
+    original.prompt = prompt_core._USER_FIRST_SOURCE_LAST_PROMPT + "\n\nblue coat"
+    original.input_params = {
+        "reference_images": REFS[:2] + [SOURCE],
+        prompt_core.FEED_REMIX_CONTEXT_KEY: {
+            "version": 2, "source_generation_id": 77, "prompt": original.prompt,
+        },
+    }
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: launch.source if gid == 77 else original,
+    ))
+    monkeypatch.setattr(repeat_safe, "get_repeat_task_by_any_id", AsyncMock(return_value=original))
+    monkeypatch.setattr(repeat_safe, "_is_admin", lambda _user: False)
+    monkeypatch.setattr(repeat_safe, "safe_answer_callback", AsyncMock())
+    persisted = {}
+
+    async def create_generation(*_args, **_kwargs):
+        context = current_repeat_launch_context()
+        assert context is not None
+        confirm_key = context.input_params_extra["repeat_confirm_key"]
+        assert confirm_key not in persisted
+        generated = SimpleNamespace(id=100 + len(persisted), task_id="queued", status="processing")
+        persisted[confirm_key] = generated
+        return generated
+
+    monkeypatch.setattr(repo, "create_generation", AsyncMock(side_effect=create_generation))
+    monkeypatch.setattr(repeat_safe, "find_repeat_by_confirm_key", AsyncMock(
+        side_effect=lambda _session, *, user_id, confirm_key: persisted.get(confirm_key),
+    ))
+    call = SimpleNamespace(
+        data="repeat_image_img_99", from_user=SimpleNamespace(id=777),
+        message=AsyncMock(), answer=AsyncMock(),
+    )
+    state, data = mutable_state()
+    await repeat_safe.open_repeat(call, launch.session, state, launch.user, AsyncMock())
+    first_key = data["repeat_confirm_key"]
+    if edit_prompt:
+        await repeat_safe.save_repeat_prompt(
+            SimpleNamespace(text="change my hair color", answer=AsyncMock()), state,
+        )
+    delayed_duplicate, _ = mutable_state(data)
+    await repeat_safe.confirm_repeat(call, launch.session, state, launch.user, AsyncMock())
+    await repeat_safe.confirm_repeat(call, launch.session, delayed_duplicate, launch.user, AsyncMock())
+    assert len(wire) == 1
+    assert repo.charge_image_generation.await_count == 1
+    assert_variation(wire[0]["body"]["params"]["prompt"])
+    if edit_prompt:
+        assert "change my hair color" in wire[0]["body"]["params"]["prompt"]
+    await repeat_safe.open_repeat(call, launch.session, state, launch.user, AsyncMock())
+    assert data["repeat_confirm_key"] != first_key
+    await repeat_safe.confirm_repeat(call, launch.session, state, launch.user, AsyncMock())
+    assert len(wire) == 2
+    assert repo.charge_image_generation.await_count == 2
+    assert len(persisted) == 2
+    assert wire[0]["key"] != wire[1]["key"]
+    for submitted in wire:
+        params = submitted["body"]["params"]
+        assert params["image_urls"] == REFS[:2] + [SOURCE]
+        assert "seed" not in params
+        assert_variation(params["prompt"])
+
+
+@pytest.mark.parametrize("model", MODELS)
+async def test_missing_saved_identity_blocks_safe_repeat_before_creating_or_charging(local_launch, wire, monkeypatch, model):
+    launch = local_launch
+    original = launch.generation
+    original.model = model
+    original.image_session_id = None
+    original.source_feed_gen_id = 77
+    original.input_params = {"reference_images": [REFS[0], SOURCE]}
+    monkeypatch.setattr(repeat_safe, "get_repeat_task_by_any_id", AsyncMock(return_value=original))
+    monkeypatch.setattr(repeat_safe, "find_repeat_by_confirm_key", AsyncMock(return_value=None))
+    monkeypatch.setattr(repeat_safe, "_is_admin", lambda _user: False)
+    monkeypatch.setattr(repeat_safe, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr(repeat_safe, "public_url_is_available", lambda url: url != REFS[0])
+    call = SimpleNamespace(
+        data="repeat_image_img_99", from_user=SimpleNamespace(id=777),
+        message=AsyncMock(), answer=AsyncMock(),
+    )
+    state, data = mutable_state()
+    await repeat_safe.open_repeat(call, launch.session, state, launch.user, AsyncMock())
+    assert data["repeat_missing_references"] == [REFS[0]]
+    await repeat_safe.confirm_repeat(call, launch.session, state, launch.user, AsyncMock())
+    assert wire == []
+    repo.charge_image_generation.assert_not_awaited()
+    repo.create_generation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("model", MODELS)
+async def test_own_visible_recipe_and_previous_changes_survive_safe_repeat(local_launch, wire, monkeypatch, model):
+    launch = local_launch
+    launch.source.user_id = launch.user.id
+    launch.source.prompt = OWN_RECIPE
+    launch.source.input_params = None
+    launch.source.source_feed_gen_id = None
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(
+            model=model, image_url=REFS[0], change_request="blue coat with silver buttons",
+        ), session=launch.session, user=launch.user,
+    )
+    saved = repo.create_generation.await_args
+    original_prompt = wire[0]["body"]["params"]["prompt"]
+    original = launch.generation
+    original.model = model
+    original.prompt = saved.args[4]
+    original.source_feed_gen_id = saved.kwargs["source_feed_gen_id"]
+    original.input_params = {**saved.kwargs["input_params"], "reference_images": REFS[:1]}
+    original.image_session_id = None
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: launch.source if gid == 77 else original,
+    ))
+    monkeypatch.setattr(repeat_safe, "get_repeat_task_by_any_id", AsyncMock(return_value=original))
+    monkeypatch.setattr(repeat_safe, "find_repeat_by_confirm_key", AsyncMock(return_value=None))
+    monkeypatch.setattr(repeat_safe, "_is_admin", lambda _user: False)
+    monkeypatch.setattr(repeat_safe, "safe_answer_callback", AsyncMock())
+    call = SimpleNamespace(
+        data="repeat_image_img_99", from_user=SimpleNamespace(id=777),
+        message=AsyncMock(), answer=AsyncMock(),
+    )
+    state, _ = mutable_state()
+    await repeat_safe.open_repeat(call, launch.session, state, launch.user, AsyncMock())
+    await repeat_safe.confirm_repeat(call, launch.session, state, launch.user, AsyncMock())
+    assert len(wire) == 2
+    assert wire[1]["body"]["params"]["prompt"] == original_prompt
+    assert wire[1]["body"]["params"]["image_urls"] == REFS[:1]
+    assert "blue coat with silver buttons" in original_prompt
+    assert OWN_RECIPE in original_prompt
+
+
+@pytest.mark.parametrize("model", MODELS)
+async def test_expired_gallery_entry_does_not_promote_old_display_alias_to_identity(local_launch, wire, monkeypatch, model):
+    monkeypatch.setattr(miniapp_routes.settings, "WEB_PUBLIC_URL", "https://app.example.test")
+    monkeypatch.setattr(miniapp_routes, "public_url_is_available", lambda url: url != SOURCE)
+    monkeypatch.setattr(feed_media, "public_url_is_available", lambda url: url != SOURCE)
+    local_launch.source.result_urls = json.dumps([SOURCE, OTHER_SOURCE])
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(
+            model=model, image_url=REFS[0], source_image_url=OTHER_SOURCE,
+            reference_urls=[SOURCE, "https://app.example.test/api/v1/feed/77/display.webp?index=1"],
+        ), session=local_launch.session, user=local_launch.user,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == [REFS[0], OTHER_SOURCE]
+    assert_variation(params["prompt"])
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("entrypoint", ["remix", "style"])
+async def test_actual_explicit_telegram_callback_binds_edit_of_current_result(local_launch, wire, monkeypatch, model, entrypoint):
+    launch = local_launch
+    image_session = await repo.create_image_session(
+        launch.session, launch.user.id, model, "image", "1:1", "2K", 1,
+        None, reference_urls=REFS[:1] + [SOURCE],
+    )
+    image_session.last_generation_id = 99
+    image_session.last_result_url = OTHER_SOURCE
+    launch.generation.source_feed_gen_id = 77
+    launch.generation.result_url = OTHER_SOURCE
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: launch.source if gid == 77 else launch.generation,
+    ))
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(image_session, 99)))
+    monkeypatch.setattr(image_gen, "safe_edit_message", AsyncMock())
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data="img_session:remix:99")
+    if entrypoint == "remix":
+        await image_gen.cb_image_session_remix(call, launch.session, state, launch.user)
+    else:
+        call.data = "img_style:hair_color:99"
+        await image_gen.cb_image_style_choice(call, launch.session, state, launch.user)
+    assert data["remix_mode"] is True
+    assert data["remix_parent_generation_id"] == 99
+    assert data["image_session_id"] == image_session.id
+    assert await image_gen._launch_session_generation(
+        source_message=call.message, state=state, session=launch.session, db_user=launch.user,
+        image_session=image_session, prompt=SECRET, action_type=ImageGenerationAction.remix,
+        reference_url=[REFS[0], data["remix_reference_url"]], parent_generation_id=99,
+        source_feed_gen_id=77, feed_change_request="make the coat blue", launching_text="launch", queued_text="queued",
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == [REFS[0], OTHER_SOURCE]
+    assert_identity_roles(params["prompt"])
+    assert "Preserve its composition" in params["prompt"]
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("owns_source", [False, True])
+async def test_quote_and_submit_share_authenticated_own_recipe_reference_budget(local_launch, wire, model, owns_source):
+    launch = local_launch
+    launch.source.user_id = launch.user.id if owns_source else 100
+    launch.source.prompt = OWN_RECIPE if owns_source else SECRET
+    launch.source.input_params = {"hidden_prompt": False}
+    references = REFS + ["https://example.test/fourth-identity.jpg"]
+    # Client hints never grant ownership or permission to use another author's recipe.
+    body = miniapp_routes.FeedRemixRequest.model_validate({
+        "model": model, "reference_urls": references,
+        "is_owner": True, "can_view_prompt": True, "user_id": 100, "prompt_hidden": False,
+    })
+    if not owns_source:
+        for endpoint in (miniapp_routes.quote_feed_remix, miniapp_routes.remix_feed_post):
+            with pytest.raises(HTTPException) as error:
+                await endpoint(77, body, session=launch.session, user=launch.user)
+            assert error.value.status_code == 422
+        assert wire == []
+        repo.charge_image_generation.assert_not_awaited()
+        repo.create_generation.assert_not_awaited()
+        return
+    quote = await miniapp_routes.quote_feed_remix(77, body, session=launch.session, user=launch.user)
+    assert quote["can_run"] is True
+    assert quote["cost_credits"] == 4
+    assert wire == []
+    repo.charge_image_generation.assert_not_awaited()
+    await miniapp_routes.remix_feed_post(77, body, session=launch.session, user=launch.user)
+    assert wire[0]["body"]["params"]["image_urls"] == references
+    assert OWN_RECIPE in wire[0]["body"]["params"]["prompt"]
+    assert SECRET not in wire[0]["body"]["params"]["prompt"]
+
+
+@pytest.mark.parametrize("model", MODELS)
+async def test_repeat_after_explicit_edit_keeps_owned_derived_scene_separate_from_identity(local_launch, wire, monkeypatch, model):
+    launch = local_launch
+    image_session = await repo.create_image_session(
+        launch.session, launch.user.id, model, "image", "1:1", "2K", 1,
+        None, reference_urls=[REFS[0], OTHER_SOURCE],
+    )
+    derived = launch.generation
+    derived.source_feed_gen_id = 77
+    derived.result_url = OTHER_SOURCE
+    records = {77: launch.source, 99: derived}
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(side_effect=lambda _session, gid: records.get(gid)))
+    state, _ = mutable_state({
+        "remix_mode": True, "image_session_id": image_session.id, "remix_parent_generation_id": 99,
+    })
+    assert await image_gen._launch_session_generation(
+        source_message=AsyncMock(), state=state, session=launch.session, db_user=launch.user,
+        image_session=image_session, prompt=SECRET, action_type=ImageGenerationAction.remix,
+        reference_url=[REFS[0], OTHER_SOURCE], parent_generation_id=99,
+        source_feed_gen_id=77, feed_change_request="make the coat blue", launching_text="launch", queued_text="queued",
+    )
+    saved = repo.create_generation.await_args
+    records[101] = SimpleNamespace(
+        id=101, user_id=42, source_feed_gen_id=77, prompt=saved.args[4],
+        input_params=saved.kwargs["input_params"],
+    )
+    assert await image_gen._launch_session_generation(
+        source_message=AsyncMock(), state=mutable_state()[0], session=launch.session, db_user=launch.user,
+        image_session=image_session, prompt=records[101].prompt, action_type=ImageGenerationAction.repeat,
+        reference_url=[REFS[0], OTHER_SOURCE], parent_generation_id=101,
+        source_feed_gen_id=77, launching_text="launch", queued_text="queued",
+    )
+    assert len(wire) == 2
+    assert wire[-1]["body"]["params"]["image_urls"] == [REFS[0], OTHER_SOURCE]
+    assert_variation(wire[-1]["body"]["params"]["prompt"])
+    assert wire[-1]["body"]["params"]["prompt"].endswith("make the coat blue")
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("failure", ["tampered_url", "unowned_scene", "expired_scene"])
+async def test_invalid_saved_selected_scene_fails_before_another_charge(local_launch, wire, monkeypatch, model, failure):
+    launch = local_launch
+    launch.source.result_urls = json.dumps([SOURCE, OTHER_SOURCE])
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(
+            model=model, image_url=REFS[0], source_image_url=OTHER_SOURCE, change_request="blue coat",
+        ), session=launch.session, user=launch.user,
+    )
+    saved = repo.create_generation.await_args
+    original = launch.generation
+    original.source_feed_gen_id = 77
+    original.prompt = saved.args[4]
+    original.input_params = saved.kwargs["input_params"]
+    context = original.input_params[prompt_core.FEED_REMIX_CONTEXT_KEY]
+    if failure == "tampered_url":
+        context["source_image_url"] = "https://example.test/not-a-source-result.jpg"
+    elif failure == "unowned_scene":
+        context["scene_generation_id"] = 55
+    else:
+        monkeypatch.setattr(image_gen, "public_url_is_available", lambda url: url != OTHER_SOURCE)
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: {77: launch.source, 99: original}.get(gid),
+    ))
+    image_session = launch.created_sessions[-1]
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(image_session, 99)))
+    state, _ = mutable_state({
+        "pending_image_prompt": original.prompt, "pending_parent_generation_id": 99,
+        "pending_source_feed_gen_id": 77, "image_session_id": image_session.id,
+    })
+    repo.charge_image_generation.reset_mock()
+    repo.create_generation.reset_mock()
+    await image_gen.cb_image_repeat_launch(
+        SimpleNamespace(message=AsyncMock(), answer=AsyncMock()),
+        launch.session, state, launch.user, AsyncMock(),
+    )
+    assert len(wire) == 1
+    repo.charge_image_generation.assert_not_awaited()
+    repo.create_generation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("model", MODELS)
+async def test_feed_again_expired_saved_identity_keeps_existing_session_before_charge(local_launch, wire, monkeypatch, model):
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, model, "image", "1:1", "2K", 1,
+        None, reference_urls=[REFS[0], SOURCE],
+    )
+    original = launch.generation
+    original.model = model
+    original.image_session_id = old.id
+    original.source_feed_gen_id = 77
+    original.prompt = prompt_core._USER_FIRST_SOURCE_LAST_PROMPT
+    original.input_params = {
+        prompt_core.FEED_REMIX_CONTEXT_KEY: {
+            "version": 2, "source_generation_id": 77, "prompt": original.prompt,
+        },
+    }
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: launch.source if gid == 77 else original,
+    ))
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(image_gen, "public_url_is_available", lambda url: url != REFS[0])
+    repo.archive_active_image_sessions.reset_mock()
+    state, data = mutable_state({"existing_session": old.id})
+    await feed.cb_feed_again(
+        SimpleNamespace(data="feed:again:99", message=AsyncMock(), answer=AsyncMock()),
+        launch.session, launch.user, state, AsyncMock(),
+    )
+    assert wire == []
+    assert launch.created_sessions == [old]
+    assert data == {"existing_session": old.id}
+    repo.archive_active_image_sessions.assert_not_awaited()
+    repo.charge_image_generation.assert_not_awaited()
+    repo.create_generation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("expired", [False, True])
+async def test_legacy_alias_selection_cannot_shift_after_gallery_expiry(local_launch, wire, monkeypatch, model, version, expired):
+    from bot.utils import feed_media
+
+    launch = local_launch
+    monkeypatch.setattr(feed_media.settings, "WEB_PUBLIC_URL", "https://app.example.test")
+    def available(url):
+        return not (expired and url == SOURCE)
+
+    monkeypatch.setattr(feed_media, "public_url_is_available", available)
+    monkeypatch.setattr(image_gen, "public_url_is_available", available)
+    launch.source.result_urls = json.dumps([SOURCE, OTHER_SOURCE])
+    header = prompt_core._LEGACY_SOURCE_FIRST_PROMPT if version == 1 else prompt_core._USER_FIRST_SOURCE_LAST_PROMPT
+    previous = previous_generation(header + "\n\nblue coat", version=version)
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: {77: launch.source, 88: previous}.get(gid),
+    ))
+    alias = "https://app.example.test/api/v1/feed/77/preview.webp?index=0"
+    image_session = await repo.create_image_session(
+        launch.session, launch.user.id, model, "image", "1:1", "2K", 1,
+        None, reference_urls=[REFS[0], alias],
+    )
+    launched = await image_gen._launch_session_generation(
+        source_message=AsyncMock(), state=mutable_state()[0], session=launch.session, db_user=launch.user,
+        image_session=image_session, prompt=previous.prompt, action_type=ImageGenerationAction.repeat,
+        reference_url=[REFS[0], alias], parent_generation_id=88, source_feed_gen_id=77,
+        launching_text="launch", queued_text="queued",
+    )
+    if expired:
+        assert launched is False
+        assert wire == []
+        repo.charge_image_generation.assert_not_awaited()
+        repo.create_generation.assert_not_awaited()
+    else:
+        assert launched is True
+        assert wire[0]["body"]["params"]["image_urls"] == [REFS[0], SOURCE]
+        assert_variation(wire[0]["body"]["params"]["prompt"])

@@ -238,7 +238,7 @@ def test_repeat_feed_uses_filters_safe_video_payload_and_normalized_media_urls()
     utils = read(SRC / "lib/utils.ts")
 
     assert 'remixingId' in app
-    assert 'remixFeedItem(item)' in app
+    assert 'remixFeedItem(item, sourceMediaUrl)' in app
     # Repeat payload moved to the prelaunch runner, where user-selected media
     # and mode (not the source filename alone) determine safe video inputs.
     # Creator text-only videos must replay with text mode and no fake image/video inputs.

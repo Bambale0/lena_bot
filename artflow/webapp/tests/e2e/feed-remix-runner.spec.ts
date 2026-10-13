@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const user = {
   id: 1,
@@ -58,8 +58,10 @@ const feedItems = [
   },
 ];
 
-async function mockMiniAppApi(page: Page) {
-  await page.addInitScript(() => {
+async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = false) {
+  if (withTelegram) await page.addInitScript((nativeBack) => {
+    const backHandlers = new Set<() => void>();
+    if (nativeBack) window.addEventListener("apix:test-back", () => backHandlers.forEach(handler => handler()));
     window.Telegram = {
       WebApp: {
         initData: "test",
@@ -70,9 +72,14 @@ async function mockMiniAppApi(page: Page) {
         HapticFeedback: { impactOccurred: () => undefined, notificationOccurred: () => undefined },
         openLink: () => undefined,
         openInvoice: () => undefined,
+        BackButton: nativeBack ? {
+          show: () => undefined, hide: () => undefined,
+          onClick: (handler: () => void) => { backHandlers.add(handler); },
+          offClick: (handler: () => void) => { backHandlers.delete(handler); },
+        } : undefined,
       },
     } as typeof window.Telegram;
-  });
+  }, nativeBack);
 
   await page.route("https://example.test/source.png", (route) => route.fulfill({
     contentType: "image/png",
@@ -734,7 +741,7 @@ test("creator photo-to-video replay never sends rendered MP4 and keeps creator r
 test("deep-linked older creator video retains photo-only recipe provenance", async ({ page }) => {
   await mockMiniAppApi(page);
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/web/feed/57213", (route) => route.fulfill({ json: {
+  await page.route("**/api/v1/feed/57213", (route) => route.fulfill({ json: {
     id: 57213, model: "veo-3.1-fast", gen_type: "video",
     prompt: "", prompt_hidden: true, source_has_video_reference: false,
     original_duration: 10, original_aspect_ratio: "9:16", original_resolution: "720p",
@@ -787,4 +794,197 @@ test("text-only source video can replay author prompt without photos", async ({ 
     image_url: null, reference_urls: [], video_url: null,
     duration: 10, aspect_ratio: "9:16", resolution: "720p",
   });
+});
+
+
+async function expectCenterIsReachable(target: Locator, message: string) {
+  await expect(target).toBeVisible();
+  await expect.poll(() => target.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const hit = element.ownerDocument.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return Boolean(hit && element.contains(hit));
+  }), { message }).toBe(true);
+}
+
+async function expectViewerRepeatIsReachable(page: Page) {
+  await expectCenterIsReachable(
+    page.locator(".apix-media-viewer").getByRole("button", { name: "Повторить эту работу" }),
+    "Gallery repeat must receive clicks above the bottom navigation",
+  );
+}
+
+test("feed cover decoration leaves media reachable and its Repeat action stays clickable", async ({ page }) => {
+  await mockMiniAppApi(page);
+  let likes = 0;
+  await page.route("**/api/v1/feed/201/like", route => {
+    likes++;
+    return route.fulfill({ json: { likes_count: 4 } });
+  });
+  await page.goto("/?tgWebAppData=test");
+  const card = page.locator(".apix-feed-card").first();
+  const cover = card.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first();
+  await expectCenterIsReachable(cover, "Decorative author/model footer must not swallow the visible cover tap");
+  await cover.click();
+  await expect(page.locator(".apix-media-viewer")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".apix-media-viewer")).toHaveCount(0);
+  const author = card.getByText("Artist QA", { exact: true });
+  await expect(author).toBeVisible();
+  const point = await author.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+    const opener = element.closest(".apix-feed-card")!.querySelector('button[aria-label="Открыть внутри приложения"]')!;
+    return { x, y, opensMedia: opener.contains(element.ownerDocument.elementFromPoint(x, y)) };
+  });
+  expect(point.opensMedia, "Tapping decorative author text must target the media opener").toBe(true);
+  if (test.info().project.use.hasTouch) await page.touchscreen.tap(point.x, point.y);
+  else await page.mouse.click(point.x, point.y);
+  await expect(page.locator(".apix-media-viewer")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".apix-media-viewer")).toHaveCount(0);
+  const like = card.getByRole("button", { name: "Лайк", exact: true });
+  await expectCenterIsReachable(like, "Like must remain independently reachable");
+  await like.click();
+  await expect.poll(() => likes).toBe(1);
+  await expect(page.locator(".apix-media-viewer")).toHaveCount(0);
+  const maximize = card.getByRole("button", { name: "Открыть внутри приложения", exact: true }).nth(1);
+  await expectCenterIsReachable(maximize, "The explicit gallery control must remain reachable");
+  await maximize.click();
+  await expect(page.locator(".apix-media-viewer")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".apix-media-viewer")).toHaveCount(0);
+  const repeat = card.getByRole("button", { name: "Повторить", exact: true });
+  await expectCenterIsReachable(repeat, "Repeat must receive clicks inside the pointer-transparent footer");
+  await repeat.click();
+  await expect(page.getByRole("dialog", { name: "Повторить работу" })).toBeVisible();
+  await expect(page.locator(".apix-media-viewer")).toHaveCount(0);
+});
+
+for (const surface of ["telegram", "browser"] as const) {
+  test(`${surface} gallery repeat keeps selected second result through quote and submit`, async ({ page }) => {
+    await mockMiniAppApi(page, surface === "telegram");
+    const previews = [0, 1].map(index => `/api/v1/feed/201/preview.webp?index=${index}`);
+    await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
+      ...feedItems[0], result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
+    }] }));
+    let latestQuote: Record<string, unknown> | null = null;
+    let submitted: Record<string, unknown> | null = null;
+    await page.route("**/api/v1/feed/201/remix/quote", route => {
+      latestQuote = route.request().postDataJSON();
+      return route.fulfill({ json: { cost_credits: 1.5, balance_credits: 100, can_run: true } });
+    });
+    await page.route("**/api/v1/feed/201/remix", route => {
+      submitted = route.request().postDataJSON();
+      return route.fulfill({ status: 202, json: {
+        id: 9201, task_id: "web:selected-result", model: "nano-banana-2", gen_type: "image",
+        status: "pending", result_urls: [], credits_spent: 1.5, created_at: new Date().toISOString(),
+      } });
+    });
+    await page.goto("/?tgWebAppData=test");
+    await expect(page.getByText("Artist QA")).toBeVisible();
+    await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
+    const viewer = page.locator(".apix-media-viewer");
+    await expect(viewer).toBeVisible();
+    await viewer.getByRole("button", { name: "Следующее фото" }).click();
+    await expect(viewer.locator("img")).toHaveAttribute("src", new RegExp("index=1$"));
+    await expectViewerRepeatIsReachable(page);
+    await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+    const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+    await expect(dialog).toBeVisible();
+    const selectedSource = new URL(previews[1], page.url()).href;
+    await expect.poll(() => latestQuote?.source_image_url).toBe(selectedSource);
+    await dialog.locator("input[type=file]").setInputFiles({
+      name: "ref.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    });
+    await expect(dialog.getByText("Реф #1")).toBeVisible();
+    await expect.poll(() => latestQuote?.image_url).toBe("https://example.test/uploaded-ref.png");
+    await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+    await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+    await expect.poll(() => submitted).not.toBeNull();
+    expect(submitted).toEqual(latestQuote);
+    expect(submitted).toMatchObject({ source_image_url: selectedSource,
+      image_url: "https://example.test/uploaded-ref.png", reference_urls: ["https://example.test/uploaded-ref.png"] });
+  });
+}
+
+test("older image deep link quotes the same owned preview route as list cards", async ({ page }) => {
+  await mockMiniAppApi(page);
+  await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [] }));
+  await page.route("**/api/web/feed/201", route => route.fulfill({ json: { data: {
+    ...feedItems[0], preview_url: "https://example.test/source_preview_384_deadbeef.webp",
+    preview_urls: ["https://example.test/source_preview_384_deadbeef.webp"],
+  } } }));
+  await page.route("**/api/v1/feed/201", route => route.fulfill({ json: {
+    ...feedItems[0], result_url: "", result_urls: [],
+    preview_url: "/api/v1/feed/201/preview.webp?index=0",
+    preview_urls: ["/api/v1/feed/201/preview.webp?index=0"],
+  } }));
+  let quote: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/feed/201/remix/quote", route => {
+    quote = route.request().postDataJSON();
+    return route.fulfill({ json: { cost_credits: 1.5, balance_credits: 100, can_run: true } });
+  });
+  await page.goto("/?tgWebAppData=test&feed=201");
+  await expect(page.getByRole("dialog", { name: "Повторить работу" })).toBeVisible();
+  await expect.poll(() => quote?.source_image_url).toBe(new URL("/api/v1/feed/201/preview.webp?index=0", page.url()).href);
+});
+
+
+test("selected result survives checkout reload and a fresh gallery selection wins over it", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  const previews = [0, 1].map(index => `/api/v1/feed/201/preview.webp?index=${index}`);
+  await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
+    ...feedItems[0], result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
+  }] }));
+  let submissions = 0;
+  await page.route("**/api/v1/feed/201/remix", route => { submissions++; return route.abort(); });
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
+  const viewer = page.locator(".apix-media-viewer");
+  await viewer.getByRole("button", { name: "Следующее фото" }).click();
+  await expectViewerRepeatIsReachable(page);
+  await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  await page.goto("/?tgWebAppData=test&remix=201");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("img").first()).toHaveAttribute("src", new RegExp("index=1$"));
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+  await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
+  await expectViewerRepeatIsReachable(page);
+  await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+  await expect(dialog.locator("img").first()).toHaveAttribute("src", new RegExp("index=0$"));
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  expect(state.topups).toBe(1);
+  expect(submissions).toBe(0);
+});
+
+
+test("gallery portal closes with Escape and native Back dismisses the repeat sheet first", async ({ page }) => {
+  await mockMiniAppApi(page, true, true);
+  // Keep this deterministic native BackButton fixture from being replaced by
+  // the live SDK; no external Telegram session is part of this test.
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
+  let submissions = 0;
+  await page.route("**/api/v1/feed/201/remix", route => { submissions++; return route.abort(); });
+  await page.goto("/?tgWebAppData=test");
+  const open = page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first();
+  const viewer = page.locator(".apix-media-viewer");
+  await open.click();
+  await expectViewerRepeatIsReachable(page);
+  await page.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
+  await open.click();
+  await expectViewerRepeatIsReachable(page);
+  await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+  await page.evaluate(() => window.dispatchEvent(new Event("apix:test-back")));
+  await expect(dialog).toHaveCount(0);
+  await expect(viewer).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("apix:test-back")));
+  await expect(viewer).toHaveCount(0);
+  expect(submissions).toBe(0);
 });
