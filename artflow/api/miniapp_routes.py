@@ -3507,6 +3507,19 @@ async def get_feed(
     return [_feed_card_out(c, user) for c in cards]
 
 
+@router.get("/feed/{gen_id}")
+async def get_feed_item(
+    gen_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Hydrate shared posts with the same media and privacy contract as the list."""
+    card = await repo.get_feed_generation_card(session, gen_id, require_media=False)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return _feed_card_out(card, user)
+
+
 @router.post("/generations/{gen_id}/share", status_code=200)
 async def share_generation(
     gen_id: int,

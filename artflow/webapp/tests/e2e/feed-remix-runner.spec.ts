@@ -58,8 +58,8 @@ const feedItems = [
   },
 ];
 
-async function mockMiniAppApi(page: Page) {
-  await page.addInitScript(() => {
+async function mockMiniAppApi(page: Page, withTelegram = true) {
+  if (withTelegram) await page.addInitScript(() => {
     window.Telegram = {
       WebApp: {
         initData: "test",
@@ -734,7 +734,7 @@ test("creator photo-to-video replay never sends rendered MP4 and keeps creator r
 test("deep-linked older creator video retains photo-only recipe provenance", async ({ page }) => {
   await mockMiniAppApi(page);
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/web/feed/57213", (route) => route.fulfill({ json: {
+  await page.route("**/api/v1/feed/57213", (route) => route.fulfill({ json: {
     id: 57213, model: "veo-3.1-fast", gen_type: "video",
     prompt: "", prompt_hidden: true, source_has_video_reference: false,
     original_duration: 10, original_aspect_ratio: "9:16", original_resolution: "720p",
@@ -787,4 +787,103 @@ test("text-only source video can replay author prompt without photos", async ({ 
     image_url: null, reference_urls: [], video_url: null,
     duration: 10, aspect_ratio: "9:16", resolution: "720p",
   });
+});
+
+
+for (const surface of ["telegram", "browser"] as const) {
+  test(`${surface} gallery repeat keeps selected second result through quote and submit`, async ({ page }) => {
+    await mockMiniAppApi(page, surface === "telegram");
+    const previews = [0, 1].map(index => `/api/v1/feed/201/preview.webp?index=${index}`);
+    await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
+      ...feedItems[0], result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
+    }] }));
+    let latestQuote: Record<string, unknown> | null = null;
+    let submitted: Record<string, unknown> | null = null;
+    await page.route("**/api/v1/feed/201/remix/quote", route => {
+      latestQuote = route.request().postDataJSON();
+      return route.fulfill({ json: { cost_credits: 1.5, balance_credits: 100, can_run: true } });
+    });
+    await page.route("**/api/v1/feed/201/remix", route => {
+      submitted = route.request().postDataJSON();
+      return route.fulfill({ status: 202, json: {
+        id: 9201, task_id: "web:selected-result", model: "nano-banana-2", gen_type: "image",
+        status: "pending", result_urls: [], credits_spent: 1.5, created_at: new Date().toISOString(),
+      } });
+    });
+    await page.goto("/?tgWebAppData=test");
+    await expect(page.getByText("Artist QA")).toBeVisible();
+    await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
+    const viewer = page.locator(".apix-media-viewer");
+    await expect(viewer).toBeVisible();
+    await viewer.getByRole("button", { name: "Следующее фото" }).click();
+    await expect(viewer.locator("img")).toHaveAttribute("src", new RegExp("index=1$"));
+    await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+    const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+    await expect(dialog).toBeVisible();
+    const selectedSource = new URL(previews[1], page.url()).href;
+    await expect.poll(() => latestQuote?.source_image_url).toBe(selectedSource);
+    await dialog.locator("input[type=file]").setInputFiles({
+      name: "ref.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    });
+    await expect(dialog.getByText("Реф #1")).toBeVisible();
+    await expect.poll(() => latestQuote?.image_url).toBe("https://example.test/uploaded-ref.png");
+    await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+    await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+    await expect.poll(() => submitted).not.toBeNull();
+    expect(submitted).toEqual(latestQuote);
+    expect(submitted).toMatchObject({ source_image_url: selectedSource,
+      image_url: "https://example.test/uploaded-ref.png", reference_urls: ["https://example.test/uploaded-ref.png"] });
+  });
+}
+
+test("older image deep link quotes the same owned preview route as list cards", async ({ page }) => {
+  await mockMiniAppApi(page);
+  await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [] }));
+  await page.route("**/api/web/feed/201", route => route.fulfill({ json: { data: {
+    ...feedItems[0], preview_url: "https://example.test/source_preview_384_deadbeef.webp",
+    preview_urls: ["https://example.test/source_preview_384_deadbeef.webp"],
+  } } }));
+  await page.route("**/api/v1/feed/201", route => route.fulfill({ json: {
+    ...feedItems[0], result_url: "", result_urls: [],
+    preview_url: "/api/v1/feed/201/preview.webp?index=0",
+    preview_urls: ["/api/v1/feed/201/preview.webp?index=0"],
+  } }));
+  let quote: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/feed/201/remix/quote", route => {
+    quote = route.request().postDataJSON();
+    return route.fulfill({ json: { cost_credits: 1.5, balance_credits: 100, can_run: true } });
+  });
+  await page.goto("/?tgWebAppData=test&feed=201");
+  await expect(page.getByRole("dialog", { name: "Повторить работу" })).toBeVisible();
+  await expect.poll(() => quote?.source_image_url).toBe(new URL("/api/v1/feed/201/preview.webp?index=0", page.url()).href);
+});
+
+
+test("selected result survives checkout reload and a fresh gallery selection wins over it", async ({ page }) => {
+  const state = await pendingCheckout(page);
+  const previews = [0, 1].map(index => `/api/v1/feed/201/preview.webp?index=${index}`);
+  await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
+    ...feedItems[0], result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
+  }] }));
+  let submissions = 0;
+  await page.route("**/api/v1/feed/201/remix", route => { submissions++; return route.abort(); });
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
+  const viewer = page.locator(".apix-media-viewer");
+  await viewer.getByRole("button", { name: "Следующее фото" }).click();
+  await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  await page.goto("/?tgWebAppData=test&remix=201");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("img").first()).toHaveAttribute("src", new RegExp("index=1$"));
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+  await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
+  await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+  await expect(dialog.locator("img").first()).toHaveAttribute("src", new RegExp("index=0$"));
+  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+  expect(state.topups).toBe(1);
+  expect(submissions).toBe(0);
 });

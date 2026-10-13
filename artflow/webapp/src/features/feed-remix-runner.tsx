@@ -23,7 +23,7 @@ const ACCEPTED_REFERENCE_EXTENSIONS = ".jpg,.jpeg,.png,.webp,.heic,.heif,.avif";
 
 type ModelBucket = "image" | "video";
 type RunnerPhase = "idle" | "uploading" | "generating" | "error";
-type FeedRemixEventDetail = { item: FeedItem };
+type FeedRemixEventDetail = { item: FeedItem; sourceMediaUrl?: string };
 type PendingRemix = { resolve: (task: GenerationTask) => void; reject: (error: Error) => void };
 
 type UploadResponse = { url?: string; content_type?: string; size?: number };
@@ -118,12 +118,12 @@ async function uploadReferenceImage(file: File): Promise<UploadResponse> {
   return (payload?.data || payload) as UploadResponse;
 }
 
-function openFeedRemixRunner(item: FeedItem): Promise<GenerationTask> {
+function openFeedRemixRunner(item: FeedItem, sourceMediaUrl?: string): Promise<GenerationTask> {
   ensureFeedRemixRunnerPortal();
   if (pendingRemix) pendingRemix.reject(new Error("Открыт новый повтор"));
   return new Promise<GenerationTask>((resolve, reject) => {
     pendingRemix = { resolve, reject };
-    window.dispatchEvent(new CustomEvent<FeedRemixEventDetail>(FEED_REMIX_EVENT, { detail: { item } }));
+    window.dispatchEvent(new CustomEvent<FeedRemixEventDetail>(FEED_REMIX_EVENT, { detail: { item, sourceMediaUrl } }));
   });
 }
 
@@ -157,6 +157,7 @@ function itemLooksVideo(item: FeedItem): boolean {
 
 function FeedRemixRunnerPortal() {
   const [item, setItem] = useState<FeedItem | null>(null);
+  const [sourceMediaUrl, setSourceMediaUrl] = useState("");
   const [imageModels, setImageModels] = useState<ModelInfo[]>([]);
   const [videoModels, setVideoModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -194,7 +195,7 @@ function FeedRemixRunnerPortal() {
   const selectedModel = useMemo(() => allModels.find((model) => model.key === modelKey), [allModels, modelKey]);
   const bucket = selectedModelBucket(modelKey, videoModels);
   const busy = opening || phase === "uploading" || phase === "generating" || modelsLoading;
-  const sourcePreview = safeExternalUrl(firstMedia(item || {}));
+  const sourcePreview = safeExternalUrl(sourceMediaUrl) || safeExternalUrl(firstMedia(item || {}));
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
   const creatorRecipeReplay = sourceIsVideo && typeof item?.source_has_video_reference === "boolean";
   const needsOriginalVideo = sourceIsVideo && item?.source_has_video_reference !== false;
@@ -258,8 +259,11 @@ function FeedRemixRunnerPortal() {
   const paymentOptions = checkoutOptions(quote?.recommended_plan);
   const paymentOption = paymentOptions.find((option) => option.provider === selectedPaymentProvider) || paymentOptions[0];
 
-  const resetForm = useCallback((nextItem: FeedItem | null = null, draft: RepeatDraft | null = null) => {
+  const resetForm = useCallback((nextItem: FeedItem | null = null, draft: RepeatDraft | null = null, selectedSource?: string) => {
     setItem(nextItem);
+    // A fresh gallery click wins over an older saved result. A plain deep-link
+    // reopen restores the selection made before an interrupted checkout.
+    setSourceMediaUrl(safeExternalUrl(selectedSource) || safeExternalUrl(draft?.sourceMediaUrl) || "");
     setPhase("idle");
     setError("");
     setSelectedPaymentProvider(null);
@@ -287,7 +291,7 @@ function FeedRemixRunnerPortal() {
   // Persist the same actor/source snapshot synchronously before each payment side effect.
   const draftSnapshot = useRef<RepeatDraft | null>(null);
   draftSnapshot.current = item ? {
-    savedAt: Date.now(), references, changeRequest, modelKey, mode,
+    savedAt: Date.now(), sourceMediaUrl, references, changeRequest, modelKey, mode,
     aspectRatio, quality, count, duration, resolution, grokMode, payment: paymentRef.current,
   } : null;
   const persistDraft = useCallback((nextPayment = paymentRef.current) => {
@@ -299,7 +303,7 @@ function FeedRemixRunnerPortal() {
   }, [item?.id]);
   useEffect(() => {
     if (!opening) persistDraft();
-  }, [opening, persistDraft, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, resolution, grokMode, payment]);
+  }, [opening, persistDraft, sourceMediaUrl, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, resolution, grokMode, payment]);
 
   const cancelPending = useCallback((message = "Повтор отменён") => {
     if (pendingRemix) pendingRemix.reject(new Error(message));
@@ -327,7 +331,7 @@ function FeedRemixRunnerPortal() {
       const sequence = ++openSequence.current;
       activeScope.current = null;
       setOpening(true);
-      resetForm(detail.item);
+      resetForm(detail.item, null, detail.sourceMediaUrl);
       void loadModels();
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 15_000);
@@ -337,7 +341,7 @@ function FeedRemixRunnerPortal() {
         activeScope.current = { actorId: viewer.id, sourceId: detail.item.id };
         const telegramId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
         const legacyId = telegramId && viewer.tg_id === telegramId ? telegramId : undefined;
-        resetForm(detail.item, readRepeatDraft(draftStorage(), viewer.id, detail.item.id, Date.now(), legacyId));
+        resetForm(detail.item, readRepeatDraft(draftStorage(), viewer.id, detail.item.id, Date.now(), legacyId), detail.sourceMediaUrl);
       }).catch(() => {
         if (sequence === openSequence.current) setError("Не удалось подтвердить аккаунт. Откройте повтор ещё раз перед оплатой.");
       }).finally(() => {

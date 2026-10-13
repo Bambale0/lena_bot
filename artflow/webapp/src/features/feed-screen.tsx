@@ -40,7 +40,7 @@ interface FeedScreenProps {
   onRefresh: () => void;
   onLoadMore?: () => void;
   onLike: (item: FeedItem) => void;
-  onRemix: (item: FeedItem) => void;
+  onRemix: (item: FeedItem, sourceMediaUrl?: string) => void;
 }
 
 interface MediaViewerState {
@@ -530,7 +530,7 @@ function FeedScreen({
                             disabled={remixing}
                             onClick={(event) => {
                               event.stopPropagation();
-                              onRemix(item);
+                              onRemix(item, firstMedia(item));
                             }}
                           >
                             <Repeat2 className={cn("size-3 shrink-0", remixing && "animate-spin")} />
@@ -577,7 +577,7 @@ function FeedScreen({
         />
       )}
 
-      <MediaViewer viewer={viewer} onClose={() => setViewer(null)} onChangeIndex={(index) => setViewer((current) => current ? { ...current, index } : current)} onRemix={(item) => onRemix(item)} remixingId={remixingId} />
+      <MediaViewer viewer={viewer} onClose={() => setViewer(null)} onChangeIndex={(index) => setViewer((current) => current ? { ...current, index } : current)} onRemix={onRemix} remixingId={remixingId} />
     </div>
   );
 }
@@ -661,7 +661,7 @@ function MediaViewer({
   viewer: MediaViewerState | null;
   onClose: () => void;
   onChangeIndex: (index: number) => void;
-  onRemix: (item: FeedItem) => void;
+  onRemix: (item: FeedItem, sourceMediaUrl?: string) => void;
   remixingId: number | null;
 }) {
   if (!viewer) return null;
@@ -717,7 +717,7 @@ function MediaViewer({
               ))}
             </div>
           ) : null}
-          <Button className="min-h-10 rounded-xl" disabled={remixing} onClick={() => onRemix(viewer.item)}>
+          <Button className="min-h-10 rounded-xl" disabled={remixing} onClick={() => onRemix(viewer.item, url)}>
             <Repeat2 className={cn("size-4", remixing && "animate-spin")} /> {remixing ? "Запуск повтора" : "Повторить эту работу"}
           </Button>
         </div>

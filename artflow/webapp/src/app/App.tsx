@@ -813,11 +813,11 @@ function App() {
     }
   }, [api]);
 
-  const remixFeed = useCallback(async (item: FeedItem) => {
+  const remixFeed = useCallback(async (item: FeedItem, sourceMediaUrl?: string) => {
     if (!api || remixingId) return;
     setRemixingId(item.id);
     try {
-      const task = await api.remixFeedItem(item);
+      const task = await api.remixFeedItem(item, sourceMediaUrl);
       setData((current) => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter((entry) => entry.id !== task.id)] } : current);
       openTask(task);
       notifyHaptic("success");
@@ -1027,7 +1027,7 @@ function App() {
           onRefresh={() => void loadFeed(feedSource, Math.max(feedLimit, FEED_PAGE_SIZE))}
           onLoadMore={() => void loadMoreFeed()}
           onLike={(item) => void likeFeed(item)}
-          onRemix={(item) => void remixFeed(item)}
+          onRemix={(item, sourceMediaUrl) => void remixFeed(item, sourceMediaUrl)}
         />
       );
     }

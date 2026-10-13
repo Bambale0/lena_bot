@@ -717,3 +717,40 @@ async def test_owned_hidden_metadata_source_cannot_clear_feed_protection(image_l
     image_launch.source.user_id = 42
     image_launch.source.input_params = {"hidden_prompt": True}
     assert await image_gen._external_source_feed_id(session=AsyncMock(), source_feed_gen_id=77, db_user=SimpleNamespace(id=42)) == 77
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["miniapp", "web"])
+@pytest.mark.parametrize("personalized", [False, True])
+async def test_selected_result_quote_and_submission_match_on_both_surfaces(api_launch, monkeypatch, surface, personalized):
+    from api.web import generations as web_generations
+
+    api_launch.source.result_url = "https://example.test/first.jpg"
+    api_launch.source.result_urls = '["https://example.test/first.jpg", "https://example.test/second.jpg"]'
+    monkeypatch.setitem(api_launch.routes.IMAGE_CAPS, "nano-banana-2", {
+        **api_launch.routes.IMAGE_CAPS["nano-banana-2"], "max_refs": 2,
+    })
+    selected = "https://apixbotai.com/api/v1/feed/77/preview.webp?index=1"
+    body = api_launch.routes.FeedRemixRequest(
+        model="nano-banana-2", source_image_url=selected,
+        image_url=USER_IMAGE if personalized else selected,
+        reference_urls=[USER_IMAGE] if personalized else [],
+    )
+    if surface == "web":
+        quote_response = await web_generations.quote_feed_generation(77, body, api_launch.session, api_launch.user)
+        quote = quote_response["data"]
+    else:
+        quote = await api_launch.routes.quote_feed_remix(77, body, api_launch.session, api_launch.user)
+    assert quote["can_run"] is True
+    api_launch.charge.assert_not_awaited()
+    api_launch.generate.assert_not_awaited()
+    if surface == "web":
+        await web_generations.remix_feed_generation(77, body, api_launch.session, api_launch.user)
+    else:
+        await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+    assert api_launch.charge.await_args.kwargs["amount"] == quote["cost_credits"]
+    assert api_launch.generate.await_args.kwargs["image_url"] == (
+        [USER_IMAGE, "https://example.test/second.jpg"] if personalized else "https://example.test/second.jpg"
+    )
+    prompt = api_launch.generate.await_args.args[1]
+    assert (SECRET not in prompt) if personalized else prompt == SECRET
