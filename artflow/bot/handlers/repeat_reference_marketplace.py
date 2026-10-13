@@ -18,6 +18,33 @@ from db import repository as repo
 from db.models import ImageGenerationAction, User
 
 
+async def _reference_candidate(
+    session: AsyncSession,
+    data: dict[str, Any],
+    *,
+    file_ids: list[str] | None = None,
+    reference_urls: list[str] | None = None,
+) -> tuple[dict[str, Any], int, int]:
+    """Count a public source once, including aliases in the user's photo set."""
+    model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
+    max_refs = repeat_references._repeat_max_refs(model_key)
+    urls = list(reference_urls or [])
+    source_slots = 0
+    if data.get("feed_use_prompt") is not None:
+        source_id = marketplace._feed_use_source_id(data)
+        source = await repo.get_public_feed_generation(session, source_id) if source_id else None
+        source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
+        source_url = image_gen.canonical_generation_result_url(source) if source_type == "image" else None
+        if source_url:
+            urls = image_gen.order_feed_image_references(source_url, urls)
+            source_slots = 1
+        else:
+            # Unavailable source identity cannot justify treating an upload as
+            # its alias. Retain the conservative reserved-slot behavior.
+            max_refs = max(0, max_refs - 1)
+    return {"ref_file_ids": list(file_ids or []), "reference_urls": urls}, max_refs, source_slots
+
+
 def _keyboard(*, uploaded: int, max_refs: int, feed_repeat: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if uploaded:
@@ -54,8 +81,12 @@ def _keyboard(*, uploaded: int, max_refs: int, feed_repeat: bool) -> InlineKeybo
     return builder.as_markup()
 
 
+def _uploaded_count(data: dict[str, Any]) -> int:
+    return int(data.get("prompt_multi_ref_count", len(data.get("prompt_multi_ref_file_ids") or [])))
+
+
 def _text(data: dict[str, Any]) -> str:
-    uploaded = len(list(data.get("prompt_multi_ref_file_ids") or []))
+    uploaded = _uploaded_count(data)
     max_refs = int(data.get("prompt_multi_ref_max") or 1)
     feed_repeat = data.get("feed_use_prompt") is not None
     title = "🔁 <b>Повтор из ленты</b>" if feed_repeat else "🎨 <b>Генерация по промпту</b>"
@@ -152,27 +183,25 @@ async def _collect_prompt_reference(
     best = sorted(message.photo, key=lambda item: item.file_size or 0, reverse=True)  # type: ignore[union-attr]
     file_id = best[0].file_id
     if file_id not in existing:
-        if len(existing) >= max_refs:
-            await message.answer(
-                f"У выбранной модели максимум {max_refs} референсов.",
-                reply_markup=_keyboard(
-                    uploaded=len(existing),
-                    max_refs=max_refs,
-                    feed_repeat=data.get("feed_use_prompt") is not None,
-                ),
-            )
-            return
         existing.append(file_id)
+    candidate, provider_limit, source_slots = await _reference_candidate(session, data, file_ids=existing)
+    uploaded = await image_gen._accept_reference_candidate(
+        message, bot, candidate, provider_limit,
+    )
+    if uploaded is None:
+        return
+    uploaded -= source_slots
 
     await state.update_data(
         prompt_multi_ref_file_ids=existing,
+        prompt_multi_ref_count=uploaded,
         prompt_multi_ref_max=max_refs,
     )
     data = await state.get_data()
     await message.answer(
         _text(data),
         reply_markup=_keyboard(
-            uploaded=len(existing),
+            uploaded=uploaded,
             max_refs=max_refs,
             feed_repeat=data.get("feed_use_prompt") is not None,
         ),
@@ -213,7 +242,7 @@ async def _set_ratio(call: CallbackQuery, state: FSMContext) -> None:
     await call.message.answer(  # type: ignore[union-attr]
         _text(data),
         reply_markup=_keyboard(
-            uploaded=len(list(data.get("prompt_multi_ref_file_ids") or [])),
+            uploaded=_uploaded_count(data),
             max_refs=int(data.get("prompt_multi_ref_max") or 1),
             feed_repeat=data.get("feed_use_prompt") is not None,
         ),
@@ -223,7 +252,16 @@ async def _set_ratio(call: CallbackQuery, state: FSMContext) -> None:
 
 async def _model_menu(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     data = await state.get_data()
-    uploaded = len(list(data.get("prompt_multi_ref_file_ids") or []))
+    try:
+        candidate, _, source_slots = await _reference_candidate(
+            session, data, file_ids=list(data.get("prompt_multi_ref_file_ids") or []),
+        )
+        uploaded = await image_gen._reference_count_for_limit(
+            getattr(call, "bot", None), candidate, 0,
+        ) - source_slots
+    except Exception:
+        await call.answer("Не удалось проверить фото. Попробуй ещё раз.", show_alert=True)
+        return
     selected = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
     costs = await repo.get_all_model_costs(session)
     await call.message.answer(  # type: ignore[union-attr]
@@ -240,15 +278,25 @@ async def _model_menu(call: CallbackQuery, session: AsyncSession, state: FSMCont
 async def _set_model(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     model_key = (call.data or "").removeprefix("pmr:m:")
     data = await state.get_data()
-    uploaded = len(list(data.get("prompt_multi_ref_file_ids") or []))
     model_cost = await repo.get_model_cost(session, model_key)
     max_refs = repeat_references._prompt_user_reference_limit(model_key, data)
-    if not model_cost or not image_gen._supports_img2img(model_key) or max_refs < max(uploaded, 1):
+    if not model_cost or not image_gen._supports_img2img(model_key) or max_refs < 1:
         await call.answer("Эта нейросеть не поддерживает все загруженные фото", show_alert=True)
         return
+    candidate, provider_limit, source_slots = await _reference_candidate(
+        session, {**data, "use_model_key": model_key},
+        file_ids=list(data.get("prompt_multi_ref_file_ids") or []),
+    )
+    uploaded = await image_gen._accept_reference_candidate(
+        call, getattr(call, "bot", None), candidate, provider_limit,
+    )
+    if uploaded is None:
+        return
+    uploaded -= source_slots
     ratio = _current_ratio(data, model_key)
     await state.update_data(
         use_model_key=model_key,
+        prompt_multi_ref_count=uploaded,
         prompt_multi_ref_max=max_refs,
         prompt_multi_ref_ratio=ratio,
     )
@@ -269,7 +317,7 @@ async def _back(call: CallbackQuery, state: FSMContext) -> None:
     await call.message.answer(  # type: ignore[union-attr]
         _text(data),
         reply_markup=_keyboard(
-            uploaded=len(list(data.get("prompt_multi_ref_file_ids") or [])),
+            uploaded=_uploaded_count(data),
             max_refs=int(data.get("prompt_multi_ref_max") or 1),
             feed_repeat=data.get("feed_use_prompt") is not None,
         ),
@@ -278,7 +326,7 @@ async def _back(call: CallbackQuery, state: FSMContext) -> None:
 
 
 async def _clear(call: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(prompt_multi_ref_file_ids=[])
+    await state.update_data(prompt_multi_ref_file_ids=[], prompt_multi_ref_count=0)
     data = await state.get_data()
     await call.message.answer(  # type: ignore[union-attr]
         _text(data),
@@ -347,21 +395,34 @@ async def _run(
         return
     file_ids = list(data.get("prompt_multi_ref_file_ids") or [])
     max_refs = repeat_references._prompt_user_reference_limit(model_key, data)
-    if data.get("feed_use_prompt") is not None and (len(file_ids) > max_refs or max_refs < 1):
+    if data.get("feed_use_prompt") is not None and max_refs < 1:
         await call.answer("Слишком много фото с учётом исходного поста. Убери лишние или выбери другую модель.", show_alert=True)
         return
-    file_ids = file_ids[:max_refs]
     if not file_ids:
         await call.answer("Сначала добавь хотя бы одно фото", show_alert=True)
         return
 
     reference_urls: list[str] = []
     for file_id in file_ids:
-        url = await mirror_telegram_file(bot, file_id)
-        if url and url not in reference_urls:
+        try:
+            url = str(await mirror_telegram_file(bot, file_id) or "").strip()
+        except Exception:
+            url = ""
+        if not url:
+            await call.answer("Не удалось подготовить референсы. Отправь фото ещё раз.", show_alert=True)
+            return
+        if url not in reference_urls:
             reference_urls.append(url)
     if not reference_urls:
         await call.answer("Не удалось подготовить референсы. Отправь фото ещё раз.", show_alert=True)
+        return
+
+    # Validate every resolved photo before prompt rewards or session mutation.
+    # Keep all accepted file IDs: several IDs may resolve to the same photo.
+    candidate, provider_limit, _ = await _reference_candidate(session, data, reference_urls=reference_urls)
+    if await image_gen._accept_reference_candidate(
+        call, bot, candidate, provider_limit,
+    ) is None:
         return
 
     model_cost = await repo.resolve_image_model_cost(

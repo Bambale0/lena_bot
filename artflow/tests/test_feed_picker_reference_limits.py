@@ -119,6 +119,9 @@ async def test_forged_incompatible_video_model_is_rejected_before_picker_state_c
 
 @pytest.mark.asyncio
 async def test_image_feed_entry_reserves_source_slot_through_collection_and_submission(monkeypatch, state):
+    monkeypatch.setattr(refs.image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda bot, file_id: f"https://example.test/{file_id}.jpg",
+    ))
     monkeypatch.setitem(IMAGE_CAPS, "test/single", {"modes": ["image"], "max_refs": 1})
     monkeypatch.setitem(IMAGE_CAPS, "test/two", {"modes": ["image"], "max_refs": 2})
     items = costs(["test/single", "test/two"], GenerationType.image)
@@ -178,6 +181,10 @@ async def test_seedance_video_reference_adapter_preserves_personalization_images
 
 @pytest.mark.asyncio
 async def test_feed_image_model_switch_respects_source_and_uploaded_slots(monkeypatch, state):
+    monkeypatch.setattr(refs.repo, "get_public_feed_generation", AsyncMock(return_value=None))
+    monkeypatch.setattr(refs.image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda bot, file_id: f"https://example.test/{file_id}.jpg",
+    ))
     for key, limit in [("test/one", 1), ("test/two", 2), ("test/three", 3)]:
         monkeypatch.setitem(IMAGE_CAPS, key, {"modes": ["image"], "max_refs": limit})
     items = costs(["test/one", "test/two", "test/three"], GenerationType.image)
@@ -198,17 +205,27 @@ async def test_feed_image_model_switch_respects_source_and_uploaded_slots(monkey
 
 
 @pytest.mark.asyncio
-async def test_feed_overfull_stale_reference_state_never_uploads_or_launches(monkeypatch, state):
+async def test_feed_overfull_stale_reference_state_resolves_before_rejecting_without_launch(monkeypatch, state):
+    monkeypatch.setattr(refs.repo, "get_public_feed_generation", AsyncMock(return_value=None))
     monkeypatch.setitem(IMAGE_CAPS, "test/two", {"modes": ["image"], "max_refs": 2})
     await state.update_data(feed_use_prompt="hidden", feed_use_gen_id=77,
                             use_model_key="test/two", prompt_multi_ref_file_ids=["one", "two"])
-    mirror = AsyncMock()
+    mirror = AsyncMock(side_effect=lambda bot, file_id: f"https://example.test/{file_id}.jpg")
     launch = AsyncMock()
+    create = AsyncMock()
+    charge = AsyncMock()
+    use_prompt = AsyncMock()
+    monkeypatch.setattr(refs.repo, "create_image_session", create)
+    monkeypatch.setattr(refs.repo, "charge_image_generation", charge)
+    monkeypatch.setattr(refs.marketplace, "use_prompt", use_prompt)
     monkeypatch.setattr(refs, "mirror_telegram_file", mirror)
     monkeypatch.setattr(refs.image_gen, "_launch_session_generation", launch)
     call = make_callback(data="prompt_multi_ref:run")
     await refs._run(call, AsyncMock(), SimpleNamespace(id=2), state, AsyncMock())
-    mirror.assert_not_awaited()
+    assert mirror.await_count == 2
+    create.assert_not_awaited()
+    charge.assert_not_awaited()
+    use_prompt.assert_not_awaited()
     launch.assert_not_awaited()
     assert (await state.get_data())["prompt_multi_ref_file_ids"] == ["one", "two"]
     assert call.answer.await_args.kwargs["show_alert"] is True
@@ -216,6 +233,9 @@ async def test_feed_overfull_stale_reference_state_never_uploads_or_launches(mon
 
 @pytest.mark.asyncio
 async def test_ordinary_marketplace_still_collects_full_model_capacity(monkeypatch, state):
+    monkeypatch.setattr(refs.image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda bot, file_id: f"https://example.test/{file_id}.jpg",
+    ))
     monkeypatch.setitem(IMAGE_CAPS, "test/two", {"modes": ["image"], "max_refs": 2})
     monkeypatch.setattr(refs.image_gen, "_supports_img2img", lambda key: True)
     await state.update_data(use_prompt_id=77, use_model_key="test/two")

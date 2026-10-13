@@ -178,7 +178,8 @@ async def test_repeat_ratio_can_be_changed_before_launch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_collect_repeat_photos_appends_until_provider_limit() -> None:
+async def test_collect_repeat_photos_appends_until_provider_limit(monkeypatch) -> None:
+    monkeypatch.setitem(repeat_references.IMAGE_CAPS, "test/multi-ref", {"max_refs": 3})
     state = FakeState(
         {
             "repeat_base_reference_urls": ["https://example.test/original.jpg"],
@@ -213,7 +214,8 @@ async def test_collect_repeat_photos_appends_until_provider_limit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_repeat_combines_original_and_new_references() -> None:
+async def test_run_repeat_combines_original_and_new_references(monkeypatch) -> None:
+    monkeypatch.setitem(repeat_references.IMAGE_CAPS, "test/multi-ref", {"max_refs": 5})
     state = FakeState(
         {
             "repeat_generation_id": 77,

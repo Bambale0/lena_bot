@@ -149,7 +149,7 @@ def _repeat_keyboard_from_data(data: dict[str, Any], *, total: int, added: int) 
 def _repeat_refs_text(data: dict[str, Any]) -> str:
     base_count = len(_url_list(data.get("repeat_base_reference_urls")))
     added_count = len(list(data.get("repeat_new_reference_file_ids") or []))
-    total = base_count + added_count
+    total = int(data.get("repeat_reference_count", base_count + added_count))
     max_refs = int(data.get("repeat_max_refs") or 1)
     model_key = str(data.get("repeat_model_key") or "")
     required = bool(data.get("repeat_reference_required"))
@@ -202,7 +202,11 @@ async def _begin_repeat_collection(
         return True
 
     max_refs = _repeat_max_refs(model_key)
-    base_urls = await _resolve_base_reference_urls(bot, source_session)
+    try:
+        base_urls = await _resolve_base_reference_urls(bot, source_session)
+    except image_gen.ImageReferenceUnavailable:
+        await safe_answer_callback(call, "Не удалось подготовить сохранённые фото. Попробуй ещё раз.", show_alert=True)
+        return True
     source_file_ids = _source_reference_file_ids(source_session)
 
     await state.clear()
@@ -215,6 +219,7 @@ async def _begin_repeat_collection(
         repeat_max_refs=max_refs,
         repeat_reference_required=image_gen._requires_reference_image(model_key),
         repeat_base_reference_urls=base_urls,
+        repeat_reference_count=len(base_urls),
         repeat_new_reference_file_ids=[],
         repeat_source_reference_file_ids=source_file_ids,
         repeat_source_reference_url=(
@@ -363,28 +368,26 @@ async def _feed_again_interceptor(
 
 async def _collect_repeat_reference(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
-    max_refs = int(data.get("repeat_max_refs") or 1)
+    model_key = str(data.get("repeat_model_key") or "")
+    max_refs = _repeat_max_refs(model_key) if model_key else int(data.get("repeat_max_refs") or 1)
     base_urls = _url_list(data.get("repeat_base_reference_urls"))
     new_file_ids = list(data.get("repeat_new_reference_file_ids") or [])
 
     best = sorted(message.photo, key=lambda item: item.file_size or 0, reverse=True)  # type: ignore[union-attr]
     file_id = best[0].file_id
     if file_id not in new_file_ids:
-        if len(base_urls) + len(new_file_ids) >= max_refs:
-            await message.answer(
-                f"У этой модели максимум {max_refs} референсов. Очисти старые или запускай повтор.",
-                reply_markup=_repeat_keyboard_from_data(
-                    data,
-                    total=len(base_urls) + len(new_file_ids),
-                    added=len(new_file_ids),
-                ),
-            )
-            return
         new_file_ids.append(file_id)
-        await state.update_data(repeat_new_reference_file_ids=new_file_ids)
+    total = await image_gen._accept_reference_candidate(
+        message, getattr(message, "bot", None),
+        {"reference_urls": base_urls, "ref_file_ids": new_file_ids}, max_refs,
+    )
+    if total is None:
+        return
+    await state.update_data(
+        repeat_new_reference_file_ids=new_file_ids, repeat_reference_count=total, repeat_max_refs=max_refs,
+    )
 
     data = await state.get_data()
-    total = len(base_urls) + len(new_file_ids)
     await message.answer(
         _repeat_refs_text(data),
         reply_markup=_repeat_keyboard_from_data(data, total=total, added=len(new_file_ids)),
@@ -404,9 +407,10 @@ async def _repeat_refs_ratio(call: CallbackQuery, state: FSMContext) -> None:
         return
     await state.update_data(repeat_aspect_ratio=ratio)
     data = await state.get_data()
-    total = len(_url_list(data.get("repeat_base_reference_urls"))) + len(
-        list(data.get("repeat_new_reference_file_ids") or [])
-    )
+    total = int(data.get(
+        "repeat_reference_count",
+        len(_url_list(data.get("repeat_base_reference_urls"))) + len(data.get("repeat_new_reference_file_ids") or []),
+    ))
     await call.message.answer(  # type: ignore[union-attr]
         _repeat_refs_text(data),
         reply_markup=_repeat_keyboard_from_data(
@@ -422,6 +426,7 @@ async def _repeat_refs_clear(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     await state.update_data(
         repeat_base_reference_urls=[],
+        repeat_reference_count=0,
         repeat_new_reference_file_ids=[],
         repeat_source_reference_file_ids=[],
         repeat_source_reference_url=None,
@@ -472,18 +477,32 @@ async def _repeat_refs_run(
         and prompt == generation.prompt
     )
 
-    max_refs = int(data.get("repeat_max_refs") or 1)
+    model_key = str(data.get("repeat_model_key") or generation.model)
+    max_refs = _repeat_max_refs(model_key)
     references = _url_list(data.get("repeat_base_reference_urls"))
     new_file_ids = list(data.get("repeat_new_reference_file_ids") or [])
     for file_id in new_file_ids:
-        url = await image_gen._telegram_file_url(bot, file_id)
-        if url and url not in references:
+        try:
+            url = str(await image_gen._telegram_file_url(bot, file_id) or "").strip()
+        except Exception:
+            url = ""
+        if not url:
+            await call.answer("Не удалось подготовить референсы. Отправь фото ещё раз.", show_alert=True)
+            return
+        if url not in references:
             references.append(url)
-    if len(references) > max_refs:
-        await call.answer(
-            f"В повторе {len(references)} фото, а модель принимает до {max_refs}. Очисти референсы и добавь нужные заново.",
-            show_alert=True,
-        )
+    candidate_refs = list(references)
+    external_source_id = await image_gen._external_source_feed_id(
+        session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+    )
+    if external_source_id:
+        source = await repo.get_public_feed_generation(session, external_source_id)
+        if _generation_type_value(source) == GenerationType.image.value:
+            source_url = image_gen.canonical_generation_result_url(source)
+            candidate_refs = image_gen.order_feed_image_references(source_url, candidate_refs)
+    if await image_gen._accept_reference_candidate(
+        call, bot, {"reference_urls": candidate_refs}, max_refs,
+    ) is None:
         return
 
     if data.get("repeat_reference_required") and not references:
@@ -499,7 +518,6 @@ async def _repeat_refs_run(
     for file_id in new_file_ids:
         if file_id not in combined_file_ids:
             combined_file_ids.append(file_id)
-    combined_file_ids = combined_file_ids[:max_refs]
     # Public and mixed URL/file sets must remain complete on later repeats.
     # Mirrored Telegram URLs are durable; use one ordered URL set for mixed input
     # so the file-ID resolver cannot shadow the original public references.

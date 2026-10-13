@@ -162,6 +162,7 @@ async def test_prompt_reference_photo_with_caption_launches_prompt_handler() -> 
         )
 
     state.update_data.assert_awaited_with(
+        image_session_id=None,
         image_file_id="ref_1",
         ref_file_ids=["ref_1"],
         mode="image",

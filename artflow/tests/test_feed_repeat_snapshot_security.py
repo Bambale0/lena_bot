@@ -87,6 +87,7 @@ async def test_confirm_forwards_explicit_user_edit_and_creates_no_secret_session
     launch = AsyncMock(return_value=True)
     monkeypatch.setattr(repeat_safe.repo, "get_generation_by_id", AsyncMock(return_value=source))
     monkeypatch.setattr(repeat_safe.repo, "create_image_session", create_session)
+    monkeypatch.setattr(repeat_safe.repo, "get_public_feed_generation", AsyncMock(return_value=None))
     monkeypatch.setattr(repeat_safe, "find_repeat_by_confirm_key", AsyncMock(return_value=None))
     monkeypatch.setattr(repeat_safe.image_gen, "_launch_session_generation", launch)
     call = SimpleNamespace(data="repeat_run_confirm_42", from_user=SimpleNamespace(id=777), answer=AsyncMock(), message=SimpleNamespace(answer=AsyncMock()))

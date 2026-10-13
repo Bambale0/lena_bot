@@ -63,7 +63,7 @@ def _default_aspect_ratio_for_model(model_key: str, mode: str | None) -> str:
 
 
 def _reference_payload_from_state(data: dict, *, max_refs: int, supports_refs: bool) -> dict[str, object]:
-    from bot.handlers.image_gen import _state_reference_urls
+    from bot.handlers.image_gen import _state_reference_file_ids, _state_reference_urls
 
     if not supports_refs:
         return {
@@ -73,11 +73,7 @@ def _reference_payload_from_state(data: dict, *, max_refs: int, supports_refs: b
             "remix_reference_url": None,
         }
 
-    refs = [str(item) for item in list(data.get("carryover_ref_file_ids") or data.get("ref_file_ids") or []) if item]
-    image_file_id = data.get("carryover_image_file_id") or data.get("image_file_id")
-    if image_file_id and image_file_id not in refs:
-        refs.insert(0, str(image_file_id))
-    refs = list(dict.fromkeys(refs))
+    refs = list(dict.fromkeys(_state_reference_file_ids(data)))
 
     return {
         "image_file_id": refs[0] if refs else None,
@@ -252,34 +248,9 @@ async def open_model_composer_for_selection(
     max_refs = int(caps.get("max_refs") or 10)
     supports_refs = "image" in modes
     reference_payload = _reference_payload_from_state(data, max_refs=max_refs, supports_refs=supports_refs)
-    reference_count = _reference_count_from_state(reference_payload)
-    if reference_count > max_refs and reference_payload["ref_file_ids"] and (
-        reference_payload["reference_urls"] or reference_payload["remix_reference_url"]
-    ):
-        # A persisted public URL may mirror one of the Telegram files. Resolve
-        # mixed sets before rejecting a model by an upper-bound slot count.
-        from bot.handlers.image_gen import _telegram_file_url
+    from bot.handlers.image_gen import _accept_reference_candidate
 
-        resolved = list(reference_payload["reference_urls"])
-        scalar = reference_payload["remix_reference_url"]
-        if scalar and scalar not in resolved:
-            resolved.append(scalar)
-        try:
-            for file_id in reference_payload["ref_file_ids"]:
-                url = await _telegram_file_url(call.bot, file_id)
-                if not url:
-                    raise ValueError("Missing mirrored reference")
-                if url not in resolved:
-                    resolved.append(url)
-        except Exception:
-            await safe_answer_callback(call, "Не удалось проверить фото. Попробуй выбрать модель ещё раз.", show_alert=True)
-            return False
-        reference_count = len(resolved)
-    if reference_count > max_refs:
-        await safe_answer_callback(
-            call, f"Эта модель принимает до {max_refs} фото. Убери лишние референсы или выбери другую модель.",
-            show_alert=True,
-        )
+    if await _accept_reference_candidate(call, getattr(call, "bot", None), reference_payload, max_refs) is None:
         return False
     mode = forced_mode if forced_mode in modes else _default_mode_for_model(model_key, data, reference_payload)
     aspect_ratio = _default_aspect_ratio_for_model(model_key, mode)

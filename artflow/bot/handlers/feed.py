@@ -505,6 +505,7 @@ async def cb_feed_again(
     import json
 
     from bot.handlers.image_gen import (
+        ImageReferenceUnavailable,
         _launch_session_generation,
         _session_reference_url,
         _stored_reference_urls,
@@ -535,7 +536,11 @@ async def cb_feed_again(
     reference_url = source_session.reference_url if source_session else None
     effective_reference_url = None
     if source_session and mode == "image":
-        effective_reference_url = await _session_reference_url(bot, source_session, prefer_last_result=False)
+        try:
+            effective_reference_url = await _session_reference_url(bot, source_session, prefer_last_result=False)
+        except ImageReferenceUnavailable as exc:
+            await call.answer(str(exc), show_alert=True)
+            return
         if isinstance(effective_reference_url, str) and effective_reference_url:
             reference_url = effective_reference_url
 
@@ -638,6 +643,7 @@ async def cb_feed_remix(
         reference_url=gen.result_url,
     )
 
+    await state.clear()
     await state.set_state(ImageGenFSM.session_active)
     await state.update_data(
         image_session_id=image_session.id,
@@ -649,6 +655,8 @@ async def cb_feed_remix(
         count=image_session.count,
         image_file_id=None,
         ref_file_ids=[],
+        reference_urls=[gen.result_url],
+        remix_reference_url=gen.result_url,
         remix_mode=True,
         remix_parent_generation_id=gen.id,
         source_feed_gen_id=source_feed_gen_id,

@@ -394,8 +394,8 @@ def _stored_reference_urls(image_session: ImageSession) -> list[str]:
 
 
 def _state_reference_file_ids(data: dict) -> list[str]:
-    ref_file_ids = [item for item in list(data.get("ref_file_ids", []) or []) if item]
-    image_file_id = data.get("image_file_id")
+    ref_file_ids = [item for item in list(data.get("ref_file_ids", data.get("carryover_ref_file_ids", [])) or []) if item]
+    image_file_id = data.get("image_file_id", data.get("carryover_image_file_id"))
     if image_file_id and image_file_id not in ref_file_ids:
         ref_file_ids.insert(0, image_file_id)
     return ref_file_ids
@@ -448,6 +448,58 @@ def _state_reference_count(data: dict) -> int:
     if scalar and scalar not in urls:
         urls.append(scalar)
     return len(set(_state_reference_file_ids(data))) + len(urls)
+
+
+class ImageReferenceUnavailable(ValueError):
+    def __init__(self) -> None:
+        super().__init__("Не удалось подготовить все фото. Референсы сохранены; попробуй ещё раз или добавь фото в новую серию.")
+
+
+async def _reference_count_for_limit(bot: Bot, data: dict, max_refs: int) -> int:
+    """Count the candidate union without mutating it; resolve aliases near the cap."""
+    urls = _state_reference_urls(data)
+    scalar = _state_reference_url(data)
+    if scalar and scalar not in urls:
+        urls.append(scalar)
+    file_ids = list(dict.fromkeys(_state_reference_file_ids(data)))
+    upper_bound = len(urls) + len(file_ids)
+    if upper_bound <= max_refs:
+        return upper_bound
+    for file_id in file_ids:
+        url = await _telegram_file_url(bot, file_id)
+        if not url:
+            raise ValueError("Unresolved image reference")
+        if url not in urls:
+            urls.append(url)
+    return len(urls)
+
+
+async def _accept_reference_candidate(
+    source: Message | CallbackQuery, bot: Bot, data: dict, max_refs: int, *, resolve_all: bool = False,
+) -> int | None:
+    """Reject unresolved/over-cap candidates before any FSM or session mutation."""
+    try:
+        count = await _reference_count_for_limit(bot, data, 0 if resolve_all else max_refs)
+        error = f"Эта модель принимает до {max_refs} фото. Убери лишние референсы или выбери другую модель." if count > max_refs else None
+    except Exception:
+        count = None
+        error = "Не удалось проверить фото. Попробуй ещё раз."
+    if error:
+        if getattr(source, "message", None) is not None:
+            await safe_answer_callback(source, error, show_alert=True)
+        else:
+            await source.answer(error)
+        return None
+    return count
+
+
+async def _accept_model_reference_candidate(call: CallbackQuery, data: dict, model_key: str) -> int | None:
+    from bot.handlers.image_wizard_v2 import _reference_payload_from_state
+
+    caps = IMAGE_CAPS.get(model_key, {})
+    max_refs = int(caps.get("max_refs", 0) or 0)
+    payload = _reference_payload_from_state(data, max_refs=max_refs, supports_refs=True)
+    return await _accept_reference_candidate(call, getattr(call, "bot", None), payload, max_refs)
 
 
 def _state_has_reference(data: dict) -> bool:
@@ -595,8 +647,13 @@ async def _session_reference_url(
     # Legacy mixed sessions retain original public URLs followed by later
     # Telegram uploads. Do not return early after resolving only one storage kind.
     for file_id in file_ids:
-        url = await _telegram_file_url(bot, file_id)
-        if url and url not in urls:
+        try:
+            url = await _telegram_file_url(bot, file_id)
+        except Exception as exc:
+            raise ImageReferenceUnavailable() from exc
+        if not url:
+            raise ImageReferenceUnavailable()
+        if url not in urls:
             urls.append(url)
     return urls[0] if len(urls) == 1 else urls or None
 
@@ -660,6 +717,24 @@ async def _sync_state_with_image_session(state: FSMContext, image_session: Image
     )
 
 
+async def _accept_targeted_session_callback(call: CallbackQuery, state: FSMContext, image_session: ImageSession) -> bool:
+    """A stale settings button must not relabel another series' reference state."""
+    data = await state.get_data()
+    state_id = data.get("image_session_id")
+    if state_id:
+        if str(state_id) == str(image_session.id):
+            return True
+    elif not _state_has_reference(data) and not any(data.get(key) for key in (
+        "pending_reference_url", "repeat_reference_images", "repeat_base_reference_urls",
+        "repeat_new_reference_file_ids", "prompt_multi_ref_file_ids",
+    )):
+        await state.clear()
+        await _sync_state_with_image_session(state, image_session)
+        return True
+    await safe_answer_callback(call, "Это меню другой серии. Открой настройки активной серии.", show_alert=True)
+    return False
+
+
 async def _show_active_image_session_message(
     message: Message,
     state: FSMContext,
@@ -703,7 +778,9 @@ async def _ensure_active_image_session_from_state(
     session: AsyncSession,
     state: FSMContext,
     db_user: User,
-) -> ImageSession:
+    source: Message | CallbackQuery | None = None,
+    bot: Bot | None = None,
+) -> ImageSession | None:
     data = await state.get_data()
     existing = await repo.get_active_image_session(session, db_user.id)
     raw_model_key = str(data.get("model_key") or "").strip()
@@ -712,8 +789,6 @@ async def _ensure_active_image_session_from_state(
         return existing
 
     model_key = _image_model_key(raw_model_key or NANA_BANANO_DEFAULT_MODEL)
-    if raw_model_key != model_key:
-        await state.update_data(model_key=model_key)
 
     if existing:
         try:
@@ -723,8 +798,20 @@ async def _ensure_active_image_session_from_state(
         if state_session_id == getattr(existing, "id", None) and existing.model == model_key:
             return existing
 
+    max_refs = int(IMAGE_CAPS.get(model_key, {}).get("max_refs", 0) or 0)
+    if source is None:
+        if await _reference_count_for_limit(bot, data, max_refs) > max_refs:
+            raise ValueError(f"Model supports at most {max_refs} reference images")
+    elif await _accept_reference_candidate(source, bot, data, max_refs, resolve_all=True) is None:
+        return None
+    if raw_model_key != model_key:
+        await state.update_data(model_key=model_key)
+
     aspect_ratio = data.get("aspect_ratio")
     mode = data.get("image_mode") or data.get("mode", "text")
+    if _supports_img2img(model_key) and _state_has_reference(data):
+        mode = "image"
+        await state.update_data(mode=mode, image_mode=mode)
     quality = _normalize_session_quality(
         model_key,
         aspect_ratio,
@@ -1372,8 +1459,12 @@ async def _show_nana_banano_flow(
         return False
 
     data = await state.get_data()
-    refs_count = _nana_banano_ref_count(data) if preserve_refs else 0
-    mode = "image" if refs_count or _state_reference_url(data) else "text"
+    refs_count = 0
+    if preserve_refs:
+        refs_count = await _accept_model_reference_candidate(call, data, model_key)
+        if refs_count is None:
+            return False
+    mode = "image" if refs_count else "text"
 
     updates = dict(
         nana_banano_flow=True,
@@ -1397,6 +1488,8 @@ async def _show_nana_banano_flow(
         updates.update(
             image_file_id=None,
             ref_file_ids=[],
+            carryover_ref_file_ids=[],
+            carryover_image_file_id=None,
             reference_urls=[],
             carryover_reference_urls=[],
             reference_url=None,
@@ -1576,7 +1669,9 @@ async def cb_nana_banano_refs_hint(call: CallbackQuery, state: FSMContext) -> No
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:mode:"))
 async def cb_image_dynamic_mode(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    await state.update_data(model_key=model_key, image_model=model_key)
+    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+        return
+    await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
     await safe_edit_message(
         call.message,
         "🔀 <b>Выбери режим модели</b>",
@@ -1589,7 +1684,9 @@ async def cb_image_dynamic_mode(call: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:ratio:"))
 async def cb_image_dynamic_ratio(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    await state.update_data(model_key=model_key, image_model=model_key)
+    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+        return
+    await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
     await safe_edit_message(
         call.message,
         "📐 <b>Выбери формат</b>",
@@ -1602,7 +1699,9 @@ async def cb_image_dynamic_ratio(call: CallbackQuery, state: FSMContext) -> None
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:quality:"))
 async def cb_image_dynamic_quality(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    await state.update_data(model_key=model_key, image_model=model_key)
+    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+        return
+    await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
     await safe_edit_message(
         call.message,
         "💎 <b>Выбери качество</b>",
@@ -1615,7 +1714,9 @@ async def cb_image_dynamic_quality(call: CallbackQuery, state: FSMContext) -> No
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:count:"))
 async def cb_image_dynamic_count(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    await state.update_data(model_key=model_key, image_model=model_key)
+    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+        return
+    await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
     await safe_edit_message(
         call.message,
         "🔢 <b>Выбери количество</b>",
@@ -1628,10 +1729,13 @@ async def cb_image_dynamic_count(call: CallbackQuery, state: FSMContext) -> None
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:enhance:"))
 async def cb_image_dynamic_enhance(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
+    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+        return
     data = await state.get_data()
     mode = data.get("image_mode") or data.get("mode")
     current = bool(data.get("image_prompt_enhance"))
     await state.update_data(
+        image_session_id=None,
         model_key=model_key,
         image_model=model_key,
         image_prompt_enhance=not current,
@@ -1649,7 +1753,9 @@ async def cb_image_dynamic_enhance(call: CallbackQuery, state: FSMContext) -> No
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:reference:"))
 async def cb_image_dynamic_reference(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
-    await state.update_data(model_key=model_key, image_model=model_key)
+    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+        return
+    await state.update_data(image_session_id=None, model_key=model_key, image_model=model_key)
     await safe_edit_message(
         call.message,
         "🖼 <b>Загрузи фото-референс</b>\n\n"
@@ -1663,12 +1769,15 @@ async def cb_image_dynamic_reference(call: CallbackQuery, state: FSMContext) -> 
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:continue:"))
 async def cb_image_dynamic_continue(call: CallbackQuery, state: FSMContext) -> None:
     model_key = call.data.split(":", 2)[2]
+    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+        return
     data = await state.get_data()
     caps = IMAGE_CAPS.get(model_key, {})
     modes = caps.get("modes", ["text"])
-    mode = data.get("image_mode") or data.get("mode") or ("text" if "text" in modes else modes[0])
+    mode = data.get("image_mode") or data.get("mode") or data.get("carryover_mode") or ("text" if "text" in modes else modes[0])
 
     await state.update_data(
+        image_session_id=None,
         model_key=model_key,
         image_model=model_key,
         mode=mode,
@@ -1743,6 +1852,12 @@ async def cb_image_model(
 
         caps = IMAGE_CAPS.get(model_key, {})
         modes = list(caps.get("modes") or ["text"])
+        candidate = {
+            "ref_file_ids": _active_reference_file_ids(image_session, data),
+            "reference_urls": _stored_reference_urls(image_session),
+        }
+        if await _accept_model_reference_candidate(call, candidate, model_key) is None:
+            return
         has_references = bool(
             _active_reference_file_ids(image_session, data)
             or _stored_reference_urls(image_session)
@@ -1820,8 +1935,11 @@ async def cb_image_model(
 @router.callback_query(ImageGenFSM.mode_select, F.data.startswith("img_mode:"))
 async def cb_image_mode(call: CallbackQuery, state: FSMContext) -> None:
     _, mode, model_key = call.data.split(":", 2)
+    if await _accept_model_reference_candidate(call, await state.get_data(), model_key) is None:
+        return
 
     await state.update_data(
+        image_session_id=None,
         model_key=model_key,
         image_model=model_key,
         mode=mode,
@@ -1876,7 +1994,11 @@ async def cb_image_ratio(
             reply_markup=image_count_kb(model_key),
         )
     else:
-        image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
+        image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user,
+            source=call, bot=getattr(call, "bot", None),
+        )
+        if image_session is None:
+            return
         await _show_active_image_session_callback(call, state, session, db_user, image_session)
     await call.answer(ratio)
 
@@ -1935,7 +2057,11 @@ async def cb_image_quality(
             reply_markup=image_count_kb(model_key),
         )
     else:
-        image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
+        image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user,
+            source=call, bot=getattr(call, "bot", None),
+        )
+        if image_session is None:
+            return
         await _show_active_image_session_callback(call, state, session, db_user, image_session)
     if normalized_quality != quality:
         await call.answer("Для формата 1:1 доступно только 2K")
@@ -1953,7 +2079,11 @@ async def cb_image_count(
     count = int(call.data.split(":")[1])  # type: ignore[union-attr]
     await state.update_data(count=count)
 
-    image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
+    image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user,
+        source=call, bot=getattr(call, "bot", None),
+    )
+    if image_session is None:
+        return
     await _show_active_image_session_callback(call, state, session, db_user, image_session)
     await call.answer(f"{count} шт")
 
@@ -2007,13 +2137,18 @@ async def handle_reference_upload(
     model_key = data["model_key"]
 
     # Collect into multi-ref list
-    existing: list[str] = list(data.get("ref_file_ids", []))
+    existing = _state_reference_file_ids(data)
     caps = IMAGE_CAPS.get(model_key, {})
     max_refs: int = caps.get("max_refs", 1)
 
     if file_id not in existing:
         existing.append(file_id)
-    await state.update_data(image_file_id=existing[0], ref_file_ids=existing)
+    reference_count = await _accept_reference_candidate(
+        message, bot, {**data, "image_file_id": existing[0], "ref_file_ids": existing}, max_refs,
+    )
+    if reference_count is None:
+        return
+    await state.update_data(image_session_id=None, image_file_id=existing[0], ref_file_ids=existing)
     if (message.caption or "").strip():
         await state.update_data(mode="image", image_mode="image")
         await handle_prompt(message, state, session, db_user, bot)
@@ -2024,11 +2159,11 @@ async def handle_reference_upload(
 
     # If model supports multiple refs and we haven't hit the max, ask for more
     if max_refs > 1:
-        can_add_more = len(existing) < max_refs
+        can_add_more = reference_count < max_refs
         await message.answer(
-            f"✅ Фото {len(existing)}/{max_refs} загружено!"
+            f"✅ Фото {reference_count}/{max_refs} загружено!"
             + (f"\nМожно добавить ещё (до {max_refs} фото)" if can_add_more else "\nДостигнут максимум."),
-            reply_markup=multi_ref_kb(len(existing), max_refs),
+            reply_markup=multi_ref_kb(reference_count, max_refs),
         )
         return
 
@@ -2068,7 +2203,11 @@ async def _after_ref_upload(
             reply_markup=image_count_kb(model_key),
         )
     else:
-        image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
+        image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user,
+            source=message, bot=getattr(message, "bot", None),
+        )
+        if image_session is None:
+            return
         await _show_active_image_session_message(message, state, session, db_user, image_session)
 
 
@@ -2110,6 +2249,7 @@ async def cb_image_reference_skip(
 
     await state.update_data(
         mode="text", image_mode="text", image_file_id=None, ref_file_ids=[],
+        carryover_ref_file_ids=[], carryover_image_file_id=None,
         reference_urls=[], reference_url=None, carryover_reference_urls=[],
         carryover_reference_url=None, remix_reference_url=None,
     )
@@ -2154,17 +2294,15 @@ async def handle_prompt_reference_upload(
     existing = _state_reference_file_ids(data)
 
     if file_id not in existing:
-        if len(existing) >= max_refs:
-            await message.answer(
-                f"У этой модели максимум {max_refs} референсов. Отправь промпт текстом.",
-                reply_markup=image_nana_banano_kb(model_key, len(existing))
-                if data.get("nana_banano_flow")
-                else back_to_menu_kb(),
-            )
-            return
         existing.append(file_id)
+    reference_count = await _accept_reference_candidate(
+        message, bot, {**data, "image_file_id": existing[0], "ref_file_ids": existing}, max_refs,
+    )
+    if reference_count is None:
+        return
 
     await state.update_data(
+        image_session_id=None,
         image_file_id=existing[0],
         ref_file_ids=existing,
         mode="image",
@@ -2175,12 +2313,12 @@ async def handle_prompt_reference_upload(
         return
 
     reply_markup = (
-        image_nana_banano_kb(model_key, len(existing))
+        image_nana_banano_kb(model_key, reference_count)
         if data.get("nana_banano_flow")
         else back_to_menu_kb()
     )
     await message.answer(
-        f"✅ Референс {len(existing)}/{max_refs} добавлен.\n\n"
+        f"✅ Референс {reference_count}/{max_refs} добавлен.\n\n"
         "👇 <b>Следующий шаг</b>\n"
         "<b>Отправь промпт текстом.</b> Можно сначала добавить ещё фото.",
         reply_markup=reply_markup,
@@ -2196,9 +2334,17 @@ async def handle_prompt(
     bot: Bot,
 ) -> None:
     prompt = ((message.text or message.caption or "")).strip()
-    image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user)
+    image_session = await _ensure_active_image_session_from_state(session=session, state=state, db_user=db_user,
+        source=message, bot=bot,
+    )
+    if image_session is None:
+        return
 
-    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
+    try:
+        reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
+    except ImageReferenceUnavailable as exc:
+        await message.answer(str(exc))
+        return
     data = await state.get_data()
     current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
     current_mode = await _promote_reference_mode_if_needed(
@@ -2263,7 +2409,10 @@ async def _show_image_review(
         session=session,
         state=state,
         db_user=db_user,
+        source=call, bot=getattr(call, "bot", None),
     )
+    if image_session is None:
+        return
     model_cost = await repo.resolve_image_model_cost(
         session,
         image_session.model,
@@ -2313,7 +2462,10 @@ async def cb_image_review_ratio(
         session=session,
         state=state,
         db_user=db_user,
+        source=call, bot=getattr(call, "bot", None),
     )
+    if image_session is None:
+        return
     ratios = _ratio_options_for_mode(image_session.model, image_session.mode)
     await safe_edit_message(
         call.message,
@@ -2338,7 +2490,10 @@ async def cb_image_review_ratio_set(
         session=session,
         state=state,
         db_user=db_user,
+        source=call, bot=getattr(call, "bot", None),
     )
+    if image_session is None:
+        return
     ratio = (call.data or "").removeprefix("img_review:ratio:set:")
     if ratio not in _ratio_options_for_mode(image_session.model, image_session.mode):
         await call.answer("Этот формат недоступен для модели", show_alert=True)
@@ -2360,7 +2515,10 @@ async def cb_image_review_quality(
         session=session,
         state=state,
         db_user=db_user,
+        source=call, bot=getattr(call, "bot", None),
     )
+    if image_session is None:
+        return
     await safe_edit_message(
         call.message,
         "💎 <b>Выбери качество первой генерации</b>",
@@ -2384,7 +2542,10 @@ async def cb_image_review_quality_set(
         session=session,
         state=state,
         db_user=db_user,
+        source=call, bot=getattr(call, "bot", None),
     )
+    if image_session is None:
+        return
     quality = (call.data or "").removeprefix("img_review:quality:set:")
     allowed = {value for value, _label in _quality_options(image_session.model)}
     if quality not in allowed:
@@ -2410,7 +2571,10 @@ async def cb_image_review_count(
         session=session,
         state=state,
         db_user=db_user,
+        source=call, bot=getattr(call, "bot", None),
     )
+    if image_session is None:
+        return
     counts = [int(value) for value in IMAGE_CAPS.get(image_session.model, {}).get("counts", [1])]
     await safe_edit_message(
         call.message,
@@ -2435,7 +2599,10 @@ async def cb_image_review_count_set(
         session=session,
         state=state,
         db_user=db_user,
+        source=call, bot=getattr(call, "bot", None),
     )
+    if image_session is None:
+        return
     raw_count = (call.data or "").removeprefix("img_review:count:set:")
     counts = [int(value) for value in IMAGE_CAPS.get(image_session.model, {}).get("counts", [1])]
     count = int(raw_count) if raw_count.isdigit() else 0
@@ -2476,7 +2643,10 @@ async def cb_image_review_launch(
         session=session,
         state=state,
         db_user=db_user,
+        source=call, bot=getattr(call, "bot", None),
     )
+    if image_session is None:
+        return
     await safe_answer_callback(call)
     await _launch_session_generation(
         source_message=call.message,  # type: ignore[arg-type]
@@ -2530,12 +2700,16 @@ async def handle_session_prompt(
 
     reference_url = data.get("remix_reference_url") if is_remix else None
     if not reference_url:
-        reference_url = await _session_reference_url(
-            bot,
-            image_session,
-            prefer_last_result=is_remix and not _state_reference_file_ids(data),
-            state=state,
-        )
+        try:
+            reference_url = await _session_reference_url(
+                bot,
+                image_session,
+                prefer_last_result=is_remix and not _state_reference_file_ids(data),
+                state=state,
+            )
+        except ImageReferenceUnavailable as exc:
+            await message.answer(str(exc))
+            return
 
     current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
     current_mode = await _promote_reference_mode_if_needed(
@@ -2611,36 +2785,15 @@ async def handle_session_photo(
     replacing = bool(data.get("remix_mode")) or max_refs == 1
     existing = [] if replacing else _active_reference_file_ids(image_session, data)
     public_refs = [] if replacing else _stored_reference_urls(image_session)
-    reference_count = len(public_refs) + len(existing)
-    if not replacing:
-        if file_id not in existing:
-            reference_count += 1
-            if public_refs and reference_count > max_refs:
-                # Public URLs and Telegram IDs can alias the same input. Resolve
-                # only this ambiguous limit check, before mutating the series.
-                try:
-                    resolved = await _session_reference_url(message.bot, image_session, state=state)
-                    urls = [resolved] if isinstance(resolved, str) else list(resolved or [])
-                    new_url = await _telegram_file_url(message.bot, file_id)
-                    if not new_url:
-                        raise ValueError("unresolved reference")
-                    reference_count = len(dict.fromkeys([*urls, new_url]))
-                except Exception:
-                    await message.answer("Не удалось проверить референсы. Попробуй отправить фото ещё раз.")
-                    return
-            if reference_count > max_refs:
-                await message.answer(
-                    f"У этой модели максимум {max_refs} референсов. Напиши промпт или начни новую серию.",
-                    reply_markup=image_session_kb(
-                        image_session.last_generation_id,
-                        allow_publish=not bool(data.get("source_feed_gen_id")),
-                    ),
-                )
-                return
-            existing.append(file_id)
-        reference_file_ids = existing
-    else:
-        reference_file_ids = [file_id]
+    if file_id not in existing:
+        existing.append(file_id)
+    reference_file_ids = existing
+    reference_count = await _accept_reference_candidate(
+        message, getattr(message, "bot", None),
+        {"reference_urls": public_refs, "ref_file_ids": reference_file_ids}, max_refs,
+    )
+    if reference_count is None:
+        return
 
     reference_kwargs = {"reference_urls": public_refs} if public_refs else {}
     await repo.update_image_session_references(
@@ -2748,6 +2901,8 @@ async def cb_image_session_remix(
         image_mode="image",
         image_file_id=None,
         ref_file_ids=[],
+        carryover_ref_file_ids=[],
+        carryover_image_file_id=None,
         reference_urls=[],
         carryover_reference_urls=[],
         reference_url=None,
@@ -2853,6 +3008,8 @@ async def cb_image_style_choice(
         image_mode="image",
         image_file_id=None,
         ref_file_ids=[],
+        carryover_ref_file_ids=[],
+        carryover_image_file_id=None,
         reference_urls=[],
         carryover_reference_urls=[],
         reference_url=None,
@@ -2979,6 +3136,8 @@ async def cb_image_repeat_ratio(
         if ratio not in _ratio_options_for_mode(image_session.model, image_session.mode):
             await call.answer("Этот формат недоступен для модели", show_alert=True)
             return
+        if not await _accept_targeted_session_callback(call, state, image_session):
+            return
         image_session.aspect_ratio = ratio
         image_session.quality = _normalize_session_quality(image_session.model, ratio, image_session.quality)
         await session.commit()
@@ -3029,6 +3188,8 @@ async def cb_image_repeat_quality(
         if quality not in allowed_quality:
             await call.answer("Это качество недоступно для модели", show_alert=True)
             return
+        if not await _accept_targeted_session_callback(call, state, image_session):
+            return
         image_session.quality = _normalize_session_quality(image_session.model, image_session.aspect_ratio, quality)
         await session.commit()
         await state.update_data(image_session_id=image_session.id, quality=image_session.quality, image_quality=image_session.quality)
@@ -3071,6 +3232,11 @@ async def cb_image_repeat_launch(
     if not prompt:
         await call.answer("Не нашла промпт для повтора", show_alert=True)
         return
+    try:
+        reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
+    except ImageReferenceUnavailable as exc:
+        await call.answer(str(exc), show_alert=True)
+        return
     if _apply_default_repeat_ratio(image_session, data):
         await session.commit()
         await state.update_data(
@@ -3079,7 +3245,7 @@ async def cb_image_repeat_launch(
             quality=image_session.quality,
             image_quality=image_session.quality,
         )
-    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False, state=state)
+
     current_mode = data.get("image_mode") or data.get("mode") or getattr(image_session, "mode", None)
     current_mode = await _promote_reference_mode_if_needed(
         session=session,
@@ -3238,6 +3404,8 @@ async def cb_image_session_animate(
         grok_mode=grok_mode,
         image_file_id=None,
         ref_file_ids=[],
+        carryover_ref_file_ids=[],
+        carryover_image_file_id=None,
         reference_urls=[],
         carryover_reference_urls=[],
         reference_url=None,
@@ -3312,6 +3480,8 @@ async def cb_image_settings_ratio_set(
         await call.answer("Этот формат недоступен для модели", show_alert=True)
         return
 
+    if not await _accept_targeted_session_callback(call, state, image_session):
+        return
     previous_quality = image_session.quality
     image_session.aspect_ratio = ratio
     normalized_quality = _normalize_session_quality(image_session.model, ratio, image_session.quality)
@@ -3384,6 +3554,8 @@ async def cb_image_settings_quality_set(
         await call.answer("Это качество недоступно для модели", show_alert=True)
         return
 
+    if not await _accept_targeted_session_callback(call, state, image_session):
+        return
     normalized_quality = _normalize_session_quality(image_session.model, image_session.aspect_ratio, quality)
     image_session.quality = normalized_quality
     await session.commit()
@@ -3449,6 +3621,8 @@ async def cb_image_settings_count_set(
         await call.answer("Это количество недоступно для модели", show_alert=True)
         return
 
+    if not await _accept_targeted_session_callback(call, state, image_session):
+        return
     image_session.count = count
     await session.commit()
     await state.update_data(image_session_id=image_session.id, count=count)
@@ -3487,8 +3661,13 @@ async def cb_image_settings_model(
         elif image_session.mode:
             carryover_mode = image_session.mode
 
-    await repo.archive_active_image_sessions(session, db_user.id)
+    # Keep the previous active series until a valid replacement is created.
+    # Merely opening a picker (or rejecting a lower-cap model) is not a reset.
     await state.clear()
+    if image_session:
+        await state.update_data(
+            image_session_id=image_session.id, model_key=image_session.model, image_model=image_session.model,
+        )
     await state.update_data(
         carryover_mode=carryover_mode,
         carryover_image_file_id=carryover_image_file_id,
@@ -3716,6 +3895,11 @@ async def cb_regen_image(
     if prev.image_session_id:
         prev_session = await repo.get_image_session(session, prev.image_session_id, db_user.id)
 
+    try:
+        reference_url = await _session_reference_url(bot, prev_session, prefer_last_result=False) if prev_session else None
+    except ImageReferenceUnavailable as exc:
+        await call.answer(str(exc), show_alert=True)
+        return
     image_session = await repo.create_image_session(
         session=session,
         user_id=db_user.id,
@@ -3730,7 +3914,6 @@ async def cb_regen_image(
         reference_url=prev_session.reference_url if prev_session else None,
         reference_urls=_stored_reference_urls(prev_session) if prev_session else None,
     )
-    reference_url = await _session_reference_url(bot, image_session, prefer_last_result=False)
     await _launch_session_generation(
         source_message=call.message,  # type: ignore[arg-type]
         state=state,

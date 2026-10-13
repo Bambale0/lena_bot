@@ -66,7 +66,8 @@ def test_repeat_screen_text_shows_selected_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_feed_repeat_collects_first_photo_without_starting_generation() -> None:
+async def test_feed_repeat_collects_first_photo_without_starting_generation(monkeypatch) -> None:
+    monkeypatch.setattr(repeat_reference_marketplace.repo, "get_public_feed_generation", AsyncMock(return_value=None))
     state = FakeState(
         {
             "feed_use_prompt": "hidden feed prompt",
@@ -137,7 +138,8 @@ async def test_single_ref_model_uses_legacy_flow() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_feed_repeat_passes_all_reference_urls() -> None:
+async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch) -> None:
+    monkeypatch.setattr(repeat_reference_marketplace.repo, "get_public_feed_generation", AsyncMock(return_value=None))
     state = FakeState(
         {
             "feed_use_prompt": "hidden feed prompt",
