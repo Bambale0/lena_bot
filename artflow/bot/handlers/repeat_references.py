@@ -113,7 +113,7 @@ def _repeat_refs_keyboard(
     ]
     for offset in range(0, len(ratio_buttons), 3):
         builder.row(*ratio_buttons[offset : offset + 3])
-    if total > 0 or not required:
+    if total <= max_refs and (total > 0 or not required):
         builder.row(
             InlineKeyboardButton(
                 text=f"▶️ Запустить повтор · {total} фото" if total else "▶️ Запустить без фото",
@@ -158,6 +158,8 @@ def _repeat_refs_text(data: dict[str, Any]) -> str:
         if required and total == 0
         else "Можно сразу запустить или добавить новые фото."
     )
+    if total > max_refs:
+        requirement = "Сохранённых фото больше лимита модели. Очисти референсы и добавь нужные заново."
     return (
         "🔁 <b>Повтор генерации</b>\n\n"
         f"Модель: <b>{image_gen.get_image_model_label(model_key)}</b>\n"
@@ -200,7 +202,7 @@ async def _begin_repeat_collection(
         return True
 
     max_refs = _repeat_max_refs(model_key)
-    base_urls = (await _resolve_base_reference_urls(bot, source_session))[:max_refs]
+    base_urls = await _resolve_base_reference_urls(bot, source_session)
     source_file_ids = _source_reference_file_ids(source_session)
 
     await state.clear()
@@ -477,7 +479,12 @@ async def _repeat_refs_run(
         url = await image_gen._telegram_file_url(bot, file_id)
         if url and url not in references:
             references.append(url)
-    references = references[:max_refs]
+    if len(references) > max_refs:
+        await call.answer(
+            f"В повторе {len(references)} фото, а модель принимает до {max_refs}. Очисти референсы и добавь нужные заново.",
+            show_alert=True,
+        )
+        return
 
     if data.get("repeat_reference_required") and not references:
         await call.answer("Для этой модели нужен хотя бы один референс", show_alert=True)

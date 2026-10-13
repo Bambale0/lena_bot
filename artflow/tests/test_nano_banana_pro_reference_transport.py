@@ -383,3 +383,113 @@ async def test_pro_safe_confirmation_uses_generation_reference_snapshot(local_la
     assert nexus_posts == []
     await repeat_safe.confirm_repeat(call, launch.session, state, launch.user, AsyncMock())
     assert nexus_posts[0]["params"]["image_urls"] == REFS
+
+
+@pytest.mark.parametrize("reuse", [False, True])
+@pytest.mark.parametrize("protected", [False, True])
+async def test_pro_existing_mixed_session_keeps_public_and_telegram_refs_through_repeats(
+    local_launch, nexus_posts, monkeypatch, reuse, protected,
+):
+    from bot.handlers import repeat_references
+
+    launch = local_launch
+    # A legacy session can store the original public references alongside later
+    # Telegram uploads. Enter through the real collection resolver, not seeded FSM URLs.
+    public_refs = [REFS[0], SOURCE] if protected else [REFS[0]]
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        None if protected else "own prompt", reference_urls=public_refs,
+        reference_file_ids=["saved-photo-2", "saved-photo-3"],
+    )
+    launch.generation.image_session_id = old.id
+    if protected:
+        launch.generation.source_feed_gen_id = 77
+        launch.generation.prompt = SECRET
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
+        side_effect=lambda _session, gid: launch.source if gid == 77 else launch.generation,
+    ))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: {"saved-photo-2": REFS[1], "saved-photo-3": REFS[2]}[fid],
+    ))
+    monkeypatch.setattr(repeat_references, "safe_answer_callback", AsyncMock())
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock())
+    handled = await repeat_references._begin_repeat_collection(
+        call=call, state=state, bot=AsyncMock(), generation=launch.generation,
+        source_session=old, reuse_session=reuse, source_feed_gen_id=77 if protected else None,
+    )
+    assert handled is True
+    await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
+    expected = REFS + ([SOURCE] if protected else [])
+    assert nexus_posts[0]["params"]["image_urls"] == expected
+    assert SECRET not in nexus_posts[0]["params"]["prompt"]
+    copied = launch.created_sessions[-1]
+    assert not copied.reference_file_ids  # Mixed sets persist as one ordered URL list.
+    assert set(json.loads(copied.reference_urls)) == set(expected)
+    # Re-enter the real collection flow using the newly persisted session.
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=copied))
+    await repeat_references._begin_repeat_collection(
+        call=call, state=state, bot=AsyncMock(), generation=launch.generation,
+        source_session=copied, reuse_session=True, source_feed_gen_id=77 if protected else None,
+    )
+    await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
+    assert nexus_posts[1]["params"]["image_urls"] == expected
+    assert SECRET not in nexus_posts[1]["params"]["prompt"]
+
+
+@pytest.mark.parametrize("state_kind", ["synced", "replacement", "other_session"])
+async def test_pro_mixed_session_resolution_respects_reference_replacement(
+    local_launch, nexus_posts, monkeypatch, state_kind,
+):
+    old = await repo.create_image_session(
+        local_launch.session, local_launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS[:1], reference_file_ids=["saved-photo"],
+    )
+    state_ids = ["saved-photo"] if state_kind == "synced" else ["new-photo"]
+    state, _ = mutable_state({
+        "image_session_id": old.id if state_kind != "other_session" else old.id + 100,
+        "ref_file_ids": state_ids,
+    })
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: {"saved-photo": REFS[1], "new-photo": REFS[2]}[fid],
+    ))
+    resolved = await image_gen._session_reference_url(AsyncMock(), old, state=state)
+    await image_service.generate_image(ImageModel.NANO_BANANA_PRO, "own prompt", image_url=resolved)
+    expected = [REFS[2]] if state_kind == "replacement" else REFS[:2]
+    assert nexus_posts[0]["params"]["image_urls"] == expected
+
+
+async def test_pro_mixed_session_deduplicates_public_and_file_alias(local_launch, nexus_posts, monkeypatch):
+    old = await repo.create_image_session(
+        local_launch.session, local_launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS[:2], reference_file_id="same-photo",
+    )
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[0]))
+    resolved = await image_gen._session_reference_url(AsyncMock(), old)
+    await image_service.generate_image(ImageModel.NANO_BANANA_PRO, "own prompt", image_url=resolved)
+    assert nexus_posts[0]["params"]["image_urls"] == REFS[:2]
+
+
+async def test_pro_existing_mixed_overflow_never_truncates_before_paid_post(local_launch, nexus_posts, monkeypatch):
+    from bot.handlers import repeat_references
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_urls=REFS, reference_file_ids=["extra-1", "extra-2"],
+    )
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(
+        side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg",
+    ))
+    monkeypatch.setattr(repeat_references, "safe_answer_callback", AsyncMock())
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock())
+    await repeat_references._begin_repeat_collection(
+        call=call, state=state, bot=AsyncMock(), generation=launch.generation,
+        source_session=old, reuse_session=False, source_feed_gen_id=None,
+    )
+    assert len(data["repeat_base_reference_urls"]) == 5
+    await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
+    assert nexus_posts == []
+    repo.charge_image_generation.assert_not_awaited()

@@ -567,40 +567,30 @@ async def _session_reference_url(
     if prefer_last_result and last_result_url:
         return last_result_url
 
-    # Check FSM state for collected multi-ref file IDs that belong to this session.
+    stored_file_ids = _stored_reference_file_ids(image_session)
+    reference_file_id = getattr(image_session, "reference_file_id", None)
+    if not stored_file_ids and reference_file_id:
+        stored_file_ids = [reference_file_id]
+
+    file_ids = stored_file_ids
+    urls = _stored_reference_urls(image_session)
     if state:
         data = await state.get_data()
-        ref_file_ids: list[str] = list(data.get("ref_file_ids", [])) if _state_refs_belong_to_session(data, image_session) else []
-        if len(ref_file_ids) > 1:
-            urls = []
-            for fid in ref_file_ids:
-                url = await _telegram_file_url(bot, fid)
-                if url:
-                    urls.append(url)
-            return urls if urls else None
-        if len(ref_file_ids) == 1:
-            return await _telegram_file_url(bot, ref_file_ids[0])
+        state_file_ids = _state_reference_file_ids(data) if _state_refs_belong_to_session(data, image_session) else []
+        if state_file_ids:
+            # An unchanged FSM copy is still the persisted mixed set. A newly
+            # selected Telegram set intentionally replaces carried public URLs.
+            if state_file_ids != stored_file_ids:
+                urls = []
+            file_ids = state_file_ids
 
-    stored_file_ids = _stored_reference_file_ids(image_session)
-    if len(stored_file_ids) > 1:
-        urls = []
-        for fid in stored_file_ids:
-            url = await _telegram_file_url(bot, fid)
-            if url:
-                urls.append(url)
-        return urls if urls else None
-    if len(stored_file_ids) == 1:
-        return await _telegram_file_url(bot, stored_file_ids[0])
-
-    reference_file_id = getattr(image_session, "reference_file_id", None)
-    if reference_file_id:
-        return await _telegram_file_url(bot, reference_file_id)
-
-    reference_urls = _stored_reference_urls(image_session)
-    if reference_urls:
-        return reference_urls[0] if len(reference_urls) == 1 else reference_urls
-
-    return None
+    # Legacy mixed sessions retain original public URLs followed by later
+    # Telegram uploads. Do not return early after resolving only one storage kind.
+    for file_id in file_ids:
+        url = await _telegram_file_url(bot, file_id)
+        if url and url not in urls:
+            urls.append(url)
+    return urls[0] if len(urls) == 1 else urls or None
 
 
 def _session_settings_text(image_session: ImageSession) -> str:
