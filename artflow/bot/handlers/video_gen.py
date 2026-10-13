@@ -680,6 +680,12 @@ async def _prepare_feed_video_inputs(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
     )
     if not source_feed_gen_id:
+        # Launch and regeneration share this pre-charge boundary, including
+        # restored ordinary requests that bypass the upload widget's limit.
+        if model_key == VideoModel.SEEDANCE_2_MINI.value:
+            limit = _video_max_refs(model_key)
+            if len(_url_list(image_url)) > limit:
+                raise FeedRemixUnavailable(f"Модель поддерживает до {limit} фото.")
         return prompt, image_url, data, None
     source = await repo.get_public_feed_generation(session, source_feed_gen_id)
     source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))

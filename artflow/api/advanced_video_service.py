@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import Any
 
 from api import kieai_client
+from api.kie_model_specs import SEEDANCE_MINI_MAX_IMAGE_REFS
 from api.media_gateway import (
     AUDIO_POLICY,
     IMAGE_POLICY,
@@ -150,6 +151,8 @@ async def create_seedance_task(
         raise ValueError(f"{model.value} does not support 1080p")
     aspect_ratio = _choice(aspect_ratio, _SEEDANCE_RATIOS, "aspect_ratio")
     duration = _duration(duration, _SEEDANCE_DURATIONS, model.value)
+    if model == SeedanceModel.MINI and len(reference_image_urls or []) > SEEDANCE_MINI_MAX_IMAGE_REFS:
+        raise ValueError(f"Seedance Mini supports at most {SEEDANCE_MINI_MAX_IMAGE_REFS} reference images")
 
     first = await prepare_media_url(first_frame_url, policy=IMAGE_POLICY)
     last = await prepare_media_url(last_frame_url, policy=IMAGE_POLICY)

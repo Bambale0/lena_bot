@@ -66,6 +66,9 @@ async def _generate_video_with_references(
             prompt,
             reference_video_urls=refs[:3],
             reference_image_urls=_reference_video_list(kwargs.get("image_url")),
+            # Mini frame inputs cannot be mixed with this multimodal route.
+            # Preserve the supplied last frame so the adapter rejects the mix.
+            last_frame_url=kwargs.get("last_frame_url") if model == VideoModel.SEEDANCE_2_MINI else None,
             duration=duration,
             aspect_ratio=aspect_ratio or "16:9",
             resolution=resolution or "720p",

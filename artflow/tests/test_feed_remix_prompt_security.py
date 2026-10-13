@@ -522,15 +522,22 @@ async def test_bot_video_regeneration_migrates_legacy_source_first_context(video
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["launch", "regen"])
-async def test_bot_seedance_mini_feed_photo_repeat_rejected_before_charge(
-    video_launch, monkeypatch, operation,
+@pytest.mark.parametrize("user_count", [0, 1, 8, 9])
+async def test_bot_seedance_mini_feed_photo_repeat_preserves_references(
+    video_launch, monkeypatch, operation, user_count,
 ):
+    from api.kie_model_specs import build_kie_input
+
+    user_refs = [f"https://example.test/user-{index}.jpg" for index in range(user_count)]
+    image_refs = user_refs or [SOURCE_IMAGE]
     video_launch.source.gen_type = GenerationType.image
     video_launch.source.result_url = SOURCE_IMAGE
     video_launch.data.update(model_key="bytedance/seedance-2-mini", mode="image")
+    monkeypatch.setattr(video_gen, "_video_reference_image_url", AsyncMock(return_value=image_refs))
 
     if operation == "launch":
-        assert await video_gen._launch_video_generation_from_state(**video_launch.kwargs) is False
+        result = await video_gen._launch_video_generation_from_state(**video_launch.kwargs)
+        assert result is (user_count <= 8)
     else:
         previous = SimpleNamespace(
             id=88, user_id=42, prompt=SECRET, source_feed_gen_id=77,
@@ -541,7 +548,7 @@ async def test_bot_seedance_mini_feed_photo_repeat_rejected_before_charge(
         )
         monkeypatch.setattr("bot.handlers.genjutsu_replace.restore_result", AsyncMock(return_value=False))
         monkeypatch.setattr(video_gen, "_video_repeat_params_for_generation", AsyncMock(return_value={
-            "image_url": USER_IMAGE, "duration": 5, "resolution": "720p", "aspect_ratio": "16:9",
+            "image_url": image_refs, "duration": 5, "resolution": "720p", "aspect_ratio": "16:9",
         }))
         call = SimpleNamespace(data="regen:video:88", answer=AsyncMock(), message=AsyncMock())
         await video_gen.cb_regen_video(
@@ -549,22 +556,69 @@ async def test_bot_seedance_mini_feed_photo_repeat_rejected_before_charge(
             video_launch.kwargs["db_user"], video_launch.kwargs["bot"],
         )
 
-    video_launch.repo.spend_credits.assert_not_awaited()
-    video_launch.service.generate_video.assert_not_awaited()
+    if user_count > 8:
+        video_launch.repo.spend_credits.assert_not_awaited()
+        video_launch.service.generate_video.assert_not_awaited()
+        return
+    submitted = video_launch.service.generate_video.await_args
+    assert submitted is not None
+    assert video_gen._url_list(submitted.kwargs["image_url"]) == [*user_refs, SOURCE_IMAGE]
+    _, payload = build_kie_input(
+        model="bytedance/seedance-2-mini", prompt=submitted.args[1],
+        reference_urls=submitted.kwargs["image_url"], params=submitted.kwargs,
+    )
+    if user_count:
+        assert SECRET not in submitted.args[1]
+        assert payload["reference_image_urls"] == [*user_refs, SOURCE_IMAGE]
+        assert "first_frame_url" not in payload
+        saved = video_launch.repo.create_generation.await_args.kwargs["input_params"]
+        assert saved["feed_remix_context"]["version"] == 2
+    else:
+        assert payload["first_frame_url"] == SOURCE_IMAGE
 
 
 @pytest.mark.asyncio
-async def test_api_seedance_mini_feed_photo_repeat_rejected_before_charge(api_launch):
+@pytest.mark.parametrize("surface", ["miniapp", "web"])
+@pytest.mark.parametrize("user_count", [0, 1, 8, 9])
+async def test_api_seedance_mini_feed_photo_repeat_preserves_references(api_launch, surface, user_count):
+    from api.kie_model_specs import build_kie_input
+    from api.web import generations as web
+
+    user_refs = [f"https://example.test/user-{index}.jpg" for index in range(user_count)]
     body = api_launch.routes.FeedRemixRequest(
-        model="bytedance/seedance-2-mini", image_url=USER_IMAGE,
+        model="bytedance/seedance-2-mini", mode="image", reference_urls=user_refs,
     )
+    quote = web.quote_feed_generation if surface == "web" else api_launch.routes.quote_feed_remix
+    submit = web.remix_feed_generation if surface == "web" else api_launch.routes.remix_feed_post
+    if user_count > 8:
+        for handler in (quote, submit):
+            if surface == "web":
+                response = await handler(77, body, api_launch.session, api_launch.user)
+                assert response.status_code == 422
+            else:
+                with pytest.raises(api_launch.routes.HTTPException) as exc_info:
+                    await handler(77, body, api_launch.session, api_launch.user)
+                assert exc_info.value.status_code == 422
+        api_launch.charge.assert_not_awaited()
+        api_launch.generate.assert_not_awaited()
+        return
 
-    with pytest.raises(api_launch.routes.HTTPException) as exc_info:
-        await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
-
-    assert exc_info.value.status_code == 422
+    await quote(77, body, api_launch.session, api_launch.user)
     api_launch.charge.assert_not_awaited()
-    api_launch.generate.assert_not_awaited()
+    await submit(77, body, api_launch.session, api_launch.user)
+    submitted = api_launch.generate.await_args
+    assert submitted is not None
+    assert video_gen._url_list(submitted.kwargs["image_url"]) == [*user_refs, SOURCE_IMAGE]
+    _, payload = build_kie_input(
+        model="bytedance/seedance-2-mini", prompt=submitted.args[1],
+        reference_urls=submitted.kwargs["image_url"], params=submitted.kwargs,
+    )
+    if user_count:
+        assert SECRET not in submitted.args[1]
+        assert payload["reference_image_urls"] == [*user_refs, SOURCE_IMAGE]
+        assert "first_frame_url" not in payload
+    else:
+        assert payload["first_frame_url"] == SOURCE_IMAGE
 
 
 @pytest.mark.parametrize("change", ["user", "lineage", "version", "prompt", "json"])
@@ -680,3 +734,108 @@ async def test_owned_hidden_metadata_source_cannot_clear_feed_protection(image_l
     image_launch.source.user_id = 42
     image_launch.source.input_params = {"hidden_prompt": True}
     assert await image_gen._external_source_feed_id(session=AsyncMock(), source_feed_gen_id=77, db_user=SimpleNamespace(id=42)) == 77
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["miniapp", "web"])
+@pytest.mark.parametrize("count", [0, 1, 2, 9, 10])
+async def test_api_seedance_mini_ordinary_generation_reference_limits(api_launch, surface, count):
+    from api.web import generations as web
+
+    refs = [f"https://example.test/ref-{index}.jpg" for index in range(count)]
+    body = api_launch.routes.VideoGenRequest(
+        model="bytedance/seedance-2-mini", prompt="Animate this scene",
+        mode="image" if refs else "text", reference_urls=refs,
+        duration=5, resolution="720p", aspect_ratio="16:9",
+    )
+    submit = web.generate_video if surface == "web" else api_launch.routes.create_video_generation
+    if count > 9:
+        if surface == "web":
+            response = await submit(body, api_launch.session, api_launch.user)
+            assert response.status_code == 422
+        else:
+            with pytest.raises(api_launch.routes.HTTPException) as exc_info:
+                await submit(body, api_launch.session, api_launch.user)
+            assert exc_info.value.status_code == 422
+        api_launch.charge.assert_not_awaited()
+        api_launch.generate.assert_not_awaited()
+        return
+
+    await submit(body, api_launch.session, api_launch.user)
+    submitted = api_launch.generate.await_args
+    assert submitted is not None
+    assert video_gen._url_list(submitted.kwargs["image_url"]) == refs
+    saved = api_launch.save.await_args.kwargs["input_params"]
+    assert video_gen._url_list(saved["image_url"]) == refs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing_count", [0, 1, 8, 9])
+async def test_bot_seedance_mini_upload_collects_up_to_nine_photos(monkeypatch, existing_count):
+    refs = [f"photo-{index}" for index in range(existing_count)]
+    data = {"model_key": "bytedance/seedance-2-mini", "mode": "image", "ref_file_ids": refs}
+    state = AsyncMock()
+    state.get_data.return_value = data
+    monkeypatch.setattr(video_gen.repo, "get_model_cost", AsyncMock(return_value=None))
+    message = SimpleNamespace(photo=[SimpleNamespace(file_id="new-photo", file_size=100)], answer=AsyncMock())
+
+    await video_gen.handle_image_upload(message, state, AsyncMock())
+
+    updated = state.update_data.await_args.kwargs["ref_file_ids"]
+    expected = [*refs, "new-photo"] if existing_count < 9 else refs
+    assert updated == expected
+    assert len(updated) <= 9
+    assert "/9" in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["miniapp", "web"])
+async def test_seedance_mini_model_api_advertises_nine_image_slots(api_launch, monkeypatch, surface):
+    from api.web import generations as web
+
+    monkeypatch.setattr(api_launch.routes.repo, "get_all_model_costs", AsyncMock(return_value=[
+        SimpleNamespace(model_key="bytedance/seedance-2-mini", display_name="Seedance Mini", credits=4),
+    ]))
+    if surface == "web":
+        response = await web.video_models(api_launch.session, api_launch.user)
+        models = response["data"]
+    else:
+        models = [model.model_dump() for model in await api_launch.routes.list_video_models(api_launch.session, api_launch.user)]
+    mini = next(model for model in models if model["key"] == "bytedance/seedance-2-mini")
+    assert mini["max_refs"] == 9
+    assert mini["modes"] == ["text", "image", "video"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["launch", "regen"])
+@pytest.mark.parametrize("count", [0, 1, 2, 9, 10])
+async def test_bot_seedance_mini_ordinary_launch_and_regen_reference_limits(video_launch, monkeypatch, operation, count):
+    refs = [f"https://example.test/ref-{index}.jpg" for index in range(count)]
+    video_launch.data.update(model_key="bytedance/seedance-2-mini", mode="image" if refs else "text")
+    video_launch.kwargs.update(source_feed_gen_id=None, hidden_feed_prompt=False)
+    monkeypatch.setattr(video_gen, "_video_reference_image_url", AsyncMock(return_value=refs or None))
+    if operation == "launch":
+        result = await video_gen._launch_video_generation_from_state(**video_launch.kwargs)
+        assert result is (count <= 9)
+    else:
+        previous = SimpleNamespace(
+            id=88, user_id=42, prompt="Animate", source_feed_gen_id=None,
+            model="bytedance/seedance-2-mini", input_params={},
+        )
+        video_launch.repo.get_generation_by_id.return_value = previous
+        monkeypatch.setattr("bot.handlers.genjutsu_replace.restore_result", AsyncMock(return_value=False))
+        monkeypatch.setattr(video_gen, "_video_repeat_params_for_generation", AsyncMock(return_value={
+            "image_url": refs, "duration": 5, "resolution": "720p", "aspect_ratio": "16:9",
+        }))
+        call = SimpleNamespace(data="regen:video:88", answer=AsyncMock(), message=AsyncMock())
+        await video_gen.cb_regen_video(
+            call, video_launch.kwargs["session"], video_launch.kwargs["state"],
+            video_launch.kwargs["db_user"], video_launch.kwargs["bot"],
+        )
+    if count > 9:
+        video_launch.repo.spend_credits.assert_not_awaited()
+        video_launch.service.generate_video.assert_not_awaited()
+    else:
+        submitted = video_launch.service.generate_video.await_args
+        assert submitted is not None
+        assert video_gen._url_list(submitted.kwargs["image_url"]) == refs

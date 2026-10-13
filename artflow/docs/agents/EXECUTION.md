@@ -1523,3 +1523,38 @@ Baseline: deployed `main` `df57408517d7dc2dcdd5fc155a2de18fac23d709`; branch `fi
 5. [x] Focused provider/feed suite green: 162 tests across security, Telegram/API Seedance repeats, KIE serialization and snapshot preservation.
 6. [x] Ruff and compileall clean. The complete maintained pytest gate passed locally with UTF-8 after deselecting only two Linux-specific checks that this Windows host cannot execute (symlink privilege and missing OpenSSL); GitHub CI remains authoritative for both. Existing AsyncMock coroutine warnings remain unchanged.
 7. [ ] Independent review and exact-SHA PR CI. No schema/migration, config, price, balance or retention change.
+
+## 2026-10-13 - PR #243 Mini multimodal reference routing correction (local only)
+
+Baseline: exact PR #243 head `1364e58e519243f8a37f06a3ce3f9938ad101c85`, base main `df57408517d7dc2dcdd5fc155a2de18fac23d709`; isolated cloud branch `fix/seedance-mini-reference-routing`. No publication, deployment, paid provider calls, secrets, or production data changes are authorized.
+
+### Preflight, correction to prior evidence, and acceptance
+- Read root/artflow AGENTS, local systematic-debugging/TDD/receiving-code-review/verification skills; used prepared read-only engineering guides (Bambale0 TDD/review, claw KIE/backend, legacy-code seams, Anthropic webapp testing). The copied Superpowers contributor rules target the skill repository, not APIX; APIX instructions take priority. No skill/instruction registry changes are needed.
+- Current official provider docs, checked 2026-10-13: https://docs.kie.ai/market/bytedance/seedance-2-mini . Mini supports up to nine image references. `first_frame_url` / `last_frame_url` cannot be mixed with any `reference_*` field. The prior ledger's claim of a provider one-image limit is incorrect: it described only our incomplete regular adapter.
+- Existing regular video adapter uses `FIRST_LAST`, drops additional images, and can mix a frame with reference video/audio. Shared `VIDEO_CAPS` drives bot, Mini App and site's delegated backend model/validation surfaces. The advanced Seedance API already has explicit frame/multimodal scenarios; reuse its mutually exclusive contract without broadening the product UI.
+- Intended result: restore nine-image capability; zero images remains text; one ordinary image retains first-frame semantics; 2–9 images use ordered `reference_image_urls`; image(s) plus existing video/audio refs use multimodal fields only; last-frame requests require exactly one first-frame image and no multimodal media; reject overflow rather than truncate. Keep trusted feed v1→v2 prompt migration unchanged.
+- No DB/schema/migration, price, admin, permissions, or routing-provider changes. Provider field/capability limits are protocol facts, not new mutable business policy. Existing safe generation logs and callback registration remain unchanged; tests inspect synthetic payloads and never log customer media.
+- Test seams: public KIE payload builder, mocked provider submission, bot feed launch/regeneration, Mini App/site request/capability and feed boundaries. Existing auth/charging tests remain in scope as regression coverage.
+
+### Plan and evidence
+1. [x] Baseline, docs, instructions, adapter/service, shared capabilities, API/bot/feed contracts and CI preflight
+2. [x] RED→GREEN adapter routing tests, then minimal adapter change
+3. [x] RED→GREEN shared capability and feed boundary tests, then restore limit
+4. [x] Focused provider/feed/parity regression, lint/compile, maintained CI-equivalent checks where available
+5. [x] Independent review approved the complete local correction with no remaining blocking findings; final local diff prepared. Cloud CI/deployment are not run for unpushed local work
+
+### Independent review continuation
+- RED→GREEN confirmed: nine-image regular payload routing and frame/multimodal guards; shared capability restored; Mini App/site feed quote + submit and bot launch + regeneration accept up to eight reader images plus the public source, preserve user-first/source-last order, and reject ten total before charge. Zero-reader image-mode repeats preserve source-first-frame behavior. Ordinary API requests and bot uploader are covered through the ninth slot.
+- Review found an additional installed video-reference wrapper selecting `advanced_video_service` instead of the regular builder. Six new tests reproduced its missing nine-image cap and discarded last-frame conflict. The advanced Mini path now uses the same documented image-limit constant as the regular builder/UI; wrapper passes the last-frame argument into the advanced adapter's existing mutually-exclusive guard.
+- Review also reproduced ten-image ordinary Telegram launch/regeneration reaching charge when restored state bypassed the uploader. Two RED regressions now pass using the existing shared pre-charge preparation boundary. Other model behavior remains unchanged.
+- Corrected the surface characterization: runtime installation already exposes Mini's video mode; the fix preserves it. Existing regular and advanced provider boundaries are tested separately, including the installed wrapper's real adapter and a mocked paid POST.
+
+### Final local verification
+- `python -m pytest -o addopts='' -q` with the 78 selectors from root `.github/workflows/ci.yml` maintained PR gate: **1271 passed, 12 skipped**, no failures/errors; JUnit counts 1283 total including skips. Skips: nine tests in `test_seedance_postgres_admission.py` (ephemeral PostgreSQL absent), one `test_image_session_provenance_migration.py` integration (dedicated PostgreSQL absent), two `test_video_prompt_nginx_config.py` tests (official Nginx container not provisioned). Five existing warnings concern `python_multipart` deprecation and AsyncMock cleanup in unrelated callback-registration tests.
+- Root provider-contract workflow's 25 selectors plus `test_video_service.py` and feed snapshot/prelaunch/API/bot modules: **359 passed**, no failures/skips (one dependency warning).
+- Root bot-navigation workflow's 18 selectors: **351 passed**, no failures/skips (one dependency warning).
+- Focused changed test modules: **163 passed**. Independent review's selected integration suite: **223 passed**. Independent frontend capacity/media helper suite: **21 passed**. Site and Mini App model APIs advertise nine slots and accept valid reference counts; ordinary request overflow and feed-source-inclusive overflow fail before charge; bot uploader, ordinary launch/regeneration, and feed launch/regeneration have the same boundary.
+- Maintained baseline Ruff, changed-module Ruff, Python compileall, and `git diff --check`: passed. Provider inventory, product readiness (96 public contracts), and dry-only smoke manifest (96 contracts): passed; smoke `--execute` was never used.
+- Reviewer reproduced one unrelated non-maintained failure, `test_video_reference_support.py::test_seedance_payload_uses_reference_video_urls`, on exact baseline `1364e58e519243f8a37f06a3ce3f9938ad101c85`; its Seedance 2 registry-wrapper mismatch is unchanged and out of this Mini correction's scope.
+- Trusted v1→v2 feed prompt code and its existing security/migration tests are preserved. README now documents Mini image/frame/multimodal/feed semantics. No new schema, migrations, pricing, persistent configuration, permissions or paid calls.
+- No frontend implementation changed. Full browser E2E and locked frontend production build were not rerun; shared surface contract tests cover this change. Exact-SHA remote CI and production verification are not available for this unpushed local diff and are release gates after separate publication authorization.

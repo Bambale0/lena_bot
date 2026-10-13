@@ -1,3 +1,5 @@
+import pytest
+
 from api.kie_model_specs import build_kie_input
 
 
@@ -293,20 +295,76 @@ def test_build_kie_input_seedance_multiref_keeps_reference_image_urls_without_al
     assert "reference_image_url" not in inp
 
 
-def test_build_kie_input_seedance_mini_serializes_only_the_first_frame_reference() -> None:
+@pytest.mark.parametrize("count", [0, 1, 2, 9])
+def test_build_kie_input_seedance_mini_routes_all_image_references(count) -> None:
+    refs = [f"https://example.test/ref-{index}.jpg" for index in range(count)]
     resolved_model, inp = build_kie_input(
         model="bytedance/seedance-2-mini",
         prompt="Animate this scene",
-        reference_urls=[
-            "https://example.test/user-face.jpg",
-            "https://example.test/public-feed-scene.jpg",
-        ],
+        reference_urls=refs,
         params={"duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
     )
 
     assert resolved_model == "bytedance/seedance-2-mini"
-    assert inp["first_frame_url"] == "https://example.test/user-face.jpg"
-    assert "https://example.test/public-feed-scene.jpg" not in inp.values()
+    if count == 1:
+        assert inp["first_frame_url"] == refs[0]
+        assert "reference_image_urls" not in inp
+    elif count:
+        assert inp["reference_image_urls"] == refs
+        assert "first_frame_url" not in inp
+    else:
+        assert "first_frame_url" not in inp
+        assert "reference_image_urls" not in inp
+    assert "last_frame_url" not in inp
+
+
+@pytest.mark.parametrize("count", [0, 1, 2, 9])
+@pytest.mark.parametrize("media", ["video", "audio"])
+def test_build_kie_input_seedance_mini_multimodal_never_mixes_frames(count, media) -> None:
+    refs = [f"https://example.test/ref-{index}.jpg" for index in range(count)]
+    media_url = "https://example.test/media.mp4" if media == "video" else "https://example.test/media.mp3"
+    _, inp = build_kie_input(
+        model="bytedance/seedance-2-mini",
+        prompt="Animate with references",
+        reference_urls=refs,
+        params={f"reference_{media}_url": media_url},
+    )
+
+    assert inp[f"reference_{media}_urls"] == [media_url]
+    assert inp.get("reference_image_urls", []) == refs
+    assert "first_frame_url" not in inp
+    assert "last_frame_url" not in inp
+
+
+def test_build_kie_input_seedance_mini_preserves_first_and_last_frames() -> None:
+    _, inp = build_kie_input(
+        model="bytedance/seedance-2-mini",
+        prompt="Transition between frames",
+        reference_urls="https://example.test/first.jpg",
+        params={"last_frame_url": "https://example.test/last.jpg"},
+    )
+
+    assert inp["first_frame_url"] == "https://example.test/first.jpg"
+    assert inp["last_frame_url"] == "https://example.test/last.jpg"
+    assert not any(key.startswith("reference_") for key in inp)
+
+
+@pytest.mark.parametrize(("count", "params", "error"), [
+    (10, {}, "at most 9"),
+    (0, {"last_frame_url": "https://example.test/last.jpg"}, "requires.*first"),
+    (2, {"last_frame_url": "https://example.test/last.jpg"}, "mutually exclusive"),
+    (1, {"last_frame_url": "https://example.test/last.jpg", "reference_video_url": "https://example.test/ref.mp4"}, "mutually exclusive"),
+    (1, {"last_frame_url": "https://example.test/last.jpg", "reference_audio_url": "https://example.test/ref.mp3"}, "mutually exclusive"),
+])
+def test_build_kie_input_seedance_mini_rejects_invalid_reference_combinations(count, params, error) -> None:
+    refs = [f"https://example.test/ref-{index}.jpg" for index in range(count)]
+    with pytest.raises(ValueError, match=error):
+        build_kie_input(
+            model="bytedance/seedance-2-mini",
+            prompt="Do not submit invalid references",
+            reference_urls=refs,
+            params=params,
+        )
 
 
 def test_build_kie_input_happyhorse_multiref_keeps_image_url_alias() -> None:
@@ -435,3 +493,80 @@ def test_build_kie_input_seedream_5_pro_image_contract() -> None:
     assert inp["quality"] == "basic"
     assert inp["output_format"] == "png"
     assert inp["nsfw_checker"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [0, 1, 2, 9, 10])
+async def test_seedance_mini_service_submits_complete_references_or_rejects(monkeypatch, count) -> None:
+    from unittest.mock import AsyncMock
+
+    from api import video_service
+
+    # Exercise the real service and builder; replace only media I/O and paid POST.
+    refs = [f"https://example.test/ref-{index}.jpg" for index in range(count)]
+    post = AsyncMock(return_value={"code": 200, "data": {"taskId": "mini-task"}})
+    monkeypatch.setattr(video_service.kieai_client, "create_task", post)
+    monkeypatch.setattr(video_service, "_prepare_video_reference_urls", AsyncMock(return_value=refs))
+    monkeypatch.setattr(video_service, "_prepare_video_reference_url", AsyncMock(return_value=None))
+    monkeypatch.setattr(video_service, "_prepare_reference_video_url", AsyncMock(return_value=None))
+
+    if count > 9:
+        with pytest.raises(RuntimeError, match="at most 9"):
+            await video_service.generate_video(
+                video_service.VideoModel.SEEDANCE_2_MINI, "Animate", image_url=refs,
+            )
+        post.assert_not_awaited()
+        return
+    result = await video_service.generate_video(
+        video_service.VideoModel.SEEDANCE_2_MINI, "Animate", image_url=refs,
+        callback_url="https://example.test/callback",
+    )
+    assert result.task_id == "mini-task"
+    post.assert_awaited_once()
+    assert post.await_args.kwargs["callback_url"] == "https://example.test/callback"
+    payload = post.await_args.args[0]
+    assert payload["model"] == "bytedance/seedance-2-mini"
+    if count == 1:
+        assert payload["input"]["first_frame_url"] == refs[0]
+        assert "reference_image_urls" not in payload["input"]
+    elif count:
+        assert payload["input"]["reference_image_urls"] == refs
+        assert "first_frame_url" not in payload["input"]
+    else:
+        assert "reference_image_urls" not in payload["input"]
+        assert "first_frame_url" not in payload["input"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [0, 1, 2, 9, 10])
+@pytest.mark.parametrize("last_frame", [None, "https://example.test/last.jpg"])
+async def test_seedance_mini_installed_video_reference_route_enforces_contract(monkeypatch, count, last_frame):
+    from unittest.mock import AsyncMock
+
+    from api import video_service
+    from bot.services.video_reference_support import install_video_reference_support
+
+    install_video_reference_support()
+    refs = [f"https://example.test/ref-{index}.jpg" for index in range(count)]
+    post = AsyncMock(return_value={"code": 200, "data": {"taskId": "mini-multimodal"}})
+    monkeypatch.setattr(video_service.kieai_client, "create_task", post)
+    if count > 9 or last_frame:
+        with pytest.raises(ValueError):
+            await video_service.generate_video(
+                video_service.VideoModel.SEEDANCE_2_MINI, "Animate",
+                image_url=refs, reference_video_url="https://example.test/motion.mp4",
+                last_frame_url=last_frame,
+            )
+        post.assert_not_awaited()
+        return
+
+    await video_service.generate_video(
+        video_service.VideoModel.SEEDANCE_2_MINI, "Animate",
+        image_url=refs, reference_video_url="https://example.test/motion.mp4",
+    )
+    post.assert_awaited_once()
+    payload = post.await_args.args[0]["input"]
+    assert payload.get("reference_image_urls", []) == refs
+    assert payload["reference_video_urls"] == ["https://example.test/motion.mp4"]
+    assert "first_frame_url" not in payload
+    assert "last_frame_url" not in payload

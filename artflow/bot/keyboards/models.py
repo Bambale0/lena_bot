@@ -7,6 +7,7 @@ from aiogram.types import CopyTextButton, InlineKeyboardButton, InlineKeyboardMa
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from api.image_service import MODEL_ASPECT_RATIOS, ImageModel
+from api.kie_model_specs import SEEDANCE_MINI_MAX_IMAGE_REFS
 from api.video_service import MotionDirection, VideoModel
 from core.gemini_omni import (
     GEMINI_OMNI_ASPECT_RATIOS,
@@ -144,10 +145,7 @@ VIDEO_CAPS: dict[str, dict] = {
         "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
         "has_resolution": True,
         "resolutions": ["480p", "720p"],
-        # KIE exposes only first_frame_url for this model. A personalized feed
-        # repeat needs both the user's reference and the public source scene,
-        # so reject that unsupported combination before charging.
-        "max_refs": 1,
+        "max_refs": SEEDANCE_MINI_MAX_IMAGE_REFS,
         "billing_mode": "per_second",
     },
     "grok-imagine/text-to-video": {
