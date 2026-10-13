@@ -33,9 +33,11 @@ async def test_deep_link_feed_lookup_uses_list_representation_for_quote(client, 
     assert hydrated.status_code == 200, hydrated.text
     assert hydrated.json() == listing.json()[0]
     payload = hydrated.json()
+    from bot.utils.feed_media import feed_source_output_id
+
     assert payload["preview_urls"] == [
-        "/api/v1/feed/88/preview.webp?index=0",
-        "/api/v1/feed/88/preview.webp?index=1",
+        f"/api/v1/feed/88/preview.webp?index={index}&output_id={feed_source_output_id(source, url)}"
+        for index, url in enumerate(["https://public.example/first.jpg", "https://public.example/second.jpg"])
     ]
     assert "private creator prompt" not in hydrated.text
     lookup.assert_awaited_once()
@@ -45,10 +47,11 @@ async def test_deep_link_feed_lookup_uses_list_representation_for_quote(client, 
     body = miniapp_routes.FeedRemixRequest(
         model="nano-banana-2", image_url=selected_preview, source_image_url=selected_preview,
     )
-    prompt, refs, _, personalized = miniapp_routes._prepare_feed_remix_inputs(source, body)
+    prompt, refs, _, personalized, own_recipe = miniapp_routes._prepare_feed_remix_inputs(source, body)
     assert refs == ["https://public.example/second.jpg"]
     assert prompt == "private creator prompt"
     assert personalized is False
+    assert own_recipe is False
 
 
 @pytest.mark.asyncio

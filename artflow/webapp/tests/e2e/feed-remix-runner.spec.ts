@@ -1,5 +1,9 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+// Server-issued opaque output bindings; API tests verify real digest membership.
+const boundPreview = (index: number, output = index) =>
+  `/api/v1/feed/201/preview.webp?index=${index}&output_id=${["a", "b", "c"][output].repeat(64)}`;
+
 const user = {
   id: 1,
   tg_id: 123,
@@ -863,7 +867,7 @@ test("feed cover decoration leaves media reachable and its Repeat action stays c
 for (const surface of ["telegram", "browser"] as const) {
   test(`${surface} gallery repeat keeps selected second result through quote and submit`, async ({ page }) => {
     await mockMiniAppApi(page, surface === "telegram");
-    const previews = [0, 1].map(index => `/api/v1/feed/201/preview.webp?index=${index}`);
+    const previews = [0, 1].map(index => boundPreview(index));
     await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
       ...feedItems[0], result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
     }] }));
@@ -886,7 +890,7 @@ for (const surface of ["telegram", "browser"] as const) {
     const viewer = page.locator(".apix-media-viewer");
     await expect(viewer).toBeVisible();
     await viewer.getByRole("button", { name: "Следующее фото" }).click();
-    await expect(viewer.locator("img")).toHaveAttribute("src", new RegExp("index=1$"));
+    await expect(viewer.locator("img")).toHaveAttribute("src", new RegExp("index=1&output_id=b{64}$"));
     await expectViewerRepeatIsReachable(page);
     await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
     const dialog = page.getByRole("dialog", { name: "Повторить работу" });
@@ -916,8 +920,8 @@ test("older image deep link quotes the same owned preview route as list cards", 
   } } }));
   await page.route("**/api/v1/feed/201", route => route.fulfill({ json: {
     ...feedItems[0], result_url: "", result_urls: [],
-    preview_url: "/api/v1/feed/201/preview.webp?index=0",
-    preview_urls: ["/api/v1/feed/201/preview.webp?index=0"],
+    preview_url: boundPreview(0),
+    preview_urls: [boundPreview(0)],
   } }));
   let quote: Record<string, unknown> | null = null;
   await page.route("**/api/v1/feed/201/remix/quote", route => {
@@ -926,40 +930,112 @@ test("older image deep link quotes the same owned preview route as list cards", 
   });
   await page.goto("/?tgWebAppData=test&feed=201");
   await expect(page.getByRole("dialog", { name: "Повторить работу" })).toBeVisible();
-  await expect.poll(() => quote?.source_image_url).toBe(new URL("/api/v1/feed/201/preview.webp?index=0", page.url()).href);
+  await expect.poll(() => quote?.source_image_url).toBe(new URL(boundPreview(0), page.url()).href);
 });
 
 
-test("selected result survives checkout reload and a fresh gallery selection wins over it", async ({ page }) => {
-  const state = await pendingCheckout(page);
-  const previews = [0, 1].map(index => `/api/v1/feed/201/preview.webp?index=${index}`);
-  await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
-    ...feedItems[0], result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
-  }] }));
-  let submissions = 0;
-  await page.route("**/api/v1/feed/201/remix", route => { submissions++; return route.abort(); });
-  await page.goto("/?tgWebAppData=test");
-  await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
-  const viewer = page.locator(".apix-media-viewer");
-  await viewer.getByRole("button", { name: "Следующее фото" }).click();
-  await expectViewerRepeatIsReachable(page);
-  await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
-  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
-  await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
-  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
-  await page.goto("/?tgWebAppData=test&remix=201");
-  await expect(dialog).toBeVisible();
-  await expect(dialog.locator("img").first()).toHaveAttribute("src", new RegExp("index=1$"));
-  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
-  await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
-  await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
-  await expectViewerRepeatIsReachable(page);
-  await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
-  await expect(dialog.locator("img").first()).toHaveAttribute("src", new RegExp("index=0$"));
-  await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
-  expect(state.topups).toBe(1);
-  expect(submissions).toBe(0);
-});
+for (const restored of ["available", "expired", "legacy", "missing", "default"] as const) {
+  test(`checkout restoration ${restored} validates the exact saved output before paid launch`, async ({ page }) => {
+    const state = await pendingCheckout(page);
+    let previews = [0, 1, 2].map(index => boundPreview(index));
+    let available = new Set(["a".repeat(64), "b".repeat(64), "c".repeat(64)]);
+    await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
+      ...feedItems[0], result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
+    }] }));
+    const quoteBodies: Record<string, unknown>[] = [];
+    await page.route("**/api/v1/feed/201/remix/quote", route => {
+      const body = route.request().postDataJSON();
+      quoteBodies.push(body);
+      const outputId = new URL(body.source_image_url).searchParams.get("output_id");
+      if (!outputId || !available.has(outputId)) return route.fulfill({ status: 422, json: {
+        detail: "Выбранное фото недоступно или выбор устарел. Выберите фото заново в ленте; поцелуи не списаны.",
+      } });
+      return route.fulfill({ json: {
+        cost_credits: 5, balance_credits: state.funded ? 10 : 0, can_run: state.funded,
+        deficit_credits: state.funded ? 0 : 5,
+        recommended_plan: state.funded ? null : { key: "starter", label: "Старт", credits: 10, price_rub: 100,
+          payment_options: [{ provider: "tbank", amount: 100, currency: "RUB" }],
+        },
+      } });
+    });
+    let submitted: Record<string, unknown> | null = null;
+    await page.route("**/api/v1/feed/201/remix", route => {
+      submitted = route.request().postDataJSON();
+      return route.fulfill({ status: 202, json: {
+        id: 9201, model: "nano-banana-2", gen_type: "image", status: "pending",
+        result_urls: [], credits_spent: 5, created_at: new Date().toISOString(),
+      } });
+    });
+    const viewer = page.locator(".apix-media-viewer");
+    await page.goto(restored === "default" ? "/?tgWebAppData=test&remix=201" : "/?tgWebAppData=test");
+    if (restored !== "default") {
+      await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
+      await viewer.getByRole("button", { name: "Следующее фото" }).click();
+      await expectViewerRepeatIsReachable(page);
+      await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+    }
+    const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+    await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+    await dialog.locator("input[type=file]").setInputFiles({
+      name: "ref.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    });
+    await dialog.getByLabel("Что изменить в образе").fill("Белый костюм");
+    await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+    await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+    const selected = new URL(boundPreview(restored === "default" ? 0 : 1), page.url()).href;
+    const saved = await page.evaluate(() => JSON.parse(sessionStorage.getItem("apix:feed-repeat-draft:v2:1:201")!));
+    expect(saved.sourceMediaUrl).toBe(selected);
+    expect(saved.references).toEqual(["https://example.test/uploaded-ref.png"]);
+    // Remove A before returning: index 1 now displays C, never the selected B.
+    previews = [boundPreview(0, 1), boundPreview(1, 2)];
+    available = new Set(["b".repeat(64), "c".repeat(64)]);
+    if (restored === "expired") {
+      previews = [boundPreview(0, 2)];
+      available.delete("b".repeat(64));
+    }
+    if (restored === "legacy" || restored === "missing") await page.evaluate((missing) => {
+      const key = "apix:feed-repeat-draft:v2:1:201";
+      const old = JSON.parse(sessionStorage.getItem(key)!);
+      old.sourceMediaUrl = missing ? "" : old.sourceMediaUrl.split("&output_id=")[0];
+      sessionStorage.setItem(key, JSON.stringify(old));
+    }, restored === "missing");
+    quoteBodies.length = 0;
+    await page.goto("/?tgWebAppData=test&remix=201");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Белый костюм");
+    await expect(dialog.getByText("Реф #1")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+    const restoredSource = restored === "legacy" ? selected.split("&output_id=")[0] : selected;
+    if (restored !== "missing") await expect.poll(() => quoteBodies.some(body => body.source_image_url === restoredSource)).toBe(true);
+    else expect(quoteBodies).toEqual([]);
+    if (restored !== "available") {
+      await expect(dialog.getByText(/Выберите фото заново в ленте/)).toBeVisible();
+      await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+    }
+    expect(submitted).toBeNull();
+    expect(state.topups).toBe(1);
+    // An explicit fresh gallery selection overrides the saved binding and keeps edits/receipt.
+    await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
+    if (previews.length > 1) await viewer.getByRole("button", { name: "Следующее фото" }).click();
+    await expectViewerRepeatIsReachable(page);
+    await viewer.getByRole("button", { name: "Повторить эту работу" }).click();
+    const fresh = new URL(previews.at(-1)!, page.url()).href;
+    await expect.poll(() => quoteBodies.at(-1)?.source_image_url).toBe(fresh);
+    await expect(dialog.getByText("Реф #1")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
+    state.funded = true;
+    await dialog.getByRole("button", { name: "Проверить оплату", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+    await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+    await expect.poll(() => submitted).not.toBeNull();
+    expect(submitted).toMatchObject({ source_image_url: fresh,
+      image_url: "https://example.test/uploaded-ref.png", reference_urls: ["https://example.test/uploaded-ref.png"],
+      change_request: "Белый костюм",
+    });
+    expect(state.topups).toBe(1);
+  });
+}
 
 
 test("gallery portal closes with Escape and native Back dismisses the repeat sheet first", async ({ page }) => {

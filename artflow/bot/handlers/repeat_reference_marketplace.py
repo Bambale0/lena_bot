@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.public_files import mirror_telegram_file
+from api.public_files import mirror_telegram_file, public_url_is_available
 from bot.handlers import image_gen, marketplace, repeat_references
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.states import PromptUseFSM
@@ -35,7 +35,7 @@ async def _reference_candidate(
         source = await repo.get_public_feed_generation(session, source_id) if source_id else None
         source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
         source_url = image_gen.canonical_generation_result_url(source) if source_type == "image" else None
-        if source_url:
+        if source_url and public_url_is_available(source_url):
             urls = image_gen.order_feed_image_references(source_url, urls)
             source_slots = 1
         else:
@@ -419,7 +419,10 @@ async def _run(
 
     # Validate every resolved photo before prompt rewards or session mutation.
     # Keep all accepted file IDs: several IDs may resolve to the same photo.
-    candidate, provider_limit, _ = await _reference_candidate(session, data, reference_urls=reference_urls)
+    candidate, provider_limit, source_slots = await _reference_candidate(session, data, reference_urls=reference_urls)
+    if data.get("feed_use_prompt") is not None and not source_slots:
+        await call.answer("Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)
+        return
     if await image_gen._accept_reference_candidate(
         call, bot, candidate, provider_limit,
     ) is None:

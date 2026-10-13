@@ -158,6 +158,7 @@ function itemLooksVideo(item: FeedItem): boolean {
 function FeedRemixRunnerPortal() {
   const [item, setItem] = useState<FeedItem | null>(null);
   const [sourceMediaUrl, setSourceMediaUrl] = useState("");
+  const [sourceSelectionMissing, setSourceSelectionMissing] = useState(false);
   const [imageModels, setImageModels] = useState<ModelInfo[]>([]);
   const [videoModels, setVideoModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -195,7 +196,7 @@ function FeedRemixRunnerPortal() {
   const selectedModel = useMemo(() => allModels.find((model) => model.key === modelKey), [allModels, modelKey]);
   const bucket = selectedModelBucket(modelKey, videoModels);
   const busy = opening || phase === "uploading" || phase === "generating" || modelsLoading;
-  const sourcePreview = safeExternalUrl(sourceMediaUrl) || safeExternalUrl(firstMedia(item || {}));
+  const sourcePreview = sourceSelectionMissing ? "" : safeExternalUrl(sourceMediaUrl) || safeExternalUrl(firstMedia(item || {}));
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
   const creatorRecipeReplay = sourceIsVideo && typeof item?.source_has_video_reference === "boolean";
   const needsOriginalVideo = sourceIsVideo && item?.source_has_video_reference !== false;
@@ -253,8 +254,8 @@ function FeedRemixRunnerPortal() {
   }, [aspectRatio, bucket, changeRequest, count, creatorRecipeReplay, creatorTextOnly, duration, grokMode, item, mode, quality, references, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
   const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
   const liveQuoteRequest = useRef<{ id: number; body: Record<string, unknown>; key: string } | null>(null);
-  liveQuoteRequest.current = item && requestBody ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
-  const quoteReady = Boolean(quote && quotedBody === requestBodyKey && !quoteBusy);
+  liveQuoteRequest.current = item && requestBody && !sourceSelectionMissing ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
+  const quoteReady = Boolean(quote && quotedBody === requestBodyKey && !quoteBusy && !sourceSelectionMissing);
   const canLaunch = quoteReady && quote?.can_run === true;
   const paymentOptions = checkoutOptions(quote?.recommended_plan);
   const paymentOption = paymentOptions.find((option) => option.provider === selectedPaymentProvider) || paymentOptions[0];
@@ -263,7 +264,11 @@ function FeedRemixRunnerPortal() {
     setItem(nextItem);
     // A fresh gallery click wins over an older saved result. A plain deep-link
     // reopen restores the selection made before an interrupted checkout.
-    setSourceMediaUrl(safeExternalUrl(selectedSource) || safeExternalUrl(draft?.sourceMediaUrl) || "");
+    const freshSource = safeExternalUrl(selectedSource);
+    const savedSource = safeExternalUrl(draft?.sourceMediaUrl);
+    const imageSource = Boolean(nextItem && !itemLooksVideo(nextItem));
+    setSourceSelectionMissing(Boolean(imageSource && draft && !freshSource && !savedSource));
+    setSourceMediaUrl(freshSource || savedSource || (!draft && imageSource ? firstMedia(nextItem!) : ""));
     setPhase("idle");
     setError("");
     setSelectedPaymentProvider(null);
@@ -393,6 +398,7 @@ function FeedRemixRunnerPortal() {
   // A quote is a read-only offer; it must match the exact payload ultimately
   // submitted. A changed duration/quality/photo invalidates the old price.
   const refreshQuote = useCallback(async (id: number, body: Record<string, unknown>, key: string, quiet = false) => {
+    if (sourceSelectionMissing) return null;
     const requestSequence = ++quoteRequestSequence.current;
     if (!quiet) setQuoteBusy(true);
     try {
@@ -417,10 +423,10 @@ function FeedRemixRunnerPortal() {
     } finally {
       if (requestSequence === quoteRequestSequence.current) setQuoteBusy(false);
     }
-  }, []);
+  }, [sourceSelectionMissing]);
 
   useEffect(() => {
-    if (!item || !requestBody || !requestBodyKey) {
+    if (!item || !requestBody || !requestBodyKey || sourceSelectionMissing || opening) {
       quoteRequestSequence.current++;
       setQuote(null);
       setQuotedBody("");
@@ -434,7 +440,7 @@ function FeedRemixRunnerPortal() {
       void refreshQuote(item.id, requestBody, requestBodyKey);
     }, 220);
     return () => window.clearTimeout(timer);
-  }, [item?.id, requestBodyKey, refreshQuote]);
+  }, [item?.id, requestBodyKey, refreshQuote, sourceSelectionMissing, opening]);
 
   const checkPayment = useCallback(async (quiet = false) => {
     const current = paymentRef.current;
@@ -665,7 +671,9 @@ function FeedRemixRunnerPortal() {
       }}
       footer={
         <div className="grid gap-2">
-          {error ? <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p> : null}
+          {sourceSelectionMissing || error ? <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{
+            sourceSelectionMissing ? "Сохранённый выбор фото устарел. Выберите фото заново в ленте; поцелуи не списаны." : error
+          }</p> : null}
           <div className="flex items-center justify-between gap-3 text-xs">
             <span className="font-semibold">Стоимость: {quoteReady ? `${quote?.cost_credits} 💋` : "считаем…"}</span>
             <span className="text-muted-foreground">Баланс: {quoteReady ? `${quote?.balance_credits} 💋` : "—"}</span>

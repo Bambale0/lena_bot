@@ -143,12 +143,15 @@ async def test_rejected_feed_reference_never_persists_or_serializes_author_promp
         for base, last in feed_launch.session.persisted_prompts
     )
     active = await web_sessions.active_image_session(feed_launch.session, feed_launch.user)
-    if entrypoint == "multi" and failure == "reference_limit":
-        # Capacity now rejects before a session exists, which also closes the
-        # intermediate-persistence window this regression protects.
+    if entrypoint == "multi":
+        # Capacity and unavailable public media reject before a session exists,
+        # closing the intermediate-persistence window this regression protects.
         assert active["data"] is None
         assert feed_launch.session.sync.scalars(select(ImageSession)).all() == []
-        feed_launch.mirror.assert_not_awaited()
+        if failure == "reference_limit":
+            feed_launch.mirror.assert_not_awaited()
+        else:
+            feed_launch.mirror.assert_awaited_once()
         assert feed_launch.call.answer.await_args.kwargs["show_alert"] is True
         return
     assert active["data"]["base_prompt"] is None

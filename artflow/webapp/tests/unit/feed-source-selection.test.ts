@@ -41,7 +41,7 @@ function textOf(node: any): string {
 }
 
 test("gallery next then repeat hands off the displayed result, not the item default", () => {
-  const urls = ["https://apix.example/api/v1/feed/201/preview.webp?index=0", "https://apix.example/api/v1/feed/201/preview.webp?index=1"];
+  const urls = ["https://apix.example/api/v1/feed/201/preview.webp?index=0&output_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "https://apix.example/api/v1/feed/201/preview.webp?index=1&output_id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"];
   const item = { id: 201, gen_type: "image", preview_url: urls[0], preview_urls: urls };
   let viewer = { item, urls, index: 0 };
   let handedOff: unknown[] = [];
@@ -63,10 +63,10 @@ test("deep-link API uses the same authenticated feed representation as normal ca
   t.mock.method(globalThis, "fetch", async (url, init) => {
     assert.equal(url, "/api/v1/feed/201");
     assert.equal(new Headers(init?.headers).get("X-Telegram-Init-Data"), "fixture");
-    return new Response(JSON.stringify({ id: 201, preview_url: "/api/v1/feed/201/preview.webp?index=0" }));
+    return new Response(JSON.stringify({ id: 201, preview_url: "/api/v1/feed/201/preview.webp?index=0&output_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }));
   });
   const item = await new MiniAppApi("fixture").getPublicFeedItem(201);
-  assert.equal(item.preview_url, "/api/v1/feed/201/preview.webp?index=0");
+  assert.equal(item.preview_url, "/api/v1/feed/201/preview.webp?index=0&output_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 });
 
 test("API forwards the gallery source to the shared runner unchanged", async () => {
@@ -76,7 +76,7 @@ test("API forwards the gallery source to the shared runner unchanged", async () 
     "@/features/feed-remix-runner": { openFeedRemixRunner(...args: unknown[]) { handedOff = args; } },
   });
   const item = { id: 201 };
-  const selected = "https://apix.example/api/v1/feed/201/preview.webp?index=1";
+  const selected = "https://apix.example/api/v1/feed/201/preview.webp?index=1&output_id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   new MiniAppApi("fixture").remixFeedItem(item, selected);
   assert.deepEqual(handedOff, [item, selected]);
 });
@@ -123,12 +123,13 @@ test("runner open event restores selected source and explicit selection wins bef
     "@/lib/telegram": {}, "@/lib/utils": utils,
     "@/features/feed-repeat-references": references, "@/features/feed-repeat-payment": payment,
   }, "\nexports.Portal = FeedRemixRunnerPortal;");
-  const render = () => { stateIndex = refIndex = 0; memos = []; effects.length = 0; Portal();
+  let rendered: any;
+  const render = () => { stateIndex = refIndex = 0; memos = []; effects.length = 0; rendered = Portal();
     return memos.find(value => value && typeof value === "object" && "source_image_url" in value); };
   render();
   cleanups = effects.map(effect => effect()).filter((value): value is () => void => typeof value === "function");
-  const zero = "https://apixbotai.com/api/v1/feed/201/preview.webp?index=0";
-  const one = "https://apixbotai.com/api/v1/feed/201/preview.webp?index=1";
+  const zero = "https://apixbotai.com/api/v1/feed/201/preview.webp?index=0&output_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const one = "https://apixbotai.com/api/v1/feed/201/preview.webp?index=1&output_id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   const item = { id: 201, model: "nano-banana-2", gen_type: "image", preview_url: zero, preview_urls: [zero, one] };
   const draft = { savedAt: Date.now(), sourceMediaUrl: one, references: [], changeRequest: "", modelKey: "nano-banana-2",
     mode: "image", aspectRatio: "1:1", quality: "2K", count: 1, duration: 5, resolution: "720p", grokMode: "normal", payment: null };
@@ -149,6 +150,23 @@ test("runner open event restores selected source and explicit selection wins bef
   assert.equal(body.source_image_url, one);
   assert.equal(body.image_url, "https://example.test/user.jpg");
   assert.deepEqual(body.reference_urls, ["https://example.test/user.jpg"]);
+  // A genuinely fresh deep link captures the bound default before a checkout.
+  storage.removeItem(payment.repeatDraftKey(1, 201));
+  assert.equal((await open()).source_image_url, zero);
+  cleanups.push(...effects.map(effect => effect()).filter((value): value is () => void => typeof value === "function"));
+  assert.equal(payment.readRepeatDraft(storage, 1, 201)?.sourceMediaUrl, zero);
+  // Restore that exact default, even if a new feed snapshot has another first image.
+  item.preview_url = one;
+  item.preview_urls = [one];
+  assert.equal((await open()).source_image_url, zero);
+  const pending = { startedAt: Date.now(), provider: "tbank" as const, planKey: "starter", transactionId: 701, checkoutUrl: null };
+  payment.saveRepeatDraft(storage, 1, 201, { ...draft, sourceMediaUrl: "", references: ["https://example.test/user.jpg"], payment: pending });
+  body = await open();
+  assert.equal(body.source_image_url, null, "An old draft without a scene cannot acquire today's first output");
+  assert.match(textOf(rendered.props.footer), /Выберите фото заново в ленте/);
+  assert.deepEqual(body.reference_urls, ["https://example.test/user.jpg"]);
+  assert.deepEqual(payment.readRepeatDraft(storage, 1, 201)?.payment, pending);
+  assert.equal((await open(one)).source_image_url, one, "A fresh gallery click repairs a missing legacy selection");
 });
 
 test("all shared-link journey fixtures satisfy the production v1 hydration client", async (t) => {

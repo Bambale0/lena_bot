@@ -111,8 +111,8 @@ async def test_all_public_gallery_aliases_are_excluded_from_identity_roles(local
     await miniapp_routes.remix_feed_post(
         77, miniapp_routes.FeedRemixRequest(
             model=model, image_url=REFS[0],
-            source_image_url="https://app.example.test/api/v1/feed/77/display.webp?index=1",
-            reference_urls=[SOURCE, "https://app.example.test/api/v1/feed/77/preview.webp?index=0", REFS[1], OTHER_SOURCE],
+            source_image_url=f"https://app.example.test/api/v1/feed/77/display.webp?index=1&output_id={feed_media.feed_source_output_id(local_launch.source, OTHER_SOURCE)}",
+            reference_urls=[SOURCE, f"https://app.example.test/api/v1/feed/77/preview.webp?index=0&output_id={feed_media.feed_source_output_id(local_launch.source, SOURCE)}", REFS[1], OTHER_SOURCE],
         ), session=local_launch.session, user=local_launch.user,
     )
     params = wire[0]["body"]["params"]
@@ -522,7 +522,7 @@ async def test_own_visible_recipe_and_previous_changes_survive_safe_repeat(local
     original.model = model
     original.prompt = saved.args[4]
     original.source_feed_gen_id = saved.kwargs["source_feed_gen_id"]
-    original.input_params = {**saved.kwargs["input_params"], "reference_images": REFS[:1]}
+    original.input_params = {**(saved.kwargs["input_params"] or {}), "reference_images": REFS[:1]}
     original.image_session_id = None
     monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(
         side_effect=lambda _session, gid: launch.source if gid == 77 else original,
@@ -546,7 +546,7 @@ async def test_own_visible_recipe_and_previous_changes_survive_safe_repeat(local
 
 
 @pytest.mark.parametrize("model", MODELS)
-async def test_expired_gallery_entry_does_not_promote_old_display_alias_to_identity(local_launch, wire, monkeypatch, model):
+async def test_expired_gallery_entry_does_not_promote_bound_display_alias_to_identity(local_launch, wire, monkeypatch, model):
     monkeypatch.setattr(miniapp_routes.settings, "WEB_PUBLIC_URL", "https://app.example.test")
     monkeypatch.setattr(miniapp_routes, "public_url_is_available", lambda url: url != SOURCE)
     monkeypatch.setattr(feed_media, "public_url_is_available", lambda url: url != SOURCE)
@@ -554,7 +554,7 @@ async def test_expired_gallery_entry_does_not_promote_old_display_alias_to_ident
     await miniapp_routes.remix_feed_post(
         77, miniapp_routes.FeedRemixRequest(
             model=model, image_url=REFS[0], source_image_url=OTHER_SOURCE,
-            reference_urls=[SOURCE, "https://app.example.test/api/v1/feed/77/display.webp?index=1"],
+            reference_urls=[SOURCE, f"https://app.example.test/api/v1/feed/77/display.webp?index=1&output_id={feed_media.feed_source_output_id(local_launch.source, OTHER_SOURCE)}"],
         ), session=local_launch.session, user=local_launch.user,
     )
     params = wire[0]["body"]["params"]
@@ -789,3 +789,115 @@ async def test_legacy_alias_selection_cannot_shift_after_gallery_expiry(local_la
         assert launched is True
         assert wire[0]["body"]["params"]["image_urls"] == [REFS[0], SOURCE]
         assert_variation(wire[0]["body"]["params"]["prompt"])
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("permission", ["own", "foreign", "hidden", "derived", "malformed"])
+@pytest.mark.parametrize("personalized", [False, True])
+async def test_http_own_recipe_result_keeps_share_and_session_provenance_without_prompt_leak(local_launch, wire, monkeypatch, model, permission, personalized):
+    from fastapi import FastAPI
+
+    from api.miniapp_auth import get_miniapp_user
+    from db.models import GenerationStatus
+    from db.session import get_session
+
+    launch = local_launch
+    launch.source.user_id = 100 if permission == "foreign" else launch.user.id
+    launch.source.prompt = OWN_RECIPE if permission == "own" else SECRET
+    launch.source.source_feed_gen_id = 55 if permission == "derived" else None
+    launch.source.input_params = {"hidden_prompt": True} if permission == "hidden" else "bad-json" if permission == "malformed" else None
+    generated = launch.generation
+
+    async def persist(*args, **kwargs):
+        generated.prompt = args[4]
+        generated.model = model
+        generated.source_feed_gen_id = kwargs.get("source_feed_gen_id")
+        generated.input_params = kwargs.get("input_params")
+        return generated
+
+    monkeypatch.setattr(repo, "create_generation", AsyncMock(side_effect=persist))
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(return_value=generated))
+    monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", AsyncMock(return_value=generated))
+    share = AsyncMock(return_value=generated)
+    monkeypatch.setattr(repo, "share_to_feed", share)
+    generated.likes_count = generated.shares_count = 0
+    monkeypatch.setattr(repo, "get_feed_generation_card", AsyncMock(return_value=SimpleNamespace(
+        generation=generated, aspect_ratio="1:1", username="owner", full_name=None, remix_count=0,
+    )))
+    app = FastAPI()
+    app.include_router(miniapp_routes.router)
+    app.dependency_overrides[get_session] = lambda: launch.session
+    app.dependency_overrides[get_miniapp_user] = lambda: launch.user
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/v1/feed/77/remix", json={
+            "model": model, **({"image_url": REFS[0], "change_request": "make the coat blue"} if personalized else {}),
+        })
+        assert response.status_code == 202, response.text
+        owned = permission == "own"
+        # Established HTTP transport policy hides ALL stored prompts, even the owner's.
+        assert response.json()["prompt_hidden"] is True
+        assert response.json()["prompt_actions_allowed"] is False
+        assert response.json()["prompt"] == ""
+        assert generated.source_feed_gen_id == (None if owned else 77)
+        current = launch.created_sessions[-1]
+        assert current.prompt_provenance == ("user_supplied" if owned else None)
+        if owned:
+            assert OWN_RECIPE in generated.prompt
+            assert current.base_prompt == generated.prompt
+            if personalized:
+                assert "make the coat blue" in generated.prompt
+            assert prompt_core.FEED_REMIX_CONTEXT_KEY not in (generated.input_params or {})
+        else:
+            assert response.json()["prompt"] == ""
+            if personalized:
+                assert SECRET not in str(wire[0]["body"])
+        generated.status = GenerationStatus.done
+        generated.result_url = "https://example.test/new-result.jpg"
+        shared = await client.post("/api/v1/generations/99/share")
+        assert shared.status_code == (200 if owned else 403), shared.text
+        if not owned:
+            share.assert_not_awaited()
+        app.dependency_overrides[get_miniapp_user] = lambda: SimpleNamespace(id=999, tg_id=999)
+        public = await client.get("/api/v1/feed/99")
+        assert public.status_code == 200, public.text
+        assert public.json().get("prompt") in (None, "")
+        assert public.json().get("prompt_visibility") == "hidden"
+        assert OWN_RECIPE not in public.text and SECRET not in public.text
+        private = await client.get("/api/v1/generations/99")
+        assert private.status_code == 404
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("available", [False, True])
+async def test_marketplace_source_admission_preserves_real_session_and_provider_atomicity(local_launch, wire, monkeypatch, model, available):
+    from bot.handlers import repeat_reference_marketplace as marketplace_refs
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, model, "image", "1:1", "2K", 1,
+        "existing accepted prompt", reference_urls=REFS[:1],
+    )
+    repo.archive_active_image_sessions.reset_mock()
+    sessions_before = list(launch.created_sessions)
+    data = {
+        "feed_use_prompt": SECRET, "feed_use_gen_id": 77, "use_model_key": model,
+        "prompt_multi_ref_file_ids": ["identity-file"], "image_session_id": old.id,
+    }
+    state, live = mutable_state(data)
+    monkeypatch.setattr(marketplace_refs, "public_url_is_available", lambda url: available if url == SOURCE else True)
+    monkeypatch.setattr(marketplace_refs, "mirror_telegram_file", AsyncMock(return_value=REFS[0]))
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock())
+    await marketplace_refs._run(call, launch.session, launch.user, state, AsyncMock())
+    if available:
+        assert len(launch.created_sessions) == len(sessions_before) + 1
+        repo.archive_active_image_sessions.assert_awaited_once()
+        assert len(wire) == 1
+        assert wire[0]["body"]["params"]["image_urls"] == [REFS[0], SOURCE]
+        assert SECRET not in str(wire[0]["body"])
+    else:
+        assert launch.created_sessions == sessions_before
+        repo.archive_active_image_sessions.assert_not_awaited()
+        repo.charge_image_generation.assert_not_awaited()
+        repo.create_generation.assert_not_awaited()
+        assert live == data
+        assert wire == []

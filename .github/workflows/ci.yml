@@ -141,6 +141,8 @@ jobs:
             bot/handlers/video_prompt.py \
             bot/handlers/video_gen.py \
             bot/utils/generation_reference.py \
+            bot/utils/feed_media.py \
+            api/feed_media_viewer.py \
             tests/test_generation_task_reference.py \
             bot/handlers/video_references.py \
             scripts/check_provider_contract_coverage.py \
@@ -156,6 +158,7 @@ jobs:
             tests/test_nexus_image_migration.py \
             tests/test_nano_banana_pro_reference_transport.py \
             tests/test_feed_repeat_identity_contract.py \
+            tests/test_feed_output_binding.py \
             tests/test_nexus_admin_pricing.py \
             tests/test_referral_commission_defaults.py \
             tests/test_stars_payment.py \
@@ -229,6 +232,7 @@ jobs:
             tests/test_nexus_image_migration.py \
             tests/test_nano_banana_pro_reference_transport.py \
             tests/test_feed_repeat_identity_contract.py \
+            tests/test_feed_output_binding.py \
             tests/test_nano_banana21_routing.py \
             tests/test_nano_banana21_control_plane.py \
             tests/test_nano_banana21_recovery.py \

@@ -16,6 +16,7 @@ from api.miniapp_auth import get_miniapp_user
 from api.web import feed as web_feed
 from api.web.deps import get_web_user_or_none
 from bot.handlers import repeat_safe
+from bot.utils.feed_media import feed_source_output_id
 from db import repository as repo
 from db.models import (
     Base,
@@ -169,8 +170,8 @@ async def test_v1_feed_privacy_parity_preserves_generated_previews(published_wor
     payload = data[0] if isinstance(data, list) else data
     assert_no_inputs(payload)
     assert payload["preview_urls"] == [
-        "/api/v1/feed/77/preview.webp?index=0",
-        "/api/v1/feed/77/preview.webp?index=1",
+        f"/api/v1/feed/77/preview.webp?index={index}&output_id={feed_source_output_id(published_work.generation, url)}"
+        for index, url in enumerate(OUTPUTS)
     ]
 
 
