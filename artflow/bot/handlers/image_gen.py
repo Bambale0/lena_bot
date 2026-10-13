@@ -570,7 +570,7 @@ async def _external_source_feed_id(
 
 async def _resolve_feed_image_scene(
     *, session: AsyncSession, db_user: User, source, references: list[str],
-    previous=None, edit_parent=None,
+    previous=None, edit_parent=None, retain_user_references: bool = True,
 ) -> tuple[object, str, list[str]]:
     """One exact scene/identity union for admission and the paid launch boundary."""
     scene = edit_parent or source
@@ -591,7 +591,7 @@ async def _resolve_feed_image_scene(
     if (scene_type != "image" or selected not in generation_result_reference_urls(scene)
             or not selected or not public_url_is_available(selected)):
         raise FeedRemixUnavailable("Выбранное исходное фото из ленты больше недоступно; поцелуи не списаны.")
-    identities = feed_identity_references(scene, feed_identity_references(source, references))
+    identities = feed_identity_references(scene, feed_identity_references(source, references)) if retain_user_references else []
     if any(not public_url_is_available(url) for url in identities):
         raise FeedRemixUnavailable("Часть твоих фото недоступна. Загрузи их заново; поцелуи не списаны.")
     return scene, selected, identities

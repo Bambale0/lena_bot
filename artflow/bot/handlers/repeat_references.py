@@ -188,7 +188,7 @@ async def _resolve_base_reference_urls(bot: Bot, image_session: Any | None) -> l
 
 async def _repeat_provider_reference_urls(
     *, session: AsyncSession, db_user: User, source_feed_gen_id: int | None,
-    reference_urls: list[str], retain_user_references: bool = True,
+    reference_urls: list[str], previous: Any | None = None, retain_user_references: bool = True,
 ) -> list[str] | None:
     """Count the same public source used at launch, failing closed if it is gone."""
     external_source_id = await image_gen._external_source_feed_id(
@@ -197,14 +197,18 @@ async def _repeat_provider_reference_urls(
     if not external_source_id:
         return reference_urls if retain_user_references else []
     source = await repo.get_public_feed_generation(session, external_source_id)
-    if _generation_type_value(source) != GenerationType.image.value:
+    if _generation_type_value(source) != GenerationType.image.value or getattr(source, "id", None) != external_source_id:
         return None
-    source_url = image_gen.selected_feed_source_url(source, reference_urls)
-    if not source_url or not public_url_is_available(source_url):
+    try:
+        _, source_url, identity_refs = await image_gen._resolve_feed_image_scene(
+            session=session, db_user=db_user, source=source, references=reference_urls,
+            previous=previous, retain_user_references=retain_user_references,
+        )
+    except image_gen.FeedRemixUnavailable:
         return None
-    return image_gen.order_feed_image_references(
-        source_url, image_gen.feed_identity_references(source, reference_urls) if retain_user_references else [],
-    )
+    if not public_url_is_available(source_url):
+        return None
+    return image_gen.order_feed_image_references(source_url, identity_refs)
 
 
 async def _begin_repeat_collection(
@@ -234,7 +238,7 @@ async def _begin_repeat_collection(
         return True
     provider_refs = await _repeat_provider_reference_urls(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
-        reference_urls=base_urls,
+        reference_urls=base_urls, previous=generation,
     )
     if provider_refs is None:
         await safe_answer_callback(call, "Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)
@@ -434,6 +438,7 @@ async def _collect_repeat_reference(
         return
     source_feed_gen_id = data.get("repeat_source_feed_gen_id")
     generation_id = int(data.get("repeat_generation_id") or 0)
+    generation = None
     if generation_id:
         generation = await repo.get_generation_by_id(session, generation_id)
         if not generation or getattr(generation, "user_id", None) != db_user.id:
@@ -443,7 +448,7 @@ async def _collect_repeat_reference(
         source_feed_gen_id = getattr(generation, "source_feed_gen_id", None) or source_feed_gen_id
     candidate_urls = await _repeat_provider_reference_urls(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
-        reference_urls=candidate_urls,
+        reference_urls=candidate_urls, previous=generation,
     )
     if candidate_urls is None:
         await message.answer("Исходное фото из ленты недоступно. Выбери другую публикацию.")
@@ -505,7 +510,7 @@ async def _repeat_refs_clear(
     provider_refs = await _repeat_provider_reference_urls(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
         reference_urls=_url_list(data.get("repeat_base_reference_urls")),
-        retain_user_references=False,
+        previous=generation, retain_user_references=False,
     )
     if provider_refs is None:
         await safe_answer_callback(call, "Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)
@@ -580,7 +585,7 @@ async def _repeat_refs_run(
             references.append(url)
     candidate_refs = await _repeat_provider_reference_urls(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
-        reference_urls=references,
+        reference_urls=references, previous=generation,
     )
     if candidate_refs is None:
         await safe_answer_callback(call, "Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)

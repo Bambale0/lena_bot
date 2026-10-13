@@ -947,3 +947,178 @@ async def test_midjourney_own_recipe_preserves_reference_caps_before_charge(loca
     assert launch.created_sessions == []
     imagine.assert_not_awaited()
     blend.assert_not_awaited()
+
+
+@pytest.fixture
+async def derived_repeat(local_launch, wire, monkeypatch, model):
+    """Create real server scene provenance through the explicit feed-remix callback."""
+    from db.models import GenerationStatus
+
+    launch = local_launch
+    derived = SimpleNamespace(**{
+        **vars(launch.generation), "id": 88, "model": model, "source_feed_gen_id": 77,
+        "result_url": OTHER_SOURCE, "status": GenerationStatus.done,
+    })
+    records = {77: launch.source, 88: derived}
+    generated = []
+
+    async def persist(*args, **kwargs):
+        result = SimpleNamespace(**{
+            **vars(launch.generation), "id": 100 + len(generated), "model": model,
+            "prompt": args[4], "source_feed_gen_id": kwargs["source_feed_gen_id"],
+            "input_params": kwargs["input_params"], "image_session_id": kwargs["image_session_id"],
+        })
+        generated.append(result)
+        records[result.id] = result
+        return result
+
+    monkeypatch.setattr(repo, "create_generation", AsyncMock(side_effect=persist))
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(side_effect=lambda _session, gid: records.get(gid)))
+    monkeypatch.setattr(repo, "get_public_feed_generation", AsyncMock(side_effect=lambda _session, gid: launch.source if gid == 77 else None))
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(side_effect=lambda _session, sid, uid: next(
+        (item for item in launch.created_sessions if item.id == sid and item.user_id == uid), None,
+    )))
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data="feed:remix:88")
+    await feed.cb_feed_remix(call, launch.session, launch.user, state)
+    current = launch.created_sessions[-1]
+    # User photos accepted into the current edit session before its first submit.
+    current.reference_url = REFS[0]
+    current.reference_urls = json.dumps([*REFS[:2], OTHER_SOURCE])
+    assert data["remix_parent_generation_id"] == derived.id
+    assert await image_gen._launch_session_generation(
+        source_message=call.message, state=state, session=launch.session, db_user=launch.user,
+        image_session=current, prompt=SECRET, action_type=ImageGenerationAction.remix,
+        reference_url=[*REFS[:2], OTHER_SOURCE], parent_generation_id=derived.id,
+        source_feed_gen_id=77, feed_change_request="make the coat blue", launching_text="launch", queued_text="queued",
+    )
+    assert wire[0]["body"]["params"]["image_urls"] == [*REFS[:2], OTHER_SOURCE]
+    context = generated[-1].input_params[prompt_core.FEED_REMIX_CONTEXT_KEY]
+    assert context["scene_generation_id"] == derived.id
+    assert context["source_image_url"] == OTHER_SOURCE
+    assert SECRET not in str(wire)
+    return SimpleNamespace(launch=launch, records=records, generated=generated, derived=derived, current=current)
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("aliases", [False, True])
+async def test_derived_scene_collector_at_cap_clear_and_next_repeat(derived_repeat, wire, monkeypatch, model, aliases):
+    from bot.handlers import repeat_references
+
+    setup = derived_repeat
+    launch = setup.launch
+    if aliases:
+        monkeypatch.setattr(miniapp_routes.settings, "WEB_PUBLIC_URL", "https://app.example.test")
+        source_alias = f"https://app.example.test/api/v1/feed/77/display.webp?index=0&output_id={feed_media.feed_source_output_id(launch.source, SOURCE)}"
+        derived_alias = f"https://app.example.test/api/v1/feed/88/preview.webp?index=0&output_id={feed_media.feed_source_output_id(setup.derived, OTHER_SOURCE)}"
+        setup.current.reference_urls = json.dumps([*REFS[:2], OTHER_SOURCE, SOURCE, source_alias, derived_alias])
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[2]))
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data="regen:image:100")
+    await repeat_references._regen_repeat_interceptor(call, launch.session, state, launch.user, AsyncMock())
+    assert data["repeat_reference_count"] == 3
+    message = SimpleNamespace(photo=[SimpleNamespace(file_id="third-user-photo", file_size=10)], answer=AsyncMock())
+    await repeat_references._collect_repeat_reference(message, state, launch.session, launch.user, AsyncMock())
+    assert data["repeat_reference_count"] == 4
+    assert data["repeat_new_reference_file_ids"] == ["third-user-photo"]
+    await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
+    assert len(wire) == 2
+    assert wire[-1]["body"]["params"]["image_urls"] == [*REFS, OTHER_SOURCE]
+    assert_variation(wire[-1]["body"]["params"]["prompt"])
+    assert wire[-1]["body"]["params"]["prompt"].endswith("make the coat blue")
+    call.data = f"regen:image:{setup.generated[-1].id}"
+    await repeat_references._regen_repeat_interceptor(call, launch.session, state, launch.user, AsyncMock())
+    assert data["repeat_reference_count"] == 4
+    await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
+    assert len(wire) == 3
+    assert wire[-1]["body"]["params"]["image_urls"] == [*REFS, OTHER_SOURCE]
+    assert_variation(wire[-1]["body"]["params"]["prompt"])
+    call.data = f"regen:image:{setup.generated[-1].id}"
+    await repeat_references._regen_repeat_interceptor(call, launch.session, state, launch.user, AsyncMock())
+    # Clear must remove an expired user input rather than require it to be available.
+    monkeypatch.setattr(image_gen, "public_url_is_available", lambda url: url != REFS[0])
+    await repeat_references._repeat_refs_clear(call, state, launch.session, launch.user)
+    assert data["repeat_reference_count"] == 1
+    assert data["repeat_base_reference_urls"] == [OTHER_SOURCE]
+    await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
+    assert len(wire) == 4
+    assert wire[-1]["body"]["params"]["image_urls"] == [OTHER_SOURCE]
+    assert "EXCLUSIVE source" not in wire[-1]["body"]["params"]["prompt"]
+    assert SECRET not in str(wire)
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("stage", ["begin", "add", "clear", "run"])
+@pytest.mark.parametrize("failure", ["missing_scene", "unowned_scene", "forged_scene", "expired_scene"])
+async def test_derived_scene_admission_rejects_before_collection_or_session_mutation(
+    derived_repeat, wire, monkeypatch, model, stage, failure,
+):
+    from bot.handlers import repeat_references
+
+    setup = derived_repeat
+    launch = setup.launch
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data="regen:image:100")
+    if stage != "begin":
+        await repeat_references._regen_repeat_interceptor(call, launch.session, state, launch.user, AsyncMock())
+    if failure == "missing_scene":
+        setup.records.pop(88)
+    elif failure == "unowned_scene":
+        setup.derived.user_id = 999
+    elif failure == "forged_scene":
+        setup.generated[0].input_params[prompt_core.FEED_REMIX_CONTEXT_KEY]["scene_generation_id"] = 555
+    else:
+        monkeypatch.setattr(image_gen, "public_url_is_available", lambda url: url != OTHER_SOURCE)
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[0]))
+    before = dict(data)
+    sessions_before = list(launch.created_sessions)
+    repo.archive_active_image_sessions.reset_mock()
+    repo.charge_image_generation.reset_mock()
+    repo.create_generation.reset_mock()
+    if stage == "begin":
+        await repeat_references._regen_repeat_interceptor(call, launch.session, state, launch.user, AsyncMock())
+    elif stage == "add":
+        await repeat_references._collect_repeat_reference(
+            SimpleNamespace(photo=[SimpleNamespace(file_id="existing-user-alias", file_size=10)], answer=AsyncMock()),
+            state, launch.session, launch.user, AsyncMock(),
+        )
+    elif stage == "clear":
+        await repeat_references._repeat_refs_clear(call, state, launch.session, launch.user)
+    else:
+        await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
+    assert data == before
+    assert launch.created_sessions == sessions_before
+    assert len(wire) == 1
+    repo.archive_active_image_sessions.assert_not_awaited()
+    repo.charge_image_generation.assert_not_awaited()
+    repo.create_generation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("stage", ["add", "run"])
+async def test_derived_scene_expected_identity_availability_still_required(derived_repeat, wire, monkeypatch, model, stage):
+    from bot.handlers import repeat_references
+
+    setup = derived_repeat
+    launch = setup.launch
+    state, data = mutable_state()
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), data="regen:image:100")
+    await repeat_references._regen_repeat_interceptor(call, launch.session, state, launch.user, AsyncMock())
+    monkeypatch.setattr(image_gen, "public_url_is_available", lambda url: url != REFS[0])
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[1]))
+    before = dict(data)
+    sessions_before = list(launch.created_sessions)
+    repo.archive_active_image_sessions.reset_mock()
+    repo.charge_image_generation.reset_mock()
+    if stage == "add":
+        await repeat_references._collect_repeat_reference(
+            SimpleNamespace(photo=[SimpleNamespace(file_id="existing-user-alias", file_size=10)], answer=AsyncMock()),
+            state, launch.session, launch.user, AsyncMock(),
+        )
+    else:
+        await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
+    assert data == before
+    assert launch.created_sessions == sessions_before
+    assert len(wire) == 1
+    repo.archive_active_image_sessions.assert_not_awaited()
+    repo.charge_image_generation.assert_not_awaited()
