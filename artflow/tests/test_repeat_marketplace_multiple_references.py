@@ -67,6 +67,7 @@ def test_repeat_screen_text_shows_selected_settings() -> None:
 
 @pytest.mark.asyncio
 async def test_feed_repeat_collects_first_photo_without_starting_generation(monkeypatch) -> None:
+    monkeypatch.setattr(repeat_reference_marketplace.image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
     monkeypatch.setattr(repeat_reference_marketplace.repo, "get_public_feed_generation", AsyncMock(return_value=None))
     state = FakeState(
         {

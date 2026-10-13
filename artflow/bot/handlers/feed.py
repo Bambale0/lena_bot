@@ -506,6 +506,7 @@ async def cb_feed_again(
 
     from bot.handlers.image_gen import (
         ImageReferenceUnavailable,
+        _accept_generation_reference_candidate,
         _launch_session_generation,
         _session_reference_url,
         _stored_reference_urls,
@@ -535,17 +536,24 @@ async def cb_feed_again(
             reference_file_ids = []
     reference_url = source_session.reference_url if source_session else None
     effective_reference_url = None
-    if source_session and mode == "image":
+    if source_session:
         try:
             effective_reference_url = await _session_reference_url(bot, source_session, prefer_last_result=False)
         except ImageReferenceUnavailable as exc:
             await call.answer(str(exc), show_alert=True)
             return
+        if effective_reference_url:
+            mode = "image"
         if isinstance(effective_reference_url, str) and effective_reference_url:
             reference_url = effective_reference_url
 
     protected_source_id = getattr(gen, "source_feed_gen_id", None)
     source_feed_gen_id = protected_source_id or (gen.id if gen.is_public_feed else None)
+    if not await _accept_generation_reference_candidate(
+        call, bot, session=session, db_user=db_user, model_key=gen.model,
+        reference_url=effective_reference_url, source_feed_gen_id=source_feed_gen_id,
+    ):
+        return
     prompt_is_user_supplied = _owned_generation_prompt_is_visible(gen, db_user.id)
     image_session = await repo.create_image_session(
         session=session,

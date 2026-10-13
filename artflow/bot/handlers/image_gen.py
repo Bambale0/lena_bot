@@ -456,15 +456,12 @@ class ImageReferenceUnavailable(ValueError):
 
 
 async def _reference_count_for_limit(bot: Bot, data: dict, max_refs: int) -> int:
-    """Count the candidate union without mutating it; resolve aliases near the cap."""
+    """Resolve the complete candidate before admission, even below the cap."""
     urls = _state_reference_urls(data)
     scalar = _state_reference_url(data)
     if scalar and scalar not in urls:
         urls.append(scalar)
     file_ids = list(dict.fromkeys(_state_reference_file_ids(data)))
-    upper_bound = len(urls) + len(file_ids)
-    if upper_bound <= max_refs:
-        return upper_bound
     for file_id in file_ids:
         url = await _telegram_file_url(bot, file_id)
         if not url:
@@ -475,11 +472,11 @@ async def _reference_count_for_limit(bot: Bot, data: dict, max_refs: int) -> int
 
 
 async def _accept_reference_candidate(
-    source: Message | CallbackQuery, bot: Bot, data: dict, max_refs: int, *, resolve_all: bool = False,
+    source: Message | CallbackQuery, bot: Bot, data: dict, max_refs: int,
 ) -> int | None:
     """Reject unresolved/over-cap candidates before any FSM or session mutation."""
     try:
-        count = await _reference_count_for_limit(bot, data, 0 if resolve_all else max_refs)
+        count = await _reference_count_for_limit(bot, data, max_refs)
         error = f"Эта модель принимает до {max_refs} фото. Убери лишние референсы или выбери другую модель." if count > max_refs else None
     except Exception:
         count = None
@@ -527,6 +524,24 @@ async def _external_source_feed_id(
             and not generation_prompt_is_protected(source)):
         return None
     return source_feed_gen_id
+
+
+async def _accept_generation_reference_candidate(
+    source: Message | CallbackQuery, bot: Bot, *, session: AsyncSession, db_user: User,
+    model_key: str, reference_url: str | list[str] | None, source_feed_gen_id: int | None = None,
+) -> bool:
+    """Validate the provider union before replacing an existing image series."""
+    refs = [reference_url] if isinstance(reference_url, str) else list(reference_url or [])
+    external_source_id = await _external_source_feed_id(
+        session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
+    )
+    if external_source_id and _supports_img2img(model_key):
+        feed_source = await repo.get_public_feed_generation(session, external_source_id)
+        source_type = getattr(getattr(feed_source, "gen_type", None), "value", getattr(feed_source, "gen_type", None))
+        if source_type == GenerationType.image.value:
+            refs = order_feed_image_references(canonical_generation_result_url(feed_source), refs)
+    max_refs = int(IMAGE_CAPS.get(model_key, {}).get("max_refs", 0) or 0)
+    return await _accept_reference_candidate(source, bot, {"reference_urls": refs}, max_refs) is not None
 
 
 async def _source_feed_id_from_parent(
@@ -802,7 +817,7 @@ async def _ensure_active_image_session_from_state(
     if source is None:
         if await _reference_count_for_limit(bot, data, max_refs) > max_refs:
             raise ValueError(f"Model supports at most {max_refs} reference images")
-    elif await _accept_reference_candidate(source, bot, data, max_refs, resolve_all=True) is None:
+    elif await _accept_reference_candidate(source, bot, data, max_refs) is None:
         return None
     if raw_model_key != model_key:
         await state.update_data(model_key=model_key)
@@ -3786,6 +3801,16 @@ async def _image_session_for_result_action(
     if getattr(gen, "image_session_id", None):
         prev_session = await repo.get_image_session(session, gen.image_session_id, db_user.id)
 
+    try:
+        reference_url = await _session_reference_url(getattr(call, "bot", None), prev_session) if prev_session else None
+    except ImageReferenceUnavailable as exc:
+        await call.answer(str(exc), show_alert=True)
+        return None
+    if not await _accept_generation_reference_candidate(
+        call, getattr(call, "bot", None), session=session, db_user=db_user, model_key=gen.model,
+        reference_url=reference_url, source_feed_gen_id=getattr(gen, "source_feed_gen_id", None),
+    ):
+        return None
     image_session = await repo.create_image_session(
         session=session,
         user_id=db_user.id,
@@ -3899,6 +3924,11 @@ async def cb_regen_image(
         reference_url = await _session_reference_url(bot, prev_session, prefer_last_result=False) if prev_session else None
     except ImageReferenceUnavailable as exc:
         await call.answer(str(exc), show_alert=True)
+        return
+    if not await _accept_generation_reference_candidate(
+        call, bot, session=session, db_user=db_user, model_key=prev.model,
+        reference_url=reference_url, source_feed_gen_id=getattr(prev, "source_feed_gen_id", None),
+    ):
         return
     image_session = await repo.create_image_session(
         session=session,
@@ -4112,9 +4142,29 @@ async def cb_p2p_generate(
         await call.answer("Промпт не найден", show_alert=True)
         return
 
-    # Resolve model: explicit choice → active session → error
     image_session = None
+    if not model_key:
+        image_session = await repo.get_active_image_session(session, db_user.id)
+        if not image_session:
+            await call.answer("Выбери модель или открой активную серию", show_alert=True)
+            return
+    effective_model = model_key or image_session.model
+    reference_url: str | None = None
+    if ref_file_id and _supports_img2img(effective_model):
+        try:
+            reference_url = await _telegram_file_url(bot, ref_file_id)
+            if not reference_url:
+                raise ImageReferenceUnavailable()
+        except Exception:
+            await call.answer(str(ImageReferenceUnavailable()), show_alert=True)
+            return
+
+    # Resolve model: explicit choice → active session → error
     if model_key:
+        if not await _accept_generation_reference_candidate(
+            call, bot, session=session, db_user=db_user, model_key=model_key, reference_url=reference_url,
+        ):
+            return
         quality_opts = IMAGE_CAPS.get(model_key, {}).get("quality_options") or []
         quality = quality_opts[0][0] if quality_opts else "basic"
         mode = "image" if ref_file_id and _supports_img2img(model_key) else "text"
@@ -4129,16 +4179,9 @@ async def cb_p2p_generate(
             base_prompt=None,
             reference_file_id=ref_file_id if mode == "image" else None,
         )
-    else:
-        image_session = await repo.get_active_image_session(session, db_user.id)
-        if not image_session:
-            await call.answer("Выбери модель или открой активную серию", show_alert=True)
-            return
 
-    # Build reference URL if session uses image mode
-    reference_url: str | None = None
-    if ref_file_id and _supports_img2img(image_session.model):
-        reference_url = await _telegram_file_url(bot, ref_file_id)
+    if not _supports_img2img(image_session.model):
+        reference_url = None
 
     await _launch_session_generation(
         source_message=call.message,  # type: ignore[arg-type]

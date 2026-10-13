@@ -30,7 +30,8 @@ def test_banana_no_image_error_is_user_friendly() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ensure_active_image_session_passes_multi_ref_ids() -> None:
+async def test_ensure_active_image_session_passes_multi_ref_ids(monkeypatch) -> None:
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
     state = AsyncMock()
     state.get_data = AsyncMock(return_value={
         "model_key": "nano-banana-pro",
@@ -141,7 +142,8 @@ async def test_dynamic_continue_keeps_carried_reference_without_upload_prompt() 
 
 
 @pytest.mark.asyncio
-async def test_prompt_reference_photo_with_caption_launches_prompt_handler() -> None:
+async def test_prompt_reference_photo_with_caption_launches_prompt_handler(monkeypatch) -> None:
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
     message = SimpleNamespace(
         photo=[SimpleNamespace(file_id="ref_1", file_size=100)],
         caption="сделай студийный свет",
@@ -814,7 +816,8 @@ def test_repeat_keeps_explicitly_selected_ratio() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_session_photo_switches_active_session_to_image_mode() -> None:
+async def test_handle_session_photo_switches_active_session_to_image_mode(monkeypatch) -> None:
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
     message = SimpleNamespace(
         photo=[SimpleNamespace(file_size=10, file_id="ref_1")],
         answer=AsyncMock(),
@@ -868,7 +871,8 @@ async def test_handle_session_photo_switches_active_session_to_image_mode() -> N
 
 
 @pytest.mark.asyncio
-async def test_handle_session_photo_uses_last_generation_source_not_stale_state() -> None:
+async def test_handle_session_photo_uses_last_generation_source_not_stale_state(monkeypatch) -> None:
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
     message = SimpleNamespace(
         photo=[SimpleNamespace(file_size=10, file_id="ref_1")],
         answer=AsyncMock(),
@@ -910,7 +914,8 @@ async def test_handle_session_photo_uses_last_generation_source_not_stale_state(
 
 
 @pytest.mark.asyncio
-async def test_handle_session_photo_appends_reference_for_multiref_model() -> None:
+async def test_handle_session_photo_appends_reference_for_multiref_model(monkeypatch) -> None:
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
     message = SimpleNamespace(
         photo=[SimpleNamespace(file_size=10, file_id="outfit_ref")],
         answer=AsyncMock(),
@@ -969,7 +974,8 @@ async def test_handle_session_photo_appends_reference_for_multiref_model() -> No
 
 
 @pytest.mark.asyncio
-async def test_handle_session_photo_keeps_single_reference_for_single_ref_model() -> None:
+async def test_handle_session_photo_keeps_single_reference_for_single_ref_model(monkeypatch) -> None:
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
     message = SimpleNamespace(
         photo=[SimpleNamespace(file_size=10, file_id="new_ref")],
         answer=AsyncMock(),

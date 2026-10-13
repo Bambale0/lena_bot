@@ -1291,3 +1291,279 @@ async def test_unavailable_saved_photo_never_launches_surviving_subset(local_lau
             await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
         assert nexus_posts[0]["params"]["image_urls"] == REFS
         repo.charge_image_generation.assert_awaited_once()
+
+
+@pytest.mark.parametrize("entrypoint", ["active_upload", "prompt_upload", "legacy_upload", "model_select"])
+@pytest.mark.parametrize("failure", [None, RuntimeError("synthetic unavailable photo")])
+async def test_under_cap_admission_checks_every_photo_before_mutation(local_launch, nexus_posts, monkeypatch, entrypoint, failure):
+    launch = local_launch
+    current = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "own prompt", reference_file_id="saved", reference_file_ids=["saved"],
+    )
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=current))
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=current))
+    monkeypatch.setattr(repo, "get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4, is_active=True, display_name="Pro")))
+    monkeypatch.setattr(image_gen, "safe_edit_message", AsyncMock())
+    state, data = mutable_state()
+    await image_gen._sync_state_with_image_session(state, current)
+    before = json.loads(json.dumps(data))
+    fields = (current.model, current.reference_file_id, current.reference_file_ids, current.reference_url, current.reference_urls)
+
+    async def mirror(_bot, fid):
+        if fid == "new":
+            return REFS[0]  # Valid alias must be accepted after the saved photo recovers.
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    monkeypatch.setattr(image_gen, "_telegram_file_url", mirror)
+    message = SimpleNamespace(photo=[SimpleNamespace(file_id="new", file_size=100)], caption=None, answer=AsyncMock(), bot=AsyncMock())
+    call = SimpleNamespace(data="img_nb:model:nano-banana-pro", message=AsyncMock(), answer=AsyncMock(), bot=message.bot)
+
+    async def invoke():
+        if entrypoint == "active_upload":
+            await image_gen.handle_session_photo(message, state, launch.session, launch.user)
+        elif entrypoint == "model_select":
+            await image_gen.cb_nana_banano_model(call, state, launch.session, launch.user)
+        else:
+            handler = image_gen.handle_prompt_reference_upload if entrypoint == "prompt_upload" else image_gen.handle_reference_upload
+            await handler(message, state, launch.session, launch.user, message.bot)
+
+    launch.session.commit.reset_mock()
+    launch.session.execute.reset_mock()
+    repo.archive_active_image_sessions.reset_mock()
+    await invoke()
+    assert data == before
+    assert fields == (current.model, current.reference_file_id, current.reference_file_ids, current.reference_url, current.reference_urls)
+    assert len(launch.created_sessions) == 1
+    launch.session.commit.assert_not_awaited()
+    launch.session.execute.assert_not_awaited()
+    repo.archive_active_image_sessions.assert_not_awaited()
+    repo.charge_image_generation.assert_not_awaited()
+    assert nexus_posts == []
+
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[0]))
+    await invoke()
+    assert data["ref_file_ids"] == (["saved"] if entrypoint == "model_select" else ["saved", "new"])
+    await image_gen.handle_prompt(
+        SimpleNamespace(text="own prompt", caption=None, answer=AsyncMock()), state, launch.session, launch.user, message.bot,
+    )
+    await image_gen.cb_image_review_launch(call, state, launch.session, launch.user)
+    assert nexus_posts[0]["params"]["image_urls"] == REFS[:1]
+
+
+@pytest.mark.parametrize("entrypoint", ["regen", "feed_again"])
+@pytest.mark.parametrize("mode", ["image", "text"])
+@pytest.mark.parametrize("model,max_refs", [("nano-banana-pro", 4), ("qwen/image-to-image", 1)])
+async def test_restored_clone_checks_resolved_cap_before_archiving(local_launch, nexus_posts, monkeypatch, entrypoint, model, max_refs, mode):
+    from bot.handlers import feed
+
+    launch = local_launch
+    refs = [f"https://example.test/clone-{i}.jpg" for i in range(max_refs + 1)]
+    source = await repo.create_image_session(
+        launch.session, launch.user.id, model, mode, "9:16", "2K", 1,
+        "own prompt", reference_urls=refs,
+    )
+    active = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "active prompt", reference_urls=REFS[:1],
+    )
+    launch.generation.model = model
+    launch.generation.image_session_id = source.id
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=source))
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=active))
+    state, data = mutable_state()
+    await image_gen._sync_state_with_image_session(state, active)
+    before = json.loads(json.dumps(data))
+    call = SimpleNamespace(data="regen:image:99", message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+    launch.session.commit.reset_mock()
+    launch.session.execute.reset_mock()
+    repo.archive_active_image_sessions.reset_mock()
+    if entrypoint == "regen":
+        await image_gen.cb_regen_image(call, launch.session, state, launch.user, call.bot)
+    else:
+        call.data = "feed:again:99"
+        await feed.cb_feed_again(call, launch.session, launch.user, state, call.bot)
+    assert len(launch.created_sessions) == 2
+    assert data == before
+    assert json.loads(source.reference_urls) == refs
+    assert json.loads(active.reference_urls) == REFS[:1]
+    launch.session.commit.assert_not_awaited()
+    launch.session.execute.assert_not_awaited()
+    repo.archive_active_image_sessions.assert_not_awaited()
+    repo.charge_image_generation.assert_not_awaited()
+    repo.create_generation.assert_not_awaited()
+    assert nexus_posts == []
+
+
+@pytest.fixture
+async def image_provider_posts(monkeypatch):
+    posts = []
+
+    def capture(request):
+        assert request.method == "POST"
+        assert str(request.url) in {"https://nexus.test/generate", "https://kie.test/api/v1/jobs/createTask"}
+        posts.append(json.loads(request.content))
+        return httpx.Response(200, json={"task_id": "synthetic-task", "status": "pending", "code": 200, "data": {"taskId": "synthetic-task"}})
+
+    async with httpx.AsyncClient(base_url="https://nexus.test", transport=httpx.MockTransport(capture)) as nexus_http:
+        async with httpx.AsyncClient(base_url="https://kie.test", transport=httpx.MockTransport(capture)) as kie_http:
+            client = NexusApiClient(api_key="synthetic-test-only", base_url="https://nexus.test", client=nexus_http)
+            monkeypatch.setattr(nexus_image_adapter, "NexusApiClient", lambda: client)
+            monkeypatch.setattr(image_service.kieai_client, "get_client", lambda: kie_http)
+            monkeypatch.setattr(image_service.comet_fallback, "generate_image", AsyncMock(side_effect=AssertionError("Unexpected fallback")))
+            yield posts
+
+
+@pytest.mark.parametrize("entrypoint", ["regen", "feed_again"])
+@pytest.mark.parametrize("model,max_refs", [("nano-banana-pro", 4), ("qwen/image-to-image", 1)])
+@pytest.mark.parametrize("protected", [False, True])
+async def test_clone_retry_accepts_exact_cap_and_source_file_aliases(local_launch, image_provider_posts, monkeypatch, entrypoint, model, max_refs, protected):
+    from bot.handlers import feed
+
+    launch = local_launch
+    refs = [f"https://example.test/retry-{i}.jpg" for i in range(max_refs)]
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, model, "image", "9:16", "2K", 1,
+        None if protected else "own prompt", reference_urls=refs, reference_file_id="extra", reference_file_ids=["extra"],
+    )
+    launch.generation.model = model
+    launch.generation.image_session_id = old.id
+    launch.generation.source_feed_gen_id = 77 if protected else None
+    launch.generation.prompt = SECRET if protected else "own prompt"
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(side_effect=lambda _session, gid: launch.source if gid == 77 else launch.generation))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=SOURCE))
+    state, data = mutable_state({"image_session_id": old.id, "ref_file_ids": ["extra"]})
+    before = json.loads(json.dumps(data))
+    call = SimpleNamespace(data="regen:image:99", message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+
+    async def invoke():
+        if entrypoint == "regen":
+            await image_gen.cb_regen_image(call, launch.session, state, launch.user, call.bot)
+        else:
+            call.data = "feed:again:99"
+            await feed.cb_feed_again(call, launch.session, launch.user, state, call.bot)
+
+    repo.archive_active_image_sessions.reset_mock()
+    await invoke()
+    assert data == before
+    assert len(launch.created_sessions) == 1
+    repo.archive_active_image_sessions.assert_not_awaited()
+    repo.charge_image_generation.assert_not_awaited()
+    assert image_provider_posts == []
+    # Keep every attachment: making the public/file/source aliases identical
+    # gives a valid exact-cap candidate, without truncating representations.
+    refs[-1] = SOURCE
+    old.reference_urls = json.dumps(refs)
+    old.reference_url = refs[0]
+    await invoke()
+    assert len(launch.created_sessions) == 2
+    payload = image_provider_posts[0]
+    inp = payload["params"] if model == "nano-banana-pro" else payload["input"]
+    assert (inp["image_urls"] if model == "nano-banana-pro" else [inp["image_url"]]) == refs
+    assert json.loads(launch.created_sessions[-1].reference_file_ids) == ["extra"]
+    assert json.loads(launch.created_sessions[-1].reference_urls) == refs
+    if protected:
+        assert launch.created_sessions[-1].base_prompt is None
+        if max_refs > 1:
+            assert SECRET not in inp["prompt"]
+
+
+@pytest.mark.parametrize("failure", [None, RuntimeError("synthetic unavailable photo")])
+async def test_explicit_photo_prompt_ref_resolves_before_replacing_series(local_launch, nexus_posts, monkeypatch, failure):
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
+        "old prompt", reference_urls=REFS[:1],
+    )
+    state, data = mutable_state({"generated_prompt": "own new prompt", "p2p_model_key": "nano-banana-pro", "p2p_ref_file_id": "new"})
+    before = dict(data)
+    mirror = AsyncMock(side_effect=failure) if isinstance(failure, Exception) else AsyncMock(return_value=failure)
+    monkeypatch.setattr(image_gen, "_telegram_file_url", mirror)
+    call = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+    repo.archive_active_image_sessions.reset_mock()
+    launch.session.commit.reset_mock()
+    await image_gen.cb_p2p_generate(call, state, launch.session, launch.user, call.bot)
+    assert data == before
+    assert len(launch.created_sessions) == 1
+    assert json.loads(old.reference_urls) == REFS[:1]
+    repo.archive_active_image_sessions.assert_not_awaited()
+    launch.session.commit.assert_not_awaited()
+    repo.charge_image_generation.assert_not_awaited()
+    assert nexus_posts == []
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[1]))
+    await image_gen.cb_p2p_generate(call, state, launch.session, launch.user, call.bot)
+    assert nexus_posts[0]["params"]["image_urls"] == REFS[1:2]
+
+
+@pytest.mark.parametrize("invalid", ["missing", "overflow"])
+async def test_result_action_fallback_clone_rejects_invalid_refs_without_writes(local_launch, monkeypatch, invalid):
+    launch = local_launch
+    source = await repo.create_image_session(
+        launch.session, launch.user.id, "qwen/image-to-image", "image", "9:16", "basic", 1, "own prompt",
+        reference_urls=REFS[:2] if invalid == "overflow" else [], reference_file_ids=["missing"] if invalid == "missing" else [],
+    )
+    launch.generation.model = source.model
+    monkeypatch.setattr(image_gen, "_resolve_image_session", AsyncMock(return_value=(None, None)))
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=source))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=None))
+    state, data = mutable_state({"image_session_id": 123, "ref_file_ids": ["current-photo"]})
+    before = dict(data)
+    call = SimpleNamespace(data="reprompt:image:99", message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+    repo.archive_active_image_sessions.reset_mock()
+    launch.session.commit.reset_mock()
+    await image_gen.cb_reprompt_image(call, launch.session, state, launch.user)
+    assert data == before
+    assert len(launch.created_sessions) == 1
+    repo.archive_active_image_sessions.assert_not_awaited()
+    launch.session.commit.assert_not_awaited()
+
+
+async def test_photo_prompt_active_text_only_model_ignores_unused_stale_photo(local_launch, image_provider_posts, monkeypatch):
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "google/nano-banana", "text", "9:16", "basic", 1, "own prompt",
+    )
+    monkeypatch.setattr(repo, "get_active_image_session", AsyncMock(return_value=old))
+    mirror = AsyncMock(side_effect=AssertionError("Text-only model must not resolve unused photo"))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", mirror)
+    state, _ = mutable_state({"generated_prompt": "own new prompt", "p2p_ref_file_id": "stale-unused"})
+    repo.archive_active_image_sessions.reset_mock()
+    await image_gen.cb_p2p_generate(
+        SimpleNamespace(message=AsyncMock(), answer=AsyncMock()), state, launch.session, launch.user, AsyncMock(),
+    )
+    mirror.assert_not_awaited()
+    assert len(launch.created_sessions) == 1
+    repo.archive_active_image_sessions.assert_not_awaited()
+    assert image_provider_posts[0]["input"]["prompt"] == "own new prompt"
+    assert "image_url" not in image_provider_posts[0]["input"]
+
+
+@pytest.mark.parametrize("entrypoint", ["regen", "feed_again"])
+async def test_text_only_protected_exact_repeat_does_not_count_unconsumed_source(local_launch, image_provider_posts, monkeypatch, entrypoint):
+    from bot.handlers import feed
+
+    launch = local_launch
+    old = await repo.create_image_session(
+        launch.session, launch.user.id, "google/nano-banana", "text", "9:16", "basic", 1, None,
+    )
+    launch.generation.model = old.model
+    launch.generation.image_session_id = old.id
+    launch.generation.prompt = SECRET
+    launch.generation.source_feed_gen_id = 77
+    monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=old))
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(side_effect=lambda _session, gid: launch.source if gid == 77 else launch.generation))
+    call = SimpleNamespace(data="regen:image:99", message=AsyncMock(), answer=AsyncMock(), bot=AsyncMock())
+    state, _ = mutable_state()
+    if entrypoint == "regen":
+        await image_gen.cb_regen_image(call, launch.session, state, launch.user, call.bot)
+    else:
+        call.data = "feed:again:99"
+        await feed.cb_feed_again(call, launch.session, launch.user, state, call.bot)
+    assert len(image_provider_posts) == 1
+    assert "image_url" not in image_provider_posts[0]["input"]
+    assert "image_urls" not in image_provider_posts[0]["input"]
+    assert launch.created_sessions[-1].base_prompt is None
+    assert SECRET not in str(call.message.answer.call_args_list)

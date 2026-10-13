@@ -179,6 +179,7 @@ async def test_repeat_ratio_can_be_changed_before_launch() -> None:
 
 @pytest.mark.asyncio
 async def test_collect_repeat_photos_appends_until_provider_limit(monkeypatch) -> None:
+    monkeypatch.setattr(repeat_references.image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
     monkeypatch.setitem(repeat_references.IMAGE_CAPS, "test/multi-ref", {"max_refs": 3})
     state = FakeState(
         {
