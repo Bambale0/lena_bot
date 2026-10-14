@@ -28,6 +28,14 @@ from db.session import get_session
 
 RID = "d9307625-cff7-4341-8280-5a778154ccef"
 SECRET = "callback-test-secret"
+
+
+@pytest.fixture(autouse=True)
+def image_policy_from_bootstrap(monkeypatch):
+    monkeypatch.setattr(
+        miniapp_routes, "get_image_recovery_policy",
+        AsyncMock(return_value=SimpleNamespace(auto_refund_seconds=3600)),
+    )
 DURABLE = "https://example.test/static/generated/result.png"
 TEMPORARY = "https://provider.test/temporary.png"
 

@@ -71,6 +71,22 @@ def test_timeout_query_includes_video_with_missing_provider_identity():
     query = scheduler._expired_seedance_query()
     sql = str(query.compile(dialect=postgresql.dialect()))
     assert "generations.task_id IS NULL" in sql
+    assert "IS DISTINCT FROM" in sql
+
+
+@pytest.mark.asyncio
+async def test_missing_id_kie_callback_retains_supplier_review_and_web_privacy(monkeypatch):
+    gen = _generation(task_id=None)
+    gen.input_params = '{"kie_video_callback":{"generation_id":9001,"surface":"web"}}'
+    refunds = AsyncMock(return_value=(True, 70.0))
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", _Session)
+    monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=gen))
+    monkeypatch.setattr(scheduler.repo, "fail_generation_and_refund", refunds)
+    assert await scheduler._expire_stuck_seedance_video(gen.id)
+    kwargs = refunds.await_args.kwargs
+    assert kwargs["recovery_task_id"] == "web:kie-submit:9001"
+    assert kwargs["provider_review"]["original_task_id"] == "web:kie-submit:9001"
+    assert kwargs["video_notice_kind"] is None
 
 
 @pytest.mark.asyncio

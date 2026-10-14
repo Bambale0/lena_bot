@@ -484,6 +484,32 @@ class ProviderRoutingAudit(Base):
     )
 
 
+class ImageRecoveryPolicy(Base):
+    """Admin-managed customer refund SLA, scoped to an image provider."""
+
+    __tablename__ = "image_recovery_policies"
+
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    auto_refund_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_by_admin_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class ImageRecoveryPolicyAudit(Base):
+    __tablename__ = "image_recovery_policy_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    previous_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    new_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    changed_by_admin_tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class UserImageModelUnlimited(Base):
     """Админское право на бесплатные генерации конкретной image-моделью."""
 

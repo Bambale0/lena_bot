@@ -14,6 +14,14 @@ from core import provider_routing
 from db.models import GenerationStatus, GenerationType, ProviderRoutingAudit
 
 
+@pytest.fixture(autouse=True)
+def image_policy_from_bootstrap(monkeypatch):
+    monkeypatch.setattr(
+        miniapp_routes, "get_image_recovery_policy",
+        AsyncMock(return_value=SimpleNamespace(auto_refund_seconds=3600)),
+    )
+
+
 @pytest.mark.asyncio
 async def test_route_uses_environment_until_first_admin_edit(monkeypatch):
     session = SimpleNamespace(get=AsyncMock(return_value=None))

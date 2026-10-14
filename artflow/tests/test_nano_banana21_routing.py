@@ -394,6 +394,8 @@ async def test_reconcile_unknown_neironych_image_never_refunds(monkeypatch):
     )
     monkeypatch.setattr(miniapp_routes.neironych_image_adapter, "fetch_nano_banana21_status",
                         AsyncMock(return_value={"status": "reconciliation_required", "result_url": None}))
+    monkeypatch.setattr(miniapp_routes, "get_image_recovery_policy",
+                        AsyncMock(return_value=SimpleNamespace(auto_refund_seconds=3600)))
     refund = AsyncMock(side_effect=AssertionError("must not refund uncertain paid work"))
     monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", refund)
     result = await miniapp_routes._reconcile_generation_status(session=object(), gen=gen)
