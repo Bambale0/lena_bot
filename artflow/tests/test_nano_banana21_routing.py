@@ -469,11 +469,12 @@ def test_nexus_submission_identity_round_trip():
 
 
 @pytest.mark.asyncio
-async def test_nexus_submission_uses_persisted_idempotency_and_classifies_unknown(monkeypatch):
+@pytest.mark.parametrize("http_status", [None, 502])
+async def test_nexus_submission_uses_persisted_idempotency_and_classifies_unknown(monkeypatch, http_status):
     from api.nexusapi_client import NexusApiError
 
     request_id = "d9307625-cff7-4341-8280-5a778154ccef"
-    create = AsyncMock(side_effect=NexusApiError("network error"))
+    create = AsyncMock(side_effect=NexusApiError("network error", status_code=http_status))
     monkeypatch.setattr(
         nexus_image_adapter,
         "NexusApiClient",
@@ -488,6 +489,7 @@ async def test_nexus_submission_uses_persisted_idempotency_and_classifies_unknow
         )
 
     assert error.value.idempotency_key == request_id
+    assert error.value.status_code == http_status
     assert create.await_args.kwargs["idempotency_key"] == request_id
 
 

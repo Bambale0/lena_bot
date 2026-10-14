@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from api import miniapp_routes
+from api import image_http_failure, miniapp_routes, neironych_image_adapter, nexus_image_adapter
 from bot.handlers import image_gen, video_gen
 from bot.utils.feed_media import feed_source_output_id
 from db.models import GenerationType, ImageGenerationAction
@@ -76,6 +76,40 @@ async def test_telegram_repeat_sends_creator_recipe_and_only_reader_photo(image_
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
     assert submitted.args[1] == image_gen.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["neironych", "nexus"])
+async def test_telegram_http_502_refunds_and_shows_failure(image_launch, monkeypatch, provider):
+    image_launch.kwargs["image_session"].model = "nano-banana-2.1"
+    monkeypatch.setattr(
+        image_gen, "get_nano21_route",
+        AsyncMock(return_value=SimpleNamespace(primary_provider=provider)),
+    )
+    async def fail_submit(*args, **kwargs):
+        if provider == "nexus":
+            raise nexus_image_adapter.NexusImageSubmissionUnknown(
+                "HTTP 502", status_code=502, idempotency_key=kwargs["request_id"],
+            )
+        raise neironych_image_adapter.NeironychImageError(
+            "HTTP 502", status_code=502, request_id=kwargs["request_id"],
+        )
+    image_launch.generate.side_effect = fail_submit
+    settlement = AsyncMock(return_value=(True, 4.0))
+    monkeypatch.setattr(image_http_failure.repo, "fail_generation_and_refund", settlement)
+
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is False
+    settlement.assert_awaited_once()
+    assert settlement.await_args.kwargs["refund_note"] == f"image:http_5xx:{provider}"
+    request_id = neironych_image_adapter.client_request_id_for_generation(99)
+    expected = (
+        neironych_image_adapter.encode_task_id(request_id)
+        if provider == "neironych"
+        else nexus_image_adapter.encode_submission_id(request_id)
+    )
+    assert settlement.await_args.kwargs["expected_task_id"] == expected
+    message = image_launch.kwargs["source_message"].answer.return_value
+    assert "Кредиты возвращены" in message.edit_text.await_args.args[0]
 
 
 @pytest.mark.asyncio

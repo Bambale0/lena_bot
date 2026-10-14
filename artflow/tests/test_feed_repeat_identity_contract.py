@@ -13,7 +13,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from api import image_service, miniapp_routes, nexus_image_adapter
+from api import image_service, miniapp_routes, neironych_image_adapter, nexus_image_adapter
 from api.nexusapi_client import NexusApiClient
 from api.repeat_runtime import current_repeat_launch_context
 from bot.handlers import feed, image_gen, repeat_safe
@@ -38,6 +38,57 @@ IDENTITY_RULE = (
     "Do not copy the original subject's face. Use the clearest frontal view of the reader."
 )
 SUFFIX = "\n\nПальто синее 🧥\n\nKeep this line.  \n\t"
+
+
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+@pytest.mark.parametrize("provider", ["neironych", "nexus"])
+async def test_feed_recipe_http_502_refunds_without_second_post(
+    local_launch, wire, monkeypatch, surface, provider,
+):
+    from core.provider_routing import ProviderRoute
+    from db.models import GenerationStatus
+
+    launch = local_launch
+    launch.generation.model = "nano-banana-2.1"
+    launch.source.input_params = {"hidden_prompt": False}
+    monkeypatch.setattr(
+        miniapp_routes, "get_nano21_route",
+        AsyncMock(return_value=ProviderRoute("nano-banana-2.1", provider, "database")),
+    )
+    calls = []
+    async def provider_error(*args, **kwargs):
+        calls.append(kwargs["request_id"])
+        assert kwargs["image_url"] == REFS[0]
+        if provider == "nexus":
+            raise nexus_image_adapter.NexusImageSubmissionUnknown(
+                "HTTP 502", status_code=502, idempotency_key=kwargs["request_id"],
+            )
+        raise neironych_image_adapter.NeironychImageError(
+            "HTTP 502", status_code=502, request_id=kwargs["request_id"],
+        )
+    monkeypatch.setattr(miniapp_routes.image_service, "generate_image", provider_error)
+    async def refund(session, gen_id, error, **kwargs):
+        assert gen_id == launch.generation.id
+        task = (
+            neironych_image_adapter.encode_task_id(calls[0])
+            if provider == "neironych"
+            else nexus_image_adapter.encode_submission_id(calls[0])
+        )
+        assert kwargs["expected_task_id"] == miniapp_routes.task_id_for_surface(task, surface)
+        launch.generation.status = GenerationStatus.failed
+        return True, 4.0
+    settlement = AsyncMock(side_effect=refund)
+    monkeypatch.setattr(repo, "fail_generation_and_refund", settlement)
+
+    result = await miniapp_routes.remix_feed_post(
+        77,
+        miniapp_routes.FeedRemixRequest(model="nano-banana-2.1", image_url=REFS[0]),
+        session=launch.session, user=launch.user, surface=surface,
+    )
+    assert result.status == "failed"
+    assert len(calls) == 1
+    assert settlement.await_args.kwargs["refund_note"] == f"image:http_5xx:{provider}"
+    repo.increment_feed_share.assert_not_awaited()
 
 
 @pytest.fixture

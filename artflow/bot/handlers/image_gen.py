@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, neironych_image_adapter, nexus_image_adapter
 from api.image_errors import telegram_image_error_text
+from api.image_http_failure import is_http_5xx, settle_image_http_5xx
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
 from api.photo_prompt_service import generate_prompt_from_photo
@@ -1542,6 +1543,21 @@ async def _launch_session_generation(
             before_nexus_submit=persist_nexus_submission,
         )
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
+        settlement = await settle_image_http_5xx(
+            session, gen.id, exc, provider="nexus",
+            expected_task_id=nexus_image_adapter.encode_submission_id(exc.idempotency_key),
+        ) if is_http_5xx(exc) else None
+        if settlement is not None:
+            logger.warning("Telegram Nexus image HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
+            if settlement[0]:
+                await status_msg.edit_text(
+                    "❌ Генератор вернул ошибку сервера. Кредиты возвращены.",
+                    reply_markup=image_session_kb(
+                        parent_generation_id, allow_publish=not bool(source_feed_gen_id),
+                    ),
+                )
+                return False
+            return True
         logger.warning(
             "Telegram Nano Banana 2.1 Nexus outcome unknown gen=%s idempotency_key=%s",
             gen.id, exc.idempotency_key,
@@ -1554,7 +1570,21 @@ async def _launch_session_generation(
         )
         return True
     except neironych_image_adapter.NeironychImageError as exc:
-        # A lost HTTP response is not proof that Neironych rejected the paid job.
+        settlement = await settle_image_http_5xx(
+            session, gen.id, exc, provider="neironych",
+            expected_task_id=neironych_image_adapter.encode_task_id(image_request_id),
+        ) if is_http_5xx(exc) and image_request_id else None
+        if settlement is not None:
+            logger.warning("Telegram Neironych image HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
+            if settlement[0]:
+                await status_msg.edit_text(
+                    "❌ Генератор вернул ошибку сервера. Кредиты возвращены.",
+                    reply_markup=image_session_kb(
+                        parent_generation_id, allow_publish=not bool(source_feed_gen_id),
+                    ),
+                )
+                return False
+            return True
         logger.warning("Telegram Nano Banana 2.1 awaiting reconciliation gen=%s request_id=%s",
                        gen.id, exc.request_id)
         await _sync_state_with_image_session(state, image_session)

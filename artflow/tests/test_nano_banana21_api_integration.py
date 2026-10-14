@@ -16,7 +16,8 @@ from main import app
 
 
 @pytest.mark.asyncio
-async def test_miniapp_ambiguous_neironych_submit_preserves_charge_and_correlation(monkeypatch):
+@pytest.mark.parametrize("http_status", [None, 502, 503])
+async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, http_status):
     gen = SimpleNamespace(
         id=8101, user_id=10, model="nano-banana-2.1",
         gen_type=GenerationType.image, prompt="test photo",
@@ -46,10 +47,18 @@ async def test_miniapp_ambiguous_neironych_submit_preserves_charge_and_correlati
         assert gen.task_id == neironych_image_adapter.encode_task_id(rid)
         assert kwargs["primary_provider"] == "neironych"
         raise neironych_image_adapter.NeironychImageError(
-            "response lost", status_code=503, request_id=rid
+            "response lost", status_code=http_status, request_id=rid
         )
 
     refunds = AsyncMock()
+    async def settle_5xx(session, gen_id, error, **kwargs):
+        assert gen_id == gen.id
+        assert kwargs["expected_task_id"] == gen.task_id
+        assert kwargs["refund_note"] == "image:http_5xx:neironych"
+        gen.status = GenerationStatus.failed
+        events.append("atomic_refund")
+        return True, 2.0
+    settlement = AsyncMock(side_effect=settle_5xx)
     monkeypatch.setattr(miniapp_routes, "get_nano21_route",
                         AsyncMock(return_value=ProviderRoute("nano-banana-2.1", "neironych", "database")))
     monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
@@ -63,6 +72,7 @@ async def test_miniapp_ambiguous_neironych_submit_preserves_charge_and_correlati
     monkeypatch.setattr(miniapp_routes.repo, "update_generation_task", save_task)
     monkeypatch.setattr(miniapp_routes.repo, "fail_generation", refunds)
     monkeypatch.setattr(miniapp_routes.repo, "add_credits", refunds)
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", settlement)
     monkeypatch.setattr(miniapp_routes.image_service, "generate_image", ambiguous)
 
     async def stub_session():
@@ -86,14 +96,16 @@ async def test_miniapp_ambiguous_neironych_submit_preserves_charge_and_correlati
         app.dependency_overrides.clear()
 
     assert response.status_code == 202, response.text
-    assert response.json()["status"] == "processing"
-    assert events == ["db_create", "db_save_id", "provider_post"]
+    assert response.json()["status"] == ("failed" if http_status else "processing")
+    assert events == ["db_create", "db_save_id", "provider_post", *(["atomic_refund"] if http_status else [])]
     assert request_ids
     refunds.assert_not_awaited()
+    assert settlement.await_count == (1 if http_status else 0)
 
 
 @pytest.mark.asyncio
-async def test_miniapp_ambiguous_nexus_submit_preserves_charge_and_identity(monkeypatch):
+@pytest.mark.parametrize("http_status", [None, 502, 503])
+async def test_miniapp_nexus_submit_settles_explicit_5xx_only(monkeypatch, http_status):
     from api import nexus_image_adapter
 
     gen = SimpleNamespace(
@@ -124,10 +136,18 @@ async def test_miniapp_ambiguous_nexus_submit_preserves_charge_and_identity(monk
         assert gen.task_id == nexus_image_adapter.encode_submission_id(request_id)
         events.append("provider_post")
         raise nexus_image_adapter.NexusImageSubmissionUnknown(
-            "response lost", idempotency_key=request_id
+            "response lost", idempotency_key=request_id, status_code=http_status,
         )
 
     refunds = AsyncMock()
+    async def settle_5xx(session, gen_id, error, **kwargs):
+        assert gen_id == gen.id
+        assert kwargs["expected_task_id"] == gen.task_id
+        assert kwargs["refund_note"] == "image:http_5xx:nexus"
+        gen.status = GenerationStatus.failed
+        events.append("atomic_refund")
+        return True, 2.0
+    settlement = AsyncMock(side_effect=settle_5xx)
     monkeypatch.setattr(
         miniapp_routes,
         "get_nano21_route",
@@ -150,6 +170,7 @@ async def test_miniapp_ambiguous_nexus_submit_preserves_charge_and_identity(monk
     monkeypatch.setattr(miniapp_routes.repo, "update_generation_task", save_task)
     monkeypatch.setattr(miniapp_routes.repo, "fail_generation", refunds)
     monkeypatch.setattr(miniapp_routes.repo, "add_credits", refunds)
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", settlement)
     monkeypatch.setattr(miniapp_routes.image_service, "generate_image", ambiguous)
 
     session = AsyncMock()
@@ -175,7 +196,8 @@ async def test_miniapp_ambiguous_nexus_submit_preserves_charge_and_identity(monk
         app.dependency_overrides.clear()
 
     assert response.status_code == 202, response.text
-    assert response.json()["status"] == "processing"
-    assert events == ["db_create", "db_save_id", "provider_post"]
+    assert response.json()["status"] == ("failed" if http_status else "processing")
+    assert events == ["db_create", "db_save_id", "provider_post", *(["atomic_refund"] if http_status else [])]
     assert request_ids
     refunds.assert_not_awaited()
+    assert settlement.await_count == (1 if http_status else 0)
