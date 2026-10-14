@@ -113,6 +113,40 @@ async def test_telegram_http_502_refunds_and_shows_failure(image_launch, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_telegram_nexus_pro_502_uses_atomic_refund(image_launch, monkeypatch):
+    image_launch.generate.side_effect = nexus_image_adapter.NexusApiError(
+        "HTTP 502", status_code=502,
+    )
+    settlement = AsyncMock(return_value=(True, 4.0))
+    monkeypatch.setattr(image_http_failure.repo, "fail_generation_and_refund", settlement)
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is False
+    settlement.assert_awaited_once()
+    assert settlement.await_args.kwargs["require_missing_task_id"] is True
+    assert settlement.await_args.kwargs["provider_review_key"] == image_http_failure.repo.IMAGE_REFUND_PROVIDER_REVIEW_KEY
+    assert "Кредиты возвращены" in (
+        image_launch.kwargs["source_message"].answer.return_value.edit_text.await_args.args[0]
+    )
+
+
+@pytest.mark.asyncio
+async def test_telegram_5xx_zero_charge_and_lost_guard_render_actual_state(image_launch, monkeypatch):
+    image_launch.generate.side_effect = nexus_image_adapter.NexusApiError(
+        "HTTP 503", status_code=503,
+    )
+    settlement = AsyncMock(return_value=(True, 0.0))
+    monkeypatch.setattr(image_http_failure.repo, "fail_generation_and_refund", settlement)
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is False
+    message = image_launch.kwargs["source_message"].answer.return_value
+    assert "Кредиты возвращены" not in message.edit_text.await_args.args[0]
+
+    settlement.return_value = (False, 0.0)
+    image_launch.repo.create_generation.return_value.status = "done"
+    message.edit_text.reset_mock()
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is False
+    assert "Результат получен" in message.edit_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_telegram_historic_recipe_uses_only_users_photo(
     image_launch, monkeypatch,
 ):

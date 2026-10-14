@@ -160,6 +160,63 @@ class SupplierReviewResolutionRequest(BaseModel):
     note: str = Field(..., min_length=12, max_length=500)
 
 
+def _unsettled_image_supplier_reviews_query(limit: int):
+    state = func.jsonb_extract_path_text(
+        cast(Generation.input_params, JSONB),
+        repo.IMAGE_REFUND_PROVIDER_REVIEW_KEY, "state",
+    )
+    return (select(
+        Generation.id, Generation.user_id, Generation.model, Generation.input_params,
+    ).where(
+        Generation.status == GenerationStatus.failed,
+        Generation.gen_type == GenerationType.image,
+        state.in_(("pending", "remote_completed_pending_finance", "needs_admin_resolution")),
+    ).order_by(Generation.id.asc()).limit(limit))
+
+
+@router.get("/admin/images/refund-supplier-reviews")
+async def admin_list_unsettled_image_supplier_reviews(
+    limit: int = Query(default=100, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    records = (await session.execute(_unsettled_image_supplier_reviews_query(limit))).all()
+    items = []
+    for gen_id, user_id, model, raw_params in records:
+        marker = repo.parse_input_params(raw_params).get(repo.IMAGE_REFUND_PROVIDER_REVIEW_KEY)
+        if not isinstance(marker, dict):
+            continue
+        items.append({
+            "generation_id": gen_id, "user_id": user_id, "model": model,
+            "provider": marker.get("provider"), "state": marker.get("state"),
+            "original_task_id": marker.get("original_task_id"),
+            "provider_task_id": marker.get("provider_task_id"),
+            "refunded_at": marker.get("refunded_at"),
+            "last_provider_status": marker.get("last_provider_status"),
+        })
+    return ok({"items": items, "count": len(items)})
+
+
+@router.put("/admin/images/refund-supplier-review/{gen_id}")
+async def admin_resolve_refunded_image_supplier_review(
+    gen_id: int, body: SupplierReviewResolutionRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    updated = await repo.resolve_refunded_image_provider_review(
+        session, gen_id, resolution=body.resolution,
+        admin_tg_id=int(user.tg_id), note=body.note,
+    )
+    if not updated:
+        return error_response(409, "No open supplier review for this generation")
+    return ok({"generation_id": gen_id, "review_state": "settled",
+               "customer_balance_unchanged": True})
+
+
 def _unsettled_seedance_supplier_reviews_query(limit: int):
     # Durable, authenticated queue: late completed callbacks may arrive after
     # the scheduler has stopped polling the original refunded generation.

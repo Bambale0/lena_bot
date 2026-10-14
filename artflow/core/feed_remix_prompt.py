@@ -222,6 +222,8 @@ def build_feed_image_recipe_prompt(
             ):
                 if prompt.endswith(old_suffix):
                     prompt = prompt[:-len(old_suffix)]
+                    if prompt.startswith(_IMAGE_RECIPE_RELATIONSHIP_PREFIX + _IMAGE_RECIPE_SCENE_LABEL):
+                        prompt = prompt[len(_IMAGE_RECIPE_RELATIONSHIP_PREFIX + _IMAGE_RECIPE_SCENE_LABEL):]
                     if prompt.startswith(previous_policy_prefix + _IMAGE_RECIPE_SCENE_LABEL):
                         prompt = prompt[len(previous_policy_prefix):]
                     if prompt.startswith(_IMAGE_RECIPE_SCENE_LABEL):
@@ -233,8 +235,8 @@ def build_feed_image_recipe_prompt(
     instruction = identity_instruction.strip()
     return (
         f"{_IMAGE_RECIPE_RELATIONSHIP_PREFIX}"
-        f"{_IMAGE_RECIPE_POLICY_LABEL}{instruction}\n\n"
         f"{_IMAGE_RECIPE_SCENE_LABEL}{prompt}"
+        f"{_IMAGE_RECIPE_POLICY_SUFFIX}{instruction}"
     )
 
 

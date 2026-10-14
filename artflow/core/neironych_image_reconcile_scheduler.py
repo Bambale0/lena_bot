@@ -8,10 +8,14 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from sqlalchemy import or_, select
+from sqlalchemy import cast, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 
+from api import neironych_image_adapter
 from api.nexus_image_adapter import NEXUS_IMAGE_MODEL_MAP
+from core.admin_alerts import send_admin_alert_once
 from core.config import settings
+from db import repository as repo
 from db.models import Generation, GenerationStatus, GenerationType
 from db.session import AsyncSessionLocal
 
@@ -21,6 +25,7 @@ _revisit_id = 0
 _revisit_ceiling = 0
 _forward_ids: set[int] = set()
 _single_revisit_next = False
+_review_last_id = 0
 
 
 def _eligible_query():
@@ -110,13 +115,83 @@ async def reconcile_neironych_images_once(stop: asyncio.Event | None = None) -> 
     return checked
 
 
+async def reconcile_refunded_neironych_images_once(stop: asyncio.Event | None = None) -> int:
+    """Read supplier outcomes after customer 5xx refunds; never retry a paid POST."""
+    global _review_last_id
+    review_state = func.jsonb_extract_path_text(
+        cast(Generation.input_params, JSONB),
+        repo.IMAGE_REFUND_PROVIDER_REVIEW_KEY, "state",
+    )
+    query = select(Generation.id, Generation.task_id).where(
+        Generation.gen_type == GenerationType.image,
+        Generation.status == GenerationStatus.failed,
+        Generation.task_id.like("%neironych-image:%"),
+        review_state == "pending",
+    )
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(
+            query.where(Generation.id > _review_last_id)
+            .order_by(Generation.id.asc())
+            .limit(settings.NEIRONYCH_IMAGE_RECONCILE_BATCH_SIZE)
+        )).all()
+        if not rows and _review_last_id:
+            _review_last_id = 0
+            rows = (await session.execute(
+                query.order_by(Generation.id.asc())
+                .limit(settings.NEIRONYCH_IMAGE_RECONCILE_BATCH_SIZE)
+            )).all()
+        await session.rollback()
+        checked = 0
+        for gen_id, task_id in rows:
+            if stop is not None and stop.is_set():
+                break
+            _review_last_id = gen_id
+            request_id = neironych_image_adapter.decode_task_id(task_id)
+            if not request_id:
+                continue
+            try:
+                state = await neironych_image_adapter.fetch_nano_banana21_status(request_id)
+                provider_state = state["status"]
+                if provider_state not in {"completed", "failed", "timeout", "cancelled"}:
+                    checked += 1
+                    continue
+                succeeded = provider_state == "completed"
+                recorded = await repo.record_late_image_provider_outcome(
+                    session, gen_id, provider="neironych",
+                    provider_task_id=task_id, succeeded=succeeded,
+                )
+                if recorded:
+                    logger.warning(
+                        "Neironych late image outcome recorded gen=%s state=%s",
+                        gen_id, provider_state,
+                    )
+                    try:
+                        await send_admin_alert_once(
+                            alert_key=f"image-late-provider-result:{gen_id}",
+                            title="Изображение: исход провайдера после возврата",
+                            message=f"APIX генерация {gen_id}: Neironych сообщил исход "
+                                    "после возврата. Проверьте расход в admin API.",
+                        )
+                    except Exception as exc:
+                        logger.warning("Image supplier alert deferred gen=%s error=%s",
+                                       gen_id, type(exc).__name__)
+            except Exception:
+                await session.rollback()
+                logger.exception("Refunded image supplier review failed gen=%s", gen_id)
+            checked += 1
+        return checked
+
+
 async def run_neironych_image_reconcile_scheduler(stop: asyncio.Event) -> None:
     logger.info("Nano Banana 2.1 reconciliation scheduler started")
     while not stop.is_set():
         try:
             checked = await reconcile_neironych_images_once(stop)
+            reviewed = await reconcile_refunded_neironych_images_once(stop)
             if checked:
                 logger.info("Nano Banana 2.1 reconciliation checked=%s", checked)
+            if reviewed:
+                logger.info("Refunded Neironych image supplier reviews checked=%s", reviewed)
         except asyncio.CancelledError:
             raise
         except Exception:

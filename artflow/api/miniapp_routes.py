@@ -2935,6 +2935,18 @@ async def create_image_generation(
         )
         await session.refresh(gen)
         return _gen_out(gen)
+    except nexus_image_adapter.NexusApiError as exc:
+        settlement = await settle_image_http_5xx(
+            session, gen.id, exc, provider="nexus",
+        )
+        if settlement is not None:
+            logger.warning("Nexus image HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
+            await session.refresh(gen)
+            return _gen_out(gen)
+        await repo.fail_generation_and_refund(
+            session, gen.id, str(exc), refund_note="image:nexus_error",
+        )
+        raise HTTPException(status_code=502, detail=image_generation_user_error(exc))
     except neironych_image_adapter.NeironychImageError as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="neironych",
@@ -4458,6 +4470,10 @@ async def remix_feed_post(
         if settlement is not None:
             logger.warning("Nexus remix HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
             await session.refresh(gen)
+            if not settlement[0] and gen.status in (
+                GenerationStatus.pending, GenerationStatus.processing, GenerationStatus.done,
+            ):
+                await repo.increment_feed_share(session, gen_id)
             return _gen_out(gen)
         logger.warning(
             "Nexus remix awaiting reconciliation gen=%s idempotency_key=%s",
@@ -4466,6 +4482,22 @@ async def remix_feed_post(
         await repo.increment_feed_share(session, gen_id)
         await session.refresh(gen)
         return _gen_out(gen)
+    except nexus_image_adapter.NexusApiError as exc:
+        settlement = await settle_image_http_5xx(
+            session, gen.id, exc, provider="nexus",
+        )
+        if settlement is not None:
+            logger.warning("Nexus remix HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
+            await session.refresh(gen)
+            if not settlement[0] and gen.status in (
+                GenerationStatus.pending, GenerationStatus.processing, GenerationStatus.done,
+            ):
+                await repo.increment_feed_share(session, gen_id)
+            return _gen_out(gen)
+        await repo.fail_generation_and_refund(
+            session, gen.id, str(exc), refund_note="feed_image_nexus_error",
+        )
+        raise HTTPException(status_code=502, detail="Generation service error")
     except neironych_image_adapter.NeironychImageError as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="neironych",
@@ -4476,6 +4508,10 @@ async def remix_feed_post(
         if settlement is not None:
             logger.warning("Neironych remix HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
             await session.refresh(gen)
+            if not settlement[0] and gen.status in (
+                GenerationStatus.pending, GenerationStatus.processing, GenerationStatus.done,
+            ):
+                await repo.increment_feed_share(session, gen_id)
             return _gen_out(gen)
         logger.warning("Neironych remix awaiting reconciliation gen=%s request_id=%s",
                        gen.id, exc.request_id)

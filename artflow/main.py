@@ -117,6 +117,7 @@ from core.neironych_video_reconcile_scheduler import run_neironych_video_reconci
 from db import repository as repo
 from db.models import (
     Generation,
+    GenerationStatus,
     GenerationType,
     ImageSession,
     PaymentProvider,
@@ -1672,6 +1673,10 @@ async def _recover_nexus_submission(session, request_id: str, task_id: str):
         raise HTTPException(status_code=409, detail="Nexus submission correlation mismatch")
     if not nexus_image_adapter.submission_scope_matches(gen.input_params):
         raise HTTPException(status_code=503, detail="Nexus credential scope requires manual reconciliation")
+    if gen.status == GenerationStatus.failed:
+        # The signed callback can still account for supplier work after the
+        # customer received an immediate 5xx refund.
+        return gen
     bound_task = _web_task_lookup_id(task_id) if is_web_task_id(marker) else task_id
     won = await repo.update_generation_task(
         session, gen.id, bound_task, expected_task_id=marker
@@ -1764,6 +1769,28 @@ async def kie_webhook(
         # review marker for operator reconciliation.
         if gen.status.value in {"done", "failed"}:
             late_outcome = _late_kie_supplier_outcome(payload)
+            if (gen.status.value == "failed" and provider == "nexus"
+                    and nexus_request_id and late_outcome is not None
+                    and gen.gen_type == GenerationType.image):
+                recorded = await repo.record_late_image_provider_outcome(
+                    session, gen.id, provider="nexus",
+                    provider_task_id=lookup_task_id, succeeded=late_outcome,
+                )
+                if recorded:
+                    logger.warning(
+                        "Nexus late image outcome recorded after refund gen=%s state=%s",
+                        gen.id, "done" if late_outcome else "failed",
+                    )
+                    try:
+                        await send_admin_alert_once(
+                            alert_key=f"image-late-provider-result:{gen.id}",
+                            title="Изображение: исход провайдера после возврата",
+                            message=f"APIX генерация {gen.id}: Nexus завершил задачу "
+                                    "после возврата. Проверьте расход в admin API.",
+                        )
+                    except Exception as exc:
+                        logger.warning("Nexus image supplier alert deferred gen=%s error=%s",
+                                       gen.id, type(exc).__name__)
             if (gen.status.value == "failed" and apix_generation_id == gen.id
                     and apix_generation_sig and late_outcome is not None):
                 recorded = await repo.record_late_kie_video_callback(

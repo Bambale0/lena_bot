@@ -92,7 +92,14 @@ from core.feed_remix_prompt import (
 from core.model_pricing import pricing_variant_key
 from core.provider_routing import get_nano21_route
 from db import repository as repo
-from db.models import Generation, GenerationType, ImageGenerationAction, ImageSession, User
+from db.models import (
+    Generation,
+    GenerationStatus,
+    GenerationType,
+    ImageGenerationAction,
+    ImageSession,
+    User,
+)
 
 logger = logging.getLogger(__name__)
 router = Router(name="image_gen")
@@ -1522,6 +1529,35 @@ async def _launch_session_generation(
                 idempotency_key=request_id,
             )
 
+    async def show_http_5xx_settlement(settlement: tuple[bool, float]) -> bool:
+        if settlement[0]:
+            text = "❌ Генератор вернул ошибку сервера."
+            if settlement[1] > 0:
+                text += " Кредиты возвращены."
+            await status_msg.edit_text(
+                text,
+                reply_markup=image_session_kb(
+                    parent_generation_id, allow_publish=not bool(source_feed_gen_id),
+                ),
+            )
+            return False
+        # A signed callback or another reconciler won the guarded transition.
+        await session.refresh(gen)
+        await _sync_state_with_image_session(state, image_session)
+        current = getattr(gen.status, "value", gen.status)
+        if current == GenerationStatus.done.value:
+            text = f"✅ Результат получен. Задача APIX: <code>{gen.id}</code>"
+        elif current == GenerationStatus.failed.value:
+            text = f"❌ Генерация завершилась с ошибкой. Задача APIX: <code>{gen.id}</code>"
+        else:
+            text = (
+                "⏳ Запрос отправлен, уточняем результат у провайдера.\n"
+                f"Задача APIX: <code>{gen.id}</code>\n"
+                "Не запускай её повторно: результат может ещё прийти."
+            )
+        await status_msg.edit_text(text)
+        return current in {GenerationStatus.pending.value, GenerationStatus.processing.value}
+
     try:
         if image_request_id:
             initial_identity = (
@@ -1549,15 +1585,7 @@ async def _launch_session_generation(
         ) if is_http_5xx(exc) else None
         if settlement is not None:
             logger.warning("Telegram Nexus image HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
-            if settlement[0]:
-                await status_msg.edit_text(
-                    "❌ Генератор вернул ошибку сервера. Кредиты возвращены.",
-                    reply_markup=image_session_kb(
-                        parent_generation_id, allow_publish=not bool(source_feed_gen_id),
-                    ),
-                )
-                return False
-            return True
+            return await show_http_5xx_settlement(settlement)
         logger.warning(
             "Telegram Nano Banana 2.1 Nexus outcome unknown gen=%s idempotency_key=%s",
             gen.id, exc.idempotency_key,
@@ -1569,6 +1597,23 @@ async def _launch_session_generation(
             "Не запускай её повторно: результат может ещё прийти."
         )
         return True
+    except nexus_image_adapter.NexusApiError as exc:
+        settlement = await settle_image_http_5xx(
+            session, gen.id, exc, provider="nexus",
+        )
+        if settlement is not None:
+            logger.warning("Telegram Nexus image HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
+            return await show_http_5xx_settlement(settlement)
+        await repo.fail_generation_and_refund(
+            session, gen.id, str(exc), refund_note="bot_image_nexus_error",
+        )
+        await status_msg.edit_text(
+            telegram_image_error_text(exc),
+            reply_markup=image_session_kb(
+                parent_generation_id, allow_publish=not bool(source_feed_gen_id),
+            ),
+        )
+        return False
     except neironych_image_adapter.NeironychImageError as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="neironych",
@@ -1576,15 +1621,7 @@ async def _launch_session_generation(
         ) if is_http_5xx(exc) and image_request_id else None
         if settlement is not None:
             logger.warning("Telegram Neironych image HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
-            if settlement[0]:
-                await status_msg.edit_text(
-                    "❌ Генератор вернул ошибку сервера. Кредиты возвращены.",
-                    reply_markup=image_session_kb(
-                        parent_generation_id, allow_publish=not bool(source_feed_gen_id),
-                    ),
-                )
-                return False
-            return True
+            return await show_http_5xx_settlement(settlement)
         logger.warning("Telegram Nano Banana 2.1 awaiting reconciliation gen=%s request_id=%s",
                        gen.id, exc.request_id)
         await _sync_state_with_image_session(state, image_session)
