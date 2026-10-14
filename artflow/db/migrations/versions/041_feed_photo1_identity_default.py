@@ -16,8 +16,11 @@ DEFAULT_INSTRUCTION = (
     "Match its face shape, eyes, brows, nose, lips, jawline, skin tone, hairline and distinctive details. "
     "If Photo 1 is a collage, use its clearest frontal face and do not reproduce the collage. "
     "Additional user photos may clarify this same person but must not change the identity chosen from Photo 1. "
-    "Use the creator prompt for scene, pose, clothing and lighting; Photo 1 takes priority over any "
-    "conflicting appearance description. Do not blend in another face."
+    "Use the creator prompt for scene, pose, clothing and lighting unless the reader explicitly "
+    "requests a change. The reader's requested changes to clothing, pose, styling, hair color "
+    "and other non-facial details take priority over both the creator prompt and photos. "
+    "Photo 1 takes priority over any conflicting description of facial identity. "
+    "Do not blend in another face."
 )
 
 

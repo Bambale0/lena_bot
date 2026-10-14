@@ -16,6 +16,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from core.feed_recipe_identity_policy import validate_instruction
+from core.feed_remix_prompt import build_feed_image_recipe_prompt
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "db/migrations/versions/041_feed_photo1_identity_default.py"
@@ -37,6 +38,22 @@ def test_photo1_policy_migration_is_current_and_valid():
     instruction = _migration().DEFAULT_INSTRUCTION
     assert validate_instruction(instruction) == instruction
     assert "Photo 1" in instruction and "Additional user photos" in instruction
+    assert "reader's requested changes to clothing, pose, styling, hair color and other non-facial details" in instruction
+    assert "take priority over both the creator prompt and photos" in instruction
+    assert "conflicting description of facial identity" in instruction
+
+
+def test_photo1_default_keeps_explicit_reader_edits():
+    instruction = _migration().DEFAULT_INSTRUCTION
+    change = "blue coat, standing pose and blonde hair"
+    composed = build_feed_image_recipe_prompt(
+        "A person in a red coat, sitting, with dark hair.",
+        change,
+        identity_instruction=instruction,
+    )
+    assert composed.index(change) < composed.index("Фото 1 — лицо")
+    assert "reader's requested changes to clothing, pose, styling, hair color and other non-facial details" in composed
+    assert "take priority over both the creator prompt and photos" in composed
 
 
 def _exercise_migration(connection):
