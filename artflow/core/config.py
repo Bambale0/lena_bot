@@ -186,6 +186,8 @@ class Settings(BaseSettings):
     COMET_VIDEO_PROMPT_FPS: float = Field(default=2.0, ge=0.1, le=10.0)
 
     # Feature flags
+    # Restore pre-2026-10-09 photo-feed repeat semantics. Reversible via env.
+    FEED_ORIGINAL_RECIPE_ENABLED: bool = True
     SUBSCRIPTION_ENABLED: bool = False
     TELEGRAM_STARS_ENABLED: bool = False
     REFERRAL_FREEZE: bool = False

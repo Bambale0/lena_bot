@@ -33,3 +33,11 @@ test("a video rendered from creator photo must not demand video-input support", 
   assert.equal(feedUserReferenceCapacity({ max_refs: 4, supports_video_input: false }, true, false), 4);
   assert.equal(feedUserReferenceCapacity({ max_refs: 1, supports_video_input: false }, true, false), 1);
 });
+
+
+test("historical image recipe uses every supported slot for reader photos", () => {
+  assert.equal(feedUserReferenceCapacity({ max_refs: 4 }, false, false, true), 4);
+  assert.equal(feedUserReferenceCapacity({ max_refs: 1 }, false, false, true), 1);
+  assert.equal(feedUserReferenceCapacity({ max_refs: 4 }, false, false, false), 3);
+  assert.equal(feedUserReferenceCapacity({ max_refs: 4 }, true, true, true), 0);
+});

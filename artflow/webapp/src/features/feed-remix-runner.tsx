@@ -199,6 +199,7 @@ function FeedRemixRunnerPortal() {
   const sourcePreview = sourceSelectionMissing ? "" : safeExternalUrl(sourceMediaUrl) || safeExternalUrl(firstMedia(item || {}));
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
   const creatorRecipeReplay = sourceIsVideo && typeof item?.source_has_video_reference === "boolean";
+  const originalImageRecipe = Boolean(!sourceIsVideo && bucket === "image" && item?.source_image_recipe_available);
   const needsOriginalVideo = sourceIsVideo && item?.source_has_video_reference !== false;
   const creatorTextOnly = Boolean(
     creatorRecipeReplay && selectedModel && !needsOriginalVideo
@@ -206,7 +207,9 @@ function FeedRemixRunnerPortal() {
     && !selectedModel.modes?.includes("multimodal")
     && selectedModel.modes?.includes("text"),
   );
-  const userReferenceLimit = feedUserReferenceCapacity(selectedModel, sourceIsVideo, needsOriginalVideo);
+  const userReferenceLimit = feedUserReferenceCapacity(
+    selectedModel, sourceIsVideo, needsOriginalVideo, originalImageRecipe,
+  );
   const referencesOverLimit = references.length > userReferenceLimit;
   const referenceLimitMessage = creatorTextOnly
     ? "Автор создал ролик без фото — эта модель принимает только текст. Повтор сохраняет исходный промпт."
@@ -214,7 +217,9 @@ function FeedRemixRunnerPortal() {
     ? `Загрузи своё фото (до ${userReferenceLimit}). ${needsOriginalVideo ? "Будет использован только исходный видео-референс автора." : "Готовое видео автора не будет отправлено модели."}`
     : sourceIsVideo
       ? `Для этой модели можно добавить своих фото: ${userReferenceLimit}. Нужна поддержка исходного видео.`
-      : `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`;
+      : originalImageRecipe
+        ? `Повтор по исходному рецепту автора. Можно добавить своих фото: ${userReferenceLimit}. Готовое изображение автора не отправляется модели.`
+        : `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`;
   const aspectRatios = modelAspectRatios(selectedModel);
   const durations = modelDurations(selectedModel);
   const durationIndex = Math.max(0, durations.indexOf(duration));
@@ -284,8 +289,10 @@ function FeedRemixRunnerPortal() {
     setPaymentBusy(false);
     setModelKey(sourceHasRecipe ? nextItem.model : draft?.modelKey || nextItem?.model || "");
     setMode(sourceHasRecipe ? "image" : draft?.mode || (nextItem && itemLooksVideo(nextItem) ? "text" : "image"));
-    setAspectRatio(sourceHasRecipe ? nextItem.original_aspect_ratio || "9:16" : draft?.aspectRatio || nextItem?.aspect_ratio || "1:1");
-    setQuality(draft?.quality || "basic");
+    setAspectRatio(sourceHasRecipe ? nextItem.original_aspect_ratio || "9:16" :
+      draft?.aspectRatio || (nextItem?.source_image_recipe_available ? nextItem.original_aspect_ratio : null)
+      || nextItem?.aspect_ratio || "1:1");
+    setQuality(draft?.quality || (nextItem?.source_image_recipe_available ? nextItem.original_image_quality : null) || "basic");
     setCount(draft?.count || 1);
     setDuration(sourceHasRecipe ? nextItem.original_duration || 5 : draft?.duration || 5);
     setResolution(sourceHasRecipe ? nextItem.original_resolution || "720p" : draft?.resolution || "720p");
@@ -812,7 +819,7 @@ function FeedRemixRunnerPortal() {
             Модель
             <select className="min-h-11 rounded-xl border border-input bg-background px-3 text-sm" value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={busy || modelsLoading || creatorRecipeReplay}>
               {modelsLoading ? <option>Загружаем модели…</option> : null}
-              {imageModels.length && !creatorRecipeReplay ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo)}>{model.display_name}</option>)}</optgroup> : null}
+              {imageModels.length && !creatorRecipeReplay ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo, Boolean(!sourceIsVideo && item?.source_image_recipe_available))}>{model.display_name}</option>)}</optgroup> : null}
               {videoModels.length ? <optgroup label="Видео">{videoModels.map((model) => <option key={model.key} value={model.key} disabled={(creatorRecipeReplay && model.key !== item.model) || references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo)}>{model.display_name}</option>)}</optgroup> : null}
             </select>
           </label>

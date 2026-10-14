@@ -47,7 +47,8 @@ async def test_deep_link_feed_lookup_uses_list_representation_for_quote(client, 
     body = miniapp_routes.FeedRemixRequest(
         model="nano-banana-2", image_url=selected_preview, source_image_url=selected_preview,
     )
-    prompt, refs, _, personalized, own_recipe = miniapp_routes._prepare_feed_remix_inputs(source, body)
+    prompt, refs, _, personalized, own_recipe, original_recipe_replay = miniapp_routes._prepare_feed_remix_inputs(source, body)
+    assert original_recipe_replay is False
     assert refs == ["https://public.example/second.jpg"]
     assert prompt == "private creator prompt"
     assert personalized is False

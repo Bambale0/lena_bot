@@ -32,7 +32,10 @@ from bot.utils.telegram_images import (
     send_image_to_message,
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from core.config import settings
 from core.feed_remix_prompt import (
+    feed_image_original_recipe_allowed,
+    feed_image_recipe_source_parameters,
     original_feed_video_inputs,
     original_feed_video_references,
     owned_generation_prompt_is_visible,
@@ -470,18 +473,33 @@ async def cb_feed_use(
         await safe_answer_callback(call)
         return
 
+    original_recipe = gen.model in IMAGE_CAPS and feed_image_original_recipe_allowed(
+        gen, user_id=db_user.id, model_key=gen.model,
+        enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
+    )
+    creator = feed_image_recipe_source_parameters(gen) if original_recipe else {}
     await state.set_state(PromptUseFSM.model_select)
     await state.update_data(
         feed_use_gen_id=gen_id,
         feed_use_prompt=gen.prompt,
         feed_use_model=gen.model,
         feed_use_gen_type="image",
+        feed_original_recipe_replay=original_recipe,
+        feed_use_user_id=db_user.id,
+        **({"prompt_multi_ref_ratio": creator["aspect_ratio"]} if original_recipe and creator["aspect_ratio"] else {}),
     )
     await call.message.answer(  # type: ignore[union-attr]
         "🎨 <b>Повторить изображение</b>\n\n"
-        "Выбери модель для работы по фото. Потом загрузи свой референс — "
-        "повтор создадим по опубликованному изображению. Оно занимает один слот референса.",
-        reply_markup=prompt_use_model_kb(gen_id, model_costs, reference_only=True, reserved_refs=1),
+        + (
+            "Выбери модель и загрузи свои фотографии. "
+            "Для повтора используем исходный рецепт автора, но не его готовую картинку."
+            if original_recipe else
+            "Выбери модель для работы по фото. Потом загрузи свой референс — "
+            "повтор создадим по опубликованному изображению. Оно занимает один слот референса."
+        ),
+        reply_markup=prompt_use_model_kb(
+            gen_id, model_costs, reference_only=True, reserved_refs=0 if original_recipe else 1,
+        ),
     )
     await safe_answer_callback(call)
 
