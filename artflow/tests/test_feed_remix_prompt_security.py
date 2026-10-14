@@ -97,7 +97,7 @@ async def test_telegram_historic_recipe_uses_only_users_photo(
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
     assert image_launch.source.prompt in submitted.args[1]
-    assert submitted.args[1] == image_launch.source.prompt
+    assert submitted.args[1] == prompt_core.build_feed_image_recipe_prompt(image_launch.source.prompt)
     assert submitted.kwargs["aspect_ratio"] == "2:3"
     created = image_launch.repo.create_generation.await_args
     assert created.kwargs["source_feed_gen_id"] == 77
@@ -105,6 +105,28 @@ async def test_telegram_historic_recipe_uses_only_users_photo(
     assert context["version"] == 4
     assert "prompt" not in context  # Do not repeat creator text in provenance.
     assert image_launch.kwargs["image_session"].last_prompt is None
+
+
+@pytest.mark.asyncio
+async def test_bot_nano21_recipe_payload_uses_reader_face_without_creator_photo(
+    image_launch, monkeypatch,
+):
+    from api.neironych_image_adapter import build_nano_banana21_payload
+    from core import feed_remix_prompt as prompt_core
+
+    monkeypatch.setattr(image_gen.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    image_launch.kwargs["image_session"].model = "nano-banana-2.1"
+    image_launch.source.model = "nano-banana-pro"
+    image_launch.source.input_params = {"reference_images": [SOURCE_IMAGE]}
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
+    submitted = image_launch.generate.await_args
+    payload = build_nano_banana21_payload(
+        prompt=submitted.args[1], image_urls=[submitted.kwargs["image_url"]],
+        aspect_ratio="1:1", quality="2K",
+    )
+    assert payload["images"] == [{"image_url": USER_IMAGE}]
+    assert payload["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET)
+    assert "EXCLUSIVE source of the subject's face" in payload["prompt"]
 
 
 

@@ -68,6 +68,7 @@ from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
     build_feed_image_prompt,
+    build_feed_image_recipe_prompt,
     build_owned_feed_image_prompt,
     feed_image_original_recipe_allowed,
     feed_image_recipe_context,
@@ -1271,10 +1272,9 @@ async def _launch_session_generation(
             inherited = trusted_feed_image_recipe_prompt(
                 previous, user_id=db_user.id, source_generation_id=source.id,
             )
-            prompt = inherited or str(source.prompt or "").strip()
-            if feed_change_request:
-                prompt += "\n\n" + feed_change_request.strip()
-            prompt = prompt.strip()
+            prompt = build_feed_image_recipe_prompt(
+                inherited or str(source.prompt or ""), feed_change_request or "",
+            )
             state_data = await state.get_data()
             explicitly_selected = isinstance(state_data, dict) and (
                 "repeat_aspect_ratio" in state_data or "aspect_ratio_explicit" in state_data

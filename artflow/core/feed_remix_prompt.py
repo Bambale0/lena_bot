@@ -31,6 +31,15 @@ FEED_REMIX_CONTEXT_VERSION = 2
 FEED_IMAGE_REMIX_CONTEXT_VERSION = 3
 FEED_IMAGE_RECIPE_CONTEXT_VERSION = 4
 
+_RECIPE_READER_IDENTITY_INSTRUCTION = (
+    "The supplied reference photos are the EXCLUSIVE source of the subject's face and identity. "
+    "If they show multiple views or a collage, use the clearest frontal face as the identity anchor "
+    "and the other views only to confirm the same person's features. Preserve that person's face shape, "
+    "eyes, eyebrows, nose, lips, jawline, skin tone and distinctive facial details in the finished portrait. "
+    "Apply the scene, clothing, pose, lighting and artistic style described above to this person. "
+    "Do not copy the original subject's face, invent a different face, blend identities or output a collage."
+)
+
 _IMAGE_IDENTITY_ROLES = (
     "All images preceding the final image are the user's identity references. "
     "Use ALL of them as the EXCLUSIVE source of the user's face and identity. "
@@ -154,6 +163,20 @@ def feed_image_recipe_source_parameters(source) -> dict:
         "original_urls": [str(url) for url in original_refs if isinstance(url, str)]
         if isinstance(original_refs, list) else [],
     }
+
+
+def build_feed_image_recipe_prompt(source_prompt: str, change_request: str = "") -> str:
+    """Keep the creator's recipe while assigning facial identity to reader media."""
+    prompt = str(source_prompt or "").strip()
+    # A saved v4 recipe may already end with this instruction. Retain all
+    # creator text and previous edits when placing it after the next edit.
+    suffix = f"\n\n{_RECIPE_READER_IDENTITY_INSTRUCTION}"
+    if prompt.endswith(suffix):
+        prompt = prompt[:-len(suffix)]
+    change = str(change_request or "").strip()
+    if change:
+        prompt = f"{prompt}\n\nИзменения, которые запросил пользователь для повтора: {change}"
+    return f"{prompt}{suffix}"
 
 
 def feed_image_recipe_context(source_generation_id: int, prompt: str) -> dict:

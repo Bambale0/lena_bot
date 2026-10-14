@@ -147,6 +147,18 @@ def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback
     ) is None
 
 
+def test_creator_recipe_prioritizes_reader_face_and_does_not_duplicate_instruction():
+    creator = "Gothic black-and-white portrait of a witch with dark hair."
+    composed = prompt_core.build_feed_image_recipe_prompt(creator)
+    assert composed.startswith(creator)
+    assert "EXCLUSIVE source of the subject's face" in composed
+    assert "Do not copy the original subject's face" in composed
+    assert prompt_core.build_feed_image_recipe_prompt(composed) == composed
+    edited = prompt_core.build_feed_image_recipe_prompt(composed, "blue cloak")
+    assert edited.count("EXCLUSIVE source of the subject's face") == 1
+    assert "blue cloak" in edited
+
+
 
 @pytest.mark.parametrize("surface", ["web", "miniapp"])
 @pytest.mark.parametrize("model", MODELS)
@@ -175,7 +187,7 @@ async def test_ksu_style_feed_recipe_replaces_author_refs_and_preserves_settings
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0]]  # Author output and original input excluded.
     assert source.prompt in params["prompt"]
-    assert params["prompt"] == source.prompt
+    assert params["prompt"] == prompt_core.build_feed_image_recipe_prompt(source.prompt)
     assert params["aspect_ratio"] == "2:3"
     assert params["image_size"] == "2K"
     args = repo.create_generation.await_args
@@ -200,7 +212,10 @@ async def test_historic_recipe_rollout_can_be_disabled_without_breaking_legacy(
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == ([REFS[0]] if enabled else [SOURCE, REFS[0]])
-    assert params["prompt"] == (SECRET if enabled else prompt_core._LEGACY_SOURCE_FIRST_PROMPT)
+    assert params["prompt"] == (
+        prompt_core.build_feed_image_recipe_prompt(SECRET) if enabled
+        else prompt_core._LEGACY_SOURCE_FIRST_PROMPT
+    )
 
 
 async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_response(
@@ -213,7 +228,7 @@ async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_resp
         session=local_launch.session, user=local_launch.user,
     )
     assert wire[0]["body"]["params"]["image_urls"] == [REFS[0]]
-    assert wire[0]["body"]["params"]["prompt"] == SECRET
+    assert wire[0]["body"]["params"]["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET)
     assert SECRET not in str(result)
     assert result.prompt_hidden is True
     assert local_launch.created_sessions[-1].base_prompt is None
