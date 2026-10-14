@@ -22,8 +22,8 @@ NEXUS_SUBMISSION_PREFIX = "nexus-submit:"
 class NexusImageSubmissionUnknown(NexusApiError):
     """Nexus may have accepted a paid POST but no task id was returned."""
 
-    def __init__(self, message: str, *, idempotency_key: str) -> None:
-        super().__init__(message)
+    def __init__(self, message: str, *, idempotency_key: str, status_code: int | None = None) -> None:
+        super().__init__(message, status_code=status_code)
         self.idempotency_key = idempotency_key
 
 
@@ -336,7 +336,7 @@ async def create_nexus_image_task(
         ):
             raise NexusImageSubmissionUnknown(
                 "Nexus submission outcome unknown; do not refund or resubmit with a new key",
-                idempotency_key=persisted_key,
+                idempotency_key=persisted_key, status_code=status,
             ) from exc
         raise
     return prefix_nexus_task_id(result.task_id)

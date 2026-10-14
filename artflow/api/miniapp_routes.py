@@ -37,6 +37,7 @@ from api import (
 )
 from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
 from api.image_errors import image_generation_user_error
+from api.image_http_failure import is_http_5xx, settle_image_http_5xx
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_webhook import extract_error, extract_status
 from api.kieai_client import KieSubmissionOutcomeUnknown
@@ -2918,6 +2919,16 @@ async def create_image_generation(
             before_nexus_submit=persist_nexus_submission,
         )
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
+        settlement = await settle_image_http_5xx(
+            session, gen.id, exc, provider="nexus",
+            expected_task_id=task_id_for_surface(
+                nexus_image_adapter.encode_submission_id(exc.idempotency_key), surface,
+            ),
+        ) if is_http_5xx(exc) else None
+        if settlement is not None:
+            logger.warning("Nexus image HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
+            await session.refresh(gen)
+            return _gen_out(gen)
         logger.warning(
             "Nexus image awaiting reconciliation gen=%s idempotency_key=%s",
             gen.id, exc.idempotency_key,
@@ -2925,8 +2936,16 @@ async def create_image_generation(
         await session.refresh(gen)
         return _gen_out(gen)
     except neironych_image_adapter.NeironychImageError as exc:
-        # Provider may have accepted and charged the POST before the response was lost.
-        # Never refund or submit another task while its outcome is unknown.
+        settlement = await settle_image_http_5xx(
+            session, gen.id, exc, provider="neironych",
+            expected_task_id=task_id_for_surface(
+                neironych_image_adapter.encode_task_id(image_request_id), surface,
+            ),
+        ) if is_http_5xx(exc) and image_request_id else None
+        if settlement is not None:
+            logger.warning("Neironych image HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
+            await session.refresh(gen)
+            return _gen_out(gen)
         logger.warning("Neironych image awaiting reconciliation gen=%s request_id=%s status=%s",
                        gen.id, exc.request_id, exc.status_code)
         await session.refresh(gen)
@@ -4430,6 +4449,16 @@ async def remix_feed_post(
         await session.refresh(gen)
         return _gen_out(gen)
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
+        settlement = await settle_image_http_5xx(
+            session, gen.id, exc, provider="nexus",
+            expected_task_id=task_id_for_surface(
+                nexus_image_adapter.encode_submission_id(exc.idempotency_key), surface,
+            ),
+        ) if is_http_5xx(exc) else None
+        if settlement is not None:
+            logger.warning("Nexus remix HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
+            await session.refresh(gen)
+            return _gen_out(gen)
         logger.warning(
             "Nexus remix awaiting reconciliation gen=%s idempotency_key=%s",
             gen.id, exc.idempotency_key,
@@ -4438,6 +4467,16 @@ async def remix_feed_post(
         await session.refresh(gen)
         return _gen_out(gen)
     except neironych_image_adapter.NeironychImageError as exc:
+        settlement = await settle_image_http_5xx(
+            session, gen.id, exc, provider="neironych",
+            expected_task_id=task_id_for_surface(
+                neironych_image_adapter.encode_task_id(image_request_id), surface,
+            ),
+        ) if is_http_5xx(exc) and image_request_id else None
+        if settlement is not None:
+            logger.warning("Neironych remix HTTP 5xx settled gen=%s refunded=%s", gen.id, settlement[1])
+            await session.refresh(gen)
+            return _gen_out(gen)
         logger.warning("Neironych remix awaiting reconciliation gen=%s request_id=%s",
                        gen.id, exc.request_id)
         await repo.increment_feed_share(session, gen_id)
