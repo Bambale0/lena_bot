@@ -510,6 +510,31 @@ class ImageRecoveryPolicyAudit(Base):
     )
 
 
+class FeedRecipeIdentityPolicy(Base):
+    """Admin-managed identity instruction for public image recipe repeats."""
+
+    __tablename__ = "feed_recipe_identity_policy"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by_admin_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FeedRecipeIdentityPolicyAudit(Base):
+    __tablename__ = "feed_recipe_identity_policy_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    previous_instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    new_instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    changed_by_admin_tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class UserImageModelUnlimited(Base):
     """Админское право на бесплатные генерации конкретной image-моделью."""
 

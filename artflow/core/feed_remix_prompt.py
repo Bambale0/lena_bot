@@ -176,26 +176,34 @@ def feed_image_recipe_source_parameters(source) -> dict:
     }
 
 
-def feed_image_recipe_context(source_generation_id: int, prompt: str) -> dict:
+def build_feed_image_recipe_prompt(
+    source_prompt: str, identity_instruction: str, change_request: str = "",
+    *, previous_instruction: str | None = None,
+) -> str:
+    """Keep the creator's recipe while assigning facial identity to reader media."""
+    prompt = str(source_prompt or "").strip()
+    if prompt.startswith(_IMAGE_RECIPE_SCENE_PREFIX) and _IMAGE_RECIPE_IDENTITY_MARKER in prompt:
+        prompt = prompt[len(_IMAGE_RECIPE_SCENE_PREFIX):].rsplit(_IMAGE_RECIPE_IDENTITY_MARKER, 1)[0]
+    if previous_instruction:
+        old_suffix = f"\n\n{previous_instruction.strip()}"
+        if prompt.endswith(old_suffix):
+            prompt = prompt[:-len(old_suffix)]
+    change = str(change_request or "").strip()
+    if change:
+        prompt = f"{prompt}\n\nИзменения, которые запросил пользователь для повтора: {change}"
+    return f"{prompt}\n\n{identity_instruction.strip()}"
+
+
+def feed_image_recipe_context(
+    source_generation_id: int, prompt: str, identity_instruction: str | None = None,
+) -> dict:
     """Store an authenticated provenance digest; never duplicate secret text."""
     return {
         "version": FEED_IMAGE_RECIPE_CONTEXT_VERSION,
         "source_generation_id": source_generation_id,
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        **({"identity_instruction": identity_instruction} if identity_instruction else {}),
     }
-
-
-def build_feed_image_recipe_prompt(creator_prompt: str, change_request: str = "") -> str:
-    """Keep the creator's scene while making the reader reference authoritative for identity."""
-    scene = str(creator_prompt or "").strip()
-    if scene.startswith(_IMAGE_RECIPE_SCENE_PREFIX) and _IMAGE_RECIPE_IDENTITY_MARKER in scene:
-        # The stable policy marker lets trusted continuations unwrap previous
-        # policy wording without nesting conflicting instructions.
-        scene = scene[len(_IMAGE_RECIPE_SCENE_PREFIX):].rsplit(_IMAGE_RECIPE_IDENTITY_MARKER, 1)[0]
-    change = str(change_request or "").strip()
-    if change:
-        scene += "\n\nReader's requested scene changes:\n" + change
-    return _IMAGE_RECIPE_SCENE_PREFIX + scene + _IMAGE_RECIPE_IDENTITY_PRIORITY
 
 
 def build_feed_image_prompt(
@@ -458,6 +466,23 @@ def trusted_feed_image_recipe_prompt(
     if context is None or context["version"] != FEED_IMAGE_RECIPE_CONTEXT_VERSION:
         return None
     return generation.prompt
+
+
+def trusted_feed_image_recipe_instruction(
+    generation, *, user_id: int, source_generation_id: int,
+) -> str | None:
+    """Return only the admin text bound to an authenticated saved recipe."""
+    context = _trusted_feed_context(
+        generation, user_id=user_id, source_generation_id=source_generation_id,
+    )
+    if context is None or context["version"] != FEED_IMAGE_RECIPE_CONTEXT_VERSION:
+        return None
+    instruction = context.get("identity_instruction")
+    prompt = getattr(generation, "prompt", None)
+    if (not isinstance(instruction, str) or not instruction.strip()
+            or not isinstance(prompt, str) or not prompt.endswith(f"\n\n{instruction}")):
+        return None
+    return instruction
 
 
 def trusted_feed_image_scene(

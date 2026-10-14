@@ -218,7 +218,7 @@ function FeedRemixRunnerPortal() {
     : sourceIsVideo
       ? `Для этой модели можно добавить своих фото: ${userReferenceLimit}. Нужна поддержка исходного видео.`
       : originalImageRecipe
-        ? `Повтор по исходному рецепту автора. Можно добавить своих фото: ${userReferenceLimit}. Готовое изображение автора не отправляется модели.`
+        ? `Повтор по исходному рецепту автора: лицо возьмём с твоих фото (до ${userReferenceLimit}). Готовое изображение автора не отправляется модели.`
         : `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`;
   const aspectRatios = modelAspectRatios(selectedModel);
   const durations = modelDurations(selectedModel);

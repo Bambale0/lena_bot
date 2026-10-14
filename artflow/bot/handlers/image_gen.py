@@ -64,6 +64,7 @@ from bot.utils.telegram_images import (
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.feed_recipe_identity_policy import get_feed_recipe_identity_instruction
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
@@ -80,6 +81,7 @@ from core.feed_remix_prompt import (
     order_feed_image_references,
     owned_generation_prompt_is_visible,
     trusted_feed_image_prompt,
+    trusted_feed_image_recipe_instruction,
     trusted_feed_image_recipe_prompt,
     trusted_feed_image_scene,
 )
@@ -1272,8 +1274,13 @@ async def _launch_session_generation(
             inherited = trusted_feed_image_recipe_prompt(
                 previous, user_id=db_user.id, source_generation_id=source.id,
             )
+            previous_instruction = trusted_feed_image_recipe_instruction(
+                previous, user_id=db_user.id, source_generation_id=source.id,
+            )
+            recipe_identity_instruction = await get_feed_recipe_identity_instruction(session)
             prompt = build_feed_image_recipe_prompt(
-                inherited or source.prompt, feed_change_request or "",
+                inherited or str(source.prompt or ""), recipe_identity_instruction,
+                feed_change_request or "", previous_instruction=previous_instruction,
             )
             state_data = await state.get_data()
             explicitly_selected = isinstance(state_data, dict) and (
@@ -1285,7 +1292,9 @@ async def _launch_session_generation(
                 image_session.quality = creator["quality"]
             refs = identity_refs
             feed_context = {
-                FEED_REMIX_CONTEXT_KEY: feed_image_recipe_context(source.id, prompt),
+                FEED_REMIX_CONTEXT_KEY: feed_image_recipe_context(
+                    source.id, prompt, recipe_identity_instruction,
+                ),
             }
             logger.info(
                 "feed_photo_recipe_bot source_gen=%s user=%s model=%s identity_refs=%s",

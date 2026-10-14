@@ -103,6 +103,7 @@ from bot.utils.telegram_images import (
     send_original_document_to_chat,
 )
 from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
+from core.feed_recipe_identity_policy import get_feed_recipe_identity_instruction
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
@@ -3826,7 +3827,9 @@ def _prepare_feed_remix_inputs(
         if original_recipe_replay:
             # Creator's scene recipe with the reader's identity as the priority.
             # The finished author image is *not* a provider reference.
-            prompt = build_feed_image_recipe_prompt(source.prompt, body.change_request)
+            prompt = str(source.prompt or "").strip()
+            if body.change_request.strip():
+                prompt += "\n\nИзменения, которые запросил пользователь для повтора: " + body.change_request.strip()
         elif image_repeat and own_recipe:
             if identity_refs and not supports_feed_source_media(caps, "image"):
                 raise FeedRemixUnavailable("Модель не поддерживает фото-референсы.")
@@ -3938,7 +3941,12 @@ async def quote_feed_remix(
     if source is None:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
-    repeat_prompt, repeat_refs, body, _, _, _ = _prepare_feed_remix_inputs(source, body, user_id=user.id)
+    repeat_prompt, repeat_refs, body, _, _, original_recipe_replay = _prepare_feed_remix_inputs(
+        source, body, user_id=user.id,
+    )
+    if original_recipe_replay:
+        instruction = await get_feed_recipe_identity_instruction(session)
+        repeat_prompt = build_feed_image_recipe_prompt(repeat_prompt, instruction)
     gen_type: str
     count = 1
     edit_quote = {}
@@ -4059,14 +4067,17 @@ async def remix_feed_post(
     repeat_prompt, repeat_refs, body, personalized, own_recipe, original_recipe_replay = _prepare_feed_remix_inputs(
         source, body, user_id=user.id,
     )
+    recipe_identity_instruction = None
     if original_recipe_replay:
+        recipe_identity_instruction = await get_feed_recipe_identity_instruction(session)
+        repeat_prompt = build_feed_image_recipe_prompt(repeat_prompt, recipe_identity_instruction)
         logger.info(
             "feed_original_recipe_submit source_gen=%s user=%s model=%s references=%s",
             gen_id, user.id, body.model, len(repeat_refs),
         )
     feed_context = (
         {FEED_REMIX_CONTEXT_KEY: (
-            feed_image_recipe_context(gen_id, repeat_prompt) if original_recipe_replay else
+            feed_image_recipe_context(gen_id, repeat_prompt, recipe_identity_instruction) if original_recipe_replay else
             feed_image_remix_context(
                 gen_id, repeat_prompt,
                 source_image_url=(
