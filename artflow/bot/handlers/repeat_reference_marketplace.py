@@ -107,16 +107,15 @@ def _text(data: dict[str, Any]) -> str:
     max_refs = int(data.get("prompt_multi_ref_max") or 1)
     feed_repeat = data.get("feed_use_prompt") is not None
     title = "🔁 <b>Повтор из ленты</b>" if feed_repeat else "🎨 <b>Генерация по промпту</b>"
-    note = (
-        (
-            "Повторим исходный рецепт автора, а лицо возьмём с твоих фото; "
-            "готовое изображение автора не отправляем."
-            if data.get("feed_original_recipe_replay")
-            else "Повтор создадим по опубликованному изображению. Оно занимает ещё один слот референса. Добавь свои фото."
+    if feed_repeat:
+        note = "" if data.get("feed_original_recipe_replay") else (
+            "Повтор создадим по опубликованному изображению. Оно занимает ещё один слот референса. Добавь свои фото."
         )
-        if feed_repeat
-        else "Добавь фото для лица, объекта, стиля или композиции."
-    )
+    else:
+        note = "Добавь фото для лица, объекта, стиля или композиции."
+    footer = f"\n\n{note}" if note else ""
+    if not feed_repeat:
+        footer += "\nМожно отправлять фото по одному или альбомом. Генерация начнётся только после кнопки запуска."
     model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
     ratio = str(data.get("prompt_multi_ref_ratio") or "авто")
     return (
@@ -124,9 +123,7 @@ def _text(data: dict[str, Any]) -> str:
         f"Референсы: <b>{uploaded}/{max_refs}</b>\n\n"
         f"Режим: <b>Фото → фото</b>\n"
         f"Формат: <b>{ratio}</b>\n"
-        f"Нейросеть: <b>{image_gen.get_image_model_label(model_key)}</b>\n\n"
-        f"{note}\n"
-        "Можно отправлять фото по одному или альбомом. Генерация начнётся только после кнопки запуска."
+        f"Нейросеть: <b>{image_gen.get_image_model_label(model_key)}</b>{footer}"
     )
 
 
