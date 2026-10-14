@@ -130,7 +130,8 @@ test("runner open event restores selected source and explicit selection wins bef
   cleanups = effects.map(effect => effect()).filter((value): value is () => void => typeof value === "function");
   const zero = "https://apixbotai.com/api/v1/feed/201/preview.webp?index=0&output_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const one = "https://apixbotai.com/api/v1/feed/201/preview.webp?index=1&output_id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-  const item = { id: 201, model: "nano-banana-2", gen_type: "image", preview_url: zero, preview_urls: [zero, one] };
+  const item = { id: 201, model: "nano-banana-2", gen_type: "image", is_mine: true,
+    preview_url: zero, preview_urls: [zero, one] };
   const draft = { savedAt: Date.now(), sourceMediaUrl: one, references: [], changeRequest: "", modelKey: "nano-banana-2",
     mode: "image", aspectRatio: "1:1", quality: "2K", count: 1, duration: 5, resolution: "720p", grokMode: "normal", payment: null };
   const open = async (sourceMediaUrl?: string) => {
