@@ -107,6 +107,7 @@ from core.gemini_omni import (
 )
 from core.kie_seedance_callback import callback_url_for_generation
 from core.seedance_reconciliation import (
+    PRODUCT_MODELS,
     handle_submission_not_sent,
     handle_submission_unknown,
     make_submission_context,
@@ -2159,6 +2160,13 @@ async def _launch_video_generation_from_state(
         await source_message.answer(str(exc), reply_markup=main_menu_kb())
         return False
 
+    if model_key in PRODUCT_MODELS and await repo._has_pending_refunded_seedance_review(session, db_user.id):
+        await source_message.answer(
+            "Предыдущая задача Seedance ещё проверяется у провайдера. Новый запуск временно недоступен; 💋 не списаны.",
+            reply_markup=main_menu_kb(),
+        )
+        return False
+
     content_edit = model_key == SEEDANCE25_MODEL_KEY and data.get("flow_id") == "genjutsu_face_clothing"
     seedance_kwargs = {}
     if content_edit:
@@ -3027,6 +3035,10 @@ async def cb_regen_video(
         video_model = VideoModel(model_key)
     except ValueError:
         await call.answer("Эту видео-модель нельзя повторить", show_alert=True)
+        return
+
+    if model_key in PRODUCT_MODELS and await repo._has_pending_refunded_seedance_review(session, db_user.id):
+        await call.answer("Предыдущая задача Seedance ещё проверяется у провайдера. 💋 не списаны.", show_alert=True)
         return
 
     repeat_params = await _video_repeat_params_for_generation(session, prev)

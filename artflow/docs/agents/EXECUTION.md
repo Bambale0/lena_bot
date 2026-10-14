@@ -1,5 +1,13 @@
 # Execution ledger — video to prompt integration
 
+## 2026-10-14 — Seedance repeat API 500 after supplier review gate
+
+Baseline `73501c1885303a404cfb0e81d846f13c01556fc1`, branch `fix/apix-seedance-preflight-charge-20261014`. User report: Mini App exact creator video repeat displayed API 500 and then an indefinitely queued task. Production evidence: generation 59203 belonged to the reported account, was `pending` with 70 charged credits, no provider task ID, no Neironych/KIE submission marker and no callback marker. Earlier refunded generation 58339 has supplier review `needs_admin_resolution`, so the account-scoped provider liability gate is active. The callback registration path checks this gate only after `spend_credits` and `create_generation` have committed. On normal rejection it rolls back the SQLAlchemy session, expiring the ORM user; the generic exception handler then accesses `user.id` before refunding, which reproduces an unhandled 500 and a charged pending row. The original HTTP traceback was unavailable after normal container replacement; this is a code-and-state-supported diagnosis, reproduced with a rollback-expired user test.
+
+Incident action: generation 59203 was verified as pre-submit and refunded through `repo.fail_generation_and_refund` with its missing-task guard. Postcheck: `failed`, exactly one 70-credit `generation_refund` ledger row, balance 173. No provider POST was attempted by the intervention.
+
+Acceptance: an unsettled supplier review is shown before quote or charge on Web/Mini App and before spend in the Telegram bot; no new generation is created; callback-registration failure after charge atomically fails/refunds only when no submission identity exists; no second paid POST; API returns a meaningful status and no expired ORM access. Supplier review 58339 remains unresolved pending provider/finance evidence; customer wallet must not be debited to settle it. No migration or runtime secret/config change. Observability: log generation ID and refund amount without prompt/media/credentials. Test seams: API quote/launch/remix behavior, bot launch, fallback refund, existing provider submission and refund regressions. Steps: [x] production DB/root-cause audit; [x] 59203 refund/postcheck; [x] RED tests; [x] preflight and guarded callback fallback; [x] 556 focused tests across ten modules, Ruff and diff check; [ ] exact-head CI and code review; [ ] PR/auto-merge; [ ] exact-SHA Production Autodeploy and health.
+
 ## 2026-10-14 — stalled generation incident and customer refunds
 
 ### Follow-up after PR #248 auto-merge

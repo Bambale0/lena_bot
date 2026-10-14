@@ -523,6 +523,7 @@ async def test_regen_video_restores_kie_image_refs() -> None:
 
     with patch("bot.handlers.video_gen.repo", AsyncMock(
         get_generation_by_id=AsyncMock(return_value=prev),
+        _has_pending_refunded_seedance_review=AsyncMock(return_value=False),
         resolve_video_model_cost=AsyncMock(return_value=mock_cost),
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=new_gen),
@@ -581,6 +582,7 @@ async def test_regen_video_restores_reference_image_urls_for_dual_mode_model() -
 
     with patch("bot.handlers.video_gen.repo", AsyncMock(
         get_generation_by_id=AsyncMock(return_value=prev),
+        _has_pending_refunded_seedance_review=AsyncMock(return_value=False),
         resolve_video_model_cost=AsyncMock(return_value=mock_cost),
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=new_gen),
@@ -629,6 +631,7 @@ async def test_regen_video_prefers_saved_input_params_when_provider_omits_refs()
 
     with patch("bot.handlers.video_gen.repo", AsyncMock(
         get_generation_by_id=AsyncMock(return_value=prev),
+        _has_pending_refunded_seedance_review=AsyncMock(return_value=False),
         resolve_video_model_cost=AsyncMock(return_value=mock_cost),
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=new_gen),
@@ -669,6 +672,7 @@ async def test_handle_video_prompt_persists_reference_input_params() -> None:
 
     with patch("bot.handlers.video_gen.repo", AsyncMock(
         spend_credits=AsyncMock(return_value=True),
+        _has_pending_refunded_seedance_review=AsyncMock(return_value=False),
         create_generation=AsyncMock(return_value=mock_gen),
         update_generation_task=AsyncMock(),
         resolve_video_model_cost=AsyncMock(return_value=mock_cost),
@@ -948,6 +952,7 @@ async def test_seedance_repeat_launch_sends_role_order_to_provider() -> None:
     mock_gen = SimpleNamespace(id=999, task_id=None, model=video_gen.SEEDANCE25_MODEL_KEY)
     repo_stub = AsyncMock(
         resolve_video_model_cost=AsyncMock(return_value=mock_cost),
+        _has_pending_refunded_seedance_review=AsyncMock(return_value=False),
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=mock_gen),
         update_generation_task=AsyncMock(),

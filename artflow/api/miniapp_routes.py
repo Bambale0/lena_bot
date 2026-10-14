@@ -139,6 +139,7 @@ from core.neironych_video_poll_gate import (
 )
 from core.provider_routing import get_nano21_route
 from core.seedance_reconciliation import (
+    PRODUCT_MODELS,
     handle_submission_not_sent,
     handle_submission_unknown,
     make_submission_context,
@@ -191,6 +192,40 @@ MAX_SUNO_VOICE_AUDIO_BYTES = 30 * 1024 * 1024
 MAX_REFERENCE_REDIRECTS = 3
 FEED_REMIX_MAX_REFS = 4
 WEB_TASK_PREFIX = "web:"
+
+_SEEDANCE_SUPPLIER_REVIEW_MESSAGE = (
+    "Предыдущая задача Seedance ещё проверяется у провайдера. "
+    "Новый запуск временно недоступен; поцелуи не списаны."
+)
+
+
+async def _reject_unsettled_seedance_before_charge(
+    session: AsyncSession, user_id: int, model_key: str,
+) -> None:
+    if model_key in PRODUCT_MODELS and await repo._has_pending_refunded_seedance_review(session, user_id):
+        raise HTTPException(status_code=409, detail=_SEEDANCE_SUPPLIER_REVIEW_MESSAGE)
+
+
+async def _register_seedance_callback_before_submit(
+    session: AsyncSession, gen_id: int, *, surface: str,
+) -> bool:
+    """Settle a definite pre-submit failure without a second paid POST."""
+    try:
+        if await repo.register_kie_video_callback(session, gen_id, surface=surface):
+            return True
+    except Exception:
+        logger.exception("Seedance callback registration failed gen=%s", gen_id)
+    await session.rollback()
+    failed, refunded = await repo.fail_generation_and_refund(
+        session, gen_id, "Видео не было отправлено провайдеру.",
+        refund_note="seedance:callback_registration_failed",
+        require_missing_task_id=True,
+    )
+    if failed:
+        logger.warning("Seedance pre-submit refund gen=%s credits=%s", gen_id, refunded)
+        raise HTTPException(status_code=503, detail="Видео не отправлено. Поцелуи возвращены.")
+    logger.warning("Seedance callback registration requires reconciliation gen=%s", gen_id)
+    return False
 
 _TELEGRAM_STARS_RUB_PER_STAR = 10.5
 
@@ -3033,6 +3068,8 @@ async def create_video_generation(
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Unknown video model: {body.model!r}")
 
+    await _reject_unsettled_seedance_before_charge(session, user.id, body.model)
+
     normalized = _normalize_video_request(
         model_key=body.model,
         mode=body.mode,
@@ -3124,12 +3161,13 @@ async def create_video_generation(
     failed_user_id = user.id
     submission_context = make_submission_context(session, gen.id, body.model, surface=surface)
 
+    if submission_context and not await _register_seedance_callback_before_submit(
+        session, gen.id, surface=surface,
+    ):
+        await session.refresh(gen)
+        return _gen_out(gen)
+
     try:
-        if submission_context and not await repo.register_kie_video_callback(
-            session, gen.id, surface=surface,
-        ):
-            # A provider POST must never run without a durable callback identity.
-            raise RuntimeError("Video provider callback correlation could not be persisted")
         result = await video_service.generate_video(
             model,
             user_prompt,
@@ -3165,10 +3203,11 @@ async def create_video_generation(
         await session.refresh(gen)
         return _gen_out(gen)
     except Exception as exc:
-        logger.error("miniapp video gen error user=%s: %s", user.id, exc)
+        logger.error("miniapp video gen error user=%s: %s", failed_user_id, exc)
         await session.rollback()
-        if await repo.fail_generation(session, failed_generation_id, str(exc)):
-            await repo.add_credits(session, failed_user_id, total_credits)
+        await repo.fail_generation_and_refund(
+            session, failed_generation_id, str(exc), refund_note="miniapp_video_gen",
+        )
         raise HTTPException(status_code=502, detail="Generation service error")
 
     if submission_context and submission_context.started:
@@ -3916,6 +3955,8 @@ async def quote_feed_remix(
     if source is None:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
+    await _reject_unsettled_seedance_before_charge(session, user.id, body.model)
+
     repeat_prompt, repeat_refs, body, _, _, _ = _prepare_feed_remix_inputs(source, body, user_id=user.id)
     gen_type: str
     count = 1
@@ -4033,6 +4074,8 @@ async def remix_feed_post(
     source = await repo.get_public_feed_generation(session, gen_id)
     if not source:
         raise HTTPException(status_code=404, detail="Post not found or not public")
+
+    await _reject_unsettled_seedance_before_charge(session, user.id, body.model)
 
     repeat_prompt, repeat_refs, body, personalized, own_recipe, original_recipe_replay = _prepare_feed_remix_inputs(
         source, body, user_id=user.id,
@@ -4279,6 +4322,12 @@ async def remix_feed_post(
         if gen_type == "video" else None
     )
 
+    if submission_context and not await _register_seedance_callback_before_submit(
+        session, gen.id, surface=surface,
+    ):
+        await session.refresh(gen)
+        return _gen_out(gen)
+
     async def persist_remix_nexus_submission(request_id: str, snapshot: dict) -> None:
         saved = await repo.persist_nexus_image_submission(
             session, gen.id, task_id_for_surface(nexus_image_adapter.encode_submission_id(request_id), surface), snapshot
@@ -4300,10 +4349,6 @@ async def remix_feed_post(
                 session, gen.id, task_id_for_surface(initial_identity, surface),
             )
         if gen_type == "video":
-            if submission_context and not await repo.register_kie_video_callback(
-                session, gen.id, surface=surface,
-            ):
-                raise RuntimeError("Video provider callback correlation could not be persisted")
             result = await video_service.generate_video(
                 model,
                 repeat_prompt,
@@ -4368,10 +4413,12 @@ async def remix_feed_post(
         await session.refresh(gen)
         return _gen_out(gen)
     except Exception as exc:
-        logger.error("feed remix error user=%s gen=%s: %s", user.id, gen_id, exc)
+        logger.error("feed remix error user=%s gen=%s: %s", failed_user_id, gen_id, exc)
         await session.rollback()
-        if await repo.fail_generation(session, failed_generation_id, str(exc)):
-            await repo.add_credits(session, failed_user_id, total_credits)
+        await repo.fail_generation_and_refund(
+            session, failed_generation_id, str(exc),
+            refund_note="feed_video_remix" if gen_type == "video" else "feed_image_remix",
+        )
         raise HTTPException(status_code=502, detail="Generation service error")
 
     if gen_type == "image" and not getattr(result, "is_async", True):

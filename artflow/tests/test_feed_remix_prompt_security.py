@@ -178,6 +178,7 @@ def video_launch(monkeypatch):
         # Provider route tests use a fake DB session; durable callback binding
         # is verified independently in test_kie_seedance_callback.
         register_kie_video_callback=AsyncMock(return_value=True),
+        _has_pending_refunded_seedance_review=AsyncMock(return_value=False),
     )
     service = SimpleNamespace(
         generate_video=AsyncMock(return_value=SimpleNamespace(task_id="fake", provider="kieai", uses_webhook=True)),
@@ -271,6 +272,7 @@ def api_launch(monkeypatch):
         # This fixture simulates the API without a persistent SQL session.
         # Durable Kie callback registration is covered by SQLite roundtrips.
         "register_kie_video_callback": AsyncMock(return_value=True),
+        "_has_pending_refunded_seedance_review": AsyncMock(return_value=False),
         "increment_feed_share": AsyncMock(),
     }.items():
         monkeypatch.setattr(miniapp_routes.repo, name, value)
