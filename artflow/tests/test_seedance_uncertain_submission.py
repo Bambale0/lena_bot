@@ -527,7 +527,6 @@ async def test_durable_submission_is_single_use_and_late_results_cannot_clobber(
     gen = generation()
     gen.task_id = None
     session = FakeSession(gen)
-    monkeypatch.setattr(repo, '_has_pending_refunded_seedance_review', AsyncMock(return_value=False))
     monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
     request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
     assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
@@ -545,7 +544,6 @@ async def test_terminal_submission_marker_is_never_overwritten(monkeypatch):
     gen = generation()
     gen.task_id = None
     session = FakeSession(gen)
-    monkeypatch.setattr(repo, '_has_pending_refunded_seedance_review', AsyncMock(return_value=False))
     monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
     request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
     assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
@@ -680,7 +678,7 @@ async def test_callback_registration_failure_never_starts_a_paid_seedance_post(
     )
     register = AsyncMock(return_value=False)
     monkeypatch.setattr(routes.repo, "register_kie_video_callback", register)
-    monkeypatch.setattr(routes.repo, "fail_generation_and_refund", AsyncMock())
+    monkeypatch.setattr(routes.repo, "fail_generation_and_refund", AsyncMock(return_value=(True, 4.0)))
     if operation == "launch":
         body = routes.VideoGenRequest(model=model, prompt="Synthetic video input", duration=5)
         call = routes.create_video_generation(
@@ -693,9 +691,176 @@ async def test_callback_registration_failure_never_starts_a_paid_seedance_post(
         )
     with pytest.raises(HTTPException) as error:
         await call
-    assert error.value.status_code == 502
+    assert error.value.status_code == 503
     register.assert_awaited_once()
     api_launch.generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["quote", "launch", "remix"])
+async def test_unsettled_old_supplier_review_does_not_block_new_seedance(
+    api_launch, monkeypatch, operation,
+):
+    routes = api_launch.routes
+    model = "bytedance/seedance-2-5"
+    gate = AsyncMock(return_value=True)
+    monkeypatch.setattr(routes.repo, "_has_pending_refunded_seedance_review", gate)
+    if operation == "launch":
+        call = routes.create_video_generation(
+            routes.VideoGenRequest(model=model, prompt="Synthetic video", duration=5),
+            api_launch.session, api_launch.user, "miniapp",
+        )
+    else:
+        api_launch.source.model = model
+        api_launch.source.gen_type = GenerationType.image
+        body = routes.FeedRemixRequest(model=model, change_request="change outfit", duration=5)
+        call = (
+            routes.quote_feed_remix(77, body, api_launch.session, api_launch.user)
+            if operation == "quote" else
+            routes.remix_feed_post(77, body, api_launch.session, api_launch.user, "miniapp")
+        )
+    await call
+    gate.assert_not_awaited()
+    if operation == "quote":
+        api_launch.charge.assert_not_awaited()
+    else:
+        api_launch.charge.assert_awaited()
+        api_launch.save.assert_awaited()
+        api_launch.generate.assert_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["launch", "remix"])
+async def test_callback_registration_rollback_restores_charge_atomically(
+    api_launch, monkeypatch, operation,
+):
+    from fastapi import HTTPException
+
+    class ExpiringUser:
+        credits = 100
+        tg_id = 777
+        expired = False
+
+        @property
+        def id(self):
+            if self.expired:
+                raise RuntimeError("expired ORM user accessed after rollback")
+            return 42
+
+    routes = api_launch.routes
+    api_launch.user = ExpiringUser()
+    model = "bytedance/seedance-2-5"
+    monkeypatch.setattr(
+        routes, "make_submission_context",
+        lambda *_args, **_kwargs: SimpleNamespace(client_request_id="synthetic", started=False),
+    )
+
+    async def rejected(*_args, **_kwargs):
+        api_launch.user.expired = True
+        return False
+
+    monkeypatch.setattr(routes.repo, "register_kie_video_callback", AsyncMock(side_effect=rejected))
+    refunded = AsyncMock(return_value=(True, 4.0))
+    monkeypatch.setattr(routes.repo, "fail_generation_and_refund", refunded)
+    if operation == "launch":
+        call = routes.create_video_generation(
+            routes.VideoGenRequest(model=model, prompt="Synthetic video", duration=5),
+            api_launch.session, api_launch.user, "miniapp",
+        )
+    else:
+        api_launch.source.gen_type = GenerationType.image
+        body = routes.FeedRemixRequest(model=model, change_request="change outfit", duration=5)
+        call = routes.remix_feed_post(
+            77, body, api_launch.session, api_launch.user, "miniapp",
+        )
+    with pytest.raises(HTTPException) as error:
+        await call
+    assert error.value.status_code == 503
+    refunded.assert_awaited_once()
+    assert refunded.await_args.kwargs["refund_note"] == "seedance:callback_registration_failed"
+    api_launch.generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_old_supplier_review_does_not_block_new_job(video_launch):
+    from bot.handlers import video_gen
+
+    video_launch.data.update(model_key="bytedance/seedance-2-5", mode="text")
+    video_launch.kwargs.update(source_feed_gen_id=None, hidden_feed_prompt=False)
+    gate = AsyncMock(return_value=True)
+    video_launch.repo._has_pending_refunded_seedance_review = gate
+    assert await video_gen._launch_video_generation_from_state(**video_launch.kwargs) is True
+    gate.assert_not_awaited()
+    video_launch.repo.spend_credits.assert_awaited()
+    video_launch.repo.create_generation.assert_awaited()
+    video_launch.service.generate_video.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_regeneration_ignores_old_supplier_review(video_launch, monkeypatch):
+    from bot.handlers import video_gen
+
+    previous = SimpleNamespace(
+        id=88, user_id=42, prompt="synthetic", model="bytedance/seedance-2-5",
+        source_feed_gen_id=None,
+    )
+    video_launch.repo.get_generation_by_id = AsyncMock(return_value=previous)
+    gate = AsyncMock(return_value=True)
+    video_launch.repo._has_pending_refunded_seedance_review = gate
+    monkeypatch.setattr("bot.handlers.genjutsu_replace.restore_result", AsyncMock(return_value=False))
+    call = SimpleNamespace(data="regen:video:88", answer=AsyncMock(), message=AsyncMock())
+    await video_gen.cb_regen_video(
+        call, video_launch.kwargs["session"], video_launch.kwargs["state"],
+        video_launch.kwargs["db_user"], video_launch.kwargs["bot"],
+    )
+    gate.assert_not_awaited()
+    video_launch.repo.spend_credits.assert_awaited()
+    video_launch.repo.create_generation.assert_awaited()
+    video_launch.service.generate_video.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_callback_registration_ambiguous_commit_keeps_customer_review_state(api_launch, monkeypatch):
+    routes = api_launch.routes
+    monkeypatch.setattr(
+        routes, "make_submission_context",
+        lambda *_args, **_kwargs: SimpleNamespace(client_request_id="synthetic", started=False),
+    )
+    monkeypatch.setattr(routes.repo, "register_kie_video_callback", AsyncMock(return_value=False))
+    guarded_refund = AsyncMock(return_value=(False, 0.0))
+    monkeypatch.setattr(routes.repo, "fail_generation_and_refund", guarded_refund)
+    body = routes.VideoGenRequest(
+        model="bytedance/seedance-2-5", prompt="Synthetic video", duration=5,
+    )
+    result = await routes.create_video_generation(
+        body, api_launch.session, api_launch.user, "miniapp",
+    )
+    assert result.status == "processing"
+    assert guarded_refund.await_args.kwargs["require_missing_task_id"] is True
+    api_launch.generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["launch", "remix"])
+async def test_definite_video_launch_error_uses_one_atomic_refund(api_launch, monkeypatch, operation):
+    from fastapi import HTTPException
+
+    routes = api_launch.routes
+    api_launch.generate.side_effect = RuntimeError("synthetic provider rejection")
+    refunded = AsyncMock(return_value=(True, 4.0))
+    monkeypatch.setattr(routes.repo, "fail_generation_and_refund", refunded)
+    if operation == "launch":
+        call = routes.create_video_generation(
+            routes.VideoGenRequest(model="veo3_fast", prompt="Synthetic video", duration=5),
+            api_launch.session, api_launch.user, "miniapp",
+        )
+    else:
+        body = routes.FeedRemixRequest(model="veo3_fast", change_request="change outfit", duration=5)
+        call = routes.remix_feed_post(77, body, api_launch.session, api_launch.user, "miniapp")
+    with pytest.raises(HTTPException) as error:
+        await call
+    assert error.value.status_code == 502
+    refunded.assert_awaited_once()
 
 
 @pytest.mark.asyncio

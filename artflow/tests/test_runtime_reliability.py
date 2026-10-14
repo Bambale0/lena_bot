@@ -100,8 +100,8 @@ def test_video_failure_paths_do_not_read_expired_generation_after_rollback() -> 
 
     assert source.count("failed_generation_id = gen.id") >= 2
     assert source.count("failed_user_id = user.id") >= 2
-    assert "await repo.fail_generation(session, failed_generation_id, str(exc))" in source
-    assert "await repo.add_credits(session, failed_user_id, total_credits)" in source
+    assert source.count("await repo.fail_generation_and_refund(") >= 2
+    assert "session, failed_generation_id, str(exc), refund_note=" in source
 
 
 def test_artflow_nginx_uses_real_compose_backend() -> None:

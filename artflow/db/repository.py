@@ -1274,13 +1274,7 @@ def _active_seedance_submission(gen, client_request_id):
 async def _has_pending_refunded_seedance_review(
     session: AsyncSession, user_id: int,
 ) -> bool:
-    """User-scoped liability gate, never a model-wide circuit.
-
-    A refund on an accepted-but-uncertain supplier request restores customer
-    credits, while the upstream may still charge for it. Prevent *that same
-    account* from repeatedly recycling the refunded credits into new paid
-    Neironych submissions. Other users are unaffected.
-    """
+    """Report unresolved supplier reviews for support and finance workflows."""
     from core.seedance_reconciliation import PRODUCT_MODELS
 
     candidates = (await session.execute(
@@ -1313,11 +1307,6 @@ async def register_kie_video_callback(
     if gen is None or gen.status not in (
         GenerationStatus.pending, GenerationStatus.processing
     ):
-        await session.rollback()
-        return False
-    # The same customer must not recycle refunded supplier liability through
-    # a Kie-primary paid POST (Neironych already enforces this in its gate).
-    if await _has_pending_refunded_seedance_review(session, gen.user_id):
         await session.rollback()
         return False
     params = parse_input_params(gen.input_params)
@@ -1509,11 +1498,6 @@ async def begin_seedance_submission(
             or gen.task_id or params.get(SEEDANCE_SUBMISSION_KEY)):
         await session.commit()
         return False
-    # This guard is scoped to the account, not to the model. It executes
-    # before the first paid provider POST and does not affect unrelated users.
-    if await _has_pending_refunded_seedance_review(session, gen.user_id):
-        raise ValueError("Prior refunded Seedance job still under supplier review")
-
     params[SEEDANCE_SUBMISSION_KEY] = {
         "client_request_id": client_request_id, "idempotency_key": idempotency_key,
         "payload_sha256": payload_sha256, "product_model": product_model,

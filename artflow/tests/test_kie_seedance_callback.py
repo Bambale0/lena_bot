@@ -202,7 +202,7 @@ def test_missing_dedicated_hmac_key_refuses_signatures(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_kie_callback_registration_rejects_unresolved_supplier_liability(kie_transaction_db):
+async def test_kie_callback_registration_allows_new_job_despite_old_supplier_review(kie_transaction_db):
     import json
 
     with Session(kie_transaction_db, expire_on_commit=False) as session:
@@ -215,12 +215,46 @@ async def test_kie_callback_registration_rejects_unresolved_supplier_liability(k
             }),
         ))
         session.commit()
-        assert not await repo.register_kie_video_callback(
+        assert await repo.register_kie_video_callback(
             LocalAsyncSession(session), 73, surface="miniapp",
         )
-        assert repo.KIE_VIDEO_CALLBACK_KEY not in repo.parse_input_params(
+        assert repo.KIE_VIDEO_CALLBACK_KEY in repo.parse_input_params(
             session.get(Generation, 73).input_params,
         )
+        assert await repo._has_pending_refunded_seedance_review(LocalAsyncSession(session), 42)
+
+
+@pytest.mark.asyncio
+async def test_neironych_new_submission_allows_old_review_but_stays_single_use(kie_transaction_db):
+    import json
+
+    with Session(kie_transaction_db, expire_on_commit=False) as session:
+        session.add(Generation(
+            id=74, user_id=42, model="bytedance/seedance-2-5",
+            gen_type=GenerationType.video, status=GenerationStatus.failed,
+            task_id="neironych:old", prompt="older paid work", credits_spent=40,
+            input_params=json.dumps({
+                repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY: {"state": "needs_admin_resolution"},
+            }),
+        ))
+        session.add(Generation(
+            id=75, user_id=42, model="bytedance/seedance-2-5",
+            gen_type=GenerationType.video, status=GenerationStatus.pending,
+            prompt="new paid work", credits_spent=70, input_params="{}",
+        ))
+        session.commit()
+        db = LocalAsyncSession(session)
+        request_id = "e150cc69-0350-43aa-a4fc-a6b17388ec10"
+        assert await repo.begin_seedance_submission(
+            db, 75, request_id, "new-idem", "a" * 64,
+            product_model="bytedance/seedance-2-5",
+        )
+        assert not await repo.begin_seedance_submission(
+            db, 75, request_id, "new-idem", "a" * 64,
+            product_model="bytedance/seedance-2-5",
+        )
+        assert session.get(Generation, 75).task_id == "neironych-submit:" + request_id
+        assert await repo._has_pending_refunded_seedance_review(db, 42)
 
 
 @pytest.mark.asyncio
