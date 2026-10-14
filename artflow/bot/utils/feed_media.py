@@ -176,7 +176,7 @@ def feed_identity_references(source: Any, requested_refs: list[str]) -> list[str
 
 
 def selected_feed_source_url(source: Any, requested_refs: list[str]) -> str | None:
-    """Keep the selected scene stored last by the server in personalized repeats."""
+    """Resolve the selected scene regardless of historical reference order."""
     known = generation_result_reference_urls(source)
     for url in reversed(requested_refs):
         if not isinstance(url, str):

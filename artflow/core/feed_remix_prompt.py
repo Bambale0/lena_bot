@@ -79,6 +79,7 @@ _IMAGE_HEADERS = {
     "scene_variation": _IMAGE_SCENE_VARIATION_PROMPT,
     "identity_edit": _IMAGE_EDIT_PROMPT,
     "face_replacement": _IMAGE_FACE_REPLACEMENT_PROMPT,
+    "scene_first": _LEGACY_SOURCE_FIRST_PROMPT,
     "scene_edit": _IMAGE_SCENE_EDIT_PROMPT,
 }
 
@@ -103,15 +104,16 @@ def owned_generation_prompt_is_visible(generation, user_id: int) -> bool:
 
 def build_feed_image_prompt(
     change_request: str = "", *, has_user_references: bool, has_source_media: bool,
-    fixed_composition: bool = False,
+    fixed_composition: bool = False, scene_first: bool = False,
 ) -> str:
     """Image-only semantic roles; the provider has no pixel-level identity guarantee."""
     if not has_source_media:
         raise FeedRemixUnavailable("Для повтора нужно доступное исходное фото из ленты.")
     if has_user_references:
-        # Every personalized repeat uses the uploaded face in the author scene.
-        # Fixed composition remains the default even for the first repeat.
-        header = _IMAGE_FACE_REPLACEMENT_PROMPT
+        # Restore the recorded pre-October-13 Nexus image edit contract.
+        # The author scene is the base (first image); user photos follow.
+        # This is independent of the existing video reference semantics.
+        header = _LEGACY_SOURCE_FIRST_PROMPT if scene_first else _IMAGE_FACE_REPLACEMENT_PROMPT
     elif fixed_composition:
         header = _IMAGE_SCENE_EDIT_PROMPT
     else:
@@ -137,13 +139,12 @@ def build_owned_feed_image_prompt(source_prompt: str, change_request: str, *, ha
 def order_feed_image_references(
     source_url: str | None,
     requested_refs: list[str],
-    *, source_urls: list[str] | None = None,
+    *, source_urls: list[str] | None = None, source_first: bool = False,
 ) -> list[str]:
-    """Put reader-owned identity refs before the public scene reference.
+    """Order verified scene and identity refs for the installed provider contract.
 
-    Image providers preserve reference order and commonly give the first image
-    the strongest identity role.  A feed card is scene/style context, so it
-    must not displace a reader's uploaded appearance from that position.
+    Nexus personalized photo repeat edits the first image (public scene) using
+    additional user references. Video and other routes retain their ordering.
     """
     source = str(source_url or "").strip()
     known_sources = set(source_urls or []) | {source}
@@ -152,7 +153,8 @@ def order_feed_image_references(
         for url in requested_refs
         if str(url or "").strip() and str(url).strip() not in known_sources
     ]
-    return list(dict.fromkeys([*user_refs, *([source] if source else [])]))
+    ordered = [source, *user_refs] if source_first else [*user_refs, source]
+    return list(dict.fromkeys(url for url in ordered if url))
 
 
 def build_feed_remix_prompt(
@@ -314,6 +316,7 @@ def trusted_feed_prompt(generation, *, user_id: int, source_generation_id: int) 
 def trusted_feed_image_prompt(
     generation, *, user_id: int, source_generation_id: int,
     has_user_references: bool, fixed_composition: bool = False,
+    scene_first: bool = False,
 ) -> str | None:
     """Replace only a complete known machine header; preserve suffix bytes exactly."""
     context = _trusted_feed_context(generation, user_id=user_id, source_generation_id=source_generation_id)
@@ -329,7 +332,7 @@ def trusted_feed_image_prompt(
         if prompt == header or prompt.startswith(header + "\n\n"):
             current_header = build_feed_image_prompt(
                 has_user_references=has_user_references, has_source_media=True,
-                fixed_composition=fixed_composition,
+                fixed_composition=fixed_composition, scene_first=scene_first,
             )
             return current_header + prompt[len(header):]
     return prompt

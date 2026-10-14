@@ -36,7 +36,7 @@ async def _reference_candidate(
         source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
         source_url = image_gen.canonical_generation_result_url(source) if source_type == "image" else None
         if source_url and public_url_is_available(source_url):
-            urls = image_gen.order_feed_image_references(source_url, urls)
+            urls = image_gen.order_feed_image_references(source_url, urls, source_first=True)
             source_slots = 1
         else:
             # Unavailable source identity cannot justify treating an upload as
