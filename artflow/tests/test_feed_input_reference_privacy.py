@@ -59,6 +59,9 @@ class LocalSession:
 
 @pytest.fixture
 async def published_work(monkeypatch, tmp_path):
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(
+        return_value="Photo 1 is the sole source of the person's face; later user photos only clarify the same person and the creator prompt defines the scene."
+    ))
     local_reference = tmp_path / "references" / "synthetic-telegram-face.jpg"
     local_reference.parent.mkdir()
     local_reference.write_bytes(b"synthetic-input-photo")

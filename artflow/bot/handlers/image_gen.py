@@ -17,6 +17,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import image_service, neironych_image_adapter, nexus_image_adapter
@@ -65,6 +66,7 @@ from bot.utils.telegram_images import (
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.feed_recipe_identity_policy import get_feed_recipe_identity_instruction
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
@@ -81,6 +83,7 @@ from core.feed_remix_prompt import (
     legacy_feed_edit_unavailable,
     order_feed_image_references,
     owned_generation_prompt_is_visible,
+    photo_one_identity_instruction,
     resolve_feed_image_recipe_origin,
     trusted_feed_image_legacy_changes,
     trusted_feed_image_prompt,
@@ -1339,9 +1342,16 @@ async def _launch_session_generation(
                 ) if inherited is None else None
             )
             changes = "\n\n".join(part for part in (legacy_changes, feed_change_request) if part)
+            try:
+                instruction = await get_feed_recipe_identity_instruction(session)
+            except (RuntimeError, ValueError, SQLAlchemyError):
+                logger.exception("feed_photo_recipe_identity_policy_unavailable source_gen=%s", source.id)
+                await source_message.answer("Настройка переноса лица временно недоступна; поцелуи не списаны.")
+                return False
             prompt = build_feed_image_recipe_prompt(
                 inherited or str(recipe_source.prompt or ""),
                 change_request=changes, previous_instruction=previous_instruction,
+                identity_instruction=instruction,
             )
             state_data = await state.get_data()
             explicitly_selected = isinstance(state_data, dict) and (
@@ -1357,7 +1367,7 @@ async def _launch_session_generation(
             refs = identity_refs
             feed_context = {
                 FEED_REMIX_CONTEXT_KEY: feed_image_recipe_context(
-                    source.id, prompt,
+                    source.id, prompt, photo_one_identity_instruction(instruction),
                 ),
             }
             logger.info(

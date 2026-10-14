@@ -127,6 +127,7 @@ jobs:
             db/models.py \
             db/repository.py \
             db/migrations/versions/038_image_session_prompt_provenance.py \
+            db/migrations/versions/041_feed_photo1_identity_default.py \
             bot/handlers/balance.py \
             bot/handlers/repeat_references.py \
             bot/ui/router.py \
@@ -190,6 +191,8 @@ jobs:
             tests/test_feed_session_prompt_security.py \
             tests/test_image_session_prompt_provenance.py \
             tests/test_image_session_provenance_migration.py \
+            tests/test_feed_photo1_policy_migration.py \
+            tests/test_feed_recipe_identity_policy.py \
             tests/test_delivery_prompt_security.py \
             tests/test_repeat_multiple_references.py \
             tests/test_repeat_marketplace_multiple_references.py \
@@ -281,6 +284,8 @@ jobs:
             tests/test_feed_session_prompt_security.py \
             tests/test_image_session_prompt_provenance.py \
             tests/test_image_session_provenance_migration.py \
+            tests/test_feed_photo1_policy_migration.py \
+            tests/test_feed_recipe_identity_policy.py \
             tests/test_delivery_prompt_security.py \
             tests/test_repeat_multiple_references.py \
             tests/test_repeat_marketplace_multiple_references.py \

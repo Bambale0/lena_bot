@@ -202,8 +202,9 @@ def feed_image_recipe_source_parameters(source) -> dict:
 def build_feed_image_recipe_prompt(
     source_prompt: str, change_request: str = "",
     *, previous_instruction: str | None = None,
+    identity_instruction: str | None = None,
 ) -> str:
-    """Replay the creator's text as on October 1; unwrap older saved policies."""
+    """Keep the creator recipe and bind the first reader image to facial identity."""
     prompt = str(source_prompt or "").strip()
     if prompt.startswith(_IMAGE_RECIPE_SCENE_PREFIX) and _IMAGE_RECIPE_IDENTITY_MARKER in prompt:
         prompt = prompt[len(_IMAGE_RECIPE_SCENE_PREFIX):].rsplit(_IMAGE_RECIPE_IDENTITY_MARKER, 1)[0]
@@ -232,7 +233,14 @@ def build_feed_image_recipe_prompt(
     change = str(change_request or "").strip()
     if change:
         prompt = f"{prompt}\n\nИзменения, которые запросил пользователь для повтора: {change}"
+    if identity_instruction:
+        prompt += _IMAGE_RECIPE_POLICY_SUFFIX + photo_one_identity_instruction(identity_instruction)
     return prompt
+
+
+def photo_one_identity_instruction(instruction: str) -> str:
+    """Label the first provider image without exposing or embedding its URL."""
+    return "Фото 1 — лицо.\n" + str(instruction or "").strip()
 
 
 def feed_image_recipe_context(

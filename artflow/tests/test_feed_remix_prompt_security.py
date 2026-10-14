@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 
 from api import image_http_failure, miniapp_routes, neironych_image_adapter, nexus_image_adapter
 from bot.handlers import image_gen, video_gen
@@ -28,6 +29,9 @@ def bound_preview(url=SOURCE_IMAGE, *, index=0, display=False):
 
 @pytest.fixture
 def image_launch(monkeypatch):
+    monkeypatch.setattr(
+        image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE),
+    )
     source = SimpleNamespace(
         id=77, user_id=99, is_public_feed=True, gen_type=GenerationType.image,
         prompt=SECRET, result_url=SOURCE_IMAGE, result_urls=None,
@@ -74,7 +78,17 @@ async def test_telegram_repeat_sends_creator_recipe_and_only_reader_photo(image_
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
-    assert submitted.args[1] == SECRET
+    assert submitted.args[1].startswith(SECRET)
+    assert "Фото 1 — лицо" in submitted.args[1]
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("missing policy"), SQLAlchemyError("database unavailable")])
+async def test_telegram_missing_photo1_policy_fails_before_charge(image_launch, failure):
+    image_gen.get_feed_recipe_identity_instruction.side_effect = failure
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is False
+    image_launch.repo.charge_image_generation.assert_not_awaited()
+    image_launch.generate.assert_not_awaited()
+    assert "поцелуи не списаны" in image_launch.kwargs["source_message"].answer.await_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -165,7 +179,8 @@ async def test_telegram_historic_recipe_uses_only_users_photo(
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
     assert image_launch.source.prompt in submitted.args[1]
-    assert submitted.args[1] == image_launch.source.prompt
+    assert submitted.args[1].startswith(image_launch.source.prompt)
+    assert "Фото 1 — лицо" in submitted.args[1]
     assert submitted.kwargs["aspect_ratio"] == "2:3"
     created = image_launch.repo.create_generation.await_args
     assert created.kwargs["source_feed_gen_id"] == 77
@@ -210,8 +225,8 @@ async def test_bot_nano21_recipe_payload_uses_reader_face_without_creator_photo(
         aspect_ratio="1:1", quality="2K",
     )
     assert payload["images"] == [{"image_url": USER_IMAGE}]
-    assert payload["prompt"] == SECRET
-    assert "EXCLUSIVE source of the subject's face" not in payload["prompt"]
+    assert payload["prompt"].startswith(SECRET)
+    assert "Фото 1 — лицо" in payload["prompt"]
 
 
 @pytest.mark.asyncio
@@ -227,7 +242,8 @@ async def test_bot_derived_feed_uses_origin_prompt_and_only_reader_reference(ima
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
-    assert submitted.args[1] == origin.prompt
+    assert submitted.args[1].startswith(origin.prompt)
+    assert "Фото 1 — лицо" in submitted.args[1]
 
 
 @pytest.mark.asyncio
@@ -244,7 +260,8 @@ async def test_bot_all_reference_models_use_origin_without_author_image_or_metad
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
-    assert submitted.args[1] == origin.prompt
+    assert submitted.args[1].startswith(origin.prompt)
+    assert "Фото 1 — лицо" in submitted.args[1]
 
 
 @pytest.mark.asyncio
@@ -433,6 +450,9 @@ def api_launch(monkeypatch):
     monkeypatch.setattr(miniapp_routes.image_service, "generate_image", generate)
     monkeypatch.setattr(miniapp_routes.video_service, "generate_video", generate)
     monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
+    monkeypatch.setattr(
+        miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE),
+    )
     return SimpleNamespace(
         routes=miniapp_routes, source=source, costs=costs, charge=charge, save=save,
         generate=generate, session=AsyncMock(), user=SimpleNamespace(id=42, credits=100, tg_id=777),
@@ -453,6 +473,7 @@ async def test_all_reference_capable_image_models_quote_and_submit_reader_photo_
     sent = api_launch.generate.await_args
     assert sent.kwargs["image_url"] == USER_IMAGE
     assert SECRET in sent.args[1]
+    assert "Фото 1 — лицо" in sent.args[1]
     assert SOURCE_IMAGE not in str(sent)
     context = api_launch.save.await_args.kwargs["input_params"]["feed_remix_context"]
     assert context["version"] == 4 and "prompt" not in context
@@ -1042,7 +1063,8 @@ async def test_plain_repeat_treats_source_whitespace_as_equivalent(image_launch)
     image_launch.source.prompt = f"  {SECRET}\n"
     image_launch.kwargs.update(prompt=SECRET, reference_url=USER_IMAGE)
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
-    assert image_launch.generate.await_args.args[1] == SECRET
+    assert image_launch.generate.await_args.args[1].startswith(SECRET)
+    assert "Фото 1 — лицо" in image_launch.generate.await_args.args[1]
 
 
 @pytest.mark.asyncio

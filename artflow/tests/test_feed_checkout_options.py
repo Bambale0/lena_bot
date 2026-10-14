@@ -87,6 +87,10 @@ async def test_feed_quote_skips_smaller_unpurchasable_plan_and_discloses_mapped_
 ):
     from api import miniapp_routes
 
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(
+        return_value="Photo 1 is the sole source of the person's face; later user photos only clarify the same person and the creator prompt defines the scene."
+    ))
+
     monkeypatch.setattr(settings, "TRIBUTE_API_KEY", "test" if provider == "tribute" else "")
     monkeypatch.setattr(settings, "LAVA_API_KEY", "test" if provider == "lava" else "")
     monkeypatch.setattr(type(settings), "lava_offer_id_for_plan", lambda self, key: "offer" if key == "lava_mapped" else "")

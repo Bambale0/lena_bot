@@ -23,6 +23,7 @@ from aiogram.types import LabeledPrice, URLInputFile
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import Date, String, cast, desc, func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import (
@@ -104,6 +105,7 @@ from bot.utils.telegram_images import (
     send_original_document_to_chat,
 )
 from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
+from core.feed_recipe_identity_policy import get_feed_recipe_identity_instruction
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
@@ -120,6 +122,7 @@ from core.feed_remix_prompt import (
     original_feed_video_inputs,
     original_feed_video_references,
     owned_generation_prompt_is_visible,
+    photo_one_identity_instruction,
     resolve_feed_image_recipe_origin,
     supports_feed_source_media,
 )
@@ -3998,6 +4001,17 @@ def _normalize_feed_midjourney_request(
     }
 
 
+async def _required_feed_photo1_instruction(session: AsyncSession) -> str:
+    try:
+        return await get_feed_recipe_identity_instruction(session)
+    except (RuntimeError, ValueError, SQLAlchemyError) as exc:
+        logger.error("feed_photo_recipe_identity_policy_unavailable error_type=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Настройка переноса лица временно недоступна; поцелуи не списаны.",
+        ) from exc
+
+
 @router.post("/feed/{gen_id}/remix/quote")
 async def quote_feed_remix(
     gen_id: int,
@@ -4015,7 +4029,10 @@ async def quote_feed_remix(
         source, body, user_id=user.id, recipe_source=recipe_source,
     )
     if original_recipe_replay:
-        repeat_prompt = build_feed_image_recipe_prompt(repeat_prompt)
+        instruction = await _required_feed_photo1_instruction(session)
+        repeat_prompt = build_feed_image_recipe_prompt(
+            repeat_prompt, identity_instruction=instruction,
+        )
     gen_type: str
     count = 1
     edit_quote = {}
@@ -4137,15 +4154,22 @@ async def remix_feed_post(
     repeat_prompt, repeat_refs, body, personalized, own_recipe, original_recipe_replay = _prepare_feed_remix_inputs(
         source, body, user_id=user.id, recipe_source=recipe_source,
     )
+    identity_instruction = None
     if original_recipe_replay:
-        repeat_prompt = build_feed_image_recipe_prompt(repeat_prompt)
+        instruction = await _required_feed_photo1_instruction(session)
+        identity_instruction = photo_one_identity_instruction(instruction)
+        repeat_prompt = build_feed_image_recipe_prompt(
+            repeat_prompt, identity_instruction=instruction,
+        )
         logger.info(
             "feed_original_recipe_submit source_gen=%s user=%s model=%s references=%s",
             gen_id, user.id, body.model, len(repeat_refs),
         )
     feed_context = (
         {FEED_REMIX_CONTEXT_KEY: (
-            feed_image_recipe_context(gen_id, repeat_prompt) if original_recipe_replay else
+            feed_image_recipe_context(
+                gen_id, repeat_prompt, identity_instruction,
+            ) if original_recipe_replay else
             feed_image_remix_context(
                 gen_id, repeat_prompt,
                 source_image_url=(

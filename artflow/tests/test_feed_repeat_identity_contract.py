@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 
 from api import image_service, miniapp_routes, neironych_image_adapter, nexus_image_adapter
 from api.nexusapi_client import NexusApiClient
@@ -23,6 +24,7 @@ from db import repository as repo
 from db.models import ImageGenerationAction
 from tests import test_nano_banana_pro_reference_transport as reference_fixtures
 from tests.test_nano_banana_pro_reference_transport import (
+    PHOTO_ONE_POLICY,
     REFS,
     SECRET,
     SOURCE,
@@ -206,6 +208,13 @@ def assert_recipe_identity_priority(prompt, creator_prompt):
     assert prompt.endswith("never the original creator's subject.")
 
 
+def assert_photo_one_recipe(prompt: str, creator_prompt: str) -> None:
+    assert prompt.startswith(creator_prompt)
+    assert prompt.count(creator_prompt) == 1
+    assert prompt.count("Фото 1 — лицо") == 1
+    assert PHOTO_ONE_POLICY in prompt
+
+
 def previous_generation(prompt, *, version=2, **extra):
     context = {"version": version, "source_generation_id": 77, "prompt": prompt}
     return SimpleNamespace(
@@ -231,7 +240,7 @@ async def test_collage_edit_uses_creator_prompt_and_only_reader_reference(
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0]]
     prompt = params["prompt"]
-    assert prompt == SECRET
+    assert_photo_one_recipe(prompt, SECRET)
 
 
 def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback():
@@ -342,6 +351,67 @@ def test_recipe_prompt_does_not_add_identity_instruction():
     assert composed == "Candlelit studio scene."
 
 
+def test_recipe_prompt_labels_first_reader_reference_as_face_anchor():
+    creator = "Studio portrait with a white jacket and dramatic light."
+    policy = "Match facial structure and distinctive features from the first user photo only."
+    composed = prompt_core.build_feed_image_recipe_prompt(
+        creator, identity_instruction=policy,
+    )
+    assert composed.startswith(creator)
+    assert "Фото 1 — лицо" in composed
+    assert policy in composed
+    assert composed.count("Фото 1 — лицо") == 1
+
+    continued = prompt_core.build_feed_image_recipe_prompt(
+        composed, "blue jacket", previous_instruction=prompt_core.photo_one_identity_instruction(policy),
+        identity_instruction=policy,
+    )
+    assert continued.count(creator) == 1
+    assert continued.count("Фото 1 — лицо") == 1
+    assert "blue jacket" in continued
+
+
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+@pytest.mark.parametrize("model", MODELS)
+async def test_paid_feed_repeat_labels_first_provider_image_as_face(
+    local_launch, wire, monkeypatch, surface, model,
+):
+    policy = "Use the first user image as the only source of facial identity and distinctive features."
+    getter = AsyncMock(return_value=policy)
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", getter, raising=False)
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(
+            model=model, image_url=REFS[0], reference_urls=REFS[1:],
+        ),
+        session=local_launch.session, user=local_launch.user, surface=surface,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == REFS
+    assert params["prompt"].startswith(SECRET)
+    assert "Фото 1 — лицо" in params["prompt"]
+    assert policy in params["prompt"]
+    assert SOURCE not in params["image_urls"]
+    getter.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("missing policy"), SQLAlchemyError("database unavailable")])
+async def test_feed_repeat_missing_identity_policy_fails_before_charge(
+    local_launch, wire, monkeypatch, failure,
+):
+    monkeypatch.setattr(
+        miniapp_routes, "get_feed_recipe_identity_instruction",
+        AsyncMock(side_effect=failure),
+    )
+    with pytest.raises(HTTPException) as error:
+        await miniapp_routes.remix_feed_post(
+            77, miniapp_routes.FeedRemixRequest(model="nano-banana-pro", image_url=REFS[0]),
+            session=local_launch.session, user=local_launch.user,
+        )
+    assert error.value.status_code == 503
+    assert wire == []
+    repo.charge_image_generation.assert_not_awaited()
+
+
 def test_recipe_continuation_unwraps_previous_main_policy_wording():
     creator = "Gothic forest portrait."
     previous = (
@@ -419,7 +489,7 @@ async def test_ksu_style_feed_recipe_replaces_author_refs_and_preserves_settings
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0]]  # Author output and original input excluded.
     assert source.prompt in params["prompt"]
-    assert params["prompt"] == source.prompt
+    assert_photo_one_recipe(params["prompt"], source.prompt)
     assert params["aspect_ratio"] == "2:3"
     assert params["image_size"] == "2K"
     args = repo.create_generation.await_args
@@ -479,7 +549,7 @@ async def test_every_nexus_image_model_uses_creator_prompt_and_reader_photo_with
     )
     submitted = wire[0]["body"]["params"]
     assert submitted["image_urls"] == [REFS[0]]
-    assert submitted["prompt"] == SECRET
+    assert_photo_one_recipe(submitted["prompt"], SECRET)
     context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
     assert context["version"] == 4
 
@@ -501,7 +571,7 @@ async def test_derived_photo_on_other_image_models_uses_public_origin_recipe(
     )
     submitted = wire[0]["body"]["params"]
     assert submitted["image_urls"] == [REFS[0]]
-    assert submitted["prompt"] == origin.prompt
+    assert_photo_one_recipe(submitted["prompt"], origin.prompt)
 
 
 @pytest.mark.parametrize("model", ["nano-banana-pro", "google/nano-banana", "midjourney-blend"])
@@ -542,7 +612,7 @@ async def test_disabled_recipe_fails_closed_without_author_photo(
         )
         params = wire[0]["body"]["params"]
         assert params["image_urls"] == [REFS[0]]
-        assert params["prompt"] == SECRET
+        assert_photo_one_recipe(params["prompt"], SECRET)
 
 
 async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_response(
@@ -555,7 +625,7 @@ async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_resp
         session=local_launch.session, user=local_launch.user,
     )
     assert wire[0]["body"]["params"]["image_urls"] == [REFS[0]]
-    assert wire[0]["body"]["params"]["prompt"] == SECRET
+    assert_photo_one_recipe(wire[0]["body"]["params"]["prompt"], SECRET)
     assert SECRET not in str(result)
     assert result.prompt_hidden is True
     assert local_launch.created_sessions[-1].base_prompt is None
@@ -657,7 +727,7 @@ async def test_nexus_personalized_repeat_uses_reader_reference_only(
     )
     submitted = wire[0]["body"]["params"]
     assert submitted["image_urls"] == [REFS[0]]
-    assert submitted["prompt"] == SECRET
+    assert_photo_one_recipe(submitted["prompt"], SECRET)
     context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
     assert context["version"] == 4
     assert "source_image_url" not in context
@@ -690,7 +760,7 @@ async def test_nano21_derived_feed_uses_origin_prompt_and_only_reader_photo(
     submitted = generate.await_args.kwargs
     assert quote["gen_type"] == "image"
     assert submitted["image_urls"] == [REFS[0]]
-    assert submitted["prompt"] == origin.prompt
+    assert_photo_one_recipe(submitted["prompt"], origin.prompt)
     assert SOURCE not in submitted["image_urls"]
 
 
@@ -788,7 +858,7 @@ async def test_all_public_gallery_aliases_are_excluded_from_identity_roles(local
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == REFS[:2]
-    assert params["prompt"] == SECRET
+    assert_photo_one_recipe(params["prompt"], SECRET)
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -903,6 +973,11 @@ async def test_fresh_web_result_repeated_in_telegram_rebuilds_current_reference_
         "pending_parent_generation_id": 99, "pending_source_feed_gen_id": 77,
         "image_session_id": image_session.id,
     })
+    updated_policy = (
+        "Take the exact face from the first user photo. Other user photos confirm only this same person. "
+        "Keep the creator's scene while retaining the reader's distinctive facial features."
+    )
+    image_gen.get_feed_recipe_identity_instruction.return_value = updated_policy
     await image_gen.cb_image_repeat_launch(
         SimpleNamespace(message=AsyncMock(), answer=AsyncMock()),
         launch.session, state, launch.user, AsyncMock(),
@@ -912,6 +987,10 @@ async def test_fresh_web_result_repeated_in_telegram_rebuilds_current_reference_
     assert params["model_name"] == model
     assert params["image_urls"] == references
     assert SECRET in params["prompt"]
+    assert "Фото 1 — лицо" in params["prompt"]
+    assert params["prompt"].count("Фото 1 — лицо") == 1
+    assert updated_policy in params["prompt"]
+    assert PHOTO_ONE_POLICY not in params["prompt"]
     assert IDENTITY_RULE not in params["prompt"]
     assert "blue coat" in params["prompt"]
     assert wire[0]["key"] != wire[1]["key"]
@@ -1273,7 +1352,7 @@ async def test_expired_gallery_entry_does_not_promote_bound_display_alias_to_ide
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0]]
-    assert params["prompt"] == SECRET
+    assert_photo_one_recipe(params["prompt"], SECRET)
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -1337,7 +1416,7 @@ async def test_quote_and_submit_share_authenticated_own_recipe_reference_budget(
     assert wire[0]["body"]["params"]["image_urls"] == references
     assert (OWN_RECIPE if owns_source else SECRET) in wire[0]["body"]["params"]["prompt"]
     if not owns_source:
-        assert wire[0]["body"]["params"]["prompt"] == SECRET
+        assert_photo_one_recipe(wire[0]["body"]["params"]["prompt"], SECRET)
         context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
         assert context["version"] == 4 and "prompt" not in context
 

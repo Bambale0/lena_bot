@@ -78,6 +78,9 @@ def local_session():
 
 @pytest.fixture
 def feed_launch(local_session, monkeypatch):
+    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(
+        return_value="Photo 1 is the sole source of the person's face; later user photos only clarify the same person and the creator prompt defines the scene."
+    ))
     charge = AsyncMock(return_value=SimpleNamespace(allowed=True, charged_credits=4))
     generate = AsyncMock(return_value=SimpleNamespace(task_id="synthetic-task", is_async=True))
     monkeypatch.setattr(repo, "resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4)))
