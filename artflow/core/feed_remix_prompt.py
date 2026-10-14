@@ -37,6 +37,7 @@ _IMAGE_RECIPE_SCENE_PREFIX = (
     "Creator scene recipe:\n"
 )
 _IMAGE_RECIPE_SCENE_LABEL = "Creator scene prompt:\n"
+_IMAGE_RECIPE_POLICY_LABEL = "Subject identity policy:\n"
 _IMAGE_RECIPE_POLICY_SUFFIX = "\n\nSubject identity policy:\n"
 _IMAGE_RECIPE_IDENTITY_MARKER = "\n\nReference identity priority: "
 _IMAGE_RECIPE_IDENTITY_PRIORITY = (
@@ -204,19 +205,26 @@ def build_feed_image_recipe_prompt(
     if prompt.startswith(_IMAGE_RECIPE_SCENE_PREFIX) and _IMAGE_RECIPE_IDENTITY_MARKER in prompt:
         prompt = prompt[len(_IMAGE_RECIPE_SCENE_PREFIX):].rsplit(_IMAGE_RECIPE_IDENTITY_MARKER, 1)[0]
     if previous_instruction:
+        previous_policy_prefix = f"{_IMAGE_RECIPE_POLICY_LABEL}{previous_instruction.strip()}\n\n"
         for old_suffix in (
             f"{_IMAGE_RECIPE_POLICY_SUFFIX}{previous_instruction.strip()}",
             f"\n\n{previous_instruction.strip()}",
         ):
             if prompt.endswith(old_suffix):
                 prompt = prompt[:-len(old_suffix)]
+                if prompt.startswith(previous_policy_prefix + _IMAGE_RECIPE_SCENE_LABEL):
+                    prompt = prompt[len(previous_policy_prefix):]
                 if prompt.startswith(_IMAGE_RECIPE_SCENE_LABEL):
                     prompt = prompt[len(_IMAGE_RECIPE_SCENE_LABEL):]
                 break
     change = str(change_request or "").strip()
     if change:
         prompt = f"{prompt}\n\nИзменения, которые запросил пользователь для повтора: {change}"
-    return f"{_IMAGE_RECIPE_SCENE_LABEL}{prompt}{_IMAGE_RECIPE_POLICY_SUFFIX}{identity_instruction.strip()}"
+    instruction = identity_instruction.strip()
+    return (
+        f"{_IMAGE_RECIPE_POLICY_LABEL}{instruction}\n\n"
+        f"{_IMAGE_RECIPE_SCENE_LABEL}{prompt}{_IMAGE_RECIPE_POLICY_SUFFIX}{instruction}"
+    )
 
 
 def feed_image_recipe_context(

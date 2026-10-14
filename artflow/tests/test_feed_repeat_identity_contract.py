@@ -163,13 +163,14 @@ def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback
     ) is None
 
 
-def test_creator_recipe_prioritizes_reader_face_and_does_not_duplicate_instruction():
+def test_creator_recipe_brackets_scene_with_current_reader_identity_policy():
     creator = "Gothic black-and-white portrait of a witch with dark hair."
     composed = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
-    assert composed.startswith("Creator scene prompt:\n")
+    assert composed.startswith("Subject identity policy:\n" + IDENTITY_RULE + "\n\nCreator scene prompt:\n")
     assert "Creator scene prompt:\n" + creator in composed
     assert composed.count(creator) == 1
     assert composed.endswith("\n\nSubject identity policy:\n" + IDENTITY_RULE)
+    assert composed.count(IDENTITY_RULE) == 2
     assert "EXCLUSIVE source of the subject's face" in composed
     assert "Do not copy the original subject's face" in composed
     assert prompt_core.build_feed_image_recipe_prompt(
@@ -178,7 +179,7 @@ def test_creator_recipe_prioritizes_reader_face_and_does_not_duplicate_instructi
     edited = prompt_core.build_feed_image_recipe_prompt(
         composed, IDENTITY_RULE, "blue cloak", previous_instruction=IDENTITY_RULE,
     )
-    assert edited.count("EXCLUSIVE source of the subject's face") == 1
+    assert edited.count("EXCLUSIVE source of the subject's face") == 2
     assert "blue cloak" in edited
     new_rule = "Use the reader's facial identity, never the creator's facial identity."
     updated = prompt_core.build_feed_image_recipe_prompt(
@@ -186,6 +187,7 @@ def test_creator_recipe_prioritizes_reader_face_and_does_not_duplicate_instructi
     )
     assert IDENTITY_RULE not in updated
     assert updated.endswith(new_rule)
+    assert updated.count(new_rule) == 2
     previous = SimpleNamespace(
         user_id=42, source_feed_gen_id=77, prompt=composed,
         input_params={prompt_core.FEED_REMIX_CONTEXT_KEY: prompt_core.feed_image_recipe_context(
@@ -201,7 +203,7 @@ def test_creator_recipe_prioritizes_reader_face_and_does_not_duplicate_instructi
     ) is None
 
 
-def test_recipe_continuation_replaces_old_unlabeled_identity_rule_once():
+def test_recipe_continuation_replaces_old_unlabeled_identity_rule():
     creator = "Black-and-white portrait of a witch."
     old_rule = "Use the old user's face from uploaded photo."
     previous = creator + "\n\n" + old_rule
@@ -217,9 +219,9 @@ def test_recipe_continuation_replaces_old_unlabeled_identity_rule_once():
     continued = prompt_core.build_feed_image_recipe_prompt(
         previous, IDENTITY_RULE, "blue cloak", previous_instruction=old_rule,
     )
-    assert continued.startswith("Creator scene prompt:\n")
+    assert continued.startswith("Subject identity policy:\n" + IDENTITY_RULE + "\n\nCreator scene prompt:\n")
     assert continued.count(creator) == 1
-    assert continued.count(IDENTITY_RULE) == 1
+    assert continued.count(IDENTITY_RULE) == 2
     assert old_rule not in continued
     assert "blue cloak" in continued
 
@@ -230,7 +232,7 @@ def test_recipe_prompt_uses_only_the_current_admin_instruction_for_identity_rule
         "The administrator controls any more specific subject instructions for this campaign."
     )
     composed = prompt_core.build_feed_image_recipe_prompt("Candlelit studio scene.", revised_rule)
-    assert composed.startswith("Creator scene prompt:\nCandlelit studio scene.")
+    assert composed.startswith("Subject identity policy:\n" + revised_rule + "\n\nCreator scene prompt:\nCandlelit studio scene.")
     assert composed.endswith("\n\nSubject identity policy:\n" + revised_rule)
     assert "facial identity" not in composed
     assert "facial features" not in composed
@@ -245,7 +247,7 @@ def test_recipe_continuation_unwraps_previous_main_policy_wording():
     continued = prompt_core.build_feed_image_recipe_prompt(previous, IDENTITY_RULE, "silver bat crown")
     assert continued.count(creator) == 1
     assert "Previous policy wording" not in continued
-    assert continued.count(IDENTITY_RULE) == 1
+    assert continued.count(IDENTITY_RULE) == 2
     assert "silver bat crown" in continued
 
 
