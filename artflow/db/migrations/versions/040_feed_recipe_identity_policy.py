@@ -14,10 +14,13 @@ depends_on = None
 DEFAULT_INSTRUCTION = (
     "The supplied reference photos are the EXCLUSIVE source of the subject's face and identity. "
     "If they show multiple views or a collage, use the clearest frontal face as the identity anchor "
-    "and the other views only to confirm the same person's features. Preserve that person's face shape, "
-    "eyes, eyebrows, nose, lips, jawline, skin tone and distinctive facial details in the finished portrait. "
-    "Apply the scene, clothing, pose, lighting and artistic style described above to this person. "
-    "Do not copy the original subject's face, invent a different face, blend identities or output a collage."
+    "and other views to confirm the same person's features; do not output the collage layout. "
+    "Preserve face shape, eyes, eyebrows, nose, lips, jawline, skin tone, hairline, hair texture, "
+    "hair color and distinctive facial details. Apply the creator recipe to the scene, clothing, "
+    "pose, lighting and artistic style, but the reader's reference takes priority over conflicting "
+    "appearance or color descriptions, including a monochrome scene instruction. The reader's "
+    "explicit appearance changes take priority where requested. Do not copy the creator's face, "
+    "invent a different face, blend identities or output a collage."
 )
 
 

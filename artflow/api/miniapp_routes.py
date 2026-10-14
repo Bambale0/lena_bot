@@ -3825,7 +3825,7 @@ def _prepare_feed_remix_inputs(
             body = body.model_copy(update=updated)
     try:
         if original_recipe_replay:
-            # Historical pre-Oct-09 contract: creator prompt + reader's images.
+            # Creator's scene recipe with the reader's identity as the priority.
             # The finished author image is *not* a provider reference.
             prompt = str(source.prompt or "").strip()
             if body.change_request.strip():
