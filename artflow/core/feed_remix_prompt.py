@@ -139,16 +139,13 @@ def _feed_source_input_params(source) -> dict | None:
 def feed_image_original_recipe_allowed(
     source, *, user_id: int, model_key: str, enabled: bool,
 ) -> bool:
-    """Replay the creator's published image recipe; never copy creator media.
-
-    The original prompt is only used server-side. Derived/legacy-unverifiable
-    public items continue through the isolated scene-edit fallback.
-    """
+    """Replay a creator recipe with reader media only."""
     if not enabled or source is None:
         return False
-    if (not getattr(source, "is_public_feed", False)
-            or getattr(source, "source_feed_gen_id", None)
-            or getattr(source, "user_id", None) == user_id):
+    if not getattr(source, "is_public_feed", False):
+        return False
+    same_owner = getattr(source, "user_id", None) == user_id
+    if same_owner and not (model_key == "nano-banana-2.1" and getattr(source, "source_feed_gen_id", None)):
         return False
     kind = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
     if kind != "image":
@@ -157,10 +154,37 @@ def feed_image_original_recipe_allowed(
     # Midjourney and video have separate contracts.
     if not isinstance(model_key, str) or not model_key:
         return False
-    params = _feed_source_input_params(source)
-    if params is None or not isinstance(params.get("reference_images"), list):
+    if not str(getattr(source, "prompt", "") or "").strip():
         return False
-    return bool(str(getattr(source, "prompt", "") or "").strip())
+    if model_key == "nano-banana-2.1":
+        # This provider receives the recipe and reader references for every
+        # public photo repeat, including older and derived feed posts.
+        return True
+    if getattr(source, "source_feed_gen_id", None):
+        return False
+    params = _feed_source_input_params(source)
+    return params is not None and isinstance(params.get("reference_images"), list)
+
+
+async def resolve_feed_image_recipe_origin(source, public_lookup):
+    """Find the original public image recipe behind a derived feed post."""
+    current = source
+    seen: set[int] = set()
+    for _ in range(8):
+        source_id = getattr(current, "id", None)
+        if not isinstance(source_id, int) or source_id in seen:
+            return None
+        seen.add(source_id)
+        parent_id = getattr(current, "source_feed_gen_id", None)
+        if not parent_id:
+            return current
+        parent = await public_lookup(parent_id)
+        kind = getattr(getattr(parent, "gen_type", None), "value", getattr(parent, "gen_type", None))
+        if (parent is None or getattr(parent, "id", None) != parent_id
+                or not getattr(parent, "is_public_feed", False) or kind != "image"):
+            return None
+        current = parent
+    return None
 
 
 def feed_image_recipe_source_parameters(source) -> dict:

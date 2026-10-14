@@ -108,6 +108,7 @@ export interface FeedItem {
   gen_type?: string;
   source_has_video_reference?: boolean | null;
   source_image_recipe_available?: boolean;
+  source_image_recipe_available_for_nano21?: boolean;
   original_image_quality?: string | null;
   original_duration?: number | null;
   original_aspect_ratio?: string | null;

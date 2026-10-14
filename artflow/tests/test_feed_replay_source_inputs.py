@@ -215,6 +215,24 @@ def test_feed_card_reports_only_public_recipe_capabilities_not_prompt():
     assert FeedCard.from_feed_card(card).source_has_video_reference is True
 
 
+def test_derived_photo_card_exposes_nano21_prompt_only_capacity():
+    source = SimpleNamespace(
+        id=77, user_id=99, model="nano-banana-2", gen_type=GenerationType.image,
+        prompt=PROMPT, result_url=AUTHOR_PHOTO, result_urls=None,
+        likes_count=0, shares_count=0, created_at=datetime.now(timezone.utc),
+        input_params={"reference_images": [AUTHOR_PHOTO]}, is_public_feed=True,
+        source_feed_gen_id=55,
+    )
+    card = SimpleNamespace(generation=source, username="author", full_name=None,
+                           aspect_ratio="9:16", remix_count=2, quality=None)
+    mini = _feed_card_out(card, SimpleNamespace(id=42))
+    web = FeedCard.from_feed_card(card).model_dump()
+    for payload in (mini, web):
+        assert payload["source_image_recipe_available"] is False
+        assert payload["source_image_recipe_available_for_nano21"] is True
+    assert PROMPT not in str(mini)
+
+
 @pytest.mark.asyncio
 async def test_api_photo_creator_replay_rejects_rendered_mp4_in_image_slots(api_launch):
     api_launch.source.gen_type = GenerationType.video

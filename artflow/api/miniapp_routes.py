@@ -120,6 +120,7 @@ from core.feed_remix_prompt import (
     original_feed_video_inputs,
     original_feed_video_references,
     owned_generation_prompt_is_visible,
+    resolve_feed_image_recipe_origin,
     supports_feed_source_media,
 )
 from core.feed_remix_prompt import build_feed_remix_prompt as _build_feed_remix_prompt
@@ -422,6 +423,13 @@ def _feed_card_out(card: Any, user: User | None) -> dict:
         generation, user_id=user.id, model_key=str(generation.model),
         enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
     )
+    nano21_recipe = source_kind == "image" and bool(user) and (
+        owned_generation_prompt_is_visible(generation, user.id)
+        or feed_image_original_recipe_allowed(
+            generation, user_id=user.id, model_key="nano-banana-2.1",
+            enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
+        )
+    )
     image_recipe_settings = feed_image_recipe_source_parameters(generation) if photo_recipe else {}
     return {
         "id": generation.id,
@@ -436,6 +444,7 @@ def _feed_card_out(card: Any, user: User | None) -> dict:
         "aspect_ratio": card.aspect_ratio,
         "source_has_video_reference": bool(replay_videos) if replay_videos is not None else None,
         "source_image_recipe_available": bool(photo_recipe),
+        "source_image_recipe_available_for_nano21": bool(nano21_recipe),
         "original_image_quality": image_recipe_settings.get("quality"),
         "original_duration": (creator_inputs or {}).get("duration"),
         "original_aspect_ratio": (creator_inputs or {}).get("aspect_ratio")
@@ -3665,6 +3674,7 @@ def _canonical_feed_source_reference(source: Generation, url: str, source_urls: 
 
 def _prepare_feed_remix_inputs(
     source: Generation, body: FeedRemixRequest, *, user_id: int | None = None,
+    recipe_source: Generation | None = None,
 ) -> tuple[str, list[str], FeedRemixRequest, bool, bool, bool]:
     """Return normalized inputs and original-recipe provenance for photo repeats."""
     source_urls = _generation_result_urls(source)
@@ -3767,6 +3777,9 @@ def _prepare_feed_remix_inputs(
     image_repeat = source_type == "image" and body.model in (IMAGE_CAPS.keys() | _MJ_STUDIO_IMAGE_MODELS)
     own_recipe = image_repeat and user_id is not None and owned_generation_prompt_is_visible(source, user_id)
     identity_refs = feed_identity_references(source, requested_refs) if image_repeat else requested_refs
+    if image_repeat and body.model == "nano-banana-2.1" and not own_recipe and not identity_refs:
+        raise HTTPException(status_code=422, detail="Для повтора фото из ленты загрузи своё фото; поцелуи не списаны.")
+    recipe_source = recipe_source or source
     original_recipe_replay = bool(
         image_repeat and body.model in IMAGE_CAPS and identity_refs and user_id is not None
         and feed_image_original_recipe_allowed(
@@ -3774,6 +3787,8 @@ def _prepare_feed_remix_inputs(
             enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
         )
     )
+    if image_repeat and body.model == "nano-banana-2.1" and not own_recipe and not original_recipe_replay:
+        raise HTTPException(status_code=422, detail="Повтор по промпту автора временно недоступен; поцелуи не списаны.")
     has_user_inputs = bool(
         (bool(identity_refs) if image_repeat else any(url not in source_urls or source_type != "image" for url in requested_refs))
         or (body.video_url and (source_type != "video" or body.video_url not in source_urls))
@@ -3808,7 +3823,10 @@ def _prepare_feed_remix_inputs(
     if image_repeat and any(not public_url_is_available(url) for url in identity_refs):
         raise HTTPException(status_code=422, detail="Часть твоих фото недоступна. Загрузи их заново; поцелуи не списаны.")
     if original_recipe_replay:
-        creator_settings = feed_image_recipe_source_parameters(source)
+        identity_refs = feed_identity_references(recipe_source, identity_refs)
+        if not identity_refs:
+            raise HTTPException(status_code=422, detail="Для повтора фото из ленты загрузи своё фото; поцелуи не списаны.")
+        creator_settings = feed_image_recipe_source_parameters(recipe_source)
         if len(identity_refs) < creator_settings["required_images"]:
             raise HTTPException(
                 status_code=422,
@@ -3827,7 +3845,7 @@ def _prepare_feed_remix_inputs(
         if original_recipe_replay:
             # Creator's scene recipe with the reader's identity as the priority.
             # The finished author image is *not* a provider reference.
-            prompt = str(source.prompt or "").strip()
+            prompt = str(recipe_source.prompt or "").strip()
             if body.change_request.strip():
                 prompt += "\n\nИзменения, которые запросил пользователь для повтора: " + body.change_request.strip()
         elif image_repeat and own_recipe:
@@ -3867,6 +3885,19 @@ def _prepare_feed_remix_inputs(
     if len(refs) > max_refs:
         raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s), including the source post")
     return prompt, refs, body, True, bool(image_repeat and own_recipe), original_recipe_replay
+
+
+async def _feed_recipe_source(session: AsyncSession, source: Generation, model_key: str) -> Generation:
+    source_kind = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
+    if (model_key != "nano-banana-2.1" or source_kind != "image"
+            or not getattr(source, "source_feed_gen_id", None)):
+        return source
+    origin = await resolve_feed_image_recipe_origin(
+        source, lambda generation_id: repo.get_public_feed_generation(session, generation_id),
+    )
+    if origin is None or not str(getattr(origin, "prompt", "") or "").strip():
+        raise HTTPException(status_code=422, detail="Исходный рецепт автора недоступен; поцелуи не списаны.")
+    return origin
 
 
 
@@ -3941,8 +3972,9 @@ async def quote_feed_remix(
     if source is None:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
+    recipe_source = await _feed_recipe_source(session, source, body.model)
     repeat_prompt, repeat_refs, body, _, _, original_recipe_replay = _prepare_feed_remix_inputs(
-        source, body, user_id=user.id,
+        source, body, user_id=user.id, recipe_source=recipe_source,
     )
     if original_recipe_replay:
         instruction = await get_feed_recipe_identity_instruction(session)
@@ -4064,8 +4096,9 @@ async def remix_feed_post(
     if not source:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
+    recipe_source = await _feed_recipe_source(session, source, body.model)
     repeat_prompt, repeat_refs, body, personalized, own_recipe, original_recipe_replay = _prepare_feed_remix_inputs(
-        source, body, user_id=user.id,
+        source, body, user_id=user.id, recipe_source=recipe_source,
     )
     recipe_identity_instruction = None
     if original_recipe_replay:

@@ -134,6 +134,35 @@ async def test_bot_nano21_recipe_payload_uses_reader_face_without_creator_photo(
     assert "EXCLUSIVE source of the subject's face" in payload["prompt"]
 
 
+@pytest.mark.asyncio
+async def test_bot_derived_feed_uses_origin_prompt_and_only_reader_reference(image_launch):
+    image_launch.kwargs["image_session"].model = "nano-banana-2.1"
+    image_launch.source.source_feed_gen_id = 55
+    image_launch.source.input_params = {"reference_images": [SOURCE_IMAGE]}
+    origin = SimpleNamespace(**{**vars(image_launch.source), "id": 55, "source_feed_gen_id": None,
+                                "prompt": "Original author scene recipe."})
+    image_launch.repo.get_public_feed_generation.side_effect = lambda _session, source_id: (
+        image_launch.source if source_id == 77 else origin if source_id == 55 else None
+    )
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
+    submitted = image_launch.generate.await_args
+    assert submitted.kwargs["image_url"] == USER_IMAGE
+    assert submitted.args[1] == image_gen.build_feed_image_recipe_prompt(origin.prompt, IDENTITY_RULE)
+
+
+@pytest.mark.asyncio
+async def test_bot_original_recipe_uses_exact_reader_reference(image_launch, monkeypatch):
+    monkeypatch.setattr(image_gen.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    image_launch.kwargs["image_session"].model = "nano-banana-2.1"
+    image_launch.source.model = "nano-banana-pro"
+    image_launch.source.input_params = {"reference_images": [SOURCE_IMAGE]}
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
+    submitted = image_launch.generate.await_args
+    assert submitted.kwargs["image_url"] == USER_IMAGE
+    assert SOURCE_IMAGE != submitted.kwargs["image_url"]
+    assert SECRET in submitted.args[1]  # Private recipe goes only to the provider.
+
+
 
 @pytest.mark.asyncio
 async def test_bot_missing_public_source_fails_before_charge(image_launch):

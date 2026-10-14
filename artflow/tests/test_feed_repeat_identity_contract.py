@@ -210,6 +210,19 @@ def test_recipe_continuation_unwraps_previous_main_policy_wording():
     assert "silver bat crown" in continued
 
 
+def test_nano21_public_derived_recipe_is_available_to_its_owner():
+    source = SimpleNamespace(
+        id=77, user_id=42, is_public_feed=True, gen_type="image",
+        source_feed_gen_id=55, prompt="Server-held derived edit",
+    )
+    assert prompt_core.feed_image_original_recipe_allowed(
+        source, user_id=42, model_key="nano-banana-2.1", enabled=True,
+    )
+    assert not prompt_core.feed_image_original_recipe_allowed(
+        source, user_id=42, model_key="nano-banana-2", enabled=True,
+    )
+
+
 
 @pytest.mark.parametrize("surface", ["web", "miniapp"])
 @pytest.mark.parametrize("model", MODELS)
@@ -417,6 +430,96 @@ async def test_nexus_personalized_repeat_replays_pre_regression_scene_first_cont
     assert context["source_image_url"] == SOURCE
     assert context["header_family"] == "scene_first"
     assert SECRET not in submitted["prompt"]
+
+
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+async def test_nano21_derived_feed_uses_origin_prompt_and_only_reader_photo(
+    local_launch, wire, monkeypatch, surface,
+):
+    local_launch.source.source_feed_gen_id = 55
+    local_launch.source.input_params = {"reference_images": [SOURCE]}
+    origin = SimpleNamespace(**{**vars(local_launch.source), "id": 55, "source_feed_gen_id": None,
+                                "prompt": "Original author portrait recipe."})
+    repo.get_public_feed_generation.side_effect = lambda _session, source_id: (
+        local_launch.source if source_id == 77 else origin if source_id == 55 else None
+    )
+    generate = AsyncMock(return_value="https://example.test/generated.jpg")
+    monkeypatch.setattr(image_service.neironych_image_adapter, "generate_nano_banana21_image", generate)
+    monkeypatch.setattr(miniapp_routes, "get_nano21_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
+    monkeypatch.setattr(repo, "finish_generation", AsyncMock(return_value=local_launch.generation))
+    quote = await miniapp_routes.quote_feed_remix(
+        77, miniapp_routes.FeedRemixRequest(model="nano-banana-2.1", image_url=REFS[0]),
+        session=local_launch.session, user=local_launch.user,
+    )
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(model="nano-banana-2.1", image_url=REFS[0]),
+        session=local_launch.session, user=local_launch.user, surface=surface,
+    )
+    submitted = generate.await_args.kwargs
+    assert quote["gen_type"] == "image"
+    assert submitted["image_urls"] == [REFS[0]]
+    assert submitted["prompt"] == prompt_core.build_feed_image_recipe_prompt(origin.prompt, IDENTITY_RULE)
+    assert SOURCE not in submitted["image_urls"]
+
+
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+async def test_nano21_derived_feed_missing_origin_fails_before_charge(local_launch, wire, surface):
+    local_launch.source.source_feed_gen_id = 55
+    repo.get_public_feed_generation.side_effect = lambda _session, source_id: (
+        local_launch.source if source_id == 77 else None
+    )
+    with pytest.raises(HTTPException) as error:
+        await miniapp_routes.remix_feed_post(
+            77, miniapp_routes.FeedRemixRequest(model="nano-banana-2.1", image_url=REFS[0]),
+            session=local_launch.session, user=local_launch.user, surface=surface,
+        )
+    assert error.value.status_code == 422
+    assert wire == []
+    repo.charge_image_generation.assert_not_awaited()
+
+
+async def test_nano21_feed_repeat_without_reader_photo_fails_before_charge(local_launch, wire):
+    with pytest.raises(HTTPException) as error:
+        await miniapp_routes.remix_feed_post(
+            77, miniapp_routes.FeedRemixRequest(model="nano-banana-2.1", image_url=SOURCE),
+            session=local_launch.session, user=local_launch.user,
+        )
+    assert error.value.status_code == 422
+    assert wire == []
+    repo.charge_image_generation.assert_not_awaited()
+
+
+async def test_nano21_disabled_recipe_fails_without_author_photo(local_launch, wire, monkeypatch):
+    monkeypatch.setattr(miniapp_routes.settings, "FEED_ORIGINAL_RECIPE_ENABLED", False)
+    with pytest.raises(HTTPException) as error:
+        await miniapp_routes.remix_feed_post(
+            77, miniapp_routes.FeedRemixRequest(model="nano-banana-2.1", image_url=REFS[0]),
+            session=local_launch.session, user=local_launch.user,
+        )
+    assert error.value.status_code == 422
+    assert wire == []
+    repo.charge_image_generation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+async def test_nano21_original_recipe_uses_exact_reader_reference(
+    local_launch, wire, monkeypatch, surface,
+):
+    local_launch.source.source_feed_gen_id = None
+    local_launch.source.input_params = {"reference_images": [SOURCE]}
+    monkeypatch.setattr(miniapp_routes.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    generate = AsyncMock(return_value="https://example.test/generated.jpg")
+    monkeypatch.setattr(image_service.neironych_image_adapter, "generate_nano_banana21_image", generate)
+    monkeypatch.setattr(miniapp_routes, "get_nano21_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
+    monkeypatch.setattr(repo, "finish_generation", AsyncMock(return_value=local_launch.generation))
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(model="nano-banana-2.1", image_url=REFS[0]),
+        session=local_launch.session, user=local_launch.user, surface=surface,
+    )
+    submitted = generate.await_args.kwargs
+    assert submitted["image_urls"] == [REFS[0]]
+    assert SOURCE not in submitted["image_urls"]
+    assert SECRET in submitted["prompt"]
 
 
 @pytest.mark.parametrize("model", MODELS)
