@@ -481,10 +481,13 @@ async def test_telegram_replay_collector_does_not_reserve_creator_image_slot(
     assert source_slots == 0
     assert cap == composer.repeat_references._repeat_max_refs("nano-banana-pro")
     assert composer.repeat_references._prompt_user_reference_limit("nano-banana-pro", state) == cap
-    assert "рецепт автора" in composer._text({
+    screen = composer._text({
         **state, "prompt_multi_ref_count": 1,
         "prompt_multi_ref_max": cap,
     })
+    assert f"Референсы: <b>1/{cap}</b>" in screen
+    assert "Повторим исходный рецепт автора" not in screen
+    assert "Можно отправлять фото по одному" not in screen
 
 
 async def test_quote_and_submission_inherit_identical_historic_photo_settings(
