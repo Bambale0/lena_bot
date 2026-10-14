@@ -149,7 +149,7 @@ async def test_cb_feed_use() -> None:
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
     mock_state = AsyncMock()
-    gen = SimpleNamespace(id=42, prompt="beautiful landscape", model="sdxl", gen_type=GenerationType.image)
+    gen = SimpleNamespace(id=42, user_id=99, is_public_feed=True, prompt="beautiful landscape", model="sdxl", gen_type=GenerationType.image)
     # Используем настоящий ModelCost
     model_cost = ModelCost(
         model_key="sdxl", display_name="SDXL", credits=8,
@@ -160,7 +160,7 @@ async def test_cb_feed_use() -> None:
         with patch("bot.handlers.feed.prompt_use_model_kb", MagicMock(return_value=model_kb)) as kb:
             await feed.cb_feed_use(call, AsyncMock(), SimpleNamespace(id=42, credits=500, is_banned=False), mock_state)
     mock_state.set_state.assert_called_with(PromptUseFSM.model_select)
-    kb.assert_called_once_with(42, [model_cost], reference_only=True, reserved_refs=1)
+    kb.assert_called_once_with(42, [model_cost], reference_only=True, reserved_refs=0)
     assert mock_state.update_data.await_args.kwargs["feed_use_gen_type"] == "image"
 
 

@@ -3777,17 +3777,23 @@ def _prepare_feed_remix_inputs(
     image_repeat = source_type == "image" and body.model in (IMAGE_CAPS.keys() | _MJ_STUDIO_IMAGE_MODELS)
     own_recipe = image_repeat and user_id is not None and owned_generation_prompt_is_visible(source, user_id)
     identity_refs = feed_identity_references(source, requested_refs) if image_repeat else requested_refs
-    if image_repeat and body.model == "nano-banana-2.1" and not own_recipe and not identity_refs:
+    recipe_model_supported = (
+        body.model == "midjourney-imagine"
+        or "image" in IMAGE_CAPS.get(body.model, {}).get("modes", [])
+    )
+    if image_repeat and not own_recipe and not recipe_model_supported:
+        raise HTTPException(status_code=422, detail="Эта модель не поддерживает повтор по промпту и фото; поцелуи не списаны.")
+    if image_repeat and not own_recipe and not identity_refs:
         raise HTTPException(status_code=422, detail="Для повтора фото из ленты загрузи своё фото; поцелуи не списаны.")
     recipe_source = recipe_source or source
     original_recipe_replay = bool(
-        image_repeat and body.model in IMAGE_CAPS and identity_refs and user_id is not None
+        image_repeat and recipe_model_supported and identity_refs and user_id is not None
         and feed_image_original_recipe_allowed(
             source, user_id=user_id, model_key=body.model,
             enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
         )
     )
-    if image_repeat and body.model == "nano-banana-2.1" and not own_recipe and not original_recipe_replay:
+    if image_repeat and not own_recipe and not original_recipe_replay:
         raise HTTPException(status_code=422, detail="Повтор по промпту автора временно недоступен; поцелуи не списаны.")
     has_user_inputs = bool(
         (bool(identity_refs) if image_repeat else any(url not in source_urls or source_type != "image" for url in requested_refs))
@@ -3883,14 +3889,16 @@ def _prepare_feed_remix_inputs(
             prompt = feed_video_edit_prompt(prompt)
     max_refs = int(caps.get("max_refs", 1) or 1)
     if len(refs) > max_refs:
-        raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s), including the source post")
+        suffix = "" if original_recipe_replay else ", including the source post"
+        raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s){suffix}")
     return prompt, refs, body, True, bool(image_repeat and own_recipe), original_recipe_replay
 
 
 async def _feed_recipe_source(session: AsyncSession, source: Generation, model_key: str) -> Generation:
     source_kind = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
-    if (model_key != "nano-banana-2.1" or source_kind != "image"
-            or not getattr(source, "source_feed_gen_id", None)):
+    if (model_key not in IMAGE_CAPS and model_key != "midjourney-imagine") or (
+        source_kind != "image" or not getattr(source, "source_feed_gen_id", None)
+    ):
         return source
     origin = await resolve_feed_image_recipe_origin(
         source, lambda generation_id: repo.get_public_feed_generation(session, generation_id),
@@ -4170,7 +4178,7 @@ async def remix_feed_post(
                 aspect_ratio=normalized_ratio,
                 quality=normalized_quality,
                 count=1,
-                base_prompt=source_prompt if personalized or own_recipe else None,
+                base_prompt=None if original_recipe_replay else source_prompt if personalized or own_recipe else None,
                 prompt_provenance="user_supplied" if own_recipe else None,
                 reference_file_id=None,
                 reference_url=refs[0] if refs else None,

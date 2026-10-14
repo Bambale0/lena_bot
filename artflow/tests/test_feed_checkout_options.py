@@ -91,8 +91,12 @@ async def test_feed_quote_skips_smaller_unpurchasable_plan_and_discloses_mapped_
     monkeypatch.setattr(settings, "LAVA_API_KEY", "test" if provider == "lava" else "")
     monkeypatch.setattr(type(settings), "lava_offer_id_for_plan", lambda self, key: "offer" if key == "lava_mapped" else "")
     source = SimpleNamespace(id=88, model="nano-banana-2", gen_type="image", prompt="hidden author prompt",
+                             user_id=99, is_public_feed=True,
                              result_url="https://example.test/source.png", result_urls=None)
     monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(
+        return_value="Use only the reader's reference photos for the subject's identity. " * 3,
+    ))
     monkeypatch.setattr(miniapp_routes.repo, "resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=5, is_active=True)))
     monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
     packages = AsyncMock(return_value=[plan("unmapped", credits=6, label="Unmapped"), plan(mapped_key, credits=15, label="Mapped")])
@@ -103,7 +107,8 @@ async def test_feed_quote_skips_smaller_unpurchasable_plan_and_discloses_mapped_
     monkeypatch.setattr(miniapp_routes.repo, "create_transaction", transaction)
 
     result = await miniapp_routes.quote_feed_remix(
-        88, miniapp_routes.FeedRemixRequest(model="nano-banana-2", quality="2K"),
+        88, miniapp_routes.FeedRemixRequest(model="nano-banana-2", quality="2K",
+                                            reference_urls=["https://example.test/reader.png"]),
         session=AsyncMock(), user=SimpleNamespace(id=42, credits=0),
     )
     assert result["recommended_plan"]["key"] == mapped_key
@@ -117,7 +122,8 @@ async def test_feed_quote_skips_smaller_unpurchasable_plan_and_discloses_mapped_
 
     packages.return_value = [plan("unmapped", credits=6, label="Unmapped")]
     result = await miniapp_routes.quote_feed_remix(
-        88, miniapp_routes.FeedRemixRequest(model="nano-banana-2", quality="2K"),
+        88, miniapp_routes.FeedRemixRequest(model="nano-banana-2", quality="2K",
+                                            reference_urls=["https://example.test/reader.png"]),
         session=AsyncMock(), user=SimpleNamespace(id=42, credits=0),
     )
     assert result["recommended_plan"] is None

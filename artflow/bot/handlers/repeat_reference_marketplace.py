@@ -27,6 +27,7 @@ async def _reference_candidate(
     *,
     file_ids: list[str] | None = None,
     reference_urls: list[str] | None = None,
+    reader_user_id: int | None = None,
 ) -> tuple[dict[str, Any], int, int]:
     """Count a public source once, including aliases in the user's photo set."""
     model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
@@ -34,18 +35,22 @@ async def _reference_candidate(
     urls = list(reference_urls or [])
     source_slots = 0
     if data.get("feed_use_prompt") is not None:
+        user_id = reader_user_id if reader_user_id is not None else int(data.get("feed_use_user_id") or 0)
         source_id = marketplace._feed_use_source_id(data)
         source = await repo.get_public_feed_generation(session, source_id) if source_id else None
         source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
         original_recipe = model_key in image_gen.IMAGE_CAPS and feed_image_original_recipe_allowed(
             source,
-            user_id=int(data.get("feed_use_user_id") or 0),
+            user_id=user_id,
             model_key=model_key,
             enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
         )
         if source_type == "image" and original_recipe:
             urls = feed_identity_references(source, urls)
             return {"ref_file_ids": list(file_ids or []), "reference_urls": urls}, max_refs, 0
+        if source_type == "image" and getattr(source, "user_id", None) != user_id:
+            # A stale form or disabled recipe must never attach the author's image.
+            return {"ref_file_ids": list(file_ids or []), "reference_urls": []}, max_refs, 0
         source_url = image_gen.canonical_generation_result_url(source) if source_type == "image" else None
         if source_url and public_url_is_available(source_url):
             urls = image_gen.order_feed_image_references(source_url, urls, source_first=True)
@@ -242,6 +247,9 @@ async def _mode(call: CallbackQuery) -> None:
 async def _ratio_menu(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
+    if not repeat_references._repeat_ratio_options(model_key):
+        await call.answer("Для этой модели формат определяется автоматически", show_alert=True)
+        return
     selected = _current_ratio(data, model_key)
     await call.message.answer(  # type: ignore[union-attr]
         "📐 <b>Выбери формат результата</b>",
@@ -414,6 +422,21 @@ async def _run(
         await call.answer("Не удалось определить исходный пост. Открой его в ленте заново.", show_alert=True)
         await state.clear()
         return
+    if data.get("feed_use_prompt") is not None and not image_gen._supports_img2img(model_key):
+        await call.answer("Эта модель не поддерживает повтор по промпту и фото; поцелуи не списаны.", show_alert=True)
+        return
+    if data.get("feed_use_prompt") is not None:
+        feed_source = await repo.get_public_feed_generation(session, source_feed_gen_id)
+        source_type = getattr(getattr(feed_source, "gen_type", None), "value", getattr(feed_source, "gen_type", None))
+        if feed_source is None or (
+            source_type == "image" and getattr(feed_source, "user_id", None) != db_user.id
+            and not feed_image_original_recipe_allowed(
+                feed_source, user_id=db_user.id, model_key=model_key,
+                enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
+            )
+        ):
+            await call.answer("Исходный рецепт автора недоступен; поцелуи не списаны.", show_alert=True)
+            return
     file_ids = list(data.get("prompt_multi_ref_file_ids") or [])
     max_refs = repeat_references._prompt_user_reference_limit(model_key, data)
     if data.get("feed_use_prompt") is not None and max_refs < 1:
@@ -440,7 +463,12 @@ async def _run(
 
     # Validate every resolved photo before prompt rewards or session mutation.
     # Keep all accepted file IDs: several IDs may resolve to the same photo.
-    candidate, provider_limit, source_slots = await _reference_candidate(session, data, reference_urls=reference_urls)
+    candidate, provider_limit, source_slots = await _reference_candidate(
+        session, data, reference_urls=reference_urls, reader_user_id=db_user.id,
+    )
+    if any(not public_url_is_available(url) for url in candidate["reference_urls"]):
+        await call.answer("Часть твоих фото недоступна. Загрузи их заново; поцелуи не списаны.", show_alert=True)
+        return
     if (
         data.get("feed_use_prompt") is not None
         and not source_slots and not data.get("feed_original_recipe_replay")
@@ -485,6 +513,9 @@ async def _run(
             reference_url=None,
         )
         await state.clear()
+        # The recipe launch reads explicit settings from FSM; retain only the
+        # selected ratio after clearing the private source/prompt state.
+        await state.update_data(repeat_aspect_ratio=aspect_ratio)
         launched = await image_gen._launch_session_generation(
             source_message=call.message,  # type: ignore[arg-type]
             state=state,

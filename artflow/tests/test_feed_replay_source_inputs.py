@@ -228,7 +228,7 @@ def test_derived_photo_card_exposes_nano21_prompt_only_capacity():
     mini = _feed_card_out(card, SimpleNamespace(id=42))
     web = FeedCard.from_feed_card(card).model_dump()
     for payload in (mini, web):
-        assert payload["source_image_recipe_available"] is False
+        assert payload["source_image_recipe_available"] is True
         assert payload["source_image_recipe_available_for_nano21"] is True
     assert PROMPT not in str(mini)
 

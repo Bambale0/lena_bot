@@ -18,7 +18,7 @@ async def test_deep_link_feed_lookup_uses_list_representation_for_quote(client, 
         id=88, user_id=99, model="nano-banana-2", gen_type="image",
         prompt="private creator prompt", result_url="https://public.example/first.jpg",
         result_urls='["https://public.example/first.jpg", "https://public.example/second.jpg"]',
-        likes_count=0, shares_count=0,
+        likes_count=0, shares_count=0, is_public_feed=True,
     )
     card = SimpleNamespace(
         generation=source, username="artist", full_name=None,
@@ -45,13 +45,13 @@ async def test_deep_link_feed_lookup_uses_list_representation_for_quote(client, 
     assert lookup.await_args.kwargs == {"require_media": False}
     selected_preview = "https://apixbotai.com" + payload["preview_urls"][1]
     body = miniapp_routes.FeedRemixRequest(
-        model="nano-banana-2", image_url=selected_preview, source_image_url=selected_preview,
+        model="nano-banana-2", image_url="https://public.example/reader.jpg", source_image_url=selected_preview,
     )
-    prompt, refs, _, personalized, own_recipe, original_recipe_replay = miniapp_routes._prepare_feed_remix_inputs(source, body)
-    assert original_recipe_replay is False
-    assert refs == ["https://public.example/second.jpg"]
+    prompt, refs, _, personalized, own_recipe, original_recipe_replay = miniapp_routes._prepare_feed_remix_inputs(source, body, user_id=42)
+    assert original_recipe_replay is True
+    assert refs == ["https://public.example/reader.jpg"]
     assert prompt == "private creator prompt"
-    assert personalized is False
+    assert personalized is True
     assert own_recipe is False
 
 
@@ -85,7 +85,7 @@ async def client():
 @pytest.mark.asyncio
 async def test_feed_remix_quote_prices_variants_and_count_without_spending(client, monkeypatch):
     source = SimpleNamespace(
-        id=88, model="nano-banana-2", gen_type="image",
+        id=88, user_id=99, model="nano-banana-2", gen_type="image", is_public_feed=True,
         prompt="secret prompt", result_url="https://public.example/image.jpg",
         result_urls=None,
     )
@@ -95,12 +95,13 @@ async def test_feed_remix_quote_prices_variants_and_count_without_spending(clien
     monkeypatch.setattr(miniapp_routes.repo, "resolve_image_model_cost", cost)
     monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
     monkeypatch.setattr(miniapp_routes.repo, "charge_image_generation", charge)
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value="Use only the reader photo as the source of identity and keep its distinctive face features."))
     monkeypatch.setattr(miniapp_routes.repo, "get_active_price_plans", AsyncMock(return_value=[
         SimpleNamespace(key="starter", label="Старт", credits=10, price_rub=100)
     ]))
     response = await client.post("/api/v1/feed/88/remix/quote", json={
         "model": "nano-banana-2", "mode": "image", "quality": "2K",
-        "count": 2, "aspect_ratio": "1:1",
+        "count": 2, "aspect_ratio": "1:1", "image_url": "https://public.example/reader.jpg",
     })
     assert response.status_code == 200, response.text
     data = response.json()
@@ -139,7 +140,7 @@ async def test_edit_is_applied_on_first_paid_image_repeat_without_revealing_auth
     from db.models import GenerationStatus, GenerationType
 
     source = SimpleNamespace(
-        id=91, model="nano-banana-2", gen_type=GenerationType.image,
+        id=91, user_id=99, model="nano-banana-2", gen_type=GenerationType.image, is_public_feed=True,
         prompt="secret creator instructions", result_url="https://example.test/source.png",
         result_urls=None,
     )
@@ -162,18 +163,22 @@ async def test_edit_is_applied_on_first_paid_image_repeat_without_revealing_auth
     monkeypatch.setattr(miniapp_routes.repo, "update_generation_task", AsyncMock())
     monkeypatch.setattr(miniapp_routes.repo, "increment_feed_share", AsyncMock())
     monkeypatch.setattr(miniapp_routes.image_service, "generate_image", image_generate)
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value="Use only the reader photo as the source of identity and keep its distinctive face features."))
 
     response = await client.post("/api/v1/feed/91/remix", json={
         "model": "nano-banana-2", "mode": "image", "count": 2,
         "change_request": "Замени одежду на белый костюм", "quality": "2K",
+        "image_url": "https://example.test/reader.png",
     })
     assert response.status_code == 202, response.text
     assert response.json()["prompt_hidden"] is True
     assert response.json()["prompt"] == ""
     assert charge.await_args.kwargs["amount"] == 5.0
-    assert "secret creator instructions" not in image_generate.await_args.args[1]
+    assert "secret creator instructions" in image_generate.await_args.args[1]
+    assert "secret creator instructions" not in response.text
     assert "Замени одежду на белый костюм" in image_generate.await_args.args[1]
-    assert "Замени одежду" in save_session.await_args.kwargs["base_prompt"]
+    assert save_session.await_args.kwargs["base_prompt"] is None
+    assert image_generate.await_args.kwargs["image_url"] == "https://example.test/reader.png"
     assert save_gen.await_args.kwargs["source_feed_gen_id"] == 91
 
 
@@ -234,21 +239,22 @@ async def test_web_quote_proxy_requires_authenticated_user_without_invoicing():
 @pytest.mark.parametrize("model,gen_type,refs,aspect_ratio,prompt,detail", [
     ("midjourney-video", "video", [], None, "hidden", "requires a reference image"),
     ("midjourney-video", "image", ["https://example.test/extra.png"], None, "hidden", "at most 1"),
-    ("midjourney-imagine", "image", ["https://example.test/extra.png"], None, "hidden", "at most 1"),
-    ("midjourney-blend", "image", [f"https://example.test/{i}.png" for i in range(5)], None, "hidden", "at most 5"),
-    ("midjourney-imagine", "image", [], "4:7", "hidden", "aspect ratio"),
-    ("midjourney-imagine", "image", [], None, "", "Prompt is required"),
+    ("midjourney-imagine", "image", ["https://example.test/extra.png", "https://example.test/second.png"], None, "hidden", "at most 1"),
+    ("midjourney-blend", "image", [f"https://example.test/{i}.png" for i in range(5)], None, "hidden", "не поддерживает повтор"),
+    ("midjourney-imagine", "image", ["https://example.test/reader.png"], "4:7", "hidden", "aspect ratio"),
+    ("midjourney-imagine", "image", ["https://example.test/reader.png"], None, "", "Повтор по промпту автора"),
 ])
 async def test_midjourney_quote_and_submit_reject_same_invalid_inputs_before_charge(
     client, monkeypatch, model, gen_type, refs, aspect_ratio, prompt, detail,
 ):
     source = SimpleNamespace(
-        id=88, model=model, gen_type=gen_type, prompt=prompt,
+        id=88, user_id=99, model=model, gen_type=gen_type, prompt=prompt,
         result_url=f"https://example.test/source.{'mp4' if gen_type == 'video' else 'png'}",
-        result_urls=None,
+        result_urls=None, is_public_feed=True,
     )
     monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
     monkeypatch.setattr(miniapp_routes.repo, "get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=5, is_active=True)))
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value="Use only the reader photo as the source of identity and keep its distinctive face features."))
     monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
     plans = AsyncMock(return_value=[])
     charge = AsyncMock()
@@ -270,13 +276,14 @@ async def test_midjourney_quote_and_submit_reject_same_invalid_inputs_before_cha
 @pytest.mark.asyncio
 async def test_midjourney_quote_deduplicates_source_and_primary_reference(client, monkeypatch):
     source_url = "https://example.test/source.png"
-    source = SimpleNamespace(id=88, model="midjourney-imagine", gen_type="image", prompt="secret", result_url=source_url, result_urls=None)
+    source = SimpleNamespace(id=88, user_id=99, model="midjourney-imagine", gen_type="image", prompt="secret", result_url=source_url, result_urls=None, is_public_feed=True)
     monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
     monkeypatch.setattr(miniapp_routes.repo, "get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=2, is_active=True)))
     monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value="Use only the reader photo as the source of identity and keep its distinctive face features."))
     quote = await client.post("/api/v1/feed/88/remix/quote", json={
-        "model": "midjourney-imagine", "image_url": source_url,
-        "source_image_url": source_url, "reference_urls": [source_url],
+        "model": "midjourney-imagine", "image_url": "https://example.test/reader.png",
+        "source_image_url": source_url, "reference_urls": [source_url, "https://example.test/reader.png"],
     })
     assert quote.status_code == 200, quote.text
     assert quote.json()["cost_credits"] == 2

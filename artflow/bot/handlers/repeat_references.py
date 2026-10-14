@@ -30,6 +30,7 @@ from core.config import settings
 from core.feed_remix_prompt import (
     feed_image_original_recipe_allowed,
     feed_image_recipe_source_parameters,
+    trusted_feed_image_scene,
 )
 from db import repository as repo
 from db.models import GenerationType, ImageGenerationAction, User
@@ -82,9 +83,7 @@ def _repeat_ratio_options(model_key: str) -> list[str]:
         remix_model = getattr(spec, "remix_model", None) if spec else None
         ratios = list(IMAGE_CAPS.get(str(remix_model), {}).get("aspect_ratios") or [])
     ratios = list(dict.fromkeys(str(ratio) for ratio in ratios if ratio))
-    if "9:16" not in ratios:
-        ratios.insert(0, "9:16")
-    else:
+    if "9:16" in ratios:
         ratios.insert(0, ratios.pop(ratios.index("9:16")))
     return ratios
 
@@ -207,7 +206,11 @@ async def _repeat_provider_reference_urls(
     source = await repo.get_public_feed_generation(session, external_source_id)
     if _generation_type_value(source) != GenerationType.image.value or getattr(source, "id", None) != external_source_id:
         return None
-    if model_key in IMAGE_CAPS and feed_image_original_recipe_allowed(
+    scene_marker = trusted_feed_image_scene(
+        previous, user_id=db_user.id, source_generation_id=external_source_id,
+    )
+    owned_derived_scene = bool(scene_marker and scene_marker[0] != external_source_id)
+    if not owned_derived_scene and model_key in IMAGE_CAPS and feed_image_original_recipe_allowed(
         source, user_id=db_user.id, model_key=model_key,
         enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
     ):
@@ -215,6 +218,8 @@ async def _repeat_provider_reference_urls(
         # aliases must not be smuggled in as identity photos.
         refs = feed_identity_references(source, reference_urls)
         return refs if retain_user_references else []
+    if getattr(source, "user_id", None) != db_user.id and not owned_derived_scene:
+        return None
     try:
         _, source_url, identity_refs = await image_gen._resolve_feed_image_scene(
             session=session, db_user=db_user, source=source, references=reference_urls,
@@ -282,7 +287,7 @@ async def _begin_repeat_collection(
         repeat_model_key=model_key,
         repeat_max_refs=max_refs,
         repeat_reference_required=(
-            bool(creator["required_images"]) if original_recipe_replay
+            True if original_recipe_replay
             else image_gen._requires_reference_image(model_key)
         ),
         repeat_base_reference_urls=base_urls,
@@ -629,7 +634,7 @@ async def _repeat_refs_run(
     ) is None:
         return
 
-    if image_gen._requires_reference_image(model_key) and not candidate_refs:
+    if (source_feed_gen_id or image_gen._requires_reference_image(model_key)) and not candidate_refs:
         await call.answer("Для этой модели нужен хотя бы один референс", show_alert=True)
         return
 

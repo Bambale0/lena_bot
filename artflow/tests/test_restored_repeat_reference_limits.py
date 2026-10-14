@@ -44,6 +44,8 @@ def callback(data=""):
 
 @pytest.fixture
 def repeat_runtime(monkeypatch):
+    identity_instruction = "Use only the reader's reference photos for the subject's identity. " * 3
+    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=identity_instruction))
     active = ImageSession(
         id=1, user_id=42, model="nano-banana-pro", status=ImageSessionStatus.active,
         mode="image", base_prompt="previous series", last_prompt="previous series",
@@ -102,7 +104,7 @@ def repeat_runtime(monkeypatch):
 @pytest.mark.parametrize("protected_feed", [False, True])
 async def test_safe_repeat_rejects_restored_overflow_before_archiving(repeat_runtime, protected_feed):
     runtime = repeat_runtime
-    refs = REFS[:4] if protected_feed else REFS
+    refs = REFS
     runtime.generation.input_params = json.dumps({"reference_images": refs})
     if protected_feed:
         runtime.generation.source_feed_gen_id = 77
@@ -135,7 +137,7 @@ async def test_safe_repeat_overflow_is_visible_after_callback_was_answered(repea
     from bot.utils.telegram_ui import safe_answer_callback
 
     runtime = repeat_runtime
-    runtime.generation.input_params = json.dumps({"reference_images": REFS[:4] if protected_feed else REFS})
+    runtime.generation.input_params = json.dumps({"reference_images": REFS})
     if protected_feed:
         runtime.generation.source_feed_gen_id = 77
         runtime.generation.prompt = runtime.source.prompt
@@ -181,7 +183,7 @@ async def test_safe_repeat_deduplicates_restored_urls_without_losing_inputs(repe
     runtime = repeat_runtime
     original_saved_refs = [*REFS[:3], SOURCE] if protected_feed else REFS[:4]
     runtime.generation.input_params = json.dumps({"reference_images": [original_saved_refs[0], *original_saved_refs]})
-    expected = [SOURCE, *REFS[:3]] if protected_feed else REFS[:4]
+    expected = REFS[:3] if protected_feed else REFS[:4]
     if protected_feed:
         runtime.generation.source_feed_gen_id = 77
         runtime.generation.prompt = runtime.source.prompt
@@ -313,13 +315,14 @@ async def test_legacy_collector_counts_resolved_url_file_union(monkeypatch, alia
 
 
 @pytest.mark.parametrize("source_in_state", [77, None, 123])
-async def test_legacy_collector_rejects_fourth_user_photo_with_protected_source(repeat_runtime, monkeypatch, source_in_state):
+async def test_legacy_collector_rejects_fifth_user_photo_with_protected_source(repeat_runtime, monkeypatch, source_in_state):
     from bot.handlers import repeat_references
 
     runtime = repeat_runtime
     runtime.generation.source_feed_gen_id = 77
+    creator_prompt = runtime.source.prompt
     runtime.generation.prompt = runtime.source.prompt
-    runtime.active.reference_urls = json.dumps(REFS[:3])
+    runtime.active.reference_urls = json.dumps(REFS[:4])
     state = RepeatState()
     call = callback("img_session:repeat:99")
     await repeat_references._begin_repeat_collection(
@@ -329,7 +332,7 @@ async def test_legacy_collector_rejects_fourth_user_photo_with_protected_source(
     await state.update_data(repeat_source_feed_gen_id=source_in_state)
     before = dict(state.data)
     stored_before = dict(runtime.active.__dict__)
-    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[3]))
+    monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[4]))
     message = SimpleNamespace(photo=[SimpleNamespace(file_id="fourth-user-file", file_size=10)], answer=AsyncMock(), bot=call.bot)
     handler = next(item for router in image_gen.router.chain_tail for item in router.message.handlers if item.callback is repeat_references._collect_repeat_reference)
 
@@ -338,7 +341,7 @@ async def test_legacy_collector_rejects_fourth_user_photo_with_protected_source(
     assert state.data == before
     assert runtime.active.__dict__ == stored_before
     assert "до 4 фото" in message.answer.await_args.args[0]
-    assert runtime.source.prompt not in str(message.answer.await_args_list)
+    assert creator_prompt not in str(message.answer.await_args_list)
     assert runtime.created == []
     runtime.session.add.assert_not_called()
     runtime.session.commit.assert_not_awaited()
@@ -349,12 +352,13 @@ async def test_legacy_collector_rejects_fourth_user_photo_with_protected_source(
 
 
 @pytest.mark.parametrize("entrypoint", ["collect", "run"])
-@pytest.mark.parametrize("missing", ["publication", "media", "unavailable"])
+@pytest.mark.parametrize("missing", ["publication", "recipe"])
 async def test_legacy_repeat_missing_protected_source_is_atomic(repeat_runtime, monkeypatch, missing, entrypoint):
     from bot.handlers import repeat_references
 
     runtime = repeat_runtime
     runtime.generation.source_feed_gen_id = 77
+    creator_prompt = runtime.source.prompt
     state = RepeatState({
         "repeat_generation_id": 99, "repeat_source_feed_gen_id": 77,
         "repeat_model_key": "nano-banana-pro", "repeat_max_refs": 4,
@@ -363,13 +367,10 @@ async def test_legacy_repeat_missing_protected_source_is_atomic(repeat_runtime, 
     before = dict(state.data)
     if missing == "publication":
         monkeypatch.setattr(repo, "get_public_feed_generation", AsyncMock(return_value=None))
-    elif missing == "media":
-        runtime.source.result_url = None
-        runtime.source.result_urls = None
+    elif missing == "recipe":
+        runtime.source.prompt = ""
     else:
-        from core.config import settings
-
-        runtime.source.result_url = f"https://example.test{settings.STATIC_UPLOAD_URL_PATH}/missing-repeat-source.jpg"
+        raise AssertionError(missing)
     monkeypatch.setattr(image_gen, "_telegram_file_url", AsyncMock(return_value=REFS[2]))
     message = SimpleNamespace(photo=[SimpleNamespace(file_id="new-user-file", file_size=10)], answer=AsyncMock())
 
@@ -385,7 +386,7 @@ async def test_legacy_repeat_missing_protected_source_is_atomic(repeat_runtime, 
     if entrypoint == "run":
         visible.extend(item.args[0] for item in call.answer.await_args_list)
     assert any("недоступ" in text for text in visible)
-    assert runtime.source.prompt not in str(message.answer.await_args_list)
+    assert creator_prompt not in str(message.answer.await_args_list)
     assert runtime.active.status == ImageSessionStatus.active
     assert runtime.created == []
     runtime.session.add.assert_not_called()
@@ -421,20 +422,20 @@ async def test_legacy_collector_preserves_canonical_source_union_on_first_and_ne
     await repeat_references._collect_repeat_reference(message, state, runtime.session, runtime.user, call.bot)
 
     assert state.data["repeat_new_reference_file_ids"] == ["new-user-file"]
-    assert state.data["repeat_reference_count"] == 4
-    assert "<b>4/4</b>" in message.answer.await_args.args[0]
+    assert state.data["repeat_reference_count"] == 3
+    assert "<b>3/4</b>" in message.answer.await_args.args[0]
     runtime.session.commit.assert_not_awaited()
     repo.charge_image_generation.assert_not_awaited()
     runtime.provider.assert_not_awaited()
     await repeat_references._repeat_refs_run(call, runtime.session, state, runtime.user, call.bot)
 
-    expected = [SOURCE, *REFS[:3]]
+    expected = REFS[:3]
     assert runtime.provider.await_count == 1
     assert runtime.provider.await_args.kwargs["image_url"] == expected
     copied = runtime.created[-1]
     assert copied.base_prompt is None
     assert runtime.source.prompt not in str(copied.last_prompt)
-    assert runtime.source.prompt not in str(runtime.provider.await_args)
+    assert runtime.source.prompt in str(runtime.provider.await_args)
     assert runtime.source.prompt not in str(call.message.answer.await_args_list)
     assert runtime.source.prompt not in str(message.answer.await_args_list)
     runtime.generation.prompt = repo.create_generation.await_args.args[4]
@@ -450,7 +451,7 @@ async def test_legacy_collector_preserves_canonical_source_union_on_first_and_ne
     assert runtime.provider.await_args.kwargs["image_url"] == expected
     assert copied.base_prompt is None
     assert runtime.source.prompt not in str(copied.last_prompt)
-    assert runtime.source.prompt not in str(runtime.provider.await_args_list)
+    assert runtime.source.prompt in str(runtime.provider.await_args_list)
     assert runtime.source.prompt not in str(call.message.answer.await_args_list)
 
 
@@ -479,7 +480,7 @@ async def test_legacy_repeat_rejects_restored_overflow_before_session_writes(rep
     from bot.handlers import repeat_references
 
     runtime = repeat_runtime
-    refs = REFS[:4] if protected_feed else REFS
+    refs = REFS
     if protected_feed:
         runtime.generation.source_feed_gen_id = 77
         runtime.generation.prompt = runtime.source.prompt
@@ -583,6 +584,7 @@ async def test_feed_marketplace_counts_user_photo_aliasing_public_source_once(re
     runtime.generation.source_feed_gen_id = 77
     state = RepeatState({
         "feed_use_prompt": runtime.source.prompt, "feed_use_gen_id": 77,
+        "feed_use_user_id": runtime.user.id, "feed_original_recipe_replay": True,
         "use_model_key": "nano-banana-pro-vip" if entrypoint in {"menu", "set"} else "nano-banana-pro",
         "prompt_multi_ref_file_ids": file_ids[:3] if entrypoint == "collect" else file_ids,
         "prompt_multi_ref_max": 14,
@@ -592,7 +594,7 @@ async def test_feed_marketplace_counts_user_photo_aliasing_public_source_once(re
         message = SimpleNamespace(photo=[SimpleNamespace(file_id=file_ids[-1], file_size=10)], answer=AsyncMock())
         await repeat_reference_marketplace._collect_prompt_reference(message, runtime.session, runtime.user, state, call.bot)
         assert state.data["prompt_multi_ref_file_ids"] == file_ids
-        assert "<b>3/3</b>" in message.answer.await_args.args[0]
+        assert "<b>4/4</b>" in message.answer.await_args.args[0]
     elif entrypoint == "menu":
         await repeat_reference_marketplace._model_menu(call, runtime.session, state)
         markup = call.message.answer.await_args.kwargs["reply_markup"]
@@ -603,7 +605,7 @@ async def test_feed_marketplace_counts_user_photo_aliasing_public_source_once(re
         assert state.data["prompt_multi_ref_file_ids"] == file_ids
     else:
         await repeat_reference_marketplace._run(call, runtime.session, runtime.user, state, call.bot)
-        expected = [SOURCE, *REFS[:3]]
+        expected = REFS[:3]
         assert runtime.provider.await_args.kwargs["image_url"] == expected
         copied = runtime.created[-1]
         assert json.loads(copied.reference_file_ids) == file_ids
@@ -690,31 +692,18 @@ async def test_clear_repeat_keeps_only_available_protected_scene(repeat_runtime,
         "repeat_source_reference_file_ids": ["old-user-photo"],
         "repeat_source_reference_url": REFS[0], "repeat_mode": "image",
     })
-    before = dict(state.data)
     monkeypatch.setattr(repeat_references, "public_url_is_available", lambda url: available if url == selected else True)
     call = callback("repeat_refs:clear")
     handler = next(item for router in image_gen.router.chain_tail for item in router.callback_query.handlers if item.callback is repeat_references._repeat_refs_clear)
     await handler.call(call, state=state, session=runtime.session, db_user=runtime.user, bot=call.bot)
 
-    if not available:
-        assert state.data == before
-        runtime.provider.assert_not_awaited()
-        repo.archive_active_image_sessions.assert_not_awaited()
-        repo.charge_image_generation.assert_not_awaited()
-        return
-    assert state.data["repeat_reference_count"] == 1
-    assert state.data["repeat_base_reference_urls"] == [selected]
+    assert state.data["repeat_reference_count"] == 0
+    assert state.data["repeat_base_reference_urls"] == []
     assert state.data["repeat_new_reference_file_ids"] == []
     assert state.data["repeat_source_reference_file_ids"] == []
-    buttons = call.message.answer.await_args.kwargs["reply_markup"].inline_keyboard
-    assert any(button.callback_data == "repeat_refs:run" for row in buttons for button in row)
     await repeat_references._repeat_refs_run(call, runtime.session, state, runtime.user, call.bot)
-    runtime.provider.assert_awaited_once()
-    assert runtime.provider.await_args.kwargs["image_url"] == selected
-    prompt = runtime.provider.await_args.args[1]
-    assert "EXCLUSIVE source" not in prompt
-    assert runtime.source.prompt not in prompt
-    assert runtime.created[-1].mode == "image"
+    runtime.provider.assert_not_awaited()
+    repo.charge_image_generation.assert_not_awaited()
 
 
 @pytest.mark.parametrize("model", ["nano-banana-pro", "seedream/4.5-edit"])
@@ -734,14 +723,14 @@ async def test_run_repeat_required_reference_uses_actual_source_candidate(repeat
     })
     call = callback("repeat_refs:run")
     await repeat_references._repeat_refs_run(call, runtime.session, state, runtime.user, call.bot)
-    if not protected and image_gen._requires_reference_image(model):
+    if protected or image_gen._requires_reference_image(model):
         assert runtime.created == []
         runtime.provider.assert_not_awaited()
         repo.charge_image_generation.assert_not_awaited()
     else:
         runtime.provider.assert_awaited_once()
-        assert runtime.provider.await_args.kwargs["image_url"] == ([SOURCE] if protected else None)
-        assert runtime.created[-1].mode == ("image" if protected else "text")
+        assert runtime.provider.await_args.kwargs["image_url"] is None
+        assert runtime.created[-1].mode == "text"
 
 
 @pytest.mark.parametrize("available", [False, True])
@@ -757,15 +746,11 @@ async def test_repeat_collection_initial_count_includes_protected_scene(repeat_r
     monkeypatch.setattr(repo, "get_image_session", AsyncMock(return_value=runtime.active))
     monkeypatch.setattr(repeat_references, "public_url_is_available", lambda url: available)
     state = RepeatState({"image_session_id": runtime.active.id, "accepted": "previous state"})
-    before = dict(state.data)
     call = callback("regen:image:99")
     await repeat_references._regen_repeat_interceptor(call, runtime.session, state, runtime.user, call.bot)
-    if available:
-        assert state.data["repeat_reference_count"] == 1
-        buttons = call.message.answer.await_args.kwargs["reply_markup"].inline_keyboard
-        assert any(button.callback_data == "repeat_refs:run" for row in buttons for button in row)
-    else:
-        assert state.data == before
+    assert state.data["repeat_reference_count"] == 0
+    assert state.data["repeat_base_reference_urls"] == []
+    assert runtime.source.result_url not in str(state.data)
     assert runtime.created == []
     repo.archive_active_image_sessions.assert_not_awaited()
     repo.charge_image_generation.assert_not_awaited()

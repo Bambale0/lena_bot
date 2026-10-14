@@ -200,9 +200,9 @@ function FeedRemixRunnerPortal() {
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
   const creatorRecipeReplay = sourceIsVideo && typeof item?.source_has_video_reference === "boolean";
   const imageRecipeForModel = (candidateKey: string) => Boolean(
-    candidateKey === "nano-banana-2.1"
-      ? item?.source_image_recipe_available_for_nano21
-      : item?.source_image_recipe_available
+    item?.source_image_recipe_available
+    && (candidateKey === "midjourney-imagine"
+      || allModels.find((model) => model.key === candidateKey)?.modes?.includes("image"))
   );
   const originalImageRecipe = Boolean(!sourceIsVideo && bucket === "image" && imageRecipeForModel(modelKey));
   const needsOriginalVideo = sourceIsVideo && item?.source_has_video_reference !== false;
@@ -224,7 +224,9 @@ function FeedRemixRunnerPortal() {
       ? `Для этой модели можно добавить своих фото: ${userReferenceLimit}. Нужна поддержка исходного видео.`
       : originalImageRecipe
         ? `Повтор по исходному рецепту автора: лицо возьмём с твоих фото (до ${userReferenceLimit}). Готовое изображение автора не отправляется модели.`
-        : `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`;
+        : item?.is_mine
+          ? `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`
+          : `Повтор по промпту автора и твоему фото недоступен для этой модели или публикации.`;
   const aspectRatios = modelAspectRatios(selectedModel);
   const durations = modelDurations(selectedModel);
   const durationIndex = Math.max(0, durations.indexOf(duration));
@@ -235,6 +237,8 @@ function FeedRemixRunnerPortal() {
   const countOptions = selectedModel?.counts?.length ? selectedModel.counts : [1];
   const requestBody = useMemo(() => {
     if (!item || !selectedModel || referencesOverLimit) return null;
+    if (!sourceIsVideo && bucket === "image" && !item.is_mine
+      && (!originalImageRecipe || references.length === 0)) return null;
     if (creatorRecipeReplay && (selectedModel.key !== item.model || (creatorTextOnly ? references.length > 0 : references.length === 0))) return null;
     const sourceMedia = sourcePreview || "";
     const primaryUserReference = references[0] || "";
@@ -261,7 +265,7 @@ function FeedRemixRunnerPortal() {
       quality,
       count,
     };
-  }, [aspectRatio, bucket, changeRequest, count, creatorRecipeReplay, creatorTextOnly, duration, grokMode, item, mode, quality, references, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
+  }, [aspectRatio, bucket, changeRequest, count, creatorRecipeReplay, creatorTextOnly, duration, grokMode, item, mode, originalImageRecipe, quality, references, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
   const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
   const liveQuoteRequest = useRef<{ id: number; body: Record<string, unknown>; key: string } | null>(null);
   liveQuoteRequest.current = item && requestBody && !sourceSelectionMissing ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
@@ -762,7 +766,11 @@ function FeedRemixRunnerPortal() {
                     : needsOriginalVideo
                       ? "Применим исходный промпт автора и его входной видео-референс, если он был."
                       : "Применим исходный промпт автора к твоему фото. Готовое видео автора не передаётся."
-                  : "Исходная работа будет использована как основной референс."}
+                  : !sourceIsVideo && item.source_image_recipe_available
+                    ? "Применим промпт автора к твоим фото. Готовую работу автора модели не отправляем."
+                    : !sourceIsVideo && !item.is_mine
+                      ? "Для этой публикации повтор по промпту автора недоступен."
+                    : "Исходная работа будет использована как основной референс."}
               </p>
             </div>
           </div>
@@ -778,7 +786,7 @@ function FeedRemixRunnerPortal() {
               disabled={busy}
               onChange={(event) => setChangeRequest(event.target.value)}
             />
-            <span className="text-[11px] text-muted-foreground">Необязательно. Со своим фото или изменениями повтор создаётся по опубликованному изображению или видео. Исходное фото занимает один слот референса. Промпт автора остаётся скрыт.</span>
+            <span className="text-[11px] text-muted-foreground">Для повтора фото загрузи свой референс: модель получит промпт автора и только твои фото. Промпт автора остаётся скрыт.</span>
           </label> : <p className="rounded-xl border border-primary/25 bg-primary/5 p-3 text-xs">
             {creatorTextOnly
               ? "Это повтор по исходному текстовому промпту автора без фото-референсов."
@@ -824,7 +832,7 @@ function FeedRemixRunnerPortal() {
             Модель
             <select className="min-h-11 rounded-xl border border-input bg-background px-3 text-sm" value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={busy || modelsLoading || creatorRecipeReplay}>
               {modelsLoading ? <option>Загружаем модели…</option> : null}
-              {imageModels.length && !creatorRecipeReplay ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo, Boolean(!sourceIsVideo && imageRecipeForModel(model.key)))}>{model.display_name}</option>)}</optgroup> : null}
+              {imageModels.length && !creatorRecipeReplay ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={(!sourceIsVideo && !item?.is_mine && !imageRecipeForModel(model.key)) || references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo, Boolean(!sourceIsVideo && imageRecipeForModel(model.key)))}>{model.display_name}</option>)}</optgroup> : null}
               {videoModels.length ? <optgroup label="Видео">{videoModels.map((model) => <option key={model.key} value={model.key} disabled={(creatorRecipeReplay && model.key !== item.model) || references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo)}>{model.display_name}</option>)}</optgroup> : null}
             </select>
           </label>

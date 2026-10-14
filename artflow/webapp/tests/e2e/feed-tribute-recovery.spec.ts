@@ -6,6 +6,7 @@ const source = {
   result_url: "https://example.test/source.png", result_urls: ["https://example.test/source.png"],
   preview_url: "https://example.test/source.png", preview_urls: ["https://example.test/source.png"],
   likes_count: 0, shares_count: 0, remixes: 0, aspect_ratio: "1:1", author: "Tribute QA", is_mine: false,
+  source_image_recipe_available: true,
 };
 
 async function tributeCheckout(page: Page, lostResponse = false) {

@@ -78,6 +78,8 @@ def local_session():
 
 @pytest.fixture
 def feed_launch(local_session, monkeypatch):
+    identity_instruction = "Use only the reader's reference photos for the subject's identity. " * 3
+    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=identity_instruction))
     charge = AsyncMock(return_value=SimpleNamespace(allowed=True, charged_credits=4))
     generate = AsyncMock(return_value=SimpleNamespace(task_id="synthetic-task", is_async=True))
     monkeypatch.setattr(repo, "resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4)))
@@ -91,6 +93,8 @@ def feed_launch(local_session, monkeypatch):
     data = {
         "feed_use_prompt": SECRET,
         "feed_use_gen_id": 77,
+        "feed_use_user_id": 42,
+        "feed_original_recipe_replay": True,
         "use_model_key": "nano-banana-2",
         "prompt_multi_ref_file_ids": ["synthetic-reference"],
     }
@@ -118,15 +122,15 @@ async def _run_feed_reference(launch, entrypoint: str) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entrypoint", ["single", "multi"])
-@pytest.mark.parametrize("failure", ["reference_limit", "missing_public_media"])
+@pytest.mark.parametrize("failure", ["unsupported_model", "missing_public_recipe"])
 async def test_rejected_feed_reference_never_persists_or_serializes_author_prompt(
     feed_launch, entrypoint, failure,
 ):
-    if failure == "reference_limit":
-        feed_launch.data["use_model_key"] = "qwen/image-edit"
+    if failure == "unsupported_model":
+        feed_launch.data["use_model_key"] = "google/nano-banana"
     else:
         source = feed_launch.session.sync.get(Generation, 77)
-        source.result_url = None
+        source.prompt = ""
         await feed_launch.session.commit()
 
     await _run_feed_reference(feed_launch, entrypoint)
@@ -148,10 +152,8 @@ async def test_rejected_feed_reference_never_persists_or_serializes_author_promp
         # closing the intermediate-persistence window this regression protects.
         assert active["data"] is None
         assert feed_launch.session.sync.scalars(select(ImageSession)).all() == []
-        if failure == "reference_limit":
+        if failure == "unsupported_model" or entrypoint == "multi":
             feed_launch.mirror.assert_not_awaited()
-        else:
-            feed_launch.mirror.assert_awaited_once()
         assert feed_launch.call.answer.await_args.kwargs["show_alert"] is True
         return
     assert active["data"]["base_prompt"] is None
@@ -183,7 +185,7 @@ async def test_feed_reference_without_valid_source_provenance_stops_before_sessi
 
 @pytest.mark.asyncio
 async def test_rejected_multi_reference_does_not_report_a_successful_launch(feed_launch):
-    feed_launch.data["use_model_key"] = "qwen/image-edit"
+    feed_launch.data["use_model_key"] = "google/nano-banana"
 
     await _run_feed_reference(feed_launch, "multi")
 
@@ -200,12 +202,12 @@ async def test_successful_feed_reference_stays_protected_without_session_secret(
     await _run_feed_reference(feed_launch, entrypoint)
 
     feed_launch.generate.assert_awaited_once()
-    assert SECRET not in feed_launch.generate.await_args.args[1]
+    assert SECRET in feed_launch.generate.await_args.args[1]
     generation = feed_launch.session.sync.scalars(
         select(Generation).where(Generation.user_id == 42)
     ).one()
     assert generation.source_feed_gen_id == 77
-    assert SECRET not in generation.prompt
+    assert SECRET in generation.prompt
     assert all(
         SECRET not in (base or "") and SECRET not in (last or "")
         for base, last in feed_launch.session.persisted_prompts
@@ -376,6 +378,13 @@ async def test_feed_remix_keeps_owned_private_ordinary_prompt(feed_launch):
 @pytest.mark.parametrize("public", [False, True])
 async def test_feed_again_never_persists_protected_prompt_before_launch(feed_launch, public):
     generation = await _owned_result(feed_launch.session, public=public)
+    prior = await repo.create_image_session(
+        session=feed_launch.session, user_id=42, model=generation.model, mode="image",
+        aspect_ratio="1:1", quality="2K", count=1, base_prompt=None,
+        reference_urls=[USER_IMAGE],
+    )
+    generation.image_session_id = prior.id
+    await feed_launch.session.commit()
     feed_launch.call.data = f"feed:again:{generation.id}"
 
     await feed.cb_feed_again(
@@ -428,7 +437,7 @@ async def test_repeat_reference_constructor_uses_durable_protection_before_rejec
     feed_launch.data.update(
         repeat_generation_id=88, repeat_parent_generation_id=88,
         repeat_prompt=SECRET, repeat_source_feed_gen_id=state_source_id,
-        repeat_base_reference_urls=[USER_IMAGE], repeat_max_refs=1,
+        repeat_base_reference_urls=[USER_IMAGE, "https://example.test/second-user-reference.jpg"], repeat_max_refs=1,
         repeat_reuse_session_id=image_session.id if image_session else None,
     )
 
