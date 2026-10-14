@@ -44,6 +44,9 @@ def callback(data=""):
 
 @pytest.fixture
 def repeat_runtime(monkeypatch):
+    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(
+        return_value="Photo 1 is the sole source of the person's face; later user photos only clarify the same person and the creator prompt defines the scene."
+    ))
     active = ImageSession(
         id=1, user_id=42, model="nano-banana-pro", status=ImageSessionStatus.active,
         mode="image", base_prompt="previous series", last_prompt="previous series",

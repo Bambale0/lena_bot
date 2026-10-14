@@ -19,6 +19,10 @@ from db.models import GenerationStatus, GenerationType, ImageSession
 REFS = [f"https://example.test/person-{index}.jpg" for index in range(1, 4)]
 SOURCE = "https://example.test/public-scene.jpg"
 SECRET = "private-author-text-never-disclosed"
+PHOTO_ONE_POLICY = (
+    "Use the first user image as the sole source of facial identity and distinctive features. "
+    "Other user images only confirm the same person; the creator prompt defines the scene."
+)
 
 
 @pytest.fixture
@@ -74,6 +78,8 @@ def local_launch(monkeypatch):
     }.items():
         monkeypatch.setattr(repo, name, value)
     monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value=PHOTO_ONE_POLICY))
+    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=PHOTO_ONE_POLICY), raising=False)
     monkeypatch.setattr(image_gen, "safe_answer_callback", AsyncMock())
     session = AsyncMock()
     session.execute = AsyncMock(return_value=SimpleNamespace(all=lambda: []))

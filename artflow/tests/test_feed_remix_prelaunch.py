@@ -66,7 +66,10 @@ async def test_deep_link_feed_lookup_does_not_fall_back_to_private_generation(cl
 
 
 @pytest.fixture
-async def client():
+async def client(monkeypatch):
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(
+        return_value="Photo 1 is the sole source of the person's face; later user photos only clarify the same person and the creator prompt defines the scene."
+    ))
     async def session_override():
         yield AsyncMock()
 
