@@ -52,10 +52,33 @@ _IMAGE_SCENE_EDIT_PROMPT = (
     "Edit the final public scene image. Preserve its composition and subjects except for the requested changes. "
     "No separate user identity references are supplied."
 )
+# A feed identity repeat is an edit of the author's *scene*, not a
+# freeform variation.  Legacy v3 headers remain registered below so that
+# authenticated previous repeats can still be replayed and migrated safely.
+_IMAGE_FACE_REPLACEMENT_PROMPT = (
+    "Edit the final public scene image, not a new scene. "
+    "The final image is public scene reference only for composition, pose, clothing, "
+    "background, lighting, props and camera framing; preserve the scene composition "
+    "and those non-identity details unless the user's change request explicitly modifies them. "
+    "All images preceding the final image are the user's identity references. "
+    "Use the first user reference as the EXCLUSIVE source of the user's face and identity, "
+    "and any other user references only as additional views of that same person. "
+    "If the user reference is a collage or multiple views of one person, use the largest clear "
+    "frontal face as the identity anchor and the other views to confirm their appearance; "
+    "never output the collage layout. "
+    "Edit the main subject: replace the source subject's face and facial identity with the "
+    "user's face shape, eyes, eyebrows, nose, lips, jawline, skin tone and distinctive facial features. "
+    "Use the user's visible hair color while adapting its styling to the source pose. "
+    "Do not copy, retain, average or blend the author's face or identity from the final image. "
+    "The user's identity takes priority over resemblance to the source scene. "
+    "Return one coherent edited photo, not a split screen, photo grid or the original author."
+)
+
 _IMAGE_HEADERS = {
     "variation": _IMAGE_VARIATION_PROMPT,
     "scene_variation": _IMAGE_SCENE_VARIATION_PROMPT,
     "identity_edit": _IMAGE_EDIT_PROMPT,
+    "face_replacement": _IMAGE_FACE_REPLACEMENT_PROMPT,
     "scene_edit": _IMAGE_SCENE_EDIT_PROMPT,
 }
 
@@ -85,10 +108,14 @@ def build_feed_image_prompt(
     """Image-only semantic roles; the provider has no pixel-level identity guarantee."""
     if not has_source_media:
         raise FeedRemixUnavailable("Для повтора нужно доступное исходное фото из ленты.")
-    if fixed_composition:
-        header = _IMAGE_EDIT_PROMPT if has_user_references else _IMAGE_SCENE_EDIT_PROMPT
+    if has_user_references:
+        # Every personalized repeat uses the uploaded face in the author scene.
+        # Fixed composition remains the default even for the first repeat.
+        header = _IMAGE_FACE_REPLACEMENT_PROMPT
+    elif fixed_composition:
+        header = _IMAGE_SCENE_EDIT_PROMPT
     else:
-        header = _IMAGE_VARIATION_PROMPT if has_user_references else _IMAGE_SCENE_VARIATION_PROMPT
+        header = _IMAGE_SCENE_VARIATION_PROMPT
     change = str(change_request or "").strip()
     return f"{header}\n\n{change}" if change else header
 
