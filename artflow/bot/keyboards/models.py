@@ -690,6 +690,7 @@ def image_nana_banano_kb(
     selected_model: str = NANA_BANANO_DEFAULT_MODEL,
     refs_count: int = 0,
     *,
+    quality: str | None = None,
     back_cb: str = "menu:image",
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -720,6 +721,18 @@ def image_nana_banano_kb(
             callback_data=f"img_nb:model:{pro_vip}",
         )
     )
+    # The quick flow launches on the next text message. Expose resolution
+    # instead of silently using the first option (1K for Nano Banana 2.1).
+    options = IMAGE_CAPS.get(selected, {}).get("quality_options") or []
+    selected_quality = quality or (options[0][0] if options else None)
+    if options:
+        builder.row(*[
+            InlineKeyboardButton(
+                text=f"{'✅ ' if value == selected_quality else ''}{label}",
+                callback_data=f"img_nb:quality:{selected}:{value}",
+            )
+            for value, label in options
+        ])
     builder.row(
         InlineKeyboardButton(text=f"📎 Референсы: {refs_count}", callback_data="img_nb:refs"),
         InlineKeyboardButton(text="← Назад", callback_data=back_cb),

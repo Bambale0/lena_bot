@@ -88,6 +88,7 @@ from core.feed_remix_prompt import (
     trusted_feed_image_recipe_prompt,
     trusted_feed_image_scene,
 )
+from core.model_pricing import pricing_variant_key
 from core.provider_routing import get_nano21_route
 from db import repository as repo
 from db.models import Generation, GenerationType, ImageGenerationAction, ImageSession, User
@@ -1733,14 +1734,19 @@ def _image_model_key(model_key: str | ImageModel) -> str:
     return model_key.value if isinstance(model_key, ImageModel) else str(model_key)
 
 
-def _nana_banano_text(model_key: str, refs_count: int) -> str:
+def _nana_banano_text(model_key: str, refs_count: int, quality: str | None = None) -> str:
     model_label = _NANA_BANANO_MODEL_LABELS.get(model_key, model_key)
     max_refs = int(IMAGE_CAPS.get(model_key, {}).get("max_refs", 0) or 0)
     refs_label = f"{refs_count}/{max_refs}" if max_refs else str(refs_count)
+    quality_line = (
+        f"💎 Качество: <b>{_quality_label(model_key, quality or _default_image_quality(model_key))}</b>\n"
+        if IMAGE_CAPS.get(model_key, {}).get("has_quality") else ""
+    )
     return (
         "🍌 <b>nana banano</b>\n\n"
         f"Модель: <b>{model_label}</b>\n"
-        f"Референсы: <b>{refs_label}</b>\n\n"
+        f"Референсы: <b>{refs_label}</b>\n"
+        f"{quality_line}\n"
         "👇 <b>Как запустить</b>\n"
         "1️⃣ <b>Отправь фото-референс</b> сюда же.\n"
         "2️⃣ <b>Затем отправь промпт текстом</b> — сразу запущу генерацию."
@@ -1824,8 +1830,8 @@ async def _show_nana_banano_flow(
     await state.set_state(ImageGenFSM.prompt_input)
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
-        _nana_banano_text(model_key, refs_count),
-        reply_markup=image_nana_banano_kb(model_key, refs_count),
+        _nana_banano_text(model_key, refs_count, default_quality),
+        reply_markup=image_nana_banano_kb(model_key, refs_count, quality=default_quality),
     )
     return True
 
@@ -1975,6 +1981,52 @@ async def cb_nana_banano_model(
     model_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
     if await _show_nana_banano_flow(call, state, session, db_user, model_key):
         await call.answer(f"Модель: {_NANA_BANANO_MODEL_LABELS.get(model_key, model_key)}")
+
+
+@router.callback_query(ImageGenFSM.prompt_input, F.data.startswith("img_nb:quality:"))
+async def cb_nana_banano_quality(
+    call: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    """Update the fast-flow resolution before its paid generation is submitted."""
+    data = await state.get_data()
+    model_key = _image_model_key(data.get("model_key") or "")
+    requested = (call.data or "").removeprefix("img_nb:quality:")  # type: ignore[union-attr]
+    requested_model, _, quality = requested.rpartition(":")
+    allowed = {value for value, _ in _quality_options(model_key)}
+    if (
+        not data.get("nana_banano_flow")
+        or model_key not in NANA_BANANO_MODEL_CHOICES
+        or requested_model != model_key
+        or quality not in allowed
+    ):
+        await call.answer("Это качество недоступно для выбранной модели", show_alert=True)
+        return
+
+    normalized = _normalize_session_quality(model_key, data.get("aspect_ratio"), quality)
+    # The general price resolver falls back to the base model: here that
+    # would silently allow 4K even after an admin disabled the 4K tariff.
+    # Nano Banana 2.1's 1K is deliberately billed by its base price row.
+    exact_price_key = (
+        model_key if model_key == ImageModel.NANO_BANANA_21.value and normalized == "1K"
+        else pricing_variant_key(model_key, quality=normalized)
+    )
+    model_cost = await repo.get_model_cost(session, exact_price_key)
+    if not model_cost or not model_cost.is_active:
+        await call.answer("Тариф этого качества недоступен", show_alert=True)
+        return
+
+    await state.update_data(
+        quality=normalized, image_quality=normalized, credits=model_cost.credits,
+    )
+    refs_count = _nana_banano_ref_count(data)
+    await safe_edit_message(
+        call.message,  # type: ignore[arg-type]
+        _nana_banano_text(model_key, refs_count, normalized),
+        reply_markup=image_nana_banano_kb(model_key, refs_count, quality=normalized),
+    )
+    await call.answer(f"Качество: {normalized} · {model_cost.credits:g} 💋")
 
 
 @router.callback_query(ImageGenFSM.prompt_input, F.data == "img_nb:refs")
@@ -2608,7 +2660,9 @@ async def handle_prompt_reference_upload(
     if not _supports_img2img(model_key):
         await message.answer(
             "Эта модель не принимает фото-референсы. Выбери модель с поддержкой референсов или отправь текстовый промпт.",
-            reply_markup=image_nana_banano_kb(model_key, _nana_banano_ref_count(data))
+            reply_markup=image_nana_banano_kb(
+                model_key, _nana_banano_ref_count(data), quality=data.get("quality"),
+            )
             if data.get("nana_banano_flow")
             else back_to_menu_kb(),
         )
@@ -2638,7 +2692,7 @@ async def handle_prompt_reference_upload(
         return
 
     reply_markup = (
-        image_nana_banano_kb(model_key, reference_count)
+        image_nana_banano_kb(model_key, reference_count, quality=data.get("quality"))
         if data.get("nana_banano_flow")
         else back_to_menu_kb()
     )
