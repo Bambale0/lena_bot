@@ -13,6 +13,14 @@ from db import repository as repo
 from db.models import GenerationStatus, GenerationType
 
 
+@pytest.fixture(autouse=True)
+def image_policy_from_bootstrap(monkeypatch):
+    monkeypatch.setattr(
+        miniapp_routes, "get_image_recovery_policy",
+        AsyncMock(return_value=SimpleNamespace(auto_refund_seconds=3600)),
+    )
+
+
 def test_image_scheduler_selects_all_nexus_image_models():
     compiled = image_scheduler._eligible_query().compile(dialect=postgresql.dialect())
     values = list(compiled.params.values())
@@ -76,3 +84,25 @@ async def test_stale_nexus_pending_refunds_once_without_resubmission(monkeypatch
     assert await miniapp_routes._reconcile_generation_status(object(), gen) is final
     refund.assert_awaited_once()
     assert refund.await_args.kwargs["expected_task_id"] == gen.task_id
+
+
+@pytest.mark.asyncio
+async def test_live_admin_image_sla_controls_refund_without_redeploy(monkeypatch):
+    gen = SimpleNamespace(
+        id=22, task_id="nexus:provider-task", model="nano-banana-pro",
+        gen_type=GenerationType.image, status=GenerationStatus.processing,
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=45),
+        input_params="{}",
+    )
+    monkeypatch.setattr(image_service, "poll_image_result_urls", AsyncMock(return_value=None))
+    monkeypatch.setattr(nexus_image_adapter, "submission_scope_matches", lambda _: True)
+    monkeypatch.setattr(
+        miniapp_routes, "get_image_recovery_policy",
+        AsyncMock(return_value=SimpleNamespace(auto_refund_seconds=1800)),
+    )
+    refund = AsyncMock(return_value=(True, 1.5))
+    final = SimpleNamespace(status=GenerationStatus.failed)
+    monkeypatch.setattr(repo, "fail_generation_and_refund", refund)
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(return_value=final))
+    assert await miniapp_routes._reconcile_generation_status(object(), gen) is final
+    refund.assert_awaited_once()

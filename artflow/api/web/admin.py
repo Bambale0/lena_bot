@@ -14,6 +14,7 @@ from api.web.billing import enabled_payment_methods
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import enum_value, iso_datetime
 from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
+from core.image_recovery_policy import get_image_recovery_policy, set_image_recovery_policy
 from core.provider_routing import get_nano21_route, set_nano21_route
 from core.reporting_time import REPORTING_TZ, moscow_day_bounds_utc
 from db import repository as repo
@@ -40,6 +41,47 @@ router = APIRouter(tags=["web-admin"])
 
 class Nano21ProviderRoutingUpdate(BaseModel):
     primary_provider: Literal["neironych", "nexus"]
+
+
+class ImageRecoveryPolicyUpdate(BaseModel):
+    auto_refund_seconds: int = Field(..., ge=600, le=86400)
+
+
+@router.get("/admin/image-recovery/{provider}")
+async def admin_get_image_recovery_policy(
+    provider: Literal["neironych", "nexus"],
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    policy = await get_image_recovery_policy(session, provider)
+    return ok({
+        "provider": policy.provider,
+        "auto_refund_seconds": policy.auto_refund_seconds,
+        "source": policy.source,
+        "updated_by_admin_tg_id": policy.updated_by_admin_tg_id,
+    })
+
+
+@router.put("/admin/image-recovery/{provider}")
+async def admin_set_image_recovery_policy(
+    provider: Literal["neironych", "nexus"],
+    body: ImageRecoveryPolicyUpdate,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    policy = await set_image_recovery_policy(
+        session, provider, body.auto_refund_seconds, admin_tg_id=int(user.tg_id),
+    )
+    return ok({
+        "provider": policy.provider,
+        "auto_refund_seconds": policy.auto_refund_seconds,
+        "source": policy.source,
+        "updated_by_admin_tg_id": policy.updated_by_admin_tg_id,
+    })
 
 
 @router.get("/admin/provider-routing/nano-banana-2.1")

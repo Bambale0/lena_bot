@@ -127,6 +127,7 @@ from core.gemini_omni import (
     normalize_gemini_omni_seed,
     validate_gemini_omni_media_slots,
 )
+from core.image_recovery_policy import get_image_recovery_policy
 from core.kie_seedance_callback import callback_url_for_generation
 from core.neironych_video_poll_gate import (
     NeironychVideoPollLeaseLost,
@@ -590,7 +591,8 @@ async def _reconcile_neironych_image_generation(
     age = datetime.now(timezone.utc) - (getattr(gen, "created_at", None) or datetime.now(timezone.utc))
 
     async def refund_if_overdue(reason: str, current=None):
-        if age.total_seconds() < settings.IMAGE_AUTO_REFUND_SECONDS:
+        policy = await get_image_recovery_policy(session, "neironych")
+        if age.total_seconds() < policy.auto_refund_seconds:
             return current or gen
         logger.warning("Image customer SLA expired gen=%s provider=neironych state=%s", gen.id, reason)
         await repo.fail_generation_and_refund(
@@ -813,7 +815,8 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         and nexus_image_adapter.is_nexus_task_id(task_id)
     )
     async def refund_stale_nexus(reason: str):
-        if age.total_seconds() < settings.IMAGE_AUTO_REFUND_SECONDS:
+        policy = await get_image_recovery_policy(session, "nexus")
+        if age.total_seconds() < policy.auto_refund_seconds:
             return gen
         logger.warning("Image customer SLA expired gen=%s provider=nexus state=%s", gen.id, reason)
         await repo.fail_generation_and_refund(

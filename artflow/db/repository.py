@@ -1757,6 +1757,7 @@ async def fail_generation_and_refund(
     refund_note: str | None = None,
     expected_task_id: str | None = None,
     require_missing_task_id: bool = False,
+    recovery_task_id: str | None = None,
     video_notice_kind: str | None = None,
     provider_review: dict[str, object] | None = None,
 ) -> tuple[bool, float]:
@@ -1785,17 +1786,33 @@ async def fail_generation_and_refund(
         return False, 0.0
     if require_missing_task_id:
         current_params = parse_input_params(generation.input_params)
+        callback = current_params.get(KIE_VIDEO_CALLBACK_KEY)
         if (generation.task_id not in (None, "")
                 or isinstance(current_params.get(SEEDANCE_SUBMISSION_KEY), dict)
-                or isinstance(current_params.get(KIE_VIDEO_SUBMISSION_KEY), dict)):
+                or isinstance(current_params.get(KIE_VIDEO_SUBMISSION_KEY), dict)
+                or (recovery_task_id is None and isinstance(callback, dict))):
             await session.commit()
             return False, 0.0
+        if recovery_task_id is not None:
+            expected_recovery_id = (
+                ("web:" if isinstance(callback, dict) and callback.get("surface") == "web" else "")
+                + f"kie-submit:{gen_id}"
+            )
+            if (not isinstance(callback, dict)
+                    or callback.get("generation_id") != gen_id
+                    or recovery_task_id != expected_recovery_id):
+                await session.commit()
+                return False, 0.0
+    elif recovery_task_id is not None:
+        raise ValueError("recovery_task_id requires a missing-ID guard")
     status = getattr(generation.status, "value", generation.status)
     if status not in (GenerationStatus.pending.value, GenerationStatus.processing.value):
         return False, 0.0
 
     credits = float(generation.credits_spent or 0.0)
     params = parse_input_params(generation.input_params)
+    if recovery_task_id is not None:
+        generation.task_id = recovery_task_id
     params["refund_applied"] = credits > 0
     if refund_note:
         params["refund_note"] = refund_note[:160]

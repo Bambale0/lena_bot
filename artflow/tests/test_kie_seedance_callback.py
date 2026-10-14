@@ -150,6 +150,37 @@ async def test_kie_late_callback_after_atomic_refund_requires_admin_settlement(k
         assert len(list(session.scalars(select(CreditLedgerEntry)))) == 1
 
 
+@pytest.mark.asyncio
+async def test_missing_id_kie_callback_refund_keeps_late_supplier_reconciliation(kie_transaction_db):
+    with Session(kie_transaction_db, expire_on_commit=False) as session:
+        db = LocalAsyncSession(session)
+        assert await repo.register_kie_video_callback(db, 73, surface="web")
+        gen = session.get(Generation, 73)
+        gen.task_id = None  # process stopped after callback registration, before task binding
+        session.commit()
+        review = {
+            "state": "pending", "reason": "timeout_provider_unconfirmed",
+            "original_task_id": "web:kie-submit:73",
+            "refunded_at": datetime.now(timezone.utc).isoformat(),
+            "last_provider_status": "unknown", "checks": 0,
+        }
+        assert await repo.fail_generation_and_refund(
+            db, 73, "customer SLA expired", require_missing_task_id=True,
+            recovery_task_id="web:kie-submit:73", provider_review=review,
+        ) == (True, 40.0)
+        assert session.get(Generation, 73).task_id == "web:kie-submit:73"
+        assert await repo.record_late_kie_video_callback(
+            db, 73, "late-provider-task", succeeded=True,
+        )
+        marker = repo.parse_input_params(session.get(Generation, 73).input_params)[
+            repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY
+        ]
+        assert marker["state"] == "remote_completed_pending_finance"
+        assert session.get(User, 42).credits == 140
+        assert len(list(session.scalars(select(CreditLedgerEntry)))) == 1
+        assert session.get(Generation, 73).status == GenerationStatus.failed
+
+
 def test_generation_callback_signing_ignores_exposed_url_secret(monkeypatch):
     monkeypatch.setattr(c.settings, "KIE_WEBHOOK_SECRET", "visible-secret")
     monkeypatch.setattr(c.settings, "KIE_WEBHOOK_HMAC_KEY", "private-supplier-hmac-key")

@@ -145,6 +145,27 @@ async def test_missing_identity_refund_does_not_race_submission_marker(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_kie_callback_refund_preserves_virtual_identity_under_lock(monkeypatch) -> None:
+    generation = SimpleNamespace(
+        id=80, user_id=42, status=GenerationStatus.processing,
+        task_id=None, credits_spent=70,
+        input_params=json.dumps({repo.KIE_VIDEO_CALLBACK_KEY: {
+            "generation_id": 80, "surface": "web",
+        }}), error_msg=None, finished_at=None,
+    )
+    session = _SessionStub(generation, 170.0)
+    monkeypatch.setattr(repo, "_publish_generation_update", AsyncMock())
+    changed, amount = await repo.fail_generation_and_refund(
+        session, 80, "timeout", require_missing_task_id=True,
+        recovery_task_id="web:kie-submit:80",
+        provider_review={"state": "pending", "original_task_id": "web:kie-submit:80"},
+    )
+    assert (changed, amount) == (True, 70.0)
+    assert generation.task_id == "web:kie-submit:80"
+    assert json.loads(generation.input_params)[repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY]["state"] == "pending"
+
+
+@pytest.mark.asyncio
 async def test_fail_generation_and_refund_skips_credit_when_nothing_was_charged(monkeypatch) -> None:
     generation = SimpleNamespace(
         id=88,

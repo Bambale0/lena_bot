@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import redis.asyncio as aioredis
-from sqlalchemy import DateTime, cast, func, or_, select
+from sqlalchemy import DateTime, and_, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 
 from api import neironych_seedance_runtime
@@ -130,9 +130,18 @@ def _expired_seedance_query():
         Generation.gen_type == GenerationType.video,
         Generation.model.in_(tuple(PRODUCT_MODELS)),
         Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
-        or_(*(Generation.task_id.like(prefix + "%")
-              for prefix in _NEIRONYCH_TASK_PREFIXES),
-            Generation.task_id.is_(None), Generation.task_id == ""),
+        or_(
+            *(Generation.task_id.like(prefix + "%") for prefix in _NEIRONYCH_TASK_PREFIXES),
+            and_(
+                or_(Generation.task_id.is_(None), Generation.task_id == ""),
+                func.jsonb_typeof(func.jsonb_extract_path(
+                    params_json, repo.SEEDANCE_SUBMISSION_KEY,
+                )).is_distinct_from("object"),
+                func.jsonb_typeof(func.jsonb_extract_path(
+                    params_json, repo.KIE_VIDEO_SUBMISSION_KEY,
+                )).is_distinct_from("object"),
+            ),
+        ),
         started <= cutoff,
     )
 
@@ -270,6 +279,22 @@ async def _expire_stuck_seedance_video(gen_id: int) -> bool:
                     < settings.SEEDANCE_AUTO_REFUND_SECONDS):
                 return False
             expected_task_id = gen.task_id
+            callback = params.get(repo.KIE_VIDEO_CALLBACK_KEY)
+            callback = callback if isinstance(callback, dict) and callback.get("generation_id") == gen_id else None
+            recovery_task_id = None
+            review = None
+            if callback:
+                recovery_task_id = (
+                    ("web:" if callback.get("surface") == "web" else "")
+                    + f"kie-submit:{gen_id}"
+                )
+                now = datetime.now(timezone.utc).isoformat()
+                review = {
+                    "state": "pending", "reason": "timeout_provider_unconfirmed",
+                    "original_task_id": recovery_task_id,
+                    "refunded_at": now, "next_check_at": now,
+                    "last_provider_status": "unknown", "checks": 0,
+                }
             await session.rollback()
             async with AsyncSessionLocal() as refund_session:
                 changed, _ = await repo.fail_generation_and_refund(
@@ -277,7 +302,9 @@ async def _expire_stuck_seedance_video(gen_id: int) -> bool:
                     refund_note="seedance:auto_timeout:missing_provider_identity",
                     expected_task_id=expected_task_id,
                     require_missing_task_id=True,
-                    video_notice_kind="failed",
+                    recovery_task_id=recovery_task_id,
+                    provider_review=review,
+                    video_notice_kind="failed" if not callback or callback.get("surface") != "web" else None,
                 )
                 return changed
         if ((datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
