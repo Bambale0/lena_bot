@@ -109,6 +109,24 @@ async def test_telegram_historic_recipe_uses_only_users_photo(
 
 
 @pytest.mark.asyncio
+async def test_bot_recipe_does_not_inherit_unsupported_origin_ratio(image_launch):
+    image_launch.kwargs["image_session"].model = "seedream/5-pro-image-to-image"
+    image_launch.kwargs["image_session"].aspect_ratio = "9:16"
+    image_launch.source.input_params = {"img_ratio": "21:9"}
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
+    assert image_launch.generate.await_args.kwargs["aspect_ratio"] == "9:16"
+
+
+@pytest.mark.asyncio
+async def test_bot_recipe_keeps_explicit_reader_ratio(image_launch):
+    image_launch.source.input_params = {"img_ratio": "21:9"}
+    image_launch.kwargs["image_session"].aspect_ratio = "9:16"
+    image_launch.kwargs["state"].get_data = AsyncMock(return_value={"repeat_aspect_ratio": "9:16"})
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
+    assert image_launch.generate.await_args.kwargs["aspect_ratio"] == "9:16"
+
+
+@pytest.mark.asyncio
 async def test_bot_nano21_recipe_payload_uses_reader_face_without_creator_photo(
     image_launch, monkeypatch,
 ):

@@ -247,6 +247,9 @@ async def _mode(call: CallbackQuery) -> None:
 async def _ratio_menu(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
+    if not repeat_references._repeat_ratio_options(model_key):
+        await call.answer("Для этой модели формат определяется автоматически", show_alert=True)
+        return
     selected = _current_ratio(data, model_key)
     await call.message.answer(  # type: ignore[union-attr]
         "📐 <b>Выбери формат результата</b>",
@@ -510,6 +513,9 @@ async def _run(
             reference_url=None,
         )
         await state.clear()
+        # The recipe launch reads explicit settings from FSM; retain only the
+        # selected ratio after clearing the private source/prompt state.
+        await state.update_data(repeat_aspect_ratio=aspect_ratio)
         launched = await image_gen._launch_session_generation(
             source_message=call.message,  # type: ignore[arg-type]
             state=state,

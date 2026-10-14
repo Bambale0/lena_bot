@@ -83,9 +83,7 @@ def _repeat_ratio_options(model_key: str) -> list[str]:
         remix_model = getattr(spec, "remix_model", None) if spec else None
         ratios = list(IMAGE_CAPS.get(str(remix_model), {}).get("aspect_ratios") or [])
     ratios = list(dict.fromkeys(str(ratio) for ratio in ratios if ratio))
-    if "9:16" not in ratios:
-        ratios.insert(0, "9:16")
-    else:
+    if "9:16" in ratios:
         ratios.insert(0, ratios.pop(ratios.index("9:16")))
     return ratios
 

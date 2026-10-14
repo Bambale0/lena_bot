@@ -65,6 +65,10 @@ def test_repeat_screen_text_shows_selected_settings() -> None:
     assert "Нейросеть:" in text
 
 
+def test_ratio_menu_does_not_offer_unsupported_portrait_ratio() -> None:
+    assert repeat_reference_marketplace.repeat_references._repeat_ratio_options("qwen/image-edit") == []
+
+
 @pytest.mark.asyncio
 async def test_feed_repeat_collects_first_photo_without_starting_generation(monkeypatch) -> None:
     monkeypatch.setattr(repeat_reference_marketplace.image_gen, "_telegram_file_url", AsyncMock(side_effect=lambda _bot, fid: f"https://example.test/{fid}.jpg"))
@@ -152,6 +156,7 @@ async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch, stale_stat
             "feed_use_user_id": stale_state_user_id,
             "feed_original_recipe_replay": True,
             "use_model_key": "nano-banana-pro",
+            "prompt_multi_ref_ratio": "9:16",
             "prompt_multi_ref_file_ids": ["ref-1", "ref-2", "ref-3"],
             "prompt_multi_ref_max": 4,
         }
@@ -203,6 +208,8 @@ async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch, stale_stat
     create_kwargs = create_session.await_args.kwargs
     assert create_kwargs["reference_file_ids"] == ["ref-1", "ref-2", "ref-3"]
     assert create_kwargs["mode"] == "image"
+    assert create_kwargs["aspect_ratio"] == "9:16"
+    assert state.data.get("repeat_aspect_ratio") == "9:16"
 
     launch_kwargs = launch.await_args.kwargs
     assert launch_kwargs["action_type"] == ImageGenerationAction.repeat

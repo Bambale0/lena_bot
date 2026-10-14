@@ -1340,7 +1340,10 @@ async def _launch_session_generation(
             explicitly_selected = isinstance(state_data, dict) and (
                 "repeat_aspect_ratio" in state_data or "aspect_ratio_explicit" in state_data
             )
-            if not explicitly_selected and creator["aspect_ratio"]:
+            if (
+                not explicitly_selected and creator["aspect_ratio"]
+                and creator["aspect_ratio"] in _ratio_options_for_mode(image_session.model, image_session.mode)
+            ):
                 image_session.aspect_ratio = creator["aspect_ratio"]
             if not (isinstance(state_data, dict) and state_data.get("quality_explicit")) and creator["quality"]:
                 image_session.quality = creator["quality"]
