@@ -938,6 +938,7 @@ for (const surface of ["telegram", "browser"] as const) {
     const dialog = page.getByRole("dialog", { name: "Повторить работу" });
     await expect(dialog).toBeVisible();
     const selectedSource = new URL(previews[1], page.url()).href;
+    await expect(dialog.locator("input[type=file]")).toBeEnabled();
     await dialog.locator("input[type=file]").setInputFiles({
       name: "ref.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
     });
