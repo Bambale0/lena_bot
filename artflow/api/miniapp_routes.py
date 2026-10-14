@@ -3741,7 +3741,8 @@ def _prepare_feed_remix_inputs(
             prompt = build_owned_feed_image_prompt(source.prompt, body.change_request, has_user_references=bool(identity_refs))
         elif image_repeat:
             prompt = build_feed_image_prompt(
-                body.change_request, has_user_references=bool(identity_refs), has_source_media=applicable,
+                body.change_request, has_user_references=bool(identity_refs),
+                has_source_media=applicable, scene_first=body.model in IMAGE_CAPS,
             )
         else:
             prompt = _build_feed_remix_prompt(
@@ -3755,7 +3756,10 @@ def _prepare_feed_remix_inputs(
 
     multimodal = bool(caps.get("auto_route_by_inputs") and "multimodal" in caps.get("modes", []))
     if source_type == "image":
-        refs = identity_refs if image_repeat and own_recipe and identity_refs else order_feed_image_references(source_url, identity_refs)
+        refs = (
+            identity_refs if image_repeat and own_recipe and identity_refs
+            else order_feed_image_references(source_url, identity_refs, source_first=body.model in IMAGE_CAPS)
+        )
         body = body.model_copy(update={"mode": "multimodal" if multimodal else "image"})
     else:
         if body.video_url and body.video_url != source_url:
@@ -3963,7 +3967,13 @@ async def remix_feed_post(
     repeat_prompt, repeat_refs, body, personalized, own_recipe = _prepare_feed_remix_inputs(source, body, user_id=user.id)
     feed_context = (
         {FEED_REMIX_CONTEXT_KEY: (
-            feed_image_remix_context(gen_id, repeat_prompt, source_image_url=repeat_refs[-1] if repeat_refs else None)
+            feed_image_remix_context(
+                gen_id, repeat_prompt,
+                source_image_url=(
+                    (repeat_refs[0] if body.model in IMAGE_CAPS else repeat_refs[-1])
+                    if repeat_refs else None
+                ),
+            )
             if body.model in IMAGE_CAPS and getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None)) == "image"
             else feed_remix_context(gen_id, repeat_prompt)
         )} if personalized and not own_recipe else {}

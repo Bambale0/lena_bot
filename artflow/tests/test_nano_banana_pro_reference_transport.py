@@ -221,7 +221,7 @@ async def test_pro_five_distinct_browser_refs_fail_before_charge(local_launch, n
 
 
 @pytest.mark.parametrize("surface", ["web", "miniapp"])
-async def test_pro_feed_repeat_serializes_user_first_source_last_without_author_prompt(local_launch, nexus_posts, surface):
+async def test_pro_feed_repeat_serializes_author_scene_first_without_author_prompt(local_launch, nexus_posts, surface):
     launch = local_launch
     result = await miniapp_routes.remix_feed_post(
         77, miniapp_routes.FeedRemixRequest(
@@ -231,7 +231,7 @@ async def test_pro_feed_repeat_serializes_user_first_source_last_without_author_
         session=launch.session, user=launch.user, surface=surface,
     )
     assert nexus_posts[0]["params"]["model_name"] == "nano-banana-pro"
-    assert nexus_posts[0]["params"]["image_urls"] == REFS + [SOURCE]
+    assert nexus_posts[0]["params"]["image_urls"] == [SOURCE, *REFS]
     assert SECRET not in nexus_posts[0]["params"]["prompt"]
     assert SECRET not in str(result)
 
@@ -349,7 +349,7 @@ async def test_pro_protected_feed_clone_keeps_order_and_excludes_author_prompt(l
         SimpleNamespace(data="regen:image:99", message=AsyncMock(), answer=AsyncMock()),
         launch.session, mutable_state()[0], launch.user, AsyncMock(),
     )
-    assert nexus_posts[0]["params"]["image_urls"] == REFS + [SOURCE]
+    assert nexus_posts[0]["params"]["image_urls"] == [SOURCE, *REFS]
     assert SECRET not in nexus_posts[0]["params"]["prompt"]
     assert SECRET not in repo.create_generation.await_args.args[4]
     assert launch.created_sessions[-1].base_prompt is None
@@ -425,7 +425,7 @@ async def test_pro_existing_mixed_session_keeps_public_and_telegram_refs_through
     )
     assert handled is True
     await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
-    expected = REFS + ([SOURCE] if protected else [])
+    expected = [SOURCE, *REFS] if protected else REFS
     assert nexus_posts[0]["params"]["image_urls"] == expected
     assert SECRET not in nexus_posts[0]["params"]["prompt"]
     copied = launch.created_sessions[-1]
@@ -1462,7 +1462,12 @@ async def test_clone_retry_accepts_exact_cap_and_source_file_aliases(local_launc
     assert len(launch.created_sessions) == 2
     payload = image_provider_posts[0]
     inp = payload["params"] if model == "nano-banana-pro" else payload["input"]
-    assert (inp["image_urls"] if model == "nano-banana-pro" else [inp["image_url"]]) == refs
+    expected_provider_refs = (
+        [SOURCE, *(url for url in refs if url != SOURCE)]
+        if protected and model == "nano-banana-pro"
+        else refs
+    )
+    assert (inp["image_urls"] if model == "nano-banana-pro" else [inp["image_url"]]) == expected_provider_refs
     assert json.loads(launch.created_sessions[-1].reference_file_ids) == ["extra"]
     assert json.loads(launch.created_sessions[-1].reference_urls) == refs
     if protected:

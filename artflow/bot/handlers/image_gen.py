@@ -621,7 +621,7 @@ async def _accept_generation_reference_candidate(
             _, selected, identities = await _resolve_feed_image_scene(
                 session=session, db_user=db_user, source=feed_source, references=refs, previous=previous,
             )
-            refs = order_feed_image_references(selected, identities)
+            refs = order_feed_image_references(selected, identities, source_first=True)
         if any(not public_url_is_available(url) for url in refs):
             raise FeedRemixUnavailable("Часть сохранённых фото недоступна. Загрузи их заново; поцелуи не списаны.")
     except FeedRemixUnavailable as exc:
@@ -1256,11 +1256,13 @@ async def _launch_session_generation(
                 safe_previous = trusted_feed_image_prompt(
                     previous, user_id=db_user.id, source_generation_id=source_feed_gen_id,
                     has_user_references=bool(identity_refs), fixed_composition=fixed_composition,
+                    scene_first=True,
                 )
                 if feed_change_request is None and prompt.strip() != str(getattr(source, "prompt", "") or "").strip() and safe_previous is None:
                     raise legacy_feed_edit_unavailable()
                 public_base = build_feed_image_prompt(
                     has_user_references=bool(identity_refs), fixed_composition=fixed_composition,
+                    scene_first=True,
                     has_source_media=bool(source_url and public_url_is_available(source_url) and _supports_img2img(image_session.model)),
                 )
                 if any(not public_url_is_available(url) for url in identity_refs):
@@ -1271,7 +1273,7 @@ async def _launch_session_generation(
                 feed_context = {FEED_REMIX_CONTEXT_KEY: feed_image_remix_context(
                     source_feed_gen_id, prompt, source_image_url=source_url, scene_generation_id=scene.id,
                 )}
-                refs = order_feed_image_references(source_url, identity_refs)
+                refs = order_feed_image_references(source_url, identity_refs, source_first=True)
                 max_refs = int(IMAGE_CAPS.get(image_session.model, {}).get("max_refs", 1) or 1)
                 if len(refs) > max_refs:
                     raise FeedRemixUnavailable(

@@ -59,8 +59,22 @@ async def test_bot_uploaded_reference_never_sees_hidden_author_prompt(image_laun
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
     submitted = image_launch.generate.await_args
     assert SECRET not in submitted.args[1]
-    assert submitted.kwargs["image_url"] == [USER_IMAGE, SOURCE_IMAGE]
+    assert submitted.kwargs["image_url"] == [SOURCE_IMAGE, USER_IMAGE]
     assert SECRET not in image_launch.repo.create_generation.await_args.args[4]
+
+
+@pytest.mark.asyncio
+async def test_telegram_repeat_restores_source_first_transport_and_original_edit_prompt(image_launch):
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
+    submitted = image_launch.generate.await_args
+    assert submitted.kwargs["image_url"] == [SOURCE_IMAGE, USER_IMAGE]
+    assert submitted.args[1] == (
+        "Edit the supplied public source media. Preserve its visible composition, "
+        "style and scene except for the requested changes. "
+        "The source is the first image or the source video. "
+        "Use additional references for the user's appearance or object."
+    )
+    assert SECRET not in submitted.args[1]
 
 
 @pytest.mark.asyncio
@@ -253,7 +267,7 @@ async def test_api_user_inputs_never_reach_model_with_author_secret(api_launch, 
     assert SECRET not in api_launch.generate.await_args.args[1]
     assert SECRET not in api_launch.save.await_args.args[4]
     refs = api_launch.generate.await_args.kwargs["image_url"]
-    expected = [SOURCE_IMAGE] if "change_request" in inputs else [USER_IMAGE, SOURCE_IMAGE]
+    expected = [SOURCE_IMAGE] if "change_request" in inputs else [SOURCE_IMAGE, USER_IMAGE]
     assert (refs if isinstance(refs, list) else [refs]) == expected
 
 
@@ -321,7 +335,7 @@ async def test_api_feed_preview_alias_is_not_sent_as_a_second_source_reference(a
 
     await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
 
-    assert api_launch.generate.await_args.kwargs["image_url"] == [USER_IMAGE, SOURCE_IMAGE]
+    assert api_launch.generate.await_args.kwargs["image_url"] == [SOURCE_IMAGE, USER_IMAGE]
 
 
 @pytest.mark.asyncio
@@ -342,7 +356,7 @@ async def test_api_preview_alias_quote_and_submit_share_canonical_reference_limi
 
     await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
     assert api_launch.charge.await_args.kwargs["amount"] == quote["cost_credits"]
-    assert api_launch.generate.await_args.kwargs["image_url"] == [USER_IMAGE, SOURCE_IMAGE]
+    assert api_launch.generate.await_args.kwargs["image_url"] == [SOURCE_IMAGE, USER_IMAGE]
     assert SECRET not in api_launch.generate.await_args.args[1]
 
 
@@ -362,8 +376,8 @@ async def test_api_feed_preview_alias_keeps_selected_multi_result_source(api_lau
     await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
 
     assert api_launch.generate.await_args.kwargs["image_url"] == [
-        USER_IMAGE,
         "https://example.test/second.jpg",
+        USER_IMAGE,
     ]
 
 
@@ -1025,7 +1039,7 @@ async def test_selected_result_quote_and_submission_match_on_both_surfaces(api_l
         await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
     assert api_launch.charge.await_args.kwargs["amount"] == quote["cost_credits"]
     assert api_launch.generate.await_args.kwargs["image_url"] == (
-        [USER_IMAGE, "https://example.test/second.jpg"] if personalized else "https://example.test/second.jpg"
+        ["https://example.test/second.jpg", USER_IMAGE] if personalized else "https://example.test/second.jpg"
     )
     prompt = api_launch.generate.await_args.args[1]
     assert (SECRET not in prompt) if personalized else prompt == SECRET

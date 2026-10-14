@@ -208,7 +208,7 @@ async def _repeat_provider_reference_urls(
         return None
     if not public_url_is_available(source_url):
         return None
-    return image_gen.order_feed_image_references(source_url, identity_refs)
+    return image_gen.order_feed_image_references(source_url, identity_refs, source_first=True)
 
 
 async def _begin_repeat_collection(

@@ -179,8 +179,9 @@ async def test_safe_repeat_overflow_is_visible_after_callback_was_answered(repea
 @pytest.mark.parametrize("protected_feed", [False, True])
 async def test_safe_repeat_deduplicates_restored_urls_without_losing_inputs(repeat_runtime, protected_feed):
     runtime = repeat_runtime
-    expected = REFS[:3] + [SOURCE] if protected_feed else REFS[:4]
-    runtime.generation.input_params = json.dumps({"reference_images": [expected[0], *expected]})
+    original_saved_refs = [*REFS[:3], SOURCE] if protected_feed else REFS[:4]
+    runtime.generation.input_params = json.dumps({"reference_images": [original_saved_refs[0], *original_saved_refs]})
+    expected = [SOURCE, *REFS[:3]] if protected_feed else REFS[:4]
     if protected_feed:
         runtime.generation.source_feed_gen_id = 77
         runtime.generation.prompt = runtime.source.prompt
@@ -190,8 +191,10 @@ async def test_safe_repeat_deduplicates_restored_urls_without_losing_inputs(repe
     await repeat_safe.confirm_repeat(call, runtime.session, state, runtime.user, call.bot)
 
     assert runtime.provider.await_args.kwargs["image_url"] == expected
-    assert json.loads(runtime.created[-1].reference_urls) == expected
-    assert await image_gen._session_reference_url(call.bot, runtime.created[-1]) == expected
+    # The saved legacy session retains its original input snapshot, while the
+    # protected feed submission resolves the effective provider order afresh.
+    assert json.loads(runtime.created[-1].reference_urls) == original_saved_refs
+    assert await image_gen._session_reference_url(call.bot, runtime.created[-1]) == original_saved_refs
 
 
 @pytest.mark.parametrize("alias", [False, True])
@@ -425,7 +428,7 @@ async def test_legacy_collector_preserves_canonical_source_union_on_first_and_ne
     runtime.provider.assert_not_awaited()
     await repeat_references._repeat_refs_run(call, runtime.session, state, runtime.user, call.bot)
 
-    expected = [*REFS[:3], SOURCE]
+    expected = [SOURCE, *REFS[:3]]
     assert runtime.provider.await_count == 1
     assert runtime.provider.await_args.kwargs["image_url"] == expected
     copied = runtime.created[-1]
@@ -600,7 +603,7 @@ async def test_feed_marketplace_counts_user_photo_aliasing_public_source_once(re
         assert state.data["prompt_multi_ref_file_ids"] == file_ids
     else:
         await repeat_reference_marketplace._run(call, runtime.session, runtime.user, state, call.bot)
-        expected = REFS[:3] + [SOURCE]
+        expected = [SOURCE, *REFS[:3]]
         assert runtime.provider.await_args.kwargs["image_url"] == expected
         copied = runtime.created[-1]
         assert json.loads(copied.reference_file_ids) == file_ids
