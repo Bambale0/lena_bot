@@ -39,6 +39,23 @@ async def test_image_refund_sla_admin_change_is_audited(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_image_refund_sla_first_write_is_audited_at_bootstrap_value(monkeypatch):
+    monkeypatch.setattr(image_recovery_policy.settings, "IMAGE_AUTO_REFUND_SECONDS", 3600)
+    row = SimpleNamespace(auto_refund_seconds=3600, updated_by_admin_tg_id=None)
+    session = SimpleNamespace(
+        execute=AsyncMock(side_effect=[None, SimpleNamespace(scalar_one=lambda: row)]),
+        add=MagicMock(), commit=AsyncMock(),
+    )
+    changed = await image_recovery_policy.set_image_recovery_policy(
+        session, "nexus", 3600, admin_tg_id=42,
+    )
+    assert (changed.auto_refund_seconds, changed.updated_by_admin_tg_id) == (3600, 42)
+    audit = session.add.call_args.args[0]
+    assert (audit.previous_seconds, audit.new_seconds, audit.changed_by_admin_tg_id) == (3600, 3600, 42)
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_image_refund_sla_web_admin_requires_admin(monkeypatch):
     monkeypatch.setattr(web_admin.settings, "ADMIN_IDS", [42])
     body = web_admin.ImageRecoveryPolicyUpdate(auto_refund_seconds=1800)

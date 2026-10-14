@@ -61,7 +61,7 @@ async def set_image_recovery_policy(
         .with_for_update()
     )).scalar_one()
     previous = record.auto_refund_seconds
-    if previous != auto_refund_seconds:
+    if previous != auto_refund_seconds or record.updated_by_admin_tg_id is None:
         record.auto_refund_seconds = auto_refund_seconds
         record.updated_by_admin_tg_id = int(admin_tg_id)
         session.add(ImageRecoveryPolicyAudit(
