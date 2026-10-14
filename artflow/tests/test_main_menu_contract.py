@@ -142,6 +142,7 @@ def test_image_entry_keeps_photo_prompt_visible():
         "img_v2:quality",
         "img_v2:refs",
         "img_menu:advanced",
+        "img_scn:fast",
         "img:photo2prompt",
         "vid:video2prompt",
         "menu:create",
