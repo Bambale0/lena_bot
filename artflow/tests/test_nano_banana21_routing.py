@@ -561,14 +561,18 @@ async def test_nana_banano_21_quick_quality_change_keeps_user_references(
     call = SimpleNamespace(
         data=f"img_nb:quality:nano-banana-2.1:{quality}", message=AsyncMock(), answer=AsyncMock()
     )
-    resolved_cost = AsyncMock(return_value=SimpleNamespace(credits=credits))
+    exact_cost = AsyncMock(return_value=SimpleNamespace(credits=credits, is_active=True))
     edit_message = AsyncMock()
-    monkeypatch.setattr(image_gen.repo, "resolve_image_model_cost", resolved_cost)
+    monkeypatch.setattr(image_gen.repo, "get_model_cost", exact_cost)
     monkeypatch.setattr(image_gen, "safe_edit_message", edit_message)
 
     db_session = object()
     await image_gen.cb_nana_banano_quality(call, state, db_session)
-    resolved_cost.assert_awaited_once_with(db_session, "nano-banana-2.1", quality=quality)
+    expected_key = (
+        "nano-banana-2.1" if quality == "1K"
+        else f"nano-banana-2.1__quality={quality}"
+    )
+    exact_cost.assert_awaited_once_with(db_session, expected_key)
     assert saved["quality"] == saved["image_quality"] == quality
     assert saved["credits"] == credits
     assert saved["ref_file_ids"] == ["existing-file-id"]
@@ -592,7 +596,7 @@ async def test_nana_banano_21_quick_quality_rejects_unknown_value_without_state_
     }
     call = SimpleNamespace(data="img_nb:quality:nano-banana-2.1:8K", message=AsyncMock(), answer=AsyncMock())
     cost = AsyncMock()
-    monkeypatch.setattr(image_gen.repo, "resolve_image_model_cost", cost)
+    monkeypatch.setattr(image_gen.repo, "get_model_cost", cost)
     await image_gen.cb_nana_banano_quality(call, state, object())
     state.update_data.assert_not_awaited()
     cost.assert_not_awaited()
@@ -613,7 +617,7 @@ async def test_nana_banano_quality_stale_model_button_cannot_mutate_current_sess
         message=AsyncMock(), answer=AsyncMock(),
     )
     cost = AsyncMock()
-    monkeypatch.setattr(image_gen.repo, "resolve_image_model_cost", cost)
+    monkeypatch.setattr(image_gen.repo, "get_model_cost", cost)
     await image_gen.cb_nana_banano_quality(call, state, object())
     state.update_data.assert_not_awaited()
     cost.assert_not_awaited()
@@ -649,3 +653,31 @@ async def test_nana_banano_selected_4k_is_stored_in_generation_session(monkeypat
     assert create.await_args.kwargs["model"] == "nano-banana-2.1"
     assert create.await_args.kwargs["quality"] == "4K"
     assert create.await_args.kwargs["count"] == 1
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row", [None, SimpleNamespace(credits=1.5, is_active=False)])
+async def test_nano21_quick_4k_disabled_variant_never_falls_back_to_base_price(monkeypatch, row):
+    from bot.handlers import image_gen
+
+    state = AsyncMock()
+    state.get_data.return_value = {
+        "nana_banano_flow": True, "model_key": "nano-banana-2.1",
+        "quality": "1K", "ref_file_ids": ["user-photo"],
+    }
+    call = SimpleNamespace(
+        data="img_nb:quality:nano-banana-2.1:4K",
+        message=AsyncMock(), answer=AsyncMock(),
+    )
+    exact = AsyncMock(return_value=row)
+    fallback = AsyncMock(return_value=SimpleNamespace(credits=1))
+    monkeypatch.setattr(image_gen.repo, "get_model_cost", exact)
+    monkeypatch.setattr(image_gen.repo, "resolve_image_model_cost", fallback)
+    db_session = object()
+    await image_gen.cb_nana_banano_quality(call, state, db_session)
+    exact.assert_awaited_once_with(db_session, "nano-banana-2.1__quality=4K")
+    fallback.assert_not_awaited()
+    state.update_data.assert_not_awaited()
+    call.answer.assert_awaited_once()
+    assert call.answer.await_args.kwargs["show_alert"] is True

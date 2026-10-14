@@ -88,6 +88,7 @@ from core.feed_remix_prompt import (
     trusted_feed_image_recipe_prompt,
     trusted_feed_image_scene,
 )
+from core.model_pricing import pricing_variant_key
 from core.provider_routing import get_nano21_route
 from db import repository as repo
 from db.models import Generation, GenerationType, ImageGenerationAction, ImageSession, User
@@ -2004,9 +2005,16 @@ async def cb_nana_banano_quality(
         return
 
     normalized = _normalize_session_quality(model_key, data.get("aspect_ratio"), quality)
-    model_cost = await repo.resolve_image_model_cost(session, model_key, quality=normalized)
-    if not model_cost:
-        await call.answer("Не удалось получить тариф для выбранного качества", show_alert=True)
+    # The general price resolver falls back to the base model: here that
+    # would silently allow 4K even after an admin disabled the 4K tariff.
+    # Nano Banana 2.1's 1K is deliberately billed by its base price row.
+    exact_price_key = (
+        model_key if model_key == ImageModel.NANO_BANANA_21.value and normalized == "1K"
+        else pricing_variant_key(model_key, quality=normalized)
+    )
+    model_cost = await repo.get_model_cost(session, exact_price_key)
+    if not model_cost or not model_cost.is_active:
+        await call.answer("Тариф этого качества недоступен", show_alert=True)
         return
 
     await state.update_data(

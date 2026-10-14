@@ -38,6 +38,9 @@ def _image_start_kb(*, show_continue: bool = False):
         InlineKeyboardButton(text="🧠 Сменить модель", callback_data="img_menu:advanced"),
     )
     builder.row(
+        InlineKeyboardButton(text="🍌 nana banano · быстрый режим", callback_data="img_scn:fast"),
+    )
+    builder.row(
         InlineKeyboardButton(text="📸 Промпт по фото", callback_data="img:photo2prompt"),
         InlineKeyboardButton(text="🎬 Промпт по видео", callback_data="vid:video2prompt"),
     )
