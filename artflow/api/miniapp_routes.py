@@ -587,12 +587,25 @@ async def _reconcile_neironych_image_generation(
     recovery case, not proof of failure or a reason to issue another paid POST.
     """
     expected_task_id = gen.task_id
+    age = datetime.now(timezone.utc) - (getattr(gen, "created_at", None) or datetime.now(timezone.utc))
+
+    async def refund_if_overdue(reason: str, current=None):
+        if age.total_seconds() < settings.IMAGE_AUTO_REFUND_SECONDS:
+            return current or gen
+        logger.warning("Image customer SLA expired gen=%s provider=neironych state=%s", gen.id, reason)
+        await repo.fail_generation_and_refund(
+            session, gen.id, "Изображение не пришло вовремя. Кредиты возвращены.",
+            refund_note=f"image:auto_timeout:neironych:{reason}",
+            expected_task_id=expected_task_id,
+        )
+        return await repo.get_generation_by_id(session, gen.id)
+
     try:
         state = await neironych_image_adapter.fetch_nano_banana21_status(request_id)
     except Exception as exc:
         logger.warning("Neironych image reconciliation delayed gen=%s request_id=%s error=%s",
                        gen.id, request_id, type(exc).__name__)
-        return gen
+        return await refund_if_overdue("poll_unavailable")
 
     provider_state = state["status"]
     if provider_state in {"failed", "timeout", "cancelled"}:
@@ -607,10 +620,10 @@ async def _reconcile_neironych_image_generation(
         url = state.get("result_url")
         if not url:
             logger.error(
-                "Neironych completed without recoverable image; manual support required gen=%s request_id=%s",
+                "Neironych completed without recoverable image gen=%s request_id=%s",
                 gen.id, request_id,
             )
-            return gen
+            return await refund_if_overdue("completed_no_media")
         try:
             durable_url = await neironych_image_adapter.mirror_verified_nano_banana21_result(url)
             finished = await repo.finish_generation(
@@ -636,11 +649,14 @@ async def _reconcile_neironych_image_generation(
                 "Neironych image delivery/reconcile failed gen=%s request_id=%s",
                 gen.id, request_id,
             )
-        return await repo.get_generation_by_id(session, gen.id)
+        current = await repo.get_generation_by_id(session, gen.id)
+        if current and getattr(current, "status", None) in {GenerationStatus.pending, GenerationStatus.processing}:
+            return await refund_if_overdue("media_unavailable", current)
+        return current
 
     # not_found, reconciliation_required, submitting, processing, queued:
     # no definitive evidence that the provider did not reserve credits.
-    return gen
+    return await refund_if_overdue(provider_state)
 
 
 async def _reconcile_neironych_video_generation(
@@ -793,12 +809,23 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
 
     strict_nexus_image = (
         gen.gen_type == GenerationType.image
-        and gen.model == 'nano-banana-2.1'
+        and nexus_image_adapter.is_nexus_image_model(str(gen.model))
         and nexus_image_adapter.is_nexus_task_id(task_id)
     )
+    async def refund_stale_nexus(reason: str):
+        if age.total_seconds() < settings.IMAGE_AUTO_REFUND_SECONDS:
+            return gen
+        logger.warning("Image customer SLA expired gen=%s provider=nexus state=%s", gen.id, reason)
+        await repo.fail_generation_and_refund(
+            session, gen.id, "Изображение не пришло вовремя. Кредиты возвращены.",
+            refund_note=f"image:auto_timeout:nexus:{reason}",
+            expected_task_id=stored_task_id,
+        )
+        return await repo.get_generation_by_id(session, gen.id)
+
     if strict_nexus_image and not nexus_image_adapter.submission_scope_matches(getattr(gen, "input_params", None)):
         logger.error("Nexus credential scope changed; manual reconciliation required gen=%s", gen.id)
-        return gen
+        return await refund_stale_nexus("credential_scope_changed")
     try:
         result_urls: list[str] | None = None
         if gen.gen_type == GenerationType.image:
@@ -823,7 +850,7 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         if strict_nexus_image:
             if (not isinstance(exc, nexus_image_adapter.NexusImageTaskFailed)
                     or exc.task_id != nexus_image_adapter.strip_nexus_task_id(task_id)):
-                return gen
+                return await refund_stale_nexus("poll_or_media_unavailable")
         await repo.fail_generation_and_refund(
             session,
             gen.id,
@@ -843,7 +870,7 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 result_url = result_urls[0]
             except Exception:
                 logger.exception("Nexus image verification deferred gen=%s", gen.id)
-                return gen
+                return await refund_stale_nexus("media_unavailable")
         finished = await repo.finish_generation(
             session, gen.id, result_url, result_urls=result_urls,
             **({"expected_task_id": stored_task_id} if strict_nexus_image else {}),
@@ -881,7 +908,7 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
 
     if strict_nexus_image:
         # A pending/unknown Nexus task is not proof that paid work failed.
-        return gen
+        return await refund_stale_nexus("provider_pending")
 
     if age >= STALE_GENERATION_TIMEOUT:
         logger.warning(

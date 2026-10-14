@@ -6,8 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from api import miniapp_routes  # noqa: F401 - initialise API route/module imports
+from core import neironych_video_reconcile_scheduler as scheduler
 from db import repository as repo
 from db.models import GenerationStatus, GenerationType
 
@@ -62,6 +64,22 @@ async def test_notice_claim_is_single_winner_and_success_is_durable():
     assert state["state"] == "sent" and state["sent_at"]
     assert await repo.claim_neironych_video_notice(session, row.id) is None
     assert json.loads(row.input_params)["resolution"] == "720p"
+
+
+@pytest.mark.asyncio
+async def test_refunded_video_without_provider_id_can_send_failure_notice():
+    row = _row(kind="failed")
+    row.task_id = None
+    params = json.loads(row.input_params)
+    params["refund_applied"] = True
+    row.input_params = json.dumps(params)
+    claim = await repo.claim_neironych_video_notice(FakeSession(row), row.id)
+    assert claim and claim.kind == "failed"
+
+
+def test_notice_scheduler_selects_refunded_videos_without_provider_id():
+    sql = str(scheduler._eligible_notice_query().compile(dialect=postgresql.dialect()))
+    assert "generations.task_id IS NULL" in sql
 
 
 @pytest.mark.asyncio
