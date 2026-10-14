@@ -147,8 +147,6 @@ async def test_feed_5xx_lost_guard_keeps_accepted_share(
 @pytest.fixture
 async def wire(monkeypatch):
     posts = []
-    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE))
-    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE))
 
     def capture(request):
         assert request.method == "POST"
@@ -233,7 +231,7 @@ async def test_collage_edit_uses_creator_prompt_and_only_reader_reference(
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0]]
     prompt = params["prompt"]
-    assert prompt == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+    assert prompt == SECRET
 
 
 def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback():
@@ -267,64 +265,57 @@ def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback
     ) is None
 
 
-def test_creator_recipe_uses_one_current_reader_identity_policy():
+def test_creator_recipe_is_verbatim_and_old_policy_can_be_unwrapped():
     creator = "Gothic black-and-white portrait of a witch with dark hair."
-    composed = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
-    assert composed.startswith(
-        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Creator scene prompt:\n" + creator
-    )
-    assert composed.endswith("Subject identity policy:\n" + IDENTITY_RULE)
-    assert "Creator scene prompt:\n" + creator in composed
-    assert composed.count(creator) == 1
-    assert composed.count("Subject identity policy:\n") == 1
-    assert composed.count(IDENTITY_RULE) == 1
-    assert "EXCLUSIVE source of the subject's face" in composed
-    assert "Do not copy the original subject's face" in composed
+    composed = prompt_core.build_feed_image_recipe_prompt(creator)
+    assert composed == creator
     assert prompt_core.build_feed_image_recipe_prompt(
-        composed, IDENTITY_RULE, previous_instruction=IDENTITY_RULE,
+        composed, previous_instruction=IDENTITY_RULE,
     ) == composed
     edited = prompt_core.build_feed_image_recipe_prompt(
-        composed, IDENTITY_RULE, "blue cloak", previous_instruction=IDENTITY_RULE,
+        composed, "blue cloak", previous_instruction=IDENTITY_RULE,
     )
-    assert edited.count("EXCLUSIVE source of the subject's face") == 1
-    assert "blue cloak" in edited
+    assert edited == creator + "\n\nИзменения, которые запросил пользователь для повтора: blue cloak"
     new_rule = "Use the reader's facial identity, never the creator's facial identity."
     updated = prompt_core.build_feed_image_recipe_prompt(
-        composed, new_rule, previous_instruction=IDENTITY_RULE,
+        composed, previous_instruction=IDENTITY_RULE,
     )
-    assert IDENTITY_RULE not in updated
-    assert updated.startswith(
+    assert updated == creator
+    old_wrapped = (
         prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
         + "Creator scene prompt:\n" + creator
+        + "\n\nSubject identity policy:\n" + IDENTITY_RULE
     )
-    assert updated.endswith("Subject identity policy:\n" + new_rule)
-    assert updated.count(new_rule) == 1
     previous = SimpleNamespace(
-        user_id=42, source_feed_gen_id=77, prompt=composed,
+        user_id=42, source_feed_gen_id=77, prompt=old_wrapped,
         input_params={prompt_core.FEED_REMIX_CONTEXT_KEY: prompt_core.feed_image_recipe_context(
-            77, composed, IDENTITY_RULE,
+            77, old_wrapped, IDENTITY_RULE,
         )},
     )
     assert prompt_core.trusted_feed_image_recipe_instruction(
         previous, user_id=42, source_generation_id=77,
     ) == IDENTITY_RULE
+    assert prompt_core.build_feed_image_recipe_prompt(
+        old_wrapped, previous_instruction=IDENTITY_RULE,
+    ) == creator
     previous.input_params[prompt_core.FEED_REMIX_CONTEXT_KEY]["identity_instruction"] = new_rule
     assert prompt_core.trusted_feed_image_recipe_instruction(
         previous, user_id=42, source_generation_id=77,
     ) is None
 
 
-def test_creator_face_descriptions_precede_the_single_reader_identity_rule():
+def test_october_first_recipe_uses_exact_creator_prompt_without_identity_policy():
     creator = "Studio portrait, angular jawline, full lips, white blazer."
-    composed = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
-    assert composed.count(creator) == 1
-    assert composed.count(IDENTITY_RULE) == 1
-    assert composed.index(creator) < composed.index(IDENTITY_RULE)
-    assert composed.endswith("Subject identity policy:\n" + IDENTITY_RULE)
+    assert prompt_core.build_feed_image_recipe_prompt(creator) == creator
+
+
+def test_creator_face_descriptions_remain_verbatim_without_added_rule():
+    creator = "Studio portrait, angular jawline, full lips, white blazer."
+    composed = prompt_core.build_feed_image_recipe_prompt(creator)
+    assert composed == creator
     assert prompt_core.build_feed_image_recipe_prompt(
-        composed, IDENTITY_RULE, previous_instruction=IDENTITY_RULE,
-    ) == composed
+        composed, previous_instruction=IDENTITY_RULE,
+    ) == creator
 
 
 def test_recipe_continuation_replaces_old_unlabeled_identity_rule():
@@ -341,32 +332,14 @@ def test_recipe_continuation_replaces_old_unlabeled_identity_rule():
         saved, user_id=42, source_generation_id=77,
     ) == old_rule
     continued = prompt_core.build_feed_image_recipe_prompt(
-        previous, IDENTITY_RULE, "blue cloak", previous_instruction=old_rule,
+        previous, "blue cloak", previous_instruction=old_rule,
     )
-    assert continued.startswith(
-        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Creator scene prompt:\n" + creator
-    )
-    assert continued.endswith("Subject identity policy:\n" + IDENTITY_RULE)
-    assert continued.count(creator) == 1
-    assert continued.count(IDENTITY_RULE) == 1
-    assert old_rule not in continued
-    assert "blue cloak" in continued
+    assert continued == creator + "\n\nИзменения, которые запросил пользователь для повтора: blue cloak"
 
 
-def test_recipe_prompt_uses_only_the_current_admin_instruction_for_identity_rules():
-    revised_rule = (
-        "Use the reader's reference images according to the current campaign settings. "
-        "The administrator controls any more specific subject instructions for this campaign."
-    )
-    composed = prompt_core.build_feed_image_recipe_prompt("Candlelit studio scene.", revised_rule)
-    assert composed.startswith(
-        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Creator scene prompt:\nCandlelit studio scene."
-    )
-    assert composed.endswith("Subject identity policy:\n" + revised_rule)
-    assert "facial identity" not in composed
-    assert "facial features" not in composed
+def test_recipe_prompt_does_not_add_identity_instruction():
+    composed = prompt_core.build_feed_image_recipe_prompt("Candlelit studio scene.")
+    assert composed == "Candlelit studio scene."
 
 
 def test_recipe_continuation_unwraps_previous_main_policy_wording():
@@ -375,11 +348,11 @@ def test_recipe_continuation_unwraps_previous_main_policy_wording():
         prompt_core._IMAGE_RECIPE_SCENE_PREFIX + creator
         + "\n\nReference identity priority: Previous policy wording."
     )
-    continued = prompt_core.build_feed_image_recipe_prompt(previous, IDENTITY_RULE, "silver bat crown")
+    continued = prompt_core.build_feed_image_recipe_prompt(previous, "silver bat crown")
     assert continued.count(creator) == 1
     assert "Previous policy wording" not in continued
-    assert continued.count(IDENTITY_RULE) == 1
-    assert "silver bat crown" in continued
+    assert IDENTITY_RULE not in continued
+    assert continued == creator + "\n\nИзменения, которые запросил пользователь для повтора: silver bat crown"
 
 
 def test_recipe_continuation_unwraps_previous_double_policy_once():
@@ -391,30 +364,18 @@ def test_recipe_continuation_unwraps_previous_double_policy_once():
         + "\n\nSubject identity policy:\n" + old_rule
     )
     continued = prompt_core.build_feed_image_recipe_prompt(
-        previous, IDENTITY_RULE, previous_instruction=old_rule,
+        previous, previous_instruction=old_rule,
     )
-    assert continued == (
-        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Creator scene prompt:\n" + creator
-        + "\n\nSubject identity policy:\n" + IDENTITY_RULE
-    )
+    assert continued == creator
 
 
-def test_recipe_continuation_keeps_new_reference_relationship_and_scene_once():
+def test_recipe_continuation_keeps_creator_scene_once():
     creator = "Candlelit portrait, red velvet clothing."
-    first = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
+    first = prompt_core.build_feed_image_recipe_prompt(creator)
     continued = prompt_core.build_feed_image_recipe_prompt(
-        first, IDENTITY_RULE, "blue cloak", previous_instruction=IDENTITY_RULE,
+        first, "blue cloak", previous_instruction=IDENTITY_RULE,
     )
-    assert continued.count(prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX) == 1
-    assert continued.count(IDENTITY_RULE) == 1
-    assert continued.count(creator) == 1
-    assert continued.count("blue cloak") == 1
-    assert continued.startswith(
-        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Creator scene prompt:\n" + creator
-    )
-    assert continued.endswith("Subject identity policy:\n" + IDENTITY_RULE)
+    assert continued == creator + "\n\nИзменения, которые запросил пользователь для повтора: blue cloak"
 
 
 def test_public_derived_recipe_is_available_to_its_owner_for_all_image_models():
@@ -458,7 +419,7 @@ async def test_ksu_style_feed_recipe_replaces_author_refs_and_preserves_settings
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0]]  # Author output and original input excluded.
     assert source.prompt in params["prompt"]
-    assert params["prompt"] == prompt_core.build_feed_image_recipe_prompt(source.prompt, IDENTITY_RULE)
+    assert params["prompt"] == source.prompt
     assert params["aspect_ratio"] == "2:3"
     assert params["image_size"] == "2K"
     args = repo.create_generation.await_args
@@ -471,7 +432,7 @@ async def test_ksu_style_feed_recipe_replaces_author_refs_and_preserves_settings
     assert source.prompt not in str(result)
 
 
-async def test_monochrome_recipe_keeps_reader_face_and_hair_priority_in_provider_request(
+async def test_monochrome_recipe_sends_exact_creator_prompt_and_reader_photo(
     local_launch, wire, monkeypatch,
 ):
     monkeypatch.setattr(miniapp_routes.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
@@ -490,7 +451,7 @@ async def test_monochrome_recipe_keeps_reader_face_and_hair_priority_in_provider
     assert submitted["image_urls"] == [REFS[0]]
     prompt = submitted["prompt"]
     assert source.prompt in prompt
-    assert IDENTITY_RULE in prompt
+    assert IDENTITY_RULE not in prompt
     assert SOURCE not in submitted["image_urls"]
     saved = repo.create_generation.await_args.args[4]
     assert saved == prompt
@@ -518,7 +479,7 @@ async def test_every_nexus_image_model_uses_creator_prompt_and_reader_photo_with
     )
     submitted = wire[0]["body"]["params"]
     assert submitted["image_urls"] == [REFS[0]]
-    assert submitted["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+    assert submitted["prompt"] == SECRET
     context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
     assert context["version"] == 4
 
@@ -540,7 +501,7 @@ async def test_derived_photo_on_other_image_models_uses_public_origin_recipe(
     )
     submitted = wire[0]["body"]["params"]
     assert submitted["image_urls"] == [REFS[0]]
-    assert submitted["prompt"] == prompt_core.build_feed_image_recipe_prompt(origin.prompt, IDENTITY_RULE)
+    assert submitted["prompt"] == origin.prompt
 
 
 @pytest.mark.parametrize("model", ["nano-banana-pro", "google/nano-banana", "midjourney-blend"])
@@ -581,7 +542,7 @@ async def test_disabled_recipe_fails_closed_without_author_photo(
         )
         params = wire[0]["body"]["params"]
         assert params["image_urls"] == [REFS[0]]
-        assert params["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+        assert params["prompt"] == SECRET
 
 
 async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_response(
@@ -594,7 +555,7 @@ async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_resp
         session=local_launch.session, user=local_launch.user,
     )
     assert wire[0]["body"]["params"]["image_urls"] == [REFS[0]]
-    assert wire[0]["body"]["params"]["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+    assert wire[0]["body"]["params"]["prompt"] == SECRET
     assert SECRET not in str(result)
     assert result.prompt_hidden is True
     assert local_launch.created_sessions[-1].base_prompt is None
@@ -696,7 +657,7 @@ async def test_nexus_personalized_repeat_uses_reader_reference_only(
     )
     submitted = wire[0]["body"]["params"]
     assert submitted["image_urls"] == [REFS[0]]
-    assert submitted["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+    assert submitted["prompt"] == SECRET
     context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
     assert context["version"] == 4
     assert "source_image_url" not in context
@@ -729,7 +690,7 @@ async def test_nano21_derived_feed_uses_origin_prompt_and_only_reader_photo(
     submitted = generate.await_args.kwargs
     assert quote["gen_type"] == "image"
     assert submitted["image_urls"] == [REFS[0]]
-    assert submitted["prompt"] == prompt_core.build_feed_image_recipe_prompt(origin.prompt, IDENTITY_RULE)
+    assert submitted["prompt"] == origin.prompt
     assert SOURCE not in submitted["image_urls"]
 
 
@@ -795,7 +756,7 @@ async def test_nano21_original_recipe_uses_exact_reader_reference(
 
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("surface", ["web", "miniapp"])
-async def test_fresh_feed_repeat_sends_identity_contract_to_real_provider(local_launch, wire, model, surface):
+async def test_fresh_feed_repeat_sends_creator_prompt_to_real_provider(local_launch, wire, model, surface):
     result = await miniapp_routes.remix_feed_post(
         77, miniapp_routes.FeedRemixRequest(
             model=model, image_url=REFS[0], reference_urls=REFS[1:], mode="image",
@@ -806,7 +767,7 @@ async def test_fresh_feed_repeat_sends_identity_contract_to_real_provider(local_
     assert params["model_name"] == model
     assert params["image_urls"] == REFS
     assert SECRET in params["prompt"]
-    assert IDENTITY_RULE in params["prompt"]
+    assert IDENTITY_RULE not in params["prompt"]
     assert "make the coat blue" in params["prompt"]
     assert SECRET not in str(result)
     context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
@@ -827,7 +788,7 @@ async def test_all_public_gallery_aliases_are_excluded_from_identity_roles(local
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == REFS[:2]
-    assert params["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+    assert params["prompt"] == SECRET
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -875,7 +836,7 @@ async def test_unavailable_supplied_identity_fails_without_scene_only_fallback(l
 
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("metadata", [None, {"hidden_prompt": False}, '{"hidden_prompt": false}'])
-async def test_own_visible_recipe_uses_user_identity_without_finished_author_image(local_launch, wire, model, metadata):
+async def test_own_visible_recipe_uses_reader_photo_without_finished_author_image(local_launch, wire, model, metadata):
     local_launch.source.user_id = local_launch.user.id
     local_launch.source.prompt = OWN_RECIPE
     local_launch.source.source_feed_gen_id = None
@@ -888,7 +849,7 @@ async def test_own_visible_recipe_uses_user_identity_without_finished_author_ima
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == REFS[:1]
     assert OWN_RECIPE in params["prompt"]
-    assert "EXCLUSIVE source" in params["prompt"]
+    assert "EXCLUSIVE source" not in params["prompt"]
     assert "make the coat blue" in params["prompt"]
 
 
@@ -951,7 +912,7 @@ async def test_fresh_web_result_repeated_in_telegram_rebuilds_current_reference_
     assert params["model_name"] == model
     assert params["image_urls"] == references
     assert SECRET in params["prompt"]
-    assert IDENTITY_RULE in params["prompt"]
+    assert IDENTITY_RULE not in params["prompt"]
     assert "blue coat" in params["prompt"]
     assert wire[0]["key"] != wire[1]["key"]
     assert "seed" not in params
@@ -982,7 +943,7 @@ async def test_trusted_legacy_next_repeat_upgrades_actual_provider_payload(local
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == REFS[:2]
     assert SECRET in params["prompt"]
-    assert IDENTITY_RULE in params["prompt"]
+    assert IDENTITY_RULE not in params["prompt"]
     assert "make the coat blue" in params["prompt"]
     assert repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]["version"] == 4
 
@@ -1017,7 +978,7 @@ async def test_personalized_telegram_edit_uses_creator_recipe_with_stale_state(l
     prompt = wire[0]["body"]["params"]["prompt"]
     assert wire[0]["body"]["params"]["image_urls"] == [REFS[0]]
     assert SECRET in prompt
-    assert IDENTITY_RULE in prompt
+    assert IDENTITY_RULE not in prompt
     assert "change my hair color" in prompt
 
 
@@ -1228,7 +1189,7 @@ async def test_safe_repeat_same_confirm_submits_once_but_new_repeat_is_fresh(
         assert params["image_urls"] == REFS[:2]
         assert "seed" not in params
         assert SECRET in params["prompt"]
-        assert IDENTITY_RULE in params["prompt"]
+        assert IDENTITY_RULE not in params["prompt"]
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -1312,7 +1273,7 @@ async def test_expired_gallery_entry_does_not_promote_bound_display_alias_to_ide
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0]]
-    assert params["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+    assert params["prompt"] == SECRET
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -1376,13 +1337,7 @@ async def test_quote_and_submit_share_authenticated_own_recipe_reference_budget(
     assert wire[0]["body"]["params"]["image_urls"] == references
     assert (OWN_RECIPE if owns_source else SECRET) in wire[0]["body"]["params"]["prompt"]
     if not owns_source:
-        assert wire[0]["body"]["params"]["prompt"].startswith(
-            prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-            + "Creator scene prompt:\n"
-        )
-        assert wire[0]["body"]["params"]["prompt"].endswith(
-            "Subject identity policy:\n" + IDENTITY_RULE
-        )
+        assert wire[0]["body"]["params"]["prompt"] == SECRET
         context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
         assert context["version"] == 4 and "prompt" not in context
 

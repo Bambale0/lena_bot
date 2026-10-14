@@ -47,9 +47,6 @@ async def nexus_posts(monkeypatch):
 
 @pytest.fixture
 def local_launch(monkeypatch):
-    identity_instruction = "Use only the reader's reference photos for the subject's identity. " * 3
-    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value=identity_instruction))
-    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=identity_instruction))
     created_sessions = []
     generation = SimpleNamespace(
         id=99, user_id=42, gen_type=GenerationType.image, model="nano-banana-pro", prompt="own prompt",

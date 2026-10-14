@@ -44,8 +44,6 @@ def callback(data=""):
 
 @pytest.fixture
 def repeat_runtime(monkeypatch):
-    identity_instruction = "Use only the reader's reference photos for the subject's identity. " * 3
-    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=identity_instruction))
     active = ImageSession(
         id=1, user_id=42, model="nano-banana-pro", status=ImageSessionStatus.active,
         mode="image", base_prompt="previous series", last_prompt="previous series",

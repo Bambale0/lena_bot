@@ -28,7 +28,6 @@ def bound_preview(url=SOURCE_IMAGE, *, index=0, display=False):
 
 @pytest.fixture
 def image_launch(monkeypatch):
-    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE))
     source = SimpleNamespace(
         id=77, user_id=99, is_public_feed=True, gen_type=GenerationType.image,
         prompt=SECRET, result_url=SOURCE_IMAGE, result_urls=None,
@@ -75,7 +74,7 @@ async def test_telegram_repeat_sends_creator_recipe_and_only_reader_photo(image_
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
-    assert submitted.args[1] == image_gen.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+    assert submitted.args[1] == SECRET
 
 
 @pytest.mark.asyncio
@@ -166,7 +165,7 @@ async def test_telegram_historic_recipe_uses_only_users_photo(
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
     assert image_launch.source.prompt in submitted.args[1]
-    assert submitted.args[1] == prompt_core.build_feed_image_recipe_prompt(image_launch.source.prompt, IDENTITY_RULE)
+    assert submitted.args[1] == image_launch.source.prompt
     assert submitted.kwargs["aspect_ratio"] == "2:3"
     created = image_launch.repo.create_generation.await_args
     assert created.kwargs["source_feed_gen_id"] == 77
@@ -199,7 +198,6 @@ async def test_bot_nano21_recipe_payload_uses_reader_face_without_creator_photo(
     image_launch, monkeypatch,
 ):
     from api.neironych_image_adapter import build_nano_banana21_payload
-    from core import feed_remix_prompt as prompt_core
 
     monkeypatch.setattr(image_gen.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
     image_launch.kwargs["image_session"].model = "nano-banana-2.1"
@@ -212,8 +210,8 @@ async def test_bot_nano21_recipe_payload_uses_reader_face_without_creator_photo(
         aspect_ratio="1:1", quality="2K",
     )
     assert payload["images"] == [{"image_url": USER_IMAGE}]
-    assert payload["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
-    assert "EXCLUSIVE source of the subject's face" in payload["prompt"]
+    assert payload["prompt"] == SECRET
+    assert "EXCLUSIVE source of the subject's face" not in payload["prompt"]
 
 
 @pytest.mark.asyncio
@@ -229,7 +227,7 @@ async def test_bot_derived_feed_uses_origin_prompt_and_only_reader_reference(ima
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
-    assert submitted.args[1] == image_gen.build_feed_image_recipe_prompt(origin.prompt, IDENTITY_RULE)
+    assert submitted.args[1] == origin.prompt
 
 
 @pytest.mark.asyncio
@@ -246,7 +244,7 @@ async def test_bot_all_reference_models_use_origin_without_author_image_or_metad
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
-    assert submitted.args[1] == image_gen.build_feed_image_recipe_prompt(origin.prompt, IDENTITY_RULE)
+    assert submitted.args[1] == origin.prompt
 
 
 @pytest.mark.asyncio
@@ -433,7 +431,6 @@ def api_launch(monkeypatch):
         monkeypatch.setattr(miniapp_routes.repo, name, value)
     generate = AsyncMock(return_value=SimpleNamespace(task_id="fake", is_async=True))
     monkeypatch.setattr(miniapp_routes.image_service, "generate_image", generate)
-    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE))
     monkeypatch.setattr(miniapp_routes.video_service, "generate_video", generate)
     monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
     return SimpleNamespace(
@@ -1045,7 +1042,7 @@ async def test_plain_repeat_treats_source_whitespace_as_equivalent(image_launch)
     image_launch.source.prompt = f"  {SECRET}\n"
     image_launch.kwargs.update(prompt=SECRET, reference_url=USER_IMAGE)
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
-    assert image_launch.generate.await_args.args[1] == image_gen.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
+    assert image_launch.generate.await_args.args[1] == SECRET
 
 
 @pytest.mark.asyncio

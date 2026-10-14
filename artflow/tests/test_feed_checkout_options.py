@@ -94,9 +94,6 @@ async def test_feed_quote_skips_smaller_unpurchasable_plan_and_discloses_mapped_
                              user_id=99, is_public_feed=True,
                              result_url="https://example.test/source.png", result_urls=None)
     monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
-    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(
-        return_value="Use only the reader's reference photos for the subject's identity. " * 3,
-    ))
     monkeypatch.setattr(miniapp_routes.repo, "resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=5, is_active=True)))
     monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
     packages = AsyncMock(return_value=[plan("unmapped", credits=6, label="Unmapped"), plan(mapped_key, credits=15, label="Mapped")])

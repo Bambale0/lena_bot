@@ -65,7 +65,6 @@ from bot.utils.telegram_images import (
 )
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
-from core.feed_recipe_identity_policy import get_feed_recipe_identity_instruction
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
@@ -1251,7 +1250,7 @@ async def _launch_session_generation(
                     prompt += "\n\n" + feed_change_request.strip()
             else:
                 prompt = build_owned_feed_image_prompt(
-                    requested_source.prompt, feed_change_request or "", has_user_references=bool(identity_refs),
+                    requested_source.prompt, feed_change_request or "",
                 )
             if identity_refs:
                 reference_url = identity_refs
@@ -1340,10 +1339,9 @@ async def _launch_session_generation(
                 ) if inherited is None else None
             )
             changes = "\n\n".join(part for part in (legacy_changes, feed_change_request) if part)
-            recipe_identity_instruction = await get_feed_recipe_identity_instruction(session)
             prompt = build_feed_image_recipe_prompt(
-                inherited or str(recipe_source.prompt or ""), recipe_identity_instruction,
-                changes, previous_instruction=previous_instruction,
+                inherited or str(recipe_source.prompt or ""),
+                change_request=changes, previous_instruction=previous_instruction,
             )
             state_data = await state.get_data()
             explicitly_selected = isinstance(state_data, dict) and (
@@ -1359,7 +1357,7 @@ async def _launch_session_generation(
             refs = identity_refs
             feed_context = {
                 FEED_REMIX_CONTEXT_KEY: feed_image_recipe_context(
-                    source.id, prompt, recipe_identity_instruction,
+                    source.id, prompt,
                 ),
             }
             logger.info(
