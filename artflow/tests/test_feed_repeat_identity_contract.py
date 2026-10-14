@@ -116,6 +116,185 @@ async def test_collage_edit_replays_scene_first_without_private_author_prompt(
     assert_scene_first_edit(prompt)
 
 
+def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback():
+    submitted = "Original unpublished creator recipe with lens and pose.\n\nUse my portrait."
+    ctx = prompt_core.feed_image_recipe_context(77, submitted)
+    assert ctx["version"] == prompt_core.FEED_IMAGE_RECIPE_CONTEXT_VERSION
+    assert "prompt" not in ctx
+    previous = SimpleNamespace(
+        user_id=42, source_feed_gen_id=77, prompt=submitted,
+        input_params={prompt_core.FEED_REMIX_CONTEXT_KEY: ctx},
+    )
+    assert prompt_core.trusted_feed_image_recipe_prompt(
+        previous, user_id=42, source_generation_id=77,
+    ) == submitted
+    assert prompt_core.trusted_feed_image_prompt(
+        previous, user_id=42, source_generation_id=77,
+        has_user_references=True, scene_first=True,
+    ) is None  # Feature rollback cannot resurrect the private recipe.
+    assert prompt_core.trusted_feed_prompt(
+        previous, user_id=42, source_generation_id=77,
+    ) is None  # A photo recipe cannot be migrated into the video prompt path.
+    assert prompt_core.trusted_feed_image_recipe_prompt(
+        previous, user_id=99, source_generation_id=77,
+    ) is None
+    assert prompt_core.trusted_feed_image_recipe_prompt(
+        previous, user_id=42, source_generation_id=78,
+    ) is None
+    previous.prompt += " tampered"
+    assert prompt_core.trusted_feed_image_recipe_prompt(
+        previous, user_id=42, source_generation_id=77,
+    ) is None
+
+
+
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+@pytest.mark.parametrize("model", MODELS)
+async def test_ksu_style_feed_recipe_replaces_author_refs_and_preserves_settings(
+    local_launch, wire, monkeypatch, model, surface,
+):
+    monkeypatch.setattr(miniapp_routes.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    source = local_launch.source
+    source.source_feed_gen_id = None
+    source.input_params = {
+        "hidden_prompt": False,
+        "reference_images": [SOURCE],
+        "img_ratio": "2:3",
+        "img_quality": "2K",
+    }
+    source.prompt = (
+        "Original creator recipe: studio lighting, detailed wardrobe, winter scenery, "
+        "camera angle and film aesthetics."
+    )
+    source.model = "nano-banana-2"
+    result = await miniapp_routes.remix_feed_post(
+        77,
+        miniapp_routes.FeedRemixRequest(model=model, image_url=REFS[0], mode="image"),
+        session=local_launch.session, user=local_launch.user, surface=surface,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == [REFS[0]]  # Author output and original input excluded.
+    assert source.prompt in params["prompt"]
+    assert params["prompt"] == source.prompt
+    assert params["aspect_ratio"] == "2:3"
+    assert params["image_size"] == "2K"
+    args = repo.create_generation.await_args
+    assert args.kwargs["source_feed_gen_id"] == 77
+    context = args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
+    assert context["version"] == 4
+    assert "source_image_url" not in context
+    assert local_launch.created_sessions[-1].base_prompt is None
+    assert result.prompt_hidden is True
+    assert source.prompt not in str(result)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_historic_recipe_rollout_can_be_disabled_without_breaking_legacy(
+    local_launch, wire, monkeypatch, enabled,
+):
+    monkeypatch.setattr(miniapp_routes.settings, "FEED_ORIGINAL_RECIPE_ENABLED", enabled)
+    local_launch.source.input_params = {"reference_images": [SOURCE]}
+    await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(model="nano-banana-pro", image_url=REFS[0]),
+        session=local_launch.session, user=local_launch.user,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == ([REFS[0]] if enabled else [SOURCE, REFS[0]])
+    assert params["prompt"] == (SECRET if enabled else prompt_core._LEGACY_SOURCE_FIRST_PROMPT)
+
+
+async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_response(
+    local_launch, wire, monkeypatch,
+):
+    monkeypatch.setattr(miniapp_routes.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    local_launch.source.input_params = {"hidden_prompt": True, "reference_images": [SOURCE]}
+    result = await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(model="nano-banana-pro", image_url=REFS[0]),
+        session=local_launch.session, user=local_launch.user,
+    )
+    assert wire[0]["body"]["params"]["image_urls"] == [REFS[0]]
+    assert wire[0]["body"]["params"]["prompt"] == SECRET
+    assert SECRET not in str(result)
+    assert result.prompt_hidden is True
+    assert local_launch.created_sessions[-1].base_prompt is None
+    ctx = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
+    assert ctx["version"] == 4 and "prompt" not in ctx
+
+
+
+
+async def test_historic_recipe_missing_reference_count_fails_before_charge(
+    local_launch, wire, monkeypatch,
+):
+    monkeypatch.setattr(miniapp_routes.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    local_launch.source.input_params = {
+        "hidden_prompt": False, "reference_images": [SOURCE, OTHER_SOURCE],
+    }
+    with pytest.raises(HTTPException) as err:
+        await miniapp_routes.remix_feed_post(
+            77, miniapp_routes.FeedRemixRequest(model="nano-banana-pro", image_url=REFS[0]),
+            session=local_launch.session, user=local_launch.user,
+        )
+    assert err.value.status_code == 422
+    repo.charge_image_generation.assert_not_awaited()
+    assert wire == []
+
+
+
+async def test_telegram_replay_collector_does_not_reserve_creator_image_slot(
+    local_launch, monkeypatch,
+):
+    from bot.handlers import repeat_reference_marketplace as composer
+    source = local_launch.source
+    source.input_params = {"hidden_prompt": True, "reference_images": [SOURCE]}
+    source.source_feed_gen_id = None
+    monkeypatch.setattr(composer.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    monkeypatch.setattr(composer.repo, "get_public_feed_generation", AsyncMock(return_value=source))
+    state = {
+        "feed_use_prompt": "server-side source prompt",
+        "feed_use_gen_id": 77,
+        "feed_use_user_id": local_launch.user.id,
+        "feed_original_recipe_replay": True,
+        "use_model_key": "nano-banana-pro",
+    }
+    candidate, cap, source_slots = await composer._reference_candidate(
+        local_launch.session, state, reference_urls=[SOURCE, REFS[0]],
+        file_ids=["synthetic-user-photo"],
+    )
+    assert candidate["reference_urls"] == [REFS[0]]
+    assert candidate["ref_file_ids"] == ["synthetic-user-photo"]
+    assert source_slots == 0
+    assert cap == composer.repeat_references._repeat_max_refs("nano-banana-pro")
+    assert composer.repeat_references._prompt_user_reference_limit("nano-banana-pro", state) == cap
+    assert "рецепт автора" in composer._text({
+        **state, "prompt_multi_ref_count": 1,
+        "prompt_multi_ref_max": cap,
+    })
+
+
+async def test_quote_and_submission_inherit_identical_historic_photo_settings(
+    local_launch, wire, monkeypatch,
+):
+    monkeypatch.setattr(miniapp_routes.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    local_launch.source.input_params = {
+        "reference_images": [SOURCE], "img_ratio": "2:3", "img_quality": "2K",
+    }
+    body = miniapp_routes.FeedRemixRequest(model="nano-banana-pro", image_url=REFS[0])
+    await miniapp_routes.quote_feed_remix(
+        77, body, session=local_launch.session, user=local_launch.user,
+    )
+    from_quote = repo.resolve_image_model_cost.await_args.kwargs["quality"]
+    await miniapp_routes.remix_feed_post(
+        77, body, session=local_launch.session, user=local_launch.user,
+    )
+    assert from_quote == "2K"
+    assert repo.resolve_image_model_cost.await_args.kwargs["quality"] == from_quote
+    assert wire[0]["body"]["params"]["image_urls"] == [REFS[0]]
+    assert wire[0]["body"]["params"]["aspect_ratio"] == "2:3"
+    assert wire[0]["body"]["params"]["image_size"] == from_quote
+
+
+
 @pytest.mark.parametrize("model", ["nano-banana-pro", "nano-banana-2"])
 @pytest.mark.parametrize("surface", ["web", "miniapp"])
 async def test_nexus_personalized_repeat_replays_pre_regression_scene_first_contract(

@@ -13,7 +13,10 @@ from api.public_files import mirror_telegram_file, public_url_is_available
 from bot.handlers import image_gen, marketplace, repeat_references
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.states import PromptUseFSM
+from bot.utils.feed_media import feed_identity_references
 from bot.utils.telegram_ui import safe_answer_callback
+from core.config import settings
+from core.feed_remix_prompt import feed_image_original_recipe_allowed
 from db import repository as repo
 from db.models import ImageGenerationAction, User
 
@@ -34,6 +37,15 @@ async def _reference_candidate(
         source_id = marketplace._feed_use_source_id(data)
         source = await repo.get_public_feed_generation(session, source_id) if source_id else None
         source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
+        original_recipe = model_key in image_gen.IMAGE_CAPS and feed_image_original_recipe_allowed(
+            source,
+            user_id=int(data.get("feed_use_user_id") or 0),
+            model_key=model_key,
+            enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
+        )
+        if source_type == "image" and original_recipe:
+            urls = feed_identity_references(source, urls)
+            return {"ref_file_ids": list(file_ids or []), "reference_urls": urls}, max_refs, 0
         source_url = image_gen.canonical_generation_result_url(source) if source_type == "image" else None
         if source_url and public_url_is_available(source_url):
             urls = image_gen.order_feed_image_references(source_url, urls, source_first=True)
@@ -91,7 +103,11 @@ def _text(data: dict[str, Any]) -> str:
     feed_repeat = data.get("feed_use_prompt") is not None
     title = "🔁 <b>Повтор из ленты</b>" if feed_repeat else "🎨 <b>Генерация по промпту</b>"
     note = (
-        "Повтор создадим по опубликованному изображению. Оно занимает ещё один слот референса. Добавь свои фото."
+        (
+            "Повторим исходный рецепт автора с твоими фото; готовое изображение автора не отправляем."
+            if data.get("feed_original_recipe_replay")
+            else "Повтор создадим по опубликованному изображению. Оно занимает ещё один слот референса. Добавь свои фото."
+        )
         if feed_repeat
         else "Добавь фото для лица, объекта, стиля или композиции."
     )
@@ -133,6 +149,7 @@ def _ratio_keyboard(model_key: str, selected: str | None) -> InlineKeyboardMarku
 
 def _model_keyboard(
     costs: list[Any], *, uploaded: int, selected: str, feed_repeat: bool = False,
+    original_recipe: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     seen: set[str] = set()
@@ -144,7 +161,9 @@ def _model_keyboard(
             or "__" in model_key
             or not image_gen._supports_img2img(model_key)
             or repeat_references._prompt_user_reference_limit(
-                model_key, {"feed_use_prompt": ""} if feed_repeat else {},
+                model_key,
+                {"feed_use_prompt": "", "feed_original_recipe_replay": original_recipe}
+                if feed_repeat else {},
             ) < max(uploaded, 1)
         ):
             continue
@@ -270,6 +289,7 @@ async def _model_menu(call: CallbackQuery, session: AsyncSession, state: FSMCont
         reply_markup=_model_keyboard(
             costs, uploaded=uploaded, selected=selected,
             feed_repeat=data.get("feed_use_prompt") is not None,
+            original_recipe=bool(data.get("feed_original_recipe_replay")),
         ),
     )
     await safe_answer_callback(call)
@@ -420,7 +440,10 @@ async def _run(
     # Validate every resolved photo before prompt rewards or session mutation.
     # Keep all accepted file IDs: several IDs may resolve to the same photo.
     candidate, provider_limit, source_slots = await _reference_candidate(session, data, reference_urls=reference_urls)
-    if data.get("feed_use_prompt") is not None and not source_slots:
+    if (
+        data.get("feed_use_prompt") is not None
+        and not source_slots and not data.get("feed_original_recipe_replay")
+    ):
         await call.answer("Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)
         return
     if await image_gen._accept_reference_candidate(

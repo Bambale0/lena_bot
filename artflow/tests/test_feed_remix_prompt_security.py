@@ -78,6 +78,37 @@ async def test_telegram_repeat_restores_source_first_transport_and_original_edit
 
 
 @pytest.mark.asyncio
+async def test_telegram_historic_recipe_uses_only_users_photo(
+    image_launch, monkeypatch,
+):
+    from core import feed_remix_prompt as prompt_core
+    monkeypatch.setattr(image_gen.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    image_launch.source.model = "nano-banana-2"
+    image_launch.source.input_params = {
+        "hidden_prompt": False,
+        "reference_images": [SOURCE_IMAGE],
+        "img_ratio": "2:3",
+        "img_quality": "2K",
+    }
+    image_launch.source.prompt = (
+        "Creator's original recipe, a snowy portrait with wardrobe and cinematic lighting."
+    )
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
+    submitted = image_launch.generate.await_args
+    assert submitted.kwargs["image_url"] == USER_IMAGE
+    assert image_launch.source.prompt in submitted.args[1]
+    assert submitted.args[1] == image_launch.source.prompt
+    assert submitted.kwargs["aspect_ratio"] == "2:3"
+    created = image_launch.repo.create_generation.await_args
+    assert created.kwargs["source_feed_gen_id"] == 77
+    context = created.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
+    assert context["version"] == 4
+    assert "prompt" not in context  # Do not repeat creator text in provenance.
+    assert image_launch.kwargs["image_session"].last_prompt is None
+
+
+
+@pytest.mark.asyncio
 async def test_bot_missing_public_source_fails_before_charge(image_launch):
     image_launch.source.result_url = None
     assert await image_gen._launch_session_generation(**image_launch.kwargs) is False

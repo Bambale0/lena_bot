@@ -2,7 +2,8 @@ type FeedReferenceModel = { max_refs?: number; max_refs_with_video?: number | nu
 
 /** A rendered video is not a video input unless the creator submitted one. */
 export function feedUserReferenceCapacity(
-  model: FeedReferenceModel | undefined, sourceIsVideo: boolean, requiresVideoInput = sourceIsVideo,
+  model: FeedReferenceModel | undefined, sourceIsVideo: boolean,
+  requiresVideoInput = sourceIsVideo, useOriginalImageRecipe = false,
 ): number {
   const maximum = model?.max_refs;
   if (!Number.isSafeInteger(maximum) || maximum === undefined || maximum < 1) return 0;
@@ -13,5 +14,5 @@ export function feedUserReferenceCapacity(
     if (sharedLimit == null) return maximum;
     return Number.isSafeInteger(sharedLimit) && sharedLimit >= 0 ? Math.min(maximum, sharedLimit) : 0;
   }
-  return maximum - 1;
+  return useOriginalImageRecipe ? maximum : maximum - 1;
 }
