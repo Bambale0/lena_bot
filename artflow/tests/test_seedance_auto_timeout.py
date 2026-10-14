@@ -67,6 +67,25 @@ def test_timeout_query_is_explicitly_neironych_only_and_checks_deadline():
     assert "bytedance/seedance-2-5" in str(values) or "bytedance/seedance-2-5" in str(sql)
 
 
+def test_timeout_query_includes_video_with_missing_provider_identity():
+    query = scheduler._expired_seedance_query()
+    sql = str(query.compile(dialect=postgresql.dialect()))
+    assert "generations.task_id IS NULL" in sql
+
+
+@pytest.mark.asyncio
+async def test_expired_video_without_identity_or_submission_marker_refunds(monkeypatch):
+    gen = _generation(task_id=None)
+    refunds = AsyncMock(return_value=(True, 70.0))
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", _Session)
+    monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=gen))
+    monkeypatch.setattr(scheduler.repo, "fail_generation_and_refund", refunds)
+    assert await scheduler._expire_stuck_seedance_video(gen.id)
+    refunds.assert_awaited_once()
+    assert refunds.await_args.kwargs["video_notice_kind"] == "failed"
+    assert refunds.await_args.kwargs["expected_task_id"] is None
+
+
 @pytest.mark.asyncio
 async def test_expired_job_gets_final_read_only_poll_then_atomic_refund(monkeypatch):
     gen = _generation()

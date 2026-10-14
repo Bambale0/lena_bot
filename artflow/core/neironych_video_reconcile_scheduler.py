@@ -131,7 +131,8 @@ def _expired_seedance_query():
         Generation.model.in_(tuple(PRODUCT_MODELS)),
         Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
         or_(*(Generation.task_id.like(prefix + "%")
-              for prefix in _NEIRONYCH_TASK_PREFIXES)),
+              for prefix in _NEIRONYCH_TASK_PREFIXES),
+            Generation.task_id.is_(None), Generation.task_id == ""),
         started <= cutoff,
     )
 
@@ -256,7 +257,29 @@ async def _expire_stuck_seedance_video(gen_id: int) -> bool:
             return False
         task_id = str(gen.task_id or "")
         if not task_id.startswith(_NEIRONYCH_TASK_PREFIXES):
-            return False
+            if task_id:
+                return False
+            params = repo.parse_input_params(gen.input_params)
+            if isinstance(params.get(repo.SEEDANCE_SUBMISSION_KEY), dict) or isinstance(
+                params.get(repo.KIE_VIDEO_SUBMISSION_KEY), dict
+            ):
+                # A persisted submission may still have an accepted paid job.
+                logger.error("Seedance missing provider identity with submission marker gen=%s", gen_id)
+                return False
+            if ((datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
+                    < settings.SEEDANCE_AUTO_REFUND_SECONDS):
+                return False
+            expected_task_id = gen.task_id
+            await session.rollback()
+            async with AsyncSessionLocal() as refund_session:
+                changed, _ = await repo.fail_generation_and_refund(
+                    refund_session, gen_id, "Видео не удалось создать вовремя.",
+                    refund_note="seedance:auto_timeout:missing_provider_identity",
+                    expected_task_id=expected_task_id,
+                    require_missing_task_id=True,
+                    video_notice_kind="failed",
+                )
+                return changed
         if ((datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
                 < settings.SEEDANCE_AUTO_REFUND_SECONDS):
             return False
@@ -431,6 +454,8 @@ def _eligible_notice_query():
             Generation.task_id.like("neironych:%"),
             Generation.task_id.like("neironych-submit:%"),
             Generation.task_id.like("kie-submit:%"),
+            Generation.task_id.is_(None),
+            Generation.task_id == "",
         ),
         Generation.input_params.op("~")(_NOTICE_PENDING_REGEX),
     )

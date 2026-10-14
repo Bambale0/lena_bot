@@ -10,6 +10,7 @@ import logging
 
 from sqlalchemy import or_, select
 
+from api.nexus_image_adapter import NEXUS_IMAGE_MODEL_MAP
 from core.config import settings
 from db.models import Generation, GenerationStatus, GenerationType
 from db.session import AsyncSessionLocal
@@ -24,12 +25,17 @@ _single_revisit_next = False
 
 def _eligible_query():
     return select(Generation).where(
-        Generation.model == "nano-banana-2.1",
         Generation.gen_type == GenerationType.image,
         Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
         or_(
-            Generation.task_id.like("%neironych-image:%"),
-            Generation.task_id.like("%nexus:%"),
+            (
+                (Generation.model == "nano-banana-2.1")
+                & Generation.task_id.like("%neironych-image:%")
+            ),
+            (
+                Generation.model.in_(tuple(NEXUS_IMAGE_MODEL_MAP))
+                & Generation.task_id.like("%nexus:%")
+            ),
         ),
     )
 

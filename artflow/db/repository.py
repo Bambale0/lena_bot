@@ -1756,6 +1756,7 @@ async def fail_generation_and_refund(
     entry_type: str = "generation_refund",
     refund_note: str | None = None,
     expected_task_id: str | None = None,
+    require_missing_task_id: bool = False,
     video_notice_kind: str | None = None,
     provider_review: dict[str, object] | None = None,
 ) -> tuple[bool, float]:
@@ -1782,6 +1783,13 @@ async def fail_generation_and_refund(
     if expected_task_id is not None and generation.task_id != expected_task_id:
         await session.commit()
         return False, 0.0
+    if require_missing_task_id:
+        current_params = parse_input_params(generation.input_params)
+        if (generation.task_id not in (None, "")
+                or isinstance(current_params.get(SEEDANCE_SUBMISSION_KEY), dict)
+                or isinstance(current_params.get(KIE_VIDEO_SUBMISSION_KEY), dict)):
+            await session.commit()
+            return False, 0.0
     status = getattr(generation.status, "value", generation.status)
     if status not in (GenerationStatus.pending.value, GenerationStatus.processing.value):
         return False, 0.0
@@ -1974,12 +1982,20 @@ async def claim_neironych_video_notice(
     status = getattr(generation.status, "value", generation.status)
     kind = data.get("kind")
     state = data.get("state")
+    known_provider_task = str(generation.task_id or "").startswith(
+        ("neironych:", "neironych-submit:", "kie-submit:")
+    )
+    refunded_without_identity = (
+        kind == "failed" and status == "failed"
+        and generation.task_id in (None, "")
+        and params.get("refund_applied") is True
+    )
     if (
         kind not in {"done", "failed", "reconciliation"}
         or (expected_kind is not None and kind != expected_kind)
         or not (kind == status or (kind == "reconciliation" and status in {"pending", "processing"}))
         or generation.gen_type != GenerationType.video
-        or not str(generation.task_id or "").startswith(("neironych:", "neironych-submit:", "kie-submit:"))
+        or not (known_provider_task or refunded_without_identity)
         or state not in {"pending", "sending"}
     ):
         await session.commit()

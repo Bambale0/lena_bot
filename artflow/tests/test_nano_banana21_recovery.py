@@ -142,14 +142,17 @@ async def test_unknown_submission_never_replays_or_refunds_even_after_cache_ttl(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", [None, NexusApiError("network"), NexusApiError("no url", payload={"status": "completed"})])
-async def test_nexus_pending_or_unrecoverable_success_never_gets_timeout_refund(monkeypatch, failure):
+async def test_nexus_pending_or_unrecoverable_success_gets_customer_sla_refund(monkeypatch, failure):
     gen = generation(task_id="nexus:accepted", created_at=datetime.now(timezone.utc) - timedelta(days=2))
     poll = AsyncMock(side_effect=failure, return_value=None)
-    refund = AsyncMock()
+    refund = AsyncMock(return_value=(True, 1.0))
+    final = generation(task_id=gen.task_id, status=GenerationStatus.failed)
     monkeypatch.setattr(miniapp_routes.image_service, "poll_image_result_urls", poll)
     monkeypatch.setattr(repo, "fail_generation_and_refund", refund)
-    assert await miniapp_routes._reconcile_generation_status(object(), gen) is gen
-    refund.assert_not_awaited()
+    monkeypatch.setattr(repo, "get_generation_by_id", AsyncMock(return_value=final))
+    assert await miniapp_routes._reconcile_generation_status(object(), gen) is final
+    refund.assert_awaited_once()
+    assert refund.await_args.kwargs["expected_task_id"] == gen.task_id
 
 
 @pytest.mark.asyncio

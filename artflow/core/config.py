@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     NEIRONYCH_IMAGE_MAX_PIXELS: int = Field(default=64 * 1024 * 1024, ge=4096)
     NEIRONYCH_IMAGE_RECONCILE_INTERVAL_SECONDS: int = Field(default=75, ge=30, le=3600)
     NEIRONYCH_IMAGE_RECONCILE_BATCH_SIZE: int = Field(default=60, ge=1, le=200)
+    IMAGE_AUTO_REFUND_SECONDS: int = Field(default=3600, ge=600, le=86400)
     NEIRONYCH_POLL_INTERVAL_SECONDS: float = 10.0
     NEIRONYCH_POLL_TIMEOUT_SECONDS: int = 1800
     NEIRONYCH_MAX_VIDEO_BYTES: int = 250 * 1024 * 1024
