@@ -69,6 +69,9 @@ from core.feed_remix_prompt import (
     FeedRemixUnavailable,
     build_feed_image_prompt,
     build_owned_feed_image_prompt,
+    feed_image_original_recipe_allowed,
+    feed_image_recipe_context,
+    feed_image_recipe_source_parameters,
     feed_image_remix_context,
     generation_has_hidden_prompt_metadata,
     generation_prompt_is_protected,
@@ -76,6 +79,7 @@ from core.feed_remix_prompt import (
     order_feed_image_references,
     owned_generation_prompt_is_visible,
     trusted_feed_image_prompt,
+    trusted_feed_image_recipe_prompt,
     trusted_feed_image_scene,
 )
 from core.provider_routing import get_nano21_route
@@ -618,10 +622,18 @@ async def _accept_generation_reference_candidate(
             if feed_source is None or getattr(feed_source, "id", None) != external_source_id:
                 raise legacy_feed_edit_unavailable()
             previous = await repo.get_generation_by_id(session, parent_generation_id) if parent_generation_id else None
-            _, selected, identities = await _resolve_feed_image_scene(
-                session=session, db_user=db_user, source=feed_source, references=refs, previous=previous,
-            )
-            refs = order_feed_image_references(selected, identities, source_first=True)
+            identities = feed_identity_references(feed_source, refs)
+            original_recipe = model_key in IMAGE_CAPS and feed_image_original_recipe_allowed(
+                feed_source, user_id=db_user.id, model_key=model_key,
+                enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
+            ) and bool(identities)
+            if original_recipe:
+                refs = identities
+            else:
+                _, selected, identities = await _resolve_feed_image_scene(
+                    session=session, db_user=db_user, source=feed_source, references=refs, previous=previous,
+                )
+                refs = order_feed_image_references(selected, identities, source_first=True)
         if any(not public_url_is_available(url) for url in refs):
             raise FeedRemixUnavailable("Часть сохранённых фото недоступна. Загрузи их заново; поцелуи не списаны.")
     except FeedRemixUnavailable as exc:
@@ -1187,6 +1199,7 @@ async def _launch_session_generation(
     original_source_id = source_feed_gen_id
     source_feed_gen_id = None if own_recipe else source_feed_gen_id
     feed_context = None
+    original_recipe_replay = False
     edit_parent = await _current_feed_image_edit_parent(
         session=session, state=state, db_user=db_user, image_session=image_session,
         parent_generation_id=parent_generation_id, action_type=action_type,
@@ -1233,6 +1246,52 @@ async def _launch_session_generation(
         source_url = selected_feed_source_url(source, refs) if source_type == "image" else None
         identity_refs = feed_identity_references(source, refs)
         fixed_composition = edit_parent is not None
+        original_recipe_replay = bool(
+            not fixed_composition and identity_refs and image_session.model in IMAGE_CAPS
+            and feed_image_original_recipe_allowed(
+                source, user_id=db_user.id, model_key=image_session.model,
+                enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
+            )
+        )
+        if original_recipe_replay:
+            creator = feed_image_recipe_source_parameters(source)
+            if len(identity_refs) < creator["required_images"]:
+                await source_message.answer(
+                    f"Для повтора по рецепту загрузи {creator['required_images']} своих фото; поцелуи не списаны.",
+                    reply_markup=main_menu_kb(),
+                )
+                return False
+            if any(ref in creator["original_urls"] for ref in identity_refs):
+                await source_message.answer("Нельзя использовать скрытые референсы автора.")
+                return False
+            previous = (
+                await repo.get_generation_by_id(session, parent_generation_id)
+                if parent_generation_id and parent_generation_id != source.id else None
+            )
+            inherited = trusted_feed_image_recipe_prompt(
+                previous, user_id=db_user.id, source_generation_id=source.id,
+            )
+            prompt = inherited or str(source.prompt or "").strip()
+            if feed_change_request:
+                prompt += "\n\n" + feed_change_request.strip()
+            prompt = prompt.strip()
+            state_data = await state.get_data()
+            explicitly_selected = isinstance(state_data, dict) and (
+                "repeat_aspect_ratio" in state_data or "aspect_ratio_explicit" in state_data
+            )
+            if not explicitly_selected and creator["aspect_ratio"]:
+                image_session.aspect_ratio = creator["aspect_ratio"]
+            if not (isinstance(state_data, dict) and state_data.get("quality_explicit")) and creator["quality"]:
+                image_session.quality = creator["quality"]
+            refs = identity_refs
+            feed_context = {
+                FEED_REMIX_CONTEXT_KEY: feed_image_recipe_context(source.id, prompt),
+            }
+            logger.info(
+                "feed_photo_recipe_bot source_gen=%s user=%s model=%s identity_refs=%s",
+                source.id, db_user.id, image_session.model, len(refs),
+            )
+            reference_url = refs[0] if len(refs) == 1 else refs
         if fixed_composition:
             source_url = canonical_generation_result_url(edit_parent)
             identity_refs = feed_identity_references(edit_parent, identity_refs)
@@ -1241,7 +1300,7 @@ async def _launch_session_generation(
             or prompt.strip() != str(getattr(source, "prompt", "") or "").strip()
             or identity_refs
         )
-        if personalized:
+        if personalized and not original_recipe_replay:
             try:
                 previous = (
                     await repo.get_generation_by_id(session, parent_generation_id)
@@ -1375,7 +1434,7 @@ async def _launch_session_generation(
             **(feed_context or {}),
         },
     )
-    session_prompt = prompt if not source_feed_gen_id or feed_context is not None else None
+    session_prompt = None if original_recipe_replay else prompt if not source_feed_gen_id or feed_context is not None else None
     await repo.update_image_session_last_prompt(session, image_session.id, session_prompt)
     image_session.last_prompt = session_prompt
 

@@ -24,7 +24,13 @@ from api.public_files import public_url_is_available
 # the fallback for single-reference/text-only models.
 from bot.handlers import feed, image_gen
 from bot.keyboards.models import IMAGE_CAPS
+from bot.utils.feed_media import feed_identity_references
 from bot.utils.telegram_ui import safe_answer_callback
+from core.config import settings
+from core.feed_remix_prompt import (
+    feed_image_original_recipe_allowed,
+    feed_image_recipe_source_parameters,
+)
 from db import repository as repo
 from db.models import GenerationType, ImageGenerationAction, User
 
@@ -62,8 +68,9 @@ def _repeat_max_refs(model_key: str) -> int:
 
 
 def _prompt_user_reference_limit(model_key: str, data: dict[str, Any]) -> int:
-    """Public image repeats reserve one provider slot for the source post."""
-    reserved = 1 if data.get("feed_use_prompt") is not None else 0
+    """Historical image recipe uses only reader photo slots; legacy edit reserves one."""
+    recipe = bool(data.get("feed_original_recipe_replay") and model_key in IMAGE_CAPS)
+    reserved = 1 if data.get("feed_use_prompt") is not None and not recipe else 0
     return max(0, _repeat_max_refs(model_key) - reserved)
 
 
@@ -189,6 +196,7 @@ async def _resolve_base_reference_urls(bot: Bot, image_session: Any | None) -> l
 async def _repeat_provider_reference_urls(
     *, session: AsyncSession, db_user: User, source_feed_gen_id: int | None,
     reference_urls: list[str], previous: Any | None = None, retain_user_references: bool = True,
+    model_key: str | None = None,
 ) -> list[str] | None:
     """Count the same public source used at launch, failing closed if it is gone."""
     external_source_id = await image_gen._external_source_feed_id(
@@ -199,6 +207,14 @@ async def _repeat_provider_reference_urls(
     source = await repo.get_public_feed_generation(session, external_source_id)
     if _generation_type_value(source) != GenerationType.image.value or getattr(source, "id", None) != external_source_id:
         return None
+    if model_key in IMAGE_CAPS and feed_image_original_recipe_allowed(
+        source, user_id=db_user.id, model_key=model_key,
+        enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
+    ):
+        # A new recipe run has no author scene slot. Distinct public source
+        # aliases must not be smuggled in as identity photos.
+        refs = feed_identity_references(source, reference_urls)
+        return refs if retain_user_references else []
     try:
         _, source_url, identity_refs = await image_gen._resolve_feed_image_scene(
             session=session, db_user=db_user, source=source, references=reference_urls,
@@ -238,12 +254,23 @@ async def _begin_repeat_collection(
         return True
     provider_refs = await _repeat_provider_reference_urls(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
-        reference_urls=base_urls, previous=generation,
+        reference_urls=base_urls, previous=generation, model_key=model_key,
     )
     if provider_refs is None:
         await safe_answer_callback(call, "Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)
         return True
     total = len(provider_refs)
+    public_source = (
+        await repo.get_public_feed_generation(session, source_feed_gen_id)
+        if source_feed_gen_id else None
+    )
+    original_recipe_replay = model_key in IMAGE_CAPS and feed_image_original_recipe_allowed(
+        public_source, user_id=db_user.id, model_key=model_key,
+        enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
+    )
+    creator = feed_image_recipe_source_parameters(public_source) if original_recipe_replay else {}
+    if original_recipe_replay:
+        base_urls = provider_refs
     source_file_ids = _source_reference_file_ids(source_session)
 
     await state.clear()
@@ -254,7 +281,10 @@ async def _begin_repeat_collection(
         repeat_prompt=str(generation.prompt),
         repeat_model_key=model_key,
         repeat_max_refs=max_refs,
-        repeat_reference_required=image_gen._requires_reference_image(model_key),
+        repeat_reference_required=(
+            bool(creator["required_images"]) if original_recipe_replay
+            else image_gen._requires_reference_image(model_key)
+        ),
         repeat_base_reference_urls=base_urls,
         repeat_reference_count=total,
         repeat_new_reference_file_ids=[],
@@ -268,7 +298,10 @@ async def _begin_repeat_collection(
         repeat_reuse_session_id=(int(source_session.id) if reuse_session and source_session else None),
         repeat_source_session_id=(int(source_session.id) if source_session else None),
         repeat_mode=(str(getattr(source_session, "mode", "text") or "text") if source_session else "text"),
-        repeat_aspect_ratio="9:16",
+        repeat_aspect_ratio=(
+            creator["aspect_ratio"] if original_recipe_replay and creator["aspect_ratio"]
+            else "9:16"
+        ),
         repeat_ratio_options=_repeat_ratio_options(model_key),
         repeat_quality=(
             str(getattr(source_session, "quality", "") or "")
@@ -448,7 +481,7 @@ async def _collect_repeat_reference(
         source_feed_gen_id = getattr(generation, "source_feed_gen_id", None) or source_feed_gen_id
     candidate_urls = await _repeat_provider_reference_urls(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
-        reference_urls=candidate_urls, previous=generation,
+        reference_urls=candidate_urls, previous=generation, model_key=model_key,
     )
     if candidate_urls is None:
         await message.answer("Исходное фото из ленты недоступно. Выбери другую публикацию.")
@@ -511,6 +544,7 @@ async def _repeat_refs_clear(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
         reference_urls=_url_list(data.get("repeat_base_reference_urls")),
         previous=generation, retain_user_references=False,
+        model_key=str(data.get("repeat_model_key") or generation.model),
     )
     if provider_refs is None:
         await safe_answer_callback(call, "Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)
@@ -585,7 +619,7 @@ async def _repeat_refs_run(
             references.append(url)
     candidate_refs = await _repeat_provider_reference_urls(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
-        reference_urls=references, previous=generation,
+        reference_urls=references, previous=generation, model_key=model_key,
     )
     if candidate_refs is None:
         await safe_answer_callback(call, "Исходное фото из ленты недоступно. Выбери другую публикацию.", show_alert=True)

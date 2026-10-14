@@ -7,6 +7,9 @@ setting ``has_source_media``; a URL supplied by the reader is not proof of it.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+
 
 class FeedRemixUnavailable(ValueError):
     """A personalized repeat cannot be grounded in applicable public media."""
@@ -26,6 +29,7 @@ _USER_FIRST_SOURCE_LAST_PROMPT = (
 )
 FEED_REMIX_CONTEXT_VERSION = 2
 FEED_IMAGE_REMIX_CONTEXT_VERSION = 3
+FEED_IMAGE_RECIPE_CONTEXT_VERSION = 4
 
 _IMAGE_IDENTITY_ROLES = (
     "All images preceding the final image are the user's identity references. "
@@ -100,6 +104,65 @@ def owned_generation_prompt_is_visible(generation, user_id: int) -> bool:
         except (TypeError, ValueError):
             return False
     return isinstance(params, dict) and not params.get("hidden_prompt")
+
+
+def _feed_source_input_params(source) -> dict | None:
+    raw = getattr(source, "input_params", None)
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+    return raw if isinstance(raw, dict) else None
+
+
+def feed_image_original_recipe_allowed(
+    source, *, user_id: int, model_key: str, enabled: bool,
+) -> bool:
+    """Replay the creator's published image recipe; never copy creator media.
+
+    The original prompt is only used server-side. Derived/legacy-unverifiable
+    public items continue through the isolated scene-edit fallback.
+    """
+    if not enabled or source is None:
+        return False
+    if (not getattr(source, "is_public_feed", False)
+            or getattr(source, "source_feed_gen_id", None)
+            or getattr(source, "user_id", None) == user_id):
+        return False
+    kind = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
+    if kind != "image":
+        return False
+    # This branch deliberately covers only the installed image request family.
+    # Midjourney and video have separate contracts.
+    if not isinstance(model_key, str) or not model_key:
+        return False
+    params = _feed_source_input_params(source)
+    if params is None or not isinstance(params.get("reference_images"), list):
+        return False
+    return bool(str(getattr(source, "prompt", "") or "").strip())
+
+
+def feed_image_recipe_source_parameters(source) -> dict:
+    """Return recipe metadata without exposing the original media references."""
+    params = _feed_source_input_params(source) or {}
+    original_refs = params.get("reference_images")
+    return {
+        "required_images": len(original_refs) if isinstance(original_refs, list) else 0,
+        "aspect_ratio": params.get("img_ratio") if isinstance(params.get("img_ratio"), str) else None,
+        "quality": params.get("img_quality") if isinstance(params.get("img_quality"), str) else None,
+        "original_urls": [str(url) for url in original_refs if isinstance(url, str)]
+        if isinstance(original_refs, list) else [],
+    }
+
+
+def feed_image_recipe_context(source_generation_id: int, prompt: str) -> dict:
+    """Store an authenticated provenance digest; never duplicate secret text."""
+    return {
+        "version": FEED_IMAGE_RECIPE_CONTEXT_VERSION,
+        "source_generation_id": source_generation_id,
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+    }
 
 
 def build_feed_image_prompt(
@@ -284,12 +347,22 @@ def _trusted_feed_context(generation, *, user_id: int, source_generation_id: int
     version = context.get("version")
     if (
         type(version) is not int
-        or version not in (1, FEED_REMIX_CONTEXT_VERSION, FEED_IMAGE_REMIX_CONTEXT_VERSION)
+        or version not in (
+            1, FEED_REMIX_CONTEXT_VERSION, FEED_IMAGE_REMIX_CONTEXT_VERSION,
+            FEED_IMAGE_RECIPE_CONTEXT_VERSION,
+        )
         or type(context.get("source_generation_id")) is not int
         or context.get("source_generation_id") != source_generation_id
-        or not isinstance(prompt, str) or not prompt.strip()
-        or prompt != getattr(generation, "prompt", None)
     ):
+        return None
+    if version == FEED_IMAGE_RECIPE_CONTEXT_VERSION:
+        persisted_prompt = getattr(generation, "prompt", None)
+        if (not isinstance(persisted_prompt, str) or not persisted_prompt.strip()
+                or not isinstance(context.get("prompt_sha256"), str)
+                or context["prompt_sha256"] != hashlib.sha256(persisted_prompt.encode("utf-8")).hexdigest()):
+            return None
+        return context
+    if not isinstance(prompt, str) or not prompt.strip() or prompt != getattr(generation, "prompt", None):
         return None
     if version == FEED_IMAGE_REMIX_CONTEXT_VERSION:
         family = context.get("header_family")
@@ -308,7 +381,7 @@ def _trusted_feed_context(generation, *, user_id: int, source_generation_id: int
 def trusted_feed_prompt(generation, *, user_id: int, source_generation_id: int) -> str | None:
     """Existing video context behavior; image v3 must not enter the video path."""
     context = _trusted_feed_context(generation, user_id=user_id, source_generation_id=source_generation_id)
-    if context is None or context["version"] == FEED_IMAGE_REMIX_CONTEXT_VERSION:
+    if context is None or context["version"] not in (1, FEED_REMIX_CONTEXT_VERSION):
         return None
     return _migrate_trusted_feed_prompt(context["version"], context["prompt"])
 
@@ -321,6 +394,10 @@ def trusted_feed_image_prompt(
     """Replace only a complete known machine header; preserve suffix bytes exactly."""
     context = _trusted_feed_context(generation, user_id=user_id, source_generation_id=source_generation_id)
     if context is None:
+        return None
+    # A recipe must never be reconstructed through the normal public-scene
+    # route, including after the rollout flag is switched off.
+    if context["version"] == FEED_IMAGE_RECIPE_CONTEXT_VERSION:
         return None
     prompt = context["prompt"]
     known_headers = (
@@ -336,6 +413,18 @@ def trusted_feed_image_prompt(
             )
             return current_header + prompt[len(header):]
     return prompt
+
+
+def trusted_feed_image_recipe_prompt(
+    generation, *, user_id: int, source_generation_id: int,
+) -> str | None:
+    """Accept only server-bound creator recipe continuation for its owner."""
+    context = _trusted_feed_context(
+        generation, user_id=user_id, source_generation_id=source_generation_id,
+    )
+    if context is None or context["version"] != FEED_IMAGE_RECIPE_CONTEXT_VERSION:
+        return None
+    return generation.prompt
 
 
 def trusted_feed_image_scene(
