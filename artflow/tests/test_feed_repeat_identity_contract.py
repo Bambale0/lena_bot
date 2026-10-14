@@ -33,12 +33,17 @@ local_launch = reference_fixtures.local_launch
 MODELS = ["nano-banana-pro", "nano-banana-2"]
 OTHER_SOURCE = "https://example.test/other-public-scene.jpg"
 OWN_RECIPE = "My visible recipe: watercolor street portrait"
+IDENTITY_RULE = (
+    "The supplied reference photos are the EXCLUSIVE source of the subject's face and identity. "
+    "Do not copy the original subject's face. Use the clearest frontal view of the reader."
+)
 SUFFIX = "\n\nПальто синее 🧥\n\nKeep this line.  \n\t"
 
 
 @pytest.fixture
 async def wire(monkeypatch):
     posts = []
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE))
 
     def capture(request):
         assert request.method == "POST"
@@ -149,14 +154,37 @@ def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback
 
 def test_creator_recipe_prioritizes_reader_face_and_does_not_duplicate_instruction():
     creator = "Gothic black-and-white portrait of a witch with dark hair."
-    composed = prompt_core.build_feed_image_recipe_prompt(creator)
+    composed = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
     assert composed.startswith(creator)
     assert "EXCLUSIVE source of the subject's face" in composed
     assert "Do not copy the original subject's face" in composed
-    assert prompt_core.build_feed_image_recipe_prompt(composed) == composed
-    edited = prompt_core.build_feed_image_recipe_prompt(composed, "blue cloak")
+    assert prompt_core.build_feed_image_recipe_prompt(
+        composed, IDENTITY_RULE, previous_instruction=IDENTITY_RULE,
+    ) == composed
+    edited = prompt_core.build_feed_image_recipe_prompt(
+        composed, IDENTITY_RULE, "blue cloak", previous_instruction=IDENTITY_RULE,
+    )
     assert edited.count("EXCLUSIVE source of the subject's face") == 1
     assert "blue cloak" in edited
+    new_rule = "Use the reader's facial identity, never the creator's facial identity."
+    updated = prompt_core.build_feed_image_recipe_prompt(
+        composed, new_rule, previous_instruction=IDENTITY_RULE,
+    )
+    assert IDENTITY_RULE not in updated
+    assert updated.endswith(new_rule)
+    previous = SimpleNamespace(
+        user_id=42, source_feed_gen_id=77, prompt=composed,
+        input_params={prompt_core.FEED_REMIX_CONTEXT_KEY: prompt_core.feed_image_recipe_context(
+            77, composed, IDENTITY_RULE,
+        )},
+    )
+    assert prompt_core.trusted_feed_image_recipe_instruction(
+        previous, user_id=42, source_generation_id=77,
+    ) == IDENTITY_RULE
+    previous.input_params[prompt_core.FEED_REMIX_CONTEXT_KEY]["identity_instruction"] = new_rule
+    assert prompt_core.trusted_feed_image_recipe_instruction(
+        previous, user_id=42, source_generation_id=77,
+    ) is None
 
 
 
@@ -187,7 +215,7 @@ async def test_ksu_style_feed_recipe_replaces_author_refs_and_preserves_settings
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0]]  # Author output and original input excluded.
     assert source.prompt in params["prompt"]
-    assert params["prompt"] == prompt_core.build_feed_image_recipe_prompt(source.prompt)
+    assert params["prompt"] == prompt_core.build_feed_image_recipe_prompt(source.prompt, IDENTITY_RULE)
     assert params["aspect_ratio"] == "2:3"
     assert params["image_size"] == "2K"
     args = repo.create_generation.await_args
@@ -213,7 +241,7 @@ async def test_historic_recipe_rollout_can_be_disabled_without_breaking_legacy(
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == ([REFS[0]] if enabled else [SOURCE, REFS[0]])
     assert params["prompt"] == (
-        prompt_core.build_feed_image_recipe_prompt(SECRET) if enabled
+        prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE) if enabled
         else prompt_core._LEGACY_SOURCE_FIRST_PROMPT
     )
 
@@ -228,7 +256,7 @@ async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_resp
         session=local_launch.session, user=local_launch.user,
     )
     assert wire[0]["body"]["params"]["image_urls"] == [REFS[0]]
-    assert wire[0]["body"]["params"]["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET)
+    assert wire[0]["body"]["params"]["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
     assert SECRET not in str(result)
     assert result.prompt_hidden is True
     assert local_launch.created_sessions[-1].base_prompt is None

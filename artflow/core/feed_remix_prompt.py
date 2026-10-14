@@ -31,15 +31,6 @@ FEED_REMIX_CONTEXT_VERSION = 2
 FEED_IMAGE_REMIX_CONTEXT_VERSION = 3
 FEED_IMAGE_RECIPE_CONTEXT_VERSION = 4
 
-_RECIPE_READER_IDENTITY_INSTRUCTION = (
-    "The supplied reference photos are the EXCLUSIVE source of the subject's face and identity. "
-    "If they show multiple views or a collage, use the clearest frontal face as the identity anchor "
-    "and the other views only to confirm the same person's features. Preserve that person's face shape, "
-    "eyes, eyebrows, nose, lips, jawline, skin tone and distinctive facial details in the finished portrait. "
-    "Apply the scene, clothing, pose, lighting and artistic style described above to this person. "
-    "Do not copy the original subject's face, invent a different face, blend identities or output a collage."
-)
-
 _IMAGE_IDENTITY_ROLES = (
     "All images preceding the final image are the user's identity references. "
     "Use ALL of them as the EXCLUSIVE source of the user's face and identity. "
@@ -165,26 +156,31 @@ def feed_image_recipe_source_parameters(source) -> dict:
     }
 
 
-def build_feed_image_recipe_prompt(source_prompt: str, change_request: str = "") -> str:
+def build_feed_image_recipe_prompt(
+    source_prompt: str, identity_instruction: str, change_request: str = "",
+    *, previous_instruction: str | None = None,
+) -> str:
     """Keep the creator's recipe while assigning facial identity to reader media."""
     prompt = str(source_prompt or "").strip()
-    # A saved v4 recipe may already end with this instruction. Retain all
-    # creator text and previous edits when placing it after the next edit.
-    suffix = f"\n\n{_RECIPE_READER_IDENTITY_INSTRUCTION}"
-    if prompt.endswith(suffix):
-        prompt = prompt[:-len(suffix)]
+    if previous_instruction:
+        old_suffix = f"\n\n{previous_instruction.strip()}"
+        if prompt.endswith(old_suffix):
+            prompt = prompt[:-len(old_suffix)]
     change = str(change_request or "").strip()
     if change:
         prompt = f"{prompt}\n\nИзменения, которые запросил пользователь для повтора: {change}"
-    return f"{prompt}{suffix}"
+    return f"{prompt}\n\n{identity_instruction.strip()}"
 
 
-def feed_image_recipe_context(source_generation_id: int, prompt: str) -> dict:
+def feed_image_recipe_context(
+    source_generation_id: int, prompt: str, identity_instruction: str | None = None,
+) -> dict:
     """Store an authenticated provenance digest; never duplicate secret text."""
     return {
         "version": FEED_IMAGE_RECIPE_CONTEXT_VERSION,
         "source_generation_id": source_generation_id,
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        **({"identity_instruction": identity_instruction} if identity_instruction else {}),
     }
 
 
@@ -448,6 +444,23 @@ def trusted_feed_image_recipe_prompt(
     if context is None or context["version"] != FEED_IMAGE_RECIPE_CONTEXT_VERSION:
         return None
     return generation.prompt
+
+
+def trusted_feed_image_recipe_instruction(
+    generation, *, user_id: int, source_generation_id: int,
+) -> str | None:
+    """Return only the admin text bound to an authenticated saved recipe."""
+    context = _trusted_feed_context(
+        generation, user_id=user_id, source_generation_id=source_generation_id,
+    )
+    if context is None or context["version"] != FEED_IMAGE_RECIPE_CONTEXT_VERSION:
+        return None
+    instruction = context.get("identity_instruction")
+    prompt = getattr(generation, "prompt", None)
+    if (not isinstance(instruction, str) or not instruction.strip()
+            or not isinstance(prompt, str) or not prompt.endswith(f"\n\n{instruction}")):
+        return None
+    return instruction
 
 
 def trusted_feed_image_scene(

@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Date, case, cast, desc, func, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,11 @@ from api.web.billing import enabled_payment_methods
 from api.web.deps import error_response, get_web_user_or_none, ok
 from api.web.schemas import enum_value, iso_datetime
 from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
+from core.feed_recipe_identity_policy import (
+    get_feed_recipe_identity_instruction,
+    set_feed_recipe_identity_instruction,
+    validate_instruction,
+)
 from core.image_recovery_policy import get_image_recovery_policy, set_image_recovery_policy
 from core.provider_routing import get_nano21_route, set_nano21_route
 from core.reporting_time import REPORTING_TZ, moscow_day_bounds_utc
@@ -45,6 +50,40 @@ class Nano21ProviderRoutingUpdate(BaseModel):
 
 class ImageRecoveryPolicyUpdate(BaseModel):
     auto_refund_seconds: int = Field(..., ge=600, le=86400)
+
+
+class FeedRecipeIdentityPolicyUpdate(BaseModel):
+    instruction: str = Field(..., min_length=100, max_length=3000)
+
+    @field_validator("instruction")
+    @classmethod
+    def normalize_instruction(cls, value: str) -> str:
+        return validate_instruction(value)
+
+
+@router.get("/admin/feed-recipe-identity")
+async def admin_get_feed_recipe_identity_policy(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    instruction = await get_feed_recipe_identity_instruction(session)
+    return ok({"instruction": instruction})
+
+
+@router.put("/admin/feed-recipe-identity")
+async def admin_set_feed_recipe_identity_policy(
+    body: FeedRecipeIdentityPolicyUpdate,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    instruction = await set_feed_recipe_identity_instruction(
+        session, body.instruction, admin_tg_id=int(user.tg_id),
+    )
+    return ok({"instruction": instruction})
 
 
 @router.get("/admin/image-recovery/{provider}")

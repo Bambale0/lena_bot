@@ -13,6 +13,10 @@ from db.models import GenerationType, ImageGenerationAction
 SECRET = "creator-private-style-7ed62a"
 SOURCE_IMAGE = "https://example.test/public-source.jpg"
 USER_IMAGE = "https://example.test/untrusted-instructions.jpg"
+IDENTITY_RULE = (
+    "The supplied reference photos are the EXCLUSIVE source of the subject's face and identity. "
+    "Do not copy the original subject's face. Use the clearest frontal view of the reader."
+)
 
 
 def bound_preview(url=SOURCE_IMAGE, *, index=0, display=False):
@@ -23,6 +27,7 @@ def bound_preview(url=SOURCE_IMAGE, *, index=0, display=False):
 
 @pytest.fixture
 def image_launch(monkeypatch):
+    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE))
     source = SimpleNamespace(
         id=77, user_id=99, is_public_feed=True, gen_type=GenerationType.image,
         prompt=SECRET, result_url=SOURCE_IMAGE, result_urls=None,
@@ -97,7 +102,7 @@ async def test_telegram_historic_recipe_uses_only_users_photo(
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
     assert image_launch.source.prompt in submitted.args[1]
-    assert submitted.args[1] == prompt_core.build_feed_image_recipe_prompt(image_launch.source.prompt)
+    assert submitted.args[1] == prompt_core.build_feed_image_recipe_prompt(image_launch.source.prompt, IDENTITY_RULE)
     assert submitted.kwargs["aspect_ratio"] == "2:3"
     created = image_launch.repo.create_generation.await_args
     assert created.kwargs["source_feed_gen_id"] == 77
@@ -125,7 +130,7 @@ async def test_bot_nano21_recipe_payload_uses_reader_face_without_creator_photo(
         aspect_ratio="1:1", quality="2K",
     )
     assert payload["images"] == [{"image_url": USER_IMAGE}]
-    assert payload["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET)
+    assert payload["prompt"] == prompt_core.build_feed_image_recipe_prompt(SECRET, IDENTITY_RULE)
     assert "EXCLUSIVE source of the subject's face" in payload["prompt"]
 
 
