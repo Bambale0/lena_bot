@@ -527,7 +527,6 @@ async def test_durable_submission_is_single_use_and_late_results_cannot_clobber(
     gen = generation()
     gen.task_id = None
     session = FakeSession(gen)
-    monkeypatch.setattr(repo, '_has_pending_refunded_seedance_review', AsyncMock(return_value=False))
     monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
     request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
     assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
@@ -545,7 +544,6 @@ async def test_terminal_submission_marker_is_never_overwritten(monkeypatch):
     gen = generation()
     gen.task_id = None
     session = FakeSession(gen)
-    monkeypatch.setattr(repo, '_has_pending_refunded_seedance_review', AsyncMock(return_value=False))
     monkeypatch.setattr(repo, '_publish_generation_update', AsyncMock())
     request_id = 'e150cc69-0350-43aa-a4fc-a6b17388ec10'
     assert await repo.begin_seedance_submission(session, gen.id, request_id, 'idem', 'a' * 64, product_model=gen.model)
@@ -700,11 +698,9 @@ async def test_callback_registration_failure_never_starts_a_paid_seedance_post(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["quote", "launch", "remix"])
-async def test_unsettled_supplier_review_blocks_seedance_before_charge(
+async def test_unsettled_old_supplier_review_does_not_block_new_seedance(
     api_launch, monkeypatch, operation,
 ):
-    from fastapi import HTTPException
-
     routes = api_launch.routes
     model = "bytedance/seedance-2-5"
     gate = AsyncMock(return_value=True)
@@ -723,14 +719,14 @@ async def test_unsettled_supplier_review_blocks_seedance_before_charge(
             if operation == "quote" else
             routes.remix_feed_post(77, body, api_launch.session, api_launch.user, "miniapp")
         )
-    with pytest.raises(HTTPException) as error:
-        await call
-    assert error.value.status_code == 409
-    assert "не списаны" in str(error.value.detail)
-    gate.assert_awaited_once()
-    api_launch.charge.assert_not_awaited()
-    api_launch.save.assert_not_awaited()
-    api_launch.generate.assert_not_awaited()
+    await call
+    gate.assert_not_awaited()
+    if operation == "quote":
+        api_launch.charge.assert_not_awaited()
+    else:
+        api_launch.charge.assert_awaited()
+        api_launch.save.assert_awaited()
+        api_launch.generate.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -754,9 +750,6 @@ async def test_callback_registration_rollback_restores_charge_atomically(
     routes = api_launch.routes
     api_launch.user = ExpiringUser()
     model = "bytedance/seedance-2-5"
-    monkeypatch.setattr(
-        routes.repo, "_has_pending_refunded_seedance_review", AsyncMock(return_value=False),
-    )
     monkeypatch.setattr(
         routes, "make_submission_context",
         lambda *_args, **_kwargs: SimpleNamespace(client_request_id="synthetic", started=False),
@@ -789,22 +782,22 @@ async def test_callback_registration_rollback_restores_charge_atomically(
 
 
 @pytest.mark.asyncio
-async def test_telegram_supplier_review_blocks_before_spend(video_launch):
+async def test_telegram_old_supplier_review_does_not_block_new_job(video_launch):
     from bot.handlers import video_gen
 
     video_launch.data.update(model_key="bytedance/seedance-2-5", mode="text")
     video_launch.kwargs.update(source_feed_gen_id=None, hidden_feed_prompt=False)
     gate = AsyncMock(return_value=True)
     video_launch.repo._has_pending_refunded_seedance_review = gate
-    assert await video_gen._launch_video_generation_from_state(**video_launch.kwargs) is False
-    gate.assert_awaited_once()
-    video_launch.repo.spend_credits.assert_not_awaited()
-    video_launch.repo.create_generation.assert_not_awaited()
-    video_launch.service.generate_video.assert_not_awaited()
+    assert await video_gen._launch_video_generation_from_state(**video_launch.kwargs) is True
+    gate.assert_not_awaited()
+    video_launch.repo.spend_credits.assert_awaited()
+    video_launch.repo.create_generation.assert_awaited()
+    video_launch.service.generate_video.assert_awaited()
 
 
 @pytest.mark.asyncio
-async def test_telegram_regeneration_supplier_review_blocks_before_spend(video_launch, monkeypatch):
+async def test_telegram_regeneration_ignores_old_supplier_review(video_launch, monkeypatch):
     from bot.handlers import video_gen
 
     previous = SimpleNamespace(
@@ -820,10 +813,10 @@ async def test_telegram_regeneration_supplier_review_blocks_before_spend(video_l
         call, video_launch.kwargs["session"], video_launch.kwargs["state"],
         video_launch.kwargs["db_user"], video_launch.kwargs["bot"],
     )
-    gate.assert_awaited_once()
-    video_launch.repo.spend_credits.assert_not_awaited()
-    video_launch.repo.create_generation.assert_not_awaited()
-    video_launch.service.generate_video.assert_not_awaited()
+    gate.assert_not_awaited()
+    video_launch.repo.spend_credits.assert_awaited()
+    video_launch.repo.create_generation.assert_awaited()
+    video_launch.service.generate_video.assert_awaited()
 
 
 @pytest.mark.asyncio

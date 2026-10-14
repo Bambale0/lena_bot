@@ -139,7 +139,6 @@ from core.neironych_video_poll_gate import (
 )
 from core.provider_routing import get_nano21_route
 from core.seedance_reconciliation import (
-    PRODUCT_MODELS,
     handle_submission_not_sent,
     handle_submission_unknown,
     make_submission_context,
@@ -192,19 +191,6 @@ MAX_SUNO_VOICE_AUDIO_BYTES = 30 * 1024 * 1024
 MAX_REFERENCE_REDIRECTS = 3
 FEED_REMIX_MAX_REFS = 4
 WEB_TASK_PREFIX = "web:"
-
-_SEEDANCE_SUPPLIER_REVIEW_MESSAGE = (
-    "Предыдущая задача Seedance ещё проверяется у провайдера. "
-    "Новый запуск временно недоступен; поцелуи не списаны."
-)
-
-
-async def _reject_unsettled_seedance_before_charge(
-    session: AsyncSession, user_id: int, model_key: str,
-) -> None:
-    if model_key in PRODUCT_MODELS and await repo._has_pending_refunded_seedance_review(session, user_id):
-        raise HTTPException(status_code=409, detail=_SEEDANCE_SUPPLIER_REVIEW_MESSAGE)
-
 
 async def _register_seedance_callback_before_submit(
     session: AsyncSession, gen_id: int, *, surface: str,
@@ -3068,8 +3054,6 @@ async def create_video_generation(
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Unknown video model: {body.model!r}")
 
-    await _reject_unsettled_seedance_before_charge(session, user.id, body.model)
-
     normalized = _normalize_video_request(
         model_key=body.model,
         mode=body.mode,
@@ -3955,8 +3939,6 @@ async def quote_feed_remix(
     if source is None:
         raise HTTPException(status_code=404, detail="Post not found or not public")
 
-    await _reject_unsettled_seedance_before_charge(session, user.id, body.model)
-
     repeat_prompt, repeat_refs, body, _, _, _ = _prepare_feed_remix_inputs(source, body, user_id=user.id)
     gen_type: str
     count = 1
@@ -4074,8 +4056,6 @@ async def remix_feed_post(
     source = await repo.get_public_feed_generation(session, gen_id)
     if not source:
         raise HTTPException(status_code=404, detail="Post not found or not public")
-
-    await _reject_unsettled_seedance_before_charge(session, user.id, body.model)
 
     repeat_prompt, repeat_refs, body, personalized, own_recipe, original_recipe_replay = _prepare_feed_remix_inputs(
         source, body, user_id=user.id,
