@@ -166,7 +166,10 @@ def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback
 def test_creator_recipe_prioritizes_reader_face_and_does_not_duplicate_instruction():
     creator = "Gothic black-and-white portrait of a witch with dark hair."
     composed = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
-    assert composed.startswith(creator)
+    assert composed.startswith("Subject identity rule: ")
+    assert "Creator scene prompt:\n" + creator in composed
+    assert composed.count(creator) == 1
+    assert composed.endswith("\n\n" + IDENTITY_RULE)
     assert "EXCLUSIVE source of the subject's face" in composed
     assert "Do not copy the original subject's face" in composed
     assert prompt_core.build_feed_image_recipe_prompt(
@@ -196,6 +199,20 @@ def test_creator_recipe_prioritizes_reader_face_and_does_not_duplicate_instructi
     assert prompt_core.trusted_feed_image_recipe_instruction(
         previous, user_id=42, source_generation_id=77,
     ) is None
+
+
+def test_recipe_continuation_replaces_old_unlabeled_identity_rule_once():
+    creator = "Black-and-white portrait of a witch."
+    old_rule = "Use the old user's face from uploaded photo."
+    previous = creator + "\n\n" + old_rule
+    continued = prompt_core.build_feed_image_recipe_prompt(
+        previous, IDENTITY_RULE, "blue cloak", previous_instruction=old_rule,
+    )
+    assert continued.startswith("Subject identity rule: ")
+    assert continued.count(creator) == 1
+    assert continued.count(IDENTITY_RULE) == 1
+    assert old_rule not in continued
+    assert "blue cloak" in continued
 
 
 def test_recipe_continuation_unwraps_previous_main_policy_wording():

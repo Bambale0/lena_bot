@@ -36,6 +36,12 @@ _IMAGE_RECIPE_SCENE_PREFIX = (
     "Use the following creator recipe for the scene, clothing, props, pose and lighting.\n\n"
     "Creator scene recipe:\n"
 )
+_IMAGE_RECIPE_SUBJECT_PREFIX = (
+    "Subject identity rule: The reader's supplied image(s) alone determine the main subject's "
+    "identity and, when a person is present, facial features. Any person described in the "
+    "creator's prompt is scene context, never a competing facial identity.\n\n"
+    "Creator scene prompt:\n"
+)
 _IMAGE_RECIPE_IDENTITY_MARKER = "\n\nReference identity priority: "
 _IMAGE_RECIPE_IDENTITY_PRIORITY = (
     _IMAGE_RECIPE_IDENTITY_MARKER + "The supplied image(s) are the sole source of the person's face "
@@ -205,10 +211,12 @@ def build_feed_image_recipe_prompt(
         old_suffix = f"\n\n{previous_instruction.strip()}"
         if prompt.endswith(old_suffix):
             prompt = prompt[:-len(old_suffix)]
+            if prompt.startswith(_IMAGE_RECIPE_SUBJECT_PREFIX):
+                prompt = prompt[len(_IMAGE_RECIPE_SUBJECT_PREFIX):]
     change = str(change_request or "").strip()
     if change:
         prompt = f"{prompt}\n\nИзменения, которые запросил пользователь для повтора: {change}"
-    return f"{prompt}\n\n{identity_instruction.strip()}"
+    return f"{_IMAGE_RECIPE_SUBJECT_PREFIX}{prompt}\n\n{identity_instruction.strip()}"
 
 
 def feed_image_recipe_context(
