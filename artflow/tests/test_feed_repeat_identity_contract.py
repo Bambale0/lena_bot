@@ -214,14 +214,18 @@ def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback
     ) is None
 
 
-def test_creator_recipe_brackets_scene_with_current_reader_identity_policy():
+def test_creator_recipe_uses_one_current_reader_identity_policy():
     creator = "Gothic black-and-white portrait of a witch with dark hair."
     composed = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
-    assert composed.startswith("Subject identity policy:\n" + IDENTITY_RULE + "\n\nCreator scene prompt:\n")
+    assert composed.startswith(
+        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
+        + "Subject identity policy:\n" + IDENTITY_RULE
+        + "\n\nCreator scene prompt:\n" + creator
+    )
     assert "Creator scene prompt:\n" + creator in composed
     assert composed.count(creator) == 1
-    assert composed.endswith("\n\nSubject identity policy:\n" + IDENTITY_RULE)
-    assert composed.count(IDENTITY_RULE) == 2
+    assert composed.count("Subject identity policy:\n") == 1
+    assert composed.count(IDENTITY_RULE) == 1
     assert "EXCLUSIVE source of the subject's face" in composed
     assert "Do not copy the original subject's face" in composed
     assert prompt_core.build_feed_image_recipe_prompt(
@@ -230,15 +234,18 @@ def test_creator_recipe_brackets_scene_with_current_reader_identity_policy():
     edited = prompt_core.build_feed_image_recipe_prompt(
         composed, IDENTITY_RULE, "blue cloak", previous_instruction=IDENTITY_RULE,
     )
-    assert edited.count("EXCLUSIVE source of the subject's face") == 2
+    assert edited.count("EXCLUSIVE source of the subject's face") == 1
     assert "blue cloak" in edited
     new_rule = "Use the reader's facial identity, never the creator's facial identity."
     updated = prompt_core.build_feed_image_recipe_prompt(
         composed, new_rule, previous_instruction=IDENTITY_RULE,
     )
     assert IDENTITY_RULE not in updated
-    assert updated.endswith(new_rule)
-    assert updated.count(new_rule) == 2
+    assert updated.startswith(
+        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
+        + "Subject identity policy:\n" + new_rule
+    )
+    assert updated.count(new_rule) == 1
     previous = SimpleNamespace(
         user_id=42, source_feed_gen_id=77, prompt=composed,
         input_params={prompt_core.FEED_REMIX_CONTEXT_KEY: prompt_core.feed_image_recipe_context(
@@ -270,9 +277,13 @@ def test_recipe_continuation_replaces_old_unlabeled_identity_rule():
     continued = prompt_core.build_feed_image_recipe_prompt(
         previous, IDENTITY_RULE, "blue cloak", previous_instruction=old_rule,
     )
-    assert continued.startswith("Subject identity policy:\n" + IDENTITY_RULE + "\n\nCreator scene prompt:\n")
+    assert continued.startswith(
+        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
+        + "Subject identity policy:\n" + IDENTITY_RULE
+        + "\n\nCreator scene prompt:\n" + creator
+    )
     assert continued.count(creator) == 1
-    assert continued.count(IDENTITY_RULE) == 2
+    assert continued.count(IDENTITY_RULE) == 1
     assert old_rule not in continued
     assert "blue cloak" in continued
 
@@ -283,8 +294,11 @@ def test_recipe_prompt_uses_only_the_current_admin_instruction_for_identity_rule
         "The administrator controls any more specific subject instructions for this campaign."
     )
     composed = prompt_core.build_feed_image_recipe_prompt("Candlelit studio scene.", revised_rule)
-    assert composed.startswith("Subject identity policy:\n" + revised_rule + "\n\nCreator scene prompt:\nCandlelit studio scene.")
-    assert composed.endswith("\n\nSubject identity policy:\n" + revised_rule)
+    assert composed.startswith(
+        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
+        + "Subject identity policy:\n" + revised_rule
+        + "\n\nCreator scene prompt:\nCandlelit studio scene."
+    )
     assert "facial identity" not in composed
     assert "facial features" not in composed
 
@@ -298,8 +312,43 @@ def test_recipe_continuation_unwraps_previous_main_policy_wording():
     continued = prompt_core.build_feed_image_recipe_prompt(previous, IDENTITY_RULE, "silver bat crown")
     assert continued.count(creator) == 1
     assert "Previous policy wording" not in continued
-    assert continued.count(IDENTITY_RULE) == 2
+    assert continued.count(IDENTITY_RULE) == 1
     assert "silver bat crown" in continued
+
+
+def test_recipe_continuation_unwraps_previous_double_policy_once():
+    creator = "Gothic forest portrait."
+    old_rule = "Use the previous reader policy."
+    previous = (
+        "Subject identity policy:\n" + old_rule
+        + "\n\nCreator scene prompt:\n" + creator
+        + "\n\nSubject identity policy:\n" + old_rule
+    )
+    continued = prompt_core.build_feed_image_recipe_prompt(
+        previous, IDENTITY_RULE, previous_instruction=old_rule,
+    )
+    assert continued == (
+        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
+        + "Subject identity policy:\n" + IDENTITY_RULE
+        + "\n\nCreator scene prompt:\n" + creator
+    )
+
+
+def test_recipe_continuation_keeps_new_reference_relationship_and_scene_once():
+    creator = "Candlelit portrait, red velvet clothing."
+    first = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
+    continued = prompt_core.build_feed_image_recipe_prompt(
+        first, IDENTITY_RULE, "blue cloak", previous_instruction=IDENTITY_RULE,
+    )
+    assert continued.count(prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX) == 1
+    assert continued.count(IDENTITY_RULE) == 1
+    assert continued.count(creator) == 1
+    assert continued.count("blue cloak") == 1
+    assert continued.startswith(
+        prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
+        + "Subject identity policy:\n" + IDENTITY_RULE
+        + "\n\nCreator scene prompt:\n" + creator
+    )
 
 
 def test_public_derived_recipe_is_available_to_its_owner_for_all_image_models():
@@ -1261,7 +1310,11 @@ async def test_quote_and_submit_share_authenticated_own_recipe_reference_budget(
     assert wire[0]["body"]["params"]["image_urls"] == references
     assert (OWN_RECIPE if owns_source else SECRET) in wire[0]["body"]["params"]["prompt"]
     if not owns_source:
-        assert wire[0]["body"]["params"]["prompt"].endswith(IDENTITY_RULE)
+        assert wire[0]["body"]["params"]["prompt"].startswith(
+            prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
+            + "Subject identity policy:\n" + IDENTITY_RULE
+            + "\n\nCreator scene prompt:\n"
+        )
         context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
         assert context["version"] == 4 and "prompt" not in context
 
