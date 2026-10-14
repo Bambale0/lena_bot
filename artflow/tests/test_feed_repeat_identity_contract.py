@@ -69,11 +69,13 @@ def assert_identity_roles(prompt):
     assert SECRET not in prompt
 
 
-def assert_variation(prompt):
+def assert_face_replacement(prompt):
     assert_identity_roles(prompt)
-    assert "new pose, framing and composition" in prompt
-    assert "Preserve its visible composition" not in prompt
-    assert "Preserve its composition" not in prompt
+    assert "Edit the final public scene image" in prompt
+    assert "replace the source subject's face" in prompt
+    assert "preserve the scene composition" in prompt
+    assert "collage or multiple views" in prompt
+    assert "new pose, framing and composition" not in prompt
 
 
 def previous_generation(prompt, *, version=2, **extra):
@@ -82,6 +84,31 @@ def previous_generation(prompt, *, version=2, **extra):
         id=88, user_id=42, source_feed_gen_id=77, prompt=prompt,
         input_params={prompt_core.FEED_REMIX_CONTEXT_KEY: context}, **extra,
     )
+
+
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+async def test_collage_face_reference_replaces_author_identity_in_original_scene(
+    local_launch, wire, surface,
+):
+    # Regression: real task 59011 had a multi-angle user collage, an author
+    # portrait as the final reference and an output dominated by the author.
+    # No paid requests: the Nexus transport is a synthetic MockTransport.
+    await miniapp_routes.remix_feed_post(
+        77,
+        miniapp_routes.FeedRemixRequest(
+            model="nano-banana-pro", image_url=REFS[0], mode="image", quality="2K",
+        ),
+        session=local_launch.session, user=local_launch.user, surface=surface,
+    )
+    params = wire[0]["body"]["params"]
+    assert params["image_urls"] == [REFS[0], SOURCE]
+    prompt = params["prompt"]
+    assert "Edit the final public scene image" in prompt
+    assert "replace the source subject's face" in prompt
+    assert "collage or multiple views" in prompt
+    assert "preserve the scene composition" in prompt
+    assert "new pose, framing and composition" not in prompt
+    assert SECRET not in prompt
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -96,7 +123,7 @@ async def test_fresh_feed_repeat_sends_identity_contract_to_real_provider(local_
     params = wire[0]["body"]["params"]
     assert params["model_name"] == model
     assert params["image_urls"] == REFS + [SOURCE]
-    assert_variation(params["prompt"])
+    assert_face_replacement(params["prompt"])
     assert params["prompt"].endswith("make the coat blue")
     assert SECRET not in str(result)
     context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
@@ -117,7 +144,7 @@ async def test_all_public_gallery_aliases_are_excluded_from_identity_roles(local
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == REFS[:2] + [OTHER_SOURCE]
-    assert_variation(params["prompt"])
+    assert_face_replacement(params["prompt"])
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -199,7 +226,7 @@ async def test_owner_hidden_or_derivative_recipe_never_enters_personalized_reque
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0], SOURCE]
-    assert_variation(params["prompt"])
+    assert_face_replacement(params["prompt"])
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -241,7 +268,7 @@ async def test_fresh_web_result_repeated_in_telegram_rebuilds_current_reference_
     params = wire[-1]["body"]["params"]
     assert params["model_name"] == model
     assert params["image_urls"] == references + [selected_source]
-    assert_variation(params["prompt"])
+    assert_face_replacement(params["prompt"])
     assert params["prompt"].endswith("blue coat")
     assert wire[0]["key"] != wire[1]["key"]
     assert "seed" not in params
@@ -271,14 +298,14 @@ async def test_trusted_legacy_next_repeat_upgrades_actual_provider_payload(local
     assert len(wire) == 1
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == REFS[:2] + [SOURCE]
-    assert_variation(params["prompt"])
+    assert_face_replacement(params["prompt"])
     assert params["prompt"].endswith("\n\nmake the coat blue")
     assert repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]["version"] == 3
 
 
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("intent", ["current", "stale_session", "stale_parent", "foreign_session", "string_flag", "action_only", "repeat"])
-async def test_only_bound_current_explicit_edit_can_preserve_composition(local_launch, wire, monkeypatch, model, intent):
+async def test_personalized_telegram_edit_stays_identity_first_even_with_stale_state(local_launch, wire, monkeypatch, model, intent):
     image_session = await repo.create_image_session(
         local_launch.session, local_launch.user.id, model, "image", "1:1", "2K", 1,
         None, reference_urls=[REFS[0], SOURCE],
@@ -304,13 +331,8 @@ async def test_only_bound_current_explicit_edit_can_preserve_composition(local_l
         feed_change_request="change my hair color", launching_text="launch", queued_text="queued",
     )
     prompt = wire[0]["body"]["params"]["prompt"]
-    assert_identity_roles(prompt)
+    assert_face_replacement(prompt)
     assert "change my hair color" in prompt
-    if intent == "current":
-        assert "Preserve its composition" in prompt
-        assert "new pose, framing and composition" not in prompt
-    else:
-        assert_variation(prompt)
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -321,7 +343,7 @@ def test_known_legacy_header_migration_preserves_suffix_bytes(version, suffix):
         previous_generation(header + suffix, version=version), user_id=42,
         source_generation_id=77, has_user_references=True,
     )
-    assert_variation(migrated)
+    assert_face_replacement(migrated)
     assert migrated.partition("\n\n")[2] == suffix.removeprefix("\n\n")
     assert migrated.endswith(suffix)
 
@@ -379,9 +401,33 @@ def test_v3_current_relative_roles_survive_removal_and_readdition():
     restored = prompt_core.trusted_feed_image_prompt(
         saved, user_id=42, source_generation_id=77, has_user_references=True,
     )
-    assert_variation(restored)
+    assert_face_replacement(restored)
     assert "All images preceding the final image" in restored
     assert restored.endswith(SUFFIX)
+
+
+def test_old_v3_variation_metadata_still_replays_as_identity_replacement():
+    # Already paid v3 generations must remain authenticated after changing
+    # the default semantic role contract. Preserve user change suffix verbatim.
+    legacy = prompt_core._IMAGE_VARIATION_PROMPT + SUFFIX
+    previous = previous_generation(legacy, version=3)
+    previous.input_params[prompt_core.FEED_REMIX_CONTEXT_KEY] = {
+        "version": 3,
+        "source_generation_id": 77,
+        "prompt": legacy,
+        "header_family": "variation",
+        "source_image_url": SOURCE,
+        "scene_generation_id": 77,
+    }
+    restored = prompt_core.trusted_feed_image_prompt(
+        previous, user_id=42, source_generation_id=77,
+        has_user_references=True,
+    )
+    assert_face_replacement(restored)
+    assert restored.endswith(SUFFIX)
+    assert prompt_core.trusted_feed_image_scene(
+        previous, user_id=42, source_generation_id=77,
+    ) == (77, SOURCE)
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -461,7 +507,7 @@ async def test_safe_repeat_same_confirm_submits_once_but_new_repeat_is_fresh(
     await repeat_safe.confirm_repeat(call, launch.session, delayed_duplicate, launch.user, AsyncMock())
     assert len(wire) == 1
     assert repo.charge_image_generation.await_count == 1
-    assert_variation(wire[0]["body"]["params"]["prompt"])
+    assert_face_replacement(wire[0]["body"]["params"]["prompt"])
     if edit_prompt:
         assert "change my hair color" in wire[0]["body"]["params"]["prompt"]
     await repeat_safe.open_repeat(call, launch.session, state, launch.user, AsyncMock())
@@ -475,7 +521,7 @@ async def test_safe_repeat_same_confirm_submits_once_but_new_repeat_is_fresh(
         params = submitted["body"]["params"]
         assert params["image_urls"] == REFS[:2] + [SOURCE]
         assert "seed" not in params
-        assert_variation(params["prompt"])
+        assert_face_replacement(params["prompt"])
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -559,7 +605,7 @@ async def test_expired_gallery_entry_does_not_promote_bound_display_alias_to_ide
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0], OTHER_SOURCE]
-    assert_variation(params["prompt"])
+    assert_face_replacement(params["prompt"])
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -598,7 +644,7 @@ async def test_actual_explicit_telegram_callback_binds_edit_of_current_result(lo
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0], OTHER_SOURCE]
     assert_identity_roles(params["prompt"])
-    assert "Preserve its composition" in params["prompt"]
+    assert "preserve the scene composition" in params["prompt"]
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -668,7 +714,7 @@ async def test_repeat_after_explicit_edit_keeps_owned_derived_scene_separate_fro
     )
     assert len(wire) == 2
     assert wire[-1]["body"]["params"]["image_urls"] == [REFS[0], OTHER_SOURCE]
-    assert_variation(wire[-1]["body"]["params"]["prompt"])
+    assert_face_replacement(wire[-1]["body"]["params"]["prompt"])
     assert wire[-1]["body"]["params"]["prompt"].endswith("make the coat blue")
 
 
@@ -788,7 +834,7 @@ async def test_legacy_alias_selection_cannot_shift_after_gallery_expiry(local_la
     else:
         assert launched is True
         assert wire[0]["body"]["params"]["image_urls"] == [REFS[0], SOURCE]
-        assert_variation(wire[0]["body"]["params"]["prompt"])
+        assert_face_replacement(wire[0]["body"]["params"]["prompt"])
 
 
 @pytest.mark.parametrize("model", [*MODELS, "midjourney-imagine", "midjourney-blend"])
@@ -1024,7 +1070,7 @@ async def test_derived_scene_collector_at_cap_clear_and_next_repeat(derived_repe
     await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
     assert len(wire) == 2
     assert wire[-1]["body"]["params"]["image_urls"] == [*REFS, OTHER_SOURCE]
-    assert_variation(wire[-1]["body"]["params"]["prompt"])
+    assert_face_replacement(wire[-1]["body"]["params"]["prompt"])
     assert wire[-1]["body"]["params"]["prompt"].endswith("make the coat blue")
     call.data = f"regen:image:{setup.generated[-1].id}"
     await repeat_references._regen_repeat_interceptor(call, launch.session, state, launch.user, AsyncMock())
@@ -1032,7 +1078,7 @@ async def test_derived_scene_collector_at_cap_clear_and_next_repeat(derived_repe
     await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
     assert len(wire) == 3
     assert wire[-1]["body"]["params"]["image_urls"] == [*REFS, OTHER_SOURCE]
-    assert_variation(wire[-1]["body"]["params"]["prompt"])
+    assert_face_replacement(wire[-1]["body"]["params"]["prompt"])
     call.data = f"regen:image:{setup.generated[-1].id}"
     await repeat_references._regen_repeat_interceptor(call, launch.session, state, launch.user, AsyncMock())
     # Clear must remove an expired user input rather than require it to be available.
