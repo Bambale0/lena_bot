@@ -88,6 +88,16 @@ def assert_scene_first_edit(prompt):
     assert SECRET not in prompt
 
 
+def assert_recipe_identity_priority(prompt, creator_prompt):
+    assert creator_prompt in prompt
+    assert prompt.count(creator_prompt) == 1
+    assert "sole source of the person's face" in prompt
+    assert "hair color" in prompt
+    assert "largest clear frontal face" in prompt
+    assert "takes priority over conflicting" in prompt
+    assert prompt.endswith("never the original creator's subject.")
+
+
 def previous_generation(prompt, *, version=2, **extra):
     context = {"version": version, "source_generation_id": 77, "prompt": prompt}
     return SimpleNamespace(
@@ -147,6 +157,14 @@ def test_recipe_context_is_owner_bound_digest_only_and_respects_rollout_rollback
     ) is None
 
 
+def test_recipe_continuation_keeps_one_identity_rule_after_scene_change():
+    creator = "Monochrome portrait of another person in a gothic forest."
+    initial = prompt_core.build_feed_image_recipe_prompt(creator)
+    continued = prompt_core.build_feed_image_recipe_prompt(initial, "Add a silver bat crown")
+    assert_recipe_identity_priority(continued, creator)
+    assert continued.count("Reference identity priority:") == 1
+    assert continued.index("Add a silver bat crown") < continued.index("Reference identity priority:")
+
 
 @pytest.mark.parametrize("surface", ["web", "miniapp"])
 @pytest.mark.parametrize("model", MODELS)
@@ -174,8 +192,7 @@ async def test_ksu_style_feed_recipe_replaces_author_refs_and_preserves_settings
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == [REFS[0]]  # Author output and original input excluded.
-    assert source.prompt in params["prompt"]
-    assert params["prompt"] == source.prompt
+    assert_recipe_identity_priority(params["prompt"], source.prompt)
     assert params["aspect_ratio"] == "2:3"
     assert params["image_size"] == "2K"
     args = repo.create_generation.await_args
@@ -186,6 +203,41 @@ async def test_ksu_style_feed_recipe_replaces_author_refs_and_preserves_settings
     assert local_launch.created_sessions[-1].base_prompt is None
     assert result.prompt_hidden is True
     assert source.prompt not in str(result)
+
+
+async def test_monochrome_recipe_keeps_reader_face_and_hair_priority_in_provider_request(
+    local_launch, wire, monkeypatch,
+):
+    monkeypatch.setattr(miniapp_routes.settings, "FEED_ORIGINAL_RECIPE_ENABLED", True)
+    source = local_launch.source
+    source.source_feed_gen_id = None
+    source.input_params = {"reference_images": [SOURCE], "img_ratio": "9:16"}
+    source.prompt = "Black-and-white portrait of a black-haired witch with a silver bat crown."
+
+    await miniapp_routes.remix_feed_post(
+        77,
+        miniapp_routes.FeedRemixRequest(model="nano-banana-pro", image_url=REFS[0]),
+        session=local_launch.session, user=local_launch.user,
+    )
+
+    submitted = wire[0]["body"]["params"]
+    assert submitted["image_urls"] == [REFS[0]]
+    prompt = submitted["prompt"]
+    assert source.prompt in prompt
+    assert "sole source of the person's face" in prompt
+    assert "hair color" in prompt
+    assert "takes priority over conflicting" in prompt
+    assert SOURCE not in submitted["image_urls"]
+    saved = repo.create_generation.await_args.args[4]
+    assert saved == prompt
+    context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
+    owned_repeat = SimpleNamespace(
+        user_id=local_launch.user.id, source_feed_gen_id=77, prompt=saved,
+        input_params={prompt_core.FEED_REMIX_CONTEXT_KEY: context},
+    )
+    assert prompt_core.trusted_feed_image_recipe_prompt(
+        owned_repeat, user_id=local_launch.user.id, source_generation_id=77,
+    ) == prompt
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -200,7 +252,10 @@ async def test_historic_recipe_rollout_can_be_disabled_without_breaking_legacy(
     )
     params = wire[0]["body"]["params"]
     assert params["image_urls"] == ([REFS[0]] if enabled else [SOURCE, REFS[0]])
-    assert params["prompt"] == (SECRET if enabled else prompt_core._LEGACY_SOURCE_FIRST_PROMPT)
+    if enabled:
+        assert_recipe_identity_priority(params["prompt"], SECRET)
+    else:
+        assert params["prompt"] == prompt_core._LEGACY_SOURCE_FIRST_PROMPT
 
 
 async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_response(
@@ -213,7 +268,7 @@ async def test_hidden_creator_prompt_used_by_provider_not_exposed_in_client_resp
         session=local_launch.session, user=local_launch.user,
     )
     assert wire[0]["body"]["params"]["image_urls"] == [REFS[0]]
-    assert wire[0]["body"]["params"]["prompt"] == SECRET
+    assert_recipe_identity_priority(wire[0]["body"]["params"]["prompt"], SECRET)
     assert SECRET not in str(result)
     assert result.prompt_hidden is True
     assert local_launch.created_sessions[-1].base_prompt is None

@@ -97,7 +97,8 @@ async def test_telegram_historic_recipe_uses_only_users_photo(
     submitted = image_launch.generate.await_args
     assert submitted.kwargs["image_url"] == USER_IMAGE
     assert image_launch.source.prompt in submitted.args[1]
-    assert submitted.args[1] == image_launch.source.prompt
+    assert "sole source of the person's face" in submitted.args[1]
+    assert "takes priority over conflicting" in submitted.args[1]
     assert submitted.kwargs["aspect_ratio"] == "2:3"
     created = image_launch.repo.create_generation.await_args
     assert created.kwargs["source_feed_gen_id"] == 77

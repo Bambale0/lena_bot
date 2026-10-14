@@ -31,6 +31,23 @@ FEED_REMIX_CONTEXT_VERSION = 2
 FEED_IMAGE_REMIX_CONTEXT_VERSION = 3
 FEED_IMAGE_RECIPE_CONTEXT_VERSION = 4
 
+_IMAGE_RECIPE_SCENE_PREFIX = (
+    "Create one new image using the supplied reference image(s) for the subject. "
+    "Use the following creator recipe for the scene, clothing, props, pose and lighting.\n\n"
+    "Creator scene recipe:\n"
+)
+_IMAGE_RECIPE_IDENTITY_PRIORITY = (
+    "\n\nReference identity priority: The supplied image(s) are the sole source of the person's face "
+    "and defining appearance, or of the referenced object's defining appearance. "
+    "For a person, preserve the reference's face shape, eyes, nose, lips, skin tone, hairline, "
+    "hair texture and hair color. If a reference is a collage of one person, use its largest "
+    "clear frontal face as the identity anchor and other views to confirm that same person; "
+    "do not output the collage layout. Do not reproduce the creator's person from the scene recipe. "
+    "Reference identity takes priority over conflicting descriptions of appearance or color, "
+    "including a monochrome scene instruction; preserve the other scene details. "
+    "Return one coherent image of the referenced subject, never the original creator's subject."
+)
+
 _IMAGE_IDENTITY_ROLES = (
     "All images preceding the final image are the user's identity references. "
     "Use ALL of them as the EXCLUSIVE source of the user's face and identity. "
@@ -163,6 +180,19 @@ def feed_image_recipe_context(source_generation_id: int, prompt: str) -> dict:
         "source_generation_id": source_generation_id,
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
     }
+
+
+def build_feed_image_recipe_prompt(creator_prompt: str, change_request: str = "") -> str:
+    """Keep the creator's scene while making the reader reference authoritative for identity."""
+    scene = str(creator_prompt or "").strip()
+    if scene.startswith(_IMAGE_RECIPE_SCENE_PREFIX) and scene.endswith(_IMAGE_RECIPE_IDENTITY_PRIORITY):
+        # A trusted continuation already contains this wrapper. Keep one copy
+        # and place any new user change before the final identity instruction.
+        scene = scene[len(_IMAGE_RECIPE_SCENE_PREFIX):-len(_IMAGE_RECIPE_IDENTITY_PRIORITY)]
+    change = str(change_request or "").strip()
+    if change:
+        scene += "\n\nReader's requested scene changes:\n" + change
+    return _IMAGE_RECIPE_SCENE_PREFIX + scene + _IMAGE_RECIPE_IDENTITY_PRIORITY
 
 
 def build_feed_image_prompt(
