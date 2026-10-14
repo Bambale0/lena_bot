@@ -39,6 +39,9 @@ _IMAGE_RECIPE_SCENE_PREFIX = (
 _IMAGE_RECIPE_SCENE_LABEL = "Creator scene prompt:\n"
 _IMAGE_RECIPE_POLICY_LABEL = "Subject identity policy:\n"
 _IMAGE_RECIPE_POLICY_SUFFIX = "\n\nSubject identity policy:\n"
+_IMAGE_RECIPE_RELATIONSHIP_PREFIX = (
+    "Create one image using the supplied reference images and the creator scene prompt.\n\n"
+)
 _IMAGE_RECIPE_IDENTITY_MARKER = "\n\nReference identity priority: "
 _IMAGE_RECIPE_IDENTITY_PRIORITY = (
     _IMAGE_RECIPE_IDENTITY_MARKER + "The supplied image(s) are the sole source of the person's face "
@@ -206,24 +209,32 @@ def build_feed_image_recipe_prompt(
         prompt = prompt[len(_IMAGE_RECIPE_SCENE_PREFIX):].rsplit(_IMAGE_RECIPE_IDENTITY_MARKER, 1)[0]
     if previous_instruction:
         previous_policy_prefix = f"{_IMAGE_RECIPE_POLICY_LABEL}{previous_instruction.strip()}\n\n"
-        for old_suffix in (
-            f"{_IMAGE_RECIPE_POLICY_SUFFIX}{previous_instruction.strip()}",
-            f"\n\n{previous_instruction.strip()}",
-        ):
-            if prompt.endswith(old_suffix):
-                prompt = prompt[:-len(old_suffix)]
-                if prompt.startswith(previous_policy_prefix + _IMAGE_RECIPE_SCENE_LABEL):
-                    prompt = prompt[len(previous_policy_prefix):]
-                if prompt.startswith(_IMAGE_RECIPE_SCENE_LABEL):
-                    prompt = prompt[len(_IMAGE_RECIPE_SCENE_LABEL):]
-                break
+        current_prefix = (
+            _IMAGE_RECIPE_RELATIONSHIP_PREFIX + previous_policy_prefix
+            + _IMAGE_RECIPE_SCENE_LABEL
+        )
+        if prompt.startswith(current_prefix):
+            prompt = prompt[len(current_prefix):]
+        else:
+            for old_suffix in (
+                f"{_IMAGE_RECIPE_POLICY_SUFFIX}{previous_instruction.strip()}",
+                f"\n\n{previous_instruction.strip()}",
+            ):
+                if prompt.endswith(old_suffix):
+                    prompt = prompt[:-len(old_suffix)]
+                    if prompt.startswith(previous_policy_prefix + _IMAGE_RECIPE_SCENE_LABEL):
+                        prompt = prompt[len(previous_policy_prefix):]
+                    if prompt.startswith(_IMAGE_RECIPE_SCENE_LABEL):
+                        prompt = prompt[len(_IMAGE_RECIPE_SCENE_LABEL):]
+                    break
     change = str(change_request or "").strip()
     if change:
         prompt = f"{prompt}\n\nИзменения, которые запросил пользователь для повтора: {change}"
     instruction = identity_instruction.strip()
     return (
+        f"{_IMAGE_RECIPE_RELATIONSHIP_PREFIX}"
         f"{_IMAGE_RECIPE_POLICY_LABEL}{instruction}\n\n"
-        f"{_IMAGE_RECIPE_SCENE_LABEL}{prompt}{_IMAGE_RECIPE_POLICY_SUFFIX}{instruction}"
+        f"{_IMAGE_RECIPE_SCENE_LABEL}{prompt}"
     )
 
 
@@ -512,10 +523,20 @@ def trusted_feed_image_recipe_instruction(
         return None
     instruction = context.get("identity_instruction")
     prompt = getattr(generation, "prompt", None)
+    relationship_prefix = (
+        _IMAGE_RECIPE_RELATIONSHIP_PREFIX
+        + _IMAGE_RECIPE_POLICY_LABEL
+        + instruction.strip()
+        + "\n\n"
+        + _IMAGE_RECIPE_SCENE_LABEL
+    ) if isinstance(instruction, str) else ""
     if (not isinstance(instruction, str) or not instruction.strip()
-            or not isinstance(prompt, str) or not any(prompt.endswith(suffix) for suffix in (
-                f"{_IMAGE_RECIPE_POLICY_SUFFIX}{instruction}", f"\n\n{instruction}",
-            ))):
+            or not isinstance(prompt, str) or not (
+                prompt.startswith(relationship_prefix)
+                or any(prompt.endswith(suffix) for suffix in (
+                    f"{_IMAGE_RECIPE_POLICY_SUFFIX}{instruction}", f"\n\n{instruction}",
+                ))
+            )):
         return None
     return instruction
 
