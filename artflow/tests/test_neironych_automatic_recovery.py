@@ -354,7 +354,7 @@ async def test_proven_prepost_failure_refunds_only_owned_unsubmitted_attempt(rec
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("review_state", ["pending", "remote_completed_pending_finance", "needs_admin_resolution"])
-async def test_refunded_unknown_supplier_job_blocks_only_own_account_paid_submission(
+async def test_refunded_unknown_supplier_job_does_not_block_new_paid_submission(
     recovery, review_state,
 ):
     from db import repository as repo
@@ -362,8 +362,7 @@ async def test_refunded_unknown_supplier_job_blocks_only_own_account_paid_submis
     r = recovery
     request_id = "c150cc69-0350-43aa-a4fc-a6b17388ec10"
     with r.db() as db:
-        # A previous 1-hour refund must not be recycled into more charges at
-        # an upstream whose original task might still be paid/in progress.
+        # The older supplier dispute remains separate from this new paid job.
         previous = Generation(
             id=111, user_id=42, model="bytedance/seedance-2-5",
             gen_type=GenerationType.video, status=GenerationStatus.failed,
@@ -376,15 +375,19 @@ async def test_refunded_unknown_supplier_job_blocks_only_own_account_paid_submis
         current = db.sync.get(Generation, 73)
         current.task_id = None
         await db.commit()
-        with pytest.raises(ValueError, match="refunded Seedance"):
-            await repo.begin_seedance_submission(
-                db, current.id, request_id, "idem-guard", "a" * 64,
-                product_model=current.model,
-            )
-        # No paid Neironych request has been started.
-        assert current.task_id is None
-        assert repo.SEEDANCE_SUBMISSION_KEY not in repo.parse_input_params(current.input_params)
+        assert await repo._has_pending_refunded_seedance_review(db, 42)
+        assert await repo.begin_seedance_submission(
+            db, current.id, request_id, "idem-new", "a" * 64,
+            product_model=current.model,
+        )
+        assert not await repo.begin_seedance_submission(
+            db, current.id, request_id, "idem-new", "a" * 64,
+            product_model=current.model,
+        )
+        assert current.task_id == "neironych-submit:" + request_id
+        assert repo.SEEDANCE_SUBMISSION_KEY in repo.parse_input_params(current.input_params)
         assert db.sync.get(User, 42).credits == 100
+        assert await repo._has_pending_refunded_seedance_review(db, 42)
 
         # Other customers remain unaffected, even for the SAME model.
         db.add(User(id=55, tg_id=5500, credits=120, referral_code="other-user"))
