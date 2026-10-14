@@ -67,6 +67,15 @@ On startup, `db.seed._seed_nano_banana_21_prices` creates missing base/2K/4K com
 
 The same `ImageModel`, `IMAGE_CAPS`, and database prices drive the website, Telegram Mini App, and text bot. Ref count = 4; modes = text and reference edit; output resolutions = 1K/2K/4K.
 
+For the Telegram quick menu **🍌 nana banano**, select a quality button
+**1K / 2K / 4K** before sending the prompt. The selected quality is shown in
+the menu, persists when the user adds reference images, and is stored in the
+image generation session. The displayed selection is tied to the currently
+selected model; stale buttons from another model are ignored. Pricing uses
+the existing admin-defined model and quality rows. The normal website,
+Telegram Mini App, and advanced Telegram image wizard already expose all
+three Nano Banana 2.1 resolutions.
+
 ## Verification
 
 ```bash
