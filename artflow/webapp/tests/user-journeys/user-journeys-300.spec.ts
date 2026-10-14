@@ -512,6 +512,7 @@ registerDomain("06 · Повтор работы из ленты сохраняе
   const item = makeFeedItem(seed, {
     id: 6000 + seed,
     author: `Repeat ${seed}`,
+    source_image_recipe_available: true,
     result_url: source,
     result_urls: [source],
     preview_url: source,
