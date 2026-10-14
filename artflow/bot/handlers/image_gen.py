@@ -80,6 +80,7 @@ from core.feed_remix_prompt import (
     legacy_feed_edit_unavailable,
     order_feed_image_references,
     owned_generation_prompt_is_visible,
+    resolve_feed_image_recipe_origin,
     trusted_feed_image_prompt,
     trusted_feed_image_recipe_instruction,
     trusted_feed_image_recipe_prompt,
@@ -1249,15 +1250,33 @@ async def _launch_session_generation(
         source_url = selected_feed_source_url(source, refs) if source_type == "image" else None
         identity_refs = feed_identity_references(source, refs)
         fixed_composition = edit_parent is not None
+        if source_type == "image" and image_session.model == "nano-banana-2.1" and not identity_refs:
+            await source_message.answer("Для повтора фото из ленты загрузи своё фото; поцелуи не списаны.")
+            return False
         original_recipe_replay = bool(
-            not fixed_composition and identity_refs and image_session.model in IMAGE_CAPS
+            (not fixed_composition or image_session.model == "nano-banana-2.1")
+            and identity_refs and image_session.model in IMAGE_CAPS
             and feed_image_original_recipe_allowed(
                 source, user_id=db_user.id, model_key=image_session.model,
                 enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
             )
         )
+        if (source_type == "image" and image_session.model == "nano-banana-2.1"
+                and not own_recipe and not original_recipe_replay):
+            await source_message.answer("Повтор по промпту автора временно недоступен; поцелуи не списаны.")
+            return False
         if original_recipe_replay:
-            creator = feed_image_recipe_source_parameters(source)
+            recipe_source = await resolve_feed_image_recipe_origin(
+                source, lambda generation_id: repo.get_public_feed_generation(session, generation_id),
+            )
+            if recipe_source is None or not str(getattr(recipe_source, "prompt", "") or "").strip():
+                await source_message.answer("Исходный рецепт автора недоступен; поцелуи не списаны.")
+                return False
+            identity_refs = feed_identity_references(recipe_source, identity_refs)
+            if not identity_refs:
+                await source_message.answer("Для повтора фото из ленты загрузи своё фото; поцелуи не списаны.")
+                return False
+            creator = feed_image_recipe_source_parameters(recipe_source)
             if len(identity_refs) < creator["required_images"]:
                 await source_message.answer(
                     f"Для повтора по рецепту загрузи {creator['required_images']} своих фото; поцелуи не списаны.",
@@ -1279,7 +1298,7 @@ async def _launch_session_generation(
             )
             recipe_identity_instruction = await get_feed_recipe_identity_instruction(session)
             prompt = build_feed_image_recipe_prompt(
-                inherited or str(source.prompt or ""), recipe_identity_instruction,
+                inherited or str(recipe_source.prompt or ""), recipe_identity_instruction,
                 feed_change_request or "", previous_instruction=previous_instruction,
             )
             state_data = await state.get_data()

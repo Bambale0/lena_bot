@@ -199,7 +199,12 @@ function FeedRemixRunnerPortal() {
   const sourcePreview = sourceSelectionMissing ? "" : safeExternalUrl(sourceMediaUrl) || safeExternalUrl(firstMedia(item || {}));
   const sourceIsVideo = item ? itemLooksVideo(item) : false;
   const creatorRecipeReplay = sourceIsVideo && typeof item?.source_has_video_reference === "boolean";
-  const originalImageRecipe = Boolean(!sourceIsVideo && bucket === "image" && item?.source_image_recipe_available);
+  const imageRecipeForModel = (candidateKey: string) => Boolean(
+    candidateKey === "nano-banana-2.1"
+      ? item?.source_image_recipe_available_for_nano21
+      : item?.source_image_recipe_available
+  );
+  const originalImageRecipe = Boolean(!sourceIsVideo && bucket === "image" && imageRecipeForModel(modelKey));
   const needsOriginalVideo = sourceIsVideo && item?.source_has_video_reference !== false;
   const creatorTextOnly = Boolean(
     creatorRecipeReplay && selectedModel && !needsOriginalVideo
@@ -819,7 +824,7 @@ function FeedRemixRunnerPortal() {
             Модель
             <select className="min-h-11 rounded-xl border border-input bg-background px-3 text-sm" value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={busy || modelsLoading || creatorRecipeReplay}>
               {modelsLoading ? <option>Загружаем модели…</option> : null}
-              {imageModels.length && !creatorRecipeReplay ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo, Boolean(!sourceIsVideo && item?.source_image_recipe_available))}>{model.display_name}</option>)}</optgroup> : null}
+              {imageModels.length && !creatorRecipeReplay ? <optgroup label="Фото">{imageModels.map((model) => <option key={model.key} value={model.key} disabled={references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo, Boolean(!sourceIsVideo && imageRecipeForModel(model.key)))}>{model.display_name}</option>)}</optgroup> : null}
               {videoModels.length ? <optgroup label="Видео">{videoModels.map((model) => <option key={model.key} value={model.key} disabled={(creatorRecipeReplay && model.key !== item.model) || references.length > feedUserReferenceCapacity(model, sourceIsVideo, needsOriginalVideo)}>{model.display_name}</option>)}</optgroup> : null}
             </select>
           </label>
