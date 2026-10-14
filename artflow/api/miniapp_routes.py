@@ -107,6 +107,7 @@ from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
     build_feed_image_prompt,
+    build_feed_image_recipe_prompt,
     build_owned_feed_image_prompt,
     feed_image_original_recipe_allowed,
     feed_image_recipe_context,
@@ -3823,11 +3824,9 @@ def _prepare_feed_remix_inputs(
             body = body.model_copy(update=updated)
     try:
         if original_recipe_replay:
-            # Historical pre-Oct-09 contract: creator prompt + reader's images.
+            # Creator's scene recipe with the reader's identity as the priority.
             # The finished author image is *not* a provider reference.
-            prompt = str(source.prompt or "").strip()
-            if body.change_request.strip():
-                prompt += "\n\nИзменения, которые запросил пользователь для повтора: " + body.change_request.strip()
+            prompt = build_feed_image_recipe_prompt(source.prompt, body.change_request)
         elif image_repeat and own_recipe:
             if identity_refs and not supports_feed_source_media(caps, "image"):
                 raise FeedRemixUnavailable("Модель не поддерживает фото-референсы.")
