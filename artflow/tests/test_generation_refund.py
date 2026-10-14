@@ -108,6 +108,43 @@ async def test_fail_generation_and_refund_is_idempotent_for_final_generation(mon
 
 
 @pytest.mark.asyncio
+async def test_missing_identity_refund_does_not_race_new_provider_binding(monkeypatch) -> None:
+    generation = SimpleNamespace(
+        id=78, user_id=42, status=GenerationStatus.processing,
+        task_id="neironych:new-provider-id", credits_spent=70,
+        input_params="{}", error_msg=None, finished_at=None,
+    )
+    session = _SessionStub(generation)
+    publish = AsyncMock()
+    monkeypatch.setattr(repo, "_publish_generation_update", publish)
+
+    result = await repo.fail_generation_and_refund(
+        session, 78, "timeout", require_missing_task_id=True,
+    )
+    assert result == (False, 0.0)
+    assert generation.status == GenerationStatus.processing
+    assert session.added == []
+    publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_missing_identity_refund_does_not_race_submission_marker(monkeypatch) -> None:
+    generation = SimpleNamespace(
+        id=79, user_id=42, status=GenerationStatus.processing,
+        task_id=None, credits_spent=70,
+        input_params=json.dumps({repo.SEEDANCE_SUBMISSION_KEY: {"client_request_id": "persisted"}}),
+        error_msg=None, finished_at=None,
+    )
+    session = _SessionStub(generation)
+    monkeypatch.setattr(repo, "_publish_generation_update", AsyncMock())
+    assert await repo.fail_generation_and_refund(
+        session, 79, "timeout", require_missing_task_id=True,
+    ) == (False, 0.0)
+    assert generation.status == GenerationStatus.processing
+    assert session.added == []
+
+
+@pytest.mark.asyncio
 async def test_fail_generation_and_refund_skips_credit_when_nothing_was_charged(monkeypatch) -> None:
     generation = SimpleNamespace(
         id=88,

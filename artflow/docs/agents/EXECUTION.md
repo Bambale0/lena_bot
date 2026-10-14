@@ -1,5 +1,16 @@
 # Execution ledger — video to prompt integration
 
+## 2026-10-14 — stalled generation incident and customer refunds
+
+- Baseline `6a4754ed99a79a048f93a045399b81c3bd92df1e`; isolated branch `fix/apix-stalled-generation-recovery-20261014`. Production main checkout had only pre-existing untracked diagnostics.
+- User outcome: return credits for all 35 old active jobs identified at 16:00 Moscow time, then prevent known reconciliation gaps from leaving future paid jobs active indefinitely. Acceptance: exactly one refund per incident generation; active old count zero; no second paid provider POST; scheduled reconciliation handles all Nexus image models and missing-ID videos; focused tests and required CI pass.
+- Production evidence before repair: 35 active jobs across 20 users, 279.5 recorded spent credits, zero prior generation refunds. Breakdown: 28 Neironych images, 4 Nexus images, 3 Seedance videos lacking provider task IDs. Provider GET: 14 Neironych `not_found`, 11 `reconciliation_required`, 3 `completed` without URL; Nexus 2 completed with URLs and 2 failed. Image scheduler selected only Nano Banana 2.1; Seedance scheduler counted missing IDs but never settled them.
+- Authorized incident action completed via `repo.fail_generation_and_refund` using row locks, expected task identity, and a short incident note. Read-only postcheck: 35 `failed` rows, 35 unique `generation_refund` ledger rows, 279.5 credits returned across 20 users; no active job older than 10 minutes. Telegram video notices were persisted for the 3 videos. No paid provider submission or manual SQL balance edit.
+- Risks/dependencies: some provider states were ambiguous or completed without recoverable media. Customer refunds are final; late supplier cost must be investigated separately. New policy does not infer free provider failure from 404. No schema migration. Existing pricing/admin model settings remain unchanged. `IMAGE_AUTO_REFUND_SECONDS` is a typed, bounded environment setting (default one hour) for incident recovery; moving the SLA to the authenticated, audited admin control plane remains a follow-up. A provider completion cannot overwrite a refunded final job.
+- Observability: incident note in ledger and `refund_applied` marker; scheduler logs provider/state and generation ID without prompt, URL or credentials. Test seams: scheduler selection, expected-ID atomic refund, timeout outcomes, no paid re-submit, and notice behavior.
+- Steps: [x] preflight/current-production audit; [x] customer compensation and verification; [x] RED regression tests; [x] minimal reconciliation fix; [x] focused tests (159 passed), Ruff and compile checks; [x] OCR delegate preview/rules plus manual review of all 5 reviewable source files (standard OCR could not use an LLM endpoint); [ ] PR/required CI/auto-merge; [ ] exact-SHA deploy and public health verification.
+
+
 Baseline: commit `31a91c6`; working tree had no tracked changes at task start.
 Date: 2026-09-16.
 
