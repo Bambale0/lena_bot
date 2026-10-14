@@ -91,6 +91,59 @@ async def test_feed_recipe_http_502_refunds_without_second_post(
     repo.increment_feed_share.assert_not_awaited()
 
 
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+async def test_feed_recipe_nexus_pro_502_uses_atomic_refund(
+    local_launch, wire, monkeypatch, surface,
+):
+    from db.models import GenerationStatus
+
+    launch = local_launch
+    launch.generation.model = "nano-banana-pro"
+    launch.source.input_params = {"hidden_prompt": False}
+    async def provider_error(*args, **kwargs):
+        assert kwargs["request_id"] is None
+        raise nexus_image_adapter.NexusApiError("HTTP 502", status_code=502)
+    monkeypatch.setattr(miniapp_routes.image_service, "generate_image", provider_error)
+    async def refund(session, gen_id, error, **kwargs):
+        assert kwargs["require_missing_task_id"] is True
+        launch.generation.status = GenerationStatus.failed
+        return True, 4.0
+    settlement = AsyncMock(side_effect=refund)
+    monkeypatch.setattr(repo, "fail_generation_and_refund", settlement)
+
+    result = await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(model="nano-banana-pro", image_url=REFS[0]),
+        session=launch.session, user=launch.user, surface=surface,
+    )
+    assert result.status == "failed"
+    settlement.assert_awaited_once()
+    repo.increment_feed_share.assert_not_awaited()
+
+
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+async def test_feed_5xx_lost_guard_keeps_accepted_share(
+    local_launch, wire, monkeypatch, surface,
+):
+    from db.models import GenerationStatus
+
+    launch = local_launch
+    launch.generation.model = "nano-banana-pro"
+    launch.generation.status = GenerationStatus.done
+    launch.source.input_params = {"hidden_prompt": False}
+    monkeypatch.setattr(
+        miniapp_routes.image_service, "generate_image",
+        AsyncMock(side_effect=nexus_image_adapter.NexusApiError("HTTP 502", status_code=502)),
+    )
+    monkeypatch.setattr(repo, "fail_generation_and_refund", AsyncMock(return_value=(False, 0.0)))
+
+    result = await miniapp_routes.remix_feed_post(
+        77, miniapp_routes.FeedRemixRequest(model="nano-banana-pro", image_url=REFS[0]),
+        session=launch.session, user=launch.user, surface=surface,
+    )
+    assert result.status == "done"
+    repo.increment_feed_share.assert_awaited_once()
+
+
 @pytest.fixture
 async def wire(monkeypatch):
     posts = []
@@ -219,9 +272,9 @@ def test_creator_recipe_uses_one_current_reader_identity_policy():
     composed = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
     assert composed.startswith(
         prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Subject identity policy:\n" + IDENTITY_RULE
-        + "\n\nCreator scene prompt:\n" + creator
+        + "Creator scene prompt:\n" + creator
     )
+    assert composed.endswith("Subject identity policy:\n" + IDENTITY_RULE)
     assert "Creator scene prompt:\n" + creator in composed
     assert composed.count(creator) == 1
     assert composed.count("Subject identity policy:\n") == 1
@@ -243,8 +296,9 @@ def test_creator_recipe_uses_one_current_reader_identity_policy():
     assert IDENTITY_RULE not in updated
     assert updated.startswith(
         prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Subject identity policy:\n" + new_rule
+        + "Creator scene prompt:\n" + creator
     )
+    assert updated.endswith("Subject identity policy:\n" + new_rule)
     assert updated.count(new_rule) == 1
     previous = SimpleNamespace(
         user_id=42, source_feed_gen_id=77, prompt=composed,
@@ -259,6 +313,18 @@ def test_creator_recipe_uses_one_current_reader_identity_policy():
     assert prompt_core.trusted_feed_image_recipe_instruction(
         previous, user_id=42, source_generation_id=77,
     ) is None
+
+
+def test_creator_face_descriptions_precede_the_single_reader_identity_rule():
+    creator = "Studio portrait, angular jawline, full lips, white blazer."
+    composed = prompt_core.build_feed_image_recipe_prompt(creator, IDENTITY_RULE)
+    assert composed.count(creator) == 1
+    assert composed.count(IDENTITY_RULE) == 1
+    assert composed.index(creator) < composed.index(IDENTITY_RULE)
+    assert composed.endswith("Subject identity policy:\n" + IDENTITY_RULE)
+    assert prompt_core.build_feed_image_recipe_prompt(
+        composed, IDENTITY_RULE, previous_instruction=IDENTITY_RULE,
+    ) == composed
 
 
 def test_recipe_continuation_replaces_old_unlabeled_identity_rule():
@@ -279,9 +345,9 @@ def test_recipe_continuation_replaces_old_unlabeled_identity_rule():
     )
     assert continued.startswith(
         prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Subject identity policy:\n" + IDENTITY_RULE
-        + "\n\nCreator scene prompt:\n" + creator
+        + "Creator scene prompt:\n" + creator
     )
+    assert continued.endswith("Subject identity policy:\n" + IDENTITY_RULE)
     assert continued.count(creator) == 1
     assert continued.count(IDENTITY_RULE) == 1
     assert old_rule not in continued
@@ -296,9 +362,9 @@ def test_recipe_prompt_uses_only_the_current_admin_instruction_for_identity_rule
     composed = prompt_core.build_feed_image_recipe_prompt("Candlelit studio scene.", revised_rule)
     assert composed.startswith(
         prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Subject identity policy:\n" + revised_rule
-        + "\n\nCreator scene prompt:\nCandlelit studio scene."
+        + "Creator scene prompt:\nCandlelit studio scene."
     )
+    assert composed.endswith("Subject identity policy:\n" + revised_rule)
     assert "facial identity" not in composed
     assert "facial features" not in composed
 
@@ -329,8 +395,8 @@ def test_recipe_continuation_unwraps_previous_double_policy_once():
     )
     assert continued == (
         prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Subject identity policy:\n" + IDENTITY_RULE
-        + "\n\nCreator scene prompt:\n" + creator
+        + "Creator scene prompt:\n" + creator
+        + "\n\nSubject identity policy:\n" + IDENTITY_RULE
     )
 
 
@@ -346,9 +412,9 @@ def test_recipe_continuation_keeps_new_reference_relationship_and_scene_once():
     assert continued.count("blue cloak") == 1
     assert continued.startswith(
         prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-        + "Subject identity policy:\n" + IDENTITY_RULE
-        + "\n\nCreator scene prompt:\n" + creator
+        + "Creator scene prompt:\n" + creator
     )
+    assert continued.endswith("Subject identity policy:\n" + IDENTITY_RULE)
 
 
 def test_public_derived_recipe_is_available_to_its_owner_for_all_image_models():
@@ -1312,8 +1378,10 @@ async def test_quote_and_submit_share_authenticated_own_recipe_reference_budget(
     if not owns_source:
         assert wire[0]["body"]["params"]["prompt"].startswith(
             prompt_core._IMAGE_RECIPE_RELATIONSHIP_PREFIX
-            + "Subject identity policy:\n" + IDENTITY_RULE
-            + "\n\nCreator scene prompt:\n"
+            + "Creator scene prompt:\n"
+        )
+        assert wire[0]["body"]["params"]["prompt"].endswith(
+            "Subject identity policy:\n" + IDENTITY_RULE
         )
         context = repo.create_generation.await_args.kwargs["input_params"][prompt_core.FEED_REMIX_CONTEXT_KEY]
         assert context["version"] == 4 and "prompt" not in context

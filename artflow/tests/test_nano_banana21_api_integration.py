@@ -201,3 +201,64 @@ async def test_miniapp_nexus_submit_settles_explicit_5xx_only(monkeypatch, http_
     assert request_ids
     refunds.assert_not_awaited()
     assert settlement.await_count == (1 if http_status else 0)
+
+
+@pytest.mark.asyncio
+async def test_miniapp_nexus_pro_5xx_uses_atomic_refund(monkeypatch):
+    from api import nexus_image_adapter
+
+    gen = SimpleNamespace(
+        id=8202, user_id=10, model="nano-banana-pro",
+        gen_type=GenerationType.image, prompt="test photo", task_id=None,
+        status=GenerationStatus.pending, result_url=None, result_urls=None,
+        credits_spent=2, created_at=datetime.now(timezone.utc), finished_at=None,
+        is_public_feed=False, is_prompt_library=False, source_feed_gen_id=None,
+        image_session_id=12, action_type=None,
+    )
+    async def provider_error(model, prompt, **kwargs):
+        assert kwargs["request_id"] is None
+        raise nexus_image_adapter.NexusApiError("HTTP 502", status_code=502)
+
+    async def settle(session, gen_id, error, **kwargs):
+        assert kwargs["require_missing_task_id"] is True
+        assert kwargs["provider_review_key"] == miniapp_routes.repo.IMAGE_REFUND_PROVIDER_REVIEW_KEY
+        gen.status = GenerationStatus.failed
+        return True, 2.0
+    settlement = AsyncMock(side_effect=settle)
+    refunds = AsyncMock(side_effect=AssertionError("non-atomic refund"))
+    monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
+    monkeypatch.setattr(miniapp_routes.repo, "resolve_image_model_cost",
+                        AsyncMock(return_value=SimpleNamespace(credits=2)))
+    monkeypatch.setattr(miniapp_routes.repo, "count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr(miniapp_routes.repo, "charge_image_generation",
+                        AsyncMock(return_value=SimpleNamespace(allowed=True, charged_credits=2, unlimited=False)))
+    monkeypatch.setattr(miniapp_routes.repo, "create_image_session", AsyncMock(return_value=SimpleNamespace(id=12)))
+    monkeypatch.setattr(miniapp_routes.repo, "create_generation", AsyncMock(return_value=gen))
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation", refunds)
+    monkeypatch.setattr(miniapp_routes.repo, "add_credits", refunds)
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", settlement)
+    monkeypatch.setattr(miniapp_routes.image_service, "generate_image", provider_error)
+
+    async def stub_session():
+        yield AsyncMock()
+
+    async def stub_user():
+        return SimpleNamespace(
+            id=10, tg_id=1212121, credits=100, referral_code="REF",
+            full_name="Tester", username="tester", photo_url=None,
+            referral_balance=0, is_banned=False,
+        )
+
+    app.dependency_overrides[get_session] = stub_session
+    app.dependency_overrides[get_miniapp_user] = stub_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/v1/generate/image", json={
+                "model": "nano-banana-pro", "prompt": "test photo", "quality": "2K",
+            })
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "failed"
+    settlement.assert_awaited_once()
+    refunds.assert_not_awaited()

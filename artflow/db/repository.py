@@ -56,6 +56,7 @@ ACTIVE_GENERATION_WINDOW = timedelta(minutes=45)
 EXPIRED_FEED_MEDIA_HOSTS = {"tempfile.aiquickdraw.com"}
 NEIRONYCH_VIDEO_NOTICE_KEY = "neironych_video_notice"
 SEEDANCE_REFUND_PROVIDER_REVIEW_KEY = "seedance_refund_provider_review"
+IMAGE_REFUND_PROVIDER_REVIEW_KEY = "image_refund_provider_review"
 
 
 def _new_neironych_video_notice(kind: str) -> dict[str, object]:
@@ -1440,6 +1441,101 @@ async def record_late_kie_video_callback(
     return True
 
 
+async def record_late_image_provider_outcome(
+    session: AsyncSession, gen_id: int, *, provider: str,
+    provider_task_id: str | None, succeeded: bool,
+) -> bool:
+    """Record supplier work after an HTTP 5xx refund without changing the wallet."""
+    row = (await session.execute(
+        select(Generation).where(Generation.id == gen_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if row is None or row.gen_type != GenerationType.image or row.status != GenerationStatus.failed:
+        await session.rollback()
+        return False
+    params = parse_input_params(row.input_params)
+    review = params.get(IMAGE_REFUND_PROVIDER_REVIEW_KEY)
+    if (not isinstance(review, dict) or review.get("state") != "pending"
+            or review.get("provider") != provider):
+        await session.rollback()
+        return False
+    review["provider_task_id"] = str(provider_task_id or "")
+    review["last_provider_status"] = "done" if succeeded else "failed"
+    review["state"] = "remote_completed_pending_finance" if succeeded else "remote_failed"
+    review["reconciled_at"] = datetime.now(timezone.utc).isoformat()
+    params[IMAGE_REFUND_PROVIDER_REVIEW_KEY] = review
+    row.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    return True
+
+
+async def register_legacy_image_5xx_supplier_review(
+    session: AsyncSession, gen_id: int, *, provider: str,
+) -> bool:
+    """Attach review metadata to an already-refunded pre-review 5xx task."""
+    if provider not in {"neironych", "nexus"}:
+        raise ValueError("Unsupported image provider")
+    row = (await session.execute(
+        select(Generation).where(Generation.id == gen_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if row is None or row.gen_type != GenerationType.image or row.status != GenerationStatus.failed:
+        await session.rollback()
+        return False
+    params = parse_input_params(row.input_params)
+    if (params.get(IMAGE_REFUND_PROVIDER_REVIEW_KEY)
+            or params.get("refund_applied") is not True
+            or not str(params.get("refund_note") or "").startswith(
+                f"image:http_5xx:{provider}"
+            )):
+        await session.rollback()
+        return False
+    params[IMAGE_REFUND_PROVIDER_REVIEW_KEY] = {
+        "state": "pending", "provider": provider,
+        "original_task_id": str(row.task_id or ""),
+        "last_provider_status": "http_5xx",
+        "refunded_at": (row.finished_at or datetime.now(timezone.utc)).isoformat(),
+    }
+    row.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    return True
+
+
+async def resolve_refunded_image_provider_review(
+    session: AsyncSession, gen_id: int, *, resolution: str,
+    admin_tg_id: int, note: str,
+) -> bool:
+    """Operator-only supplier cost settlement; customer state and credits stay final."""
+    if resolution not in {"confirmed_not_accepted", "cost_reconciled"}:
+        raise ValueError("Invalid supplier reconciliation resolution")
+    if not admin_tg_id or len(note.strip()) < 12:
+        raise ValueError("Supplier review resolution requires an actor and evidence")
+    row = (await session.execute(
+        select(Generation).where(Generation.id == gen_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if row is None or row.gen_type != GenerationType.image or row.status != GenerationStatus.failed:
+        await session.rollback()
+        return False
+    params = parse_input_params(row.input_params)
+    review = params.get(IMAGE_REFUND_PROVIDER_REVIEW_KEY)
+    if not isinstance(review, dict) or review.get("state") not in {
+        "pending", "remote_completed_pending_finance", "needs_admin_resolution",
+    }:
+        await session.rollback()
+        return False
+    review.update({
+        "state": "settled", "resolution": resolution,
+        "resolved_by_admin_tg_id": int(admin_tg_id),
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+        "resolution_note": note.strip(),
+    })
+    params[IMAGE_REFUND_PROVIDER_REVIEW_KEY] = review
+    row.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    return True
+
+
 async def resolve_refunded_seedance_provider_review(
     session: AsyncSession, gen_id: int, *,
     resolution: str, admin_tg_id: int, note: str,
@@ -1744,6 +1840,7 @@ async def fail_generation_and_refund(
     recovery_task_id: str | None = None,
     video_notice_kind: str | None = None,
     provider_review: dict[str, object] | None = None,
+    provider_review_key: str = SEEDANCE_REFUND_PROVIDER_REVIEW_KEY,
 ) -> tuple[bool, float]:
     """Fail a pending/processing generation and return its credits in one commit.
 
@@ -1804,7 +1901,11 @@ async def fail_generation_and_refund(
         params[NEIRONYCH_VIDEO_NOTICE_KEY] = _new_neironych_video_notice(video_notice_kind)
     if provider_review:
         # Durable supplier review is committed with the user ledger transition.
-        params[SEEDANCE_REFUND_PROVIDER_REVIEW_KEY] = dict(provider_review)
+        if provider_review_key not in {
+            SEEDANCE_REFUND_PROVIDER_REVIEW_KEY, IMAGE_REFUND_PROVIDER_REVIEW_KEY,
+        }:
+            raise ValueError("Unsupported provider review key")
+        params[provider_review_key] = dict(provider_review)
     generation.input_params = json.dumps(params, ensure_ascii=False)
     generation.status = GenerationStatus.failed
     generation.error_msg = error
