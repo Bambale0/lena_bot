@@ -73,7 +73,7 @@ const feedItems = [
   },
 ];
 
-async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = false) {
+async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = false, imageRecipe = false) {
   if (withTelegram) await page.addInitScript((nativeBack) => {
     const backHandlers = new Set<() => void>();
     if (nativeBack) window.addEventListener("apix:test-back", () => backHandlers.forEach(handler => handler()));
@@ -104,7 +104,9 @@ async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = fals
   await page.route("**/api/v1/models/image", (route) => route.fulfill({ json: imageModels }));
   await page.route("**/api/v1/models/video", (route) => route.fulfill({ json: videoModels }));
   await page.route("**/api/v1/history?**", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: feedItems }));
+  await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: feedItems.map((item) => ({
+    ...item, is_mine: !imageRecipe, source_image_recipe_available: imageRecipe,
+  })) }));
   await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/payment-methods", (route) => route.fulfill({ json: ["tbank"] }));
@@ -117,7 +119,7 @@ async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = fals
 }
 
 test("feed work repeat asks for settings and preserves source media payload", async ({ page }) => {
-  await mockMiniAppApi(page);
+  await mockMiniAppApi(page, true, false, true);
   let remixPayload: Record<string, unknown> | null = null;
   await page.route("**/api/v1/feed/201/remix", async (route) => {
     remixPayload = route.request().postDataJSON() as Record<string, unknown>;
@@ -145,8 +147,8 @@ test("feed work repeat asks for settings and preserves source media payload", as
 
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("Исходная работа будет использована как основной референс.")).toBeVisible();
-  await expect(dialog.getByLabel("Модель")).toBeVisible();
+  await expect(dialog.getByText("Применим промпт автора к твоим фото. Готовую работу автора модели не отправляем.")).toBeVisible();
+  await expect(dialog.locator("select").first()).toBeVisible();
 
   await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
   await dialog.locator("input[type=file]").setInputFiles({
@@ -546,13 +548,18 @@ test("Seedance source-video edit discloses measured billing without starting gen
   expect(paidRequests).toBe(0);
 });
 
-test("image personalization reserves a source slot before uploading photos", async ({ page }) => {
-  await mockMiniAppApi(page);
+test("image recipe uses all reference slots for reader photos", async ({ page }) => {
+  await mockMiniAppApi(page, true, false, true);
   await page.route("**/api/v1/models/image", route => route.fulfill({ json: [
     ...imageModels, { ...imageModels[0], key: "qwen/image-edit", display_name: "Single reference", max_refs: 1 },
   ] }));
   let uploads = 0;
   let paidRequests = 0;
+  let quotes = 0;
+  await page.route("**/api/v1/feed/201/remix/quote", route => {
+    quotes++;
+    return route.fulfill({ json: { cost_credits: 2, balance_credits: 100, can_run: true } });
+  });
   await page.route("**/api/web/upload-media", route => {
     uploads++;
     return route.fulfill({ json: { data: { url: `https://example.test/ref-${uploads}.png` } } });
@@ -563,19 +570,42 @@ test("image personalization reserves a source slot before uploading photos", asy
   });
   await page.goto("/?tgWebAppData=test&remix=201");
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
-  await expect(dialog.getByText("Исходная работа занимает один слот. Можно добавить своих фото: 3.")).toBeVisible();
+  await expect(dialog.getByText("Повтор по исходному рецепту автора: лицо возьмём с твоих фото (до 4). Готовое изображение автора не отправляется модели.")).toBeVisible();
+  expect(quotes).toBe(0);
   const photo = (index: number) => ({ name: `ref-${index}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, index]) });
   await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
-  await dialog.locator("input[type=file]").setInputFiles([1, 2, 3, 4].map(photo));
-  await expect(dialog.getByRole("contentinfo").getByText("Исходная работа занимает один слот. Можно добавить своих фото: 3.")).toBeVisible();
+  await dialog.locator("input[type=file]").setInputFiles([1, 2, 3, 4, 5].map(photo));
+  await expect(dialog.getByRole("contentinfo").getByText("Повтор по исходному рецепту автора: лицо возьмём с твоих фото (до 4). Готовое изображение автора не отправляется модели.")).toBeVisible();
   expect(uploads).toBe(0);
   await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
-  await dialog.locator("input[type=file]").setInputFiles([1, 2, 3].map(photo));
-  await expect(dialog.getByLabel("Удалить референс")).toHaveCount(3);
+  await dialog.locator("input[type=file]").setInputFiles([1, 2, 3, 4].map(photo));
+  await expect(dialog.getByLabel("Удалить референс")).toHaveCount(4);
   await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeDisabled();
-  await expect(dialog.getByLabel("Модель").locator('option[value="qwen/image-edit"]')).toHaveJSProperty("disabled", true);
-  expect(uploads).toBe(3);
+  await expect(dialog.locator("select").first().locator('option[value="qwen/image-edit"]')).toHaveJSProperty("disabled", true);
+  expect(uploads).toBe(4);
+  await expect.poll(() => quotes).toBeGreaterThan(0);
   expect(paidRequests).toBe(0);
+});
+
+test("foreign photo without a public recipe cannot reach quote or checkout", async ({ page }) => {
+  await mockMiniAppApi(page);
+  await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
+    ...feedItems[0], is_mine: false, source_image_recipe_available: false,
+  }] }));
+  let quotes = 0;
+  await page.route("**/api/v1/feed/201/remix/quote", route => {
+    quotes++;
+    return route.fulfill({ status: 422, json: { detail: "Recipe unavailable" } });
+  });
+  await page.goto("/?tgWebAppData=test&remix=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByText("Для этой публикации повтор по промпту автора недоступен.")).toBeVisible();
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "ref.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+  await expect(dialog.getByText("Реф #1")).toBeVisible();
+  expect(quotes).toBe(0);
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
 });
 
 test("one-reference image models retain text edits without offering impossible photo uploads", async ({ page }) => {
@@ -880,7 +910,8 @@ for (const surface of ["telegram", "browser"] as const) {
     await mockMiniAppApi(page, surface === "telegram");
     const previews = [0, 1].map(index => boundPreview(index));
     await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
-      ...feedItems[0], result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
+      ...feedItems[0], source_image_recipe_available: true,
+      result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
     }] }));
     let latestQuote: Record<string, unknown> | null = null;
     let submitted: Record<string, unknown> | null = null;
@@ -907,11 +938,11 @@ for (const surface of ["telegram", "browser"] as const) {
     const dialog = page.getByRole("dialog", { name: "Повторить работу" });
     await expect(dialog).toBeVisible();
     const selectedSource = new URL(previews[1], page.url()).href;
-    await expect.poll(() => latestQuote?.source_image_url).toBe(selectedSource);
     await dialog.locator("input[type=file]").setInputFiles({
       name: "ref.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
     });
     await expect(dialog.getByText("Реф #1")).toBeVisible();
+    await expect.poll(() => latestQuote?.source_image_url).toBe(selectedSource);
     await expect.poll(() => latestQuote?.image_url).toBe("https://example.test/uploaded-ref.png");
     await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
     await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
@@ -926,11 +957,12 @@ test("older image deep link quotes the same owned preview route as list cards", 
   await mockMiniAppApi(page);
   await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [] }));
   await page.route("**/api/web/feed/201", route => route.fulfill({ json: { data: {
-    ...feedItems[0], preview_url: "https://example.test/source_preview_384_deadbeef.webp",
+    ...feedItems[0], source_image_recipe_available: true,
+    preview_url: "https://example.test/source_preview_384_deadbeef.webp",
     preview_urls: ["https://example.test/source_preview_384_deadbeef.webp"],
   } } }));
   await page.route("**/api/v1/feed/201", route => route.fulfill({ json: {
-    ...feedItems[0], result_url: "", result_urls: [],
+    ...feedItems[0], source_image_recipe_available: true, result_url: "", result_urls: [],
     preview_url: boundPreview(0),
     preview_urls: [boundPreview(0)],
   } }));
@@ -940,7 +972,11 @@ test("older image deep link quotes the same owned preview route as list cards", 
     return route.fulfill({ json: { cost_credits: 1.5, balance_credits: 100, can_run: true } });
   });
   await page.goto("/?tgWebAppData=test&feed=201");
-  await expect(page.getByRole("dialog", { name: "Повторить работу" })).toBeVisible();
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog).toBeVisible();
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "ref.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
   await expect.poll(() => quote?.source_image_url).toBe(new URL(boundPreview(0), page.url()).href);
 });
 
@@ -951,7 +987,8 @@ for (const restored of ["available", "expired", "legacy", "missing", "default"] 
     let previews = [0, 1, 2].map(index => boundPreview(index));
     let available = new Set(["a".repeat(64), "b".repeat(64), "c".repeat(64)]);
     await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [{
-      ...feedItems[0], result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
+      ...feedItems[0], source_image_recipe_available: true,
+      result_url: "", result_urls: [], preview_url: previews[0], preview_urls: previews,
     }] }));
     const quoteBodies: Record<string, unknown>[] = [];
     await page.route("**/api/v1/feed/201/remix/quote", route => {

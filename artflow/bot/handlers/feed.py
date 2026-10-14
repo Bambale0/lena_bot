@@ -473,10 +473,14 @@ async def cb_feed_use(
         await safe_answer_callback(call)
         return
 
-    original_recipe = gen.model in IMAGE_CAPS and feed_image_original_recipe_allowed(
+    original_recipe = feed_image_original_recipe_allowed(
         gen, user_id=db_user.id, model_key=gen.model,
         enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
     )
+    if gen.user_id != db_user.id and not original_recipe:
+        await call.message.answer("Повтор по промпту автора временно недоступен; поцелуи не списаны.")  # type: ignore[union-attr]
+        await safe_answer_callback(call)
+        return
     creator = feed_image_recipe_source_parameters(gen) if original_recipe else {}
     await state.set_state(PromptUseFSM.model_select)
     await state.update_data(

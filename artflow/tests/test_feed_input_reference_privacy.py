@@ -216,7 +216,7 @@ async def test_publishing_keeps_owner_internal_repeat_inputs(published_work, mon
     assert json.loads(work.image_session.reference_urls) == INPUT_REFS
 
 
-async def test_public_repeat_uses_selected_generated_output_not_author_inputs(published_work, monkeypatch):
+async def test_public_repeat_uses_reader_photo_and_creator_prompt_not_author_inputs(published_work, monkeypatch):
     work = published_work
     work.viewer = work.reader
     monkeypatch.setattr(repo, "resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4)))
@@ -225,14 +225,22 @@ async def test_public_repeat_uses_selected_generated_output_not_author_inputs(pu
     monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
     generate = AsyncMock(return_value=SimpleNamespace(task_id="synthetic-remix-task", is_async=True))
     monkeypatch.setattr(miniapp_routes.image_service, "generate_image", generate)
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value=(
+        "Use only the reader's uploaded image as the source of facial identity and preserve its distinctive features."
+    )))
 
     response = await work.client.post("/api/v1/feed/77/remix", json={
         "model": "nano-banana-pro", "mode": "image", "quality": "2K",
-        "source_image_url": OUTPUTS[1], "change_request": "Make the background blue",
+        "source_image_url": OUTPUTS[1], "image_url": "https://reader.example.test/portrait.jpg",
+        "reference_urls": ["https://reader.example.test/portrait.jpg", "https://reader.example.test/profile.jpg"],
+        "change_request": "Make the background blue",
     })
     assert response.status_code == 202, response.text
-    assert generate.await_args.kwargs["image_url"] == OUTPUTS[1]
-    assert SECRET_PROMPT not in generate.await_args.args[1]
+    assert generate.await_args.kwargs["image_url"] == [
+        "https://reader.example.test/portrait.jpg", "https://reader.example.test/profile.jpg",
+    ]
+    assert SECRET_PROMPT in generate.await_args.args[1]
+    assert OUTPUTS[1] not in str(generate.await_args)
     assert_no_inputs(response.json())
     assert json.loads(work.image_session.reference_urls) == INPUT_REFS
 

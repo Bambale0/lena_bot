@@ -145,25 +145,18 @@ def feed_image_original_recipe_allowed(
     if not getattr(source, "is_public_feed", False):
         return False
     same_owner = getattr(source, "user_id", None) == user_id
-    if same_owner and not (model_key == "nano-banana-2.1" and getattr(source, "source_feed_gen_id", None)):
+    if same_owner and not getattr(source, "source_feed_gen_id", None):
         return False
     kind = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
     if kind != "image":
         return False
-    # This branch deliberately covers only the installed image request family.
-    # Midjourney and video have separate contracts.
+    # Callers check the selected provider's prompt + image contract. Eligibility
+    # depends on the public source, not which compatible image model was picked.
     if not isinstance(model_key, str) or not model_key:
         return False
     if not str(getattr(source, "prompt", "") or "").strip():
         return False
-    if model_key == "nano-banana-2.1":
-        # This provider receives the recipe and reader references for every
-        # public photo repeat, including older and derived feed posts.
-        return True
-    if getattr(source, "source_feed_gen_id", None):
-        return False
-    params = _feed_source_input_params(source)
-    return params is not None and isinstance(params.get("reference_images"), list)
+    return True
 
 
 async def resolve_feed_image_recipe_origin(source, public_lookup):
@@ -507,6 +500,40 @@ def trusted_feed_image_recipe_instruction(
             or not isinstance(prompt, str) or not prompt.endswith(f"\n\n{instruction}")):
         return None
     return instruction
+
+
+def trusted_feed_image_legacy_changes(
+    generation, *, user_id: int, source_generation_id: int,
+) -> str | None:
+    """Recover only the reader's suffix from a verified pre-recipe image repeat."""
+    context = _trusted_feed_context(
+        generation, user_id=user_id, source_generation_id=source_generation_id,
+    )
+    if context is None or context["version"] == FEED_IMAGE_RECIPE_CONTEXT_VERSION:
+        return None
+    prompt = context["prompt"]
+    headers = (
+        [_IMAGE_HEADERS[context["header_family"]]]
+        if context["version"] == FEED_IMAGE_REMIX_CONTEXT_VERSION
+        else [_LEGACY_SOURCE_FIRST_PROMPT, _USER_FIRST_SOURCE_LAST_PROMPT]
+    )
+    for header in headers:
+        if prompt == header:
+            return ""
+        if prompt.startswith(header + "\n\n"):
+            return prompt[len(header) + 2:].strip()
+    return None
+
+
+def feed_image_recipe_claimed(generation) -> bool:
+    """A saved v4 marker must validate before another paid continuation."""
+    params = _feed_source_input_params(generation) if generation is not None else None
+    context = params.get(FEED_REMIX_CONTEXT_KEY) if params else None
+    return (
+        isinstance(context, dict)
+        and type(context.get("version")) is int
+        and context["version"] == FEED_IMAGE_RECIPE_CONTEXT_VERSION
+    )
 
 
 def trusted_feed_image_scene(

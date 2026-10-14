@@ -139,17 +139,21 @@ async def test_single_ref_model_uses_legacy_flow() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch) -> None:
+@pytest.mark.parametrize("stale_state_user_id", [42, 99])
+async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch, stale_state_user_id) -> None:
     monkeypatch.setattr(repeat_reference_marketplace.repo, "get_public_feed_generation", AsyncMock(return_value=SimpleNamespace(
-        id=77, gen_type="image", result_url="https://example.test/source.jpg", result_urls=None,
+        id=77, user_id=99, is_public_feed=True, prompt="hidden feed prompt", gen_type="image",
+        result_url="https://example.test/source.jpg", result_urls=None,
     )))
     state = FakeState(
         {
             "feed_use_prompt": "hidden feed prompt",
             "feed_use_gen_id": 77,
-            "use_model_key": "test/multi-ref",
+            "feed_use_user_id": stale_state_user_id,
+            "feed_original_recipe_replay": True,
+            "use_model_key": "nano-banana-pro",
             "prompt_multi_ref_file_ids": ["ref-1", "ref-2", "ref-3"],
-            "prompt_multi_ref_max": 5,
+            "prompt_multi_ref_max": 4,
         }
     )
     call = SimpleNamespace(message=SimpleNamespace(answer=AsyncMock()), answer=AsyncMock())
@@ -214,13 +218,15 @@ async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", ["nano-banana-pro", "nano-banana-2"])
 @pytest.mark.parametrize("available", [False, True])
-async def test_marketplace_run_checks_canonical_source_before_session_or_state_mutation(monkeypatch, model, available):
+async def test_marketplace_run_uses_recipe_without_canonical_scene(monkeypatch, model, available):
     from db.models import GenerationType
 
     source_url = "https://example.test/expired-source.jpg"
-    source = SimpleNamespace(id=77, gen_type=GenerationType.image, result_url=source_url, result_urls=None)
+    source = SimpleNamespace(id=77, user_id=99, is_public_feed=True, prompt="hidden feed prompt",
+                             gen_type=GenerationType.image, result_url=source_url, result_urls=None)
     data = {
         "feed_use_prompt": "hidden feed prompt", "feed_use_gen_id": 77,
+        "feed_use_user_id": 42, "feed_original_recipe_replay": True,
         "use_model_key": model, "prompt_multi_ref_file_ids": ["identity-file"],
         "image_session_id": 123,
     }
@@ -240,14 +246,7 @@ async def test_marketplace_run_checks_canonical_source_before_session_or_state_m
     monkeypatch.setattr(image_gen, "_launch_session_generation", launch)
     call = SimpleNamespace(message=SimpleNamespace(answer=AsyncMock()), answer=AsyncMock())
     await repeat_reference_marketplace._run(call, AsyncMock(), SimpleNamespace(id=42, credits=100), state, AsyncMock())
-    if available:
-        create.assert_awaited_once()
-        launch.assert_awaited_once()
-        assert launch.await_args.kwargs["reference_url"] == ["https://example.test/identity.jpg"]
-    else:
-        create.assert_not_awaited()
-        archive.assert_not_awaited()
-        launch.assert_not_awaited()
-        assert state.data == data
-        assert state.state == "previous-accepted-state"
-        assert call.answer.await_args.kwargs["show_alert"] is True
+    create.assert_awaited_once()
+    launch.assert_awaited_once()
+    assert launch.await_args.kwargs["reference_url"] == ["https://example.test/identity.jpg"]
+    assert source_url not in str(launch.await_args)

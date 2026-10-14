@@ -47,7 +47,8 @@ def costs(keys, gen_type):
 
 async def enter_feed(monkeypatch, state, gen_type, model_costs):
     source = SimpleNamespace(id=77, user_id=99, prompt="private author prompt", model=SEEDANCE,
-                             gen_type=gen_type, result_url=SOURCE_VIDEO, result_urls=None)
+                             gen_type=gen_type, result_url=SOURCE_VIDEO, result_urls=None,
+                             is_public_feed=True)
     monkeypatch.setattr(feed.repo, "get_public_feed_generation", AsyncMock(return_value=source))
     monkeypatch.setattr(feed.repo, "get_all_model_costs", AsyncMock(return_value=model_costs))
     call = make_callback(data="feed:use:77")
@@ -118,7 +119,7 @@ async def test_forged_incompatible_video_model_is_rejected_before_picker_state_c
 
 
 @pytest.mark.asyncio
-async def test_image_feed_entry_reserves_source_slot_through_collection_and_submission(monkeypatch, state):
+async def test_image_feed_entry_uses_all_slots_for_reader_photos(monkeypatch, state):
     monkeypatch.setattr(refs.image_gen, "_telegram_file_url", AsyncMock(
         side_effect=lambda bot, file_id: f"https://example.test/{file_id}.jpg",
     ))
@@ -127,11 +128,11 @@ async def test_image_feed_entry_reserves_source_slot_through_collection_and_subm
     items = costs(["test/single", "test/two"], GenerationType.image)
     entry = await enter_feed(monkeypatch, state, GenerationType.image, items)
     offered = callbacks(entry.message.answer.await_args.kwargs["reply_markup"])
-    assert "prompt_pick_model:77:test/single" not in offered
+    assert "prompt_pick_model:77:test/single" in offered
     assert "prompt_pick_model:77:test/two" in offered
     picker = make_callback(data="prompt_pick_model:77:test/two")
     await marketplace.cb_prompt_pick_model(picker, state)
-    assert (await state.get_data())["prompt_multi_ref_max"] == 1
+    assert (await state.get_data())["prompt_multi_ref_max"] == 2
     monkeypatch.setattr(refs.image_gen, "_supports_img2img", lambda key: True)
     legacy = AsyncMock()
     monkeypatch.setattr(marketplace, "fsm_prompt_use_reference", legacy)
@@ -139,7 +140,7 @@ async def test_image_feed_entry_reserves_source_slot_through_collection_and_subm
     for file_id in ["first", "excess"]:
         message = SimpleNamespace(photo=[SimpleNamespace(file_id=file_id, file_size=100)], answer=AsyncMock())
         await refs._collect_prompt_reference(message, AsyncMock(), user, state, AsyncMock())
-    assert (await state.get_data())["prompt_multi_ref_file_ids"] == ["first"]
+    assert (await state.get_data())["prompt_multi_ref_file_ids"] == ["first", "excess"]
     legacy.assert_not_awaited()
     monkeypatch.setattr(refs, "mirror_telegram_file", AsyncMock(return_value="https://example.test/user.jpg"))
     monkeypatch.setattr(refs.repo, "resolve_image_model_cost", AsyncMock(return_value=items[1]))
@@ -222,7 +223,7 @@ async def test_feed_overfull_stale_reference_state_resolves_before_rejecting_wit
     monkeypatch.setattr(refs.image_gen, "_launch_session_generation", launch)
     call = make_callback(data="prompt_multi_ref:run")
     await refs._run(call, AsyncMock(), SimpleNamespace(id=2), state, AsyncMock())
-    assert mirror.await_count == 2
+    mirror.assert_not_awaited()
     create.assert_not_awaited()
     charge.assert_not_awaited()
     use_prompt.assert_not_awaited()

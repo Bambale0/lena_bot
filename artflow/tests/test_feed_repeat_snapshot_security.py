@@ -82,7 +82,7 @@ async def test_confirm_forwards_explicit_user_edit_and_creates_no_secret_session
     state = State(
         repeat_source_generation_id=42, repeat_raw_task_id="42", repeat_confirm_key="safe-key",
         repeat_prompt="make the coat white", repeat_feed_change_request="make the coat white",
-        repeat_source_feed_gen_id=77, repeat_reference_images=[], repeat_quality="2K",
+        repeat_source_feed_gen_id=77, repeat_reference_images=["https://example.test/reader.jpg"], repeat_quality="2K",
     )
     create_session = AsyncMock(return_value=SimpleNamespace(id=123))
     launch = AsyncMock(return_value=True)
@@ -90,7 +90,7 @@ async def test_confirm_forwards_explicit_user_edit_and_creates_no_secret_session
     monkeypatch.setattr(repeat_safe.repo, "create_image_session", create_session)
     public_source = SimpleNamespace(
         id=77, user_id=99, gen_type=GenerationType.image, prompt=SECRET,
-        result_url="https://example.test/source.jpg", result_urls=None,
+        result_url="https://example.test/source.jpg", result_urls=None, is_public_feed=True,
     )
     monkeypatch.setattr(repeat_safe.repo, "get_public_feed_generation", AsyncMock(
         return_value=public_source if source_available else None,

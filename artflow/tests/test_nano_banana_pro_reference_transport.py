@@ -47,6 +47,9 @@ async def nexus_posts(monkeypatch):
 
 @pytest.fixture
 def local_launch(monkeypatch):
+    identity_instruction = "Use only the reader's reference photos for the subject's identity. " * 3
+    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value=identity_instruction))
+    monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=identity_instruction))
     created_sessions = []
     generation = SimpleNamespace(
         id=99, user_id=42, gen_type=GenerationType.image, model="nano-banana-pro", prompt="own prompt",
@@ -221,7 +224,7 @@ async def test_pro_five_distinct_browser_refs_fail_before_charge(local_launch, n
 
 
 @pytest.mark.parametrize("surface", ["web", "miniapp"])
-async def test_pro_feed_repeat_serializes_author_scene_first_without_author_prompt(local_launch, nexus_posts, surface):
+async def test_pro_feed_repeat_serializes_creator_prompt_with_reader_refs_only(local_launch, nexus_posts, surface):
     launch = local_launch
     result = await miniapp_routes.remix_feed_post(
         77, miniapp_routes.FeedRemixRequest(
@@ -231,8 +234,8 @@ async def test_pro_feed_repeat_serializes_author_scene_first_without_author_prom
         session=launch.session, user=launch.user, surface=surface,
     )
     assert nexus_posts[0]["params"]["model_name"] == "nano-banana-pro"
-    assert nexus_posts[0]["params"]["image_urls"] == [SOURCE, *REFS]
-    assert SECRET not in nexus_posts[0]["params"]["prompt"]
+    assert nexus_posts[0]["params"]["image_urls"] == REFS
+    assert SECRET in nexus_posts[0]["params"]["prompt"]
     assert SECRET not in str(result)
 
 
@@ -332,7 +335,7 @@ async def test_pro_legacy_reference_confirmation_persists_full_set(local_launch,
     assert nexus_posts[-1]["params"]["image_urls"] == expected
 
 
-async def test_pro_protected_feed_clone_keeps_order_and_excludes_author_prompt(local_launch, nexus_posts, monkeypatch):
+async def test_pro_protected_feed_clone_sends_creator_prompt_and_reader_refs(local_launch, nexus_posts, monkeypatch):
     launch = local_launch
     old = await repo.create_image_session(
         launch.session, launch.user.id, "nano-banana-pro", "image", "9:16", "2K", 1,
@@ -349,9 +352,9 @@ async def test_pro_protected_feed_clone_keeps_order_and_excludes_author_prompt(l
         SimpleNamespace(data="regen:image:99", message=AsyncMock(), answer=AsyncMock()),
         launch.session, mutable_state()[0], launch.user, AsyncMock(),
     )
-    assert nexus_posts[0]["params"]["image_urls"] == [SOURCE, *REFS]
-    assert SECRET not in nexus_posts[0]["params"]["prompt"]
-    assert SECRET not in repo.create_generation.await_args.args[4]
+    assert nexus_posts[0]["params"]["image_urls"] == REFS
+    assert SECRET in nexus_posts[0]["params"]["prompt"]
+    assert SECRET in repo.create_generation.await_args.args[4]
     assert launch.created_sessions[-1].base_prompt is None
 
 
@@ -425,9 +428,9 @@ async def test_pro_existing_mixed_session_keeps_public_and_telegram_refs_through
     )
     assert handled is True
     await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
-    expected = [SOURCE, *REFS] if protected else REFS
+    expected = REFS
     assert nexus_posts[0]["params"]["image_urls"] == expected
-    assert SECRET not in nexus_posts[0]["params"]["prompt"]
+    assert (SECRET in nexus_posts[0]["params"]["prompt"]) is protected
     copied = launch.created_sessions[-1]
     assert not copied.reference_file_ids  # Mixed sets persist as one ordered URL list.
     assert set(json.loads(copied.reference_urls)) == set(expected)
@@ -439,7 +442,7 @@ async def test_pro_existing_mixed_session_keeps_public_and_telegram_refs_through
     )
     await repeat_references._repeat_refs_run(call, launch.session, state, launch.user, AsyncMock())
     assert nexus_posts[1]["params"]["image_urls"] == expected
-    assert SECRET not in nexus_posts[1]["params"]["prompt"]
+    assert (SECRET in nexus_posts[1]["params"]["prompt"]) is protected
 
 
 @pytest.mark.parametrize("state_kind", ["synced", "replacement", "other_session"])
@@ -1448,6 +1451,13 @@ async def test_clone_retry_accepts_exact_cap_and_source_file_aliases(local_launc
 
     repo.archive_active_image_sessions.reset_mock()
     await invoke()
+    if protected:
+        # A historical source alias does not consume a reader photo slot.
+        assert len(image_provider_posts) == 1
+        inp = image_provider_posts[0]["params"] if model == "nano-banana-pro" else image_provider_posts[0]["input"]
+        assert (inp["image_urls"] if model == "nano-banana-pro" else [inp["image_url"]]) == refs
+        assert SECRET in inp["prompt"]
+        return
     assert data == before
     assert len(launch.created_sessions) == 1
     repo.archive_active_image_sessions.assert_not_awaited()
@@ -1567,9 +1577,8 @@ async def test_text_only_protected_exact_repeat_does_not_count_unconsumed_source
     else:
         call.data = "feed:again:99"
         await feed.cb_feed_again(call, launch.session, launch.user, state, call.bot)
-    assert len(image_provider_posts) == 1
-    assert "image_url" not in image_provider_posts[0]["input"]
-    assert "image_urls" not in image_provider_posts[0]["input"]
+    assert image_provider_posts == []
+    repo.charge_image_generation.assert_not_awaited()
     assert launch.created_sessions[-1].base_prompt is None
     assert SECRET not in str(call.message.answer.call_args_list)
 

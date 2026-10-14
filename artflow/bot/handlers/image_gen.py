@@ -72,6 +72,7 @@ from core.feed_remix_prompt import (
     build_feed_image_recipe_prompt,
     build_owned_feed_image_prompt,
     feed_image_original_recipe_allowed,
+    feed_image_recipe_claimed,
     feed_image_recipe_context,
     feed_image_recipe_source_parameters,
     feed_image_remix_context,
@@ -81,6 +82,7 @@ from core.feed_remix_prompt import (
     order_feed_image_references,
     owned_generation_prompt_is_visible,
     resolve_feed_image_recipe_origin,
+    trusted_feed_image_legacy_changes,
     trusted_feed_image_prompt,
     trusted_feed_image_recipe_instruction,
     trusted_feed_image_recipe_prompt,
@@ -626,18 +628,23 @@ async def _accept_generation_reference_candidate(
             if feed_source is None or getattr(feed_source, "id", None) != external_source_id:
                 raise legacy_feed_edit_unavailable()
             previous = await repo.get_generation_by_id(session, parent_generation_id) if parent_generation_id else None
+            scene_marker = trusted_feed_image_scene(
+                previous, user_id=db_user.id, source_generation_id=external_source_id,
+            )
             identities = feed_identity_references(feed_source, refs)
-            original_recipe = model_key in IMAGE_CAPS and feed_image_original_recipe_allowed(
+            original_recipe = not (scene_marker and scene_marker[0] != external_source_id) and model_key in IMAGE_CAPS and feed_image_original_recipe_allowed(
                 feed_source, user_id=db_user.id, model_key=model_key,
                 enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
             ) and bool(identities)
             if original_recipe:
                 refs = identities
-            else:
+            elif scene_marker and scene_marker[0] != external_source_id:
                 _, selected, identities = await _resolve_feed_image_scene(
                     session=session, db_user=db_user, source=feed_source, references=refs, previous=previous,
                 )
                 refs = order_feed_image_references(selected, identities, source_first=True)
+            else:
+                raise FeedRemixUnavailable("Повтор по промпту автора временно недоступен; поцелуи не списаны.")
         if any(not public_url_is_available(url) for url in refs):
             raise FeedRemixUnavailable("Часть сохранённых фото недоступна. Загрузи их заново; поцелуи не списаны.")
     except FeedRemixUnavailable as exc:
@@ -1249,20 +1256,36 @@ async def _launch_session_generation(
         refs = [reference_url] if isinstance(reference_url, str) else list(reference_url or [])
         source_url = selected_feed_source_url(source, refs) if source_type == "image" else None
         identity_refs = feed_identity_references(source, refs)
-        fixed_composition = edit_parent is not None
-        if source_type == "image" and image_session.model == "nano-banana-2.1" and not identity_refs:
+        fixed_composition = (
+            edit_parent is not None
+            and getattr(edit_parent, "id", None) != source_feed_gen_id
+            and getattr(edit_parent, "user_id", None) == db_user.id
+        )
+        previous_scene = (
+            await repo.get_generation_by_id(session, parent_generation_id)
+            if parent_generation_id and parent_generation_id != source_feed_gen_id else None
+        )
+        scene_marker = trusted_feed_image_scene(
+            previous_scene, user_id=db_user.id, source_generation_id=source_feed_gen_id,
+        )
+        owned_derived_scene = bool(scene_marker and scene_marker[0] != source_feed_gen_id)
+        if source_type == "image" and not own_recipe and not _supports_img2img(image_session.model):
+            await source_message.answer("Эта модель не поддерживает повтор по промпту и фото; поцелуи не списаны.")
+            return False
+        if source_type == "image" and not own_recipe and not fixed_composition and not owned_derived_scene and not identity_refs:
             await source_message.answer("Для повтора фото из ленты загрузи своё фото; поцелуи не списаны.")
             return False
         original_recipe_replay = bool(
             (not fixed_composition or image_session.model == "nano-banana-2.1")
+            and not owned_derived_scene
             and identity_refs and image_session.model in IMAGE_CAPS
             and feed_image_original_recipe_allowed(
                 source, user_id=db_user.id, model_key=image_session.model,
                 enabled=settings.FEED_ORIGINAL_RECIPE_ENABLED,
             )
         )
-        if (source_type == "image" and image_session.model == "nano-banana-2.1"
-                and not own_recipe and not original_recipe_replay):
+        if (source_type == "image" and not own_recipe and not original_recipe_replay
+                and not fixed_composition and not owned_derived_scene):
             await source_message.answer("Повтор по промпту автора временно недоступен; поцелуи не списаны.")
             return False
         if original_recipe_replay:
@@ -1275,6 +1298,9 @@ async def _launch_session_generation(
             identity_refs = feed_identity_references(recipe_source, identity_refs)
             if not identity_refs:
                 await source_message.answer("Для повтора фото из ленты загрузи своё фото; поцелуи не списаны.")
+                return False
+            if any(not public_url_is_available(ref) for ref in identity_refs):
+                await source_message.answer("Часть твоих фото недоступна. Загрузи их заново; поцелуи не списаны.")
                 return False
             creator = feed_image_recipe_source_parameters(recipe_source)
             if len(identity_refs) < creator["required_images"]:
@@ -1293,13 +1319,22 @@ async def _launch_session_generation(
             inherited = trusted_feed_image_recipe_prompt(
                 previous, user_id=db_user.id, source_generation_id=source.id,
             )
+            if feed_image_recipe_claimed(previous) and inherited is None:
+                await source_message.answer(str(legacy_feed_edit_unavailable()))
+                return False
             previous_instruction = trusted_feed_image_recipe_instruction(
                 previous, user_id=db_user.id, source_generation_id=source.id,
             )
+            legacy_changes = (
+                trusted_feed_image_legacy_changes(
+                    previous, user_id=db_user.id, source_generation_id=source.id,
+                ) if inherited is None else None
+            )
+            changes = "\n\n".join(part for part in (legacy_changes, feed_change_request) if part)
             recipe_identity_instruction = await get_feed_recipe_identity_instruction(session)
             prompt = build_feed_image_recipe_prompt(
                 inherited or str(recipe_source.prompt or ""), recipe_identity_instruction,
-                feed_change_request or "", previous_instruction=previous_instruction,
+                changes, previous_instruction=previous_instruction,
             )
             state_data = await state.get_data()
             explicitly_selected = isinstance(state_data, dict) and (
