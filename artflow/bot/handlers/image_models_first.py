@@ -29,6 +29,11 @@ def _model_list_kb(model_costs: list, *, back_text: str, back_callback: str) -> 
     markup = image_models_kb(model_costs)
     rows = [list(row) for row in markup.inline_keyboard]
     if rows:
+        # This router owns the live menu:image entrypoint. Give new users a
+        # route to the existing Nana Banano quick composer and its quality chips.
+        rows.insert(-1, [InlineKeyboardButton(
+            text="🍌 nana banano · быстрый режим", callback_data="img_scn:fast",
+        )])
         rows[-1] = [InlineKeyboardButton(text=back_text, callback_data=back_callback)]
     else:
         rows = [[InlineKeyboardButton(text=back_text, callback_data=back_callback)]]

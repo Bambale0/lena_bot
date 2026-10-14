@@ -20,45 +20,51 @@ def test_image_fast_start_is_renamed_to_nana_banano() -> None:
     assert buttons[0].callback_data == "img_scn:fast"
 
 
-def test_nana_banano_keyboard_has_four_buttons_with_pro_default() -> None:
+def test_nana_banano_keyboard_shows_models_and_pro_quality_choices() -> None:
     buttons = _buttons(image_nana_banano_kb())
-    assert len(buttons) == 4
     assert buttons[0].text == "✅ Pro"
     assert buttons[0].callback_data == "img_nb:model:nano-banana-pro"
     assert buttons[1].text == "Banana 2"
     assert buttons[1].callback_data == "img_nb:model:nano-banana-2"
-    assert buttons[3].callback_data == "menu:image"
+    assert buttons[2].callback_data == "img_nb:model:nano-banana-2.1"
+    assert buttons[3].callback_data == "img_nb:model:nano-banana-pro-vip"
+    assert buttons[4].callback_data == "img_nb:quality:nano-banana-pro:2K"
+    assert buttons[5].callback_data == "img_nb:quality:nano-banana-pro:4K"
+    assert buttons[6].callback_data == "img_nb:refs"
+    assert buttons[7].callback_data == "menu:image"
 
 
-def test_image_entry_keeps_full_scenario_menu() -> None:
+def test_image_entry_uses_active_model_composer() -> None:
     render = render_image_scenarios()
     buttons = _buttons(render.reply_markup)
-    assert "Выбери сценарий" in render.text
-    assert buttons[0].text == "🍌 nana banano"
-    assert buttons[1].text == "🖼️ Из фото в новую версию"
-    assert buttons[2].text == "📸 Фото → промпт"
-    assert buttons[2].callback_data == "img:photo2prompt"
-    assert buttons[3].text == "🧠 Все нейросети"
+    assert "Seedream 5 Pro" in render.text
+    assert "Качество: 1K" in render.text
+    assert buttons  # The image entry uses the active composer, not the old scenario menu.
 
 
 @pytest.mark.asyncio
 async def test_prompt_input_photo_adds_reference_inside_nana_banano_menu() -> None:
     message = SimpleNamespace(
         photo=[SimpleNamespace(file_size=10, file_id="ref_1")],
-        answer=AsyncMock(),
+        caption=None, answer=AsyncMock(),
     )
     state = AsyncMock()
     state.get_data = AsyncMock(
         return_value={
             "nana_banano_flow": True,
             "model_key": "nano-banana-pro",
+            "quality": "4K",
             "ref_file_ids": [],
         }
     )
-
-    await image_gen.handle_prompt_reference_upload(message, state)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(image_gen, "_accept_reference_candidate", AsyncMock(return_value=1))
+        await image_gen.handle_prompt_reference_upload(
+            message, state, AsyncMock(), SimpleNamespace(id=42), AsyncMock(),
+        )
 
     state.update_data.assert_awaited_once_with(
+        image_session_id=None,
         image_file_id="ref_1",
         ref_file_ids=["ref_1"],
         mode="image",
@@ -66,8 +72,9 @@ async def test_prompt_input_photo_adds_reference_inside_nana_banano_menu() -> No
     )
     markup = message.answer.await_args.kwargs["reply_markup"]
     buttons = _buttons(markup)
-    assert len(buttons) == 4
-    assert buttons[2].text == "📎 Референсы: 1"
+    assert next(button for button in buttons
+                if button.callback_data == "img_nb:quality:nano-banana-pro:4K").text.startswith("✅ ")
+    assert next(button for button in buttons if button.callback_data == "img_nb:refs").text == "📎 Референсы: 1"
 
 
 @pytest.mark.asyncio
