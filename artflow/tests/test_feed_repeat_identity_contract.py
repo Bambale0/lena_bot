@@ -166,6 +166,28 @@ def test_recipe_continuation_keeps_one_identity_rule_after_scene_change():
     assert continued.index("Add a silver bat crown") < continued.index("Reference identity priority:")
 
 
+def test_recipe_continuation_unwraps_previous_policy_wording():
+    creator = "Gothic forest portrait."
+    previous = (
+        prompt_core._IMAGE_RECIPE_SCENE_PREFIX + creator
+        + "\n\nReference identity priority: Previous policy wording."
+    )
+    continued = prompt_core.build_feed_image_recipe_prompt(previous, "Add a silver bat crown")
+    assert_recipe_identity_priority(continued, creator)
+    assert "Previous policy wording" not in continued
+    assert continued.count("Reference identity priority:") == 1
+
+
+def test_recipe_reader_appearance_edit_is_explicitly_authoritative():
+    prompt = prompt_core.build_feed_image_recipe_prompt(
+        "A black-haired woman in a monochrome forest.",
+        "Make my hair blue and the cloak red.",
+    )
+    assert "Make my hair blue and the cloak red." in prompt
+    assert "reader's explicit changes" in prompt.lower()
+    assert "creator recipe" in prompt.lower()
+
+
 @pytest.mark.parametrize("surface", ["web", "miniapp"])
 @pytest.mark.parametrize("model", MODELS)
 async def test_ksu_style_feed_recipe_replaces_author_refs_and_preserves_settings(
