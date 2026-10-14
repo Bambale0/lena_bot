@@ -200,10 +200,10 @@ def feed_image_recipe_source_parameters(source) -> dict:
 
 
 def build_feed_image_recipe_prompt(
-    source_prompt: str, identity_instruction: str, change_request: str = "",
+    source_prompt: str, change_request: str = "",
     *, previous_instruction: str | None = None,
 ) -> str:
-    """Keep the creator's recipe while assigning facial identity to reader media."""
+    """Replay the creator's text as on October 1; unwrap older saved policies."""
     prompt = str(source_prompt or "").strip()
     if prompt.startswith(_IMAGE_RECIPE_SCENE_PREFIX) and _IMAGE_RECIPE_IDENTITY_MARKER in prompt:
         prompt = prompt[len(_IMAGE_RECIPE_SCENE_PREFIX):].rsplit(_IMAGE_RECIPE_IDENTITY_MARKER, 1)[0]
@@ -232,12 +232,7 @@ def build_feed_image_recipe_prompt(
     change = str(change_request or "").strip()
     if change:
         prompt = f"{prompt}\n\nИзменения, которые запросил пользователь для повтора: {change}"
-    instruction = identity_instruction.strip()
-    return (
-        f"{_IMAGE_RECIPE_RELATIONSHIP_PREFIX}"
-        f"{_IMAGE_RECIPE_SCENE_LABEL}{prompt}"
-        f"{_IMAGE_RECIPE_POLICY_SUFFIX}{instruction}"
-    )
+    return prompt
 
 
 def feed_image_recipe_context(
@@ -272,15 +267,9 @@ def build_feed_image_prompt(
     return f"{header}\n\n{change}" if change else header
 
 
-def build_owned_feed_image_prompt(source_prompt: str, change_request: str, *, has_user_references: bool) -> str:
+def build_owned_feed_image_prompt(source_prompt: str, change_request: str) -> str:
     """Only callers with affirmative server-authenticated recipe permission may use this."""
     prompt = str(source_prompt or "").strip()
-    if has_user_references:
-        prompt += (
-            "\n\nAll supplied images are the user's identity references. "
-            "Use ALL of them as the EXCLUSIVE source of face and identity. "
-            "The user's identity takes priority over any person described in the scenario."
-        )
     change = str(change_request or "").strip()
     return f"{prompt}\n\n{change}" if change else prompt
 

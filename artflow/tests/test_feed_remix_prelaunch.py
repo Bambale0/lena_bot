@@ -95,7 +95,6 @@ async def test_feed_remix_quote_prices_variants_and_count_without_spending(clien
     monkeypatch.setattr(miniapp_routes.repo, "resolve_image_model_cost", cost)
     monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
     monkeypatch.setattr(miniapp_routes.repo, "charge_image_generation", charge)
-    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value="Use only the reader photo as the source of identity and keep its distinctive face features."))
     monkeypatch.setattr(miniapp_routes.repo, "get_active_price_plans", AsyncMock(return_value=[
         SimpleNamespace(key="starter", label="Старт", credits=10, price_rub=100)
     ]))
@@ -163,7 +162,6 @@ async def test_edit_is_applied_on_first_paid_image_repeat_without_revealing_auth
     monkeypatch.setattr(miniapp_routes.repo, "update_generation_task", AsyncMock())
     monkeypatch.setattr(miniapp_routes.repo, "increment_feed_share", AsyncMock())
     monkeypatch.setattr(miniapp_routes.image_service, "generate_image", image_generate)
-    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value="Use only the reader photo as the source of identity and keep its distinctive face features."))
 
     response = await client.post("/api/v1/feed/91/remix", json={
         "model": "nano-banana-2", "mode": "image", "count": 2,
@@ -254,7 +252,6 @@ async def test_midjourney_quote_and_submit_reject_same_invalid_inputs_before_cha
     )
     monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
     monkeypatch.setattr(miniapp_routes.repo, "get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=5, is_active=True)))
-    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value="Use only the reader photo as the source of identity and keep its distinctive face features."))
     monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
     plans = AsyncMock(return_value=[])
     charge = AsyncMock()
@@ -280,7 +277,6 @@ async def test_midjourney_quote_deduplicates_source_and_primary_reference(client
     monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
     monkeypatch.setattr(miniapp_routes.repo, "get_model_cost", AsyncMock(return_value=SimpleNamespace(credits=2, is_active=True)))
     monkeypatch.setattr(miniapp_routes.repo, "has_unlimited_image_model", AsyncMock(return_value=False))
-    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value="Use only the reader photo as the source of identity and keep its distinctive face features."))
     quote = await client.post("/api/v1/feed/88/remix/quote", json={
         "model": "midjourney-imagine", "image_url": "https://example.test/reader.png",
         "source_image_url": source_url, "reference_urls": [source_url, "https://example.test/reader.png"],

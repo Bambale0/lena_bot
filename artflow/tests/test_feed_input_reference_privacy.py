@@ -225,9 +225,6 @@ async def test_public_repeat_uses_reader_photo_and_creator_prompt_not_author_inp
     monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
     generate = AsyncMock(return_value=SimpleNamespace(task_id="synthetic-remix-task", is_async=True))
     monkeypatch.setattr(miniapp_routes.image_service, "generate_image", generate)
-    monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(return_value=(
-        "Use only the reader's uploaded image as the source of facial identity and preserve its distinctive features."
-    )))
 
     response = await work.client.post("/api/v1/feed/77/remix", json={
         "model": "nano-banana-pro", "mode": "image", "quality": "2K",

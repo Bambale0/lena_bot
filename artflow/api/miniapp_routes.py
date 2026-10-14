@@ -104,7 +104,6 @@ from bot.utils.telegram_images import (
     send_original_document_to_chat,
 )
 from core.config import TELEGRAM_STARS_CHECKOUT_ENABLED, settings
-from core.feed_recipe_identity_policy import get_feed_recipe_identity_instruction
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
@@ -3888,7 +3887,7 @@ def _prepare_feed_remix_inputs(
         elif image_repeat and own_recipe:
             if identity_refs and not supports_feed_source_media(caps, "image"):
                 raise FeedRemixUnavailable("Модель не поддерживает фото-референсы.")
-            prompt = build_owned_feed_image_prompt(source.prompt, body.change_request, has_user_references=bool(identity_refs))
+            prompt = build_owned_feed_image_prompt(source.prompt, body.change_request)
         elif image_repeat:
             prompt = build_feed_image_prompt(
                 body.change_request, has_user_references=bool(identity_refs),
@@ -4016,8 +4015,7 @@ async def quote_feed_remix(
         source, body, user_id=user.id, recipe_source=recipe_source,
     )
     if original_recipe_replay:
-        instruction = await get_feed_recipe_identity_instruction(session)
-        repeat_prompt = build_feed_image_recipe_prompt(repeat_prompt, instruction)
+        repeat_prompt = build_feed_image_recipe_prompt(repeat_prompt)
     gen_type: str
     count = 1
     edit_quote = {}
@@ -4139,17 +4137,15 @@ async def remix_feed_post(
     repeat_prompt, repeat_refs, body, personalized, own_recipe, original_recipe_replay = _prepare_feed_remix_inputs(
         source, body, user_id=user.id, recipe_source=recipe_source,
     )
-    recipe_identity_instruction = None
     if original_recipe_replay:
-        recipe_identity_instruction = await get_feed_recipe_identity_instruction(session)
-        repeat_prompt = build_feed_image_recipe_prompt(repeat_prompt, recipe_identity_instruction)
+        repeat_prompt = build_feed_image_recipe_prompt(repeat_prompt)
         logger.info(
             "feed_original_recipe_submit source_gen=%s user=%s model=%s references=%s",
             gen_id, user.id, body.model, len(repeat_refs),
         )
     feed_context = (
         {FEED_REMIX_CONTEXT_KEY: (
-            feed_image_recipe_context(gen_id, repeat_prompt, recipe_identity_instruction) if original_recipe_replay else
+            feed_image_recipe_context(gen_id, repeat_prompt) if original_recipe_replay else
             feed_image_remix_context(
                 gen_id, repeat_prompt,
                 source_image_url=(
