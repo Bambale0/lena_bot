@@ -3,11 +3,15 @@ name: 300 User Journey E2E
 on:
   pull_request:
     paths:
+      - "artflow/api/__init__.py"
+      - "artflow/api/feed_repeat_contract.py"
       - "artflow/webapp/**"
       - ".github/workflows/user-journeys-e2e.yml"
   push:
     branches: [main]
     paths:
+      - "artflow/api/__init__.py"
+      - "artflow/api/feed_repeat_contract.py"
       - "artflow/webapp/**"
       - ".github/workflows/user-journeys-e2e.yml"
   workflow_dispatch:
@@ -46,6 +50,9 @@ jobs:
 
       - name: Run exactly 300 user journeys
         run: npm run test:e2e:user-journeys
+
+      - name: Repeat modal deterministic regression
+        run: npx -y @playwright/test test tests/e2e/feed-remix-runner.spec.ts --project=Desktop
 
       - name: Upload Playwright failure artifacts
         if: failure()
