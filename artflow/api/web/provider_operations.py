@@ -172,13 +172,6 @@ async def start_provider_operation(
     user: WebUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ProviderOperationAccepted:
-    if contract_id not in PUBLIC_API_CONTRACT_IDS:
-        # Do not charge for providers that need a different source-aware
-        # billing and durable submission pipeline (currently Wan3).
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Provider operation not available; use the Studio video generator.",
-        )
     try:
         spec: OperationSpec = get_operation_spec(contract_id)
     except KeyError as exc:

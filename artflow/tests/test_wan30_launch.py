@@ -109,8 +109,8 @@ async def test_frontend_repeated_image_url_not_mistaken_for_two_frames():
     assert build_kie_wan30_payload(request)["input"]["first_frame_url"] == same
 
 
-def test_wan3_never_uses_generic_public_provider_operations_charger():
-    """That older gateway lacks the server-measured input-seconds contract."""
+def test_wan3_contracts_are_in_provider_inventory():
+    """The contract list includes both Wan3 modes for CI audit coverage."""
     from api.provider_contract_catalog import ALL_CONTRACTS
     from api.provider_operation_registry import PUBLIC_API_CONTRACT_IDS
 
@@ -118,4 +118,11 @@ def test_wan3_never_uses_generic_public_provider_operations_charger():
         "wan/3-0-video", "wan/3-0-video-prime",
     }}
     assert exposed == {"video.wan30", "video.wan30.prime"}
-    assert not exposed.intersection(PUBLIC_API_CONTRACT_IDS)
+    assert exposed <= PUBLIC_API_CONTRACT_IDS
+
+
+def test_unquoted_legacy_provider_operation_router_is_not_mounted():
+    from main import app
+
+    public_routes = {getattr(route, "path", "") for route in app.routes}
+    assert not any("/provider-operations/" in route for route in public_routes)
