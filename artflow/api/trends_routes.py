@@ -15,6 +15,7 @@ from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import (
     GenerationOut,
     ImageGenRequest,
+    PreSubmitRejection,
     VideoGenRequest,
     _normalize_image_request,
     create_image_generation,
@@ -51,7 +52,7 @@ from db.prompt_repository import (
     get_prompts_by_tag,
 )
 from db.session import get_session
-from db.trend_run_claims import get_claim, reserve_claim
+from db.trend_run_claims import get_claim, release_pre_submit_claim, reserve_claim
 
 router = APIRouter(prefix="/api/v1", tags=["trends"])
 logger = logging.getLogger(__name__)
@@ -211,6 +212,10 @@ def _trend_video_duration(model: str, settings_payload: dict[str, Any]) -> int:
     raw = settings_payload.get("duration")
     fallback = GEMINI_OMNI_DURATIONS[0] if model == GEMINI_OMNI_VIDEO_MODEL else 5
     duration = _safe_int(raw, fallback)
+    # Previously published Gemini trends stored the old five-second default.
+    # The provider adapter already interpreted that value as four seconds.
+    if model == GEMINI_OMNI_VIDEO_MODEL and duration == 5:
+        return GEMINI_OMNI_DURATIONS[0]
     if model == GEMINI_OMNI_VIDEO_MODEL and duration not in GEMINI_OMNI_DURATIONS:
         raise HTTPException(status_code=422, detail="Unsupported Gemini Omni trend duration")
     return duration
@@ -218,6 +223,8 @@ def _trend_video_duration(model: str, settings_payload: dict[str, Any]) -> int:
 
 def _validate_trend_video_settings(model: str, settings_payload: dict[str, Any]) -> None:
     if model == GEMINI_OMNI_VIDEO_MODEL:
+        if _safe_int(settings_payload.get("duration"), GEMINI_OMNI_DURATIONS[0]) == 5:
+            raise HTTPException(status_code=422, detail="Unsupported Gemini Omni trend duration")
         _trend_video_duration(model, settings_payload)
 
 
@@ -429,7 +436,6 @@ async def run_trend(
     asset_url = str(asset["url"])
 
     if kind == "video":
-        _validate_trend_video_settings(trend.model, settings_payload)
         request = VideoGenRequest(
             model=trend.model,
             prompt="Использовать скрытый трендовый промпт",
@@ -451,7 +457,10 @@ async def run_trend(
             ):
                 raise HTTPException(
                     status_code=409,
-                    detail="Цена тренда изменилась. Проверь стоимость и подтверди запуск.",
+                    detail={
+                        "code": "trend_quote_stale",
+                        "message": "Цена тренда изменилась. Проверь стоимость и подтверди запуск.",
+                    },
                 )
             request.quoted_credits = float(quote["cost_credits"])
     else:
@@ -486,6 +495,14 @@ async def run_trend(
             task = await create_image_generation(
                 body=request, session=session, user=user, surface="web"
             )
+    except PreSubmitRejection:
+        await session.rollback()
+        await release_pre_submit_claim(
+            session, user_id=user.id, request_key=body.idempotency_key,
+            request_hash=request_hash,
+        )
+        logger.info("Trend run rejected before submit trend=%s user=%s", trend_id, user.id)
+        raise
     except Exception as exc:
         await session.rollback()
         claim = await get_claim(session, user.id, body.idempotency_key)
@@ -716,7 +733,7 @@ async def admin_update_trend(
             prompt.tags = build_trend_tags(kind, merged_settings)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if kind == "video":
+    if kind == "video" and (body.model is not None or body.settings is not None):
         _validate_trend_video_settings(prompt.model, trend_settings(prompt))
     await session.commit()
     await session.refresh(prompt)

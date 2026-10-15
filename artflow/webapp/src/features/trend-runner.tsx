@@ -97,6 +97,12 @@ function initDataHeader(): string {
   }
 }
 
+class TrendApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+  }
+}
+
 async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = init.body;
   const isForm = body instanceof FormData;
@@ -110,13 +116,16 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!response.ok) {
     let message = `Ошибка API ${response.status}`;
+    let code: string | undefined;
     try {
       const payload = await response.json();
-      message = String(payload?.error?.message || payload?.detail || payload?.message || message);
+      const detail = payload?.detail;
+      code = typeof detail?.code === "string" ? detail.code : undefined;
+      message = String(payload?.error?.message || detail?.message || detail || payload?.message || message);
     } catch {
       // Keep fallback message.
     }
-    throw new Error(message);
+    throw new TrendApiError(message, response.status, code);
   }
   if (response.status === 204) return undefined as T;
   const payload = await response.json();
@@ -751,9 +760,14 @@ function TrendRunnerPortal() {
       const message = runError instanceof Error ? runError.message : "Не удалось запустить тренд";
       setError(message);
       setPhase("error");
+      if (runError instanceof TrendApiError && runError.code === "trend_quote_stale") {
+        await refreshCheckout(trend.id);
+        setPhase("idle");
+        return;
+      }
       toast.error(message);
     }
-  }, [checkout, genericBusy, resetRunner, trend]);
+  }, [checkout, genericBusy, refreshCheckout, resetRunner, trend]);
 
   const runPhoto = useCallback(async (file: File | undefined | null) => {
     if (!trend || !file || genericBusy) return;

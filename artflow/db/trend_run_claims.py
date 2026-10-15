@@ -47,3 +47,16 @@ async def reserve_claim(
         return existing, False
     await session.commit()
     return claim, True
+
+
+async def release_pre_submit_claim(
+    session: AsyncSession, *, user_id: int, request_key: str, request_hash: str,
+) -> None:
+    """Release only this request's unlinked claim after a proven pre-submit reject."""
+    claim = await get_claim(session, user_id, request_key)
+    if claim is None or claim.request_hash != request_hash or claim.generation_id is not None:
+        return
+    if claim.status != "running":
+        return
+    await session.delete(claim)
+    await session.commit()

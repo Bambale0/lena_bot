@@ -970,11 +970,22 @@ function TrendAdminForm({ imageModels, videoModels, onCreated, onNotice }) {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
   const models = kind === "video" ? (videoModels || []) : (imageModels || []);
+  const geminiDurations = useMemo(() => {
+    if (model !== "gemini-omni-video") return null;
+    const geminiModel = models.find((item) => item.key === model);
+    const configured = geminiModel?.durations || geminiModel?.duration_options || [];
+    const supported = configured.map(Number).filter((value) => [4, 6, 8, 10].includes(value));
+    return supported.length ? supported : [4, 6, 8, 10];
+  }, [model, models]);
 
   useEffect(() => {
     if (!models.length) { setModel(""); return; }
     if (!models.some((item) => item.key === model)) setModel(models[0].key);
   }, [kind, models, model]);
+
+  useEffect(() => {
+    if (geminiDurations && !geminiDurations.includes(Number(duration))) setDuration(geminiDurations[0]);
+  }, [model, duration, geminiDurations]);
 
   async function uploadPreview(event) {
     const file = event.target.files?.[0];
@@ -997,6 +1008,10 @@ function TrendAdminForm({ imageModels, videoModels, onCreated, onNotice }) {
 
   async function submit() {
     if (busy) return;
+    if (geminiDurations && !geminiDurations.includes(Number(duration))) {
+      onNotice?.({ type: "error", message: "Для Gemini Omni выбери допустимую длительность" });
+      return;
+    }
     setBusy(true);
     try {
       await api("/admin/trends", {
@@ -1028,7 +1043,8 @@ function TrendAdminForm({ imageModels, videoModels, onCreated, onNotice }) {
     }
   }
 
-  const ready = title.trim().length >= 3 && promptTemplate.trim() && previewUrl && model;
+  const ready = title.trim().length >= 3 && promptTemplate.trim() && previewUrl && model
+    && (!geminiDurations || geminiDurations.includes(Number(duration)));
   return (
     <section className="assistantPanel" style={{ marginBottom: 18 }}>
       <div className="studioHead"><h1 style={{ fontSize: 18 }}>Добавить тренд</h1><span className="statusBadge success">только админ</span></div>
@@ -1044,7 +1060,9 @@ function TrendAdminForm({ imageModels, videoModels, onCreated, onNotice }) {
       {kind === "video" && (
         <div className="settingsGrid">
           <SettingsRow label="Сценарий"><select value={scenario} onChange={(e) => setScenario(e.target.value)}><option value="text">Текст → видео</option><option value="image">Фото → видео</option></select></SettingsRow>
-          <SettingsRow label="Длительность"><input className="field" type="number" min="2" max="30" value={duration} onChange={(e) => setDuration(e.target.value)} /></SettingsRow>
+          <SettingsRow label="Длительность">{geminiDurations
+            ? <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>{geminiDurations.map((value) => <option key={value} value={value}>{value} сек</option>)}</select>
+            : <input className="field" type="number" min="2" max="30" value={duration} onChange={(e) => setDuration(e.target.value)} />}</SettingsRow>
           <SettingsRow label="Разрешение"><input className="field" value={resolution} onChange={(e) => setResolution(e.target.value)} placeholder="720p" /></SettingsRow>
         </div>
       )}

@@ -14,10 +14,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from api.miniapp_auth import get_miniapp_user
+from api.miniapp_routes import PreSubmitRejection
 from api.trends_routes import TrendRunRequest, _trend_request_hash, _trend_video_duration
 from db.models import TrendRunClaim
 from db.session import get_session
-from db.trend_run_claims import reserve_claim
+from db.trend_run_claims import release_pre_submit_claim, reserve_claim
 from main import app
 
 
@@ -225,6 +226,7 @@ async def test_wan_trend_rejects_stale_quote_without_reserving_or_spending(trend
     )
 
     assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "trend_quote_stale"
     reserve.assert_not_awaited()
     create.assert_not_awaited()
 
@@ -259,8 +261,40 @@ async def test_gemini_trend_uses_supported_default_duration(trend_client):
 
     assert response.status_code == 202
     assert create.await_args.kwargs["body"].duration == 4
-    with pytest.raises(Exception):
-        _trend_video_duration("gemini-omni-video", {"duration": 5})
+    assert _trend_video_duration("gemini-omni-video", {"duration": 5}) == 4
+
+
+@pytest.mark.asyncio
+async def test_legacy_five_second_gemini_trend_still_launches_at_four(trend_client):
+    client, monkeypatch, _reserve, create = trend_client
+    trend = SimpleNamespace(
+        id=13, model="gemini-omni-video", tags=["trend", "trend-video", "trend-duration:5"]
+    )
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+
+    response = await client.post("/api/v1/trends/13/run", json={
+        "asset_id": "signed-photo-asset-id", "idempotency_key": "request-123",
+    })
+
+    assert response.status_code == 202
+    assert create.await_args.kwargs["body"].duration == 4
+
+
+@pytest.mark.asyncio
+async def test_definitive_pre_submit_rejection_releases_trend_key(trend_client):
+    client, monkeypatch, _reserve, create = trend_client
+    trend = SimpleNamespace(id=13, model="gemini-omni-video", tags=["trend", "trend-video"])
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    create.side_effect = PreSubmitRejection(status_code=402, detail="Insufficient credits")
+    release = AsyncMock()
+    monkeypatch.setattr("api.trends_routes.release_pre_submit_claim", release)
+
+    response = await client.post("/api/v1/trends/13/run", json={
+        "asset_id": "signed-photo-asset-id", "idempotency_key": "request-123",
+    })
+
+    assert response.status_code == 402
+    release.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -283,5 +317,32 @@ async def test_concurrent_trend_claims_admit_only_one_paid_request(tmp_path):
 
     try:
         assert sorted(await asyncio.gather(attempt(), attempt())) == [False, True]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_pre_submit_rejection_releases_claim_for_retry(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'released-claim.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(TrendRunClaim.__table__.create)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    try:
+        async with sessions() as session:
+            _claim, created = await reserve_claim(
+                session, user_id=7, request_key="request-123",
+                request_hash="a" * 64, trend_id=12,
+            )
+            assert created
+            await release_pre_submit_claim(
+                session, user_id=7, request_key="request-123", request_hash="a" * 64,
+            )
+        async with sessions() as session:
+            _claim, created = await reserve_claim(
+                session, user_id=7, request_key="request-123",
+                request_hash="a" * 64, trend_id=12,
+            )
+            assert created
     finally:
         await engine.dispose()
