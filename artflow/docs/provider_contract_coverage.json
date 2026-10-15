@@ -1,0 +1,2729 @@
+{
+  "contracts": [
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.seedream5.t2i",
+      "contract_tests": [
+        "tests/test_nexus_image_migration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.seedream5.t2i",
+      "miniapp": true,
+      "model": "seedream/5-pro-text-to-image",
+      "modes": [
+        "text"
+      ],
+      "notes": "KIE Market route restored after persistent Nexus task failures",
+      "official_docs": [
+        "https://docs.kie.ai/market/seedream/5-pro-text-to-image"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.seedream5.i2i",
+      "contract_tests": [
+        "tests/test_nexus_image_migration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.seedream5.i2i",
+      "miniapp": true,
+      "model": "seedream/5-pro-image-to-image",
+      "modes": [
+        "image"
+      ],
+      "notes": "KIE Market route restored after persistent Nexus task failures",
+      "official_docs": [
+        "https://docs.kie.ai/market/seedream/5-pro-image-to-image"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.seedream45.t2i",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.seedream45.t2i",
+      "miniapp": true,
+      "model": "seedream/4.5-text-to-image",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/seedream/4-5-text-to-image"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.seedream45.edit",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.seedream45.edit",
+      "miniapp": true,
+      "model": "seedream/4.5-edit",
+      "modes": [
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/seedream/4-5-edit"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.grok.t2i",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.grok.t2i",
+      "miniapp": true,
+      "model": "grok-imagine/text-to-image",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/grok-imagine/text-to-image"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.grok.i2i",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.grok.i2i",
+      "miniapp": true,
+      "model": "grok-imagine/image-to-image",
+      "modes": [
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/grok-imagine/image-to-image"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.wan27",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.wan27",
+      "miniapp": true,
+      "model": "wan/2-7-image",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/wan/2-7-image"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.wan27.pro",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.wan27.pro",
+      "miniapp": true,
+      "model": "wan/2-7-image-pro",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/wan/2-7-image-pro"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.nano.legacy",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.nano.legacy",
+      "miniapp": true,
+      "model": "google/nano-banana",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/google/nano-banana"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.nano2",
+      "contract_tests": [
+        "tests/test_nexus_image_migration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.nano2",
+      "miniapp": true,
+      "model": "nano-banana-2",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://nexusapi.dev/openapi.json",
+        "https://github.com/mat12121212/nexusapi-examples"
+      ],
+      "product_ready": true,
+      "provider": "nexus",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.nano21",
+      "contract_tests": [
+        "tests/test_nano_banana21_routing.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.nano21",
+      "miniapp": true,
+      "model": "nano-banana-2.1",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://api.xn--e1aikcel5c5a.online/guide",
+        "https://nexusapi.dev/openapi.json"
+      ],
+      "product_ready": true,
+      "provider": "neironych",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.nano2.lite",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.nano2.lite",
+      "miniapp": true,
+      "model": "nano-banana-2-lite",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/google/nano-banana-2-lite"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.nano.pro",
+      "contract_tests": [
+        "tests/test_nexus_image_migration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.nano.pro",
+      "miniapp": true,
+      "model": "nano-banana-pro",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://nexusapi.dev/openapi.json",
+        "https://github.com/mat12121212/nexusapi-examples"
+      ],
+      "product_ready": true,
+      "provider": "nexus",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.nano.pro.vip",
+      "contract_tests": [
+        "tests/test_nexus_image_migration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.nano.pro.vip",
+      "miniapp": true,
+      "model": "nano-banana-pro-vip",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://nexusapi.dev/openapi.json",
+        "https://github.com/mat12121212/nexusapi-examples"
+      ],
+      "product_ready": true,
+      "provider": "nexus",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.qwen.t2i",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.qwen.t2i",
+      "miniapp": true,
+      "model": "qwen/text-to-image",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/qwen/text-to-image"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.qwen.i2i",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.qwen.i2i",
+      "miniapp": true,
+      "model": "qwen/image-to-image",
+      "modes": [
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/qwen/image-to-image"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.qwen.edit",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.qwen.edit",
+      "miniapp": true,
+      "model": "qwen/image-edit",
+      "modes": [
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/qwen/image-edit"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.qwen2.t2i",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.qwen2.t2i",
+      "miniapp": true,
+      "model": "qwen2/text-to-image",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/qwen2/text-to-image"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.qwen2.edit",
+      "contract_tests": [
+        "tests/test_image_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.qwen2.edit",
+      "miniapp": true,
+      "model": "qwen2/image-edit",
+      "modes": [
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/qwen2/image-edit"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.gpt2.t2i",
+      "contract_tests": [
+        "tests/test_nexus_image_migration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.gpt2.t2i",
+      "miniapp": true,
+      "model": "gpt-image-2-text-to-image",
+      "modes": [
+        "text"
+      ],
+      "notes": "Nexus model_name=gpt-image-2",
+      "official_docs": [
+        "https://nexusapi.dev/openapi.json",
+        "https://github.com/mat12121212/nexusapi-examples"
+      ],
+      "product_ready": true,
+      "provider": "nexus",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.gpt2.i2i",
+      "contract_tests": [
+        "tests/test_nexus_image_migration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.gpt2.i2i",
+      "miniapp": true,
+      "model": "gpt-image-2-image-to-image",
+      "modes": [
+        "image"
+      ],
+      "notes": "Nexus model_name=gpt-image-2",
+      "official_docs": [
+        "https://nexusapi.dev/openapi.json",
+        "https://github.com/mat12121212/nexusapi-examples"
+      ],
+      "product_ready": true,
+      "provider": "nexus",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.gpt2.vip",
+      "contract_tests": [
+        "tests/test_nexus_image_migration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.gpt2.vip",
+      "miniapp": true,
+      "model": "gpt-image-2-vip",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://nexusapi.dev/openapi.json",
+        "https://github.com/mat12121212/nexusapi-examples"
+      ],
+      "product_ready": true,
+      "provider": "nexus",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.kling26.t2v",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.kling26.t2v",
+      "miniapp": true,
+      "model": "kling-2.6/text-to-video",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/kling/text-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.kling26.i2v",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.kling26.i2v",
+      "miniapp": true,
+      "model": "kling-2.6/image-to-video",
+      "modes": [
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/kling/image-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.kling_grok_service:create_kling_motion_control"
+      ],
+      "billing": true,
+      "contract_id": "video.kling26.motion",
+      "contract_tests": [
+        "tests/test_kling_grok_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.kling26.motion",
+      "miniapp": true,
+      "model": "kling-2.6/motion-control",
+      "modes": [
+        "motion"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/kling/motion-control"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.kling_grok_service:create_kling_30_video"
+      ],
+      "billing": true,
+      "contract_id": "video.kling30",
+      "contract_tests": [
+        "tests/test_kling_grok_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.kling30",
+      "miniapp": true,
+      "model": "kling-3.0/video",
+      "modes": [
+        "text",
+        "image",
+        "multi_shot",
+        "elements"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/kling/kling-3-0"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.kling_grok_service:create_kling_motion_control"
+      ],
+      "billing": true,
+      "contract_id": "video.kling30.motion",
+      "contract_tests": [
+        "tests/test_kling_grok_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.kling30.motion",
+      "miniapp": true,
+      "model": "kling-3.0/motion-control",
+      "modes": [
+        "motion"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/kling/motion-control-v3"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.kling_grok_service:create_kling_v3_turbo_text"
+      ],
+      "billing": true,
+      "contract_id": "video.klingv3.turbo.t2v",
+      "contract_tests": [
+        "tests/test_kling_grok_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.klingv3.turbo.t2v",
+      "miniapp": true,
+      "model": "kling/v3-turbo-text-to-video",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/kling/v3-turbo-text-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.kling_grok_service:create_kling_v3_turbo_image"
+      ],
+      "billing": true,
+      "contract_id": "video.klingv3.turbo.i2v",
+      "contract_tests": [
+        "tests/test_kling_grok_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.klingv3.turbo.i2v",
+      "miniapp": true,
+      "model": "kling/v3-turbo-image-to-video",
+      "modes": [
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/kling/v3-turbo-image-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_wan_text_to_video"
+      ],
+      "billing": true,
+      "contract_id": "video.wan27.t2v",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.wan27.t2v",
+      "miniapp": true,
+      "model": "wan/2-7-text-to-video",
+      "modes": [
+        "text",
+        "audio"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/wan/2-7-text-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_wan_image_to_video"
+      ],
+      "billing": true,
+      "contract_id": "video.wan27.i2v",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.wan27.i2v",
+      "miniapp": true,
+      "model": "wan/2-7-image-to-video",
+      "modes": [
+        "first_frame",
+        "first_last",
+        "continue"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/wan/2-7-image-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.wan30_provider:submit_wan30_provider",
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.wan30",
+      "contract_tests": [
+        "tests/test_wan30_contract.py",
+        "tests/test_wan30_launch.py",
+        "tests/test_wan30_recovery.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.wan30",
+      "miniapp": true,
+      "model": "wan/3-0-video",
+      "modes": [
+        "text",
+        "image",
+        "video",
+        "reference",
+        "audio",
+        "file",
+        "link"
+      ],
+      "notes": "Neironych-first only when live model catalog permits; KIE standby, read-only status, measured-reference credits, durable media delivery",
+      "official_docs": [
+        "https://docs.kie.ai/market/wan/3-0-video"
+      ],
+      "product_ready": true,
+      "provider": "neironych+kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.wan30_provider:submit_wan30_provider",
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.wan30.prime",
+      "contract_tests": [
+        "tests/test_wan30_contract.py",
+        "tests/test_wan30_provider.py",
+        "tests/test_wan30_recovery.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.wan30.prime",
+      "miniapp": true,
+      "model": "wan/3-0-video-prime",
+      "modes": [
+        "text",
+        "image",
+        "video",
+        "reference",
+        "audio",
+        "file",
+        "link"
+      ],
+      "notes": "Premium Wan3 with identical settlement and user surface contract; no paid smoke without operator approval",
+      "official_docs": [
+        "https://docs.kie.ai/market/wan/3-0-video-prime"
+      ],
+      "product_ready": true,
+      "provider": "neironych+kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_seedance_task"
+      ],
+      "billing": true,
+      "contract_id": "video.seedance2",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.seedance2",
+      "miniapp": true,
+      "model": "bytedance/seedance-2",
+      "modes": [
+        "text",
+        "frame",
+        "multimodal"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/bytedance/seedance-2"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_seedance_task"
+      ],
+      "billing": true,
+      "contract_id": "video.seedance2.fast",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.seedance2.fast",
+      "miniapp": true,
+      "model": "bytedance/seedance-2-fast",
+      "modes": [
+        "text",
+        "frame",
+        "multimodal"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/bytedance/seedance-2-fast"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_seedance_task"
+      ],
+      "billing": true,
+      "contract_id": "video.seedance2.mini",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.seedance2.mini",
+      "miniapp": true,
+      "model": "bytedance/seedance-2-mini",
+      "modes": [
+        "text",
+        "frame",
+        "multimodal"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/bytedance/seedance-2-mini"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.seedance25",
+      "contract_tests": [
+        "tests/test_seedance25_admin_model_visibility.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.seedance25",
+      "miniapp": true,
+      "model": "bytedance/seedance-2-5",
+      "modes": [
+        "text",
+        "first_frame",
+        "first_last",
+        "multimodal",
+        "audio"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/bytedance/seedance-2-5"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.minimaxh3.t2v",
+      "contract_tests": [
+        "tests/test_minimax_h3_adapter.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.minimaxh3.t2v",
+      "miniapp": true,
+      "model": "minimax-h3/text-to-video",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/minimax-h3/text-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.minimaxh3.i2v",
+      "contract_tests": [
+        "tests/test_minimax_h3_adapter.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.minimaxh3.i2v",
+      "miniapp": true,
+      "model": "minimax-h3/image-to-video",
+      "modes": [
+        "first_frame",
+        "first_last"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/minimax-h3/image-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.minimaxh3.reference",
+      "contract_tests": [
+        "tests/test_minimax_h3_adapter.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.minimaxh3.reference",
+      "miniapp": true,
+      "model": "minimax-h3/reference-to-video",
+      "modes": [
+        "reference_image",
+        "reference_video",
+        "reference_audio",
+        "multimodal"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/minimax-h3/reference-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.grok.t2v",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.grok.t2v",
+      "miniapp": true,
+      "model": "grok-imagine/text-to-video",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/grok-imagine/text-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.grok.i2v",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.grok.i2v",
+      "miniapp": true,
+      "model": "grok-imagine/image-to-video",
+      "modes": [
+        "source_task",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/grok-imagine/image-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_happyhorse_text_to_video"
+      ],
+      "billing": true,
+      "contract_id": "video.happyhorse.t2v",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.happyhorse.t2v",
+      "miniapp": true,
+      "model": "happyhorse/text-to-video",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/happyhorse/text-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_happyhorse_image_to_video"
+      ],
+      "billing": true,
+      "contract_id": "video.happyhorse.i2v",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.happyhorse.i2v",
+      "miniapp": true,
+      "model": "happyhorse/image-to-video",
+      "modes": [
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/happyhorse/image-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.gemini.omni",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.gemini.omni",
+      "miniapp": true,
+      "model": "gemini-omni-video",
+      "modes": [
+        "text",
+        "image",
+        "video",
+        "audio_id",
+        "character_id"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/gemini-omni-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.veo3",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py",
+        "tests/test_veo_capabilities.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.veo3",
+      "miniapp": true,
+      "model": "veo3",
+      "modes": [
+        "text",
+        "first_last"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/veo3-api/generate-veo-3-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.veo3.fast",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py",
+        "tests/test_veo_capabilities.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.veo3.fast",
+      "miniapp": true,
+      "model": "veo3_fast",
+      "modes": [
+        "text",
+        "first_last",
+        "reference"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/veo3-api/generate-veo-3-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.veo3.lite",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py",
+        "tests/test_veo_capabilities.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.veo3.lite",
+      "miniapp": true,
+      "model": "veo3_lite",
+      "modes": [
+        "text",
+        "first_last",
+        "reference"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/veo3-api/generate-veo-3-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.genjutsu_adapter:create_motion_transfer"
+      ],
+      "billing": true,
+      "contract_id": "video.genjutsu.motion",
+      "contract_tests": [
+        "tests/test_genjutsu_integration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.genjutsu.motion",
+      "miniapp": true,
+      "model": "higgsfield/genjutsu/motion-transfer",
+      "modes": [
+        "reference_images",
+        "source_video"
+      ],
+      "notes": "Provider endpoint version is config-backed; source duration is measured server-side before billing.",
+      "official_docs": [
+        "https://open.higgsfield.ai/models/higgsfield/genjutsu/motion-transfer/v1.0/playground"
+      ],
+      "product_ready": true,
+      "provider": "higgsfield",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.genjutsu_adapter:create_object_swap"
+      ],
+      "billing": true,
+      "contract_id": "video.genjutsu.object",
+      "contract_tests": [
+        "tests/test_genjutsu_integration.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.genjutsu.object",
+      "miniapp": true,
+      "model": "higgsfield/genjutsu/object-swap",
+      "modes": [
+        "reference_images",
+        "source_video"
+      ],
+      "notes": "Object Swap endpoint remains config-backed because Higgsfield docs have published inconsistent path spelling.",
+      "official_docs": [
+        "https://open.higgsfield.ai/models/workflows/genjutsu/object-swap/playground"
+      ],
+      "product_ready": true,
+      "provider": "higgsfield",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_wan_reference_to_video"
+      ],
+      "billing": true,
+      "contract_id": "video.wan27.r2v",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.wan27.r2v",
+      "miniapp": false,
+      "model": "wan/2-7-r2v",
+      "modes": [
+        "reference"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/wan/2-7-r2v"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_wan_video_edit"
+      ],
+      "billing": true,
+      "contract_id": "video.wan27.edit",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.wan27.edit",
+      "miniapp": false,
+      "model": "wan/2-7-videoedit",
+      "modes": [
+        "video_edit"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/wan/2-7-video-edit"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_happyhorse_reference_to_video"
+      ],
+      "billing": true,
+      "contract_id": "video.happyhorse.r2v",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.happyhorse.r2v",
+      "miniapp": false,
+      "model": "happyhorse/reference-to-video",
+      "modes": [
+        "reference"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/happyhorse/reference-to-video"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_happyhorse_video_edit"
+      ],
+      "billing": true,
+      "contract_id": "video.happyhorse.edit",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.happyhorse.edit",
+      "miniapp": false,
+      "model": "happyhorse/video-edit",
+      "modes": [
+        "video_edit"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/happyhorse/video-edit"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_happyhorse_text_to_video"
+      ],
+      "billing": true,
+      "contract_id": "video.happyhorse11.t2v",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.happyhorse11.t2v",
+      "miniapp": false,
+      "model": "happyhorse-1-1/text-to-video",
+      "modes": [
+        "text"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/happyhorse-1-1/text-to-video"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_happyhorse_image_to_video"
+      ],
+      "billing": true,
+      "contract_id": "video.happyhorse11.i2v",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.happyhorse11.i2v",
+      "miniapp": false,
+      "model": "happyhorse-1-1/image-to-video",
+      "modes": [
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/happyhorse-1-1/image-to-video"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.advanced_video_service:create_happyhorse_reference_to_video"
+      ],
+      "billing": true,
+      "contract_id": "video.happyhorse11.r2v",
+      "contract_tests": [
+        "tests/test_advanced_video_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.happyhorse11.r2v",
+      "miniapp": false,
+      "model": "happyhorse-1-1/reference-to-video",
+      "modes": [
+        "reference"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/happyhorse-1-1/reference-to-video"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.kling_grok_service:create_grok_upscale"
+      ],
+      "billing": true,
+      "contract_id": "video.grok.upscale",
+      "contract_tests": [
+        "tests/test_kling_grok_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.grok.upscale",
+      "miniapp": false,
+      "model": "grok-imagine/upscale",
+      "modes": [
+        "upscale"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/grok-imagine/upscale"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.kling_grok_service:create_grok_extend"
+      ],
+      "billing": true,
+      "contract_id": "video.grok.extend",
+      "contract_tests": [
+        "tests/test_kling_grok_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.grok.extend",
+      "miniapp": false,
+      "model": "grok-imagine/extend",
+      "modes": [
+        "extend"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/grok-imagine/extend"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.kling_grok_service:create_grok_preview_15"
+      ],
+      "billing": true,
+      "contract_id": "video.grok.preview15",
+      "contract_tests": [
+        "tests/test_kling_grok_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.grok.preview15",
+      "miniapp": false,
+      "model": "grok-imagine-video-1-5-preview",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/grok-imagine/video-1-5-preview"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:extend_veo_video"
+      ],
+      "billing": true,
+      "contract_id": "video.veo.extend",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.veo.extend",
+      "miniapp": false,
+      "model": "veo/extend",
+      "modes": [
+        "extend"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/veo3-api/extend-video"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:get_veo_1080p_url"
+      ],
+      "billing": true,
+      "contract_id": "video.veo.1080",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.veo.1080",
+      "miniapp": false,
+      "model": "veo/get-1080p-video",
+      "modes": [
+        "enhance"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/veo3-api/get-1080p-video"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.video_service:generate_video_4k"
+      ],
+      "billing": true,
+      "contract_id": "video.veo.4k",
+      "contract_tests": [
+        "tests/test_provider_spec_p0.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "video.veo.4k",
+      "miniapp": false,
+      "model": "veo/get-4k-video",
+      "modes": [
+        "enhance"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/veo3-api/get-4k-video"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:generate_music"
+      ],
+      "billing": true,
+      "contract_id": "suno.generate",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.generate",
+      "miniapp": false,
+      "model": "suno/generate",
+      "modes": [
+        "generate"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:extend_music"
+      ],
+      "billing": true,
+      "contract_id": "suno.extend",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.extend",
+      "miniapp": false,
+      "model": "suno/extend",
+      "modes": [
+        "extend"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:upload_and_cover"
+      ],
+      "billing": true,
+      "contract_id": "suno.upload-cover",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.upload-cover",
+      "miniapp": false,
+      "model": "suno/upload-cover",
+      "modes": [
+        "upload-cover"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:upload_and_extend"
+      ],
+      "billing": true,
+      "contract_id": "suno.upload-extend",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.upload-extend",
+      "miniapp": false,
+      "model": "suno/upload-extend",
+      "modes": [
+        "upload-extend"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:add_instrumental"
+      ],
+      "billing": true,
+      "contract_id": "suno.add-instrumental",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.add-instrumental",
+      "miniapp": false,
+      "model": "suno/add-instrumental",
+      "modes": [
+        "add-instrumental"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:add_vocals"
+      ],
+      "billing": true,
+      "contract_id": "suno.add-vocals",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.add-vocals",
+      "miniapp": false,
+      "model": "suno/add-vocals",
+      "modes": [
+        "add-vocals"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:replace_section"
+      ],
+      "billing": true,
+      "contract_id": "suno.replace-section",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.replace-section",
+      "miniapp": false,
+      "model": "suno/replace-section",
+      "modes": [
+        "replace-section"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:generate_persona"
+      ],
+      "billing": true,
+      "contract_id": "suno.persona",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.persona",
+      "miniapp": false,
+      "model": "suno/persona",
+      "modes": [
+        "persona"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:generate_mashup"
+      ],
+      "billing": true,
+      "contract_id": "suno.mashup",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.mashup",
+      "miniapp": false,
+      "model": "suno/mashup",
+      "modes": [
+        "mashup"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:generate_lyrics"
+      ],
+      "billing": true,
+      "contract_id": "suno.lyrics",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.lyrics",
+      "miniapp": false,
+      "model": "suno/lyrics",
+      "modes": [
+        "lyrics"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:get_timestamped_lyrics"
+      ],
+      "billing": true,
+      "contract_id": "suno.timestamped-lyrics",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.timestamped-lyrics",
+      "miniapp": false,
+      "model": "suno/timestamped-lyrics",
+      "modes": [
+        "timestamped-lyrics"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:boost_style"
+      ],
+      "billing": true,
+      "contract_id": "suno.style",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.style",
+      "miniapp": false,
+      "model": "suno/style",
+      "modes": [
+        "style"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:generate_cover_art"
+      ],
+      "billing": true,
+      "contract_id": "suno.cover-art",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.cover-art",
+      "miniapp": false,
+      "model": "suno/cover-art",
+      "modes": [
+        "cover-art"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:convert_to_wav"
+      ],
+      "billing": true,
+      "contract_id": "suno.wav",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.wav",
+      "miniapp": false,
+      "model": "suno/wav",
+      "modes": [
+        "wav"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:separate_stems"
+      ],
+      "billing": true,
+      "contract_id": "suno.stems",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.stems",
+      "miniapp": false,
+      "model": "suno/stems",
+      "modes": [
+        "stems"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:generate_midi"
+      ],
+      "billing": true,
+      "contract_id": "suno.midi",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.midi",
+      "miniapp": false,
+      "model": "suno/midi",
+      "modes": [
+        "midi"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:create_music_video"
+      ],
+      "billing": true,
+      "contract_id": "suno.music-video",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.music-video",
+      "miniapp": false,
+      "model": "suno/music-video",
+      "modes": [
+        "music-video"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:create_voice_validation"
+      ],
+      "billing": true,
+      "contract_id": "suno.voice-validate",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.voice-validate",
+      "miniapp": false,
+      "model": "suno/voice-validate",
+      "modes": [
+        "voice-validate"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:regenerate_voice_validation"
+      ],
+      "billing": true,
+      "contract_id": "suno.voice-regenerate",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.voice-regenerate",
+      "miniapp": false,
+      "model": "suno/voice-regenerate",
+      "modes": [
+        "voice-regenerate"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.suno_full_service:create_custom_voice"
+      ],
+      "billing": true,
+      "contract_id": "suno.voice-create",
+      "contract_tests": [
+        "tests/test_suno_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "suno.voice-create",
+      "miniapp": false,
+      "model": "suno/voice-create",
+      "modes": [
+        "voice-create"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/suno-api"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:imagine"
+      ],
+      "billing": true,
+      "contract_id": "midjourney.imagine",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "midjourney.imagine",
+      "miniapp": true,
+      "model": "midjourney/imagine",
+      "modes": [
+        "imagine"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": true,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:action"
+      ],
+      "billing": true,
+      "contract_id": "midjourney.action",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "midjourney.action",
+      "miniapp": true,
+      "model": "midjourney/action",
+      "modes": [
+        "action"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": true,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:change"
+      ],
+      "billing": true,
+      "contract_id": "midjourney.change",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "midjourney.change",
+      "miniapp": false,
+      "model": "midjourney/change",
+      "modes": [
+        "change"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": false,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:blend"
+      ],
+      "billing": true,
+      "contract_id": "midjourney.blend",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "midjourney.blend",
+      "miniapp": true,
+      "model": "midjourney/blend",
+      "modes": [
+        "blend"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": true,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:describe"
+      ],
+      "billing": true,
+      "contract_id": "midjourney.describe",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "midjourney.describe",
+      "miniapp": true,
+      "model": "midjourney/describe",
+      "modes": [
+        "describe"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": true,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:modal"
+      ],
+      "billing": true,
+      "contract_id": "midjourney.modal",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "midjourney.modal",
+      "miniapp": false,
+      "model": "midjourney/modal",
+      "modes": [
+        "modal"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": true,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:submit_editor"
+      ],
+      "billing": true,
+      "contract_id": "midjourney.editor",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "midjourney.editor",
+      "miniapp": false,
+      "model": "midjourney/editor",
+      "modes": [
+        "editor"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": false,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:submit_video"
+      ],
+      "billing": true,
+      "contract_id": "midjourney.video",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "midjourney.video",
+      "miniapp": true,
+      "model": "midjourney/video",
+      "modes": [
+        "video"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": true,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:fetch_task"
+      ],
+      "billing": false,
+      "contract_id": "midjourney.fetch",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": null,
+      "miniapp": false,
+      "model": "midjourney/fetch",
+      "modes": [
+        "fetch"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": false,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.midjourney_full_service:list_by_condition"
+      ],
+      "billing": false,
+      "contract_id": "midjourney.list",
+      "contract_tests": [
+        "tests/test_midjourney_full_service.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": null,
+      "miniapp": false,
+      "model": "midjourney/list",
+      "modes": [
+        "list"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/models/midjourney"
+      ],
+      "product_ready": false,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.llm_provider_service:call_route"
+      ],
+      "billing": false,
+      "contract_id": "llm.kie.responses",
+      "contract_tests": [
+        "tests/test_llm_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "llm.kie.responses",
+      "miniapp": false,
+      "model": "gpt-responses",
+      "modes": [
+        "text",
+        "vision",
+        "tools",
+        "web_search"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/chat/gpt-5-5"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.llm_provider_service:call_route"
+      ],
+      "billing": false,
+      "contract_id": "llm.kie.claude",
+      "contract_tests": [
+        "tests/test_llm_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "llm.kie.claude",
+      "miniapp": false,
+      "model": "claude-sonnet-4-5",
+      "modes": [
+        "text",
+        "tools",
+        "thinking"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/chat/claude-sonnet-4-5"
+      ],
+      "product_ready": false,
+      "provider": "kie",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.llm_provider_service:call_route"
+      ],
+      "billing": false,
+      "contract_id": "llm.comet.chat",
+      "contract_tests": [
+        "tests/test_llm_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": false,
+      "live_smoke_id": "llm.comet.chat",
+      "miniapp": false,
+      "model": "openai-compatible-chat",
+      "modes": [
+        "text",
+        "vision",
+        "tools",
+        "json_schema"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://www.cometapi.com/docs"
+      ],
+      "product_ready": false,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": false
+    },
+    {
+      "backend_entrypoints": [
+        "api.photo_prompt_service:generate_prompt_from_photo_result"
+      ],
+      "billing": false,
+      "contract_id": "llm.photo-prompt",
+      "contract_tests": [
+        "tests/test_photo_prompt_service.py",
+        "tests/test_llm_provider_contracts.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "llm.photo-prompt",
+      "miniapp": true,
+      "model": "photo-prompt-router",
+      "modes": [
+        "vision"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://docs.kie.ai/market/chat/gpt-5-2"
+      ],
+      "product_ready": true,
+      "provider": "neironych+kie",
+      "public_api": false,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.assistant_service:generate_prompt_moderation_decision"
+      ],
+      "billing": false,
+      "contract_id": "llm.moderation",
+      "contract_tests": [
+        "tests/test_llm_provider_contracts.py",
+        "tests/test_moderation_review_contract.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "llm.moderation",
+      "miniapp": true,
+      "model": "strict-json-moderation",
+      "modes": [
+        "json_schema"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://platform.openai.com/docs/guides/structured-outputs"
+      ],
+      "product_ready": true,
+      "provider": "comet",
+      "public_api": false,
+      "telegram": true
+    }
+  ]
+}

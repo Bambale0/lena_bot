@@ -31,7 +31,8 @@ Standalone Web ---------+       |-- payments ------------> payment providers
                                 |-- Redis
                                 +-- public media / webhooks
 
-React + TypeScript Mini App --> /api/webapp/*
+React + TypeScript Mini App --> /api/v1/*
+Standalone Web ------------> /api/web/*
 Telegram updates -------------> /webhook/telegram
 Provider callbacks -----------> generation webhook handlers
 Payment callbacks ------------> payment webhook handlers
@@ -91,10 +92,13 @@ artflow/
 
 ## Local development
 
+Run these commands from the repository root. See [application setup](artflow/README.md) for PostgreSQL, Redis, migrations, tests and deployment details.
+
 ```bash
+cd artflow
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 cp .env.example .env
 ```
 
@@ -106,11 +110,13 @@ npm install
 npm run dev
 ```
 
-Backend checks:
+Focused backend checks:
 
 ```bash
-pytest
+pytest -q tests/test_trend_run_reliability.py tests/test_payment_webhooks.py
 ```
+
+The maintained release checks run in [GitHub Actions](.github/workflows/ci.yml). The full historical pytest suite has known failures outside that gate; see the [2026-10-16 project audit](artflow/docs/audits/2026-10-16-full-project.md). Current model availability and pricing come from backend metadata and database configuration, rather than this README.
 
 ## Engineering focus
 

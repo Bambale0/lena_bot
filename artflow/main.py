@@ -2491,7 +2491,8 @@ async def kie_music_webhook(
     return {"ok": True}
 
 
-@app.api_route("/health", methods=["GET", "HEAD"])
+@app.get("/health", operation_id="public_health_get")
+@app.head("/health", operation_id="public_health_head")
 async def health() -> dict:
     return {"status": "ok", "service": "apix"}
 
