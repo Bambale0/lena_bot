@@ -544,7 +544,7 @@ function FeedScreen({
                     <div className="flex gap-2 px-2 py-1.5 text-[9px] text-muted-foreground">
                       <span>♥ {item.likes_count || 0}</span>
                       <span>↗ {item.shares_count || 0}</span>
-                      <span>↻ {item.remixes || 0}</span>
+                      <span title="Успешных повторов">✅ {item.remixes ?? 0}</span>
                     </div>
                   </Card>
                 );
@@ -630,12 +630,15 @@ function TrendCategorySurface({
                   <div className="mb-1 flex items-center gap-1 text-[8px] opacity-85">
                     <span>{trend.category_emoji || (isVideo ? "🎬" : "🖼️")}</span>
                     <span className="truncate">{trend.category_title || trend.kind}</span>
-                    {trend.uses_count ? <span className="ml-auto">↻ {trend.uses_count}</span> : null}
+                    <span className="ml-auto" title="Успешно завершённые повторы">✅ {trend.successful_runs ?? 0}</span>
                   </div>
                   <h2 className="line-clamp-2 text-[11px] font-semibold leading-tight">{trend.title}</h2>
                 </div>
               </div>
               <div className="grid gap-1.5 p-1.5">
+                <p className="text-[10px] text-muted-foreground" title="Только успешные генерации">
+                  Успешно: {trend.successful_runs ?? 0} · За 7 дней: {trend.successful_runs_7d ?? 0}
+                </p>
                 {trend.description ? (
                   <details className="apix-help border-0">
                     <summary className="py-1 text-[10px]">Описание</summary>

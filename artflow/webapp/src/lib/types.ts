@@ -149,7 +149,13 @@ export interface TrendItem {
   category?: string;
   category_title?: string;
   category_emoji?: string;
-  uses_count?: number;
+  uses_count?: number; // legacy marketplace uses; not successful generation count
+  successful_runs?: number;
+  successful_runs_7d?: number;
+  total_runs?: number; // admin metrics
+  failed_runs?: number;
+  active_runs?: number;
+  unique_users?: number;
   settings?: Record<string, unknown>;
   user_fields?: TrendUserField[];
 }
