@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,14 @@ class QwenRoute:
     backup_provider: QwenProvider | None
     source: str
     updated_by_admin_tg_id: int | None = None
+
+
+def is_definitive_provider_rejection(error: Exception) -> bool:
+    """Only a completed 4xx rejection proves no ambiguous paid completion."""
+    return (
+        isinstance(error, httpx.HTTPStatusError)
+        and error.response.status_code in {400, 401, 403, 404, 415, 422}
+    )
 
 
 def validate_route(mode: str, primary: str, backup: str | None) -> None:

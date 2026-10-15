@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from api import assistant_service
@@ -93,6 +94,28 @@ async def test_assistant_timeout_never_starts_second_paid_request(monkeypatch) -
     with pytest.raises(RuntimeError, match="повторная платная отправка остановлена"):
         await assistant_service.generate_assistant_reply([{"role": "user", "content": "Привет"}])
     kie.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_kie_primary_definitive_rejection_uses_qwen_backup(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from core.qwen_routing import QwenRoute
+
+    monkeypatch.setattr(assistant_service, "get_qwen_route", AsyncMock(
+        return_value=QwenRoute("text", "kie", "neironych", "test"),
+    ))
+    request = httpx.Request("POST", "https://kie.test/chat")
+    response = httpx.Response(422, request=request)
+    kie = AsyncMock(side_effect=httpx.HTTPStatusError("unsupported", request=request, response=response))
+    monkeypatch.setattr(assistant_service.llm, "call_route", kie)
+    qwen = SimpleNamespace(analyze_text=AsyncMock(return_value="Ответ Qwen после отказа KIE"))
+    monkeypatch.setattr(assistant_service, "NeironychQwen38Service", lambda: qwen)
+
+    answer = await assistant_service.generate_assistant_reply([{"role": "user", "content": "Привет"}])
+    assert answer == "Ответ Qwen после отказа KIE"
+    kie.assert_awaited_once()
+    qwen.analyze_text.assert_awaited_once()
 
 
 def test_extract_chat_output_text_supports_list_content() -> None:

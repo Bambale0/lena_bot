@@ -3,10 +3,16 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from api.web import admin as web_admin
-from core.qwen_routing import get_qwen_route, set_qwen_route, validate_route
+from core.qwen_routing import (
+    get_qwen_route,
+    is_definitive_provider_rejection,
+    set_qwen_route,
+    validate_route,
+)
 
 
 class _Session:
@@ -32,6 +38,14 @@ def test_video_route_rejects_unverified_neironych_media() -> None:
         validate_route("video", "neironych", "kie")
     with pytest.raises(ValueError, match="visual contract"):
         validate_route("video", "kie", "neironych")
+
+
+def test_only_definitive_kie_rejection_allows_reverse_fallback() -> None:
+    request = httpx.Request("POST", "https://kie.test/chat")
+    for status, expected in ((422, True), (400, True), (429, False), (503, False)):
+        response = httpx.Response(status, request=request)
+        assert is_definitive_provider_rejection(httpx.HTTPStatusError("rejected", request=request, response=response)) is expected
+    assert is_definitive_provider_rejection(httpx.ReadTimeout("timeout")) is False
 
 
 @pytest.mark.asyncio

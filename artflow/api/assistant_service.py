@@ -11,7 +11,7 @@ import httpx
 from api import llm_provider_service as llm
 from api.neironych_qwen38_service import NeironychQwen38Service, Qwen38ProviderError
 from core.config import settings
-from core.qwen_routing import get_qwen_route
+from core.qwen_routing import get_qwen_route, is_definitive_provider_rejection
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +240,8 @@ async def generate_assistant_result(
                 # A dispatched KIE request may have completed despite a client
                 # failure. Do not attempt another paid provider call.
                 last_error = exc
-                break
+                if not is_definitive_provider_rejection(exc):
+                    break
         raise RuntimeError("AI-ассистент временно недоступен") from last_error
     result = await llm.call_with_fallbacks(
         _assistant_routes(web_search=web_search),

@@ -10,7 +10,7 @@ import httpx
 
 from api.neironych_qwen38_service import NeironychQwen38Service, Qwen38ProviderError
 from core.config import settings
-from core.qwen_routing import get_qwen_route
+from core.qwen_routing import get_qwen_route, is_definitive_provider_rejection
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,8 @@ async def generate_prompt_from_photo_result(
                 raise RuntimeError("Фото обработано с неопределённым исходом; повторный платный запрос остановлен") from exc
         except Exception as exc:
             last_error = exc
-            break
+            if not is_definitive_provider_rejection(exc):
+                break
     raise RuntimeError("Не удалось создать промпт по фото") from last_error
 
 

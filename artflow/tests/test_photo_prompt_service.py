@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from api import photo_prompt_service
@@ -103,3 +104,25 @@ async def test_photo_ambiguous_neironych_failure_never_starts_second_paid_reques
     with pytest.raises(RuntimeError, match="неопределённым исходом"):
         await photo_prompt_service.generate_prompt_from_photo_result(b"image", "image/jpeg")
     kie.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_kie_primary_definitive_rejection_uses_neironych_backup(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from core.qwen_routing import QwenRoute
+
+    monkeypatch.setattr(photo_prompt_service, "get_qwen_route", AsyncMock(
+        return_value=QwenRoute("image", "kie", "neironych", "test"),
+    ))
+    request = httpx.Request("POST", "https://kie.test/chat")
+    response = httpx.Response(422, request=request)
+    kie = AsyncMock(side_effect=httpx.HTTPStatusError("unsupported", request=request, response=response))
+    monkeypatch.setattr(photo_prompt_service, "_call_kie_chat", kie)
+    qwen = SimpleNamespace(analyze_image=AsyncMock(return_value="Подробный русский промпт: красный квадрат на белом фоне."))
+    monkeypatch.setattr(photo_prompt_service, "NeironychQwen38Service", lambda: qwen)
+
+    result = await photo_prompt_service.generate_prompt_from_photo_result(b"image", "image/jpeg")
+    assert result.provider == "neironych"
+    kie.assert_awaited_once()
+    qwen.analyze_image.assert_awaited_once()
