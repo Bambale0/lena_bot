@@ -190,7 +190,8 @@ class PreSubmitRejection(HTTPException):
     """A generation rejected before any provider submission or paid task exists."""
 
 
-@router.api_route("/health", methods=["GET", "HEAD"])
+@router.get("/health", operation_id="miniapp_health_get")
+@router.head("/health", operation_id="miniapp_health_head")
 async def health() -> dict:
     return {"status": "ok"}
 
