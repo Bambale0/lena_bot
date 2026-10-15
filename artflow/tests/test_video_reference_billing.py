@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from api import miniapp_routes
 from api import video_reference_billing as billing
 
 
@@ -39,15 +40,16 @@ async def test_seedance_control_video_references_are_counted_without_mutating_pa
 
 @pytest.mark.asyncio
 async def test_flat_video_tariff_does_not_add_reference_seconds(monkeypatch) -> None:
-    probe = AsyncMock()
+    monkeypatch.setattr(billing, "local_upload_path_from_url", lambda url: Path(url))
+    probe = AsyncMock(return_value=SimpleNamespace(duration_seconds=4.2))
     monkeypatch.setattr(billing, "probe_local_media", probe)
 
     result = await billing.measured_video_seconds({
-        "duration": 8, "reference_video_url": "https://example.test/input.mp4",
+        "duration": 8, "reference_video_url": "input.mp4",
     }, per_second=False)
 
-    assert (result.output, result.references, result.billable) == (8, 0, 8)
-    probe.assert_not_awaited()
+    assert (result.output, result.references, result.billable) == (8, 5, 8)
+    probe.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -58,3 +60,15 @@ async def test_unmeasurable_reference_fails_before_payment(monkeypatch) -> None:
         await billing.measured_video_seconds({
             "duration": 5, "reference_video_url": "https://remote.test/input.mp4",
         }, per_second=True)
+
+
+@pytest.mark.asyncio
+async def test_midjourney_video_quote_uses_flat_database_tariff(monkeypatch) -> None:
+    tariff = SimpleNamespace(credits=24, is_active=True, model_key="midjourney-video")
+    monkeypatch.setattr(miniapp_routes.repo, "get_model_cost", AsyncMock(return_value=tariff))
+    quote = await miniapp_routes.quote_video_generation(
+        body=miniapp_routes.VideoGenRequest(model="midjourney-video", prompt="Camera moves"),
+        session=SimpleNamespace(),
+        user=SimpleNamespace(credits=25),
+    )
+    assert (quote["cost_credits"], quote["reference_seconds"], quote["can_run"]) == (24, 0, True)

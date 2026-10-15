@@ -3137,7 +3137,18 @@ async def quote_video_generation(
     """Read-only tariff quote after the same normalization and media probe as launch."""
     prompt, _ = await _video_prompt_and_source(body, session)
     if body.model in _MJ_VIDEO_MODELS:
-        raise HTTPException(status_code=422, detail="This model does not support video reference billing")
+        model_cost = await repo.get_model_cost(session, body.model)
+        if not model_cost or not bool(getattr(model_cost, "is_active", True)):
+            raise HTTPException(status_code=422, detail="Model not available")
+        cost = round(float(model_cost.credits), 6)
+        balance = float(user.credits or 0)
+        return {
+            "model": body.model, "cost_credits": cost,
+            "balance_credits": balance, "can_run": balance >= cost,
+            "output_seconds": int(body.duration), "reference_seconds": 0,
+            "billable_seconds": int(body.duration), "reference_count": 0,
+            "rate_credits_per_second": None, "tariff_key": model_cost.model_key,
+        }
     try:
         VideoModel(body.model)
     except ValueError as exc:

@@ -2311,10 +2311,10 @@ async def _launch_video_generation_from_state(
         await source_message.answer("Seedance 2.5 сейчас недоступен. Попробуй позже.")
         return False
     motion_credits = None if content_edit else data.get("motion_credits")
+    rate_or_flat = model_cost.credits if model_cost else float(data.get("credits", 0))
     if motion_credits is not None:
         credits = float(motion_credits)
     else:
-        rate_or_flat = model_cost.credits if model_cost else float(data.get("credits", 0))
         credits = float(_video_total_credits(model_key, duration, rate_or_flat))
 
     if model_key == SEEDANCE25_MODEL_KEY and data.get("seedance_identity_transfer"):

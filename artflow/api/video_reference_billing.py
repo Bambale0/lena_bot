@@ -31,7 +31,7 @@ async def measured_video_seconds(normalized: dict[str, Any], *, per_second: bool
     if output <= 0:
         raise ValueError("Output video duration must be positive before pricing")
     urls = reference_video_urls(normalized)
-    if not urls or not per_second:
+    if not urls:
         return VideoSeconds(output=output, references=0, billable=output, reference_count=len(urls))
 
     duration = 0.0
@@ -48,6 +48,6 @@ async def measured_video_seconds(normalized: dict[str, Any], *, per_second: bool
     return VideoSeconds(
         output=output,
         references=references,
-        billable=output + references,
+        billable=output + references if per_second else output,
         reference_count=len(urls),
     )

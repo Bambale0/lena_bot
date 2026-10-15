@@ -181,7 +181,8 @@
   if (baseRequest) {
     request = async function parityRequest(path, options = {}) {
       if (!options?.body || options.body instanceof FormData) return baseRequest(path, options);
-      const isGeneration = /\/generate\/(image|video|music)$/.test(path) || /\/feed\/[^/]+\/remix$/.test(path);
+      const isGeneration = /\/generate\/(image|video|music)(?:\/quote)?$/.test(path)
+        || /\/feed\/[^/]+\/remix(?:\/quote)?$/.test(path);
       if (!isGeneration) return baseRequest(path, options);
       let body;
       try { body = JSON.parse(options.body); } catch { return baseRequest(path, options); }

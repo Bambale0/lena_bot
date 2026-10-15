@@ -662,10 +662,9 @@ function App() {
         audio_ids: draft.audioIds, character_ids: draft.characterIds, seed: draft.seed,
         grok_mode: draft.grokMode || "normal",
       };
-      const needsVideoQuote = kind !== "image" && Boolean(
-        draft.videoUrl || draft.audioIds.some(item => item.startsWith("__apix_seedance25:video_ref="))
-        || (draft.model.startsWith("minimax-h3/") && draft.characterIds.length),
-      );
+      // Model-specific upload panels hold files outside GenerationDraft. Quote
+      // every video launch so their enhancers can attach those files first.
+      const needsVideoQuote = kind !== "image";
       let quotedCredits: number | undefined;
       if (needsVideoQuote) {
         const quote = await api.quoteVideo(videoBody);

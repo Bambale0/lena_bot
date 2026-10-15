@@ -271,7 +271,8 @@
 
   window.fetch = async (input, init = {}) => {
     const url = generationUrl(input);
-    const isGeneration = url.includes(GENERATE_PATH) && String(init.method || "GET").toUpperCase() === "POST";
+    const isGeneration = (url.includes(GENERATE_PATH) || /\/api\/web\/feed\/\d+\/remix(?:\/quote)?$/.test(url))
+      && String(init.method || "GET").toUpperCase() === "POST";
     if (!isGeneration || typeof init.body !== "string") return originalFetch(input, init);
 
     let body;
