@@ -115,6 +115,7 @@ from core.music_reconcile_scheduler import run_music_reconcile_scheduler
 from core.neironych_image_reconcile_scheduler import run_neironych_image_reconcile_scheduler
 from core.neironych_video_poll_gate import require_neironych_video_redis_ready
 from core.neironych_video_reconcile_scheduler import run_neironych_video_reconcile_scheduler
+from core.provider_logging import callback_anomaly, safe_identifier
 from db import repository as repo
 from db.models import (
     Generation,
@@ -1096,14 +1097,14 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
     payload = await request.json()
     task_result = MJTaskResult.from_dict(payload)
     if not task_result.task_id:
-        logger.warning("Midjourney webhook without task_id: %s", payload)
+        callback_anomaly(logger, "comet", "missing_midjourney_task_id")
         return {"ok": True}
 
     if not task_result.is_done:
         logger.info(
             "Midjourney webhook ignoring non-terminal status task=%s status=%s",
-            task_result.task_id,
-            task_result.status,
+            safe_identifier(task_result.task_id),
+            safe_identifier(task_result.status),
         )
         return {"ok": True}
 
@@ -1112,7 +1113,7 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
         if not gen:
             gen = await repo.get_generation_by_task_id(session, _web_task_lookup_id(task_result.task_id))
         if not gen:
-            logger.warning("Midjourney webhook for unknown task_id=%s", task_result.task_id)
+            logger.warning("Midjourney webhook for unknown task_id=%s", safe_identifier(task_result.task_id))
             return {"ok": True}
         if gen.status.value in {"done", "failed"}:
             return {"ok": True}
@@ -1200,7 +1201,7 @@ async def midjourney_webhook(request: Request, secret: str | None = None) -> dic
                 await _finish_midjourney_video_generation(gen, user.tg_id, task_result, state_ctx=state_ctx)
             return {"ok": True}
 
-        logger.info("Midjourney webhook ignored unsupported model=%s task=%s", gen.model, task_result.task_id)
+        logger.info("Midjourney webhook ignored unsupported model=%s task=%s", gen.model, safe_identifier(task_result.task_id))
         return {"ok": True}
 
 
@@ -1241,7 +1242,7 @@ async def cryptobot_webhook(request: Request) -> dict:
                             reply_markup=back_to_menu_kb(),
                         )
                     except Exception as e:
-                        logger.warning("Failed to notify user %s: %s", user.tg_id, e)
+                        logger.warning('Failed to notify user %s: %s', user.tg_id, type(e).__name__)
 
     return {"ok": True}
 
@@ -1251,31 +1252,31 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
     try:
         data = await request.json()
     except Exception as exc:
-        logger.warning("Invalid T-Bank webhook JSON: %s", exc)
+        logger.warning('Invalid T-Bank webhook JSON: %s', type(exc).__name__)
         return PlainTextResponse("OK")
 
     if not verify_notification_token(data, settings.TBANK_PASSWORD):
         logger.warning(
             "Invalid T-Bank webhook token: payment_id=%s status=%s order_id=%s",
-            data.get("PaymentId"),
-            data.get("Status"),
-            data.get("OrderId"),
+            safe_identifier(data.get("PaymentId")),
+            safe_identifier(data.get("Status")),
+            safe_identifier(data.get("OrderId")),
         )
         return PlainTextResponse("OK")
 
     if not data.get("Success"):
         logger.info(
             "T-Bank webhook non-success acknowledged: payment_id=%s status=%s order_id=%s",
-            data.get("PaymentId"),
-            data.get("Status"),
-            data.get("OrderId"),
+            safe_identifier(data.get("PaymentId")),
+            safe_identifier(data.get("Status")),
+            safe_identifier(data.get("OrderId")),
         )
         return PlainTextResponse("OK")
 
     status = str(data.get("Status", "")).upper()
     external_id = str(data.get("PaymentId", "")).strip()
     if not external_id:
-        logger.warning("T-Bank webhook without PaymentId: %s", data)
+        callback_anomaly(logger, "tbank", "missing_payment_id")
         return PlainTextResponse("OK")
 
     async with AsyncSessionLocal() as session:
@@ -1300,7 +1301,7 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
                                 reply_markup=back_to_menu_kb(),
                             )
                         except Exception as e:
-                            logger.warning("Failed to notify user %s: %s", user.tg_id, e)
+                            logger.warning('Failed to notify user %s: %s', user.tg_id, type(e).__name__)
         elif status in {"CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL"}:
             await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
         elif status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
@@ -1313,7 +1314,7 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
                 if user:
                     await _reverse_referral_commissions(session, user, tx)
         else:
-            logger.info("Unhandled T-Bank status acknowledged: payment_id=%s status=%s", external_id, status)
+            logger.info("Unhandled T-Bank status acknowledged: payment_id=%s status=%s", safe_identifier(external_id), safe_identifier(status))
 
     return PlainTextResponse("OK")
 
@@ -1340,7 +1341,7 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
     try:
         data = await request.json()
     except Exception as exc:
-        logger.warning("Invalid Lava webhook JSON: %s", exc)
+        logger.warning('Invalid Lava webhook JSON: %s', type(exc).__name__)
         return PlainTextResponse("OK")
 
     if not lava_is_success_webhook(data):
@@ -1348,16 +1349,16 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
 
     external_id = lava_webhook_contract_id(data)
     if not external_id:
-        logger.warning("Lava webhook without invoice id: %s", data)
+        callback_anomaly(logger, "lava", "missing_invoice_id")
         return PlainTextResponse("OK")
 
     async with AsyncSessionLocal() as session:
         tx = await repo.get_transaction_by_external_id(session, external_id)
         if not tx:
-            logger.warning("Lava webhook for unknown invoice id: %s", external_id)
+            logger.warning("Lava webhook for unknown invoice id: %s", safe_identifier(external_id))
             return PlainTextResponse("OK")
         if tx.provider != PaymentProvider.lava:
-            logger.warning("Lava webhook invoice id belongs to another provider: %s", external_id)
+            logger.warning("Lava webhook invoice id belongs to another provider: %s", safe_identifier(external_id))
             return PlainTextResponse("OK")
         if tx.status != TransactionStatus.pending:
             return PlainTextResponse("OK")
@@ -1365,25 +1366,25 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
         try:
             invoice = await lava_get_invoice(external_id)
         except Exception as exc:
-            logger.error("Lava invoice verification failed for %s: %s", external_id, exc)
+            logger.error('Lava invoice verification failed for %s: %s', safe_identifier(external_id), type(exc).__name__)
             return PlainTextResponse("OK")
 
         verified_invoice_id = lava_extract_invoice_id(invoice)
         if verified_invoice_id and not hmac.compare_digest(str(verified_invoice_id), str(external_id)):
-            logger.warning("Lava invoice id mismatch webhook=%s verified=%s", external_id, verified_invoice_id)
+            logger.warning("Lava invoice id mismatch webhook=%s verified=%s", safe_identifier(external_id), safe_identifier(verified_invoice_id))
             return PlainTextResponse("OK")
         if not lava_is_paid_invoice(invoice):
-            logger.warning("Lava webhook claimed paid but invoice is not paid: %s", external_id)
+            logger.warning("Lava webhook claimed paid but invoice is not paid: %s", safe_identifier(external_id))
             return PlainTextResponse("OK")
         currency = lava_extract_currency(invoice)
         if currency and currency != "RUB":
-            logger.warning("Lava invoice currency mismatch invoice=%s currency=%s", external_id, currency)
+            logger.warning("Lava invoice currency mismatch invoice=%s currency=%s", safe_identifier(external_id), safe_identifier(currency))
             return PlainTextResponse("OK")
         amount_rub = lava_extract_amount_rub(invoice)
         if amount_rub is not None and round(amount_rub, 2) != round(float(tx.amount_rub), 2):
             logger.warning(
                 "Lava invoice amount mismatch invoice=%s expected=%s actual=%s",
-                external_id,
+                safe_identifier(external_id),
                 tx.amount_rub,
                 amount_rub,
             )
@@ -1409,7 +1410,7 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
                             reply_markup=back_to_menu_kb(),
                         )
                     except Exception as e:
-                        logger.warning("Failed to notify user %s: %s", user.tg_id, e)
+                        logger.warning('Failed to notify user %s: %s', user.tg_id, type(e).__name__)
 
     return PlainTextResponse("OK")
 
@@ -1451,7 +1452,7 @@ async def tribute_webhook(request: Request) -> dict:
 
         product = tribute_digital_product_for_id(product_id)
         if product is None:
-            logger.warning("Ignoring unmapped Tribute digital product id=%s purchase=%s", product_id, purchase_id)
+            logger.warning("Ignoring unmapped Tribute digital product id=%s purchase=%s", safe_identifier(product_id), safe_identifier(purchase_id))
             return {"status": "ok"}
 
         external_id = tribute_digital_purchase_external_id(purchase_id)
@@ -1459,10 +1460,10 @@ async def tribute_webhook(request: Request) -> dict:
             if event_name == "digital_product_refunded":
                 tx = await repo.get_transaction_by_external_id(session, external_id)
                 if not tx:
-                    logger.warning("Tribute refund for unknown digital purchase=%s", purchase_id)
+                    logger.warning("Tribute refund for unknown digital purchase=%s", safe_identifier(purchase_id))
                     return {"status": "ok"}
                 if tx.provider != PaymentProvider.tribute:
-                    logger.warning("Tribute digital purchase belongs to another provider: %s", external_id)
+                    logger.warning("Tribute digital purchase belongs to another provider: %s", safe_identifier(external_id))
                     return {"status": "ok"}
                 was_paid = tx.status == TransactionStatus.paid
                 refunded_tx = await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
@@ -1489,7 +1490,7 @@ async def tribute_webhook(request: Request) -> dict:
 
             plan = await repo.get_price_plan_by_key(session, product.plan_key)
             if not plan or not plan.is_active:
-                logger.error("Mapped Tribute plan is unavailable product=%s plan=%s", product_id, product.plan_key)
+                logger.error("Mapped Tribute plan is unavailable product=%s plan=%s", safe_identifier(product_id), product.plan_key)
                 raise HTTPException(status_code=503, detail="Mapped APIX plan is unavailable")
 
             currency = tribute_webhook_currency(data)
@@ -1497,10 +1498,10 @@ async def tribute_webhook(request: Request) -> dict:
             if currency != product.currency or amount_minor != product.amount_minor:
                 logger.error(
                     "Tribute digital product payment mismatch product=%s expected=%s/%s actual=%s/%s",
-                    product_id,
+                    safe_identifier(product_id),
                     product.currency,
                     product.amount_minor,
-                    currency,
+                    safe_identifier(currency),
                     amount_minor,
                 )
                 raise HTTPException(status_code=503, detail="Tribute product payment mismatch")
@@ -1533,7 +1534,7 @@ async def tribute_webhook(request: Request) -> dict:
                         raise
 
             if tx.provider != PaymentProvider.tribute or tx.user_id != user.id:
-                logger.error("Tribute digital purchase collision external_id=%s", external_id)
+                logger.error("Tribute digital purchase collision external_id=%s", safe_identifier(external_id))
                 raise HTTPException(status_code=503, detail="Tribute purchase collision")
             if tx.status != TransactionStatus.pending:
                 return {"status": "ok"}
@@ -1556,7 +1557,7 @@ async def tribute_webhook(request: Request) -> dict:
                             reply_markup=back_to_menu_kb(),
                         )
                     except Exception as exc:
-                        logger.warning("Failed to notify Tribute payer %s: %s", user.tg_id, exc)
+                        logger.warning('Failed to notify Tribute payer %s: %s', user.tg_id, type(exc).__name__)
             return {"status": "ok"}
 
     # Backward compatibility for Shop API orders created before migration to
@@ -1568,27 +1569,27 @@ async def tribute_webhook(request: Request) -> dict:
     async with AsyncSessionLocal() as session:
         tx = await repo.get_transaction_by_external_id(session, external_id)
         if not tx:
-            logger.warning("Tribute webhook for unknown order uuid: %s", external_id)
+            logger.warning("Tribute webhook for unknown order uuid: %s", safe_identifier(external_id))
             return {"status": "ok"}
         if tx.provider != PaymentProvider.tribute:
-            logger.warning("Tribute order uuid belongs to another provider: %s", external_id)
+            logger.warning("Tribute order uuid belongs to another provider: %s", safe_identifier(external_id))
             return {"status": "ok"}
 
         if event_name == "shop_order":
             if tx.status != TransactionStatus.pending:
                 return {"status": "ok"}
             if tribute_webhook_status(data) != "paid":
-                logger.warning("Tribute shop_order without paid status: %s", external_id)
+                logger.warning("Tribute shop_order without paid status: %s", safe_identifier(external_id))
                 return {"status": "ok"}
             currency = tribute_webhook_currency(data)
             if currency != "rub":
-                logger.warning("Tribute currency mismatch order=%s currency=%s", external_id, currency)
+                logger.warning("Tribute currency mismatch order=%s currency=%s", safe_identifier(external_id), safe_identifier(currency))
                 return {"status": "ok"}
             amount_rub = tribute_webhook_amount_rub(data)
             if amount_rub is None or round(amount_rub, 2) != round(float(tx.amount_rub), 2):
                 logger.warning(
                     "Tribute amount mismatch order=%s expected=%s actual=%s",
-                    external_id,
+                    safe_identifier(external_id),
                     tx.amount_rub,
                     amount_rub,
                 )
@@ -1597,10 +1598,10 @@ async def tribute_webhook(request: Request) -> dict:
             try:
                 verified_status = await tribute_get_order_status(external_id)
             except Exception as exc:
-                logger.error("Tribute order verification failed order=%s: %s", external_id, exc)
+                logger.error('Tribute order verification failed order=%s: %s', safe_identifier(external_id), type(exc).__name__)
                 raise HTTPException(status_code=503, detail="Tribute verification unavailable") from exc
             if verified_status != "paid":
-                logger.warning("Tribute order not paid server-side order=%s status=%s", external_id, verified_status)
+                logger.warning("Tribute order not paid server-side order=%s status=%s", safe_identifier(external_id), safe_identifier(verified_status))
                 raise HTTPException(status_code=503, detail="Tribute order is not paid yet")
 
             confirmed = await repo.confirm_transaction_and_add_credits(
@@ -1623,7 +1624,7 @@ async def tribute_webhook(request: Request) -> dict:
                                 reply_markup=back_to_menu_kb(),
                             )
                         except Exception as exc:
-                            logger.warning("Failed to notify Tribute payer %s: %s", user.tg_id, exc)
+                            logger.warning('Failed to notify Tribute payer %s: %s', user.tg_id, type(exc).__name__)
             return {"status": "ok"}
 
         if event_name == "shop_order_payment_failed":
@@ -1716,7 +1717,7 @@ async def kie_webhook(
     payload = await request.json()
     task_id = extract_task_id(payload)
     if not task_id:
-        logger.warning("Provider webhook without task_id provider=%s: %s", provider or "kie", payload)
+        callback_anomaly(logger, provider or "kie", "missing_task_id")
         return {"ok": True}
 
     lookup_task_id = task_id
@@ -1733,7 +1734,7 @@ async def kie_webhook(
         try:
             payload = await nexus_image_adapter.get_nexus_task_payload(task_id)
         except Exception as exc:
-            logger.warning("Nexus webhook canonical task fetch failed task_id=%s: %s", task_id, exc)
+            logger.warning('Nexus webhook canonical task fetch failed task_id=%s: %s', safe_identifier(task_id), type(exc).__name__)
             raise HTTPException(status_code=503, detail="Nexus task status temporarily unavailable") from exc
         if str(payload.get("task_id") or "") != task_id:
             raise HTTPException(status_code=503, detail="Nexus canonical task mismatch")
@@ -1756,7 +1757,7 @@ async def kie_webhook(
             # lost submit replies, process crashes and callback race ordering.
             gen = await repo.bind_kie_video_callback(session, apix_generation_id, task_id)
         if not gen:
-            logger.warning("KIE webhook for unknown task_id=%s lookup_task_id=%s", task_id, lookup_task_id)
+            logger.warning("KIE webhook for unknown task_id=%s lookup_task_id=%s", safe_identifier(task_id), safe_identifier(lookup_task_id))
             return {"ok": True}
 
         if provider == "nexus" and nexus_request_id:
@@ -1840,7 +1841,7 @@ async def kie_webhook(
 
         if not is_success(payload):
             if is_processing(payload):
-                logger.info("KIE webhook ignoring non-terminal task_id=%s status update", task_id)
+                logger.info("KIE webhook ignoring non-terminal task_id=%s status update", safe_identifier(task_id))
                 return {"ok": True}
             err = extract_error(payload)
             user_err = _sanitize_provider_error(None if generation_prompt_is_protected(gen) else err)
@@ -1875,7 +1876,7 @@ async def kie_webhook(
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
-                    logger.warning("Failed to notify KIE failure user=%s: %s", user.tg_id, e)
+                    logger.warning('Failed to notify KIE failure user=%s: %s', user.tg_id, type(e).__name__)
             return {"ok": True}
 
         urls = _extract_video_result_urls(payload) if gen.gen_type == GenerationType.video else extract_result_urls(payload)
@@ -1912,7 +1913,7 @@ async def kie_webhook(
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
-                    logger.warning("Failed to notify empty KIE result user=%s: %s", user.tg_id, e)
+                    logger.warning('Failed to notify empty KIE result user=%s: %s', user.tg_id, type(e).__name__)
             return {"ok": True}
 
         if gen.gen_type == GenerationType.video:
@@ -1932,7 +1933,7 @@ async def kie_webhook(
                 if strict_nexus_image or strict_wan_video:
                     logger.warning("Provider media verification deferred gen=%s error=%s", gen.id, type(e).__name__)
                     raise HTTPException(status_code=503, detail="Video media recovery pending") from e
-                logger.warning("Failed to mirror KIE result task_id=%s url=%s: %s", task_id, url, e)
+                callback_anomaly(logger, "kie", "media_mirror_failed", task_id=task_id, error=e)
                 result_urls.append(url)
         if image_session is not None:
             reference_urls = _image_session_reference_urls(image_session)
@@ -1962,7 +1963,7 @@ async def kie_webhook(
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
-                    logger.warning("Failed to notify reference-echo user=%s: %s", user.tg_id, e)
+                    logger.warning('Failed to notify reference-echo user=%s: %s', user.tg_id, type(e).__name__)
             return {"ok": True}
 
         result_url = result_urls[0]
@@ -1985,7 +1986,7 @@ async def kie_webhook(
                     from api.miniapp_routes import _deliver_pending_neironych_video_notice
                     await _deliver_pending_neironych_video_notice(session, finished.id)
                 except Exception:
-                    logger.exception("Wan3 Telegram notice deferred gen=%s", finished.id)
+                    logger.warning('Wan3 Telegram notice deferred gen=%s', finished.id)
             return {"ok": True}
 
         if gen.image_session_id:
@@ -2121,10 +2122,7 @@ async def kie_webhook(
                         )
                         logger.info("Video ready notification sent user=%s gen=%s", user.tg_id, gen.id)
                     except Exception as notify_err:
-                        logger.warning(
-                            "Video ready notification failed user=%s gen=%s err=%s",
-                            user.tg_id, gen.id, notify_err,
-                        )
+                        logger.warning('Video ready notification failed user=%s gen=%s err=%s', user.tg_id, gen.id, type(notify_err).__name__)
                     telegram_safe_video_bytes = 49 * 1024 * 1024
                     video_sent = False
                     video_too_large = False
@@ -2140,15 +2138,9 @@ async def kie_webhook(
                         logger.info("Video URL sent user=%s gen=%s", user.tg_id, gen.id)
                     except TelegramEntityTooLarge as video_url_err:
                         video_too_large = True
-                        logger.warning(
-                            "Video URL send too large user=%s gen=%s url=%s err=%s",
-                            user.tg_id, gen.id, result_url, video_url_err,
-                        )
+                        logger.warning('Video URL send too large user=%s gen=%s err=%s', user.tg_id, gen.id, type(video_url_err).__name__)
                     except Exception as video_url_err:
-                        logger.warning(
-                            "Video URL send failed user=%s gen=%s url=%s err=%s",
-                            user.tg_id, gen.id, result_url, video_url_err,
-                        )
+                        logger.warning('Video URL send failed user=%s gen=%s err=%s', user.tg_id, gen.id, type(video_url_err).__name__)
                         tmp_video = await _download_url_to_tempfile(result_url, suffix=".mp4")
                         if tmp_video:
                             try:
@@ -2162,15 +2154,9 @@ async def kie_webhook(
                                 logger.info("Video file sent user=%s gen=%s", user.tg_id, gen.id)
                             except TelegramEntityTooLarge as video_file_err:
                                 video_too_large = True
-                                logger.warning(
-                                    "Video file send too large user=%s gen=%s url=%s err=%s",
-                                    user.tg_id, gen.id, result_url, video_file_err,
-                                )
+                                logger.warning('Video file send too large user=%s gen=%s err=%s', user.tg_id, gen.id, type(video_file_err).__name__)
                             except Exception as video_file_err:
-                                logger.warning(
-                                    "Video file send failed user=%s gen=%s url=%s err=%s",
-                                    user.tg_id, gen.id, result_url, video_file_err,
-                                )
+                                logger.warning('Video file send failed user=%s gen=%s err=%s', user.tg_id, gen.id, type(video_file_err).__name__)
                     if not video_sent:
                         if tmp_video is None:
                             tmp_video = await _download_url_to_tempfile(result_url, suffix=".mp4")
@@ -2181,10 +2167,7 @@ async def kie_webhook(
                             except Exception:
                                 tmp_video_size = None
                         if video_too_large and tmp_video_size and tmp_video_size > telegram_safe_video_bytes:
-                            logger.warning(
-                                "Video exceeds safe Telegram upload limit user=%s gen=%s url=%s size_bytes=%s",
-                                user.tg_id, gen.id, result_url, tmp_video_size,
-                            )
+                            logger.warning('Video exceeds safe Telegram upload limit user=%s gen=%s size_bytes=%s', user.tg_id, gen.id, tmp_video_size)
                         elif tmp_video:
                             try:
                                 await bot.send_document(
@@ -2197,15 +2180,9 @@ async def kie_webhook(
                                 logger.info("Video document sent user=%s gen=%s", user.tg_id, gen.id)
                             except TelegramEntityTooLarge as video_doc_err:
                                 video_too_large = True
-                                logger.warning(
-                                    "Video document send too large user=%s gen=%s url=%s err=%s",
-                                    user.tg_id, gen.id, result_url, video_doc_err,
-                                )
+                                logger.warning('Video document send too large user=%s gen=%s err=%s', user.tg_id, gen.id, type(video_doc_err).__name__)
                             except Exception as video_doc_err:
-                                logger.warning(
-                                    "Video document fallback failed user=%s gen=%s url=%s err=%s",
-                                    user.tg_id, gen.id, result_url, video_doc_err,
-                                )
+                                logger.warning('Video document fallback failed user=%s gen=%s err=%s', user.tg_id, gen.id, type(video_doc_err).__name__)
                         if not video_sent:
                             fallback_text = (
                                 f"✅ <b>Видео готово</b>\n\n"
@@ -2229,7 +2206,7 @@ async def kie_webhook(
                         except Exception:
                             pass
             except Exception as e:
-                logger.warning("Failed to send KIE result user=%s gen=%s: %s", user.tg_id, gen.id, e)
+                logger.warning('Failed to send KIE result user=%s gen=%s: %s', user.tg_id, gen.id, type(e).__name__)
 
     return {"ok": True}
 
@@ -2255,7 +2232,7 @@ async def kie_suno_voice_webhook(
 
     task_id = extract_suno_voice_task_id(payload) or extract_task_id(payload)
     if not task_id:
-        logger.warning("KIE Suno voice webhook without task_id stage=%s payload=%s", stage, payload)
+        callback_anomaly(logger, "kie", "missing_suno_voice_task_id", status=stage)
         return {"ok": True}
 
     provider_status = extract_suno_voice_status(payload)
@@ -2269,7 +2246,7 @@ async def kie_suno_voice_webhook(
         if not voice:
             voice = await repo.get_suno_voice_by_voice_task_id(session, task_id)
         if not voice:
-            logger.warning("KIE Suno voice webhook unknown task_id=%s stage=%s", task_id, stage)
+            logger.warning("KIE Suno voice webhook unknown task_id=%s stage=%s", safe_identifier(task_id), safe_identifier(stage))
             return {"ok": True}
 
         if _suno_voice_status_contains(provider_status, SUNO_VOICE_FAILED_STATUSES):
@@ -2319,7 +2296,7 @@ async def kie_music_webhook(
 
     task_id = extract_task_id(payload)
     if not task_id:
-        logger.warning("KIE music webhook without task_id: %s", payload)
+        callback_anomaly(logger, "kie", "missing_music_task_id")
         return {"ok": True}
 
     from api.music_service import pop_miniapp_task
@@ -2355,12 +2332,7 @@ async def kie_music_webhook(
         or "text generated successfully" in normalized_msg
         or "lyrics/text generation successful" in normalized_msg
     ):
-        logger.info(
-            "KIE music still processing task_id=%s status=%s msg=%s",
-            task_id,
-            status,
-            normalized_msg,
-        )
+        logger.info('KIE music still processing task_id=%s status=%s', safe_identifier(task_id), safe_identifier(status))
         return {"ok": True}
 
     audio_urls = extract_music_urls(payload)
@@ -2386,14 +2358,9 @@ async def kie_music_webhook(
 
     if not audio_urls and not looks_failed and not explicit_success and not is_success(payload):
         if "all generated successfully" in normalized_msg:
-            logger.warning("KIE music final-looking callback without parsed audio task_id=%s payload=%s", task_id, payload)
+            callback_anomaly(logger, "kie", "missing_final_audio", task_id=task_id)
         else:
-            logger.info(
-                "KIE music non-final callback task_id=%s status=%s msg=%s",
-                task_id,
-                status,
-                normalized_msg,
-            )
+            logger.info('KIE music non-final callback task_id=%s status=%s', safe_identifier(task_id), safe_identifier(status))
         return {"ok": True}
 
     db_gen = None
@@ -2419,13 +2386,13 @@ async def kie_music_webhook(
     generation_id = db_gen.id if db_gen else miniapp_gen_id
 
     if not tg_id and not generation_id:
-        logger.warning("KIE music webhook: unknown task_id=%s status=%s", task_id, status)
+        logger.warning("KIE music webhook: unknown task_id=%s status=%s", safe_identifier(task_id), safe_identifier(status))
         return {"ok": True}
 
     if looks_failed or (not audio_urls and not explicit_success and not is_success(payload)):
         err = extracted_error or msg or f"Music generation failed: {status}"
         user_err = _sanitize_provider_error(err, fallback="Ошибка при генерации музыки")
-        logger.warning("KIE music failed task_id=%s status=%s: %s", task_id, status, err)
+        logger.warning('KIE music failed task_id=%s status=%s', safe_identifier(task_id), safe_identifier(status))
         refunded = 0.0
         if generation_id:
             async with AsyncSessionLocal() as session:
@@ -2446,11 +2413,11 @@ async def kie_music_webhook(
                     reply_markup=back_to_menu_kb(),
                 )
             except Exception as e:
-                logger.warning("Failed to notify music failure tg_id=%s: %s", tg_id, e)
+                logger.warning('Failed to notify music failure tg_id=%s: %s', tg_id, type(e).__name__)
         return {"ok": True}
 
     if not audio_urls:
-        logger.warning("KIE music webhook: no audio URLs task_id=%s status=%s payload=%s", task_id, status, payload)
+        callback_anomaly(logger, "kie", "missing_audio", task_id=task_id, status=status)
         if tg_id and int(tg_id) > 0 and bot:
             try:
                 await bot.send_message(
@@ -2475,7 +2442,7 @@ async def kie_music_webhook(
                     reply_markup=back_to_menu_kb(),
                 )
         except Exception as e:
-            logger.warning("Failed to send music result tg_id=%s: %s", tg_id, e)
+            logger.warning('Failed to send music result tg_id=%s: %s', tg_id, type(e).__name__)
             try:
                 links = "\n".join(audio_urls)
                 await bot.send_message(
@@ -2484,9 +2451,9 @@ async def kie_music_webhook(
                     + provider_task_reference(task_id),
                     reply_markup=back_to_menu_kb(),
                 )
-                logger.info("Music link fallback sent tg_id=%s task_id=%s", tg_id, task_id)
+                logger.info("Music link fallback sent tg_id=%s task_id=%s", tg_id, safe_identifier(task_id))
             except Exception as fallback_err:
-                logger.warning("Failed to send music link fallback tg_id=%s: %s", tg_id, fallback_err)
+                logger.warning('Failed to send music link fallback tg_id=%s: %s', tg_id, type(fallback_err).__name__)
 
     return {"ok": True}
 
@@ -2518,3 +2485,9 @@ else:
     @app.get("/", response_class=PlainTextResponse)
     async def landing_not_built() -> str:
         return "Landing is not built."
+
+
+# Schema metadata only; runtime custom authentication remains unchanged.
+from api.openapi_security import install_openapi_security  # noqa: E402
+
+install_openapi_security(app)

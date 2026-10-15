@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from api import assistant_service, llm_provider_service as llm
+from api import assistant_service
+from api import llm_provider_service as llm
 
 
 @pytest.mark.asyncio

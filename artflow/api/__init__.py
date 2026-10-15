@@ -12,8 +12,8 @@ import sys
 from types import ModuleType
 from typing import Any
 
-from api.provider_spec_overrides import apply_provider_spec_overrides
 from api.prompt_privacy import install_miniapp_prompt_privacy
+from api.provider_spec_overrides import apply_provider_spec_overrides
 
 apply_provider_spec_overrides()
 
@@ -21,13 +21,13 @@ apply_provider_spec_overrides()
 # new requests through the current KIE Grok Imagine Video 1.5 Preview contract.
 from api import image_service as _image_service
 from api import kieai_client as _kieai_client
-from api.grok15_adapter import install_grok15_adapter
 from api.genjutsu_adapter import (
     install_genjutsu_keyboard_support,
     install_genjutsu_miniapp,
     install_genjutsu_provider_support,
 )
 from api.genjutsu_pricing import install_genjutsu_seed_rows
+from api.grok15_adapter import install_grok15_adapter
 from api.minimax_h3_adapter import (
     install_minimax_h3_keyboard_support,
     install_minimax_h3_miniapp,
@@ -94,7 +94,10 @@ class _MiniappLabelLoader(importlib.abc.Loader):
         from api.kling_motion_visibility import install_kling_motion_visibility
         from api.pinterest_service_routes import install_pinterest_service_router
         from api.video_request_compat import install_video_request_compat
-        from bot.ui.model_labels import install_miniapp_model_labels, install_repository_model_labels
+        from bot.ui.model_labels import (
+            install_miniapp_model_labels,
+            install_repository_model_labels,
+        )
         from db import repository
         from db.feed_relevance import install_feed_relevance
 

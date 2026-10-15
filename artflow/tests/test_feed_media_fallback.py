@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 VIEWER = Path("api/feed_media_viewer.py")
 
 

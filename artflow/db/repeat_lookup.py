@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Generation
 
-
 _DB_ID_PREFIX = "db_"
 
 

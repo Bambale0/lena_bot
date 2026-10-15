@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 _SAFETY_MARKERS = (
     "image_safety",
     "prohibited_content",

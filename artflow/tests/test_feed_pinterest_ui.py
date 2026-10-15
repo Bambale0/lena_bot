@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 WEBAPP = Path("webapp")
 API = Path("api")
 

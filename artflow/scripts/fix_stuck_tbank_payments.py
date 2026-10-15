@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from sqlalchemy import select, update
+from sqlalchemy import select
+
 from db.models import Transaction, TransactionStatus, User
 from db.session import AsyncSessionLocal
 from payments.tbank import get_payment_state

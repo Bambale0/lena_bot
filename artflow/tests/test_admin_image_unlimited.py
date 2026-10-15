@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from db.models import GenerationType
 from bot.keyboards.admin_unlimited import (
     eligible_image_models,
     image_unlimited_models_kb,
 )
+from db.models import GenerationType
 
 
 def _cost(model_id: int, key: str, name: str, gen_type: GenerationType):

@@ -327,3 +327,58 @@ test("Seedance recovery stays neutral and reaches ready without a paid replay", 
   await expect(dialog.getByText("Готово", { exact: true })).toBeVisible();
   expect(submits).toBe(0);
 });
+
+for (const trend of trends) {
+  test(`bot trend=${trend.id} deep link uses shared upload/claim runner only`, async ({ page }) => {
+    const genericRequests: string[] = [];
+    const runs: Record<string, unknown>[] = [];
+    let checkoutReads = 0;
+    await page.route(`**/api/v1/trends/${trend.id}`, (route) => route.fulfill({ json: trend }));
+    await page.route(`**/api/v1/trends/${trend.id}/checkout`, (route) => {
+      checkoutReads += 1;
+      return route.fulfill({ json: {
+        cost_credits: 1.5, balance_credits: 100, can_run: true,
+        deficit_credits: 0, recommended_plan: null,
+      } });
+    });
+    await page.route("**/api/v1/trends/*/prepare", (route) => {
+      genericRequests.push(route.request().url());
+      return route.fulfill({ status: 409, json: { detail: "Generic preparation must not run for a bot trend link" } });
+    });
+    await page.route("**/api/v1/generate/**", (route) => {
+      genericRequests.push(route.request().url());
+      return route.fulfill({ status: 409, json: { detail: "Use shared trend runner" } });
+    });
+    await page.route("**/api/v1/trends/upload", (route) => route.fulfill({ json: {
+      asset_id: "apixasset.bot-entry.signature", url: "https://example.test/own-face.jpg", kind: "image",
+    } }));
+    await page.route(`**/api/v1/trends/${trend.id}/run`, (route) => {
+      runs.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({ json: {
+        ok: true, credits: 98.5,
+        task: { id: 9500 + trend.id, model: "test-model", gen_type: trend.kind,
+          prompt: "", prompt_hidden: true, status: "pending", result_url: null,
+          result_urls: [], credits_spent: 1.5, created_at: new Date().toISOString() },
+      } });
+    });
+    await page.goto(`/?trend=${trend.id}&tgWebAppData=test`);
+    const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: trend.title });
+    await expect(dialog).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Лента", exact: true })).toBeVisible();
+    await expect.poll(() => checkoutReads).toBeGreaterThan(0);
+    expect(runs).toHaveLength(0);
+    expect(genericRequests).toEqual([]);
+    await expect(dialog.locator("textarea, select")).toHaveCount(0);
+
+    await dialog.locator("input[type=file]").setInputFiles({
+      name: "own-face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    });
+    await expect(page.getByRole("dialog", { name: `Задача #${9500 + trend.id}` })).toBeVisible();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ asset_id: "apixasset.bot-entry.signature", quoted_credits: 1.5 });
+    expect(typeof runs[0].idempotency_key).toBe("string");
+    expect(runs[0]).not.toHaveProperty("prompt");
+    expect(runs[0]).not.toHaveProperty("model");
+    expect(genericRequests).toEqual([]);
+  });
+}

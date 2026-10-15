@@ -101,7 +101,7 @@ def validate_contracts(*, strict_product: bool = False) -> list[str]:
         if strict_product:
             if not contract.has_user_surface:
                 errors.append(f"{prefix}: no Telegram, Mini App or public API surface")
-            if not contract.live_smoke_id:
+            if contract.billing and not contract.live_smoke_id:
                 errors.append(f"{prefix}: no live smoke scenario")
 
     return errors
@@ -122,7 +122,7 @@ def _contract_row(contract: ProviderContract) -> str:
         if enabled
     ) or "—"
     contract_ready = contract.contract_valid
-    product_ready = contract_ready and contract.has_user_surface and bool(contract.live_smoke_id)
+    product_ready = contract.product_ready
     return (
         f"| `{contract.contract_id}` | `{contract.model}` | {', '.join(contract.modes)} | "
         f"{surfaces} | {_status(contract_ready)} | {_status(bool(contract.live_smoke_id))} | "
@@ -138,7 +138,7 @@ def render_markdown() -> str:
     product_ready = sum(
         1
         for item in ALL_CONTRACTS
-        if item.contract_valid and item.has_user_surface and item.live_smoke_id
+        if item.product_ready
     )
     lines = [
         "# APIX provider contract coverage",
@@ -163,7 +163,8 @@ def render_markdown() -> str:
             "- **Contract-valid**: official docs, dated revision, callable backend entrypoint and contract-test files exist.",
             "- **User-surfaced**: available through Telegram, Mini App or the public API.",
             "- **Smoke**: a unique live-smoke scenario ID is declared.",
-            "- **Product-ready**: all three conditions are true.",
+            "- **Product-ready**: valid metadata and a registered user surface; billable operations also require a smoke scenario. Nonbillable reads do not require a paid smoke.",
+            "- Public API exposure is derived from the operation registry, not duplicated catalog flags. These are structural checks, not evidence of a successful live provider render.",
             "",
         ]
     )
@@ -175,13 +176,10 @@ def render_json() -> str:
         "contracts": [
             {
                 **asdict(contract),
+                "public_api": contract.public_api,
                 "contract_valid": contract.contract_valid,
                 "has_user_surface": contract.has_user_surface,
-                "product_ready": bool(
-                    contract.contract_valid
-                    and contract.has_user_surface
-                    and contract.live_smoke_id
-                ),
+                "product_ready": contract.product_ready,
             }
             for contract in ALL_CONTRACTS
         ]

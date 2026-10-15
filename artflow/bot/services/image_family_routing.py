@@ -4,7 +4,6 @@ from api import image_service
 from api.image_service import ImageModel
 from bot.keyboards.models import IMAGE_CAPS
 
-
 IMAGE_FAMILY_ROUTES: dict[ImageModel, ImageModel] = {
     ImageModel.SEEDREAM_5_PRO_T2I: ImageModel.SEEDREAM_5_PRO_I2I,
     ImageModel.SEEDREAM_45: ImageModel.SEEDREAM_45_EDIT,
