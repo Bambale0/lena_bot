@@ -79,7 +79,7 @@ function modeLabel(mode: string): string {
   return {
     text: "Текст",
     image: "Фото",
-    video: "Изменить видео",
+    video: "Видео",
     motion: "Motion",
     avatar: "Аватар",
     audio: "Голос",

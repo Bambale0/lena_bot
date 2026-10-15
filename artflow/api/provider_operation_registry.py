@@ -300,7 +300,14 @@ def _build_specs() -> dict[str, OperationSpec]:
 
 
 OPERATION_SPECS = _build_specs()
-PUBLIC_API_CONTRACT_IDS = frozenset(OPERATION_SPECS)
+# Wan3 customer launches require atomic source-video inspection, measured
+# billable input seconds, durable pre-submit journal and exact retail quote.
+# Generic provider-operations does not implement those guarantees. The Wan
+# contracts remain in OPERATION_SPECS for inventory/smoke validation but are
+# deliberately not a second public paid endpoint.
+PUBLIC_API_CONTRACT_IDS = frozenset(OPERATION_SPECS) - frozenset({
+    "video.wan30", "video.wan30.prime",
+})
 
 
 def get_operation_spec(contract_id: str) -> OperationSpec:

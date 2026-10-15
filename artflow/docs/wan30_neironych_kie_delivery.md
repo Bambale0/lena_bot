@@ -73,3 +73,13 @@ migrates DB before updating containers. Verify live API and both model
 variants. No live paid smoke until user explicitly authorizes that
 particular test. Rollback by reverting PR and disabling model base rows
 via existing admin UI; do not delete historical financial data.
+
+## Legacy generic provider-operation gateway
+
+Wan3 video tasks are available to customers through the quoted Studio video
+checkout (web and Mini App) and through the Telegram video wizard. They are
+not exposed as a separate paid operation in the older generic provider
+contract gateway: its legacy duration-only pricing ignores input video
+reference seconds. Wan3 contract entries remain in the audit inventory
+and non-paid smoke manifest. A separate generic route can be enabled only
+after its billing and durable provider identity match the quoted checkout.

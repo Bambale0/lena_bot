@@ -107,3 +107,15 @@ async def test_frontend_repeated_image_url_not_mistaken_for_two_frames():
     assert request.first_frame_url == same
     assert request.last_frame_url is None
     assert build_kie_wan30_payload(request)["input"]["first_frame_url"] == same
+
+
+def test_wan3_never_uses_generic_public_provider_operations_charger():
+    """That older gateway lacks the server-measured input-seconds contract."""
+    from api.provider_contract_catalog import ALL_CONTRACTS
+    from api.provider_operation_registry import PUBLIC_API_CONTRACT_IDS
+
+    exposed = {c.contract_id for c in ALL_CONTRACTS if c.model in {
+        "wan/3-0-video", "wan/3-0-video-prime",
+    }}
+    assert exposed == {"video.wan30", "video.wan30.prime"}
+    assert not exposed.intersection(PUBLIC_API_CONTRACT_IDS)

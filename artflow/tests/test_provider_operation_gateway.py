@@ -24,7 +24,7 @@ from db.models import GenerationType
 def test_every_catalog_contract_has_public_executor_and_smoke_case() -> None:
     catalog_ids = {contract.contract_id for contract in ALL_CONTRACTS}
     assert set(OPERATION_SPECS) == catalog_ids
-    assert set(PUBLIC_API_CONTRACT_IDS) == catalog_ids
+    assert set(PUBLIC_API_CONTRACT_IDS) == catalog_ids - {"video.wan30", "video.wan30.prime"}
     assert set(SMOKE_CASES) == catalog_ids
 
 
