@@ -109,3 +109,21 @@ def test_paid_submission_uses_journal_for_kie_even_without_primary_neironych():
     assert has_paid_submission_journal(context) is False
     context.started = True
     assert has_paid_submission_journal(context) is True
+
+@pytest.mark.asyncio
+async def test_web_kie_binding_receives_raw_provider_id_not_double_web_prefix(monkeypatch):
+    from api.neironych_seedance_runtime import SubmissionContext
+    from core.seedance_reconciliation import persist_submission_result
+
+    context = SubmissionContext(
+        client_request_id=UUID, before_submit=AsyncMock(),
+        before_kie_submit=AsyncMock(), kie_started=True,
+    )
+    bind=AsyncMock(return_value=SimpleNamespace(id=703))
+    monkeypatch.setattr(repo, "bind_kie_video_callback", bind)
+    accepted=await persist_submission_result(
+        AsyncMock(), 703, context, "kie_provider_123", surface="web",
+    )
+    assert accepted is True
+    assert bind.await_count == 1
+    assert bind.await_args.args[1:] == (703, "kie_provider_123")

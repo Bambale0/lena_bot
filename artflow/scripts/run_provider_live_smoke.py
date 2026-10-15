@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -101,6 +102,20 @@ def _run_case(
             else "wan/3-0-video"
         )
         params["mode"] = "text"
+        # Wan checkout requires a confirmed, exact server-side price. A
+        # failed/missing preflight must NEVER launch paid provider work.
+        quote_response = client.post(
+            base_url + "/api/v1/generate/video/quote", json=params,
+        )
+        quote_response.raise_for_status()
+        quote = quote_response.json()
+        amount = quote.get("cost_credits")
+        if (isinstance(amount, bool) or not isinstance(amount, (int, float))
+                or not math.isfinite(amount) or amount <= 0):
+            raise RuntimeError("Wan quote did not return a valid retail price")
+        if quote.get("can_run") is not True:
+            raise RuntimeError("Wan smoke balance is insufficient; no provider job submitted")
+        params["quoted_credits"] = float(amount)
         launch_path = "/api/v1/generate/video"
     else:
         launch_path = f"/api/v1/provider-operations/{contract_id}"

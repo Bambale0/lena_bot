@@ -275,3 +275,30 @@ async def test_unbound_submission_timeout_receipt_is_claimable_and_idempotent():
         session, row.id, claim.token, delivered=True,
     )
     assert json.loads(row.input_params)["neironych_video_notice"]["state"] == "sent"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["done", "failed"])
+async def test_wan_bound_kie_provider_task_claims_durable_bot_notice(kind):
+    row = _row(kind=kind)
+    row.model = "wan/3-0-video"
+    row.task_id = "kie_provider_123"
+    data = json.loads(row.input_params)
+    data[repo.KIE_VIDEO_SUBMISSION_KEY] = {
+        "state": "bound", "provider_task_id": row.task_id,
+    }
+    row.input_params = json.dumps(data)
+    notice = await repo.claim_neironych_video_notice(FakeSession(row), row.id)
+    assert notice is not None and notice.kind == kind
+
+
+@pytest.mark.asyncio
+async def test_wan_kie_notice_rejects_unmatched_or_unbound_provider_id():
+    row = _row()
+    row.model = "wan/3-0-video"
+    row.task_id = "kie_provider_changed"
+    data = json.loads(row.input_params)
+    data[repo.KIE_VIDEO_SUBMISSION_KEY] = {
+        "state": "bound", "provider_task_id": "old_id",
+    }
+    row.input_params = json.dumps(data)
+    assert await repo.claim_neironych_video_notice(FakeSession(row), row.id) is None

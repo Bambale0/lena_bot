@@ -2146,8 +2146,19 @@ async def claim_neironych_video_notice(
     status = getattr(generation.status, "value", generation.status)
     kind = data.get("kind")
     state = data.get("state")
-    known_provider_task = str(generation.task_id or "").startswith(
-        ("neironych:", "neironych-submit:", "kie-submit:")
+    task_identity = str(generation.task_id or "")
+    kie_marker = params.get(KIE_VIDEO_SUBMISSION_KEY)
+    confirmed_wan_kie = (
+        getattr(generation, "model", None) in {"wan/3-0-video", "wan/3-0-video-prime"}
+        and isinstance(kie_marker, dict)
+        and kie_marker.get("state") == "bound"
+        and bool(task_identity)
+        and not task_identity.startswith("web:")
+        and kie_marker.get("provider_task_id") == task_identity
+    )
+    known_provider_task = (
+        task_identity.startswith(("neironych:", "neironych-submit:", "kie-submit:"))
+        or confirmed_wan_kie
     )
     refunded_without_identity = (
         kind == "failed" and status == "failed"

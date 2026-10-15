@@ -1702,6 +1702,10 @@ def _normalize_video_request(
         if normalized_mode == "image" or (is_wan30 and (image_url or reference_urls))
         else []
     )
+    if is_wan30:
+        # Composer repeats image_url in reference_urls. Duplicates must not
+        # use up slots before the supplier-bound input is deduplicated.
+        all_refs = list(dict.fromkeys(all_refs))
     max_refs = int(caps.get("max_refs", 1) or 1)
     if len(all_refs) > max_refs:
         raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")

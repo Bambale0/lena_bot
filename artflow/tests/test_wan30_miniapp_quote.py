@@ -104,3 +104,14 @@ async def test_wan30_launch_rejects_stale_or_missing_price_before_spending(monke
     charged.assert_not_awaited()
     provider_post.assert_not_awaited()
     assert rate_model.await_count == 2
+
+def test_wan_repeat_10_unique_images_with_echoed_primary_is_accepted():
+    urls=[f"https://example.test/{n}.png" for n in range(10)]
+    normalized = miniapp_routes._normalize_video_request(
+        model_key="wan/3-0-video", mode="image",
+        duration=5, aspect_ratio="adaptive", resolution="720p",
+        image_url=urls[0], reference_urls=urls,
+    )
+    actual=normalized["image_url"]
+    assert len(actual) == 10
+    assert actual == urls

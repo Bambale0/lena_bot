@@ -178,12 +178,14 @@ async def persist_submission_result(session, gen_id: int, context, task_id: str,
     from db import repository as repo
     from db.models import GenerationStatus
 
+    if context is not None and context.kie_started:
+        # This binder applies the authenticated surface prefix itself.
+        # Passing "web:<id>" here would create "web:web:<id>", preventing
+        # provider GET and the signed callback from finding accepted work.
+        raw_kie_id = task_id.removeprefix("web:")
+        return await repo.bind_kie_video_callback(session, gen_id, raw_kie_id) is not None
     if surface == "web" and not task_id.startswith("web:"):
         task_id = "web:" + task_id
-    if context is not None and context.kie_started:
-        # A signed KIE callback may have raced with the accepted POST reply.
-        # Only the persisted KIE attempt may own this paid provider task.
-        return await repo.bind_kie_video_callback(session, gen_id, task_id) is not None
     if context is not None and context.started:
         return await repo.bind_seedance_submission_task(session, gen_id, context.client_request_id, task_id)
     # A KIE-primary success did not run the pre-POST callback. Still refuse

@@ -191,11 +191,19 @@ def test_wan_live_smoke_runner_routes_through_user_quoted_checkout_not_legacy_ap
     def fake_response(request):
         routes.append((request.method, request.url.path))
         if request.method == "POST":
-            assert request.url.path == "/api/v1/generate/video"
             payload = json.loads(request.content)
             assert payload["model"] == "wan/3-0-video"
             assert payload["duration"] == 5
             assert payload["resolution"] == "720p"
+            if request.url.path == "/api/v1/generate/video/quote":
+                assert "quoted_credits" not in payload
+                return httpx.Response(200, json={
+                    "cost_credits": 60.0,
+                    "balance_credits": 1000.0,
+                    "can_run": True,
+                })
+            assert request.url.path == "/api/v1/generate/video"
+            assert payload["quoted_credits"] == 60.0
             return httpx.Response(202, json={"id": 777, "status": "processing"})
         assert request.url.path == "/api/v1/generations/777"
         return httpx.Response(200, json={
@@ -207,4 +215,29 @@ def test_wan_live_smoke_runner_routes_through_user_quoted_checkout_not_legacy_ap
             client, "https://apixbotai.com", "video.wan30", poll_interval=0.0,
         )
     assert result["status"] == "completed"
-    assert len(routes) == 2
+    assert routes == [
+        ("POST", "/api/v1/generate/video/quote"),
+        ("POST", "/api/v1/generate/video"),
+        ("GET", "/api/v1/generations/777"),
+    ]
+
+
+
+def test_wan_smoke_rejects_invalid_quote_before_paid_post():
+    import httpx
+    import pytest
+
+    from scripts import run_provider_live_smoke as smoke
+
+    routes = []
+
+    def fake_response(request):
+        routes.append((request.method, request.url.path))
+        assert request.method == "POST"
+        assert request.url.path == "/api/v1/generate/video/quote"
+        return httpx.Response(409, json={"detail": "price must be confirmed"})
+
+    with httpx.Client(transport=httpx.MockTransport(fake_response)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            smoke._run_case(client, "https://apixbotai.com", "video.wan30.prime", poll_interval=0)
+    assert routes == [("POST", "/api/v1/generate/video/quote")]
