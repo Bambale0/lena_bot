@@ -118,6 +118,7 @@ from core.feed_remix_prompt import (
     feed_image_remix_context,
     feed_remix_context,
     feed_video_edit_prompt,
+    generation_public_error,
     order_feed_image_references,
     original_feed_video_inputs,
     original_feed_video_references,
@@ -1886,6 +1887,7 @@ class GenerationOut(BaseModel):
     prompt_hidden: bool = False
     prompt_actions_allowed: bool = True
     status: str
+    error: str | None = None
     result_url: str | None
     preview_url: str | None = None
     credits_spent: float
@@ -5506,6 +5508,7 @@ def _gen_out(gen) -> GenerationOut:
         prompt_hidden=prompt_hidden,
         prompt_actions_allowed=not prompt_hidden,
         status=public_generation_status(gen),
+        error=generation_public_error(gen),
         result_url=_generation_primary_result_url(gen),
         preview_url=_preview_media_url(_generation_primary_result_url(gen), gen.gen_type),
         credits_spent=gen.credits_spent,

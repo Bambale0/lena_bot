@@ -10,6 +10,7 @@ import mimetypes
 import tempfile
 import time
 from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
 
 import httpx
@@ -107,7 +108,7 @@ from core.admin_alerts import send_admin_alert_once
 from core.broadcast_scheduler import run_broadcast_scheduler
 from core.config import settings
 from core.db_backup_scheduler import run_database_backup_scheduler
-from core.feed_remix_prompt import generation_prompt_is_protected
+from core.feed_remix_prompt import generation_prompt_is_protected, generation_public_error
 from core.kie_seedance_callback import verify_generation_signature
 from core.logger import setup_logging
 from core.music_reconcile_scheduler import run_music_reconcile_scheduler
@@ -1852,10 +1853,22 @@ async def kie_webhook(
                 return {"ok": True}
             if bot and _should_notify_generation_in_bot(gen):
                 try:
+                    if provider == "nexus" and gen.gen_type == GenerationType.image:
+                        public_error = generation_public_error(gen, error_override=err) or "Ошибка генератора."
+                        notice = "❌ <b>Изображение не создано.</b>\n\n" + escape(public_error)
+                        if refunded > 0:
+                            amount = f"{refunded:g}".replace(".", ",")
+                            notice += f"\n\n{amount} 💋 вернулись на баланс."
+                        notice += f"\n\nЗадача #{gen.id}"
+                    else:
+                        notice = (
+                            f"❌ Генерация не удалась.{_refund_notice_line(refunded)}\n\n"
+                            f"<code>{escape(user_err[:500])}</code>"
+                            + provider_task_reference(task_id)
+                        )
                     await bot.send_message(
                         user.tg_id,
-                        f"❌ Генерация не удалась.{_refund_notice_line(refunded)}\n\n<code>{user_err[:500]}</code>"
-                        + provider_task_reference(task_id),
+                        notice,
                         reply_markup=back_to_menu_kb(),
                     )
                 except Exception as e:
