@@ -551,6 +551,7 @@ async def test_supplier_review_expiry_escalates_for_administrator(monkeypatch):
     alert.assert_awaited_once()
     assert alert.await_args.kwargs["title"] == "Seedance: нужна сверка после возврата"
     assert "Нейроныч статус unknown" in alert.await_args.kwargs["message"]
+    assert "Кредиты пользователю возвращены" in alert.await_args.kwargs["message"]
 
 
 @pytest.mark.asyncio

@@ -467,7 +467,7 @@ async def _review_refunded_provider_task(gen_id: int) -> bool:
                        else "Seedance: нужна сверка после возврата"),
                 message=(f"APIX задача {gen_id}; Нейроныч статус {status}. "
                          "Проверьте закупочный расход и завершите сверку в защищённом admin API. "
-                         "Баланс пользователя не менялся."),
+                         "Кредиты пользователю возвращены; повторного списания нет."),
             )
         except Exception as exc:
             logger.warning("Seedance supplier alert deferred gen=%s error=%s",gen_id,type(exc).__name__)
