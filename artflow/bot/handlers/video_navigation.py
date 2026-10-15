@@ -210,7 +210,13 @@ async def back_in_video(
     data = await state.get_data()
     current = await state.get_state()
     key = data.get("model_key")
-    if not key:
+    if not key or current in {
+        VideoGenFSM.model_select.state,
+        VideoGenFSM.seedance25_reference_upload.state,
+    }:
+        # Seedance 2.5 enters its multimodal collector directly, with no
+        # intermediate mode picker. Old Telegram messages may still carry
+        # vid_nav:back, so route those callbacks as well.
         await back_to_models(call, state, session)
         return
     if current == VideoGenFSM.generating.state:
