@@ -47,6 +47,7 @@ from db.prompt_repository import (
     get_prompts_by_tag,
 )
 from db.session import get_session
+from db.trend_metrics import trend_success_stats
 
 router = APIRouter(prefix="/api/v1", tags=["trends"])
 
@@ -249,6 +250,20 @@ async def _patch_trend_snapshot(
     await session.commit()
 
 
+def _trend_with_metrics(
+    prompt: UserPrompt, stats: dict[str, int] | None,
+    *, is_admin: bool = False,
+) -> dict[str, Any]:
+    payload = trend_admin_payload(prompt) if is_admin else trend_public_payload(prompt)
+    stats = stats or {}
+    keys = (
+        "total_runs", "successful_runs", "successful_runs_7d",
+        "failed_runs", "active_runs", "unique_users",
+    ) if is_admin else ("successful_runs", "successful_runs_7d")
+    payload.update({key: int(stats.get(key, 0)) for key in keys})
+    return payload
+
+
 @router.get("/trends")
 async def list_trends(
     kind: str | None = Query(default=None, pattern="^(image|video)$"),
@@ -260,7 +275,8 @@ async def list_trends(
     prompts = await get_prompts_by_tag(session, TREND_TAG, limit=limit)
     if kind:
         prompts = [item for item in prompts if trend_kind(item) == kind]
-    return [trend_public_payload(item) for item in prompts]
+    stats = await trend_success_stats(session, [item.id for item in prompts])
+    return [_trend_with_metrics(item, stats.get(item.id)) for item in prompts]
 
 
 @router.get("/trends/{trend_id}")
@@ -270,7 +286,9 @@ async def get_trend(
     user: User = Depends(get_miniapp_user),
 ) -> dict[str, Any]:
     del user
-    return trend_public_payload(await _get_public_trend(session, trend_id))
+    prompt = await _get_public_trend(session, trend_id)
+    stats = await trend_success_stats(session, [prompt.id])
+    return _trend_with_metrics(prompt, stats.get(prompt.id))
 
 
 @router.post("/trends/upload", response_model=TrendUploadResponse)
@@ -314,7 +332,9 @@ async def prepare_trend(
 ) -> dict[str, Any]:
     # Backward-compatible endpoint, intentionally no longer leaks model/settings.
     del user
-    return {**trend_public_payload(await _get_public_trend(session, trend_id)), "prompt_hidden": True}
+    prompt = await _get_public_trend(session, trend_id)
+    stats = await trend_success_stats(session, [prompt.id])
+    return {**_trend_with_metrics(prompt, stats.get(prompt.id)), "prompt_hidden": True}
 
 
 @router.post("/trends/{trend_id}/run", status_code=202)
@@ -451,7 +471,9 @@ async def admin_list_trends(
         .where(UserPrompt.tags.any(TREND_TAG))
         .order_by(desc(UserPrompt.created_at))
     )
-    return [trend_admin_payload(item) for item in result.scalars().all()]
+    prompts = list(result.scalars().all())
+    stats = await trend_success_stats(session, [item.id for item in prompts])
+    return [_trend_with_metrics(item, stats.get(item.id), is_admin=True) for item in prompts]
 
 
 @router.post("/admin/trends/upload")

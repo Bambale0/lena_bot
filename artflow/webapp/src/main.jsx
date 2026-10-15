@@ -757,7 +757,7 @@ function Home({ user, referrals, feed, prompts, historyCount, setScreen, setTopu
             <button key={f.id || i} className="feedCard" onClick={() => setScreen("feed")}>
               <MediaThumb url={generationPreviewUrl(f)} openUrl={f.result_url || generationPreviewUrl(f)} type="image" idx={i} />
               <div>
-                <p>@{f.author || "anon"} · ♥ {f.likes_count || 0} · 🔁 {f.remixes || 0}</p>
+                <p>@{f.author || "anon"} · ♥ {f.likes_count || 0} · ✅ {f.remixes || 0} успешных повторов</p>
               </div>
             </button>
           ))}
@@ -1098,7 +1098,9 @@ function Trends({ trends, loading, user, imageModels, videoModels, reload, onApp
               <TrendPreview item={item} />
               <div><h3 style={{ margin: "0 0 5px" }}>{item.title}</h3><p style={{ margin: 0, color: "var(--text-soft)" }}>{item.description}</p></div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--text-ghost)" }}>
-                <span>{item.model}</span><span>🔥 {item.uses_count || 0} повторов</span>
+                <span>{item.model}</span>
+                <span>✅ Успешно: {item.successful_runs ?? 0}</span>
+                <span>За 7 дней: {item.successful_runs_7d ?? 0}</span>
               </div>
               <div className="feedActions">
                 <button className="primary" onClick={() => onApply?.(item)}>🔥 Повторить</button>

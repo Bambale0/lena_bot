@@ -226,13 +226,25 @@ function TrendCard({
           <div className="mb-1 flex items-center gap-1 text-[8px] opacity-85">
             <span>{trend.category_emoji || (isVideo ? "🎬" : "🖼️")}</span>
             <span className="truncate">{trend.category_title || (isVideo ? "Видео-тренд" : "Фото-тренд")}</span>
-            {trend.uses_count ? <span className="ml-auto">↻ {trend.uses_count}</span> : null}
+            <span className="ml-auto" title="Успешно завершённые генерации">✅ {trend.successful_runs ?? 0}</span>
           </div>
           <h2 className="line-clamp-2 text-[11px] font-semibold leading-tight">{trend.title}</h2>
         </div>
       </button>
       <div className="grid gap-1.5 p-1.5">
         {trend.description ? <p className="line-clamp-2 text-[10px] text-muted-foreground">{trend.description}</p> : null}
+        <p className="text-[10px] text-muted-foreground" title="Только завершённые успешные генерации">
+          Успешно: <strong>{trend.successful_runs ?? 0}</strong> · За 7 дней: <strong>{trend.successful_runs_7d ?? 0}</strong>
+        </p>
+        {isAdmin && trend.total_runs !== undefined ? (
+          <details className="apix-help border-0 text-[10px] text-muted-foreground">
+            <summary>Подробная статистика запусков</summary>
+            <p className="pb-1">
+              Запусков: {trend.total_runs ?? 0} · Пользователей: {trend.unique_users ?? 0}
+              {" · "}В работе: {trend.active_runs ?? 0} · Ошибок: {trend.failed_runs ?? 0}
+            </p>
+          </details>
+        ) : null}
         <div className="grid grid-cols-[1fr_auto] gap-1.5">
           <Button className="min-h-8 px-2 text-[10px]" onClick={() => openTrendRunner(trend)}>
             <Repeat2 className="size-3.5" />
@@ -548,7 +560,9 @@ function TrendsScreen({
 }: TrendsScreenProps) {
   const client = useMemo(() => new MiniAppApi(readTelegramInitData()), []);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminStats, setAdminStats] = useState<Record<number, Partial<TrendItem>>>({});
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [popularFirst, setPopularFirst] = useState(false);
 
   useEffect(() => {
     client.request<{ is_admin?: boolean }>("/me")
@@ -556,9 +570,40 @@ function TrendsScreen({
       .catch(() => setIsAdmin(false));
   }, [client]);
 
-  const visibleItems = useMemo(() => items.filter((item) => !isPinterestServiceTrend(item)), [items]);
+  useEffect(() => {
+    if (!isAdmin) return;
+    let live = true;
+    void client.request<TrendItem[]>("/admin/trends")
+      .then((stats) => {
+        if (!live) return;
+        const mapped: Record<number, Partial<TrendItem>> = {};
+        for (const trend of stats) {
+          mapped[trend.id] = {
+            total_runs: trend.total_runs,
+            failed_runs: trend.failed_runs,
+            active_runs: trend.active_runs,
+            unique_users: trend.unique_users,
+            successful_runs: trend.successful_runs,
+            successful_runs_7d: trend.successful_runs_7d,
+          };
+        }
+        setAdminStats(mapped);
+      })
+      .catch(() => { /* Public counts remain visible if detailed admin stats fail. */ });
+    return () => { live = false; };
+  }, [client, isAdmin, items]);
+
+  const visibleItems = useMemo(
+    () => items.filter((item) => !isPinterestServiceTrend(item))
+      .map((item) => isAdmin && adminStats[item.id] ? { ...item, ...adminStats[item.id] } : item),
+    [items, isAdmin, adminStats],
+  );
   const kindFiltered = filter === "all" ? visibleItems : visibleItems.filter((item) => item.kind === filter);
   const filtered = categoryFilter === "all" ? kindFiltered : kindFiltered.filter((item) => (item.category || "featured") === categoryFilter);
+  const orderedTrends = isAdmin && popularFirst
+    ? [...filtered].sort((a, b) => (b.successful_runs_7d ?? 0) - (a.successful_runs_7d ?? 0)
+      || (b.successful_runs ?? 0) - (a.successful_runs ?? 0))
+    : filtered;
   const availableCategories = TREND_CATEGORIES.filter((category) => kindFiltered.some((item) => (item.category || "featured") === category.value));
 
   useEffect(() => {
@@ -585,6 +630,20 @@ function TrendsScreen({
       </div>
 
       {isAdmin ? <TrendAdminForm client={client} onCreated={onRefresh} /> : null}
+      {isAdmin ? (
+        <p className="text-xs text-muted-foreground" aria-label="Успешные запуски трендов">
+          ✅ Успешно: {visibleItems.reduce((sum, item) => sum + (item.successful_runs ?? 0), 0)}
+          {" · "}За 7 дней: {visibleItems.reduce((sum, item) => sum + (item.successful_runs_7d ?? 0), 0)}
+        </p>
+      ) : null}
+      {isAdmin ? (
+        <button type="button"
+          className={cn("apix-focus-ring min-h-8 rounded-lg border px-3 text-xs font-semibold",
+            popularFirst ? "border-primary/40 bg-primary/15 text-primary" : "border-border text-muted-foreground")}
+          onClick={() => setPopularFirst((old) => !old)}>
+          🔥 {popularFirst ? "Популярные за 7 дней ✓" : "По популярности за 7 дней"}
+        </button>
+      ) : null}
 
       <div className="flex gap-1 overflow-x-auto pb-0.5">
         {filters.map(({ value, label, icon: Icon }) => (
@@ -629,12 +688,23 @@ function TrendsScreen({
 
       {filtered.length ? (
         <div className="grid gap-4">
+          {isAdmin && popularFirst ? (
+            <TrendGroup
+              title="Популярные за 7 дней"
+              emoji="🔥"
+              items={orderedTrends}
+              isAdmin={isAdmin}
+              client={client}
+              onUpdated={onRefresh}
+            />
+          ) : (
+            <>
           {TREND_CATEGORIES.map((category) => (
             <TrendGroup
               key={category.value}
               title={category.label}
               emoji={category.emoji}
-              items={filtered.filter((item) => (item.category || "featured") === category.value)}
+              items={orderedTrends.filter((item) => (item.category || "featured") === category.value)}
               isAdmin={isAdmin}
               client={client}
               onUpdated={onRefresh}
@@ -643,11 +713,13 @@ function TrendsScreen({
           <TrendGroup
             title="Другие"
             emoji="✨"
-            items={filtered.filter((item) => !TREND_CATEGORIES.some((category) => category.value === (item.category || "featured")))}
+            items={orderedTrends.filter((item) => !TREND_CATEGORIES.some((category) => category.value === (item.category || "featured")))}
             isAdmin={isAdmin}
             client={client}
             onUpdated={onRefresh}
           />
+            </>
+          )}
         </div>
       ) : (
         <div className="grid min-h-28 place-items-center rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">

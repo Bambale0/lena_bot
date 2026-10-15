@@ -41,6 +41,7 @@ from db.prompt_repository import (
     get_prompt_by_id,
     get_prompts_by_tag,
 )
+from db.trend_metrics import trend_success_stats
 
 router = Router(name="trends")
 MAX_BOT_PREVIEW_BYTES = 20 * 1024 * 1024
@@ -66,7 +67,10 @@ def _model_label(model_key: str | None) -> str:
     return str(model_key or "Модель не задана").replace("/", " · ")
 
 
-def _caption(prompt: UserPrompt, *, index: int, total: int) -> str:
+def _caption(
+    prompt: UserPrompt, *, index: int, total: int,
+    successful_runs: int = 0,
+) -> str:
     kind = trend_kind(prompt)
     return (
         f"🔥 <b>Тренды · {index + 1}/{total}</b>\n\n"
@@ -74,7 +78,7 @@ def _caption(prompt: UserPrompt, *, index: int, total: int) -> str:
         f"{html.escape(prompt.description or '')}\n\n"
         f"{'🎬' if kind == 'video' else '🖼'} <b>{'Видео' if kind == 'video' else 'Фото'}</b>\n"
         f"🧠 {html.escape(_model_label(prompt.model))}\n"
-        f"🔥 Повторов: <b>{prompt.uses_count}</b>"
+        f"✅ Успешных повторов: <b>{successful_runs}</b>"
     )
 
 
@@ -145,7 +149,11 @@ async def _show(
     else:
         idx = index % len(items)
     prompt = items[idx]
-    caption = _caption(prompt, index=idx, total=len(items))
+    stats = await trend_success_stats(session, [prompt.id])
+    caption = _caption(
+        prompt, index=idx, total=len(items),
+        successful_runs=int(stats.get(prompt.id, {}).get("successful_runs", 0)),
+    )
     markup = _catalog_kb(prompt, index=idx, total=len(items), is_admin=_is_admin(user))
     media = _media_source(prompt.preview_url)
     try:

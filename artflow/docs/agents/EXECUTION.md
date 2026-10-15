@@ -1691,3 +1691,13 @@ Baseline: `8f5d381a059b64fff609945d0d5d1c50466e4117`; local branch `fix/feed-rem
 # 2026-10-15 Qwen video sampling contract
 
 The active video-to-prompt route sends an MP4 URL to KIE Gemini 3.1 Pro. Its verified API contract does not accept an FPS sampling field. Explicit FPS requests fail before any paid provider call; the former `COMET_VIDEO_PROMPT_FPS` setting was removed from current configuration. The archived 2026-10-09 release note describes the previous Comet implementation.
+
+## 2026-10-15: Trend and feed successful-run statistics
+
+- **Baseline:** APIX production/main b8aad29, deployed with Wan3 migration 043.
+- **Incident evidence:** 15 trend prompts reported only one legacy uses_count, while curated trend runs are stored in generations using trend_id/prompt_id. Live read-only SQL confirmed 3,812 done feed derivatives with source_feed_gen_id but no parent_generation_id, omitted by the old feed aggregate.
+- **Goal:** Show how many real completed generations successfully repeat each curated trend or feed work and which trends are currently popular. Display zero rather than hiding the counter. Do not count clicks, pending tasks or failures.
+- **Implementation:** A single read-only SQL aggregation per trend collection (status=done, last seven days by finished_at, distinct successful user_id), feed repeats grouped by coalesce(source_feed_gen_id,parent_generation_id). The public APIs expose completed counts, admin API additionally exposes attempt/status/user aggregates. Mini App old/new, web, and Telegram bot labels updated. Admin weekly popularity sorting is cross-category.
+- **Security:** no additional user identities, source prompts or private generation content exposed; admin detailed metrics are available only through the existing authenticated /admin/trends endpoint. No provider, pricing, balance, refund, or DB migration changes.
+- **Acceptance:** new metrics aggregate existing records; no double counting for rows containing both trend_id and prompt_id; counts update after terminal status; zero is visible; feed derivatives without parent are counted once; unit + typecheck/build + CI/review green before main deploy.
+- **Progress:** root cause verified; tests written RED then GREEN; targeted backend tests and TS build green; PR/review/CI/deploy verification pending.

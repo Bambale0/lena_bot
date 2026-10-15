@@ -2409,6 +2409,27 @@ def _feed_score(gen: Generation, remix_count: int) -> float:
     return float(score)
 
 
+def _feed_remix_counts_subquery():
+    # Across Telegram, web and Mini App the source feed ID can be recorded
+    # without a parent_generation_id. Prefer it so every completed repeat
+    # counts once against its ORIGINAL public item, even after a second edit.
+    source_id = func.coalesce(
+        Generation.source_feed_gen_id, Generation.parent_generation_id,
+    )
+    return (
+        select(
+            source_id.label("parent_id"),
+            func.count(Generation.id).label("remix_count"),
+        )
+        .where(
+            source_id.is_not(None),
+            Generation.status == GenerationStatus.done,
+        )
+        .group_by(source_id)
+        .subquery()
+    )
+
+
 async def _feed_cards_from_stmt(
     session: AsyncSession,
     stmt,
@@ -2416,18 +2437,7 @@ async def _feed_cards_from_stmt(
     require_media: bool = True,
     sort_by_score: bool = True,
 ) -> list[FeedGenerationCard]:
-    remix_counts = (
-        select(
-            Generation.parent_generation_id.label("parent_id"),
-            func.count(Generation.id).label("remix_count"),
-        )
-        .where(
-            Generation.parent_generation_id.is_not(None),
-            Generation.status == GenerationStatus.done,
-        )
-        .group_by(Generation.parent_generation_id)
-        .subquery()
-    )
+    remix_counts = _feed_remix_counts_subquery()
 
     result = await session.execute(
         stmt.outerjoin(User, Generation.user_id == User.id)
