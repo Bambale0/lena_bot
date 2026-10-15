@@ -549,6 +549,8 @@ async def test_supplier_review_expiry_escalates_for_administrator(monkeypatch):
     assert review["state"]=="needs_admin_resolution"
     assert review["escalated_at"]
     alert.assert_awaited_once()
+    assert alert.await_args.kwargs["title"] == "Seedance: нужна сверка после возврата"
+    assert "Нейроныч статус unknown" in alert.await_args.kwargs["message"]
 
 
 @pytest.mark.asyncio
