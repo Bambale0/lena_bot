@@ -17,6 +17,7 @@ from api.video_prompt_service import (
 )
 from bot.states import VideoGenFSM
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message, split_text_chunks
+from core.config import settings
 from db import repository as repo
 from db.models import User
 
@@ -41,7 +42,10 @@ def _cancel_kb() -> InlineKeyboardMarkup:
 
 async def _download_telegram_file(bot: Bot, file_id: str) -> bytes:
     telegram_file = await bot.get_file(file_id)
-    downloaded = await bot.download_file(telegram_file.file_path)
+    downloaded = await bot.download_file(
+        telegram_file.file_path,
+        timeout=settings.TELEGRAM_VIDEO_PROMPT_DOWNLOAD_TIMEOUT_SECONDS,
+    )
     return downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
 
 
