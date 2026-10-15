@@ -195,6 +195,22 @@ class Generation(Base):
 
 
 
+class TrendRunClaim(Base):
+    """Durable, user-scoped guard before a potentially paid trend submission."""
+
+    __tablename__ = "trend_run_claims"
+    __table_args__ = (UniqueConstraint("user_id", "request_key", name="uq_trend_run_claim_user_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    request_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    trend_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("generations.id"))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ImageSession(Base):
     """Saved image generation settings for iterative Syntx-like workflow."""
 

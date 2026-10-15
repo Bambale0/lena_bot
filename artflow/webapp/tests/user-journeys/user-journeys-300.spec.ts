@@ -637,6 +637,7 @@ registerDomain("10 · Запуск тренда через upload-first runner",
   await expect(page.getByRole("dialog", { name: /Задача #/ })).toBeVisible();
   expect(captures.trendRun).toMatchObject({ asset_id: "apixasset.journey.signature" });
   expect(typeof captures.trendRun?.idempotency_key).toBe("string");
+  expect(captures.trendRun?.quoted_credits).toBe(1.5);
   expect(captures.trendRun).not.toHaveProperty("model");
   expect(captures.trendRun).not.toHaveProperty("prompt");
 });

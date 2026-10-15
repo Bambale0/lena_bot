@@ -558,6 +558,7 @@ function TrendRunnerPortal() {
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const processedStart = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const runKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const genericBusy = phase === "uploading" || phase === "generating";
   const busy = genericBusy || pinterestBusy;
@@ -570,6 +571,7 @@ function TrendRunnerPortal() {
   const personalized = userFields.length > 0;
 
   const resetRunner = useCallback(() => {
+    runKeyRef.current = null;
     setPhase("idle");
     setError("");
     setPinterestBusy(false);
@@ -716,15 +718,25 @@ function TrendRunnerPortal() {
 
   const startTrend = useCallback(async (assetId: string, values: Record<string, string>) => {
     if (!trend || genericBusy) return;
+    if (!checkout) {
+      toast.error("Сначала дождись расчёта стоимости тренда");
+      return;
+    }
     setError("");
     try {
       setPhase("generating");
+      const fingerprint = JSON.stringify([trend.id, assetId, values]);
+      const requestKey = runKeyRef.current?.fingerprint === fingerprint
+        ? runKeyRef.current.key
+        : buildIdempotencyKey(trend.id);
+      runKeyRef.current = { fingerprint, key: requestKey };
       const result = await apiJson<TrendRunResponse>(`/trends/${trend.id}/run`, {
         method: "POST",
         body: JSON.stringify({
           asset_id: assetId,
-          idempotency_key: buildIdempotencyKey(trend.id),
+          idempotency_key: requestKey,
           user_values: values,
+          quoted_credits: checkout.cost_credits,
         }),
       });
       if (!result.task?.id) throw new Error("Backend не вернул задачу");
@@ -741,7 +753,7 @@ function TrendRunnerPortal() {
       setPhase("error");
       toast.error(message);
     }
-  }, [genericBusy, resetRunner, trend]);
+  }, [checkout, genericBusy, resetRunner, trend]);
 
   const runPhoto = useCallback(async (file: File | undefined | null) => {
     if (!trend || !file || genericBusy) return;
@@ -758,7 +770,7 @@ function TrendRunnerPortal() {
       const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
       if (!uploaded.asset_id) throw new Error("Backend не вернул asset_id");
       setUploadedAsset(uploaded);
-      if ((trend.user_fields || []).length || (checkout && !checkout.can_run)) {
+      if ((trend.user_fields || []).length || !checkout || !checkout.can_run) {
         setPhase("idle");
         toast.success(checkout && !checkout.can_run ? "Фото готово — пополни баланс прямо здесь" : "Фото готово");
         return;
@@ -972,7 +984,7 @@ function TrendRunnerPortal() {
 
               {uploadedAsset ? (
                 <Button
-                  disabled={genericBusy || !userFieldsReady || Boolean(checkout && !checkout.can_run)}
+                  disabled={genericBusy || !userFieldsReady || !checkout || !checkout.can_run}
                   className="min-h-12 w-full"
                   onClick={() => {
                     if (uploadedAsset) void startTrend(uploadedAsset.asset_id, userValues);
