@@ -102,7 +102,7 @@ def _checkout_kb(plan) -> object:
         )
     )
     builder.row(
-        InlineKeyboardButton(text="← К моделям", callback_data="vid_nav:back"),
+        InlineKeyboardButton(text="← К моделям", callback_data="vid_nav:models"),
         InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"),
     )
     return builder.as_markup()
@@ -132,7 +132,7 @@ async def _show_checkout(
             "Сейчас нет активного пакета пополнения. Открой баланс позже или вернись к моделям."
         )
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="← К моделям", callback_data="vid_nav:back"))
+        builder.row(InlineKeyboardButton(text="← К моделям", callback_data="vid_nav:models"))
         builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
         markup = builder.as_markup()
     else:
@@ -172,7 +172,7 @@ def _kb(*, require_image_reference: bool = False) -> object:
     if not require_image_reference:
         builder.row(InlineKeyboardButton(text="➡️ Без референсов", callback_data="s25ref:none"))
     builder.row(InlineKeyboardButton(text="🗑 Очистить", callback_data="s25ref:clear"))
-    builder.row(InlineKeyboardButton(text="← Назад", callback_data="vid_nav:back"))
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="vid_nav:models"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 
