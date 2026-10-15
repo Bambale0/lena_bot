@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import assistant_service, llm_provider_service as llm, photo_prompt_service
+from api import assistant_service, photo_prompt_service
+from api import llm_provider_service as llm
 
 
 def test_kie_responses_multimodal_web_search_payload() -> None:
@@ -204,7 +205,7 @@ async def test_assistant_routes_real_claude_fallback(monkeypatch) -> None:
     )
 
     result = await assistant_service.generate_assistant_result(
-        [{"role": "user", "content": "Hello"}]
+        [{"role": "user", "content": "Hello"}], admin_mode=True,
     )
 
     assert result.text == "Claude answered"

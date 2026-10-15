@@ -484,6 +484,34 @@ class ProviderRoutingAudit(Base):
     )
 
 
+class QwenRoutingSetting(Base):
+    """Audited provider choice for an APIX Qwen-facing user workflow."""
+
+    __tablename__ = "qwen_routing_settings"
+
+    mode: Mapped[str] = mapped_column(String(16), primary_key=True)
+    primary_provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    backup_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    updated_by_admin_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class QwenRoutingAudit(Base):
+    __tablename__ = "qwen_routing_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    previous_primary_provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    previous_backup_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    new_primary_provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    new_backup_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    changed_by_admin_tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class ImageRecoveryPolicy(Base):
     """Admin-managed customer refund SLA, scoped to an image provider."""
 

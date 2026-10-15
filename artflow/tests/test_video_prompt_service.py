@@ -43,6 +43,12 @@ class _FakeClient:
         return self._responses.pop(0)
 
 
+@pytest.fixture(autouse=True)
+def _kie_video_route(monkeypatch):
+    from core.qwen_routing import QwenRoute
+    monkeypatch.setattr(video_prompt_service, "get_qwen_route", AsyncMock(return_value=QwenRoute("video", "kie", None, "test")))
+
+
 @pytest.mark.asyncio
 async def test_video_prompt_overall_deadline_stops_a_provider_that_keeps_reading(monkeypatch) -> None:
     """The overall budget must end even when HTTPX's per-read timer would reset."""
@@ -183,62 +189,34 @@ async def test_telegram_video_prompt_does_not_charge_while_file_is_downloading(m
 
 
 @pytest.mark.asyncio
-async def test_generate_prompt_from_video_url_calls_comet_with_video_url(monkeypatch) -> None:
-    fake_client = _FakeClient(
-        [_FakeResponse({"choices": [{"message": {"content": "готовый видеопромпт"}}]})]
-    )
+async def test_generate_prompt_from_video_url_uses_verified_kie_video_contract(monkeypatch) -> None:
+    text = "A. Ready-to-use prompt — красный фон и синий квадрат; " + "детали сцены и камеры. " * 7
+    fake_client = _FakeClient([_FakeResponse({"choices": [{"message": {"content": text}}]})])
     monkeypatch.setattr(video_prompt_service.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
-    monkeypatch.setattr(
-        video_prompt_service,
-        "settings",
-        SimpleNamespace(
-            COMET_API_KEY="test-comet",
-            COMET_BASE_URL="https://api.cometapi.com",
-            COMET_VIDEO_PROMPT_MODEL="qwen3.8-max",
-        ),
-    )
 
-    result = await video_prompt_service.generate_prompt_from_video_url(
-        "https://cdn.example.test/video.mp4",
-        fps=3,
-    )
+    result = await video_prompt_service.generate_prompt_from_video_url("https://cdn.example.test/video.mp4", fps=3)
 
-    assert result.text == "готовый видеопромпт"
-    assert result.provider == "comet_chat"
-    assert result.model == "qwen3.8-max"
+    assert result.text == text.strip()
+    assert result.provider == "kie_chat"
+    assert result.model == "gemini-3.1-pro"
     args, kwargs = fake_client.calls[0]
-    assert args[0] == "https://api.cometapi.com/v1/chat/completions"
+    assert args[0] == "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions"
     payload = kwargs["json"]
-    assert payload["model"] == "qwen3.8-max"
-    content = payload["messages"][1]["content"]
-    assert content[0]["type"] == "video_url"
-    assert content[0]["video_url"] == {"url": "https://cdn.example.test/video.mp4"}
-    assert content[0]["fps"] == 3
-    assert content[1]["type"] == "text"
+    assert payload["stream"] is False
+    assert payload["messages"][0]["content"][1] == {
+        "type": "image_url", "image_url": {"url": "https://cdn.example.test/video.mp4"},
+    }
+    assert "Аудиодорожка не анализировалась" in payload["messages"][0]["content"][0]["text"]
 
 
 @pytest.mark.asyncio
-async def test_generate_prompt_from_video_url_uses_assistant_fallback_model(monkeypatch) -> None:
-    fake_client = _FakeClient(
-        [_FakeResponse({"choices": [{"message": {"content": "fallback prompt"}}]})]
-    )
+async def test_short_or_empty_kie_video_answer_is_not_success_or_retried(monkeypatch) -> None:
+    fake_client = _FakeClient([_FakeResponse({"choices": [{"message": {"content": "Неизвестно"}}]})])
     monkeypatch.setattr(video_prompt_service.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
-    monkeypatch.setattr(
-        video_prompt_service,
-        "settings",
-        SimpleNamespace(
-            COMET_API_KEY="test-comet",
-            COMET_BASE_URL="https://api.cometapi.com/",
-            COMET_VIDEO_PROMPT_MODEL="",
-            COMET_VIDEO_PROMPT_FPS=2.0,
-            COMET_ASSISTANT_MODEL="qwen3.8-max",
-        ),
-    )
 
-    result = await video_prompt_service.generate_prompt_from_video_url("https://cdn.example.test/video.mp4")
-
-    assert result.text == "fallback prompt"
-    assert fake_client.calls[0][1]["json"]["model"] == "qwen3.8-max"
+    with pytest.raises(video_prompt_service.VideoPromptProviderError, match="no usable scene analysis"):
+        await video_prompt_service.generate_prompt_from_video_url("https://cdn.example.test/video.mp4")
+    assert len(fake_client.calls) == 1
 
 
 def test_video_prompt_telegram_chunks_preserve_full_text() -> None:

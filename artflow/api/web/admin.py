@@ -21,6 +21,7 @@ from core.feed_recipe_identity_policy import (
 )
 from core.image_recovery_policy import get_image_recovery_policy, set_image_recovery_policy
 from core.provider_routing import get_nano21_route, set_nano21_route
+from core.qwen_routing import get_qwen_route, set_qwen_route
 from core.reporting_time import REPORTING_TZ, moscow_day_bounds_utc
 from db import repository as repo
 from db.models import (
@@ -46,6 +47,49 @@ router = APIRouter(tags=["web-admin"])
 
 class Nano21ProviderRoutingUpdate(BaseModel):
     primary_provider: Literal["neironych", "nexus"]
+
+
+class QwenProviderRoutingUpdate(BaseModel):
+    primary_provider: Literal["neironych", "kie"]
+    backup_provider: Literal["neironych", "kie"] | None = None
+
+
+@router.get("/admin/provider-routing/qwen38/{mode}")
+async def admin_get_qwen_route(
+    mode: Literal["text", "image", "video"],
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    route = await get_qwen_route(mode, session)
+    return ok({
+        "mode": route.mode, "primary_provider": route.primary_provider,
+        "backup_provider": route.backup_provider, "source": route.source,
+        "updated_by_admin_tg_id": route.updated_by_admin_tg_id,
+    })
+
+
+@router.put("/admin/provider-routing/qwen38/{mode}")
+async def admin_set_qwen_route(
+    mode: Literal["text", "image", "video"], body: QwenProviderRoutingUpdate,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    try:
+        route = await set_qwen_route(
+            session, mode, body.primary_provider, body.backup_provider,
+            admin_tg_id=int(user.tg_id), source="web",
+        )
+    except ValueError as exc:
+        return error_response(422, str(exc))
+    return ok({
+        "mode": route.mode, "primary_provider": route.primary_provider,
+        "backup_provider": route.backup_provider, "source": route.source,
+        "updated_by_admin_tg_id": route.updated_by_admin_tg_id,
+    })
 
 
 class ImageRecoveryPolicyUpdate(BaseModel):
