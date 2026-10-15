@@ -9,7 +9,9 @@ from typing import Any
 import httpx
 
 from api import llm_provider_service as llm
+from api.neironych_qwen38_service import NeironychQwen38Service, Qwen38ProviderError
 from core.config import settings
+from core.qwen_routing import get_qwen_route, is_definitive_provider_rejection
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +202,47 @@ async def generate_assistant_result(
         function_tools=tuple(function_tools or ()),
         tool_choice=tool_choice,
     )
+    if not admin_mode and not web_search and not function_tools and tool_choice is None:
+        route = await get_qwen_route("text")
+        candidates = [route.primary_provider]
+        if route.backup_provider:
+            candidates.append(route.backup_provider)
+        last_error: Exception | None = None
+        for provider in candidates:
+            try:
+                if provider == "neironych":
+                    clean_messages = list(request.messages)
+                    latest = clean_messages.pop()
+                    answer = await NeironychQwen38Service().analyze_text(
+                        user_instruction=str(latest["content"]), system_prompt=system_prompt,
+                        history=clean_messages,
+                    )
+                    return AssistantReply(
+                        text=sanitize_assistant_reply(answer), provider="neironych",
+                        model=settings.NEIRONYCH_QWEN38_MODEL, usage={},
+                    )
+                kie_model = str(settings.KIE_ASSISTANT_MODEL).strip()
+                result = await llm.call_route(
+                    _kie_route(kie_model), request,
+                    kie_api_key=str(settings.KIE_AI_KEY),
+                    comet_api_key="", timeout_seconds=90,
+                )
+                return AssistantReply(
+                    text=sanitize_assistant_reply(result.text),
+                    provider=result.provider.value, model=result.model,
+                    usage=dict(result.usage), tool_calls=result.tool_calls,
+                )
+            except Qwen38ProviderError as exc:
+                last_error = exc
+                if exc.ambiguous:
+                    raise RuntimeError("Ответ AI-провайдера не подтверждён; повторная платная отправка остановлена") from exc
+            except Exception as exc:
+                # A dispatched KIE request may have completed despite a client
+                # failure. Do not attempt another paid provider call.
+                last_error = exc
+                if not is_definitive_provider_rejection(exc):
+                    break
+        raise RuntimeError("AI-ассистент временно недоступен") from last_error
     result = await llm.call_with_fallbacks(
         _assistant_routes(web_search=web_search),
         request,

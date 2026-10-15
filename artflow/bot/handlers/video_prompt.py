@@ -175,7 +175,9 @@ async def _analyse_video(
                 note=f"Telegram video prompt refund: {type(exc).__name__}",
             )
         await wait_msg.edit_text(
-            "❌ Не удалось проанализировать видео. Отправь другой файл или попробуй ещё раз.",
+            "Не получилось разобрать видео. "
+            + ("Кредиты возвращены. " if "spent" in locals() and spent else "Кредиты не списаны. ")
+            + "Попробуй другой файл.",
             reply_markup=_cancel_kb(),
         )
         return

@@ -15,6 +15,7 @@ from starlette.datastructures import Headers
 from api import miniapp_routes, video_prompt_service
 from api.web import generations as web_generations
 from bot.handlers import video_prompt as telegram_video_prompt
+from core.qwen_routing import QwenRoute
 from db.models import GenerationType
 from db.seed import DEFAULT_MODEL_COSTS
 
@@ -144,6 +145,25 @@ def test_telegram_bot_exposes_video_prompt_and_uses_configured_billing() -> None
     assert menus.count("vid:video2prompt") >= 3
 
 
+@pytest.mark.asyncio
+async def test_telegram_download_failure_says_no_credits_were_spent(monkeypatch) -> None:
+    monkeypatch.setattr(telegram_video_prompt, "_download_telegram_file", AsyncMock(side_effect=TimeoutError))
+    spend = AsyncMock()
+    refund = AsyncMock()
+    monkeypatch.setattr(telegram_video_prompt.repo, "spend_credits", spend)
+    monkeypatch.setattr(telegram_video_prompt.repo, "add_credits", refund)
+    wait = AsyncMock()
+    message = SimpleNamespace(answer=AsyncMock(return_value=wait))
+    await telegram_video_prompt._analyse_video(
+        message=message, state=AsyncMock(), session=AsyncMock(),
+        db_user=SimpleNamespace(id=42), bot=AsyncMock(),
+        file_id="test-video", mime_type="video/mp4", file_size=100,
+    )
+    assert "Кредиты не списаны" in wait.edit_text.await_args.args[0]
+    spend.assert_not_awaited()
+    refund.assert_not_awaited()
+
+
 # Exercise the real shared parser through each surface; only external IO/billing
 # is mocked. No provider request, database write or Telegram send is performed.
 
@@ -152,12 +172,18 @@ def test_telegram_bot_exposes_video_prompt_and_uses_configured_billing() -> None
 @pytest.mark.parametrize("surface", ["telegram", "miniapp", "web"])
 @pytest.mark.parametrize("completion", ["failure", "malformed_text", "malformed_choices", "timeout", "success"])
 async def test_video_prompt_provider_completion_settles_once(monkeypatch, surface, completion):
+    monkeypatch.setattr(video_prompt_service, "get_qwen_route", AsyncMock(
+        return_value=QwenRoute("video", "kie", None, "test"),
+    ))
     failure = (
         "The request could not be completed. Please retry later, "
         "or reduce the request parameters/content."
     )
     failed = completion != "success"
-    text = failure if failed else "Камера плавно движется вдоль берега."
+    text = failure if failed else (
+        "Камера плавно движется вдоль берега, в кадре видны небольшие волны и мягкий утренний свет; "
+        "готовый промпт подробно сохраняет эту последовательность движения и цветовую палитру."
+    )
     payload = {"choices": [{"message": {"content": text}}]}
     if completion == "malformed_text":
         payload = {"choices": [{"message": {"content": [

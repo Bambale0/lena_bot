@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from api import photo_prompt_service
@@ -48,97 +49,80 @@ def test_photo_prompt_instructions_request_russian_output() -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_prompt_from_photo_uses_kie_first(monkeypatch) -> None:
-    fake_client = _FakeClient([_FakeResponse({"choices": [{"message": {"content": "детальный промпт"}}]})])
-    monkeypatch.setattr(photo_prompt_service.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
-    monkeypatch.setattr(
-        photo_prompt_service,
-        "settings",
-        SimpleNamespace(
-            COMET_API_KEY="test-comet",
-            COMET_BASE_URL="https://api.cometapi.com",
-            COMET_ASSISTANT_MODEL="gpt-5.4",
-            COMET_ASSISTANT_FALLBACK="gpt-5.4-mini",
-            KIE_AI_KEY="test-kie",
-            KIE_PHOTO_PROMPT_MODEL="gpt-5-2",
-            KIE_PHOTO_PROMPT_FALLBACK="gpt-5-5",
-        ),
-    )
+async def test_generate_prompt_from_photo_uses_neironych_first(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
 
-    result = await photo_prompt_service.generate_prompt_from_photo(b"image", "image/jpeg")
+    from core.qwen_routing import QwenRoute
 
-    assert result == "детальный промпт"
-    args, kwargs = fake_client.calls[0]
-    assert args[0] == "https://api.kie.ai/gpt-5-2/v1/chat/completions"
-    assert "model" not in kwargs["json"]
+    monkeypatch.setattr(photo_prompt_service, "get_qwen_route", AsyncMock(return_value=QwenRoute("image", "neironych", "kie", "test")))
+    qwen = SimpleNamespace(analyze_image=AsyncMock(return_value="Подробный русский промпт: красный квадрат на белом фоне."))
+    monkeypatch.setattr(photo_prompt_service, "NeironychQwen38Service", lambda: qwen)
+    kie = AsyncMock()
+    monkeypatch.setattr(photo_prompt_service, "_call_kie_chat", kie)
+
+    result = await photo_prompt_service.generate_prompt_from_photo_result(b"image", "image/jpeg")
+
+    assert result.provider == "neironych"
+    assert result.model == photo_prompt_service.settings.NEIRONYCH_QWEN38_MODEL
+    assert "красный квадрат" in result.text
+    qwen.analyze_image.assert_awaited_once()
+    kie.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_generate_prompt_from_photo_uses_kie_responses_for_gpt_5_5(monkeypatch) -> None:
-    fake_client = _FakeClient(
-        [
-            _FakeResponse({"error": "missing"}, status_code=404),
-            _FakeResponse(
-                {
-                    "output": [
-                        {
-                            "type": "message",
-                            "content": [{"type": "output_text", "text": "русский промпт из responses"}],
-                        }
-                    ]
-                }
-            ),
-        ]
-    )
-    monkeypatch.setattr(photo_prompt_service.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
-    monkeypatch.setattr(
-        photo_prompt_service,
-        "settings",
-        SimpleNamespace(
-            COMET_API_KEY="test-comet",
-            COMET_BASE_URL="https://api.cometapi.com",
-            COMET_ASSISTANT_MODEL="gpt-5.4",
-            COMET_ASSISTANT_FALLBACK="gpt-5.4-mini",
-            KIE_AI_KEY="test-kie",
-            KIE_PHOTO_PROMPT_MODEL="gpt-5-2",
-            KIE_PHOTO_PROMPT_FALLBACK="gpt-5-5",
-        ),
-    )
+async def test_photo_definite_neironych_rejection_uses_one_kie_fallback(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
 
-    result = await photo_prompt_service.generate_prompt_from_photo(b"image", "image/jpeg")
+    from api.neironych_qwen38_service import Qwen38ProviderError
+    from core.qwen_routing import QwenRoute
 
-    assert result == "русский промпт из responses"
-    args, kwargs = fake_client.calls[-1]
-    assert args[0] == "https://api.kie.ai/codex/v1/responses"
-    assert kwargs["json"]["model"] == "gpt-5-5"
+    monkeypatch.setattr(photo_prompt_service, "get_qwen_route", AsyncMock(return_value=QwenRoute("image", "neironych", "kie", "test")))
+    qwen = SimpleNamespace(analyze_image=AsyncMock(side_effect=Qwen38ProviderError("http_error", ambiguous=False, status=422)))
+    monkeypatch.setattr(photo_prompt_service, "NeironychQwen38Service", lambda: qwen)
+    kie = AsyncMock(return_value=photo_prompt_service.PhotoPromptResult("Детальный русский промпт", "kie_chat", "gpt-5-2"))
+    monkeypatch.setattr(photo_prompt_service, "_call_kie_chat", kie)
+
+    result = await photo_prompt_service.generate_prompt_from_photo_result(b"image", "image/jpeg")
+
+    assert result.provider == "kie_chat"
+    kie.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_generate_prompt_from_photo_uses_comet_after_kie_errors(monkeypatch) -> None:
-    fake_client = _FakeClient([
-        _FakeResponse({"error": "missing"}, status_code=404),
-        _FakeResponse({"error": "missing"}, status_code=404),
-        _FakeResponse({"error": "missing"}, status_code=404),
-        _FakeResponse({"choices": [{"message": {"content": "русский промпт comet"}}]}),
-    ])
-    monkeypatch.setattr(photo_prompt_service.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
-    monkeypatch.setattr(
-        photo_prompt_service,
-        "settings",
-        SimpleNamespace(
-            COMET_API_KEY="test-comet",
-            COMET_BASE_URL="https://api.cometapi.com",
-            COMET_ASSISTANT_MODEL="gpt-5.4",
-            COMET_ASSISTANT_FALLBACK="gpt-5.4-mini",
-            KIE_AI_KEY="test-kie",
-            KIE_PHOTO_PROMPT_MODEL="gpt-5-2",
-            KIE_PHOTO_PROMPT_FALLBACK="gpt-5-5",
-        ),
-    )
+async def test_photo_ambiguous_neironych_failure_never_starts_second_paid_request(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
 
-    result = await photo_prompt_service.generate_prompt_from_photo(b"image", "image/jpeg")
+    from api.neironych_qwen38_service import Qwen38ProviderError
+    from core.qwen_routing import QwenRoute
 
-    assert result == "русский промпт comet"
-    args, kwargs = fake_client.calls[-1]
-    assert args[0] == "https://api.cometapi.com/v1/chat/completions"
-    assert kwargs["json"]["model"] == "gpt-5.2"
+    monkeypatch.setattr(photo_prompt_service, "get_qwen_route", AsyncMock(return_value=QwenRoute("image", "neironych", "kie", "test")))
+    qwen = SimpleNamespace(analyze_image=AsyncMock(side_effect=Qwen38ProviderError("transport_error", ambiguous=True)))
+    monkeypatch.setattr(photo_prompt_service, "NeironychQwen38Service", lambda: qwen)
+    kie = AsyncMock()
+    monkeypatch.setattr(photo_prompt_service, "_call_kie_chat", kie)
+
+    with pytest.raises(RuntimeError, match="неопределённым исходом"):
+        await photo_prompt_service.generate_prompt_from_photo_result(b"image", "image/jpeg")
+    kie.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_kie_primary_definitive_rejection_uses_neironych_backup(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from core.qwen_routing import QwenRoute
+
+    monkeypatch.setattr(photo_prompt_service, "get_qwen_route", AsyncMock(
+        return_value=QwenRoute("image", "kie", "neironych", "test"),
+    ))
+    request = httpx.Request("POST", "https://kie.test/chat")
+    response = httpx.Response(422, request=request)
+    kie = AsyncMock(side_effect=httpx.HTTPStatusError("unsupported", request=request, response=response))
+    monkeypatch.setattr(photo_prompt_service, "_call_kie_chat", kie)
+    qwen = SimpleNamespace(analyze_image=AsyncMock(return_value="Подробный русский промпт: красный квадрат на белом фоне."))
+    monkeypatch.setattr(photo_prompt_service, "NeironychQwen38Service", lambda: qwen)
+
+    result = await photo_prompt_service.generate_prompt_from_photo_result(b"image", "image/jpeg")
+    assert result.provider == "neironych"
+    kie.assert_awaited_once()
+    qwen.analyze_image.assert_awaited_once()
