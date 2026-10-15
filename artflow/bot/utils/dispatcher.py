@@ -12,7 +12,9 @@ def create_dispatcher(storage: BaseStorage) -> Dispatcher:
     isolation_factory = getattr(storage, "create_isolation", None)
     if callable(isolation_factory):
         try:
-            events_isolation = isolation_factory(lock_kwargs={"timeout": 300})
+            # Cover max Telegram video download (300s), provider wait (180s),
+            # and cleanup so a retry cannot start a second paid analysis.
+            events_isolation = isolation_factory(lock_kwargs={"timeout": 600})
         except TypeError:
             events_isolation = isolation_factory()
     else:
