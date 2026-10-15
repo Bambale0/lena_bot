@@ -394,7 +394,8 @@ async def test_remote_failed_is_refunded_without_unknown_supplier_cost_marker(mo
 
 
 @pytest.mark.asyncio
-async def test_post_refund_supplier_review_records_late_completion_without_changing_user_state(monkeypatch):
+@pytest.mark.parametrize("remote_status", ["done", "failed"])
+async def test_post_refund_supplier_review_records_late_completion_without_changing_user_state(monkeypatch, remote_status):
     import json
     from types import SimpleNamespace
 
@@ -424,18 +425,24 @@ async def test_post_refund_supplier_review_records_late_completion_without_chang
     monkeypatch.setattr(scheduler.repo, "get_generation_by_id", AsyncMock(return_value=gen))
     monkeypatch.setattr(
         scheduler, "_final_neironych_provider_status",
-        AsyncMock(return_value=("done", None)),
+        AsyncMock(return_value=(remote_status, None)),
     )
     no_refund=AsyncMock()
     monkeypatch.setattr(scheduler.repo, "fail_generation_and_refund", no_refund)
     assert await scheduler._review_refunded_provider_task(gen.id)
     marker=json.loads(gen.input_params)["seedance_refund_provider_review"]
-    assert marker["state"]=="remote_completed_pending_finance"
+    assert marker["state"]==("remote_completed_pending_finance" if remote_status == "done" else "remote_failed")
     assert marker["checks"]==1 and marker["reconciled_at"]
     assert commits==[True] and gen.status==GenerationStatus.failed
     assert json.loads(gen.input_params)["refund_applied"] is True
     no_refund.assert_not_awaited()
     admin_alert.assert_awaited_once()
+    message = admin_alert.await_args.kwargs["message"]
+    if remote_status == "failed":
+        assert admin_alert.await_args.kwargs["title"] == "Seedance: ошибка подтверждена после возврата"
+        assert "завершите сверку" not in message
+    else:
+        assert "завершите сверку" in message
 
 
 
@@ -549,6 +556,9 @@ async def test_supplier_review_expiry_escalates_for_administrator(monkeypatch):
     assert review["state"]=="needs_admin_resolution"
     assert review["escalated_at"]
     alert.assert_awaited_once()
+    assert alert.await_args.kwargs["title"] == "Seedance: нужна сверка после возврата"
+    assert "Нейроныч статус unknown" in alert.await_args.kwargs["message"]
+    assert "Кредиты пользователю возвращены" in alert.await_args.kwargs["message"]
 
 
 @pytest.mark.asyncio

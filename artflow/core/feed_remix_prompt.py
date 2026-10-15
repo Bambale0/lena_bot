@@ -610,11 +610,22 @@ def generation_has_hidden_prompt_metadata(generation) -> bool:
     return bool(isinstance(params, dict) and params.get("hidden_prompt"))
 
 
-def generation_public_error(generation) -> str | None:
+def generation_public_error(generation, *, error_override: str | None = None) -> str | None:
     """Provider diagnostics may echo the submitted private prompt."""
-    error = getattr(generation, "error_msg", None)
+    error = error_override if error_override is not None else getattr(generation, "error_msg", None)
     if error and generation_prompt_is_protected(generation):
         return "Не удалось завершить генерацию. Проверьте статус задачи или обратитесь в поддержку."
+    normalized = " ".join(str(error or "").casefold().split())
+    generic_nexus_error = (
+        "⚠️ не удалось сгенерировать контент. попробуйте изменить параметры "
+        "(сид, промпт) и повторить попытку."
+    )
+    task_id = str(getattr(generation, "task_id", "") or "").removeprefix("web:")
+    if task_id.startswith("nexus:") and normalized == generic_nexus_error:
+        return (
+            "Генератор завершил задачу с ошибкой и не сообщил причину. "
+            "Можно повторить запрос позже или выбрать другую модель."
+        )
     return error
 
 

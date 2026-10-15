@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from api import video_prompt_service
+from bot.handlers import video_prompt as telegram_video_prompt
 from bot.utils.telegram_ui import split_text_chunks
 
 
@@ -87,6 +89,97 @@ def test_video_prompt_video_validation_checks_mime_and_magic_bytes() -> None:
         b"\x00\x00\x00\x18ftypmp42payload",
         "application/octet-stream",
     )
+
+
+@pytest.mark.parametrize("timeout", [29, 301])
+def test_telegram_video_prompt_download_timeout_is_bounded(timeout) -> None:
+    from pydantic import ValidationError
+
+    from core.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, TELEGRAM_VIDEO_PROMPT_DOWNLOAD_TIMEOUT_SECONDS=timeout)
+
+
+@pytest.mark.asyncio
+async def test_telegram_video_prompt_uses_extended_download_timeout(monkeypatch) -> None:
+    bot = SimpleNamespace(
+        get_file=AsyncMock(return_value=SimpleNamespace(file_path="videos/clip.mp4")),
+        download_file=AsyncMock(return_value=SimpleNamespace(read=lambda: b"video bytes")),
+    )
+    monkeypatch.setattr(
+        telegram_video_prompt,
+        "settings",
+        SimpleNamespace(TELEGRAM_VIDEO_PROMPT_DOWNLOAD_TIMEOUT_SECONDS=180),
+        raising=False,
+    )
+
+    assert await telegram_video_prompt._download_telegram_file(bot, "file-id") == b"video bytes"
+    bot.download_file.assert_awaited_once_with("videos/clip.mp4", timeout=180)
+
+
+@pytest.mark.asyncio
+async def test_telegram_video_prompt_does_not_charge_while_file_is_downloading(monkeypatch) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    raw = b"\x00\x00\x00\x18ftypmp42payload"
+
+    async def slow_download(_path, *, timeout):
+        assert timeout == 180
+        started.set()
+        await release.wait()
+        return SimpleNamespace(read=lambda: raw)
+
+    bot = SimpleNamespace(
+        get_file=AsyncMock(return_value=SimpleNamespace(file_path="videos/clip.mp4")),
+        download_file=AsyncMock(side_effect=slow_download),
+    )
+    monkeypatch.setattr(
+        telegram_video_prompt,
+        "settings",
+        SimpleNamespace(TELEGRAM_VIDEO_PROMPT_DOWNLOAD_TIMEOUT_SECONDS=180),
+    )
+    monkeypatch.setattr(
+        telegram_video_prompt.repo,
+        "get_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=3.0, is_active=True)),
+    )
+    spend = AsyncMock(return_value=True)
+    monkeypatch.setattr(telegram_video_prompt.repo, "spend_credits", spend)
+    monkeypatch.setattr(
+        telegram_video_prompt,
+        "save_public_file",
+        MagicMock(return_value="https://example.test/video.mp4"),
+    )
+    monkeypatch.setattr(telegram_video_prompt, "delete_public_file", MagicMock(return_value=True))
+    monkeypatch.setattr(
+        telegram_video_prompt,
+        "generate_prompt_from_video_url",
+        AsyncMock(return_value=SimpleNamespace(text="Камера движется")),
+    )
+    message = AsyncMock()
+    message.answer.return_value = AsyncMock()
+    state = AsyncMock()
+    session = AsyncMock()
+    task = asyncio.create_task(telegram_video_prompt._analyse_video(
+        message=message,
+        state=state,
+        session=session,
+        db_user=SimpleNamespace(id=42, credits=100.0),
+        bot=bot,
+        file_id="file-id",
+        mime_type="video/mp4",
+        file_size=len(raw),
+    ))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        session.commit.assert_awaited_once()
+        telegram_video_prompt.repo.get_model_cost.assert_not_awaited()
+        spend.assert_not_awaited()
+    finally:
+        release.set()
+        await task
+    spend.assert_awaited_once()
 
 
 @pytest.mark.asyncio

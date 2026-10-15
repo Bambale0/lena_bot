@@ -10,6 +10,7 @@ import { FeedScreen } from "@/features/feed-screen";
 import { CreateScreen } from "@/features/create-screen";
 import { WorksScreen } from "@/features/works-screen";
 import { Button } from "@/components/ui/button";
+import { Sheet } from "@/components/ui/sheet";
 import { hasDraftInput, readUserDrafts, saveUserDrafts, tabStorage } from "@/lib/draft-storage";
 import { previewEnabled, previewKey } from "@/lib/ux2";
 import { inspectDraftMedia } from "@/lib/draft-media";
@@ -54,6 +55,8 @@ import { firstMedia, isPendingTask } from "@/lib/utils";
 window.__APIX_MINIAPP_BUILD_ID__ = "20260803-settings-cabinets-v1";
 
 type FeedSource = "recent" | "top_day" | "top";
+type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
+type VideoConfirmation = { kind: "video" | "motion"; bodyKey: string; owner: number; quote: VideoQuote; count: number };
 
 function modelDurations(model?: ModelInfo): number[] {
   if (model?.duration_options?.length) return model.duration_options;
@@ -171,7 +174,13 @@ function App() {
   const [api, setApi] = useState<MiniAppApi | null>(null);
   const quoteWan = useCallback((payload: Record<string, unknown>) => {
     if (!api) return Promise.reject(new Error("Сервис временно недоступен"));
-    return api.quoteWanVideo(payload);
+    return api.quoteVideo(payload).then(value => ({
+      credits: value.cost_credits,
+      rate: value.rate_credits_per_second ?? 0,
+      billable_seconds: value.billable_seconds,
+      input_video_seconds: value.reference_seconds,
+      max_output_seconds: Math.max(0, 30 - value.reference_seconds),
+    }));
   }, [api]);
   const [data, setData] = useState<BootstrapData | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>("feed");
@@ -189,6 +198,7 @@ function App() {
   const [balanceOpen, setBalanceOpen] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [videoConfirmation, setVideoConfirmation] = useState<VideoConfirmation | null>(null);
   const [remixingId, setRemixingId] = useState<number | null>(null);
   const [feedSource, setFeedSource] = useState<FeedSource>("recent");
   const [feedLimit, setFeedLimit] = useState(FEED_PAGE_SIZE);
@@ -589,7 +599,7 @@ function App() {
     return parseReferenceAvailability(await api.checkReferenceAvailability(url, signal));
   }, [api, data?.user.id, referenceCheckVersion]);
 
-  const submitGeneration = useCallback(async (kind: "image" | "video" | "motion") => {
+  const submitGeneration = useCallback(async (kind: "image" | "video" | "motion", confirmed?: VideoConfirmation) => {
     if (!api || !data || submitting || submissionLock.current) return;
     const sourceDraft = currentDraft[kind];
     if (photoQueue.hasPending(kind)) return;
@@ -662,6 +672,43 @@ function App() {
       checkingReferences = false;
       checkingSelection = false;
       const prompt = draft.prompt.trim() || (draft.model.startsWith("higgsfield/genjutsu/") ? "" : "Использовать выбранный сценарий");
+      const videoBody = {
+        model: draft.model, prompt, prompt_id: draft.promptId, mode: draft.mode,
+        duration: draft.duration, aspect_ratio: draft.aspectRatio, resolution: draft.resolution,
+        image_url: draft.referenceUrls[0] || null, reference_urls: draft.referenceUrls,
+        video_url: draft.videoUrl || null, video_start: draft.videoStart, video_end: draft.videoEnd,
+        audio_ids: draft.audioIds, character_ids: draft.characterIds, seed: draft.seed,
+        grok_mode: draft.grokMode || "normal",
+        wan_audio: draft.wanAudio !== false,
+        wan_nsfw_checker: draft.wanNsfwChecker !== false,
+        wan_reference_video_urls: draft.wanReferenceVideoUrls || [],
+        wan_reference_audio_urls: draft.wanReferenceAudioUrls || [],
+        wan_reference_file_urls: draft.wanReferenceFileUrls || [],
+        wan_reference_link_urls: draft.wanReferenceLinkUrls || [],
+        wan_first_frame_url: draft.wanFirstFrameUrl || null,
+        wan_last_frame_url: draft.wanLastFrameUrl || null,
+      };
+      // Model-specific upload panels hold files outside GenerationDraft. Quote
+      // every video launch so their enhancers can attach those files first.
+      const needsVideoQuote = kind !== "image";
+      let quotedCredits: number | undefined;
+      if (needsVideoQuote) {
+        const quote = await api.quoteVideo(videoBody);
+        const bodyKey = JSON.stringify(videoBody);
+        if (!Number.isFinite(quote.cost_credits) || quote.cost_credits < 0) throw new Error("Стоимость видео недоступна. Повторите попытку.");
+        if (!quote.can_run || quote.balance_credits < quote.cost_credits * taskCount) {
+          throw new Error(`Недостаточно кредитов: нужно ${quote.cost_credits * taskCount} 💋.`);
+        }
+        if (!confirmed || confirmed.owner !== data.user.id || confirmed.kind !== kind
+            || confirmed.bodyKey !== bodyKey || confirmed.quote.cost_credits !== quote.cost_credits
+            || confirmed.count !== taskCount) {
+          setVideoConfirmation({ kind, bodyKey, owner: data.user.id, quote, count: taskCount });
+          if (confirmed) toast.info("Цена или параметры изменились. Проверьте расчёт ещё раз.");
+          return;
+        }
+        quotedCredits = quote.cost_credits;
+        setVideoConfirmation(null);
+      }
       for (let index = 0; index < taskCount; index += 1) {
         const task = kind === "image"
           ? await api.createImage({
@@ -674,32 +721,7 @@ function App() {
               reference_url: draft.referenceUrls[0] || null,
               reference_urls: draft.referenceUrls,
             })
-          : await api.createVideo({
-              model: draft.model,
-              prompt,
-              prompt_id: draft.promptId,
-              mode: draft.mode,
-              duration: draft.duration,
-              aspect_ratio: draft.aspectRatio,
-              resolution: draft.resolution,
-              image_url: draft.referenceUrls[0] || null,
-              reference_urls: draft.referenceUrls,
-              video_url: draft.videoUrl || null,
-              video_start: draft.videoStart,
-              video_end: draft.videoEnd,
-              audio_ids: draft.audioIds,
-              character_ids: draft.characterIds,
-              seed: draft.seed,
-              grok_mode: draft.grokMode || "normal",
-              wan_audio: draft.wanAudio !== false,
-              wan_nsfw_checker: draft.wanNsfwChecker !== false,
-              wan_reference_video_urls: draft.wanReferenceVideoUrls || [],
-              wan_reference_audio_urls: draft.wanReferenceAudioUrls || [],
-              wan_reference_file_urls: draft.wanReferenceFileUrls || [],
-              wan_reference_link_urls: draft.wanReferenceLinkUrls || [],
-              wan_first_frame_url: draft.wanFirstFrameUrl || null,
-              wan_last_frame_url: draft.wanLastFrameUrl || null,
-            });
+          : await api.createVideo({ ...videoBody, quoted_credits: quotedCredits });
         createdTasks.push(task);
       }
       const orderedTasks = [...createdTasks].reverse();
@@ -1094,6 +1116,18 @@ function App() {
       </AppShell>
       <TaskDetailSheet task={selectedTask} open={taskOpen} busy={taskBusy} onOpenChange={setTaskOpen} onRefresh={(task) => void refreshTask(task)} onShare={(task) => void toggleTaskShare(task)} onToggleLibrary={(task) => void toggleTaskLibrary(task)} />
       <BalanceSheet open={balanceOpen} user={data.user} plans={data.paymentPlans} availableProviders={data.paymentMethods} busy={paymentBusy} onOpenChange={setBalanceOpen} onPay={(provider, plan) => void pay(provider, plan)} />
+      <Sheet open={Boolean(videoConfirmation)} title="Стоимость видео" description="Проверены видеореференсы и параметры запуска" onOpenChange={(open) => { if (!open) setVideoConfirmation(null); }} footer={
+        <Button className="w-full" disabled={submitting || !videoConfirmation?.quote.can_run} onClick={() => { if (videoConfirmation) void submitGeneration(videoConfirmation.kind, videoConfirmation); }}>
+          {submitting ? "Проверяем цену…" : `Запустить за ${(videoConfirmation?.quote.cost_credits || 0) * (videoConfirmation?.count || 1)} 💋`}
+        </Button>
+      }>
+        {videoConfirmation && <div className="grid gap-2 text-sm">
+          <p>Видеореференсы: {videoConfirmation.quote.reference_seconds} сек</p>
+          <p>Результат: {videoConfirmation.quote.output_seconds} сек</p>
+          <p>К оплате: <strong>{videoConfirmation.quote.cost_credits} 💋 за задачу</strong></p>
+          {videoConfirmation.count > 1 && <p>Всего задач: {videoConfirmation.count}</p>}
+        </div>}
+      </Sheet>
       <Toaster className="apix-toaster" richColors position="top-center" closeButton />
     </>
   );

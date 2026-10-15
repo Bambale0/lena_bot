@@ -81,6 +81,7 @@ from api.video_prompt_service import (
     generate_prompt_from_video_url,
     is_supported_video_prompt_video,
 )
+from api.video_reference_billing import VideoSeconds, measured_video_seconds
 from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_service import VideoModel
 from bot.keyboards.models import (
@@ -118,6 +119,7 @@ from core.feed_remix_prompt import (
     feed_image_remix_context,
     feed_remix_context,
     feed_video_edit_prompt,
+    generation_public_error,
     order_feed_image_references,
     original_feed_video_inputs,
     original_feed_video_references,
@@ -1786,14 +1788,23 @@ def _normalize_video_request(
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    elif audio_ids or character_ids or (seed is not None and not is_wan30) or (normalized_video_url and not is_wan30):
-        raise HTTPException(status_code=422, detail="Gemini Omni extras are not supported by selected model")
+    elif model_key == SEEDANCE25_MODEL_KEY:
+        normalized_audio_ids = list(dict.fromkeys(
+            token for token in (audio_ids or [])
+            if token != f"__apix_seedance25:video_ref={normalized_video_url}"
+        ))
+        if character_ids or seed is not None:
+            raise HTTPException(status_code=422, detail="Unsupported video controls for selected model")
     elif is_wan30:
+        if audio_ids or character_ids:
+            raise HTTPException(status_code=422, detail="Unsupported Gemini Omni controls for Wan")
         normalized_seed = seed
+    elif audio_ids or character_ids or seed is not None:
+        raise HTTPException(status_code=422, detail="Gemini Omni extras are not supported by selected model")
 
     start = float(video_start or 0)
     end = video_end
-    if normalized_video_url and not is_wan30:
+    if normalized_video_url and model_key == GEMINI_OMNI_VIDEO_MODEL:
         end = float(end if end is not None else min(normalized_duration or 10, 10))
         if end <= start:
             raise HTTPException(status_code=422, detail="video_end must be greater than video_start")
@@ -1824,6 +1835,32 @@ def _video_total_credits(duration: int, rate_or_flat: float, *, is_per_second: b
     if is_per_second:
         return rate_or_flat * duration
     return rate_or_flat
+
+
+async def _video_reference_price(
+    normalized: dict[str, Any], caps: dict[str, Any], rate_or_flat: float,
+) -> tuple[VideoSeconds, float]:
+    per_second = _is_per_second_video_model(caps)
+    try:
+        seconds = await measured_video_seconds(normalized, per_second=per_second)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, RuntimeError) as exc:
+        logger.warning("Video reference pricing probe failed type=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503, detail="Не удалось проверить длительность видеореференса; кредиты не списаны.",
+        ) from exc
+    return seconds, round(_video_total_credits(
+        seconds.billable, float(rate_or_flat), is_per_second=per_second,
+    ), 6)
+
+
+def _require_video_price_confirmation(quoted: float | None, total: float, seconds: VideoSeconds) -> None:
+    if seconds.reference_count and (quoted is None or round(float(quoted), 6) != round(total, 6)):
+        raise HTTPException(
+            status_code=409,
+            detail="Цена видео изменилась или не подтверждена. Проверь стоимость и подтверди запуск ещё раз.",
+        )
 
 
 async def _video_model_rate_info(
@@ -1959,6 +1996,7 @@ class GenerationOut(BaseModel):
     prompt_hidden: bool = False
     prompt_actions_allowed: bool = True
     status: str
+    error: str | None = None
     result_url: str | None
     preview_url: str | None = None
     credits_spent: float
@@ -2009,6 +2047,7 @@ class VideoGenRequest(BaseModel):
     wan_reference_link_urls: list[str] = Field(default_factory=list, max_length=1)
     wan_first_frame_url: str | None = None
     wan_last_frame_url: str | None = None
+    quoted_credits: float | None = Field(default=None, ge=0)
     trend_user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
 
 
@@ -2029,6 +2068,7 @@ class FeedRemixRequest(BaseModel):
     character_ids: list[str] = []
     seed: int | None = None
     grok_mode: str = "normal"
+    quoted_credits: float | None = Field(default=None, ge=0)
     quality: str = "basic"
     count: int = Field(default=1, ge=1, le=6)
 
@@ -3081,69 +3121,7 @@ async def create_image_generation(
 
 # ── video generation ──────────────────────────────────────────────────────────
 
-@router.post("/generate/video/quote")
-async def quote_wan30_video(
-    body: VideoGenRequest,
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_miniapp_user),
-) -> dict[str, Any]:
-    """Read-only exact quote; never trust a browser-provided video duration."""
-    from api.wan30_contract import WAN30_MODELS
-    from api.wan30_launch import create_wan30_request, get_wan30_quote
-
-    if body.model not in WAN30_MODELS:
-        raise HTTPException(status_code=422, detail="Quote is available for Wan 3.0 only")
-    try:
-        request = await create_wan30_request(
-            model=body.model,
-            prompt=(body.prompt or "Предпросмотр видео").strip(),
-            mode=body.mode,
-            image_urls=_normalize_public_urls(body.image_url, *(body.reference_urls or [])),
-            video_url=body.video_url,
-            duration=body.duration,
-            resolution=body.resolution or "720p",
-            aspect_ratio=body.aspect_ratio,
-            options={
-                "audio": body.wan_audio,
-                "nsfw_checker": body.wan_nsfw_checker,
-                "seed": body.seed,
-                "reference_video_urls": body.wan_reference_video_urls,
-                "reference_audio_urls": body.wan_reference_audio_urls,
-                "reference_file_urls": body.wan_reference_file_urls,
-                "reference_link_urls": body.wan_reference_link_urls,
-                "first_frame_url": body.wan_first_frame_url,
-                "last_frame_url": body.wan_last_frame_url,
-            },
-        )
-        quote = await get_wan30_quote(session, request)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {
-        "model": body.model,
-        "credits": quote.credits,
-        "billable_seconds": quote.billable_seconds,
-        "input_video_seconds": round(sum(request.reference_video_durations), 3),
-        "output_seconds": request.duration,
-        "rate": quote.rate,
-        "resolution": quote.resolution,
-        "max_output_seconds": max(0, int(30 - sum(request.reference_video_durations))),
-        "user_credits": user.credits,
-    }
-
-
-@router.post("/generate/video", response_model=GenerationOut, status_code=202)
-async def create_video_generation(
-    body: VideoGenRequest,
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_miniapp_user),
-    surface: str = "miniapp",
-) -> GenerationOut:
-    """
-    Start an async video generation.
-
-    Returns immediately with `status: pending`.
-    Poll `GET /api/v1/generations/{id}` until done.
-    """
+async def _video_prompt_and_source(body: VideoGenRequest, session: AsyncSession) -> tuple[str, Any]:
     user_prompt = body.prompt
     prompt_source = None
     if body.prompt_id is not None:
@@ -3160,9 +3138,7 @@ async def create_video_generation(
                 raise HTTPException(status_code=422, detail="Trend must use its configured model")
             try:
                 user_prompt = render_trend_prompt(
-                    prompt_source.prompt_text,
-                    trend_user_fields(prompt_source),
-                    body.trend_user_values,
+                    prompt_source.prompt_text, trend_user_fields(prompt_source), body.trend_user_values,
                 )
             except TrendUserFieldsError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -3177,11 +3153,179 @@ async def create_video_generation(
     if not user_prompt.strip() and body.model not in GENJUTSU_MODEL_KEYS:
         raise HTTPException(status_code=422, detail="Video prompt is required")
     if video_prompt_max_chars(body.model) is None and len(user_prompt) > 4000:
-        # Preserve the historical contract for non-Seedance video models.
         raise HTTPException(status_code=422, detail="Video prompt must be at most 4000 characters for this model")
-
     if body.prompt_id is None and body.trend_user_values:
         raise HTTPException(status_code=422, detail="Personalization values require a trend")
+    return user_prompt, prompt_source
+
+
+async def _prepared_video_input(body: VideoGenRequest, prompt: str) -> dict[str, Any]:
+    normalized = _normalize_video_request(
+        model_key=body.model, mode=body.mode, duration=body.duration,
+        aspect_ratio=body.aspect_ratio, resolution=body.resolution,
+        image_url=body.image_url, reference_urls=body.reference_urls,
+        video_url=body.video_url, video_start=body.video_start,
+        video_end=body.video_end, audio_ids=body.audio_ids,
+        character_ids=body.character_ids, seed=body.seed, grok_mode=body.grok_mode,
+    )
+    if body.model == SEEDANCE25_MODEL_KEY:
+        identity_transfer = bool(seedance25_adapter._control_payload(
+            [str(item) for item in (normalized.get("audio_ids") or [])]
+        )[2].get("identity_transfer"))
+        try:
+            edit_duration = await seedance25_edit_billing_duration(
+                prompt, normalized["reference_video_url"], force_edit=identity_transfer,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if edit_duration is not None:
+            normalized.update(
+                duration=edit_duration, billing_duration=edit_duration,
+                provider_duration=-1, aspect_ratio="adaptive",
+            )
+
+    from api.genjutsu_adapter import MODEL_KEYS as GENJUTSU_MODEL_KEYS
+    from api.genjutsu_adapter import resolve_source_duration_seconds
+    if body.model in GENJUTSU_MODEL_KEYS:
+        try:
+            normalized["duration"] = await resolve_source_duration_seconds(normalized["reference_video_url"])
+            normalized["billing_duration"] = normalized["duration"]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return normalized
+
+
+async def _video_cost_quote(
+    session: AsyncSession, model_key: str, normalized: dict[str, Any],
+) -> tuple[Any, VideoSeconds, float]:
+    has_gemini_omni_video_input = model_key == GEMINI_OMNI_VIDEO_MODEL and bool(normalized["reference_video_url"])
+    model_cost = await repo.resolve_video_model_cost(
+        session, model_key,
+        duration=None if has_gemini_omni_video_input else normalized["duration"],
+        resolution=normalized["resolution"],
+    )
+    if not model_cost or not bool(getattr(model_cost, "is_active", True)):
+        raise HTTPException(status_code=422, detail="Model not available")
+    seconds, total = await _video_reference_price(
+        normalized, VIDEO_CAPS.get(model_key, {}), model_cost.credits,
+    )
+    return model_cost, seconds, total
+
+
+async def _wan30_checkout_quote(
+    body: VideoGenRequest, prompt: str,
+    normalized: dict[str, Any], session: AsyncSession,
+):
+    """One strict paid Wan quote shared by read-only preflight and checkout."""
+    from api.wan30_launch import create_wan30_request, get_wan30_quote
+
+    try:
+        request = await create_wan30_request(
+            model=body.model, prompt=prompt, mode=normalized["mode"],
+            image_urls=normalized["image_url"],
+            video_url=normalized["reference_video_url"],
+            duration=normalized["duration"],
+            resolution=normalized["resolution"] or "720p",
+            aspect_ratio=normalized["aspect_ratio"],
+            options={
+                "audio": body.wan_audio,
+                "nsfw_checker": body.wan_nsfw_checker,
+                "seed": normalized["seed"],
+                "reference_audio_urls": body.wan_reference_audio_urls,
+                "reference_video_urls": body.wan_reference_video_urls,
+                "reference_file_urls": body.wan_reference_file_urls,
+                "reference_link_urls": body.wan_reference_link_urls,
+                "first_frame_url": body.wan_first_frame_url,
+                "last_frame_url": body.wan_last_frame_url,
+            },
+        )
+        quote = await get_wan30_quote(session, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return request, quote
+
+
+@router.post("/generate/video/quote")
+async def quote_video_generation(
+    body: VideoGenRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    """Read-only tariff quote after the same normalization and media probe as launch."""
+    prompt, _ = await _video_prompt_and_source(body, session)
+    if body.model in _MJ_VIDEO_MODELS:
+        model_cost = await repo.get_model_cost(session, body.model)
+        if not model_cost or not bool(getattr(model_cost, "is_active", True)):
+            raise HTTPException(status_code=422, detail="Model not available")
+        cost = round(float(model_cost.credits), 6)
+        balance = float(user.credits or 0)
+        return {
+            "model": body.model, "cost_credits": cost,
+            "balance_credits": balance, "can_run": balance >= cost,
+            "output_seconds": int(body.duration), "reference_seconds": 0,
+            "billable_seconds": int(body.duration), "reference_count": 0,
+            "rate_credits_per_second": None, "tariff_key": model_cost.model_key,
+        }
+    try:
+        VideoModel(body.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Unknown video model: {body.model!r}") from exc
+    normalized = await _prepared_video_input(body, prompt)
+    from api.wan30_contract import WAN30_MODELS
+    if body.model in WAN30_MODELS:
+        from core.model_pricing import pricing_variant_key
+        request, quote = await _wan30_checkout_quote(body, prompt, normalized, session)
+        balance = float(user.credits or 0)
+        ref_total = sum(request.reference_video_durations)
+        return {
+            "model": body.model,
+            "cost_credits": quote.credits,
+            "balance_credits": balance,
+            "can_run": balance >= quote.credits,
+            "output_seconds": request.duration,
+            "reference_seconds": math.ceil(ref_total),
+            "billable_seconds": quote.billable_seconds,
+            "reference_count": len(request.reference_video_urls),
+            "rate_credits_per_second": quote.rate,
+            "tariff_key": pricing_variant_key(body.model, resolution=quote.resolution),
+            # Backward-compatible Wan-specific fields for compact UI estimate.
+            "credits": quote.credits,
+            "rate": quote.rate,
+            "input_video_seconds": round(ref_total, 3),
+            "max_output_seconds": max(0, int(30 - ref_total)),
+            "user_credits": balance,
+        }
+    model_cost, seconds, total = await _video_cost_quote(session, body.model, normalized)
+    balance = float(user.credits or 0)
+    return {
+        "model": body.model,
+        "cost_credits": total,
+        "balance_credits": balance,
+        "can_run": balance >= total,
+        "output_seconds": seconds.output,
+        "reference_seconds": seconds.references,
+        "billable_seconds": seconds.billable,
+        "reference_count": seconds.reference_count,
+        "rate_credits_per_second": (
+            float(model_cost.credits) if _is_per_second_video_model(VIDEO_CAPS.get(body.model, {})) else None
+        ),
+        "tariff_key": model_cost.model_key,
+    }
+
+@router.post("/generate/video", response_model=GenerationOut, status_code=202)
+async def create_video_generation(
+    body: VideoGenRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+    surface: str = "miniapp",
+) -> GenerationOut:
+    """
+    Start an async video generation.
+
+    Returns immediately with `status: pending`.
+    Poll `GET /api/v1/generations/{id}` until done.
+    """
+    user_prompt, prompt_source = await _video_prompt_and_source(body, session)
 
     prompt_meta = {
         "prompt_id": getattr(prompt_source, "id", None),
@@ -3230,106 +3374,41 @@ async def create_video_generation(
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Unknown video model: {body.model!r}")
 
-    normalized = _normalize_video_request(
-        model_key=body.model,
-        mode=body.mode,
-        duration=body.duration,
-        aspect_ratio=body.aspect_ratio,
-        resolution=body.resolution,
-        image_url=body.image_url,
-        reference_urls=body.reference_urls,
-        video_url=body.video_url,
-        video_start=body.video_start,
-        video_end=body.video_end,
-        audio_ids=body.audio_ids,
-        character_ids=body.character_ids,
-        seed=body.seed,
-        grok_mode=body.grok_mode,
-    )
-    if body.model == SEEDANCE25_MODEL_KEY:
-        identity_transfer = bool(
-            seedance25_adapter._control_payload(
-                [str(item) for item in (normalized.get("audio_ids") or [])]
-            )[2].get("identity_transfer")
-        )
-        try:
-            edit_billing_duration = await seedance25_edit_billing_duration(
-                user_prompt,
-                normalized["reference_video_url"],
-                force_edit=identity_transfer,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if edit_billing_duration is not None:
-            normalized["duration"] = edit_billing_duration
-            normalized["billing_duration"] = edit_billing_duration
-            normalized["provider_duration"] = -1
-            normalized["aspect_ratio"] = "adaptive"
-
-    from api.genjutsu_adapter import MODEL_KEYS as GENJUTSU_MODEL_KEYS
-    from api.genjutsu_adapter import resolve_source_duration_seconds
-
-    if body.model in GENJUTSU_MODEL_KEYS:
-        try:
-            normalized["duration"] = await resolve_source_duration_seconds(
-                normalized["reference_video_url"]
-            )
-            normalized["billing_duration"] = normalized["duration"]
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
+    normalized = await _prepared_video_input(body, user_prompt)
     from api.wan30_contract import WAN30_MODELS
-    from api.wan30_launch import create_wan30_request, get_wan30_quote
 
     wan_quote = None
     if body.model in WAN30_MODELS:
-        try:
-            wan_request = await create_wan30_request(
-                model=body.model,
-                prompt=user_prompt,
-                mode=normalized["mode"],
-                image_urls=normalized["image_url"],
-                video_url=normalized["reference_video_url"],
-                duration=normalized["duration"],
-                resolution=normalized["resolution"] or "720p",
-                aspect_ratio=normalized["aspect_ratio"],
-                options={
-                    "audio": body.wan_audio,
-                    "nsfw_checker": body.wan_nsfw_checker,
-                    "seed": normalized["seed"],
-                    "reference_audio_urls": body.wan_reference_audio_urls,
-                    "reference_video_urls": body.wan_reference_video_urls,
-                    "reference_file_urls": body.wan_reference_file_urls,
-                    "reference_link_urls": body.wan_reference_link_urls,
-                    "first_frame_url": body.wan_first_frame_url,
-                    "last_frame_url": body.wan_last_frame_url,
-                },
-            )
-            wan_quote = await get_wan30_quote(session, wan_request)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    has_gemini_omni_video_input = body.model == GEMINI_OMNI_VIDEO_MODEL and bool(normalized["reference_video_url"])
-    model_cost = await repo.resolve_video_model_cost(
-        session,
-        body.model,
-        duration=None if has_gemini_omni_video_input else normalized["duration"],
-        resolution=normalized["resolution"],
-    )
-    if not model_cost:
-        raise HTTPException(status_code=422, detail="Model not available")
-
-    caps: dict[str, Any] = VIDEO_CAPS.get(body.model, {})
-    total_credits = (
-        wan_quote.credits if wan_quote else
-        _video_total_credits(
-            normalized["duration"],
-            model_cost.credits,
-            is_per_second=_is_per_second_video_model(caps),
+        wan_request, wan_quote = await _wan30_checkout_quote(
+            body, user_prompt, normalized, session,
         )
-    )
-    if wan_quote:
+        model_cost = await repo.resolve_video_model_cost(
+            session, body.model, duration=normalized["duration"],
+            resolution=normalized["resolution"],
+        )
+        if not model_cost:
+            raise HTTPException(status_code=422, detail="Model not available")
+        ref_seconds = math.ceil(sum(wan_request.reference_video_durations))
+        billing_seconds = VideoSeconds(
+            output=wan_request.duration, references=ref_seconds,
+            billable=wan_quote.billable_seconds,
+            reference_count=len(wan_request.reference_video_urls),
+        )
+        total_credits = wan_quote.credits
         normalized.update(wan_quote.stored_params())
+        # A user-visible, exact server quote must be confirmed before any
+        # Wan paid request, including text-only generation.
+        if (body.quoted_credits is None
+                or round(float(body.quoted_credits), 6) != round(total_credits, 6)):
+            raise HTTPException(
+                status_code=409,
+                detail="Цена Wan изменилась или не подтверждена. Проверь сумму и подтверди запуск.",
+            )
+    else:
+        model_cost, billing_seconds, total_credits = await _video_cost_quote(
+            session, body.model, normalized,
+        )
+        _require_video_price_confirmation(body.quoted_credits, total_credits, billing_seconds)
     image_url = normalized["image_url"]
 
     if user.credits < total_credits:
@@ -3348,6 +3427,10 @@ async def create_video_generation(
         raise HTTPException(status_code=402, detail="Failed to spend credits")
 
     normalized.update(prompt_meta)
+    normalized["billing_output_seconds"] = billing_seconds.output
+    normalized["billing_reference_seconds"] = billing_seconds.references
+    normalized["billing_total_seconds"] = billing_seconds.billable
+    normalized["billing_rate"] = float(model_cost.credits)
     gen = await repo.create_generation(
         session, user.id, body.model, GenerationType.video,
         user_prompt, total_credits,
@@ -4257,10 +4340,15 @@ async def quote_feed_remix(
 
     nominal = float(cost_row.credits)
     if gen_type == "video" and body.model not in _MJ_VIDEO_MODELS:
-        nominal = _video_total_credits(
-            count, nominal,
-            is_per_second=_is_per_second_video_model(VIDEO_CAPS.get(body.model, {})),
+        billing_seconds, nominal = await _video_reference_price(
+            normalized, VIDEO_CAPS.get(body.model, {}), nominal,
         )
+        edit_quote.update({
+            "output_seconds": billing_seconds.output,
+            "reference_seconds": billing_seconds.references,
+            "billable_seconds": billing_seconds.billable,
+            "rate_credits_per_second": float(cost_row.credits) if _is_per_second_video_model(VIDEO_CAPS.get(body.model, {})) else None,
+        })
     elif gen_type == "image" and body.model not in _MJ_STUDIO_IMAGE_MODELS:
         nominal *= count
 
@@ -4499,15 +4587,19 @@ async def remix_feed_post(
         else None
     )
 
-    nominal_credits = (
-        _video_total_credits(
-            normalized_video["duration"],
-            model_cost.credits,
-            is_per_second=_is_per_second_video_model(VIDEO_CAPS.get(body.model, {})),
+    if gen_type == "video":
+        billing_seconds, nominal_credits = await _video_reference_price(
+            normalized_video, VIDEO_CAPS.get(body.model, {}), model_cost.credits,
         )
-        if gen_type == "video"
-        else float(model_cost.credits) * body.count
-    )
+        _require_video_price_confirmation(body.quoted_credits, nominal_credits, billing_seconds)
+        normalized_video.update({
+            "billing_output_seconds": billing_seconds.output,
+            "billing_reference_seconds": billing_seconds.references,
+            "billing_total_seconds": billing_seconds.billable,
+            "billing_rate": float(model_cost.credits),
+        })
+    else:
+        nominal_credits = float(model_cost.credits) * body.count
 
     await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
@@ -5675,6 +5767,7 @@ def _gen_out(gen) -> GenerationOut:
         prompt_hidden=prompt_hidden,
         prompt_actions_allowed=not prompt_hidden,
         status=public_generation_status(gen),
+        error=generation_public_error(gen),
         result_url=_generation_primary_result_url(gen),
         preview_url=_preview_media_url(_generation_primary_result_url(gen), gen.gen_type),
         credits_spent=gen.credits_spent,

@@ -1,5 +1,6 @@
 """Exercise the installed Telegram router with real FSM and external I/O mocked."""
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -8,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
+from api import video_reference_billing
 from bot.handlers import video_gen
 from core.config import settings
 from tests import test_genjutsu_face_clothing as provider_fixtures
@@ -39,6 +41,8 @@ def io(monkeypatch):
         AsyncMock(side_effect=lambda bot, file_id, **kw: f"https://example.test/{file_id}"),
     )
     monkeypatch.setattr(video_gen, "seedance25_edit_billing_duration", AsyncMock(return_value=7))
+    monkeypatch.setattr(video_reference_billing, "local_upload_path_from_url", lambda url: Path(url))
+    monkeypatch.setattr(video_reference_billing, "probe_local_media", AsyncMock(return_value=SimpleNamespace(duration_seconds=7)))
     return SimpleNamespace(
         user=SimpleNamespace(id=2, credits=1000, tg_id=2), session=AsyncMock(), bot=AsyncMock()
     )
@@ -119,7 +123,7 @@ async def test_full_flow_restores_back_and_shows_duration_price(state, io, faces
     ) + (["clothing"] if outfit != "text" else [])
     assert data["reference_video_url"] == "https://example.test/source.mp4"
     assert data["duration"] == 7
-    assert "21" in call.message.edit_text.await_args.args[0]
+    assert "42" in call.message.edit_text.await_args.args[0]
     await action("back", state, io)
     assert await state.get_state() == "GenjutsuReplaceFSM:resolution"
     assert (await state.get_data())["image_url"] == data["image_url"]
@@ -193,7 +197,7 @@ async def test_confirm_reaches_real_provider_and_persists_full_repeat_snapshot(
         "https://example.test/shirt.jpg",
     ]
     assert params["reference_video_url"] == "https://example.test/source.mp4"
-    assert billing.spend.await_args.args[2] == 21
+    assert billing.spend.await_args.args[2] == 42
     request = provider.await_args.kwargs
     assert request["video_urls"] == [params["reference_video_url"]]
     assert request["image_urls"] == params["image_url"]
@@ -297,9 +301,9 @@ async def test_resolution_prices_come_from_current_rate_and_source_duration(
     await ready(state, io)
     await action("back", state, io)
     await action(f"res:{resolution}", state, io)
-    assert (await state.get_data())["gj_quoted_cost"] == rate * 7
+    assert (await state.get_data())["gj_quoted_cost"] == rate * 14
     await action("launch", state, io)
-    assert billing.spend.await_args.args[2] == rate * 7
+    assert billing.spend.await_args.args[2] == rate * 14
     assert resolve.await_args.kwargs["resolution"] == resolution
     assert provider.await_args.kwargs["resolution"] == resolution
 
@@ -313,7 +317,7 @@ async def test_changed_price_requires_new_confirmation(state, io, billing, provi
         AsyncMock(return_value=SimpleNamespace(credits=4, is_active=True)),
     )
     await action("launch", state, io)
-    assert (await state.get_data())["gj_quoted_cost"] == 28
+    assert (await state.get_data())["gj_quoted_cost"] == 56
     billing.spend.assert_not_awaited()
 
 

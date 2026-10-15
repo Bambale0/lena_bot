@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
+from api import miniapp_routes
 from api.web.schemas import FeedCard, GenerationCard
 from db.models import GenerationStatus, GenerationType
 
@@ -35,6 +38,39 @@ def test_generation_card_uses_first_available_result_url(tmp_path, monkeypatch) 
 
     assert payload.result_url == "https://cdn.test/fallback.png"
     assert payload.result_urls == ["https://cdn.test/fallback.png"]
+
+
+@pytest.mark.parametrize("task_id", ["nexus:example-task", "web:nexus:example-task"])
+def test_generation_card_shows_plain_nexus_failure_reason(task_id: str) -> None:
+    card = GenerationCard.from_generation(_generation(
+        model="nano-banana-pro",
+        task_id=task_id,
+        status=GenerationStatus.failed,
+        error_msg=(
+            "⚠️ Не удалось сгенерировать контент. Попробуйте изменить параметры "
+            "(сид, промпт) и повторить попытку."
+        ),
+    ))
+
+    assert "Генератор завершил задачу с ошибкой" in card.error
+    assert "сид" not in card.error
+
+
+def test_miniapp_generation_history_shows_plain_nexus_failure_reason() -> None:
+    generation = _generation(
+        model="nano-banana-pro",
+        task_id="nexus:example-task",
+        status=GenerationStatus.failed,
+        error_msg=(
+            "⚠️ Не удалось сгенерировать контент. Попробуйте изменить параметры "
+            "(сид, промпт) и повторить попытку."
+        ),
+    )
+
+    item = miniapp_routes._gen_out(generation)
+
+    assert "Генератор завершил задачу с ошибкой" in item.error
+    assert "сид" not in item.error
 
 
 def test_feed_card_hides_missing_local_result_url(tmp_path, monkeypatch) -> None:

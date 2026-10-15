@@ -501,12 +501,20 @@ async def _review_refunded_provider_task(gen_id: int) -> bool:
             "customer_final_state_unchanged=true", gen_id, status,
         )
         try:
+            title = (
+                "Seedance: подтверждён результат после возврата" if status == "done"
+                else "Seedance: ошибка подтверждена после возврата" if status == "failed"
+                else "Seedance: нужна сверка после возврата"
+            )
+            message = (
+                f"APIX задача {gen_id}; Нейроныч статус {status}. "
+                + ("Проверьте закупочный расход и завершите сверку в защищённом admin API. "
+                   if status != "failed" else "Поставщик подтвердил ошибку задачи. ")
+                + "Кредиты пользователю возвращены; повторного списания нет."
+            )
             await send_admin_alert_once(
                 alert_key=f"seedance-late-provider-result:{gen_id}:{status}",
-                title="Seedance: подтверждён исход после возврата",
-                message=f"APIX задача {gen_id}; Нейроныч статус {status}. "
-                        "Если задача не подтверждена или результат опоздал, проверьте закупочный расход и "
-                        "завершите сверку в защищённом admin API. Баланс пользователя не менялся.",
+                title=title, message=message,
             )
         except Exception as exc:
             logger.warning("Seedance supplier alert deferred gen=%s error=%s",gen_id,type(exc).__name__)

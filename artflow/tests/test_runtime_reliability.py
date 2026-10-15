@@ -92,7 +92,8 @@ def test_dispatcher_extends_redis_fsm_lock_for_long_updates() -> None:
     storage = _RedisLikeStorage()
     create_dispatcher(storage)
 
-    assert storage.isolation_kwargs == {"lock_kwargs": {"timeout": 300}}
+    # 300s max Telegram download + 180s provider analysis + cleanup margin.
+    assert storage.isolation_kwargs == {"lock_kwargs": {"timeout": 600}}
 
 
 def test_video_failure_paths_do_not_read_expired_generation_after_rollback() -> None:

@@ -276,12 +276,14 @@ export class MiniAppApi {
     });
   }
 
-  quoteWanVideo(body: Record<string, unknown>): Promise<{
-    credits: number;
-    rate: number;
+  quoteVideo(body: Record<string, unknown>): Promise<{
+    cost_credits: number;
+    balance_credits: number;
+    can_run: boolean;
+    output_seconds: number;
+    reference_seconds: number;
     billable_seconds: number;
-    input_video_seconds: number;
-    max_output_seconds: number;
+    rate_credits_per_second?: number | null;
   }> {
     return this.request("/generate/video/quote", {
       method: "POST",

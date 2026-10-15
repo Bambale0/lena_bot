@@ -258,9 +258,11 @@ function unique(values: string[]): string[] {
 function patchCreateVideo(): void {
   const win = window as SeedanceWindow;
   if (win.__apixSeedance25Patched) return;
-  const original = MiniAppApi.prototype.createVideo;
+  const originalCreate = MiniAppApi.prototype.createVideo;
+  const originalQuote = MiniAppApi.prototype.quoteVideo;
 
-  MiniAppApi.prototype.createVideo = async function patchedCreateVideo(body: Record<string, unknown>) {
+  const enrichVideoBody = async (body: Record<string, unknown>) => {
+    body = { ...body };
     if (body.model === MODEL_KEY) {
       const options = readOptions();
 
@@ -311,7 +313,13 @@ function patchCreateVideo(): void {
       body.audio_ids = [...audioRefs, ...tokens];
       body.character_ids = [];
     }
-    return original.call(this, body);
+    return body;
+  };
+  MiniAppApi.prototype.createVideo = async function patchedCreateVideo(body: Record<string, unknown>) {
+    return originalCreate.call(this, await enrichVideoBody(body));
+  };
+  MiniAppApi.prototype.quoteVideo = async function patchedQuoteVideo(body: Record<string, unknown>) {
+    return originalQuote.call(this, await enrichVideoBody(body));
   };
   win.__apixSeedance25Patched = true;
 }

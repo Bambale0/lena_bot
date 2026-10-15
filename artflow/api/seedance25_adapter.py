@@ -521,7 +521,14 @@ def _install_seedance25_miniapp_normalizer(routes: Any) -> None:
         else:
             normalized_image = image_refs or None
 
-        control_tokens = [item for item in (audio_ids or []) if str(item).startswith(CONTROL_PREFIX)]
+        control_tokens = [
+            item for item in (audio_ids or [])
+            if str(item).startswith(CONTROL_PREFIX)
+            and not (
+                str(item).startswith(f"{CONTROL_PREFIX}video_ref=")
+                and str(item).partition("=")[2] in video_refs
+            )
+        ]
         return {
             "mode": route,
             "duration": billing_duration,

@@ -93,7 +93,7 @@ async def _quote(state: FSMContext, session: AsyncSession) -> float:
     cost = await _available(session, data["resolution"])
     if cost is None:
         raise ValueError("Seedance 2.5 сейчас недоступен. Попробуй позже.")
-    total = legacy._video_total_credits(MODEL_KEY, duration, float(cost.credits))
+    total = legacy._video_total_credits(MODEL_KEY, duration * 2, float(cost.credits))
     await state.update_data(duration=duration, credits=float(cost.credits), aspect_ratio="adaptive")
     return total
 
@@ -352,6 +352,7 @@ async def navigate(
             bot=bot,
             prompt="Замена лица / одежды / цифр с сохранением исходной сцены",
             parent_generation_id=saved.get("parent_generation_id"),
+            preconfirmed_credits=total,
         )
         if not ok:
             await state.set_data(saved)

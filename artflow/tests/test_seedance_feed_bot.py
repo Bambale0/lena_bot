@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from api import genjutsu_adapter, seedance25_adapter, video_runtime_fixes
+from api import genjutsu_adapter, seedance25_adapter, video_reference_billing, video_runtime_fixes
 from bot.handlers import video_gen
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
@@ -66,6 +66,11 @@ def seedance_bot(video_launch, monkeypatch):
 
     fixture.probe = AsyncMock(side_effect=probe)
     monkeypatch.setattr(video_runtime_fixes, "probe_local_media", fixture.probe)
+    monkeypatch.setattr(video_reference_billing, "probe_local_media", AsyncMock(return_value=SimpleNamespace(duration_seconds=6.2)))
+    monkeypatch.setattr(
+        video_reference_billing, "local_upload_path_from_url",
+        lambda url: Path("/tmp/feed-source-test.mp4") if url == SOURCE_VIDEO else None,
+    )
     monkeypatch.setattr(
         video_runtime_fixes, "local_upload_path_from_url",
         lambda url: Path("/tmp/feed-source-test.mp4") if url == SOURCE_VIDEO else None,
@@ -161,7 +166,7 @@ async def test_seedance_feed_source_video_enters_edit_and_prices_actual_duration
         fixture.repo.spend_credits.assert_not_awaited()
         fixture.service.generate_video.assert_not_awaited()
         assert "7 сек" in fixture.call.message.answer.await_args.args[0]
-        assert "28 💋" in fixture.call.message.answer.await_args.args[0]
+        assert "56 💋" in fixture.call.message.answer.await_args.args[0]
         fixture.call.data = fixture.call.message.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data
         await fixture.run(operation)
     else:
@@ -180,7 +185,7 @@ async def test_seedance_feed_source_video_enters_edit_and_prices_actual_duration
     assert submitted.kwargs["aspect_ratio"] == "adaptive"
     assert fixture.events == ["probe", "price", "probe", "price", "charge"]
     assert fixture.repo.resolve_video_model_cost.await_args.kwargs["duration"] == 7
-    assert fixture.repo.spend_credits.await_args.args[2] == 28
+    assert fixture.repo.spend_credits.await_args.args[2] == 56
     saved = fixture.repo.create_generation.await_args
     assert saved.kwargs["input_params"]["duration"] == 7
     assert saved.kwargs["input_params"]["aspect_ratio"] == "adaptive"
@@ -259,6 +264,12 @@ async def test_seedance_feed_plain_source_only_repeat_keeps_author_prompt(seedan
     fixture = seedance_bot
     fixture.data.update(image_url=None, reference_video_url=source_reference)
     await fixture.run(operation)
+    fixture.repo.spend_credits.assert_not_awaited()
+    if operation == "launch":
+        await fixture.run("confirm_launch")
+    else:
+        fixture.call.data = fixture.call.message.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data
+        await fixture.run(operation)
     submitted = fixture.service.generate_video.await_args
     assert submitted is not None
     assert submitted.args[1] == SECRET

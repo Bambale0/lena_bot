@@ -69,9 +69,7 @@ from api.miniapp_routes import (
 from api.miniapp_routes import (
     quote_feed_remix as miniapp_quote_feed_remix,
 )
-from api.miniapp_routes import (
-    quote_wan30_video as miniapp_quote_wan30_video,
-)
+from api.miniapp_routes import quote_video_generation as miniapp_quote_video_generation
 from api.miniapp_routes import (
     refresh_suno_voice as miniapp_refresh_suno_voice,
 )
@@ -223,17 +221,6 @@ async def generate_image(
     return await _call_miniapp(miniapp_create_image_generation, body=body, session=session, user=user, surface="web")
 
 
-@router.post("/generate/video/quote")
-async def quote_wan30_video(
-    body: VideoGenRequest,
-    session: AsyncSession = Depends(get_session),
-    user=Depends(get_web_user_or_none),
-):
-    if auth_error := _auth_required(user):
-        return auth_error
-    return await _call_miniapp(miniapp_quote_wan30_video, body=body, session=session, user=user)
-
-
 @router.post("/generate/video", status_code=202)
 async def generate_video(
     body: VideoGenRequest,
@@ -243,6 +230,17 @@ async def generate_video(
     if auth_error := _auth_required(user):
         return auth_error
     return await _call_miniapp(miniapp_create_video_generation, body=body, session=session, user=user, surface="web")
+
+
+@router.post("/generate/video/quote")
+async def quote_video(
+    body: VideoGenRequest,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if auth_error := _auth_required(user):
+        return auth_error
+    return await _call_miniapp(miniapp_quote_video_generation, body=body, session=session, user=user)
 
 
 @router.post("/generate/music", status_code=202)
