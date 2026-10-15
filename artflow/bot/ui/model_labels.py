@@ -33,6 +33,8 @@ _MODEL_LABELS: dict[str, str] = {
     "kling-3.0/motion-control": "🎥 Kling 3.0 Motion Control",
     "kling/v3-turbo-text-to-video": "⚡ Kling V3 Turbo",
     "kling/v3-turbo-image-to-video": "⚡ Kling V3 Turbo",
+    "wan/3-0-video": "🌊 Wan 3.0",
+    "wan/3-0-video-prime": "⚡ Wan 3.0 Prime",
     "wan/2-7-text-to-video": "🌊 WAN 2.7 Video",
     "wan/2-7-image-to-video": "🌊 WAN 2.7 Video",
     "bytedance/seedance-2": "🌱 Seedance 2",

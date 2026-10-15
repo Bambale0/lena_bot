@@ -105,6 +105,24 @@ VIDEO_CAPS: dict[str, dict] = {
         "resolution_labels": {"720p": "720p", "1080p": "1080p"},
         "billing_mode": "per_second",
     },
+    "wan/3-0-video": {
+        "modes": ["text", "image", "video"],
+        "duration_options": [2, 3, 5, 8, 10, 15, 20, 25, 30],
+        "aspect_ratios": ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "has_resolution": True, "max_refs": 10,
+        "supports_video_input": True, "auto_route_by_inputs": True,
+        "has_seed": True, "billing_mode": "per_second",
+    },
+    "wan/3-0-video-prime": {
+        "modes": ["text", "image", "video"],
+        "duration_options": [2, 3, 5, 8, 10, 15, 20, 25, 30],
+        "aspect_ratios": ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "has_resolution": True, "max_refs": 10,
+        "supports_video_input": True, "auto_route_by_inputs": True,
+        "has_seed": True, "billing_mode": "per_second",
+    },
     "wan/2-7-text-to-video": {
         "modes": ["text"],
         "duration_options": [2, 3, 5, 8, 10, 12, 15],
@@ -523,6 +541,8 @@ _VIDEO_MODEL_ORDER: list[str] = [
     VideoModel.VEO_3,
     VideoModel.VEO_3_FAST,
     VideoModel.SEEDANCE_2,
+    VideoModel.WAN_30,
+    VideoModel.WAN_30_PRIME,
     VideoModel.WAN_27_T2V,
     VideoModel.GROK_T2V,
     VideoModel.KLING_26_I2V,
@@ -555,6 +575,8 @@ _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
             VideoModel.VEO_3,
             VideoModel.VEO_3_FAST,
             VideoModel.SEEDANCE_2,
+            VideoModel.WAN_30,
+            VideoModel.WAN_30_PRIME,
             VideoModel.WAN_27_T2V,
             VideoModel.GROK_T2V,
                         VideoModel.KLING_V3_TURBO_T2V,
@@ -1035,6 +1057,10 @@ def video_params_kb(
     ref_count: int | None = None,
     next_label: str = "▶️ Далее: Промпт",
     identity_transfer: bool = False,
+    wan_audio: bool = True,
+    wan_nsfw_checker: bool = True,
+    wan_advanced_open: bool = False,
+    wan_seed: int | None = None,
 ) -> InlineKeyboardMarkup:
     caps = VIDEO_CAPS.get(model_key, {})
     builder = InlineKeyboardBuilder()
@@ -1094,8 +1120,39 @@ def video_params_kb(
             InlineKeyboardButton(text="🎙️ Audio ID", callback_data="vpar_omni:audio"),
             InlineKeyboardButton(text="🧍 Character IDs", callback_data="vpar_omni:character"),
         )
-    if caps.get("has_seed"):
+    if caps.get("has_seed") and model_key not in {"wan/3-0-video", "wan/3-0-video-prime"}:
         builder.row(InlineKeyboardButton(text="🌱 Seed", callback_data="vpar_omni:seed"))
+    if model_key in {"wan/3-0-video", "wan/3-0-video-prime"}:
+        builder.row(
+            InlineKeyboardButton(text="⏱ Другая длительность (2–30 сек)", callback_data="vpar_wan_duration"),
+        )
+        builder.row(InlineKeyboardButton(
+            text="🔊 Со звуком ✅" if wan_audio else "🔇 Без звука ✅",
+            callback_data="vpar_wan_audio",
+        ))
+        builder.row(InlineKeyboardButton(
+            text="▴ Скрыть дополнительные настройки" if wan_advanced_open else "⚙️ Дополнительно",
+            callback_data="vpar_wan_advanced",
+        ))
+        if wan_advanced_open:
+            builder.row(
+                InlineKeyboardButton(text=f"🌱 Seed: {wan_seed if wan_seed is not None else 'авто'}",
+                                     callback_data="vpar_wan_input:seed"),
+                InlineKeyboardButton(
+                    text="🛡️ Проверка контента ✅" if wan_nsfw_checker else "🛡️ Проверка контента ❌",
+                    callback_data="vpar_wan_nsfw",
+                ),
+            )
+            for choices in (
+                (("🖼 Фото", "photo"), ("📍 Первый кадр", "first")),
+                (("🏁 Последний кадр", "last"), ("🎞 Видео", "video")),
+                (("🎙 Аудио", "audio"), ("🗂 Файл", "file")),
+                (("🔗 Ссылка", "link"),),
+            ):
+                builder.row(*(
+                    InlineKeyboardButton(text=label, callback_data=f"vpar_wan_input:{target}")
+                    for label, target in choices
+                ))
 
     builder.row(InlineKeyboardButton(text=next_label, callback_data="vpar_next"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="vpar_back"))

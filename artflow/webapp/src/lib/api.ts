@@ -283,6 +283,7 @@ export class MiniAppApi {
     output_seconds: number;
     reference_seconds: number;
     billable_seconds: number;
+    rate_credits_per_second?: number | null;
   }> {
     return this.request("/generate/video/quote", {
       method: "POST",

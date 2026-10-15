@@ -265,9 +265,12 @@ async def create_task(
     # preserves unknown acceptance without restoring spendable credits.
     # Keep other products on their existing submission contract until each
     # obtains the same durable unknown-outcome reconciliation protocol.
+    from api.wan30_contract import WAN30_MODELS
     from core.seedance_reconciliation import PRODUCT_MODELS
 
-    if request_payload.get("model") in PRODUCT_MODELS:
+    # Wan 3.0 can bill up to 30 output+reference seconds. A network timeout
+    # must never cause the old three-POST retry path to charge multiple times.
+    if request_payload.get("model") in PRODUCT_MODELS | WAN30_MODELS:
         return await _create_task_once(request_payload)
     return await _retry_post("/api/v1/jobs/createTask", request_payload)
 

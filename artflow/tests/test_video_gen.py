@@ -1362,3 +1362,301 @@ async def test_handle_video_prompt_passes_gemini_omni_extras() -> None:
     assert kwargs["character_ids"] == ["character_1"]
     assert kwargs["video_end"] == 8
     assert kwargs["seed"] == 99
+
+@pytest.mark.asyncio
+async def test_wan30_initial_telegram_selection_defaults_to_5sec_720p(monkeypatch):
+    call = make_callback(data="vid_model:wan/3-0-video")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    state = _fake_state()
+    model_cost = _make_video_model_cost("wan/3-0-video", 12, "Wan 3.0")
+    resolve = AsyncMock(return_value=model_cost)
+    monkeypatch.setattr(video_gen, "_resolve_video_model_cost", resolve)
+    await video_gen.cb_video_model(call, AsyncMock(), state,
+        SimpleNamespace(id=42, credits=1000, language="ru"))
+    assert resolve.await_args.kwargs["duration"] == 5
+    assert resolve.await_args.kwargs["resolution"] == "720p"
+    data = await state.get_data()
+    assert data["aspect_ratio"] == "adaptive"
+    assert data["resolution"] == "720p"
+    assert data["duration"] == 5
+
+@pytest.mark.asyncio
+async def test_wan30_telegram_low_balance_can_still_choose_cheaper_quality(monkeypatch):
+    call = make_callback(data="vid_model:wan/3-0-video")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    state = _fake_state()
+    model_cost = _make_video_model_cost("wan/3-0-video", 12, "Wan 3.0")
+    monkeypatch.setattr(video_gen, "_resolve_video_model_cost", AsyncMock(return_value=model_cost))
+    await video_gen.cb_video_model(call, AsyncMock(), state,
+        SimpleNamespace(id=42, credits=35, language="ru"))
+    assert state.set_state.await_args.args[0] == VideoGenFSM.mode_select
+
+
+@pytest.mark.asyncio
+async def test_wan_repeat_restores_persisted_multimedia_without_fetching_supplier(monkeypatch):
+    import json
+
+    from api.wan30_contract import Wan30Request
+    from api.wan30_launch import Wan30Quote
+
+    request = Wan30Request(
+        model="wan/3-0-video", prompt="Replace background", mode="edit",
+        duration=7, resolution="1080p", aspect_ratio="adaptive",
+        audio=False, nsfw_checker=False, seed=0,
+        reference_image_urls=("https://test.example.com/face.png",),
+        reference_video_urls=(
+            "https://test.example.com/main.mp4",
+            "https://test.example.com/motion.mp4",
+        ),
+        reference_video_durations=(3.5, 4.5),
+        reference_audio_urls=("https://test.example.com/music.mp3",),
+        reference_audio_durations=(4,),
+    )
+    saved = Wan30Quote(
+        request=request, billable_seconds=15, rate=24, credits=360, resolution="1080p",
+    ).stored_params()
+    prev = SimpleNamespace(
+        model=request.model, input_params=json.dumps(saved),
+        task_id="kie-paid-previous", parent_generation_id=None,
+    )
+    no_supplier_get = AsyncMock(side_effect=AssertionError("repeat uses stored validated inputs"))
+    monkeypatch.setattr(video_gen.video_service.kieai_client, "get_task_status", no_supplier_get)
+    params = await video_gen._video_repeat_params_for_generation(AsyncMock(), prev)
+    state = video_gen._video_state_from_repeat_params(request.model, params)
+    assert state["mode"] == "video"
+    assert state["reference_video_url"] == "https://test.example.com/main.mp4"
+    assert state["wan_reference_video_urls"] == ["https://test.example.com/motion.mp4"]
+    assert state["wan_reference_audio_urls"] == ["https://test.example.com/music.mp3"]
+    assert state["wan_audio"] is False
+    assert state["wan_nsfw_checker"] is False
+    assert state["seed"] == 0
+    assert state["image_url"] == ["https://test.example.com/face.png"]
+    no_supplier_get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_wan_repeat_first_last_frames_survive_restore(monkeypatch):
+    import json
+
+    from api.wan30_contract import Wan30Request
+    from api.wan30_launch import Wan30Quote
+
+    req = Wan30Request(
+        model="wan/3-0-video-prime", prompt="Slow crane shot", mode="first_last",
+        first_frame_url="https://test.example.com/first.png",
+        last_frame_url="https://test.example.com/last.png",
+    )
+    prev = SimpleNamespace(
+        model=req.model, task_id="kie-previous", parent_generation_id=None,
+        input_params=json.dumps(Wan30Quote(
+            request=req, billable_seconds=5, rate=18, credits=90, resolution="720p",
+        ).stored_params()),
+    )
+    monkeypatch.setattr(video_gen.video_service.kieai_client, "get_task_status",
+                        AsyncMock(side_effect=AssertionError("no supplier GET")))
+    state = video_gen._video_state_from_repeat_params(
+        req.model, await video_gen._video_repeat_params_for_generation(AsyncMock(), prev),
+    )
+    assert state["mode"] == "image"
+    assert state["wan_first_frame_url"] == req.first_frame_url
+    assert state["wan_last_frame_url"] == req.last_frame_url
+
+
+def test_wan_bot_advanced_controls_are_collapsed_but_complete_when_open():
+    base = {
+        "model_key": "wan/3-0-video", "mode": "video", "duration": 5,
+        "resolution": "720p", "aspect_ratio": "adaptive", "wan_audio": True,
+    }
+    def actions(data):
+        keyboard = video_gen._video_params_reply_markup(data["model_key"], data)
+        return {
+            button.callback_data for row in keyboard.inline_keyboard
+            for button in row if button.callback_data
+        }
+    collapsed = actions(base)
+    assert "vpar_wan_advanced" in collapsed
+    assert "vpar_wan_nsfw" not in collapsed
+    expanded = actions({**base, "wan_advanced_open": True})
+    assert {
+        "vpar_wan_advanced", "vpar_wan_nsfw",
+        "vpar_wan_input:seed", "vpar_wan_input:first",
+        "vpar_wan_input:last", "vpar_wan_input:video",
+        "vpar_wan_input:audio", "vpar_wan_input:file",
+        "vpar_wan_input:link", "vpar_wan_input:photo",
+    } <= expanded
+
+
+def test_wan_advanced_text_validation_and_clear():
+    from api.wan30_contract import WAN30_MODELS
+    assert "wan/3-0-video-prime" in WAN30_MODELS
+    assert video_gen._wan_advanced_updates("seed", "0", {"mode": "text"}) == {"seed": 0}
+    assert video_gen._wan_advanced_updates("seed", "-", {"mode": "text"}) == {"seed": None}
+    assert video_gen._wan_advanced_updates("audio", "-", {"mode": "text"}) == {
+        "wan_reference_audio_urls": [],
+    }
+    assert video_gen._wan_advanced_updates(
+        "video",
+        "https://apixbotai.com/static/upload/one.mp4\nhttps://apixbotai.com/static/upload/one.mp4",
+        {"mode": "video"},
+    ) == {"wan_reference_video_urls": ["https://apixbotai.com/static/upload/one.mp4"]}
+    with pytest.raises(ValueError):
+        video_gen._wan_advanced_updates("video", "http://localhost/private", {"mode": "video"})
+    with pytest.raises(ValueError):
+        video_gen._wan_advanced_updates("first", "https://example.test/image.png", {"mode": "text"})
+
+
+@pytest.mark.asyncio
+async def test_wan_advanced_menu_toggles_without_leaving_params():
+    state = _fake_state(model_key="wan/3-0-video", mode="video", duration=5,
+                        resolution="720p", aspect_ratio="adaptive")
+    call = make_callback(data="vpar_wan_advanced")
+    call.message.edit_reply_markup = AsyncMock()
+    await video_gen.cb_wan_advanced_menu(call, state)
+    assert (await state.get_data())["wan_advanced_open"] is True
+    assert state.set_state.await_count == 0
+    call.message.edit_reply_markup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_wan_advanced_input_prompt_and_clear_roundtrip():
+    state = _fake_state(
+        model_key="wan/3-0-video", mode="video",
+        duration=5, resolution="720p", aspect_ratio="adaptive",
+        wan_advanced_open=True,
+    )
+    call = make_callback(data="vpar_wan_input:seed")
+    await video_gen.cb_wan_advanced_input(call, state)
+    assert state.set_state.await_args.args == (VideoGenFSM.omni_ids_input,)
+    assert (await state.get_data())["wan_input_target"] == "seed"
+    message = make_message(text="0")
+    await video_gen.handle_omni_ids_input(message, state, AsyncMock())
+    assert (await state.get_data())["seed"] == 0
+    assert (await state.get_data())["wan_input_target"] is None
+    assert state.set_state.await_args.args == (VideoGenFSM.params_select,)
+    assert "Seed" in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_wan_advanced_safety_toggle():
+    state = _fake_state(model_key="wan/3-0-video", mode="text", duration=5,
+                        resolution="720p", aspect_ratio="adaptive",
+                        wan_advanced_open=True, wan_nsfw_checker=True)
+    call = make_callback(data="vpar_wan_nsfw")
+    call.message.edit_reply_markup = AsyncMock()
+    await video_gen.cb_wan_advanced_safety(call, state)
+    assert (await state.get_data())["wan_nsfw_checker"] is False
+    call.message.edit_reply_markup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_wan_advanced_photo_upload_returns_to_price_controls(monkeypatch):
+    state = _fake_state(model_key="wan/3-0-video", mode="video",
+                        resolution="720p", wan_input_target="photo",
+                        wan_advanced_open=True)
+    msg = make_message()
+    msg.photo = [SimpleNamespace(file_id="tg_photo123", file_size=700)]
+    bot = AsyncMock()
+    mirrored = AsyncMock(return_value="https://apixbotai.com/static/upload/ref.png")
+    monkeypatch.setattr(video_gen, "mirror_telegram_file", mirrored)
+    await video_gen.handle_wan_advanced_media_upload(msg, state, bot)
+    assert (await state.get_data())["wan_reference_image_urls"] == [
+        "https://apixbotai.com/static/upload/ref.png"
+    ]
+    assert (await state.get_data())["wan_input_target"] is None
+    assert state.set_state.await_args.args == (VideoGenFSM.params_select,)
+    mirrored.assert_awaited_once_with(bot, "tg_photo123", is_video=False)
+    msg.answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_wan_advanced_video_upload_is_server_measured(monkeypatch):
+    from api import wan30_launch
+    from api.media_gateway import MediaKind
+
+    state = _fake_state(model_key="wan/3-0-video", mode="video",
+                        resolution="720p", wan_input_target="video",
+                        wan_advanced_open=True)
+    msg = make_message()
+    msg.video = SimpleNamespace(file_id="tg_clip", file_size=1500)
+    bot = AsyncMock()
+    url = "https://apixbotai.com/static/upload/extra.mp4"
+    mirror = AsyncMock(return_value=url)
+    probe = AsyncMock(return_value=6.5)
+    monkeypatch.setattr(video_gen, "mirror_telegram_file", mirror)
+    monkeypatch.setattr(wan30_launch, "_duration_for_owned_media", probe)
+    await video_gen.handle_wan_advanced_media_upload(msg, state, bot)
+    assert (await state.get_data())["wan_reference_video_urls"] == [url]
+    probe.assert_awaited_once_with(url, MediaKind.VIDEO)
+    assert (await state.get_data())["wan_input_target"] is None
+    assert state.set_state.await_args.args == (VideoGenFSM.params_select,)
+
+
+@pytest.mark.asyncio
+async def test_wan_advanced_audio_upload_is_owned_and_verified(monkeypatch):
+    from io import BytesIO
+
+    from api import wan30_launch
+    from api.media_gateway import MediaKind
+
+    state = _fake_state(model_key="wan/3-0-video", mode="video",
+                        resolution="720p", wan_input_target="audio",
+                        wan_advanced_open=True)
+    msg = make_message()
+    msg.audio = SimpleNamespace(file_id="tg_audio", mime_type="audio/mpeg", file_size=6)
+    bot = AsyncMock()
+    bot.get_file.return_value = SimpleNamespace(file_path="voice.mp3")
+    bot.download_file.return_value = BytesIO(b"record")
+    uploaded = "https://apixbotai.com/static/upload/mpeg.mp3"
+    save = MagicMock(return_value=uploaded)
+    probe = AsyncMock(return_value=3.0)
+    monkeypatch.setattr(video_gen, "save_public_file", save)
+    monkeypatch.setattr(wan30_launch, "_duration_for_owned_media", probe)
+    await video_gen.handle_wan_advanced_media_upload(msg, state, bot)
+    save.assert_called_once_with(b"record", content_type="audio/mpeg")
+    probe.assert_awaited_once_with(uploaded, MediaKind.AUDIO)
+    assert (await state.get_data())["wan_reference_audio_urls"] == [uploaded]
+    assert state.set_state.await_args.args == (VideoGenFSM.params_select,)
+
+
+@pytest.mark.asyncio
+async def test_wan_advanced_document_upload_uses_content_hash_not_original_filename(
+    monkeypatch, tmp_path,
+):
+    from io import BytesIO
+
+    state = _fake_state(model_key="wan/3-0-video", mode="text",
+                        wan_input_target="file", wan_advanced_open=True)
+    msg = make_message()
+    msg.document = SimpleNamespace(
+        file_id="tg_attachment", file_name="../user secrets.pdf",
+        mime_type="application/pdf", file_size=15,
+    )
+    bot = AsyncMock()
+    bot.get_file.return_value = SimpleNamespace(file_path="document.pdf")
+    bot.download_file.return_value = BytesIO(b"PDF SAFE")
+    monkeypatch.setattr(video_gen, "get_static_upload_directory", lambda: tmp_path)
+    monkeypatch.setattr(video_gen, "public_upload_url",
+                        lambda name: f"https://apixbotai.com/static/upload/{name}")
+    await video_gen.handle_wan_advanced_media_upload(msg, state, bot)
+    urls = (await state.get_data())["wan_reference_file_urls"]
+    assert len(urls) == 1
+    assert urls[0].endswith(".pdf")
+    assert ".." not in urls[0] and "secrets" not in urls[0]
+    assert list((tmp_path / "wan-inputs").glob("*.pdf"))
+
+
+@pytest.mark.asyncio
+async def test_wan_advanced_rejects_unsupported_audio_and_stays_in_input_state(monkeypatch):
+    state = _fake_state(model_key="wan/3-0-video", mode="video",
+                        wan_input_target="audio", wan_advanced_open=True)
+    msg = make_message()
+    msg.document = SimpleNamespace(file_id="evil", mime_type="application/x-executable",
+                                   file_name="evil.exe", file_size=12)
+    bot = AsyncMock()
+    await video_gen.handle_wan_advanced_media_upload(msg, state, bot)
+    bot.download_file.assert_not_awaited()
+    assert (await state.get_data())["wan_input_target"] == "audio"
+    state.set_state.assert_not_awaited()
+    assert "❌" in msg.answer.await_args.args[0]

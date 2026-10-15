@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AlertCircle, Film, ImageIcon, LoaderCircle, Orbit, Upload, WandSparkles, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,13 @@ interface GenerationScreenProps {
   onUploadVideoFile: (file: File) => void;
   onSubmit: () => void;
   onResetPreset: () => void;
+  onQuoteWan?: (payload: Record<string, unknown>) => Promise<{
+    credits: number;
+    rate: number;
+    billable_seconds: number;
+    input_video_seconds: number;
+    max_output_seconds: number;
+  }>;
 }
 
 const TASK_COUNT_OPTIONS = [1, 2, 3, 4, 6];
@@ -41,10 +48,12 @@ const GEMINI_MAX_TRIM_SECONDS = 10;
 const GEMINI_MAX_SEED = 2_147_483_647;
 const SEEDANCE_20_MODELS = new Set(["bytedance/seedance-2", "bytedance/seedance-2-fast", "bytedance/seedance-2-mini"]);
 const SEEDANCE_25_MODEL = "bytedance/seedance-2-5";
+const WAN30_MODELS = new Set(["wan/3-0-video", "wan/3-0-video-prime"]);
 const KLING_3_MODELS = new Set(["kling-3.0/video", "kling/v3-turbo-text-to-video", "kling/v3-turbo-image-to-video"]);
 
 function promptMaxLength(kind: "image" | "video" | "motion", modelKey: string | undefined): number {
   if (kind !== "video") return 4000;
+  if (WAN30_MODELS.has(modelKey || "")) return 4500;
   if (modelKey === SEEDANCE_25_MODEL) return 30000;
   if (modelKey && SEEDANCE_20_MODELS.has(modelKey)) return 20000;
   if (modelKey && KLING_3_MODELS.has(modelKey)) return 2500;
@@ -156,6 +165,7 @@ function GenerationScreen({
   onUploadVideoFile,
   onSubmit,
   onResetPreset,
+  onQuoteWan,
 }: GenerationScreenProps) {
   const draft = selectGenerationInputs(storedDraft);
   const preserveMedia = ux2 && draft.promptId === null;
@@ -169,6 +179,55 @@ function GenerationScreen({
       ? models.filter((model) => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"))
       : models.filter((model) => !model.modes?.includes("motion") && !/motion-control/i.test(model.key));
   const selectedModel = availableModels.find((model) => model.key === draft.model) || (ux2 && draft.model ? undefined : availableModels[0]);
+  const isWan30 = kind === "video" && WAN30_MODELS.has(selectedModel?.key || "");
+  const [wanQuote, setWanQuote] = useState<{
+    key: string;
+    credits?: number;
+    rate?: number;
+    billableSeconds?: number;
+    inputSeconds?: number;
+    error?: string;
+  } | null>(null);
+  const wanQuotePayload = {
+    // Quote depends on media and settings, not prompt keystrokes.
+    model: draft.model, prompt: "Проверка цены",
+    mode: draft.mode, duration: draft.duration,
+    resolution: draft.resolution, aspect_ratio: draft.aspectRatio,
+    image_url: draft.referenceUrls[0] || null, reference_urls: draft.referenceUrls,
+    video_url: draft.videoUrl || null,
+    seed: draft.seed,
+    wan_audio: draft.wanAudio !== false,
+    wan_nsfw_checker: draft.wanNsfwChecker !== false,
+    wan_reference_video_urls: draft.wanReferenceVideoUrls || [],
+    wan_reference_audio_urls: draft.wanReferenceAudioUrls || [],
+    wan_reference_file_urls: draft.wanReferenceFileUrls || [],
+    wan_reference_link_urls: draft.wanReferenceLinkUrls || [],
+    wan_first_frame_url: draft.wanFirstFrameUrl || null,
+    wan_last_frame_url: draft.wanLastFrameUrl || null,
+  };
+  const wanQuoteKey = JSON.stringify(wanQuotePayload);
+  useEffect(() => {
+    if (!isWan30 || !onQuoteWan || !draft.model || (draft.mode === "video" && !draft.videoUrl)
+      || (draft.mode === "image" && !draft.referenceUrls.length)) {
+      setWanQuote(null);
+      return;
+    }
+    let disposed = false;
+    setWanQuote(null);
+    const timer = window.setTimeout(() => {
+      void onQuoteWan(JSON.parse(wanQuoteKey) as Record<string, unknown>)
+        .then((value) => {
+          if (!disposed) setWanQuote({
+            key: wanQuoteKey, credits: value.credits, rate: value.rate,
+            billableSeconds: value.billable_seconds, inputSeconds: value.input_video_seconds,
+          });
+        })
+        .catch((cause: Error) => {
+          if (!disposed) setWanQuote({ key: wanQuoteKey, error: cause.message || "Не удалось рассчитать цену" });
+        });
+    }, 280);
+    return () => { disposed = true; window.clearTimeout(timer); };
+  }, [isWan30, onQuoteWan, wanQuoteKey, draft.model, draft.mode, draft.videoUrl, draft.referenceUrls.length]);
   const mediaInspection = inspectDraftMedia(storedDraft, selectedModel);
   const modes = selectedModel?.modes?.length ? selectedModel.modes : [kind === "motion" ? "motion" : "text"];
   const ratioModes = selectedModel?.aspect_ratio_modes?.length ? selectedModel.aspect_ratio_modes : modes;
@@ -180,8 +239,9 @@ function GenerationScreen({
   const modeOptions = selectedModel?.mode_options || [];
   const taskCount = clampTaskCount(draft.taskCount);
   const baseEstimate = kind === "image" ? imageBaseCost(selectedModel, draft.quality, draft.count) : videoBaseCost(selectedModel, draft);
-  const estimate = baseEstimate * taskCount;
-  const referenceVideoPricePending = kind !== "image" && Boolean(
+  const quoteReady = !isWan30 || (wanQuote?.key === wanQuoteKey && wanQuote.credits !== undefined && !wanQuote.error);
+  const estimate = (isWan30 ? (quoteReady ? Number(wanQuote?.credits) : 0) : baseEstimate) * taskCount;
+  const referenceVideoPricePending = !isWan30 && kind !== "image" && Boolean(
     draft.videoUrl || draft.audioIds.some(item => item.startsWith("__apix_seedance25:video_ref="))
     || (draft.model.startsWith("minimax-h3/") && draft.characterIds.length),
   );
@@ -212,13 +272,14 @@ function GenerationScreen({
     ? (draft.mode === "image" ? draft.referenceUrls.length : 0) + (draft.videoUrl ? 2 : 0) + draft.characterIds.length
     : 0;
   const mediaQuotaExceeded = selectedModel?.key === GEMINI_OMNI_MODEL && geminiMediaSlots > GEMINI_MAX_MEDIA_SLOTS;
-  const advancedInvalid = invalidSeed || invalidTrim || tooManyAudioIds || tooManyCharacterIds || mediaQuotaExceeded;
+  const invalidWanDuration = isWan30 && (!Number.isInteger(draft.duration) || draft.duration < 2 || draft.duration > 30);
+  const advancedInvalid = invalidSeed || invalidTrim || tooManyAudioIds || tooManyCharacterIds || mediaQuotaExceeded || invalidWanDuration;
   const unsupportedSettings = ux2 && !draft.promptId && Boolean(selectedModel && (
     !modes.includes(draft.mode) ||
     (ratios.length > 0 && !ratios.includes(draft.aspectRatio)) ||
     (kind === "image" && ((qualities.length > 0 && !qualities.some(option => option.value === draft.quality)) || !outputCounts.includes(draft.count))) ||
     (kind !== "image" && (
-      (!selectedModel.duration_from_source && durations.length > 0 && !durations.includes(draft.duration)) ||
+      (!isWan30 && !selectedModel.duration_from_source && durations.length > 0 && !durations.includes(draft.duration)) ||
       !resolutions.includes(draft.resolution) ||
       (modeOptions.length > 0 && !modeOptions.includes(draft.grokMode))
     )) || !TASK_COUNT_OPTIONS.includes(draft.taskCount)
@@ -231,15 +292,15 @@ function GenerationScreen({
       quality: qualities.some(option => option.value === draft.quality) ? draft.quality : qualities[0]?.value || draft.quality,
       count: outputCounts.includes(draft.count) ? draft.count : outputCounts[0],
       taskCount: clampTaskCount(draft.taskCount),
-      duration: durations.includes(draft.duration) ? draft.duration : durations[0] || draft.duration,
+      duration: isWan30 ? draft.duration : durations.includes(draft.duration) ? draft.duration : durations[0] || draft.duration,
       resolution: resolutions.includes(draft.resolution) ? draft.resolution : resolutions[0],
       grokMode: modeOptions.includes(draft.grokMode) ? draft.grokMode : modeOptions[0] || draft.grokMode,
     });
   };
 
-  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid || unsupportedSettings || (preserveMedia && mediaInspection.issues.length > 0);
-  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion" || selectedModel?.key === SEEDANCE_25_MODEL || (preserveMedia && (allReferences.length > 0 || (mediaInspection.referenceInputsSupported && (selectedModel?.auto_route_by_inputs === true || modes.includes("multimodal")))));
-  const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input) || (preserveMedia && Boolean(draft.videoUrl));
+  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid || unsupportedSettings || !quoteReady || (preserveMedia && mediaInspection.issues.length > 0);
+  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion" || (isWan30 && draft.mode === "video") || selectedModel?.key === SEEDANCE_25_MODEL || (preserveMedia && (allReferences.length > 0 || (mediaInspection.referenceInputsSupported && (selectedModel?.auto_route_by_inputs === true || modes.includes("multimodal")))));
+  const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input && !isWan30) || (preserveMedia && Boolean(draft.videoUrl));
   const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);
 
   const syncSelectedModel = (modelKey: string) => {
@@ -260,13 +321,21 @@ function GenerationScreen({
     onChange({
       model: modelKey,
       mode: nextMode,
-      aspectRatio: ratioAllowed ? model?.aspect_ratios?.[0] || draft.aspectRatio : draft.aspectRatio,
+      aspectRatio: WAN30_MODELS.has(modelKey) ? "adaptive" : ratioAllowed ? model?.aspect_ratios?.[0] || draft.aspectRatio : draft.aspectRatio,
       quality: model?.quality_options?.[0]?.value || "basic",
-      duration: nextDurations[0] || draft.duration || 5,
-      resolution: nextResolutions[0] || draft.resolution || "720p",
+      duration: WAN30_MODELS.has(modelKey) ? 5 : nextDurations[0] || draft.duration || 5,
+      resolution: WAN30_MODELS.has(modelKey) ? "720p" : nextResolutions[0] || draft.resolution || "720p",
       count: model?.counts?.[0] || 1,
       grokMode: model?.mode_options?.[0] || "normal",
       seed: null,
+      wanAudio: true,
+      wanNsfwChecker: true,
+      wanReferenceAudioUrls: [],
+      wanReferenceVideoUrls: [],
+      wanReferenceFileUrls: [],
+      wanReferenceLinkUrls: [],
+      wanFirstFrameUrl: "",
+      wanLastFrameUrl: "",
       audioIds: [],
       characterIds: [],
       referenceUrls: [],
@@ -288,7 +357,7 @@ function GenerationScreen({
       return;
     }
     const patch: Partial<GenerationDraft> = { mode };
-    if (mode !== "image" && kind !== "motion") patch.referenceUrls = [];
+    if (mode !== "image" && kind !== "motion" && !isWan30) patch.referenceUrls = [];
     if (mode !== "video" && kind !== "motion") {
       patch.videoUrl = "";
       patch.videoStart = 0;
@@ -463,7 +532,7 @@ function GenerationScreen({
                         <X className="size-3.5" />
                       </button>
                     </div>
-                    {selectedModel?.supports_video_input ? (
+                    {selectedModel?.supports_video_input && !isWan30 ? (
                       <div className="grid grid-cols-2 gap-2">
                         <label className="grid gap-1 text-[10px] text-muted-foreground">Старт, сек<Input type="number" min={0} value={draft.videoStart} onChange={(event) => onChange({ videoStart: Math.max(0, Number(event.target.value) || 0) })} /></label>
                         <label className="grid gap-1 text-[10px] text-muted-foreground">Конец, сек<Input type="number" min={0} value={draft.videoEnd ?? ""} placeholder="auto" aria-invalid={invalidTrim} onChange={(event) => onChange({ videoEnd: event.target.value ? Math.max(0, Number(event.target.value) || 0) : null })} /></label>
@@ -518,7 +587,7 @@ function GenerationScreen({
               <>
                 {!selectedModel?.duration_from_source && durations.length ? (() => {
                   const durationIndex = Math.max(0, durations.indexOf(draft.duration));
-                  const selectedDuration = durations[durationIndex] ?? draft.duration;
+                  const selectedDuration = isWan30 && !durations.includes(draft.duration) ? draft.duration : durations[durationIndex] ?? draft.duration;
                   return (
                     <div className="apix-parameter-group grid min-w-0 gap-1.5">
                       <div className="flex items-center justify-between gap-2">
@@ -581,11 +650,59 @@ function GenerationScreen({
                   </LabeledChips>
                 ) : null}
 
-                {selectedModel?.has_seed ? (
+                {selectedModel?.has_seed && !isWan30 ? (
                   <label className="grid min-w-0 gap-1 text-xs font-medium">
                     Seed
                     <Input type="number" min={0} max={GEMINI_MAX_SEED} step={1} value={draft.seed ?? ""} placeholder="auto" aria-invalid={invalidSeed} onChange={(event) => onChange({ seed: event.target.value ? Number(event.target.value) : null })} />
                   </label>
+                ) : null}
+
+                {isWan30 ? (
+                  <details className="apix-help rounded-xl border border-border/70 bg-muted/20 px-3 py-2">
+                    <summary className="cursor-pointer text-xs font-semibold">Ещё настройки (необязательно)</summary>
+                    <div className="grid gap-3 pt-3">
+                      <label className="grid gap-1 text-xs font-medium">
+                        Своя длительность (2–30 сек)
+                        <Input type="number" min={2} max={30} value={draft.duration} onChange={event => {
+                          const value = Number(event.target.value);
+                          if (Number.isInteger(value) && value >= 2 && value <= 30) onChange({ duration: value });
+                        }} />
+                      </label>
+                      <label className="flex items-center gap-2 text-xs">
+                        <input type="checkbox" checked={draft.wanAudio !== false} onChange={event => onChange({ wanAudio: event.target.checked })} />
+                        Видео со звуком
+                      </label>
+                      <label className="flex items-center gap-2 text-xs">
+                        <input type="checkbox" checked={draft.wanNsfwChecker !== false} onChange={event => onChange({ wanNsfwChecker: event.target.checked })} />
+                        Проверка безопасности
+                      </label>
+                      <label className="grid gap-1 text-xs font-medium">
+                        Seed (для повторяемого результата)
+                        <Input type="number" min={0} max={GEMINI_MAX_SEED} value={draft.seed ?? ""} placeholder="Автоматически" aria-invalid={invalidSeed} onChange={event => onChange({ seed: event.target.value === "" ? null : Number(event.target.value) })} />
+                      </label>
+                      {draft.mode === "image" ? <label className="grid gap-1 text-xs font-medium">
+                        Финальный кадр (если нужно)
+                        <Input value={draft.wanLastFrameUrl || ""} placeholder="https://… (или добавь второе фото)" onChange={event => onChange({ wanLastFrameUrl: event.target.value.trim() })} />
+                      </label> : null}
+                      <label className="grid gap-1 text-xs font-medium">
+                        Аудиореференсы (по одной ссылке)
+                        <Textarea className="min-h-14 font-mono" value={(draft.wanReferenceAudioUrls || []).join("\n")} placeholder="https://…/audio.mp3" onChange={event => onChange({ wanReferenceAudioUrls: splitUrls(event.target.value).slice(0, 5) })} />
+                      </label>
+                      <label className="grid gap-1 text-xs font-medium">
+                        Дополнительные видеореференсы
+                        <Textarea className="min-h-14 font-mono" value={(draft.wanReferenceVideoUrls || []).join("\n")} placeholder="Сначала загрузи видео в APIX" onChange={event => onChange({ wanReferenceVideoUrls: splitUrls(event.target.value).slice(0, 5) })} />
+                      </label>
+                      <label className="grid gap-1 text-xs font-medium">
+                        Документ для референса (HTTPS)
+                        <Input value={(draft.wanReferenceFileUrls || [])[0] || ""} placeholder="https://…/brief.pdf" onChange={event => onChange({ wanReferenceFileUrls: event.target.value.trim() ? [event.target.value.trim()] : [] })} />
+                      </label>
+                      <label className="grid gap-1 text-xs font-medium">
+                        Ссылка на веб-страницу
+                        <Input value={(draft.wanReferenceLinkUrls || [])[0] || ""} placeholder="https://…/article" onChange={event => onChange({ wanReferenceLinkUrls: event.target.value.trim() ? [event.target.value.trim()] : [] })} />
+                      </label>
+                      <p className="text-[11px] text-muted-foreground">Если не знаешь, что выбрать, оставь как есть. Дополнительные видео учитываются в стоимости.</p>
+                    </div>
+                  </details>
                 ) : null}
 
                 {maxAudioIds > 0 || (preserveMedia && draft.audioIds.length > 0) ? (
@@ -621,7 +738,14 @@ function GenerationScreen({
             <div className="apix-launch-row flex items-center justify-between gap-2">
               <div>
                 <p className="text-[10px] text-muted-foreground">Стоимость</p>
-                <p className="text-lg font-bold leading-none">{referenceVideoPricePending ? "После проверки видео" : `${formatCredits(estimate)} кр.`}</p>
+                <p className="text-lg font-bold leading-none">
+                  {isWan30 && !quoteReady ? "Проверяем цену…" :
+                    referenceVideoPricePending ? "После проверки видео" : `${formatCredits(estimate)} кр.`}
+                </p>
+                {isWan30 && quoteReady ? <p className="mt-1 text-[10px] text-muted-foreground">
+                  {wanQuote?.billableSeconds} сек к оплате
+                  {wanQuote?.inputSeconds ? ` · включая ${wanQuote.inputSeconds} сек исходного видео` : ""}
+                </p> : null}
                 {selectedModel?.is_per_second ? <p className="mt-1 text-[10px] text-muted-foreground">{formatCredits(selectedModel.credits_per_sec ?? selectedModel.credits)} кр./сек</p> : null}
                 {taskCount > 1 ? <p className="mt-1 text-[10px] text-muted-foreground">{taskCount} задачи подряд</p> : null}
               </div>
@@ -639,6 +763,7 @@ function GenerationScreen({
               {missingVideo ? <ValidationError>{kind === "motion" ? "Нужно видео движения" : "Нужно исходное видео"}</ValidationError> : null}
               {invalidTrim ? <ValidationError>Фрагмент видео: 0–10 сек, конец позже начала</ValidationError> : null}
               {invalidSeed ? <ValidationError>Seed: целое 0–2147483647</ValidationError> : null}
+              {isWan30 && wanQuote?.key === wanQuoteKey && wanQuote.error ? <ValidationError>{wanQuote.error}</ValidationError> : null}
               {mediaQuotaExceeded ? <ValidationError>Превышена квота Gemini: {geminiMediaSlots}/{GEMINI_MAX_MEDIA_SLOTS}</ValidationError> : null}
               {tooManyAudioIds ? <ValidationError>Слишком много Audio ID</ValidationError> : null}
               {tooManyCharacterIds ? <ValidationError>Слишком много Character ID</ValidationError> : null}

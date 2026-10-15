@@ -93,6 +93,18 @@ function decodeDraft(raw: unknown, kind: DraftKind, modern = false, uploads = fa
     videoStart: d.videoStart as number, videoEnd: d.videoEnd as number | null,
     audioIds: [...d.audioIds as string[]], characterIds: [...d.characterIds as string[]],
     seed: d.seed as number | null, grokMode: d.grokMode as string,
+    // Preserve the existing image/motion/other-video draft schema. Wan-only
+    // metadata must never silently leak into unrelated saved user drafts.
+    ...(kind === "video" && ["wan/3-0-video", "wan/3-0-video-prime"].includes(d.model as string) ? {
+    wanAudio: typeof d.wanAudio === "boolean" ? d.wanAudio : true,
+    wanNsfwChecker: typeof d.wanNsfwChecker === "boolean" ? d.wanNsfwChecker : true,
+    wanReferenceAudioUrls: Array.isArray(d.wanReferenceAudioUrls) ? d.wanReferenceAudioUrls.filter(safeMedia).slice(0, 5) : [],
+    wanReferenceVideoUrls: Array.isArray(d.wanReferenceVideoUrls) ? d.wanReferenceVideoUrls.filter(safeMedia).slice(0, 5) : [],
+    wanReferenceFileUrls: Array.isArray(d.wanReferenceFileUrls) ? d.wanReferenceFileUrls.filter(safeMedia).slice(0, 1) : [],
+    wanReferenceLinkUrls: Array.isArray(d.wanReferenceLinkUrls) ? d.wanReferenceLinkUrls.filter(safeMedia).slice(0, 1) : [],
+    wanFirstFrameUrl: typeof d.wanFirstFrameUrl === "string" && safeMedia(d.wanFirstFrameUrl) ? d.wanFirstFrameUrl : "",
+    wanLastFrameUrl: typeof d.wanLastFrameUrl === "string" && safeMedia(d.wanLastFrameUrl) ? d.wanLastFrameUrl : "",
+    } : {}),
   };
 }
 

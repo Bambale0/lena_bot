@@ -3,6 +3,7 @@ from __future__ import annotations
 SEEDANCE_20_PROMPT_MAX_CHARS = 20_000
 SEEDANCE_25_PROMPT_MAX_CHARS = 30_000
 KLING_3_PROMPT_MAX_CHARS = 2_500
+WAN_3_PROMPT_MAX_CHARS = 4_500
 TELEGRAM_TEXT_MESSAGE_MAX_CHARS = 4096
 
 _SEEDANCE_20_MODELS = frozenset({
@@ -26,6 +27,8 @@ def video_prompt_max_chars(model: str) -> int | None:
         return SEEDANCE_25_PROMPT_MAX_CHARS
     if key in _KLING_3_MODELS:
         return KLING_3_PROMPT_MAX_CHARS
+    if key in {"wan/3-0-video", "wan/3-0-video-prime"}:
+        return WAN_3_PROMPT_MAX_CHARS
     return None
 
 

@@ -69,3 +69,18 @@ test("nested destinations retain their five-section parent", () => {
   assert.equal(editorParent("settings"), "profile");
   assert.equal(editorParent("works"), null);
 });
+
+
+test("Wan video advanced settings round trip without changing old image drafts", () => {
+  const s = storage();
+  const wan = {
+    ...draft(), kind: "video" as const, model: "wan/3-0-video-prime",
+    mode: "video", videoUrl: "https://media.example.test/input.mp4",
+    referenceUrls: [], wanAudio: false, wanNsfwChecker: true,
+    wanReferenceAudioUrls: [], wanReferenceVideoUrls: [], wanReferenceFileUrls: [],
+    wanReferenceLinkUrls: [], wanFirstFrameUrl: "", wanLastFrameUrl: "",
+  };
+  assert.equal(saveUserDrafts(s, 7, { image: draft(), video: wan }), true);
+  assert.equal(readUserDrafts(s, 7).video?.wanAudio, false);
+  assert.deepEqual(readUserDrafts(s, 7).image, draft());
+});

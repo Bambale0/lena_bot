@@ -77,6 +77,13 @@ def _eligible_video_query():
             Generation.task_id.like("web:neironych:%"),
             Generation.task_id.like("neironych-submit:%"),
             Generation.task_id.like("web:neironych-submit:%"),
+            and_(
+                Generation.model.in_(("wan/3-0-video", "wan/3-0-video-prime")),
+                Generation.task_id.is_not(None),
+                Generation.task_id != "",
+                ~Generation.task_id.like("kie-submit:%"),
+                ~Generation.task_id.like("web:kie-submit:%"),
+            ),
         ),
         Generation.created_at <= cutoff,
     )
@@ -133,6 +140,11 @@ def _expired_seedance_query():
         or_(
             *(Generation.task_id.like(prefix + "%") for prefix in _NEIRONYCH_TASK_PREFIXES),
             and_(
+                Generation.model.in_(("wan/3-0-video", "wan/3-0-video-prime")),
+                Generation.task_id.is_not(None),
+                Generation.task_id != "",
+            ),
+            and_(
                 or_(Generation.task_id.is_(None), Generation.task_id == ""),
                 func.jsonb_typeof(func.jsonb_extract_path(
                     params_json, repo.SEEDANCE_SUBMISSION_KEY,
@@ -178,6 +190,20 @@ async def _final_neironych_provider_status(gen: Generation) -> tuple[str, str | 
         )
         return ("bound", str(provider_id)) if provider_id else ("unknown", None)
     if not neironych_seedance_runtime.is_task_id(task):
+        if gen.model in {"wan/3-0-video", "wan/3-0-video-prime"} and task:
+            # KIE fallback: the canonical GET is safe/read-only, unlike
+            # a paid createTask replay after a lost POST response.
+            from api.video_service import KieVideoTaskFailed, poll_kieai_status
+            try:
+                result = await asyncio.wait_for(
+                    poll_kieai_status(task),
+                    timeout=settings.SEEDANCE_FINAL_STATUS_TIMEOUT_SECONDS,
+                )
+            except KieVideoTaskFailed:
+                return "failed", None
+            except Exception:
+                return "unknown", None
+            return ("done", None) if result else ("pending", None)
         return "unknown", None
     client = neironych_seedance_runtime._client()
     try:
@@ -196,6 +222,7 @@ async def _final_neironych_provider_status(gen: Generation) -> tuple[str, str | 
 
 async def _settle_expired_seedance(
     gen_id: int, task_id: str, remote_state: str,
+    *, notify_telegram: bool | None = None,
 ) -> bool:
     now = datetime.now(timezone.utc)
     review: dict[str, object] | None = None
@@ -220,7 +247,10 @@ async def _settle_expired_seedance(
             return False
         # The Redis lease may be lost after the DB settlement has begun.
         protect_neironych_video_poll_settlement()
-        telegram = task_id.startswith(("neironych:", "neironych-submit:", "kie-submit:"))
+        telegram = (
+            notify_telegram if notify_telegram is not None
+            else task_id.startswith(("neironych:", "neironych-submit:", "kie-submit:"))
+        )
         changed, credits = await repo.fail_generation_and_refund(
             session, gen_id, "Видео не удалось создать вовремя.",
             expected_task_id=task_id,
@@ -265,7 +295,11 @@ async def _expire_stuck_seedance_video(gen_id: int) -> bool:
                 or gen.model not in PRODUCT_MODELS):
             return False
         task_id = str(gen.task_id or "")
-        if not task_id.startswith(_NEIRONYCH_TASK_PREFIXES):
+        wan_kie = (
+            gen.model in {"wan/3-0-video", "wan/3-0-video-prime"}
+            and bool(task_id)
+        )
+        if not task_id.startswith(_NEIRONYCH_TASK_PREFIXES) and not wan_kie:
             if task_id:
                 return False
             params = repo.parse_input_params(gen.input_params)
@@ -366,7 +400,14 @@ async def _expire_stuck_seedance_video(gen_id: int) -> bool:
                     )
             return False
         else:
-            return await _settle_expired_seedance(gen_id, task_id, remote_state)
+            wan_kie_notice = (
+                snapshot.model in {"wan/3-0-video", "wan/3-0-video-prime"}
+                and not task_id.startswith("web:")
+            )
+            return await _settle_expired_seedance(
+                gen_id, task_id, remote_state,
+                **({"notify_telegram": True} if wan_kie_notice else {}),
+            )
 
     # The active lane excludes overdue generations. Run delivery explicitly,
     # without submitting any additional paid provider request.
@@ -491,6 +532,11 @@ def _eligible_notice_query():
             Generation.task_id.like("kie-submit:%"),
             Generation.task_id.is_(None),
             Generation.task_id == "",
+            and_(
+                Generation.model.in_(("wan/3-0-video", "wan/3-0-video-prime")),
+                Generation.task_id.is_not(None),
+                Generation.task_id != "",
+            ),
         ),
         Generation.input_params.op("~")(_NOTICE_PENDING_REGEX),
     )
@@ -744,14 +790,21 @@ async def _process_active_video(gen_id: int) -> bool:
         if gen is None or gen.status not in (GenerationStatus.pending, GenerationStatus.processing):
             return False
         task_id = str(gen.task_id or "")
-        if not task_id.startswith(("neironych:", "web:neironych:", *repo.SEEDANCE_SUBMISSION_PREFIXES)):
+        is_wan_kie = (
+            gen.model in {"wan/3-0-video", "wan/3-0-video-prime"}
+            and bool(task_id)
+            and not task_id.startswith(("kie-submit:", "web:kie-submit:"))
+        )
+        if not is_wan_kie and not task_id.startswith(
+            ("neironych:", "web:neironych:", *repo.SEEDANCE_SUBMISSION_PREFIXES)
+        ):
             return False
         # Read-only ORM fields stay loaded with expire_on_commit=False. Drop
         # PostgreSQL transaction/connection before the slow provider GET or
         # potentially 250MB result download. Any terminal state re-check and
         # refund/finish acquires a fresh transaction with atomic row guards.
         await session.commit()
-        if task_id.startswith(("neironych:", "neironych-submit:")):
+        if task_id.startswith(("neironych:", "neironych-submit:")) or is_wan_kie:
             # If the app crashes after the terminal DB commit, this ID still
             # reaches the notice worker even when it is far behind the sweep.
             await _track_active_video_notice_intent(gen.id)
@@ -871,7 +924,8 @@ async def _active_ids_not_expired(ids: list[int]) -> list[int]:
         overdue = {
             gen.id for gen in live
             if gen.gen_type == GenerationType.video and gen.model in PRODUCT_MODELS
-            and str(gen.task_id or "").startswith(_NEIRONYCH_TASK_PREFIXES)
+            and (str(gen.task_id or "").startswith(_NEIRONYCH_TASK_PREFIXES)
+                 or gen.model in {"wan/3-0-video", "wan/3-0-video-prime"})
             and (datetime.now(timezone.utc) - _seedance_started_at(gen)).total_seconds()
             >= settings.SEEDANCE_AUTO_REFUND_SECONDS
         }

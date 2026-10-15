@@ -32,6 +32,9 @@ class SubmissionContext:
     client_request_id: str
     before_submit: Callable[[str, str], Awaitable[None]]
     started: bool = False
+    # Provider-independent KIE admission, committed BEFORE any paid POST.
+    before_kie_submit: Callable[[], Awaitable[None]] | None = None
+    kie_started: bool = False
 
 
 class NeironychVideoTaskFailed(RuntimeError):
@@ -54,6 +57,9 @@ class NeironychVideoReconciliationRequired(RuntimeError):
 PRODUCT_MODELS = {
     "bytedance/seedance-2": "seedance-2.0",
     "bytedance/seedance-2-5": "seedance-2.5",
+    # Catalog-gated model IDs: no paid POST is attempted with these empty defaults.
+    "wan/3-0-video": settings.WAN30_NEIRONYCH_MODEL_ID,
+    "wan/3-0-video-prime": settings.WAN30_PRIME_NEIRONYCH_MODEL_ID,
 }
 
 

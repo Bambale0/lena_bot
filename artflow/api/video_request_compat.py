@@ -50,7 +50,13 @@ def _sanitize_mode(kwargs: dict[str, Any], supported_modes: list[str]) -> None:
 
 def _sanitize_discrete_params(routes: Any, kwargs: dict[str, Any], caps: dict[str, Any]) -> None:
     durations = list(caps.get("duration_options") or [])
-    if durations and kwargs.get("duration") not in durations:
+    # Wan3 supports every integer 2..30. These are only UI quick presets;
+    # avoid converting a paid 17-second request into an unexpected 2-second
+    # video, and let the base route reject invalid values instead.
+    wan30 = str(kwargs.get("model_key") or "") in {
+        "wan/3-0-video", "wan/3-0-video-prime",
+    }
+    if not wan30 and durations and kwargs.get("duration") not in durations:
         kwargs["duration"] = _first_or_none(durations)
 
     if caps.get("has_resolution"):

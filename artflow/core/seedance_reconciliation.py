@@ -17,7 +17,11 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 RECONCILIATION_KEY = "neironych_video_reconciliation"
 PUBLIC_REVIEW_STATUS = "reconciliation_required"
-PRODUCT_MODELS = frozenset({"bytedance/seedance-2", "bytedance/seedance-2-5"})
+# Shared durable video admission/callback identities for Seedance and Wan3.
+PRODUCT_MODELS = frozenset({
+    "bytedance/seedance-2", "bytedance/seedance-2-5",
+    "wan/3-0-video", "wan/3-0-video-prime",
+})
 
 
 def public_generation_status(gen: Any) -> str:
@@ -121,7 +125,26 @@ def make_submission_context(session, gen_id: int, product_model: str, *, surface
             raise NeironychSubmissionUnknown(request_id, idempotency_key)
         context.started = True
 
-    context = SubmissionContext(client_request_id=request_id, before_submit=before_submit)
+    async def before_kie_submit() -> None:
+        # The KIE fallback follows a confirmed Neironych admission rejection,
+        # or KIE is primary. Both paths require an atomic source-independent
+        # submission identity on disk BEFORE POST.
+        from api.neironych_seedance import NeironychPreSubmitFailure
+
+        if context.kie_started:
+            raise NeironychPreSubmitFailure(request_id, f"apix-video-{gen_id}")
+        try:
+            admitted = await repo.begin_kie_video_submission(session, gen_id, request_id)
+        except Exception as exc:
+            raise NeironychPreSubmitFailure(request_id, f"apix-video-{gen_id}") from exc
+        if not admitted:
+            raise NeironychPreSubmitFailure(request_id, f"apix-video-{gen_id}")
+        context.kie_started = True
+
+    context = SubmissionContext(
+        client_request_id=request_id, before_submit=before_submit,
+        before_kie_submit=before_kie_submit,
+    )
     return context
 
 
@@ -143,10 +166,24 @@ async def handle_submission_unknown(session, gen_id: int, context) -> bool:
     return changed
 
 
+def has_paid_submission_journal(context) -> bool:
+    """Both approved Neironych and KIE Wan attempts require CAS task binding."""
+    return bool(
+        context is not None
+        and (getattr(context, "started", False) or getattr(context, "kie_started", False))
+    )
+
+
 async def persist_submission_result(session, gen_id: int, context, task_id: str, *, surface: str = "miniapp") -> bool:
     from db import repository as repo
     from db.models import GenerationStatus
 
+    if context is not None and context.kie_started:
+        # This binder applies the authenticated surface prefix itself.
+        # Passing "web:<id>" here would create "web:web:<id>", preventing
+        # provider GET and the signed callback from finding accepted work.
+        raw_kie_id = task_id.removeprefix("web:")
+        return await repo.bind_kie_video_callback(session, gen_id, raw_kie_id) is not None
     if surface == "web" and not task_id.startswith("web:"):
         task_id = "web:" + task_id
     if context is not None and context.started:

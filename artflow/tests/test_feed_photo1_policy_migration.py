@@ -33,7 +33,8 @@ def test_photo1_policy_migration_is_current_and_valid():
     config = Config()
     config.set_main_option("script_location", str(ROOT / "db/migrations"))
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["042_qwen_routing"]
+    assert scripts.get_heads() == ["043_wan30_pricing"]
+    assert scripts.get_revision("043_wan30_pricing").down_revision == "042_qwen_routing"
     assert scripts.get_revision("042_qwen_routing").down_revision == "041_feed_photo1_identity_default"
     assert scripts.get_revision("041_feed_photo1_identity_default").down_revision == "040_feed_recipe_identity_policy"
     instruction = _migration().DEFAULT_INSTRUCTION

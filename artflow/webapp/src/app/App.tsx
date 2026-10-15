@@ -97,6 +97,14 @@ function emptyDraft(kind: GenerationDraft["kind"]): GenerationDraft {
     characterIds: [],
     seed: null,
     grokMode: "normal",
+    wanAudio: true,
+    wanNsfwChecker: true,
+    wanReferenceAudioUrls: [],
+    wanReferenceVideoUrls: [],
+    wanReferenceFileUrls: [],
+    wanReferenceLinkUrls: [],
+    wanFirstFrameUrl: "",
+    wanLastFrameUrl: "",
   };
 }
 
@@ -164,6 +172,16 @@ function App() {
   const [retrying, setRetrying] = useState(false);
   const [botUsername, setBotUsername] = useState("");
   const [api, setApi] = useState<MiniAppApi | null>(null);
+  const quoteWan = useCallback((payload: Record<string, unknown>) => {
+    if (!api) return Promise.reject(new Error("Сервис временно недоступен"));
+    return api.quoteVideo(payload).then(value => ({
+      credits: value.cost_credits,
+      rate: value.rate_credits_per_second ?? 0,
+      billable_seconds: value.billable_seconds,
+      input_video_seconds: value.reference_seconds,
+      max_output_seconds: Math.max(0, 30 - value.reference_seconds),
+    }));
+  }, [api]);
   const [data, setData] = useState<BootstrapData | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>("feed");
   const [ux2, setUx2] = useState(false);
@@ -661,6 +679,14 @@ function App() {
         video_url: draft.videoUrl || null, video_start: draft.videoStart, video_end: draft.videoEnd,
         audio_ids: draft.audioIds, character_ids: draft.characterIds, seed: draft.seed,
         grok_mode: draft.grokMode || "normal",
+        wan_audio: draft.wanAudio !== false,
+        wan_nsfw_checker: draft.wanNsfwChecker !== false,
+        wan_reference_video_urls: draft.wanReferenceVideoUrls || [],
+        wan_reference_audio_urls: draft.wanReferenceAudioUrls || [],
+        wan_reference_file_urls: draft.wanReferenceFileUrls || [],
+        wan_reference_link_urls: draft.wanReferenceLinkUrls || [],
+        wan_first_frame_url: draft.wanFirstFrameUrl || null,
+        wan_last_frame_url: draft.wanLastFrameUrl || null,
       };
       // Model-specific upload panels hold files outside GenerationDraft. Quote
       // every video launch so their enhancers can attach those files first.
@@ -1051,7 +1077,7 @@ function App() {
       return <GenerationScreen checkReference={ux2 ? checkReference : undefined} ux2={ux2} kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "image" || photoUploading(imageDraft)} photoUploads={ux2 && imageDraft.promptId === null ? photoQueue.controls("image") : undefined} videoUploading={videoUploadingKind === "image"} onChange={(patch) => setImageDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("image", files)} onUploadVideoFile={(file) => void uploadVideoFile("image", file)} onSubmit={() => void submitGeneration("image")} onResetPreset={() => resetPreset("image")} />;
     }
     if (activeTab === "video") {
-      return <GenerationScreen checkReference={ux2 ? checkReference : undefined} ux2={ux2} kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video" || photoUploading(videoDraft)} photoUploads={ux2 && videoDraft.promptId === null ? photoQueue.controls("video") : undefined} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onSubmit={() => void submitGeneration("video")} onResetPreset={() => resetPreset("video")} />;
+      return <GenerationScreen checkReference={ux2 ? checkReference : undefined} ux2={ux2} kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video" || photoUploading(videoDraft)} photoUploads={ux2 && videoDraft.promptId === null ? photoQueue.controls("video") : undefined} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onQuoteWan={quoteWan} onSubmit={() => void submitGeneration("video")} onResetPreset={() => resetPreset("video")} />;
     }
     if (activeTab === "motion") {
       return <GenerationScreen checkReference={ux2 ? checkReference : undefined} ux2={ux2} kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "motion" || photoUploading(motionDraft)} photoUploads={ux2 && motionDraft.promptId === null ? photoQueue.controls("motion") : undefined} videoUploading={videoUploadingKind === "motion"} onChange={(patch) => setMotionDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("motion", files)} onUploadVideoFile={(file) => void uploadVideoFile("motion", file)} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => resetPreset("motion")} />;

@@ -285,6 +285,15 @@ export interface GenerationDraft {
   characterIds: string[];
   seed: number | null;
   grokMode: string;
+  /** Wan3 options. Ordinary users only need model, prompt, and refs. */
+  wanAudio?: boolean;
+  wanNsfwChecker?: boolean;
+  wanReferenceAudioUrls?: string[];
+  wanReferenceVideoUrls?: string[];
+  wanReferenceFileUrls?: string[];
+  wanReferenceLinkUrls?: string[];
+  wanFirstFrameUrl?: string;
+  wanLastFrameUrl?: string;
 }
 
 export interface StartTarget {

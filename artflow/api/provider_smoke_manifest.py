@@ -51,6 +51,8 @@ def _base_case(contract_id: str) -> dict[str, Any]:
         "video.klingv3.turbo.i2v": {"prompt": "Animate the scene", "image_urls": [IMAGE_URL], "duration": 5, "resolution": "720p"},
         "video.wan27.t2v": {"prompt": "A calm ocean at dawn", "duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
         "video.wan27.i2v": {"prompt": "Animate the ocean", "first_frame_url": IMAGE_URL, "duration": 5, "resolution": "720p"},
+        "video.wan30": {"prompt": "A small sailboat on a calm lake", "duration": 5, "resolution": "720p", "aspect_ratio": "adaptive"},
+        "video.wan30.prime": {"prompt": "A small sailboat on a calm lake", "duration": 5, "resolution": "720p", "aspect_ratio": "adaptive"},
         "video.seedance2": {"prompt": "A dancer in a clean studio", "duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
         "video.seedance2.fast": {"prompt": "A dancer in a clean studio", "duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
         "video.seedance2.mini": {"prompt": "A dancer in a clean studio", "duration": 5, "resolution": "720p", "aspect_ratio": "16:9"},
