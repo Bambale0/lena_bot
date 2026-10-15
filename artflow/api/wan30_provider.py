@@ -53,6 +53,12 @@ async def submit_wan30_provider(
             )
 
         async def send_kie(payload: dict) -> str:
+            if submission_context is not None:
+                if not callable(submission_context.before_kie_submit):
+                    raise RuntimeError("Wan KIE paid POST requires a durable submission journal")
+                # Whether KIE is primary or definite-rejection fallback, a
+                # process crash after accepted POST must still be recoverable.
+                await submission_context.before_kie_submit()
             response = await kieai_client.create_task(payload, callback_url=callback_url)
             fields = response.get("data") if isinstance(response, dict) else None
             task_id = fields.get("taskId") if isinstance(fields, dict) else None

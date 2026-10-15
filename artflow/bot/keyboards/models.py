@@ -1058,6 +1058,9 @@ def video_params_kb(
     next_label: str = "▶️ Далее: Промпт",
     identity_transfer: bool = False,
     wan_audio: bool = True,
+    wan_nsfw_checker: bool = True,
+    wan_advanced_open: bool = False,
+    wan_seed: int | None = None,
 ) -> InlineKeyboardMarkup:
     caps = VIDEO_CAPS.get(model_key, {})
     builder = InlineKeyboardBuilder()
@@ -1127,6 +1130,29 @@ def video_params_kb(
             text="🔊 Со звуком ✅" if wan_audio else "🔇 Без звука ✅",
             callback_data="vpar_wan_audio",
         ))
+        builder.row(InlineKeyboardButton(
+            text="▴ Скрыть дополнительные настройки" if wan_advanced_open else "⚙️ Дополнительно",
+            callback_data="vpar_wan_advanced",
+        ))
+        if wan_advanced_open:
+            builder.row(
+                InlineKeyboardButton(text=f"🌱 Seed: {wan_seed if wan_seed is not None else 'авто'}",
+                                     callback_data="vpar_wan_input:seed"),
+                InlineKeyboardButton(
+                    text="🛡️ Проверка контента ✅" if wan_nsfw_checker else "🛡️ Проверка контента ❌",
+                    callback_data="vpar_wan_nsfw",
+                ),
+            )
+            for choices in (
+                (("🖼 Фото", "photo"), ("📍 Первый кадр", "first")),
+                (("🏁 Последний кадр", "last"), ("🎞 Видео", "video")),
+                (("🎙 Аудио", "audio"), ("🗂 Файл", "file")),
+                (("🔗 Ссылка", "link"),),
+            ):
+                builder.row(*(
+                    InlineKeyboardButton(text=label, callback_data=f"vpar_wan_input:{target}")
+                    for label, target in choices
+                ))
 
     builder.row(InlineKeyboardButton(text=next_label, callback_data="vpar_next"))
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="vpar_back"))

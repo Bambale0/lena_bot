@@ -1324,6 +1324,68 @@ async def register_kie_video_callback(
     return True
 
 
+async def begin_kie_video_submission(
+    session: AsyncSession, gen_id: int, client_request_id: str,
+) -> bool:
+    """Atomic single-use KIE purchase admission, even after primary rejection.
+
+    The callback correlation is committed first. A fallback may replace only a
+    Neironych journal whose exact attempt is still at the submitting marker;
+    an ambiguous/accepted provider state must NEVER launch KIE.
+    """
+    from core.seedance_reconciliation import PRODUCT_MODELS
+
+    gen = await _locked_seedance_generation(session, gen_id)
+    if (
+        gen is None or gen.status not in (GenerationStatus.pending, GenerationStatus.processing)
+        or gen.gen_type != GenerationType.video or gen.model not in PRODUCT_MODELS
+    ):
+        await session.commit()
+        return False
+    params = parse_input_params(gen.input_params)
+    callback = params.get(KIE_VIDEO_CALLBACK_KEY)
+    if (
+        not isinstance(callback, dict)
+        or callback.get("generation_id") != gen_id
+        or params.get(KIE_VIDEO_SUBMISSION_KEY)
+    ):
+        await session.commit()
+        return False
+
+    current_id = str(gen.task_id or "")
+    neironych = params.get(SEEDANCE_SUBMISSION_KEY)
+    if current_id:
+        if (
+            current_id not in (
+                f"neironych-submit:{client_request_id}",
+                f"web:neironych-submit:{client_request_id}",
+            )
+            or not isinstance(neironych, dict)
+            or neironych.get("client_request_id") != client_request_id
+            or neironych.get("product_model") != gen.model
+            or neironych.get("state") != "submitting"
+        ):
+            await session.commit()
+            return False
+        neironych["state"] = "definite_rejected_fallback_kie"
+    elif neironych:
+        await session.commit()
+        return False
+
+    params[KIE_VIDEO_SUBMISSION_KEY] = {
+        "state": "submitting",
+        "correlation_id": gen_id,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "origin": "neironych_definite_rejection" if current_id else "kie_primary",
+    }
+    gen.task_id = ("web:" if callback.get("surface") == "web" else "") + f"kie-submit:{gen_id}"
+    gen.status = GenerationStatus.processing
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    await _publish_generation_update(gen)
+    return True
+
+
 async def mark_kie_video_submission_unknown(
     session: AsyncSession, gen_id: int,
 ) -> bool:

@@ -32,6 +32,9 @@ class SubmissionContext:
     client_request_id: str
     before_submit: Callable[[str, str], Awaitable[None]]
     started: bool = False
+    # Provider-independent KIE admission, committed BEFORE any paid POST.
+    before_kie_submit: Callable[[], Awaitable[None]] | None = None
+    kie_started: bool = False
 
 
 class NeironychVideoTaskFailed(RuntimeError):

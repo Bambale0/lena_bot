@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from api.media_gateway import MediaKind, probe_local_media
@@ -70,8 +70,16 @@ async def create_wan30_request(
     links = _clean_urls(opts.get("reference_link_urls"))
     if video_url:
         videos = (str(video_url).strip(),) + videos
+    # Photo editors can echo the main input in the advanced reference list.
+    # Count/probe each actual video/audio once, in original user order.
+    videos = tuple(dict.fromkeys(videos))
+    audios = tuple(dict.fromkeys(audios))
     explicit_first = str(opts.get("first_frame_url") or "").strip() or None
     explicit_last = str(opts.get("last_frame_url") or "").strip() or None
+    if explicit_first:
+        # A resumed Telegram UI can echo explicit frames in its generic
+        # photo preview. Do not re-add them as conflicting references.
+        photos = tuple(u for u in photos if u not in {explicit_first, explicit_last})
 
     first = explicit_first
     last = explicit_last
@@ -88,7 +96,7 @@ async def create_wan30_request(
     if mode == "video" and not videos:
         raise ValueError("Загрузи исходное видео для редактирования.")
 
-    all_images = photos + extra_photos
+    all_images = tuple(dict.fromkeys(photos + extra_photos))
     video_lengths = tuple(
         [await _duration_for_owned_media(url, MediaKind.VIDEO) for url in videos]
     )
@@ -131,7 +139,14 @@ class Wan30Quote:
     resolution: str
 
     def stored_params(self) -> dict[str, Any]:
+        normalized = asdict(self.request)
+        for field, value in normalized.items():
+            if isinstance(value, tuple):
+                normalized[field] = list(value)
         return {
+            # Preserve the original validated, independently measured inputs.
+            # A later repeat must NEVER infer media or payment from supplier GET.
+            "wan30_request": normalized,
             "wan30_billing": {
                 "reserved_billable_seconds": self.billable_seconds,
                 "input_video_seconds": sum(self.request.reference_video_durations),

@@ -269,3 +269,31 @@ async def test_provider_webhook_canonicalizes_nexus_task_before_existing_deliver
     assert get_generation_by_task_id.await_args.args == (_FAKE_SESSION, "nexus:nexus_task_1")
     finish_generation.assert_awaited_once()
     assert finish_generation.await_args.args[1:] == (88, "https://cdn.test/nexus-result.png")
+
+
+@pytest.mark.asyncio
+async def test_wan_kie_success_without_media_keeps_paid_task_recoverable(monkeypatch) -> None:
+    """A successful paid job with an incomplete webhook stays pending for GET recovery."""
+    gen = SimpleNamespace(
+        id=4242, user_id=42, status=main.GenerationStatus.processing,
+        gen_type=main.GenerationType.video, task_id="kie_wan_missing_media",
+        image_session_id=None, model="wan/3-0-video",
+        prompt="A sailing yacht", credits_spent=60,
+        source_feed_gen_id=None, action_type=None,
+    )
+    refund = AsyncMock(return_value=(True, 60))
+    monkeypatch.setattr(main.settings, "KIE_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.repo, "get_generation_by_task_id", AsyncMock(return_value=gen))
+    monkeypatch.setattr(main.repo, "get_user_by_id", AsyncMock(
+        return_value=SimpleNamespace(id=42, tg_id=555111),
+    ))
+    monkeypatch.setattr(main.repo, "fail_generation_and_refund", refund)
+    monkeypatch.setattr(main, "bot", None)
+    async with AsyncClient(transport=ASGITransport(app=main.app), base_url="http://test") as client:
+        result = await client.post(
+            "/webhook/kie?secret=test-webhook-secret",
+            json={"code": 200, "data": {"taskId": gen.task_id, "state": "success"}},
+        )
+    assert result.status_code == 503
+    refund.assert_not_awaited()

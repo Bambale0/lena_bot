@@ -45,7 +45,12 @@ from api.genjutsu_adapter import (
 )
 from api.kieai_client import KieSubmissionOutcomeUnknown
 from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
-from api.public_files import mirror_telegram_file
+from api.public_files import (
+    get_static_upload_directory,
+    mirror_telegram_file,
+    public_upload_url,
+    save_public_file,
+)
 from api.seedance25_adapter import (
     CONTROL_PREFIX as SEEDANCE25_CONTROL_PREFIX,
 )
@@ -109,6 +114,7 @@ from core.kie_seedance_callback import callback_url_for_generation
 from core.seedance_reconciliation import (
     handle_submission_not_sent,
     handle_submission_unknown,
+    has_paid_submission_journal,
     make_submission_context,
     persist_submission_result,
 )
@@ -454,7 +460,51 @@ def _video_params_reply_markup(model_key: str, data: dict):
         next_label=_video_params_next_label(data),
         identity_transfer=bool(data.get("seedance_identity_transfer")),
         wan_audio=data.get("wan_audio", True),
+        wan_nsfw_checker=data.get("wan_nsfw_checker", True),
+        wan_advanced_open=bool(data.get("wan_advanced_open")),
+        wan_seed=data.get("seed"),
     )
+
+
+# Advanced Wan controls are hidden in the normal wizard, but editable for
+# power users without dropping or inventing any supplier parameters.
+_WAN_ADVANCED_FIELDS = {
+    "photo": ("wan_reference_image_urls", 10),
+    "video": ("wan_reference_video_urls", 5),
+    "audio": ("wan_reference_audio_urls", 5),
+    "file": ("wan_reference_file_urls", 1),
+    "link": ("wan_reference_link_urls", 1),
+    "first": ("wan_first_frame_url", 1),
+    "last": ("wan_last_frame_url", 1),
+}
+
+
+def _wan_advanced_updates(target: str, raw: str, data: dict) -> dict:
+    from api.wan30_contract import _https_url
+
+    value = str(raw or "").strip()
+    if target == "seed":
+        if value == "-":
+            return {"seed": None}
+        if not value.isascii() or not value.isdecimal() or not 0 <= int(value) <= 2_147_483_647:
+            raise ValueError("Seed: введи целое число от 0 до 2147483647 или - для сброса.")
+        return {"seed": int(value)}
+    field = _WAN_ADVANCED_FIELDS.get(target)
+    if field is None:
+        raise ValueError("Неизвестный параметр Wan.")
+    if target in {"first", "last"} and data.get("mode") != "image":
+        raise ValueError("Первый и последний кадры выбираются в режиме «Фото».")
+    key, count = field
+    if value == "-":
+        return {key: "" if target in {"first", "last"} else []}
+    urls = list(dict.fromkeys(item.strip() for item in value.splitlines() if item.strip()))
+    if not urls or len(urls) > count:
+        raise ValueError(f"Можно указать от 1 до {count} HTTPS-ссылок (по одной в строке).")
+    for url in urls:
+        if len(url) > 2048:
+            raise ValueError("Слишком длинная ссылка на референс.")
+        _https_url(url)
+    return {key: urls[0] if target in {"first", "last"} else urls}
 
 
 def _normalize_resolution_for_state(model_key: str, resolution: str | None) -> str | None:
@@ -878,6 +928,30 @@ async def _video_repeat_params_from_task(task_id: str | None) -> dict:
 
 async def _video_repeat_params_for_generation(session: AsyncSession, prev) -> dict:
     stored = _as_dict(getattr(prev, "input_params", None))
+    # Wan repeats MUST replay the customer-approved full request stored at
+    # checkout, not stale/incomplete KIE GET payload or billing metadata.
+    from api.wan30_contract import WAN30_MODELS
+
+    wan = stored.get("wan30_request")
+    if str(getattr(prev, "model", "")) in WAN30_MODELS and isinstance(wan, dict) and wan.get("model") == prev.model:
+        images = _url_list(wan.get("reference_image_urls"))
+        videos = _url_list(wan.get("reference_video_urls"))
+        return {
+            **stored, "duration": wan.get("duration"),
+            "resolution": wan.get("resolution"),
+            "aspect_ratio": wan.get("aspect_ratio"),
+            "image_url": images or wan.get("first_frame_url"),
+            "reference_video_url": videos[0] if videos else None,
+            "wan_reference_video_urls": videos[1:],
+            "wan_reference_audio_urls": _url_list(wan.get("reference_audio_urls")),
+            "wan_reference_file_urls": _url_list(wan.get("reference_file_urls")),
+            "wan_reference_link_urls": _url_list(wan.get("reference_link_urls")),
+            "wan_first_frame_url": wan.get("first_frame_url") or "",
+            "wan_last_frame_url": wan.get("last_frame_url") or "",
+            "wan_audio": wan.get("audio", True),
+            "wan_nsfw_checker": wan.get("nsfw_checker", True),
+            "seed": wan.get("seed"),
+        }
     provider = await _video_repeat_params_from_task(getattr(prev, "task_id", None))
     repeat_params = _merge_repeat_params(provider, stored)
 
@@ -932,7 +1006,7 @@ def _video_state_from_repeat_params(model_key: str, repeat_params: dict) -> dict
     except ValueError:
         seed = None
 
-    return {
+    state_data = {
         "model_key": model_key,
         "mode": "video" if reference_video_url else ("image" if image_url else "text"),
         "duration": duration,
@@ -951,6 +1025,20 @@ def _video_state_from_repeat_params(model_key: str, repeat_params: dict) -> dict
         "ref_file_ids": [],
         "motion_step": None,
     }
+    from api.wan30_contract import WAN30_MODELS
+
+    if model_key in WAN30_MODELS:
+        state_data.update({
+            "wan_reference_video_urls": repeat_params.get("wan_reference_video_urls") or [],
+            "wan_reference_audio_urls": repeat_params.get("wan_reference_audio_urls") or [],
+            "wan_reference_file_urls": repeat_params.get("wan_reference_file_urls") or [],
+            "wan_reference_link_urls": repeat_params.get("wan_reference_link_urls") or [],
+            "wan_first_frame_url": repeat_params.get("wan_first_frame_url") or "",
+            "wan_last_frame_url": repeat_params.get("wan_last_frame_url") or "",
+            "wan_audio": repeat_params.get("wan_audio", True),
+            "wan_nsfw_checker": repeat_params.get("wan_nsfw_checker", True),
+        })
+    return state_data
 
 
 def _video_state_has_required_input(data: dict) -> bool:
@@ -1961,6 +2049,199 @@ async def cb_vpar_wan_audio(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer("Со звуком" if audio else "Без звука")
 
 
+@router.callback_query(VideoGenFSM.params_select, F.data == "vpar_wan_advanced")
+async def cb_wan_advanced_menu(call: CallbackQuery, state: FSMContext) -> None:
+    if not await _accept_video_parameter(call, state):
+        return
+    data = await state.get_data()
+    await state.update_data(wan_advanced_open=not bool(data.get("wan_advanced_open")))
+    updated = await state.get_data()
+    await call.message.edit_reply_markup(
+        reply_markup=_video_params_reply_markup(updated["model_key"], updated),
+    )
+    await call.answer()
+
+
+@router.callback_query(VideoGenFSM.params_select, F.data == "vpar_wan_nsfw")
+async def cb_wan_advanced_safety(call: CallbackQuery, state: FSMContext) -> None:
+    if not await _accept_video_parameter(call, state):
+        return
+    data = await state.get_data()
+    await state.update_data(wan_nsfw_checker=not data.get("wan_nsfw_checker", True))
+    updated = await state.get_data()
+    await call.message.edit_reply_markup(
+        reply_markup=_video_params_reply_markup(updated["model_key"], updated),
+    )
+    await call.answer()
+
+
+@router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_wan_input:"))
+async def cb_wan_advanced_input(call: CallbackQuery, state: FSMContext) -> None:
+    if not await _accept_video_parameter(call, state):
+        return
+    data = await state.get_data()
+    target = str(call.data or "").removeprefix("vpar_wan_input:")
+    if (
+        data.get("model_key") not in {"wan/3-0-video", "wan/3-0-video-prime"}
+        or target not in {*_WAN_ADVANCED_FIELDS, "seed"}
+    ):
+        await call.answer("Недоступный параметр Wan", show_alert=True)
+        return
+    if target in {"first", "last"} and data.get("mode") != "image":
+        await call.answer("Первый/последний кадр доступен в режиме Фото.", show_alert=True)
+        return
+    await state.update_data(wan_input_target=target)
+    await state.set_state(VideoGenFSM.omni_ids_input)
+    descriptions = {
+        "seed": "Отправь seed — целое число от 0 до 2147483647.",
+        "photo": "Отправь фото или HTTPS-ссылки по одной в строке (до 10).",
+        "first": "Отправь фото первого кадра или его HTTPS-ссылку.",
+        "last": "Отправь фото последнего кадра или его HTTPS-ссылку.",
+        "video": "Пришли видео или HTTPS-ссылки на загруженные в APIX ролики (до 5).",
+        "audio": "Пришли аудиофайл или HTTPS-ссылки на загруженные в APIX аудио (до 5).",
+        "file": "Пришли документ или HTTPS-ссылку на файл.",
+        "link": "Пришли HTTPS-ссылку на референс.",
+    }
+    await call.message.answer(
+        f"⚙️ <b>Wan · {target}</b>\n{descriptions[target]}\n\n"
+        "Отправь <code>-</code>, чтобы очистить поле."
+    )
+    await call.answer()
+
+
+@router.message(
+    VideoGenFSM.omni_ids_input,
+    F.photo | F.video | F.audio | F.document,
+)
+async def handle_wan_advanced_media_upload(
+    message: Message, state: FSMContext, bot: Bot,
+) -> None:
+    """Add optional uploaded Wan media without leaving the simple wizard."""
+    from api import wan30_launch
+    from api.media_gateway import MediaKind
+
+    data = await state.get_data()
+    target = str(data.get("wan_input_target") or "")
+    model_key = str(data.get("model_key") or "")
+    if model_key not in {"wan/3-0-video", "wan/3-0-video-prime"} or not target:
+        return
+
+    file_id = None
+    size = 0
+    photo_refs = getattr(message, "photo", None)
+    video_attachment = getattr(message, "video", None)
+    audio_attachment = getattr(message, "audio", None)
+    document_attachment = getattr(message, "document", None)
+    if photo_refs and target in {"photo", "first", "last"}:
+        photo = max(photo_refs, key=lambda x: x.file_size or 0)
+        file_id, size = photo.file_id, photo.file_size or 0
+        mime = "image/jpeg"
+    elif video_attachment and target == "video":
+        file_id, size = video_attachment.file_id, video_attachment.file_size or 0
+        mime = "video/mp4"
+    elif audio_attachment and target == "audio":
+        file_id, size = audio_attachment.file_id, audio_attachment.file_size or 0
+        mime = str(audio_attachment.mime_type or "audio/mpeg").lower()
+    elif document_attachment and target in {"file", "audio", "video"}:
+        doc = document_attachment
+        file_id, size = doc.file_id, doc.file_size or 0
+        mime = str(doc.mime_type or "").lower()
+    else:
+        await message.answer("❌ Отправь файл подходящего типа или HTTPS-ссылку.")
+        return
+
+    if size > 20 * 1024 * 1024:
+        await message.answer("❌ Файл слишком большой для Telegram-бота (до 20 МБ).")
+        return
+    allowed_audio = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav",
+                     "audio/mp4", "audio/aac", "audio/ogg", "audio/flac"}
+    allowed_video = {"video/mp4", "video/quicktime", "video/webm"}
+    allowed_file = {"application/pdf", "application/zip", "text/plain",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+    if ((target == "audio" and mime not in allowed_audio)
+            or (target == "video" and mime not in allowed_video)
+            or (target == "file" and mime not in allowed_file)):
+        await message.answer("❌ Тип файла не поддерживается. Выбери другой файл.")
+        return
+
+    try:
+        if target in {"photo", "first", "last"}:
+            url = await mirror_telegram_file(bot, file_id, is_video=False)
+        elif target == "video" and video_attachment:
+            url = await mirror_telegram_file(bot, file_id, is_video=True)
+        else:
+            if size <= 0:
+                raise ValueError("Telegram не сообщил размер файла")
+            remote = await bot.get_file(file_id)
+            downloaded = await bot.download_file(remote.file_path)
+            payload = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
+            if not payload or len(payload) > 20 * 1024 * 1024:
+                raise ValueError("Размер или содержимое файла некорректны")
+            if target == "audio":
+                url = save_public_file(payload, content_type=mime)
+            elif target == "video":
+                url = save_public_file(payload, content_type=mime)
+            else:
+                import hashlib
+                ext = {
+                    "application/pdf": ".pdf",
+                    "application/zip": ".zip",
+                    "text/plain": ".txt",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+                }[mime]
+                folder = get_static_upload_directory() / "wan-inputs"
+                folder.mkdir(parents=True, exist_ok=True)
+                name = hashlib.sha256(payload).hexdigest()[:32] + ext
+                await asyncio.to_thread((folder / name).write_bytes, payload)
+                url = public_upload_url("wan-inputs/" + name)
+        if target == "video":
+            await wan30_launch._duration_for_owned_media(url, MediaKind.VIDEO)
+        elif target == "audio":
+            await wan30_launch._duration_for_owned_media(url, MediaKind.AUDIO)
+        if target in {"first", "last"}:
+            update = {
+                "wan_first_frame_url" if target == "first" else "wan_last_frame_url": url
+            }
+        else:
+            field, limit = _WAN_ADVANCED_FIELDS[target]
+            existing = data.get(field) or []
+            refs = list(dict.fromkeys([*existing, url]))
+            if len(refs) > limit:
+                raise ValueError(f"Можно добавить не более {limit} файлов.")
+            update = {field: refs}
+    except (ValueError, OSError, RuntimeError) as exc:
+        await message.answer(f"❌ {escape(str(exc))}")
+        return
+    except Exception as exc:
+        logger.warning("Wan reference upload failed: %s", type(exc).__name__)
+        await message.answer("❌ Не удалось сохранить файл. Попробуй ещё раз.")
+        return
+
+    await state.update_data(**update, wan_input_target=None, wan_advanced_open=True)
+    await state.set_state(VideoGenFSM.params_select)
+    updated = await state.get_data()
+    await message.answer(
+        "✅ Референс добавлен. Итоговая цена будет проверена перед запуском.",
+        reply_markup=_video_params_reply_markup(model_key, updated),
+    )
+
+
+@router.callback_query(VideoGenFSM.omni_ids_input, F.data == "vpar_wan_cancel")
+async def cb_wan_advanced_cancel(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    if data.get("model_key") not in {"wan/3-0-video", "wan/3-0-video-prime"}:
+        await call.answer("Недоступно", show_alert=True)
+        return
+    await state.update_data(wan_input_target=None)
+    await state.set_state(VideoGenFSM.params_select)
+    updated = await state.get_data()
+    await call.message.answer(
+        "⚙️ Параметры Wan",
+        reply_markup=_video_params_reply_markup(updated["model_key"], updated),
+    )
+    await call.answer()
+
+
 @router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_omni:"))
 async def cb_vpar_omni_extra(call: CallbackQuery, state: FSMContext) -> None:
     target = call.data.split(":")[1]  # type: ignore[union-attr]
@@ -1998,6 +2279,25 @@ async def cb_vpar_omni_extra(call: CallbackQuery, state: FSMContext) -> None:
 @router.message(VideoGenFSM.omni_ids_input, F.text)
 async def handle_omni_ids_input(message: Message, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
+    if (
+        data.get("model_key") in {"wan/3-0-video", "wan/3-0-video-prime"}
+        and data.get("wan_input_target")
+    ):
+        target = str(data["wan_input_target"])
+        try:
+            updates = _wan_advanced_updates(target, message.text or "", data)
+        except ValueError as exc:
+            await message.answer(f"❌ {escape(str(exc))}")
+            return
+        await state.update_data(**updates, wan_input_target=None, wan_advanced_open=True)
+        await state.set_state(VideoGenFSM.params_select)
+        updated = await state.get_data()
+        await message.answer(
+            f"✅ {escape('Seed' if target == 'seed' else 'Референс')} сохранён. "
+            "Стоимость будет рассчитана при запуске.",
+            reply_markup=_video_params_reply_markup(updated["model_key"], updated),
+        )
+        return
     target = data.get("omni_input_target")
     raw = (message.text or "").strip()  # type: ignore[union-attr]
     try:
@@ -2401,7 +2701,18 @@ async def _launch_video_generation_from_state(
                 duration=duration,
                 resolution=resolution or "720p",
                 aspect_ratio=aspect_ratio,
-                options={"audio": data.get("wan_audio", True), "seed": data.get("seed")},
+                options={
+                    "audio": data.get("wan_audio", True),
+                    "seed": data.get("seed"),
+                    "nsfw_checker": data.get("wan_nsfw_checker", True),
+                    "reference_image_urls": data.get("wan_reference_image_urls") or [],
+                    "reference_video_urls": data.get("wan_reference_video_urls") or [],
+                    "reference_audio_urls": data.get("wan_reference_audio_urls") or [],
+                    "reference_file_urls": data.get("wan_reference_file_urls") or [],
+                    "reference_link_urls": data.get("wan_reference_link_urls") or [],
+                    "first_frame_url": data.get("wan_first_frame_url") or None,
+                    "last_frame_url": data.get("wan_last_frame_url") or None,
+                },
             )
             wan_quote = await get_wan30_quote(session, wan_request)
         except ValueError as exc:
@@ -2653,7 +2964,7 @@ async def _launch_video_generation_from_state(
         await state.clear()
         return False
 
-    if submission_context and submission_context.started:
+    if has_paid_submission_journal(submission_context):
         try:
             saved = await persist_submission_result(
                 session, gen_id, submission_context, result.task_id or "", surface="telegram_bot",
@@ -3490,7 +3801,7 @@ async def cb_regen_video(
         await state.clear()
         return
 
-    if submission_context and submission_context.started:
+    if has_paid_submission_journal(submission_context):
         try:
             saved = await persist_submission_result(
                 session, gen_id, submission_context, result.task_id or "", surface="telegram_bot",

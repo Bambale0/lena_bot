@@ -126,3 +126,85 @@ def test_unquoted_legacy_provider_operation_router_is_not_mounted():
 
     public_routes = {getattr(route, "path", "") for route in app.routes}
     assert not any("/provider-operations/" in route for route in public_routes)
+
+
+@pytest.mark.asyncio
+async def test_wan_primary_video_repeated_in_advanced_refs_is_only_charged_once(monkeypatch):
+    source = "https://apixbotai.com/static/upload/input.mp4"
+    monkeypatch.setattr(
+        wan30_launch, "local_upload_path_from_url",
+        lambda url: Path("/tmp/wantest-local-clip.mp4"),
+    )
+    monkeypatch.setattr(Path, "is_file", lambda _: True)
+    probe = AsyncMock(return_value=MediaProbe(width=1280, height=720, duration_seconds=7.5))
+    monkeypatch.setattr(wan30_launch, "probe_local_media", probe)
+    request = await wan30_launch.create_wan30_request(
+        model="wan/3-0-video", prompt="Edit the same scene",
+        mode="video", video_url=source, duration=5,
+        options={"reference_video_urls": [source, source]},
+    )
+    assert request.reference_video_urls == (source,)
+    assert request.reference_video_durations == (7.5,)
+    probe.assert_awaited_once()
+
+
+def test_wan_quote_persists_all_inputs_for_safe_remix_restoration():
+    request = wan30_launch.Wan30Request(
+        model="wan/3-0-video-prime", prompt="Edit in warm light",
+        mode="edit", duration=7, resolution="1080p",
+        reference_video_urls=("https://apixbotai.com/static/upload/video.mp4",),
+        reference_video_durations=(4.5,), reference_audio_urls=(
+            "https://apixbotai.com/static/upload/voice.mp3",),
+        reference_audio_durations=(4.0,), reference_image_urls=(
+            "https://apixbotai.com/static/upload/face.png",),
+        reference_file_urls=("https://files.example.com/inventory.zip",),
+        reference_link_urls=(), audio=False, nsfw_checker=True, seed=0,
+    )
+    quote = wan30_launch.Wan30Quote(
+        request=request, billable_seconds=12, rate=18, credits=216, resolution="1080p",
+    )
+    stored = quote.stored_params()
+    args = stored["wan30_request"]
+    assert args["reference_video_urls"] == [
+        "https://apixbotai.com/static/upload/video.mp4"
+    ]
+    assert args["reference_video_durations"] == [4.5]
+    assert args["reference_audio_urls"] == [
+        "https://apixbotai.com/static/upload/voice.mp3"
+    ]
+    assert args["reference_image_urls"] == [
+        "https://apixbotai.com/static/upload/face.png"
+    ]
+    assert args["audio"] is False
+    assert args["seed"] == 0
+    assert args["nsfw_checker"] is True
+
+
+def test_wan_live_smoke_runner_routes_through_user_quoted_checkout_not_legacy_api():
+    import json
+
+    import httpx
+
+    from scripts import run_provider_live_smoke as smoke
+
+    routes = []
+    def fake_response(request):
+        routes.append((request.method, request.url.path))
+        if request.method == "POST":
+            assert request.url.path == "/api/v1/generate/video"
+            payload = json.loads(request.content)
+            assert payload["model"] == "wan/3-0-video"
+            assert payload["duration"] == 5
+            assert payload["resolution"] == "720p"
+            return httpx.Response(202, json={"id": 777, "status": "processing"})
+        assert request.url.path == "/api/v1/generations/777"
+        return httpx.Response(200, json={
+            "id": 777, "status": "done", "result_url": "https://cdn.example.com/clip.mp4",
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(fake_response)) as client:
+        result = smoke._run_case(
+            client, "https://apixbotai.com", "video.wan30", poll_interval=0.0,
+        )
+    assert result["status"] == "completed"
+    assert len(routes) == 2

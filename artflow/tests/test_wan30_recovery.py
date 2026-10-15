@@ -161,3 +161,44 @@ async def test_expired_wan_kie_refund_enqueues_telegram_notice(monkeypatch):
     assert success is True
     assert finish.await_args.kwargs["video_notice_kind"] == "failed"
     notify.assert_awaited_once_with(pending.id)
+
+
+@pytest.mark.asyncio
+async def test_wan_poll_confirmed_failure_refunds_and_queues_durable_bot_notice(monkeypatch):
+    gen = wan_pending()
+    failed = SimpleNamespace(**{**vars(gen), "status": GenerationStatus.failed})
+    monkeypatch.setattr(
+        miniapp_routes.video_service, "poll_kieai_status",
+        AsyncMock(side_effect=video_service.KieVideoTaskFailed("rejected by KIE")),
+    )
+    refund = AsyncMock(return_value=(True, 15))
+    notice = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", refund)
+    monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=failed))
+    monkeypatch.setattr(miniapp_routes, "_deliver_pending_neironych_video_notice", notice)
+    out = await miniapp_routes._reconcile_generation_status(AsyncMock(), gen)
+    assert out.status == GenerationStatus.failed
+    assert refund.await_args.kwargs["expected_task_id"] == gen.task_id
+    assert refund.await_args.kwargs["video_notice_kind"] == "failed"
+    notice.assert_awaited_once()
+    assert notice.await_args.args[1] == gen.id
+
+
+@pytest.mark.asyncio
+async def test_wan_web_poll_confirmed_failure_does_not_queue_telegram_notice(monkeypatch):
+    gen = wan_pending()
+    gen.task_id = "web:kie_paid"
+    failed = SimpleNamespace(**{**vars(gen), "status": GenerationStatus.failed})
+    monkeypatch.setattr(
+        miniapp_routes.video_service, "poll_kieai_status",
+        AsyncMock(side_effect=video_service.KieVideoTaskFailed("rejected by KIE")),
+    )
+    refund = AsyncMock(return_value=(True, 15))
+    notice = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "fail_generation_and_refund", refund)
+    monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=failed))
+    monkeypatch.setattr(miniapp_routes, "_deliver_pending_neironych_video_notice", notice)
+    await miniapp_routes._reconcile_generation_status(AsyncMock(), gen)
+    assert refund.await_args.kwargs["expected_task_id"] == gen.task_id
+    assert "video_notice_kind" not in refund.await_args.kwargs
+    notice.assert_not_awaited()

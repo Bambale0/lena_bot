@@ -1875,8 +1875,10 @@ async def kie_webhook(
                     urls = filtered_urls
 
         if not urls:
-            if strict_nexus_image:
-                raise HTTPException(status_code=503, detail="Nexus image result awaiting recovery")
+            if strict_nexus_image or strict_wan_video:
+                # KIE's success callback can arrive before its media is
+                # readable. Leave the paid row live for canonical GET recovery.
+                raise HTTPException(status_code=503, detail="Provider video result awaiting recovery")
             err = "Provider callback success but no result urls"
             user_err = "Результат готов, но ссылка на файл не пришла"
             failed, refunded = await repo.fail_generation_and_refund(
@@ -1925,8 +1927,8 @@ async def kie_webhook(
                 result_urls = [url for url in result_urls if not _is_reference_echo_url(url, reference_urls)]
 
         if not result_urls:
-            if strict_nexus_image:
-                raise HTTPException(status_code=503, detail="Nexus image result awaiting recovery")
+            if strict_nexus_image or strict_wan_video:
+                raise HTTPException(status_code=503, detail="Provider video result awaiting recovery")
             err = "Provider returned reference image instead of generated result"
             user_err = "Генератор вернул референс вместо нового результата"
             failed, refunded = await repo.fail_generation_and_refund(

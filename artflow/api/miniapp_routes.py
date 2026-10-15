@@ -147,6 +147,7 @@ from core.provider_routing import get_nano21_route
 from core.seedance_reconciliation import (
     handle_submission_not_sent,
     handle_submission_unknown,
+    has_paid_submission_journal,
     make_submission_context,
     pause_neironych_route,
     persist_submission_result,
@@ -920,13 +921,31 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             if (not isinstance(exc, nexus_image_adapter.NexusImageTaskFailed)
                     or exc.task_id != nexus_image_adapter.strip_nexus_task_id(task_id)):
                 return await refund_stale_nexus("poll_or_media_unavailable")
-        await repo.fail_generation_and_refund(
+        confirmed_wan_failure = strict_wan_video and isinstance(
+            exc, video_service.KieVideoTaskFailed,
+        )
+        terminal, _ = await repo.fail_generation_and_refund(
             session,
             gen.id,
             str(exc),
             refund_note='reconcile:poll_error',
-            **({'expected_task_id': stored_task_id} if strict_nexus_image else {}),
+            **(
+                {'expected_task_id': stored_task_id}
+                if strict_nexus_image or confirmed_wan_failure else {}
+            ),
+            **(
+                {'video_notice_kind': 'failed'}
+                if confirmed_wan_failure and not is_web_task_id(stored_task_id) else {}
+            ),
         )
+        if terminal and confirmed_wan_failure and not is_web_task_id(stored_task_id):
+            try:
+                await _deliver_pending_neironych_video_notice(session, gen.id)
+            except Exception as notice_exc:
+                logger.warning(
+                    "Wan3 failure notice deferred gen=%s reason=%s",
+                    gen.id, type(notice_exc).__name__,
+                )
         return await repo.get_generation_by_id(session, gen.id)
 
     if result_url:
@@ -3388,7 +3407,7 @@ async def create_video_generation(
         )
         raise HTTPException(status_code=502, detail="Generation service error")
 
-    if submission_context and submission_context.started:
+    if has_paid_submission_journal(submission_context):
         try:
             saved = await persist_submission_result(
                 session, gen.id, submission_context, result.task_id or "", surface=surface,

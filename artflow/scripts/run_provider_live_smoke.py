@@ -91,24 +91,43 @@ def _run_case(
 ) -> dict[str, Any]:
     case = SMOKE_CASES[contract_id]
     params = _substitute(case.params)
+    # Wan3 is a complete, source-aware paid Studio flow. The legacy generic
+    # operation gateway cannot count inbound reference-video seconds; bypass
+    # that route here to smoke the actual customer checkout and recovery.
+    is_wan = contract_id in {"video.wan30", "video.wan30.prime"}
+    if is_wan:
+        params["model"] = (
+            "wan/3-0-video-prime" if contract_id.endswith(".prime")
+            else "wan/3-0-video"
+        )
+        params["mode"] = "text"
+        launch_path = "/api/v1/generate/video"
+    else:
+        launch_path = f"/api/v1/provider-operations/{contract_id}"
     response = client.post(
-        f"{base_url}/api/v1/provider-operations/{contract_id}",
-        json={"params": params},
+        base_url + launch_path,
+        json=params if is_wan else {"params": params},
     )
     response.raise_for_status()
     accepted = response.json()
-    generation_id = accepted.get("generation_id")
+    generation_id = accepted.get("id" if is_wan else "generation_id")
+    if accepted.get("status") == "done":
+        return {**accepted, "status": "completed"}
     if accepted.get("status") in {"completed", "failed", "cancelled"} or not generation_id:
         return accepted
 
     deadline = time.monotonic() + case.terminal_timeout_seconds
     while time.monotonic() < deadline:
         time.sleep(poll_interval)
-        status_response = client.get(
-            f"{base_url}/api/v1/provider-operations/generations/{generation_id}"
+        status_path = (
+            f"/api/v1/generations/{generation_id}" if is_wan
+            else f"/api/v1/provider-operations/generations/{generation_id}"
         )
+        status_response = client.get(base_url + status_path)
         status_response.raise_for_status()
         payload = status_response.json()
+        if payload.get("status") == "done":
+            return {**payload, "status": "completed"}
         if payload.get("status") in {"completed", "failed", "cancelled"}:
             return payload
     raise TimeoutError(f"{contract_id} did not finish within {case.terminal_timeout_seconds}s")
