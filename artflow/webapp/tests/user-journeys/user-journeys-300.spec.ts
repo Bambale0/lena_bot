@@ -22,6 +22,7 @@ type Captures = {
   remix?: Json;
   image?: Json;
   video?: Json;
+  videoQuote?: Json;
   trendRun?: Json;
   language?: Json;
 };
@@ -320,6 +321,14 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
       captures.image = requestJson(route);
       return route.fulfill({ status: 202, json: makeTask(1, "image") });
     }
+    if (path === "/api/v1/generate/video/quote" && method === "POST") {
+      captures.videoQuote = requestJson(route);
+      const outputSeconds = Number(captures.videoQuote.duration || 5);
+      return route.fulfill({ json: {
+        cost_credits: 20, balance_credits: Number(user.credits || 0), can_run: true,
+        output_seconds: outputSeconds, reference_seconds: 0, billable_seconds: outputSeconds,
+      } });
+    }
     if (path === "/api/v1/generate/video" && method === "POST") {
       captures.video = requestJson(route);
       return route.fulfill({ status: 202, json: makeTask(2, "video") });
@@ -577,7 +586,10 @@ registerDomain("08 · Видео-генерация с режимом, длит�
   await page.getByRole("button", { name: `${duration} сек`, exact: true }).click();
   await page.getByRole("button", { name: resolution, exact: true }).click();
   await page.locator(".apix-submit-button").click();
+  await expect(page.getByRole("dialog", { name: "Стоимость видео" })).toBeVisible();
+  await page.getByRole("button", { name: "Запустить за 20 💋" }).click();
   await expect(page.getByRole("dialog", { name: /Задача #9002/ })).toBeVisible();
+  expect(captures.videoQuote).toMatchObject({ model: "veo-3.1-fast", duration });
   expect(captures.video).toMatchObject({
     model: "veo-3.1-fast",
     prompt,
@@ -585,6 +597,7 @@ registerDomain("08 · Видео-генерация с режимом, длит�
     duration,
     aspect_ratio: ratio,
     resolution,
+    quoted_credits: 20,
   });
 });
 
