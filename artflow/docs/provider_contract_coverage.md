@@ -4,114 +4,115 @@
 
 - Contracts: **98**
 - Contract-valid: **98/98**
-- User-surfaced: **58/98**
+- User-surfaced: **98/98**
 - Live-smoke declared: **96/98**
-- Product-ready: **58/98**
+- Product-ready: **98/98**
 
 | Contract | Provider model / operation | Modes | User surfaces | Contract | Smoke | Product |
 |---|---|---|---|---:|---:|---:|
-| `image.seedream5.t2i` | `seedream/5-pro-text-to-image` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.seedream5.i2i` | `seedream/5-pro-image-to-image` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.seedream45.t2i` | `seedream/4.5-text-to-image` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.seedream45.edit` | `seedream/4.5-edit` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.grok.t2i` | `grok-imagine/text-to-image` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.grok.i2i` | `grok-imagine/image-to-image` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.wan27` | `wan/2-7-image` | text, image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.wan27.pro` | `wan/2-7-image-pro` | text, image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.nano.legacy` | `google/nano-banana` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.nano2` | `nano-banana-2` | text, image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.nano21` | `nano-banana-2.1` | text, image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.nano2.lite` | `nano-banana-2-lite` | text, image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.nano.pro` | `nano-banana-pro` | text, image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.nano.pro.vip` | `nano-banana-pro-vip` | text, image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.qwen.t2i` | `qwen/text-to-image` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.qwen.i2i` | `qwen/image-to-image` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.qwen.edit` | `qwen/image-edit` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.qwen2.t2i` | `qwen2/text-to-image` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.qwen2.edit` | `qwen2/image-edit` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.gpt2.t2i` | `gpt-image-2-text-to-image` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.gpt2.i2i` | `gpt-image-2-image-to-image` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `image.gpt2.vip` | `gpt-image-2-vip` | text, image | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.kling26.t2v` | `kling-2.6/text-to-video` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.kling26.i2v` | `kling-2.6/image-to-video` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.kling26.motion` | `kling-2.6/motion-control` | motion | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.kling30` | `kling-3.0/video` | text, image, multi_shot, elements | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.kling30.motion` | `kling-3.0/motion-control` | motion | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.klingv3.turbo.t2v` | `kling/v3-turbo-text-to-video` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.klingv3.turbo.i2v` | `kling/v3-turbo-image-to-video` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.wan27.t2v` | `wan/2-7-text-to-video` | text, audio | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.wan27.i2v` | `wan/2-7-image-to-video` | first_frame, first_last, continue | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.wan30` | `wan/3-0-video` | text, image, video, reference, audio, file, link | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.wan30.prime` | `wan/3-0-video-prime` | text, image, video, reference, audio, file, link | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.seedance2` | `bytedance/seedance-2` | text, frame, multimodal | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.seedance2.fast` | `bytedance/seedance-2-fast` | text, frame, multimodal | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.seedance2.mini` | `bytedance/seedance-2-mini` | text, frame, multimodal | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.seedance25` | `bytedance/seedance-2-5` | text, first_frame, first_last, multimodal, audio | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.minimaxh3.t2v` | `minimax-h3/text-to-video` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.minimaxh3.i2v` | `minimax-h3/image-to-video` | first_frame, first_last | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.minimaxh3.reference` | `minimax-h3/reference-to-video` | reference_image, reference_video, reference_audio, multimodal | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.grok.t2v` | `grok-imagine/text-to-video` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.grok.i2v` | `grok-imagine/image-to-video` | source_task, image | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.happyhorse.t2v` | `happyhorse/text-to-video` | text | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.happyhorse.i2v` | `happyhorse/image-to-video` | image | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.gemini.omni` | `gemini-omni-video` | text, image, video, audio_id, character_id | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.veo3` | `veo3` | text, first_last | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.veo3.fast` | `veo3_fast` | text, first_last, reference | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.veo3.lite` | `veo3_lite` | text, first_last, reference | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.genjutsu.motion` | `higgsfield/genjutsu/motion-transfer` | reference_images, source_video | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.genjutsu.object` | `higgsfield/genjutsu/object-swap` | reference_images, source_video | TG, Mini App | ✅ | ✅ | ✅ |
-| `video.wan27.r2v` | `wan/2-7-r2v` | reference | — | ✅ | ✅ | ❌ |
-| `video.wan27.edit` | `wan/2-7-videoedit` | video_edit | — | ✅ | ✅ | ❌ |
-| `video.happyhorse.r2v` | `happyhorse/reference-to-video` | reference | — | ✅ | ✅ | ❌ |
-| `video.happyhorse.edit` | `happyhorse/video-edit` | video_edit | — | ✅ | ✅ | ❌ |
-| `video.happyhorse11.t2v` | `happyhorse-1-1/text-to-video` | text | — | ✅ | ✅ | ❌ |
-| `video.happyhorse11.i2v` | `happyhorse-1-1/image-to-video` | image | — | ✅ | ✅ | ❌ |
-| `video.happyhorse11.r2v` | `happyhorse-1-1/reference-to-video` | reference | — | ✅ | ✅ | ❌ |
-| `video.grok.upscale` | `grok-imagine/upscale` | upscale | — | ✅ | ✅ | ❌ |
-| `video.grok.extend` | `grok-imagine/extend` | extend | — | ✅ | ✅ | ❌ |
-| `video.grok.preview15` | `grok-imagine-video-1-5-preview` | text, image | — | ✅ | ✅ | ❌ |
-| `video.veo.extend` | `veo/extend` | extend | — | ✅ | ✅ | ❌ |
-| `video.veo.1080` | `veo/get-1080p-video` | enhance | — | ✅ | ✅ | ❌ |
-| `video.veo.4k` | `veo/get-4k-video` | enhance | — | ✅ | ✅ | ❌ |
-| `suno.generate` | `suno/generate` | generate | — | ✅ | ✅ | ❌ |
-| `suno.extend` | `suno/extend` | extend | — | ✅ | ✅ | ❌ |
-| `suno.upload-cover` | `suno/upload-cover` | upload-cover | — | ✅ | ✅ | ❌ |
-| `suno.upload-extend` | `suno/upload-extend` | upload-extend | — | ✅ | ✅ | ❌ |
-| `suno.add-instrumental` | `suno/add-instrumental` | add-instrumental | — | ✅ | ✅ | ❌ |
-| `suno.add-vocals` | `suno/add-vocals` | add-vocals | — | ✅ | ✅ | ❌ |
-| `suno.replace-section` | `suno/replace-section` | replace-section | — | ✅ | ✅ | ❌ |
-| `suno.persona` | `suno/persona` | persona | — | ✅ | ✅ | ❌ |
-| `suno.mashup` | `suno/mashup` | mashup | — | ✅ | ✅ | ❌ |
-| `suno.lyrics` | `suno/lyrics` | lyrics | — | ✅ | ✅ | ❌ |
-| `suno.timestamped-lyrics` | `suno/timestamped-lyrics` | timestamped-lyrics | — | ✅ | ✅ | ❌ |
-| `suno.style` | `suno/style` | style | — | ✅ | ✅ | ❌ |
-| `suno.cover-art` | `suno/cover-art` | cover-art | — | ✅ | ✅ | ❌ |
-| `suno.wav` | `suno/wav` | wav | — | ✅ | ✅ | ❌ |
-| `suno.stems` | `suno/stems` | stems | — | ✅ | ✅ | ❌ |
-| `suno.midi` | `suno/midi` | midi | — | ✅ | ✅ | ❌ |
-| `suno.music-video` | `suno/music-video` | music-video | — | ✅ | ✅ | ❌ |
-| `suno.voice-validate` | `suno/voice-validate` | voice-validate | — | ✅ | ✅ | ❌ |
-| `suno.voice-regenerate` | `suno/voice-regenerate` | voice-regenerate | — | ✅ | ✅ | ❌ |
-| `suno.voice-create` | `suno/voice-create` | voice-create | — | ✅ | ✅ | ❌ |
-| `midjourney.imagine` | `midjourney/imagine` | imagine | TG, Mini App | ✅ | ✅ | ✅ |
-| `midjourney.action` | `midjourney/action` | action | TG, Mini App | ✅ | ✅ | ✅ |
-| `midjourney.change` | `midjourney/change` | change | — | ✅ | ✅ | ❌ |
-| `midjourney.blend` | `midjourney/blend` | blend | TG, Mini App | ✅ | ✅ | ✅ |
-| `midjourney.describe` | `midjourney/describe` | describe | TG, Mini App | ✅ | ✅ | ✅ |
-| `midjourney.modal` | `midjourney/modal` | modal | TG | ✅ | ✅ | ✅ |
-| `midjourney.editor` | `midjourney/editor` | editor | — | ✅ | ✅ | ❌ |
-| `midjourney.video` | `midjourney/video` | video | TG, Mini App | ✅ | ✅ | ✅ |
-| `midjourney.fetch` | `midjourney/fetch` | fetch | — | ✅ | ❌ | ❌ |
-| `midjourney.list` | `midjourney/list` | list | — | ✅ | ❌ | ❌ |
-| `llm.kie.responses` | `gpt-responses` | text, vision, tools, web_search | — | ✅ | ✅ | ❌ |
-| `llm.kie.claude` | `claude-sonnet-4-5` | text, tools, thinking | — | ✅ | ✅ | ❌ |
-| `llm.comet.chat` | `openai-compatible-chat` | text, vision, tools, json_schema | — | ✅ | ✅ | ❌ |
-| `llm.photo-prompt` | `photo-prompt-router` | vision | TG, Mini App | ✅ | ✅ | ✅ |
-| `llm.moderation` | `strict-json-moderation` | json_schema | TG, Mini App | ✅ | ✅ | ✅ |
+| `image.seedream5.t2i` | `seedream/5-pro-text-to-image` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.seedream5.i2i` | `seedream/5-pro-image-to-image` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.seedream45.t2i` | `seedream/4.5-text-to-image` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.seedream45.edit` | `seedream/4.5-edit` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.grok.t2i` | `grok-imagine/text-to-image` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.grok.i2i` | `grok-imagine/image-to-image` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.wan27` | `wan/2-7-image` | text, image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.wan27.pro` | `wan/2-7-image-pro` | text, image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.nano.legacy` | `google/nano-banana` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.nano2` | `nano-banana-2` | text, image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.nano21` | `nano-banana-2.1` | text, image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.nano2.lite` | `nano-banana-2-lite` | text, image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.nano.pro` | `nano-banana-pro` | text, image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.nano.pro.vip` | `nano-banana-pro-vip` | text, image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.qwen.t2i` | `qwen/text-to-image` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.qwen.i2i` | `qwen/image-to-image` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.qwen.edit` | `qwen/image-edit` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.qwen2.t2i` | `qwen2/text-to-image` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.qwen2.edit` | `qwen2/image-edit` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.gpt2.t2i` | `gpt-image-2-text-to-image` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.gpt2.i2i` | `gpt-image-2-image-to-image` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `image.gpt2.vip` | `gpt-image-2-vip` | text, image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.kling26.t2v` | `kling-2.6/text-to-video` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.kling26.i2v` | `kling-2.6/image-to-video` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.kling26.motion` | `kling-2.6/motion-control` | motion | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.kling30` | `kling-3.0/video` | text, image, multi_shot, elements | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.kling30.motion` | `kling-3.0/motion-control` | motion | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.klingv3.turbo.t2v` | `kling/v3-turbo-text-to-video` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.klingv3.turbo.i2v` | `kling/v3-turbo-image-to-video` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.wan27.t2v` | `wan/2-7-text-to-video` | text, audio | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.wan27.i2v` | `wan/2-7-image-to-video` | first_frame, first_last, continue | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.wan30` | `wan/3-0-video` | text, image, video, reference, audio, file, link | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.wan30.prime` | `wan/3-0-video-prime` | text, image, video, reference, audio, file, link | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.seedance2` | `bytedance/seedance-2` | text, frame, multimodal | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.seedance2.fast` | `bytedance/seedance-2-fast` | text, frame, multimodal | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.seedance2.mini` | `bytedance/seedance-2-mini` | text, frame, multimodal | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.seedance25` | `bytedance/seedance-2-5` | text, first_frame, first_last, multimodal, audio | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.minimaxh3.t2v` | `minimax-h3/text-to-video` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.minimaxh3.i2v` | `minimax-h3/image-to-video` | first_frame, first_last | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.minimaxh3.reference` | `minimax-h3/reference-to-video` | reference_image, reference_video, reference_audio, multimodal | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.grok.t2v` | `grok-imagine/text-to-video` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.grok.i2v` | `grok-imagine/image-to-video` | source_task, image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.happyhorse.t2v` | `happyhorse/text-to-video` | text | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.happyhorse.i2v` | `happyhorse/image-to-video` | image | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.gemini.omni` | `gemini-omni-video` | text, image, video, audio_id, character_id | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.veo3` | `veo3` | text, first_last | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.veo3.fast` | `veo3_fast` | text, first_last, reference | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.veo3.lite` | `veo3_lite` | text, first_last, reference | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.genjutsu.motion` | `higgsfield/genjutsu/motion-transfer` | reference_images, source_video | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.genjutsu.object` | `higgsfield/genjutsu/object-swap` | reference_images, source_video | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `video.wan27.r2v` | `wan/2-7-r2v` | reference | API | ✅ | ✅ | ✅ |
+| `video.wan27.edit` | `wan/2-7-videoedit` | video_edit | API | ✅ | ✅ | ✅ |
+| `video.happyhorse.r2v` | `happyhorse/reference-to-video` | reference | API | ✅ | ✅ | ✅ |
+| `video.happyhorse.edit` | `happyhorse/video-edit` | video_edit | API | ✅ | ✅ | ✅ |
+| `video.happyhorse11.t2v` | `happyhorse-1-1/text-to-video` | text | API | ✅ | ✅ | ✅ |
+| `video.happyhorse11.i2v` | `happyhorse-1-1/image-to-video` | image | API | ✅ | ✅ | ✅ |
+| `video.happyhorse11.r2v` | `happyhorse-1-1/reference-to-video` | reference | API | ✅ | ✅ | ✅ |
+| `video.grok.upscale` | `grok-imagine/upscale` | upscale | API | ✅ | ✅ | ✅ |
+| `video.grok.extend` | `grok-imagine/extend` | extend | API | ✅ | ✅ | ✅ |
+| `video.grok.preview15` | `grok-imagine-video-1-5-preview` | text, image | API | ✅ | ✅ | ✅ |
+| `video.veo.extend` | `veo/extend` | extend | API | ✅ | ✅ | ✅ |
+| `video.veo.1080` | `veo/get-1080p-video` | enhance | API | ✅ | ✅ | ✅ |
+| `video.veo.4k` | `veo/get-4k-video` | enhance | API | ✅ | ✅ | ✅ |
+| `suno.generate` | `suno/generate` | generate | API | ✅ | ✅ | ✅ |
+| `suno.extend` | `suno/extend` | extend | API | ✅ | ✅ | ✅ |
+| `suno.upload-cover` | `suno/upload-cover` | upload-cover | API | ✅ | ✅ | ✅ |
+| `suno.upload-extend` | `suno/upload-extend` | upload-extend | API | ✅ | ✅ | ✅ |
+| `suno.add-instrumental` | `suno/add-instrumental` | add-instrumental | API | ✅ | ✅ | ✅ |
+| `suno.add-vocals` | `suno/add-vocals` | add-vocals | API | ✅ | ✅ | ✅ |
+| `suno.replace-section` | `suno/replace-section` | replace-section | API | ✅ | ✅ | ✅ |
+| `suno.persona` | `suno/persona` | persona | API | ✅ | ✅ | ✅ |
+| `suno.mashup` | `suno/mashup` | mashup | API | ✅ | ✅ | ✅ |
+| `suno.lyrics` | `suno/lyrics` | lyrics | API | ✅ | ✅ | ✅ |
+| `suno.timestamped-lyrics` | `suno/timestamped-lyrics` | timestamped-lyrics | API | ✅ | ✅ | ✅ |
+| `suno.style` | `suno/style` | style | API | ✅ | ✅ | ✅ |
+| `suno.cover-art` | `suno/cover-art` | cover-art | API | ✅ | ✅ | ✅ |
+| `suno.wav` | `suno/wav` | wav | API | ✅ | ✅ | ✅ |
+| `suno.stems` | `suno/stems` | stems | API | ✅ | ✅ | ✅ |
+| `suno.midi` | `suno/midi` | midi | API | ✅ | ✅ | ✅ |
+| `suno.music-video` | `suno/music-video` | music-video | API | ✅ | ✅ | ✅ |
+| `suno.voice-validate` | `suno/voice-validate` | voice-validate | API | ✅ | ✅ | ✅ |
+| `suno.voice-regenerate` | `suno/voice-regenerate` | voice-regenerate | API | ✅ | ✅ | ✅ |
+| `suno.voice-create` | `suno/voice-create` | voice-create | API | ✅ | ✅ | ✅ |
+| `midjourney.imagine` | `midjourney/imagine` | imagine | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `midjourney.action` | `midjourney/action` | action | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `midjourney.change` | `midjourney/change` | change | API | ✅ | ✅ | ✅ |
+| `midjourney.blend` | `midjourney/blend` | blend | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `midjourney.describe` | `midjourney/describe` | describe | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `midjourney.modal` | `midjourney/modal` | modal | TG, API | ✅ | ✅ | ✅ |
+| `midjourney.editor` | `midjourney/editor` | editor | API | ✅ | ✅ | ✅ |
+| `midjourney.video` | `midjourney/video` | video | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `midjourney.fetch` | `midjourney/fetch` | fetch | API | ✅ | ❌ | ✅ |
+| `midjourney.list` | `midjourney/list` | list | API | ✅ | ❌ | ✅ |
+| `llm.kie.responses` | `gpt-responses` | text, vision, tools, web_search | API | ✅ | ✅ | ✅ |
+| `llm.kie.claude` | `claude-sonnet-4-5` | text, tools, thinking | API | ✅ | ✅ | ✅ |
+| `llm.comet.chat` | `openai-compatible-chat` | text, vision, tools, json_schema | API | ✅ | ✅ | ✅ |
+| `llm.photo-prompt` | `photo-prompt-router` | vision | TG, Mini App, API | ✅ | ✅ | ✅ |
+| `llm.moderation` | `strict-json-moderation` | json_schema | TG, Mini App, API | ✅ | ✅ | ✅ |
 
 ## Definitions
 
 - **Contract-valid**: official docs, dated revision, callable backend entrypoint and contract-test files exist.
 - **User-surfaced**: available through Telegram, Mini App or the public API.
 - **Smoke**: a unique live-smoke scenario ID is declared.
-- **Product-ready**: all three conditions are true.
+- **Product-ready**: valid metadata and a registered user surface; billable operations also require a smoke scenario. Nonbillable reads do not require a paid smoke.
+- Public API exposure is derived from the operation registry, not duplicated catalog flags. These are structural checks, not evidence of a successful live provider render.

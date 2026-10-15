@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 TRANSFORM = Path("webapp/feed-pinterest-transform.js")
 
 

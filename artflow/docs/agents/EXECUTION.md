@@ -1,3 +1,22 @@
+## 2026-10-16 - Audit runtime contracts remediation (active)
+
+Branch `fix/audit-contracts-20261016`, baseline `1f64429d`, isolated worktree `/tmp/apix-audit-contracts-20261016`. User requested all audit findings. This independently releasable slice covers bot trend entry, callback log privacy, provider exposure/readiness, OpenAPI security and historical test/Ruff contracts. Prices, payment behavior, credentials, permissions and production DB remain unchanged.
+
+Financial fixes are NOT included: the separate `/tmp/apix-audit-remediation-20261016` workspace contains the three confirmed refund rollback failures and an initial six-test-green full-refund draft. Further partial/late/referral tests fail and the next financial write was blocked before execution. It was not retried or moved here. That draft must not be deployed; P1 refund/partial handling and Tribute business configuration stay explicitly open.
+
+Evidence/plan:
+- [x] Repository instructions and four updated engineering skill repositories inspected in the initial task; preserve unrelated PRs and production checkout.
+- [x] Historical baseline reproduced all 44 pytest failures and 27 Ruff findings (log paths `/tmp/apix-audit-baseline-*`).
+- [x] Bot photo callback bypass and raw callback logging reproduced; all image/video trends now open the shared Mini App runner, with four passing bot navigation tests. Four callback privacy tests pass without changing signature validation.
+- [x] Catalog public exposure derives from actual operation registry, removing stale independent flags; two tests pass.
+- [x] Exporter/CI consistency, explicit auth metadata and nonbillable readiness semantics; generated dashboard strict check passes for 98 contracts.
+- [ ] Full suite classification remains OPEN (3305 passed / 47 failed / 13 skipped on pinned local run). Full Ruff is fixed and enforced in CI. Blocked test-update batches did not execute; no historical assertion was suppressed.
+- [x] Generated artifacts and explicit open-item matrix updated; two independent OpenAPI exports identical. Full Ruff/compileall, maintained backend gate and bot-navigation pass locally. Callback/payment subset: 47 passed; frontend unit: 114 passed; build and 2 mocked-browser direct-link cases passed. Provider inventory/readiness/dry smoke pass.
+- [x] Reviewed bot path end-to-end: the legacy App trend branch is unreachable because parseStartTarget deliberately excludes trend; the existing portal owns deep links. No production frontend change was needed. Added image/video browser regressions rather than rewriting correct routing.
+- [ ] PR/exact-head CI, native auto-merge and merge-SHA deploy verification. Financial and full historical-suite findings stay explicitly open; this is not completion of the entire audit. Browser suite beyond the two direct-link cases is running as job_2017f2846413, not yet claimed green.
+
+External patterns: FastAPI supported OpenAPI customization; OAS security OR alternatives and optional empty requirement. Existing authentication checks remain the only runtime authority. No live paid/provider operations are part of verification.
+
 # Execution ledger — video to prompt integration
 
 ## 2026-10-15 — Qwen 3.8 through Neironych

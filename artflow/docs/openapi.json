@@ -182,8 +182,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/me/feed": {
@@ -276,8 +287,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/me/photo": {
@@ -352,8 +374,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/assistant": {
@@ -428,8 +461,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/settings/language": {
@@ -507,8 +551,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/referrals": {
@@ -572,8 +627,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/referrals/withdrawals": {
@@ -647,8 +713,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/referrals/exchange": {
@@ -722,8 +799,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/photo-prompt": {
@@ -796,8 +884,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/video-prompt": {
@@ -870,8 +969,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/prompt/improve": {
@@ -944,8 +1054,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/help": {
@@ -1023,8 +1144,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/models/image": {
@@ -1093,8 +1225,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/models/video": {
@@ -1163,8 +1306,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/models/music": {
@@ -1233,8 +1387,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/public/midjourney": {
@@ -1417,8 +1582,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/generate/video/quote": {
@@ -1495,8 +1671,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/generate/video": {
@@ -1581,8 +1768,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/music/voices": {
@@ -1650,8 +1848,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1723,8 +1932,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/music/voices/{voice_id}/refresh": {
@@ -1797,8 +2017,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/music/voices/{voice_id}/verify": {
@@ -1881,8 +2112,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/generate/music": {
@@ -1967,8 +2209,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/generations/{gen_id}": {
@@ -2042,8 +2295,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/history": {
@@ -2135,8 +2399,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/feed": {
@@ -2228,8 +2503,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/feed/{gen_id}": {
@@ -2305,8 +2591,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/generations/{gen_id}/share": {
@@ -2382,8 +2679,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/feed/{gen_id}/remove": {
@@ -2459,8 +2767,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/feed/{gen_id}/like": {
@@ -2535,8 +2854,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/feed/{gen_id}/remix/quote": {
@@ -2622,8 +2952,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/feed/{gen_id}/remix": {
@@ -2717,8 +3058,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/feed/{gen_id}/link": {
@@ -2794,8 +3146,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/generations/{gen_id}/share-library": {
@@ -2871,8 +3234,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/generations/{gen_id}/remove-library": {
@@ -2948,8 +3322,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/prompts": {
@@ -3083,8 +3468,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -3159,8 +3555,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/prompts/my": {
@@ -3227,8 +3634,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/prompts/{prompt_id}": {
@@ -3303,8 +3721,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/prompts/{prompt_id}/like": {
@@ -3379,8 +3808,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/prompts/{prompt_id}/link": {
@@ -3455,8 +3895,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/prompts/{prompt_id}/use": {
@@ -3532,8 +3983,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/prompts/{prompt_id}/deactivate": {
@@ -3608,8 +4070,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/admin/overview": {
@@ -3687,8 +4160,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/admin/users": {
@@ -3782,8 +4270,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/admin/users/{user_id}": {
@@ -3858,8 +4361,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/admin/users/{user_id}/credits": {
@@ -3944,8 +4462,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/admin/users/{user_id}/ban": {
@@ -4030,8 +4563,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/admin/withdrawals": {
@@ -4120,8 +4668,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/admin/withdrawals/{request_id}/review": {
@@ -4206,8 +4769,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/payment-methods": {
@@ -4359,8 +4937,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/topup/stars": {
@@ -4437,8 +5026,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/topup/crypto": {
@@ -4515,8 +5115,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/topup/tribute": {
@@ -4593,8 +5204,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/topup/lava": {
@@ -4671,8 +5293,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/generations/{gen_id}/publish": {
@@ -4744,8 +5377,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/feed/{generation_id}/preview.webp": {
@@ -4949,8 +5593,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/services/pinterest/upload": {
@@ -5026,8 +5681,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/services/pinterest/run": {
@@ -5105,8 +5771,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/music/source-audio": {
@@ -5184,8 +5861,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/music/from-audio": {
@@ -5269,8 +5957,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/me/permissions": {
@@ -5338,8 +6037,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/trends": {
@@ -5437,8 +6147,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/trends/{trend_id}": {
@@ -5513,8 +6234,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/trends/upload": {
@@ -5588,8 +6320,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/trends/{trend_id}/prepare": {
@@ -5664,8 +6407,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/trends/{trend_id}/run": {
@@ -5750,8 +6504,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/trends/{trend_id}/checkout": {
@@ -5826,8 +6591,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/trends/{trend_id}/link": {
@@ -5904,8 +6680,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/api/v1/admin/trends": {
@@ -5974,8 +6761,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       },
       "post": {
         "tags": [
@@ -6049,8 +6851,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/admin/trends/upload": {
@@ -6128,8 +6945,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/admin/trends/{trend_id}/update": {
@@ -6214,8 +7046,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/v1/admin/trends/{trend_id}/archive": {
@@ -6290,8 +7137,23 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/health": {
@@ -6750,8 +7612,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/me/profile": {
@@ -6839,8 +7715,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/me/password": {
@@ -6928,8 +7818,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/models": {
@@ -7053,8 +7957,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/models/video": {
@@ -7132,8 +8050,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/models/music": {
@@ -7211,8 +8143,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generate/image": {
@@ -7300,8 +8246,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generate/video": {
@@ -7389,8 +8349,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generate/video/quote": {
@@ -7478,8 +8452,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generate/music": {
@@ -7567,8 +8555,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/music/voices": {
@@ -7646,8 +8648,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -7733,8 +8749,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/music/voices/{voice_id}/refresh": {
@@ -7821,8 +8851,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/music/voices/{voice_id}/verify": {
@@ -7919,8 +8963,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generations/active": {
@@ -7998,8 +9056,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generations/{generation_id}/download": {
@@ -8086,8 +9158,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generations/{generation_id}": {
@@ -8174,8 +9260,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generations/{generation_id}/share": {
@@ -8262,8 +9362,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generations/{generation_id}/publish": {
@@ -8350,8 +9464,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generations/{generation_id}/share-library": {
@@ -8438,8 +9566,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/generations/{generation_id}/remove-library": {
@@ -8526,8 +9668,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/feed/{generation_id}/remove": {
@@ -8614,8 +9770,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/feed/{generation_id}/remix/quote": {
@@ -8712,8 +9882,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/feed/{generation_id}/remix": {
@@ -8810,8 +9994,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/feed/{generation_id}/link": {
@@ -8898,8 +10096,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/upload-media/policy": {
@@ -8978,8 +10190,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/upload-media/check": {
@@ -9068,8 +10294,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/upload-media": {
@@ -9157,8 +10397,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/uploads/reference": {
@@ -9246,8 +10500,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/photo-prompt": {
@@ -9335,8 +10603,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/video-prompt": {
@@ -9424,8 +10706,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/prompt/improve": {
@@ -9513,8 +10809,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/billing/plans": {
@@ -9659,8 +10969,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/billing/topup/stars": {
@@ -9748,8 +11072,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/billing/topup/crypto": {
@@ -9837,8 +11175,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/billing/topup/tribute": {
@@ -9926,8 +11278,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/billing/topup/lava": {
@@ -10015,8 +11381,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/h3/upload-reference": {
@@ -10104,8 +11484,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/seedance25/upload-reference": {
@@ -10193,8 +11587,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/music/source-audio": {
@@ -10283,8 +11691,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/music/from-audio": {
@@ -10373,8 +11795,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/feed": {
@@ -10632,8 +12068,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/feed/{generation_id}/share": {
@@ -10724,8 +12174,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/feed/generations/{generation_id}/publish": {
@@ -10817,8 +12281,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/prompts": {
@@ -10969,7 +12447,19 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          },
+          {}
+        ]
       },
       "post": {
         "tags": [
@@ -11059,8 +12549,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/prompts/{prompt_id}": {
@@ -11152,7 +12656,19 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          },
+          {}
+        ]
       }
     },
     "/api/web/prompts/{prompt_id}/like": {
@@ -11243,8 +12759,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/prompts/{prompt_id}/use": {
@@ -11335,8 +12865,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/admin/prompts": {
@@ -11429,8 +12973,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/prompts/{prompt_id}/approve": {
@@ -11521,8 +13083,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/prompts/{prompt_id}/reject": {
@@ -11623,8 +13203,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/prompts/{prompt_id}/deactivate": {
@@ -11715,8 +13313,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/image-sessions/active": {
@@ -11794,8 +13410,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/image-sessions": {
@@ -11883,8 +13513,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/image-sessions/{session_id}/archive": {
@@ -11971,8 +13615,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/history": {
@@ -12073,8 +13731,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/billing/transactions": {
@@ -12168,8 +13840,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/referrals": {
@@ -12251,8 +13937,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/referrals/withdrawals": {
@@ -12344,8 +14044,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/referrals/exchange": {
@@ -12437,8 +14151,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/assistant": {
@@ -12530,8 +14258,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/settings/language": {
@@ -12623,8 +14365,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/help": {
@@ -12717,8 +14473,22 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
       }
     },
     "/api/web/admin/provider-routing/qwen38/{mode}": {
@@ -12810,8 +14580,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       },
       "put": {
         "tags": [
@@ -12911,8 +14699,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/feed-recipe-identity": {
@@ -12990,8 +14796,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       },
       "put": {
         "tags": [
@@ -13077,8 +14901,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/image-recovery/{provider}": {
@@ -13169,8 +15011,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       },
       "put": {
         "tags": [
@@ -13269,8 +15129,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/provider-routing/nano-banana-2.1": {
@@ -13348,8 +15226,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       },
       "put": {
         "tags": [
@@ -13435,8 +15331,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/images/refund-supplier-reviews": {
@@ -13526,8 +15440,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/images/refund-supplier-review/{gen_id}": {
@@ -13624,8 +15556,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/seedance/refund-supplier-reviews": {
@@ -13715,8 +15665,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/seedance/refund-supplier-review/{gen_id}": {
@@ -13813,8 +15781,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/overview": {
@@ -13896,8 +15882,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/users": {
@@ -14019,8 +16023,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/users/{user_id}/credits": {
@@ -14121,8 +16143,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/users/{user_id}/ban": {
@@ -14223,8 +16263,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/generations": {
@@ -14368,8 +16426,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/generations/{generation_id}/fail": {
@@ -14470,8 +16546,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/pricing": {
@@ -14580,8 +16674,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/model-costs/{model_id}": {
@@ -14682,8 +16794,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/price-plans/{plan_id}": {
@@ -14784,8 +16914,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/withdrawals": {
@@ -14890,8 +17038,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/withdrawals/{request_id}": {
@@ -14992,8 +17158,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/api/web/admin/ledger": {
@@ -15103,8 +17287,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
       }
     },
     "/upload": {
@@ -15178,8 +17380,19 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
           }
-        }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
       }
     },
     "/webhook/telegram": {
@@ -19010,6 +21223,26 @@
           "hash"
         ],
         "title": "TelegramLoginRequest"
+      }
+    },
+    "securitySchemes": {
+      "TelegramInitData": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Telegram-Init-Data",
+        "description": "Telegram WebApp initData, verified server-side with HMAC and expiry. Takes precedence over web credentials."
+      },
+      "WebAuthToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Web-Auth-Token",
+        "description": "Signed APIX web session token. Header takes precedence over the cookie."
+      },
+      "WebAuthCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "apix_web_token",
+        "description": "Signed APIX web session cookie; accepted by website routes only."
       }
     }
   }

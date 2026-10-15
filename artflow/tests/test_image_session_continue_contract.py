@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 MAIN_MENU = ROOT / "bot" / "ui" / "main_menu.py"
 MODEL_FIRST_HANDLER = ROOT / "bot" / "handlers" / "image_models_first.py"

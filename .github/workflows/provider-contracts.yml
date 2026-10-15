@@ -119,6 +119,11 @@ jobs:
       - name: Structural provider inventory
         run: python scripts/check_provider_contracts_ci.py
 
+      - name: Generated exposure and readiness consistency
+        run: |
+          python scripts/check_provider_contract_coverage.py --check --strict-product
+          pytest -q tests/test_provider_exposure_consistency.py
+
       - name: Strict product readiness
         run: python scripts/check_provider_product_readiness.py
 

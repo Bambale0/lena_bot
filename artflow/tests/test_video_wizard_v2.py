@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 
 from bot.handlers.video_wizard import SCENARIOS, _compact_balance, _home_kb, _review_kb
 

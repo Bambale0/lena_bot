@@ -5,9 +5,8 @@ Revises: 034_user_image_model_unlimited
 Create Date: 2026-09-26
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "035_trend_user_fields"
 down_revision = "034_user_image_model_unlimited"

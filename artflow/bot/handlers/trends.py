@@ -195,36 +195,24 @@ async def use_trend(call: CallbackQuery, session: AsyncSession, state: FSMContex
     if not is_trend_prompt(prompt) or not prompt.is_public or getattr(prompt.status, "value", prompt.status) != "approved":
         await call.answer("Тренд уже скрыт", show_alert=True)
         return
+    # All surfaces use the same server-side resolver, reference upload,
+    # checkout and trend_run_claim. A bot callback must not bypass that runner.
     user_fields = trend_user_fields(prompt)
-    if trend_kind(prompt) == "video" or user_fields:
-        url = f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?trend={prompt.id}"
-        builder = InlineKeyboardBuilder()
-        label = "🎛 Настроить и повторить" if user_fields else "🎬 Открыть видео-тренд"
-        builder.row(InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url)))
-        builder.row(InlineKeyboardButton(text="🔥 Другие тренды", callback_data="menu:trends"))
-        await call.message.answer(
-            (
-                "🎛 Перед повтором можно изменить разрешённые параметры тренда "
-                "(например, число или одежду), не раскрывая скрытый prompt."
-                if user_fields
-                else "🎬 Настройки видео-тренда готовы. Открой приложение, добавь исходное фото при необходимости и запусти генерацию."
-            ),
-            reply_markup=builder.as_markup(),
+    kind = trend_kind(prompt)
+    url = f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?trend={prompt.id}"
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🎛 Настроить и повторить", web_app=WebAppInfo(url=url)))
+    builder.row(InlineKeyboardButton(text="🔥 Другие тренды", callback_data="menu:trends"))
+    if user_fields:
+        text = (
+            "🎛 Открой тренд, добавь своё фото и измени разрешённые параметры "
+            "(например, число или одежду). Исходный промпт остаётся скрытым."
         )
-        await safe_answer_callback(call)
-        return
-
-    from bot.handlers.marketplace import _launch_prompt_generation
-
-    await _launch_prompt_generation(
-        call=call,
-        session=session,
-        state=state,
-        db_user=db_user,
-        bot=bot,
-        prompt=prompt,
-        remix=False,
-    )
+    elif kind == "video":
+        text = "🎬 Открой видео-тренд, добавь своё исходное фото и запусти генерацию в приложении."
+    else:
+        text = "📷 Открой фото-тренд, добавь своё фото и запусти генерацию в приложении."
+    await call.message.answer(text, reply_markup=builder.as_markup())
     await safe_answer_callback(call)
 
 

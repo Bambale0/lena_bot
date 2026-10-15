@@ -8,9 +8,9 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton
 
 from api.image_service import (
+    _SQUARE_4K_UNSUPPORTED_MODELS,
     MODEL_ASPECT_RATIOS,
     ImageModel,
-    _SQUARE_4K_UNSUPPORTED_MODELS,
 )
 from api.video_service import VideoModel
 from bot.keyboards import models as _models
@@ -22,7 +22,6 @@ from bot.keyboards.models import (
     VIDEO_MODEL_DESC,
 )
 from bot.ui.model_labels import model_display_name, public_model_items
-
 
 _GPT_IMAGE_2_STABLE_RATIOS = [
     "auto",

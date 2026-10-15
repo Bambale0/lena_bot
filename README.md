@@ -121,3 +121,5 @@ The maintained release checks run in [GitHub Actions](.github/workflows/ci.yml).
 ## Engineering focus
 
 APIX is useful as a portfolio project because it shows a complete product boundary: Telegram UX, web frontend, backend API design, database migrations, payments, provider integrations and deployment are all part of the same system rather than isolated demo scripts.
+
+Audit follow-up: [verified fixes and explicitly open blockers](artflow/docs/audits/2026-10-16-remediation.md). The full pytest suite and payment findings are not closed by this release.

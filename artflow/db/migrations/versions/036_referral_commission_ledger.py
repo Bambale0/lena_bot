@@ -5,9 +5,8 @@ Revises: 035_trend_user_fields
 Create Date: 2026-10-01
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "036_referral_commission_ledger"
 down_revision = "035_trend_user_fields"

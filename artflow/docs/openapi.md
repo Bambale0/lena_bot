@@ -60,7 +60,7 @@ Responses:
 
 - Summary: Upload File
 - Operation ID: `upload_file_upload_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_upload_file_upload_post`
 
 Upload an image for use as a reference in generation.
@@ -74,6 +74,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /webhook/comet/midjourney`
@@ -225,7 +226,7 @@ Responses:
 
 - Summary: Admin Overview
 - Operation ID: `admin_overview_api_v1_admin_overview_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -238,13 +239,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/admin/users`
 
 - Summary: Admin Users
 - Operation ID: `admin_users_api_v1_admin_users_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -258,13 +261,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/admin/users/{user_id}`
 
 - Summary: Admin User Detail
 - Operation ID: `admin_user_detail_api_v1_admin_users__user_id__get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -277,13 +282,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/admin/users/{user_id}/ban`
 
 - Summary: Admin User Ban
 - Operation ID: `admin_user_ban_api_v1_admin_users__user_id__ban_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AdminBanRequest`
 
 Parameters:
@@ -296,13 +303,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/admin/users/{user_id}/credits`
 
 - Summary: Admin User Credits
 - Operation ID: `admin_user_credits_api_v1_admin_users__user_id__credits_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AdminCreditsRequest`
 
 Parameters:
@@ -315,13 +324,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/admin/withdrawals`
 
 - Summary: Admin Withdrawals
 - Operation ID: `admin_withdrawals_api_v1_admin_withdrawals_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -335,13 +346,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/admin/withdrawals/{request_id}/review`
 
 - Summary: Admin Withdrawal Review
 - Operation ID: `admin_withdrawal_review_api_v1_admin_withdrawals__request_id__review_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AdminWithdrawalReviewRequest`
 
 Parameters:
@@ -354,13 +367,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/assistant`
 
 - Summary: Miniapp Assistant
 - Operation ID: `miniapp_assistant_api_v1_assistant_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AssistantChatRequest`
 
 Assistant chat inside the mini app, backed by the same assistant as the bot.
@@ -374,6 +389,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/auth/config`
@@ -409,7 +425,7 @@ Responses:
 
 - Summary: Get Feed
 - Operation ID: `get_feed_api_v1_feed_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Public image feed — prompt is hidden from non-authors.
@@ -425,13 +441,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/feed/{gen_id}`
 
 - Summary: Get Feed Item
 - Operation ID: `get_feed_item_api_v1_feed__gen_id__get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Hydrate shared posts with the same media and privacy contract as the list.
@@ -446,13 +463,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/feed/{gen_id}/like`
 
 - Summary: Like Feed Post
 - Operation ID: `like_feed_post_api_v1_feed__gen_id__like_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -465,13 +483,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/feed/{gen_id}/link`
 
 - Summary: Get Feed Share Link
 - Operation ID: `get_feed_share_link_api_v1_feed__gen_id__link_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Returns a shareable public Mini App link for a public post.
@@ -486,13 +505,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/feed/{gen_id}/remix`
 
 - Summary: Remix Feed Post
 - Operation ID: `remix_feed_post_api_v1_feed__gen_id__remix_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `FeedRemixRequest`
 
 Repeat a public post, or edit its public media without disclosing author text.
@@ -508,13 +528,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/feed/{gen_id}/remix/quote`
 
 - Summary: Quote Feed Remix
 - Operation ID: `quote_feed_remix_api_v1_feed__gen_id__remix_quote_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `FeedRemixRequest`
 
 Read-only exact DB tariff quote, with no reservation or paid submission.
@@ -529,13 +550,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/feed/{gen_id}/remove`
 
 - Summary: Remove Feed Post
 - Operation ID: `remove_feed_post_api_v1_feed__gen_id__remove_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Remove own generation from the public feed.
@@ -550,6 +572,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/feed/{generation_id}/display.webp`
@@ -594,7 +617,7 @@ Responses:
 
 - Summary: Create Image Generation
 - Operation ID: `create_image_generation_api_v1_generate_image_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ImageGenRequest`
 
 Start an async image generation.
@@ -612,13 +635,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/generate/music`
 
 - Summary: Create Music Generation
 - Operation ID: `create_music_generation_api_v1_generate_music_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `MusicGenRequest`
 
 Start Suno music generation. Returns immediately; poll /generations/{id}.
@@ -633,13 +657,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/generate/video`
 
 - Summary: Create Video Generation
 - Operation ID: `create_video_generation_api_v1_generate_video_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `VideoGenRequest`
 
 Start an async video generation.
@@ -657,13 +682,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/generate/video/quote`
 
 - Summary: Quote Video Generation
 - Operation ID: `quote_video_generation_api_v1_generate_video_quote_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `VideoGenRequest`
 
 Read-only tariff quote after the same normalization and media probe as launch.
@@ -677,13 +703,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/generations/{gen_id}`
 
 - Summary: Get Generation
 - Operation ID: `get_generation_api_v1_generations__gen_id__get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Poll a single generation for status and result_url.
@@ -698,13 +725,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/generations/{gen_id}/publish`
 
 - Summary: Publish Generation To Library
 - Operation ID: `publish_generation_to_library_api_v1_generations__gen_id__publish_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 User explicitly publishes own generation to public feed/prompt library.
@@ -719,13 +747,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/generations/{gen_id}/remove-library`
 
 - Summary: Remove From Library
 - Operation ID: `remove_from_library_api_v1_generations__gen_id__remove_library_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Remove own generation's prompt from the public prompt library.
@@ -740,13 +769,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/generations/{gen_id}/share`
 
 - Summary: Share Generation
 - Operation ID: `share_generation_api_v1_generations__gen_id__share_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Publish own generation to the public feed and return its repost link.
@@ -761,13 +791,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/generations/{gen_id}/share-library`
 
 - Summary: Share To Library
 - Operation ID: `share_to_library_api_v1_generations__gen_id__share_library_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Opt this generation's prompt into the public prompt library.
@@ -782,6 +813,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/health`
@@ -812,7 +844,7 @@ Responses:
 
 - Summary: Miniapp Help
 - Operation ID: `miniapp_help_api_v1_help_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Help texts from the Telegram bot, exposed for the Mini App.
@@ -827,13 +859,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/history`
 
 - Summary: Get History
 - Operation ID: `get_history_api_v1_history_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Paginated generations for the current user, newest first.
@@ -849,13 +882,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/me`
 
 - Summary: Get Me
 - Operation ID: `get_me_api_v1_me_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Current user profile with balance.
@@ -869,13 +903,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/me/feed`
 
 - Summary: Get My Feed
 - Operation ID: `get_my_feed_api_v1_me_feed_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Current user's public image/video feed posts.
@@ -896,13 +931,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/me/permissions`
 
 - Summary: Miniapp Permissions
 - Operation ID: `miniapp_permissions_api_v1_me_permissions_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -914,13 +950,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/me/photo`
 
 - Summary: Set Me Photo
 - Operation ID: `set_me_photo_api_v1_me_photo_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ProfilePhotoRequest`
 
 Save a profile photo uploaded by the current user.
@@ -934,13 +971,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/models/image`
 
 - Summary: List Image Models
 - Operation ID: `list_image_models_api_v1_models_image_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 All active image models with costs and capabilities.
@@ -954,13 +992,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/models/music`
 
 - Summary: List Music Models
 - Operation ID: `list_music_models_api_v1_models_music_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 All active music models with costs and capabilities.
@@ -974,13 +1013,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/models/video`
 
 - Summary: List Video Models
 - Operation ID: `list_video_models_api_v1_models_video_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 All active video models with costs and capabilities.
@@ -994,13 +1034,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/music/from-audio`
 
 - Summary: Generate From Source
 - Operation ID: `generate_from_source_api_v1_music_from_audio_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `SunoSourceGenerationRequest`
 
 Parameters:
@@ -1013,13 +1054,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/music/source-audio`
 
 - Summary: Upload Source
 - Operation ID: `upload_source_api_v1_music_source_audio_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_upload_source_api_v1_music_source_audio_post`
 
 Parameters:
@@ -1031,13 +1073,14 @@ Parameters:
 
 Responses:
 - `201`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/music/voices`
 
 - Summary: List Suno Voices
 - Operation ID: `list_suno_voices_api_v1_music_voices_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1049,13 +1092,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/music/voices`
 
 - Summary: Create Suno Voice
 - Operation ID: `create_suno_voice_api_v1_music_voices_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_create_suno_voice_api_v1_music_voices_post`
 
 Parameters:
@@ -1067,13 +1111,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/music/voices/{voice_id}/refresh`
 
 - Summary: Refresh Suno Voice
 - Operation ID: `refresh_suno_voice_api_v1_music_voices__voice_id__refresh_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1086,13 +1131,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/music/voices/{voice_id}/verify`
 
 - Summary: Verify Suno Voice
 - Operation ID: `verify_suno_voice_api_v1_music_voices__voice_id__verify_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_verify_suno_voice_api_v1_music_voices__voice_id__verify_post`
 
 Parameters:
@@ -1105,6 +1151,7 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/payment-methods`
@@ -1135,7 +1182,7 @@ Responses:
 
 - Summary: Miniapp Photo Prompt
 - Operation ID: `miniapp_photo_prompt_api_v1_photo_prompt_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_miniapp_photo_prompt_api_v1_photo_prompt_post`
 
 Generate prompt from uploaded photo for miniapp studio.
@@ -1149,6 +1196,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/plans`
@@ -1169,7 +1217,7 @@ Responses:
 
 - Summary: Miniapp Improve Prompt
 - Operation ID: `miniapp_improve_prompt_api_v1_prompt_improve_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `PromptImproveRequest`
 
 Return prompt unchanged; generation payloads must use user text verbatim.
@@ -1183,13 +1231,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/prompts`
 
 - Summary: List Prompts
 - Operation ID: `list_prompts_api_v1_prompts_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Prompt marketplace: catalog plus bot-like top/popular/collection sources.
@@ -1208,13 +1257,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/prompts`
 
 - Summary: Submit Prompt
 - Operation ID: `submit_prompt_api_v1_prompts_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `PromptSubmitRequest`
 
 Submit a new prompt for moderation.
@@ -1228,13 +1278,14 @@ Parameters:
 
 Responses:
 - `201`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/prompts/my`
 
 - Summary: My Prompts
 - Operation ID: `my_prompts_api_v1_prompts_my_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Prompts submitted by the current user, including moderation status.
@@ -1248,13 +1299,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/prompts/{prompt_id}`
 
 - Summary: Get Prompt
 - Operation ID: `get_prompt_api_v1_prompts__prompt_id__get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1267,13 +1319,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/prompts/{prompt_id}/deactivate`
 
 - Summary: Deactivate Prompt Web
 - Operation ID: `deactivate_prompt_web_api_v1_prompts__prompt_id__deactivate_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1286,13 +1339,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/prompts/{prompt_id}/like`
 
 - Summary: Like Prompt Web
 - Operation ID: `like_prompt_web_api_v1_prompts__prompt_id__like_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1305,13 +1359,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/prompts/{prompt_id}/link`
 
 - Summary: Get Prompt Share Link
 - Operation ID: `get_prompt_share_link_api_v1_prompts__prompt_id__link_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1324,13 +1379,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/prompts/{prompt_id}/use`
 
 - Summary: Use Prompt Web
 - Operation ID: `use_prompt_web_api_v1_prompts__prompt_id__use_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Mark a prompt as used when it is loaded into the web studio.
@@ -1345,6 +1401,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/public/feed/{gen_id}`
@@ -1394,7 +1451,7 @@ Responses:
 
 - Summary: Miniapp Referrals
 - Operation ID: `miniapp_referrals_api_v1_referrals_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1406,13 +1463,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/referrals/exchange`
 
 - Summary: Miniapp Exchange Referral Balance
 - Operation ID: `miniapp_exchange_referral_balance_api_v1_referrals_exchange_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ReferralExchangeRequestIn`
 
 Parameters:
@@ -1424,13 +1482,14 @@ Parameters:
 
 Responses:
 - `201`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/referrals/withdrawals`
 
 - Summary: Miniapp Create Referral Withdrawal
 - Operation ID: `miniapp_create_referral_withdrawal_api_v1_referrals_withdrawals_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ReferralWithdrawalRequestIn`
 
 Parameters:
@@ -1442,13 +1501,14 @@ Parameters:
 
 Responses:
 - `201`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/services/pinterest`
 
 - Summary: Get Pinterest Service
 - Operation ID: `get_pinterest_service_api_v1_services_pinterest_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1460,13 +1520,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/services/pinterest/run`
 
 - Summary: Run Pinterest Service
 - Operation ID: `run_pinterest_service_api_v1_services_pinterest_run_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `PinterestServiceRunRequest`
 
 Parameters:
@@ -1478,13 +1539,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/services/pinterest/upload`
 
 - Summary: Upload Pinterest Reference
 - Operation ID: `upload_pinterest_reference_api_v1_services_pinterest_upload_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_upload_pinterest_reference_api_v1_services_pinterest_upload_post`
 
 Parameters:
@@ -1496,13 +1558,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/settings/language`
 
 - Summary: Miniapp Set Language
 - Operation ID: `miniapp_set_language_api_v1_settings_language_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `LanguageRequest`
 
 Parameters:
@@ -1514,13 +1577,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/topup/crypto`
 
 - Summary: Topup Crypto
 - Operation ID: `topup_crypto_api_v1_topup_crypto_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Create a CryptoBot invoice. Returns `pay_url` to open in CryptoBot.
@@ -1534,13 +1598,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/topup/lava`
 
 - Summary: Topup Lava
 - Operation ID: `topup_lava_api_v1_topup_lava_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Create a Lava invoice. Returns `pay_url` to open checkout.
@@ -1554,13 +1619,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/topup/stars`
 
 - Summary: Topup Stars
 - Operation ID: `topup_stars_api_v1_topup_stars_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Create a Telegram Stars invoice link for the mini app.
@@ -1574,13 +1640,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/topup/tbank`
 
 - Summary: Topup Tbank
 - Operation ID: `topup_tbank_api_v1_topup_tbank_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Create a T-Bank payment invoice. Returns `pay_url` to redirect the user.
@@ -1594,13 +1661,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/topup/tribute`
 
 - Summary: Topup Tribute
 - Operation ID: `topup_tribute_api_v1_topup_tribute_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Return the fixed Tribute Digital Product checkout for a credit pack.
@@ -1614,13 +1682,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/video-prompt`
 
 - Summary: Miniapp Video Prompt
 - Operation ID: `miniapp_video_prompt_api_v1_video_prompt_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_miniapp_video_prompt_api_v1_video_prompt_post`
 
 Generate prompt from uploaded video for miniapp studio.
@@ -1634,6 +1703,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 ### trends
@@ -1642,7 +1712,7 @@ Responses:
 
 - Summary: Admin List Trends
 - Operation ID: `admin_list_trends_api_v1_admin_trends_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1654,13 +1724,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/admin/trends`
 
 - Summary: Admin Create Trend
 - Operation ID: `admin_create_trend_api_v1_admin_trends_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TrendCreateRequest`
 
 Parameters:
@@ -1672,13 +1744,15 @@ Parameters:
 
 Responses:
 - `201`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/admin/trends/upload`
 
 - Summary: Admin Upload Trend Preview
 - Operation ID: `admin_upload_trend_preview_api_v1_admin_trends_upload_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_admin_upload_trend_preview_api_v1_admin_trends_upload_post`
 
 Parameters:
@@ -1690,13 +1764,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/admin/trends/{trend_id}/archive`
 
 - Summary: Admin Archive Trend
 - Operation ID: `admin_archive_trend_api_v1_admin_trends__trend_id__archive_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1709,13 +1785,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/admin/trends/{trend_id}/update`
 
 - Summary: Admin Update Trend
 - Operation ID: `admin_update_trend_api_v1_admin_trends__trend_id__update_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TrendUpdateRequest`
 
 Parameters:
@@ -1728,13 +1806,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/trends`
 
 - Summary: List Trends
 - Operation ID: `list_trends_api_v1_trends_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1748,13 +1828,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/trends/upload`
 
 - Summary: Upload Trend Photo
 - Operation ID: `upload_trend_photo_api_v1_trends_upload_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_upload_trend_photo_api_v1_trends_upload_post`
 
 Parameters:
@@ -1766,13 +1847,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/trends/{trend_id}`
 
 - Summary: Get Trend
 - Operation ID: `get_trend_api_v1_trends__trend_id__get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1785,13 +1867,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/trends/{trend_id}/checkout`
 
 - Summary: Trend Checkout
 - Operation ID: `trend_checkout_api_v1_trends__trend_id__checkout_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1804,13 +1887,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/v1/trends/{trend_id}/link`
 
 - Summary: Trend Link
 - Operation ID: `trend_link_api_v1_trends__trend_id__link_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1823,13 +1907,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/trends/{trend_id}/prepare`
 
 - Summary: Prepare Trend
 - Operation ID: `prepare_trend_api_v1_trends__trend_id__prepare_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1842,13 +1927,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/v1/trends/{trend_id}/run`
 
 - Summary: Run Trend
 - Operation ID: `run_trend_api_v1_trends__trend_id__run_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TrendRunRequest`
 
 Parameters:
@@ -1861,6 +1947,7 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 ### web
@@ -1869,7 +1956,7 @@ Responses:
 
 - Summary: Admin Prompts
 - Operation ID: `admin_prompts_api_web_admin_prompts_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1883,13 +1970,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/admin/prompts/{prompt_id}/approve`
 
 - Summary: Admin Prompt Approve
 - Operation ID: `admin_prompt_approve_api_web_admin_prompts__prompt_id__approve_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1903,13 +1992,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/admin/prompts/{prompt_id}/deactivate`
 
 - Summary: Admin Prompt Deactivate
 - Operation ID: `admin_prompt_deactivate_api_web_admin_prompts__prompt_id__deactivate_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -1923,13 +2014,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/admin/prompts/{prompt_id}/reject`
 
 - Summary: Admin Prompt Reject
 - Operation ID: `admin_prompt_reject_api_web_admin_prompts__prompt_id__reject_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `PromptRejectRequest`
 
 Parameters:
@@ -1943,13 +2036,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/assistant`
 
 - Summary: Assistant Chat
 - Operation ID: `assistant_chat_api_web_assistant_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AssistantChatRequest`
 
 Parameters:
@@ -1962,6 +2057,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/auth/config`
@@ -2116,7 +2212,7 @@ Responses:
 
 - Summary: Topup Crypto
 - Operation ID: `topup_crypto_api_web_billing_topup_crypto_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Parameters:
@@ -2129,13 +2225,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/billing/topup/lava`
 
 - Summary: Topup Lava
 - Operation ID: `topup_lava_api_web_billing_topup_lava_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Parameters:
@@ -2148,13 +2245,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/billing/topup/stars`
 
 - Summary: Topup Stars
 - Operation ID: `topup_stars_api_web_billing_topup_stars_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Parameters:
@@ -2167,13 +2265,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/billing/topup/tbank`
 
 - Summary: Topup Tbank
 - Operation ID: `topup_tbank_api_web_billing_topup_tbank_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Parameters:
@@ -2186,13 +2285,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/billing/topup/tribute`
 
 - Summary: Topup Tribute
 - Operation ID: `topup_tribute_api_web_billing_topup_tribute_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `TopupRequest`
 
 Parameters:
@@ -2205,13 +2305,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/billing/transactions`
 
 - Summary: Billing Transactions
 - Operation ID: `billing_transactions_api_web_billing_transactions_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2225,6 +2326,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/feed`
@@ -2250,7 +2352,7 @@ Responses:
 
 - Summary: Publish Own Generation To Feed
 - Operation ID: `publish_own_generation_to_feed_api_web_feed_generations__generation_id__publish_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Publish any own ready image/video generation without exposing its prompt.
@@ -2270,6 +2372,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/feed/top`
@@ -2311,7 +2414,7 @@ Responses:
 
 - Summary: Feed Like
 - Operation ID: `feed_like_api_web_feed__generation_id__like_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2325,13 +2428,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/feed/{generation_id}/link`
 
 - Summary: Feed Share Link
 - Operation ID: `feed_share_link_api_web_feed__generation_id__link_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2345,13 +2449,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/feed/{generation_id}/remix`
 
 - Summary: Remix Feed Generation
 - Operation ID: `remix_feed_generation_api_web_feed__generation_id__remix_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `FeedRemixRequest`
 
 Parameters:
@@ -2365,13 +2470,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/feed/{generation_id}/remix/quote`
 
 - Summary: Quote Feed Generation
 - Operation ID: `quote_feed_generation_api_web_feed__generation_id__remix_quote_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `FeedRemixRequest`
 
 Parameters:
@@ -2385,13 +2491,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/feed/{generation_id}/remove`
 
 - Summary: Remove Feed Generation
 - Operation ID: `remove_feed_generation_api_web_feed__generation_id__remove_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2405,13 +2512,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/feed/{generation_id}/share`
 
 - Summary: Feed Share
 - Operation ID: `feed_share_api_web_feed__generation_id__share_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2425,13 +2533,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/generate/image`
 
 - Summary: Generate Image
 - Operation ID: `generate_image_api_web_generate_image_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ImageGenRequest`
 
 Parameters:
@@ -2444,13 +2553,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/generate/music`
 
 - Summary: Generate Music
 - Operation ID: `generate_music_api_web_generate_music_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `MusicGenRequest`
 
 Parameters:
@@ -2463,13 +2573,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/generate/video`
 
 - Summary: Generate Video
 - Operation ID: `generate_video_api_web_generate_video_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `VideoGenRequest`
 
 Parameters:
@@ -2482,13 +2593,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/generate/video/quote`
 
 - Summary: Quote Video
 - Operation ID: `quote_video_api_web_generate_video_quote_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `VideoGenRequest`
 
 Parameters:
@@ -2501,13 +2613,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/generations/active`
 
 - Summary: Active Generations
 - Operation ID: `active_generations_api_web_generations_active_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2520,13 +2633,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/generations/{generation_id}`
 
 - Summary: Generation Detail
 - Operation ID: `generation_detail_api_web_generations__generation_id__get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2540,13 +2654,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/generations/{generation_id}/download`
 
 - Summary: Generation Download
 - Operation ID: `generation_download_api_web_generations__generation_id__download_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2560,13 +2675,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/generations/{generation_id}/publish`
 
 - Summary: Publish Generation
 - Operation ID: `publish_generation_api_web_generations__generation_id__publish_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2580,13 +2696,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/generations/{generation_id}/remove-library`
 
 - Summary: Remove Generation From Library
 - Operation ID: `remove_generation_from_library_api_web_generations__generation_id__remove_library_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2600,13 +2717,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/generations/{generation_id}/share`
 
 - Summary: Share Generation
 - Operation ID: `share_generation_api_web_generations__generation_id__share_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2620,13 +2738,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/generations/{generation_id}/share-library`
 
 - Summary: Share Generation To Library
 - Operation ID: `share_generation_to_library_api_web_generations__generation_id__share_library_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2640,13 +2759,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/h3/upload-reference`
 
 - Summary: Upload H3 Reference
 - Operation ID: `upload_h3_reference_api_web_h3_upload_reference_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_upload_h3_reference_api_web_h3_upload_reference_post`
 
 Parameters:
@@ -2659,6 +2779,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/health`
@@ -2677,7 +2798,7 @@ Responses:
 
 - Summary: Help Text
 - Operation ID: `help_text_api_web_help_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2691,13 +2812,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/history`
 
 - Summary: History
 - Operation ID: `history_api_web_history_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2712,13 +2834,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/image-sessions`
 
 - Summary: Create Image Session
 - Operation ID: `create_image_session_api_web_image_sessions_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ImageSessionCreateRequest`
 
 Parameters:
@@ -2731,13 +2854,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/image-sessions/active`
 
 - Summary: Active Image Session
 - Operation ID: `active_image_session_api_web_image_sessions_active_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2750,13 +2874,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/image-sessions/{session_id}/archive`
 
 - Summary: Archive Image Session
 - Operation ID: `archive_image_session_api_web_image_sessions__session_id__archive_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2770,6 +2895,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/landing`
@@ -2788,7 +2914,7 @@ Responses:
 
 - Summary: Me
 - Operation ID: `me_api_web_me_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2801,13 +2927,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `PUT /api/web/me/password`
 
 - Summary: Update Password
 - Operation ID: `update_password_api_web_me_password_put`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `PasswordUpdateRequest`
 
 Parameters:
@@ -2820,13 +2947,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `PUT /api/web/me/profile`
 
 - Summary: Update Profile
 - Operation ID: `update_profile_api_web_me_profile_put`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ProfileUpdateRequest`
 
 Parameters:
@@ -2839,6 +2967,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/models`
@@ -2857,7 +2986,7 @@ Responses:
 
 - Summary: Image Models
 - Operation ID: `image_models_api_web_models_image_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2870,13 +2999,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/models/music`
 
 - Summary: Music Models
 - Operation ID: `music_models_api_web_models_music_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2889,13 +3019,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/models/video`
 
 - Summary: Video Models
 - Operation ID: `video_models_api_web_models_video_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2908,13 +3039,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/music/from-audio`
 
 - Summary: Generate From Source
 - Operation ID: `generate_from_source_api_web_music_from_audio_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `SunoSourceGenerationRequest`
 
 Parameters:
@@ -2927,13 +3059,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/music/source-audio`
 
 - Summary: Upload Source
 - Operation ID: `upload_source_api_web_music_source_audio_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_upload_source_api_web_music_source_audio_post`
 
 Parameters:
@@ -2946,13 +3079,14 @@ Parameters:
 
 Responses:
 - `201`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/music/voices`
 
 - Summary: Suno Voices
 - Operation ID: `suno_voices_api_web_music_voices_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -2965,13 +3099,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/music/voices`
 
 - Summary: Create Suno Voice
 - Operation ID: `create_suno_voice_api_web_music_voices_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_create_suno_voice_api_web_music_voices_post`
 
 Parameters:
@@ -2984,13 +3119,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/music/voices/{voice_id}/refresh`
 
 - Summary: Refresh Suno Voice
 - Operation ID: `refresh_suno_voice_api_web_music_voices__voice_id__refresh_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3004,13 +3140,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/music/voices/{voice_id}/verify`
 
 - Summary: Verify Suno Voice
 - Operation ID: `verify_suno_voice_api_web_music_voices__voice_id__verify_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_verify_suno_voice_api_web_music_voices__voice_id__verify_post`
 
 Parameters:
@@ -3024,13 +3161,14 @@ Parameters:
 
 Responses:
 - `202`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/photo-prompt`
 
 - Summary: Photo Prompt
 - Operation ID: `photo_prompt_api_web_photo_prompt_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_photo_prompt_api_web_photo_prompt_post`
 
 Parameters:
@@ -3043,6 +3181,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/price-plans`
@@ -3061,7 +3200,7 @@ Responses:
 
 - Summary: Improve Prompt
 - Operation ID: `improve_prompt_api_web_prompt_improve_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `PromptImproveRequest`
 
 Parameters:
@@ -3074,13 +3213,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/prompts`
 
 - Summary: Prompts
 - Operation ID: `prompts_api_web_prompts_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3104,7 +3244,7 @@ Responses:
 
 - Summary: Prompt Create
 - Operation ID: `prompt_create_api_web_prompts_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `PromptCreateRequest`
 
 Parameters:
@@ -3117,13 +3257,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/prompts/{prompt_id}`
 
 - Summary: Prompt Detail
 - Operation ID: `prompt_detail_api_web_prompts__prompt_id__get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3143,7 +3284,7 @@ Responses:
 
 - Summary: Prompt Like
 - Operation ID: `prompt_like_api_web_prompts__prompt_id__like_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3157,13 +3298,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/prompts/{prompt_id}/use`
 
 - Summary: Prompt Use
 - Operation ID: `prompt_use_api_web_prompts__prompt_id__use_post`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3177,13 +3319,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/referrals`
 
 - Summary: Referrals
 - Operation ID: `referrals_api_web_referrals_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3196,13 +3339,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/referrals/exchange`
 
 - Summary: Exchange Referral Balance
 - Operation ID: `exchange_referral_balance_api_web_referrals_exchange_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ReferralWithdrawalRequest`
 
 Parameters:
@@ -3215,13 +3359,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/referrals/withdrawals`
 
 - Summary: Create Referral Withdrawal
 - Operation ID: `create_referral_withdrawal_api_web_referrals_withdrawals_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ReferralWithdrawalRequest`
 
 Parameters:
@@ -3234,13 +3379,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/seedance25/upload-reference`
 
 - Summary: Upload Seedance25 Reference
 - Operation ID: `upload_seedance25_reference_api_web_seedance25_upload_reference_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_upload_seedance25_reference_api_web_seedance25_upload_reference_post`
 
 Parameters:
@@ -3253,13 +3399,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/settings/language`
 
 - Summary: Set Language
 - Operation ID: `set_language_api_web_settings_language_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `LanguageRequest`
 
 Parameters:
@@ -3272,13 +3419,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/upload-media`
 
 - Summary: Upload Media
 - Operation ID: `upload_media_api_web_upload_media_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_upload_media_api_web_upload_media_post`
 
 Parameters:
@@ -3291,13 +3439,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/upload-media/check`
 
 - Summary: Check Reference Availability
 - Operation ID: `check_reference_availability_api_web_upload_media_check_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ReferenceCheckRequest`
 
 Inspect a known public upload; never fetch external URLs or renew access.
@@ -3312,13 +3461,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/upload-media/policy`
 
 - Summary: Upload Media Policy
 - Operation ID: `upload_media_policy_api_web_upload_media_policy_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Read-only upload limits shared with the existing server validator.
@@ -3333,13 +3483,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/uploads/reference`
 
 - Summary: Upload Reference
 - Operation ID: `upload_reference_api_web_uploads_reference_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_upload_reference_api_web_uploads_reference_post`
 
 Parameters:
@@ -3352,13 +3503,14 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/video-prompt`
 
 - Summary: Video Prompt
 - Operation ID: `video_prompt_api_web_video_prompt_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `multipart/form-data`: `Body_video_prompt_api_web_video_prompt_post`
 
 Parameters:
@@ -3371,6 +3523,7 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
 ### web-admin
@@ -3379,7 +3532,7 @@ Responses:
 
 - Summary: Admin Get Feed Recipe Identity Policy
 - Operation ID: `admin_get_feed_recipe_identity_policy_api_web_admin_feed_recipe_identity_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3392,13 +3545,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `PUT /api/web/admin/feed-recipe-identity`
 
 - Summary: Admin Set Feed Recipe Identity Policy
 - Operation ID: `admin_set_feed_recipe_identity_policy_api_web_admin_feed_recipe_identity_put`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `FeedRecipeIdentityPolicyUpdate`
 
 Parameters:
@@ -3411,13 +3566,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/generations`
 
 - Summary: Admin Generations
 - Operation ID: `admin_generations_api_web_admin_generations_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3435,13 +3592,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/admin/generations/{generation_id}/fail`
 
 - Summary: Admin Fail Generation
 - Operation ID: `admin_fail_generation_api_web_admin_generations__generation_id__fail_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AdminGenerationFailRequest`
 
 Parameters:
@@ -3455,13 +3614,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/image-recovery/{provider}`
 
 - Summary: Admin Get Image Recovery Policy
 - Operation ID: `admin_get_image_recovery_policy_api_web_admin_image_recovery__provider__get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3475,13 +3636,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `PUT /api/web/admin/image-recovery/{provider}`
 
 - Summary: Admin Set Image Recovery Policy
 - Operation ID: `admin_set_image_recovery_policy_api_web_admin_image_recovery__provider__put`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `ImageRecoveryPolicyUpdate`
 
 Parameters:
@@ -3495,13 +3658,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `PUT /api/web/admin/images/refund-supplier-review/{gen_id}`
 
 - Summary: Admin Resolve Refunded Image Supplier Review
 - Operation ID: `admin_resolve_refunded_image_supplier_review_api_web_admin_images_refund_supplier_review__gen_id__put`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `SupplierReviewResolutionRequest`
 
 Parameters:
@@ -3515,13 +3680,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/images/refund-supplier-reviews`
 
 - Summary: Admin List Unsettled Image Supplier Reviews
 - Operation ID: `admin_list_unsettled_image_supplier_reviews_api_web_admin_images_refund_supplier_reviews_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3535,13 +3702,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/ledger`
 
 - Summary: Admin Ledger
 - Operation ID: `admin_ledger_api_web_admin_ledger_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3556,13 +3725,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `PATCH /api/web/admin/model-costs/{model_id}`
 
 - Summary: Admin Update Model Cost
 - Operation ID: `admin_update_model_cost_api_web_admin_model_costs__model_id__patch`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AdminModelCostUpdateRequest`
 
 Parameters:
@@ -3576,13 +3747,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/overview`
 
 - Summary: Admin Overview
 - Operation ID: `admin_overview_api_web_admin_overview_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3595,13 +3768,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `PATCH /api/web/admin/price-plans/{plan_id}`
 
 - Summary: Admin Update Price Plan
 - Operation ID: `admin_update_price_plan_api_web_admin_price_plans__plan_id__patch`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AdminPricePlanUpdateRequest`
 
 Parameters:
@@ -3615,13 +3790,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/pricing`
 
 - Summary: Admin Pricing
 - Operation ID: `admin_pricing_api_web_admin_pricing_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3636,13 +3813,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/provider-routing/nano-banana-2.1`
 
 - Summary: Admin Get Nano21 Provider
 - Operation ID: `admin_get_nano21_provider_api_web_admin_provider_routing_nano_banana_2_1_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3655,13 +3834,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `PUT /api/web/admin/provider-routing/nano-banana-2.1`
 
 - Summary: Admin Set Nano21 Provider
 - Operation ID: `admin_set_nano21_provider_api_web_admin_provider_routing_nano_banana_2_1_put`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `Nano21ProviderRoutingUpdate`
 
 Parameters:
@@ -3674,13 +3855,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/provider-routing/qwen38/{mode}`
 
 - Summary: Admin Get Qwen Route
 - Operation ID: `admin_get_qwen_route_api_web_admin_provider_routing_qwen38__mode__get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3694,13 +3877,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `PUT /api/web/admin/provider-routing/qwen38/{mode}`
 
 - Summary: Admin Set Qwen Route
 - Operation ID: `admin_set_qwen_route_api_web_admin_provider_routing_qwen38__mode__put`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `QwenProviderRoutingUpdate`
 
 Parameters:
@@ -3714,13 +3899,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `PUT /api/web/admin/seedance/refund-supplier-review/{gen_id}`
 
 - Summary: Admin Resolve Refunded Seedance Supplier Review
 - Operation ID: `admin_resolve_refunded_seedance_supplier_review_api_web_admin_seedance_refund_supplier_review__gen_id__put`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `SupplierReviewResolutionRequest`
 
 Parameters:
@@ -3734,13 +3921,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/seedance/refund-supplier-reviews`
 
 - Summary: Admin List Unsettled Seedance Supplier Reviews
 - Operation ID: `admin_list_unsettled_seedance_supplier_reviews_api_web_admin_seedance_refund_supplier_reviews_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3754,13 +3943,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/users`
 
 - Summary: Admin Users
 - Operation ID: `admin_users_api_web_admin_users_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3776,13 +3967,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/admin/users/{user_id}/ban`
 
 - Summary: Admin Set User Ban
 - Operation ID: `admin_set_user_ban_api_web_admin_users__user_id__ban_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AdminBanRequest`
 
 Parameters:
@@ -3796,13 +3989,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/admin/users/{user_id}/credits`
 
 - Summary: Admin Adjust User Credits
 - Operation ID: `admin_adjust_user_credits_api_web_admin_users__user_id__credits_post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AdminCreditAdjustmentRequest`
 
 Parameters:
@@ -3816,13 +4011,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `GET /api/web/admin/withdrawals`
 
 - Summary: Admin Withdrawals
 - Operation ID: `admin_withdrawals_api_web_admin_withdrawals_get`
-- Auth: not declared
+- Auth: yes
 - Request body: none
 
 Parameters:
@@ -3837,13 +4034,15 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
 #### `POST /api/web/admin/withdrawals/{request_id}`
 
 - Summary: Admin Review Withdrawal
 - Operation ID: `admin_review_withdrawal_api_web_admin_withdrawals__request_id__post`
-- Auth: not declared
+- Auth: yes
 - Request body: `application/json`: `AdminWithdrawalActionRequest`
 
 Parameters:
@@ -3857,4 +4056,6 @@ Parameters:
 
 Responses:
 - `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)

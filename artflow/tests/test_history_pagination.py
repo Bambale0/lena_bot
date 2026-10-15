@@ -8,8 +8,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import desc, select
 
-from api.miniapp_auth import get_miniapp_user
 from api import miniapp_routes
+from api.miniapp_auth import get_miniapp_user
 from db import repository
 from db.models import Generation
 from db.session import get_session

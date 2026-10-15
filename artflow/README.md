@@ -67,3 +67,5 @@ pytest -q tests/test_trend_run_reliability.py tests/test_payment_webhooks.py
 Changes reach `main` through a reviewed PR with native squash auto-merge. On a successful `main` CI run, Production Autodeploy builds the frontend, applies migrations and checks the public health endpoint. Do not manually rebuild or restart the production server for ordinary releases. See [Production autodeploy](docs/production-autodeploy.md) for the deploy and rollback contract.
 
 Secrets belong in the production `.env` and must not be committed. For configuration names and examples, use [.env.example](.env.example). The public health checks are `/health` and `/api/v1/health`.
+
+Audit follow-up: [verified fixes and explicitly open blockers](docs/audits/2026-10-16-remediation.md). The full pytest suite and payment findings are not closed by this release.
