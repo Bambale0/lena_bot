@@ -243,6 +243,14 @@ async def back_in_video(
     if current == VideoGenFSM.params_select.state:
         if await show_references(call, state, session):
             return
+    from api.seedance25_adapter import MODEL_KEY
+
+    if key == MODEL_KEY and not data.get("seedance_identity_transfer"):
+        # The normal Seedance 2.5 collector has NO explicit mode screen.
+        # Stale inline Back buttons may arrive in older FSM states and
+        # must never expose the legacy paid identity-transfer wizard.
+        await back_to_models(call, state, session)
+        return
     if data.get("feed_force_reference") or data.get("wizard_mode") or len(VIDEO_CAPS.get(key, {}).get("modes", [])) < 2:
         await back_to_models(call, state, session)
         return

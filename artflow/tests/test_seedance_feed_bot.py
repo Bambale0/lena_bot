@@ -134,6 +134,12 @@ async def test_seedance_feed_source_image_uses_multimodal_without_author_text(
         fixture.data["image_url"] = None
         _trust_prompt(fixture, build_feed_remix_prompt("", "make the coat blue", has_source_media=True))
     await fixture.run(operation)
+    if operation == "launch":
+        # Even text/photo feed replays require reviewed exact Seedance25
+        # credit cost before the first paid provider request.
+        fixture.repo.spend_credits.assert_not_awaited()
+        fixture.service.generate_video.assert_not_awaited()
+        await fixture.run("confirm_launch")
     submitted = fixture.service.generate_video.await_args
     assert submitted is not None
     assert SECRET not in submitted.args[1]

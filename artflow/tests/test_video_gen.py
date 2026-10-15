@@ -989,6 +989,9 @@ async def test_seedance_repeat_launch_sends_role_order_to_provider() -> None:
             bot=mock_bot,
             prompt="Keep the original person and scene.",
             parent_generation_id=777,
+            # A previously reviewed repeated edit already has an exact
+            # per-second checkout; this test only checks media role mapping.
+            preconfirmed_credits=50,
         )
 
     assert ok is True

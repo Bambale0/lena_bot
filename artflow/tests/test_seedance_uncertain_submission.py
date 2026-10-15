@@ -789,7 +789,13 @@ async def test_telegram_old_supplier_review_does_not_block_new_job(video_launch)
     video_launch.kwargs.update(source_feed_gen_id=None, hidden_feed_prompt=False)
     gate = AsyncMock(return_value=True)
     video_launch.repo._has_pending_refunded_seedance_review = gate
-    assert await video_gen._launch_video_generation_from_state(**video_launch.kwargs) is True
+    # The standard Seedance25 user must approve the exact amount first.
+    assert await video_gen._launch_video_generation_from_state(**video_launch.kwargs) is False
+    video_launch.repo.spend_credits.assert_not_awaited()
+    token = video_launch.data["video_reference_quote"]["token"]
+    assert await video_gen._launch_video_generation_from_state(
+        **video_launch.kwargs, price_confirmation_token=token,
+    ) is True
     gate.assert_not_awaited()
     video_launch.repo.spend_credits.assert_awaited()
     video_launch.repo.create_generation.assert_awaited()
