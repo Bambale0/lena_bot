@@ -10,7 +10,11 @@ import httpx
 
 from api.neironych_qwen38_service import NeironychQwen38Service, Qwen38ProviderError
 from core.config import settings
-from core.qwen_routing import get_qwen_route, is_definitive_provider_rejection
+from core.qwen_routing import (
+    check_kie_response_code,
+    get_qwen_route,
+    is_definitive_provider_rejection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +172,7 @@ async def _call_kie_chat(model: str, image_data_url: str) -> PhotoPromptResult:
         },
         payload,
     )
+    check_kie_response_code(data)
     return PhotoPromptResult(_extract_chat_text(data), "kie_chat", model)
 
 

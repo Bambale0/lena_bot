@@ -36,8 +36,13 @@ def extract_chat_text(data: Any) -> str:
         raise Qwen38ProviderError("filtered_or_truncated", ambiguous=True)
     message = choices[0].get("message")
     if not isinstance(message, dict) or message.get("refusal"):
-        raise Qwen38ProviderError("refused_or_invalid", ambiguous=False)
+        raise Qwen38ProviderError("refused_or_invalid", ambiguous=True)
     content = message.get("content")
+    if isinstance(content, list) and any(
+        isinstance(item, dict) and (item.get("type") == "refusal" or item.get("refusal"))
+        for item in content
+    ):
+        raise Qwen38ProviderError("refused_or_invalid", ambiguous=True)
     if isinstance(content, str):
         result = content.strip()
     elif isinstance(content, list):
@@ -156,7 +161,7 @@ class NeironychQwen38Service:
         instruction = str(user_instruction or "").strip()
         if not url or not instruction:
             raise ValueError("video_url and user_instruction are required")
-        sample_fps = float(settings.COMET_VIDEO_PROMPT_FPS if fps is None else fps)
+        sample_fps = float(2.0 if fps is None else fps)
         if not math.isfinite(sample_fps) or not 0.1 <= sample_fps <= 10:
             raise ValueError("Video prompt FPS must be between 0.1 and 10")
         messages: list[dict[str, Any]] = []

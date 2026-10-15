@@ -1,4 +1,4 @@
-"""Video-to-prompt routing through CometAPI/Qwen video understanding."""
+"""Video-to-prompt routing through verified video understanding contracts."""
 from __future__ import annotations
 
 import asyncio
@@ -57,7 +57,7 @@ class VideoPromptResult:
 def _video_prompt_chat_messages(video_url: str, *, fps: float | int | None = None) -> list[dict[str, Any]]:
     # Qwen OpenAI-compatible video inputs use fps beside video_url.
     # See Model Studio vision/video documentation; adapted from PR205.
-    sample_fps = float(settings.COMET_VIDEO_PROMPT_FPS if fps is None else fps)
+    sample_fps = float(2.0 if fps is None else fps)
     if not math.isfinite(sample_fps) or not 0.1 <= sample_fps <= 10:
         raise ValueError("Video prompt FPS must be between 0.1 and 10")
     video_payload: dict[str, Any] = {"url": video_url}
@@ -175,6 +175,8 @@ async def generate_prompt_from_video_url(
     clean_url = str(video_url or "").strip()
     if not clean_url:
         raise ValueError("Video URL is empty")
+    if fps is not None:
+        raise ValueError("FPS sampling is unavailable with the verified KIE video contract")
     route = await get_qwen_route("video")
     providers = [route.primary_provider]
     if route.backup_provider:

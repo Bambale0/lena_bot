@@ -22,6 +22,27 @@ DEFAULT_ROUTES: dict[QwenMode, tuple[QwenProvider, QwenProvider | None]] = {
 }
 
 
+class KieResponseRejected(RuntimeError):
+    """A completed KIE response with a definitive provider rejection code."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(f"KIE rejected request with code {code}")
+        self.code = code
+
+
+def check_kie_response_code(payload: dict) -> None:
+    code = payload.get("code")
+    if code in (None, 0, 200, "0", "200"):
+        return
+    try:
+        numeric = int(code)
+    except (TypeError, ValueError):
+        numeric = None
+    if numeric in {400, 401, 403, 404, 415, 422}:
+        raise KieResponseRejected(numeric)
+    raise RuntimeError("KIE response was rejected or malformed")
+
+
 @dataclass(frozen=True)
 class QwenRoute:
     mode: QwenMode
@@ -34,7 +55,8 @@ class QwenRoute:
 def is_definitive_provider_rejection(error: Exception) -> bool:
     """Only a completed 4xx rejection proves no ambiguous paid completion."""
     return (
-        isinstance(error, httpx.HTTPStatusError)
+        isinstance(error, KieResponseRejected)
+        or isinstance(error, httpx.HTTPStatusError)
         and error.response.status_code in {400, 401, 403, 404, 415, 422}
     )
 

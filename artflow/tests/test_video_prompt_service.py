@@ -194,7 +194,7 @@ async def test_generate_prompt_from_video_url_uses_verified_kie_video_contract(m
     fake_client = _FakeClient([_FakeResponse({"choices": [{"message": {"content": text}}]})])
     monkeypatch.setattr(video_prompt_service.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
 
-    result = await video_prompt_service.generate_prompt_from_video_url("https://cdn.example.test/video.mp4", fps=3)
+    result = await video_prompt_service.generate_prompt_from_video_url("https://cdn.example.test/video.mp4")
 
     assert result.text == text.strip()
     assert result.provider == "kie_chat"

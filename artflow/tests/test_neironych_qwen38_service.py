@@ -69,6 +69,11 @@ async def test_image_and_video_have_distinct_media_contracts_without_unverified_
     httpx.Response(200, json={"choices": [{"message": {"content": " "}}]}),
     httpx.Response(200, json={"choices": [{"finish_reason": "length", "message": {"content": "partial"}}]}),
     httpx.Response(200, text="not-json"),
+    httpx.Response(200, json={"choices": [{"message": {"refusal": "cannot assist"}}]}),
+    httpx.Response(200, json={"choices": [{"message": None}]}),
+    httpx.Response(200, json={"choices": [{"message": {"content": [
+        {"type": "text", "text": "partial"}, {"type": "refusal", "text": "cannot assist"},
+    ]}}]}),
 ])
 async def test_empty_or_invalid_response_is_never_success(response) -> None:
     with pytest.raises(Qwen38ProviderError) as caught:

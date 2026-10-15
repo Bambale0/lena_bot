@@ -6,8 +6,12 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+from api import llm_provider_service as llm
+from api import photo_prompt_service
 from api.web import admin as web_admin
 from core.qwen_routing import (
+    KieResponseRejected,
+    check_kie_response_code,
     get_qwen_route,
     is_definitive_provider_rejection,
     set_qwen_route,
@@ -46,6 +50,32 @@ def test_only_definitive_kie_rejection_allows_reverse_fallback() -> None:
         response = httpx.Response(status, request=request)
         assert is_definitive_provider_rejection(httpx.HTTPStatusError("rejected", request=request, response=response)) is expected
     assert is_definitive_provider_rejection(httpx.ReadTimeout("timeout")) is False
+    for code in (400, 401, 403, 404, 415, 422, "401"):
+        with pytest.raises(KieResponseRejected) as caught:
+            check_kie_response_code({"code": code, "msg": "private provider response"})
+        assert is_definitive_provider_rejection(caught.value)
+        assert "private provider response" not in str(caught.value)
+    with pytest.raises(RuntimeError) as caught:
+        check_kie_response_code({"code": 429, "msg": "uncertain"})
+    assert not is_definitive_provider_rejection(caught.value)
+
+
+def test_kie_http_200_rejection_envelope_survives_assistant_extractor() -> None:
+    route = llm.LLMRoute(llm.LLMProvider.KIE_RESPONSES, "gpt-5-4")
+    with pytest.raises(KieResponseRejected) as caught:
+        llm._extract_responses_result({"code": 401, "msg": "private detail"}, route)
+    assert caught.value.code == 401
+    assert "private detail" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_kie_http_200_rejection_envelope_survives_photo_call(monkeypatch) -> None:
+    monkeypatch.setattr(photo_prompt_service, "_post_json", AsyncMock(return_value={
+        "code": 422, "msg": "private detail",
+    }))
+    with pytest.raises(KieResponseRejected) as caught:
+        await photo_prompt_service._call_kie_chat("gpt-5-2", "data:image/png;base64,YQ==")
+    assert caught.value.code == 422
 
 
 @pytest.mark.asyncio
