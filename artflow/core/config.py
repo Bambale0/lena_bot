@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # Neironych API — Seedance 2.0/2.5 production provider + admin lab
     NEIRONYCH_API_KEY: str = ""
     NEIRONYCH_API_BASE_URL: str = "https://api.xn--e1aikcel5c5a.online"
+    # Wan 3.0: populate ONLY with confirmed IDs from this partner's GET /v1/models.
+    # Empty means no paid probe to an unavailable model: route directly to KIE backup.
+    WAN30_NEIRONYCH_MODEL_ID: str = ""
+    WAN30_PRIME_NEIRONYCH_MODEL_ID: str = ""
     NEIRONYCH_HTTP_TIMEOUT_SECONDS: float = 120.0
     # Nano Banana 2.1: Neironych synchronous primary, Nexus async fallback.
     NANO_BANANA_21_PRIMARY_PROVIDER: Literal["neironych", "nexus"] = "neironych"
