@@ -160,10 +160,11 @@ async def test_telegram_video_prompt_does_not_charge_while_file_is_downloading(m
     message = AsyncMock()
     message.answer.return_value = AsyncMock()
     state = AsyncMock()
+    session = AsyncMock()
     task = asyncio.create_task(telegram_video_prompt._analyse_video(
         message=message,
         state=state,
-        session=AsyncMock(),
+        session=session,
         db_user=SimpleNamespace(id=42, credits=100.0),
         bot=bot,
         file_id="file-id",
@@ -172,6 +173,8 @@ async def test_telegram_video_prompt_does_not_charge_while_file_is_downloading(m
     ))
     try:
         await asyncio.wait_for(started.wait(), timeout=1)
+        session.commit.assert_awaited_once()
+        telegram_video_prompt.repo.get_model_cost.assert_not_awaited()
         spend.assert_not_awaited()
     finally:
         release.set()

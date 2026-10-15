@@ -120,23 +120,22 @@ async def _analyse_video(
         await message.answer("Пришли видео MP4, MOV или WebM.", reply_markup=_cancel_kb())
         return
 
-    model_cost = await _video_prompt_cost(session)
-    if model_cost is None:
-        await message.answer("❌ Цена функции не настроена. Напиши администратору.", reply_markup=_cancel_kb())
-        return
-    credits = float(model_cost.credits or 0)
-    if credits <= 0:
-        await message.answer("❌ Цена функции не настроена. Напиши администратору.", reply_markup=_cancel_kb())
-        return
-
     wait_msg = await message.answer("⏳ Анализирую видео, движение и камеру…")
     try:
+        # AuthMiddleware may have opened a read transaction. Release its DB
+        # connection while Telegram streams a video over the network.
+        await session.commit()
         raw = await _download_telegram_file(bot, file_id)
         if len(raw) > _MAX_VIDEO_BYTES:
             await wait_msg.edit_text("Файл слишком большой. Telegram-бот может скачать максимум 20 МБ.", reply_markup=_cancel_kb())
             return
         if not is_supported_video_prompt_video(raw, mime_type):
             await wait_msg.edit_text("Пришли настоящее видео MP4, MOV или WebM.", reply_markup=_cancel_kb())
+            return
+        model_cost = await _video_prompt_cost(session)
+        credits = float(model_cost.credits or 0) if model_cost is not None else 0
+        if credits <= 0:
+            await wait_msg.edit_text("❌ Цена функции не настроена. Напиши администратору.", reply_markup=_cancel_kb())
             return
         source_id = f"telegram-video:{file_id[:48]}"
         spent = await repo.spend_credits(
