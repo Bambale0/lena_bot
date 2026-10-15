@@ -67,7 +67,7 @@ from api.video_prompt_limits import (
     validate_video_prompt,
     video_prompt_max_chars,
 )
-from api.video_reference_billing import measured_video_seconds
+from api.video_reference_billing import VideoSeconds, measured_video_seconds
 from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_service import VideoModel
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
@@ -404,6 +404,17 @@ def _video_total_credits(model_key: str, duration: int, rate_or_flat: float) -> 
     if _is_per_second_video_model(model_key):
         return round(rate_or_flat * duration, 6)
     return round(rate_or_flat, 6)
+
+
+def _requires_video_price_confirmation(
+    model_key: str, seconds: VideoSeconds, confirmation_token: str | None,
+) -> bool:
+    """Ordinary Seedance 2.5 needs a visible price confirmation before debit."""
+    return bool(
+        model_key == SEEDANCE25_MODEL_KEY
+        or seconds.reference_count
+        or confirmation_token is not None
+    )
 
 
 def _video_price_text(model_key: str, duration: int, rate_or_flat: float) -> str:
@@ -2484,6 +2495,7 @@ async def _show_video_cost_quote(
     source_message: Message, state: FSMContext, *, state_key: str,
     user_id: int, fingerprint: str, duration: int, credits: float,
     callback_prefix: str, context: dict, reference_seconds: int = 0,
+    resolution: str | None = None,
 ) -> None:
     token = secrets.token_hex(8)
     credits_text = f"{credits:.6f}".rstrip("0").rstrip(".")
@@ -2496,6 +2508,7 @@ async def _show_video_cost_quote(
     )
     await source_message.answer(
         "🎬 <b>Проверь стоимость видео</b>\n\n"
+        + (f"Качество: <b>{escape(resolution)}</b>.\n" if resolution else "")
         + duration_text
         + f"Итого: <b>{credits_text} 💋</b>.\n\n"
         "Параметры уточнены. Подтверди запуск по этой цене.",
@@ -2916,7 +2929,9 @@ async def _launch_video_generation_from_state(
             billing_total_seconds=billing_seconds.billable,
             billing_rate=float(rate_or_flat),
         )
-        if (billing_seconds.reference_count or price_confirmation_token is not None) and preconfirmed_credits != credits:
+        if (_requires_video_price_confirmation(
+            model_key, billing_seconds, price_confirmation_token,
+        ) and preconfirmed_credits != credits):
             # Every feed-source edit needs a measured quote, even after a previous
             # preflight updated FSM duration. Pressing Next again is not consent.
             fingerprint = hashlib.sha256(json.dumps({
@@ -2933,6 +2948,7 @@ async def _launch_video_generation_from_state(
                     source_message, state, state_key=quote_key, user_id=db_user.id,
                     fingerprint=fingerprint, duration=duration, credits=credits,
                     reference_seconds=billing_seconds.references,
+                    resolution=resolution,
                     callback_prefix="feed_video_confirm:" if source_feed_gen_id else "video_price_confirm:", context={
                         "source_feed_gen_id": source_feed_gen_id, "parent_generation_id": parent_generation_id,
                         "model_key": model_key, "prompt": prompt,
@@ -3800,6 +3816,7 @@ async def cb_regen_video(
                 call.message, state, state_key="video_regen_quote", user_id=db_user.id,
                 fingerprint=fingerprint, duration=duration, credits=credits,
                 reference_seconds=billing_seconds.references,
+                resolution=resolution,
                 callback_prefix=f"regen:video:{gen_id}:", context={"generation_id": gen_id},
             )
             await safe_answer_callback(call)

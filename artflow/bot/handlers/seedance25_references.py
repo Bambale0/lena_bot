@@ -256,6 +256,22 @@ async def _enter_seedance25_flow(
         audio_ids=[],
         character_ids=[],
         grok_mode=None,
+        # Start a normal auto-routed generation, never inherit a previous
+        # explicit identity edit/Genjutsu/series state from an old Telegram
+        # message or FSM draft. These flags alter both provider mode and cost.
+        seedance_identity_transfer=False,
+        seedance_identity_step=None,
+        seedance_video_edit=False,
+        seedance_repeat_editor=False,
+        seedance_repeat_source_video_url=None,
+        seedance_reference_roles=None,
+        seedance_content_edit=None,
+        flow_id=None,
+        video_review_edit=False,
+        review_prompt=None,
+        video_reference_quote=None,
+        video_feed_quote=None,
+        video_regen_quote=None,
         payment_return_callback=None,
         payment_return_label=None,
         payment_required_credits=None,

@@ -178,3 +178,70 @@ async def test_back_from_feed_ref_collector_preserves_feed_context(state, provid
     charge, post = provider
     charge.assert_not_awaited()
     post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_seedance25_normal_entry_discards_old_identity_and_edit_flags(state, provider):
+    await dispatch("vid_wizard:advanced", state)
+    await state.update_data(
+        seedance_identity_transfer=True,
+        seedance_identity_step="video",
+        seedance_video_edit=True,
+        seedance_repeat_editor=True,
+        flow_id="genjutsu_face_clothing",
+        seedance_content_edit={"scene": "old"},
+        seedance_reference_roles=["old-role"],
+        video_review_edit=True,
+        review_prompt="Old expensive identity edit",
+        video_reference_quote={"token": "old"},
+        video_feed_quote={"token": "old"},
+        duration=15, resolution="1080p",
+        reference_video_url="https://example.test/old.mp4",
+    )
+    result = await dispatch(f"vid_model:{MODEL_KEY}", state)
+    saved = await state.get_data()
+    assert await state.get_state() == VideoGenFSM.seedance25_reference_upload.state
+    assert saved["duration"] == 5
+    assert saved["resolution"] == "720p"
+    assert saved.get("seedance_identity_transfer") is False
+    assert saved.get("seedance_identity_step") is None
+    assert saved.get("seedance_video_edit") is False
+    assert saved.get("seedance_repeat_editor") is False
+    assert saved.get("flow_id") is None
+    assert saved.get("seedance_reference_roles") is None
+    assert saved.get("seedance_content_edit") is None
+    assert saved.get("video_review_edit") is False
+    assert saved.get("review_prompt") is None
+    assert saved.get("video_reference_quote") is None
+    assert saved.get("video_feed_quote") is None
+    assert saved["reference_video_url"] is None
+    assert "Замена персонажа" not in result.message.edit_text.await_args.args[0]
+
+    await dispatch("s25ref:done", state)
+    updated = await state.get_data()
+    assert updated["mode"] == "text"
+    assert updated["seedance_identity_transfer"] is False
+    markup = video_gen._video_params_reply_markup(MODEL_KEY, updated)
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert any("сек" in label for label in labels), "Ordinary durations cannot be hidden by an old edit flag"
+    charge, post = provider
+    charge.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("old_state", [VideoGenFSM.image_upload, VideoGenFSM.mode_select])
+async def test_seedance25_old_back_always_skips_identity_picker(state, provider, old_state):
+    await state.set_state(old_state)
+    await state.update_data(
+        model_key=MODEL_KEY, mode="image",
+        video_model_menu="vid_wizard:advanced",
+        seedance_identity_transfer=False,
+    )
+    returned = await dispatch("vid_nav:back", state)
+    assert await state.get_state() == VideoGenFSM.model_select.state
+    assert "Все видео-модели" in returned.message.edit_text.await_args.args[0]
+    assert not any(v.startswith("vid_mode:") for v in callbacks(returned))
+    charge, post = provider
+    charge.assert_not_awaited()
+    post.assert_not_awaited()
