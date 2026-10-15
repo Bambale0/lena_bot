@@ -55,6 +55,33 @@ def test_generation_event_payload_hides_feed_derivative_prompt() -> None:
     assert payload["prompt_actions_allowed"] is False
 
 
+def test_generation_event_replaces_nexus_boilerplate() -> None:
+    provider_error = (
+        "⚠️ Не удалось сгенерировать контент. Попробуйте изменить параметры "
+        "(сид, промпт) и повторить попытку."
+    )
+    payload = realtime.generation_event_payload(_gen(
+        model="nano-banana-pro",
+        status=GenerationStatus.failed,
+        error_msg=provider_error,
+    ))
+
+    assert "Генератор завершил задачу с ошибкой" in payload["error"]
+    assert "сид" not in payload["error"]
+    assert "промпт" not in payload["error"]
+
+
+def test_generation_event_still_hides_protected_error_details() -> None:
+    payload = realtime.generation_event_payload(_gen(
+        source_feed_gen_id=12,
+        status=GenerationStatus.failed,
+        error_msg="Rejected private creator prompt: secret-scene",
+    ))
+
+    assert "secret-scene" not in payload["error"]
+    assert "обратитесь в поддержку" in payload["error"]
+
+
 @pytest.mark.asyncio
 async def test_connection_manager_sends_only_to_target_user() -> None:
     manager = realtime.GenerationConnectionManager()
