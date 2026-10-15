@@ -38,7 +38,7 @@ https://docs.kie.ai/market/wan/3-0-video-prime
 | Wan 3.0 | 6 | 12 | 24 |
 | Wan 3.0 Prime | 9 | 18 | 36 |
 
-Migration 042 adds only missing rows and does not overwrite custom
+Migration 043 adds only missing rows and does not overwrite custom
 admin tariffs. Exact active resolution row is mandatory; there is no
 silent fallback to an inactive or cheaper base tariff.
 

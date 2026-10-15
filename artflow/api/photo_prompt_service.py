@@ -8,7 +8,13 @@ from typing import Any
 
 import httpx
 
+from api.neironych_qwen38_service import NeironychQwen38Service, Qwen38ProviderError
 from core.config import settings
+from core.qwen_routing import (
+    check_kie_response_code,
+    get_qwen_route,
+    is_definitive_provider_rejection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +104,8 @@ def _extract_chat_text(payload: Any) -> str:
             text = "\n".join(
                 str(item.get("text") or "").strip()
                 for item in content
-                if isinstance(item, dict) and item.get("text")
+                if isinstance(item, dict) and item.get("type") in {"text", "output_text"}
+                and item.get("text")
             ).strip()
             if text:
                 return text
@@ -165,6 +172,7 @@ async def _call_kie_chat(model: str, image_data_url: str) -> PhotoPromptResult:
         },
         payload,
     )
+    check_kie_response_code(data)
     return PhotoPromptResult(_extract_chat_text(data), "kie_chat", model)
 
 
@@ -237,39 +245,41 @@ async def generate_prompt_from_photo_result(
 ) -> PhotoPromptResult:
     image_bytes, mime_type = _validate_image(image_bytes, mime_type)
     image_data_url = _image_data_url(image_bytes, mime_type)
-    errors: list[str] = []
-
-    for model in (
-        getattr(settings, "KIE_PHOTO_PROMPT_MODEL", ""),
-        getattr(settings, "KIE_PHOTO_PROMPT_FALLBACK", ""),
-    ):
-        model_name = str(model or "").strip()
-        if not model_name:
-            continue
+    route = await get_qwen_route("image")
+    providers = [route.primary_provider]
+    if route.backup_provider:
+        providers.append(route.backup_provider)
+    last_error: Exception | None = None
+    for provider in providers:
         try:
-            result = await _call_kie_model(model_name, image_data_url)
-            logger.info(
-                "photo_prompt generated via provider=%s model=%s",
-                result.provider,
-                result.model,
-            )
+            if provider == "neironych":
+                text = await NeironychQwen38Service().analyze_image(
+                    image_url=image_data_url, user_instruction=_PHOTO_PROMPT_REQUEST_TEXT,
+                    system_prompt=_SYSTEM_PROMPT,
+                )
+                if len(text.strip()) < 20:
+                    raise Qwen38ProviderError("unusable_photo_prompt", ambiguous=True)
+                result = PhotoPromptResult(text.strip(), "neironych", settings.NEIRONYCH_QWEN38_MODEL)
+            else:
+                model = str(settings.KIE_PHOTO_PROMPT_MODEL).strip()
+                if model != "gpt-5-2":
+                    raise RuntimeError("Unverified KIE photo fallback model")
+                # This verified chat route is a single paid call. The older
+                # Responses-to-Chat helper can make an ambiguous second call.
+                result = await _call_kie_chat(model, image_data_url)
+                if len(result.text.strip()) < 20:
+                    raise RuntimeError("KIE returned no usable photo prompt")
+            logger.info("photo_prompt generated via provider=%s model=%s", result.provider, result.model)
             return result
+        except Qwen38ProviderError as exc:
+            last_error = exc
+            if exc.ambiguous:
+                raise RuntimeError("Фото обработано с неопределённым исходом; повторный платный запрос остановлен") from exc
         except Exception as exc:
-            errors.append(f"kie/{model_name}: {exc}")
-
-    for model in _comet_models():
-        try:
-            result = await _call_comet(model, image_data_url)
-            logger.info(
-                "photo_prompt generated via provider=%s model=%s",
-                result.provider,
-                result.model,
-            )
-            return result
-        except Exception as exc:
-            errors.append(f"comet/{model}: {exc}")
-
-    raise RuntimeError("Photo prompt models failed: " + " | ".join(errors))
+            last_error = exc
+            if not is_definitive_provider_rejection(exc):
+                break
+    raise RuntimeError("Не удалось создать промпт по фото") from last_error
 
 
 async def generate_prompt_from_photo(

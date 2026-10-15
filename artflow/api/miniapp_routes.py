@@ -2604,7 +2604,7 @@ async def miniapp_video_prompt(
             note=f"Video prompt refund: {type(e).__name__}",
         )
         logger.exception("miniapp video prompt error user=%s: %s", user.id, e)
-        raise HTTPException(status_code=502, detail=f"Video prompt failed: {e}")
+        raise HTTPException(status_code=502, detail="Не удалось разобрать видео. Кредиты возвращены; попробуй другой файл.") from e
     finally:
         if video_url and not await asyncio.to_thread(delete_public_file, video_url):
             logger.warning("miniapp video prompt temporary file cleanup failed user=%s", user.id)

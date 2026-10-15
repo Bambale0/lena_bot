@@ -1,15 +1,15 @@
 """Add Wan3 and Prime APIX retail rates (credit / billed second).
 
-Revision ID: 042_wan30_pricing
-Revises: 041_feed_photo1_identity_default
+Revision ID: 043_wan30_pricing
+Revises: 042_qwen_routing
 """
 from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "042_wan30_pricing"
-down_revision = "041_feed_photo1_identity_default"
+revision = "043_wan30_pricing"
+down_revision = "042_qwen_routing"
 branch_labels = None
 depends_on = None
 

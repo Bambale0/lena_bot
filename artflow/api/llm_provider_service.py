@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from core.qwen_routing import check_kie_response_code
+
 
 class LLMProvider(StrEnum):
     KIE_RESPONSES = "kie_responses"
@@ -265,8 +267,7 @@ def build_kie_claude_payload(model: str, request: LLMRequest) -> dict[str, Any]:
 
 
 def _extract_responses_result(payload: dict[str, Any], route: LLMRoute) -> LLMResult:
-    if payload.get("code") not in (None, 0, 200, "0", "200"):
-        raise RuntimeError(f"KIE Responses error: {payload!r}")
+    check_kie_response_code(payload)
     text_parts: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     for item in payload.get("output") or []:
@@ -287,6 +288,8 @@ def _extract_responses_result(payload: dict[str, Any], route: LLMRoute) -> LLMRe
 
 
 def _extract_chat_result(payload: dict[str, Any], route: LLMRoute) -> LLMResult:
+    if route.provider == LLMProvider.KIE_RESPONSES:
+        check_kie_response_code(payload)
     if payload.get("code") not in (None, 0, 200, "0", "200"):
         raise RuntimeError(f"Comet Chat error: {payload!r}")
     choices = payload.get("choices") or []

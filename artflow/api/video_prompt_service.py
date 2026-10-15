@@ -1,4 +1,4 @@
-"""Video-to-prompt routing through CometAPI/Qwen video understanding."""
+"""Video-to-prompt routing through verified video understanding contracts."""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +9,9 @@ from typing import Any
 
 import httpx
 
+from api.neironych_qwen38_service import NeironychQwen38Service, Qwen38ProviderError
 from core.config import settings
+from core.qwen_routing import get_qwen_route
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +57,7 @@ class VideoPromptResult:
 def _video_prompt_chat_messages(video_url: str, *, fps: float | int | None = None) -> list[dict[str, Any]]:
     # Qwen OpenAI-compatible video inputs use fps beside video_url.
     # See Model Studio vision/video documentation; adapted from PR205.
-    sample_fps = float(settings.COMET_VIDEO_PROMPT_FPS if fps is None else fps)
+    sample_fps = float(2.0 if fps is None else fps)
     if not math.isfinite(sample_fps) or not 0.1 <= sample_fps <= 10:
         raise ValueError("Video prompt FPS must be between 0.1 and 10")
     video_payload: dict[str, Any] = {"url": video_url}
@@ -125,7 +127,8 @@ def _extract_chat_text(payload: Any) -> str:
             text = "\n".join(
                 item["text"].strip()
                 for item in content
-                if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"]
+                if isinstance(item, dict) and item.get("type") in {"text", "output_text"}
+                and isinstance(item.get("text"), str) and item["text"]
             ).strip()
             if text:
                 return _validated_prompt_text(text)
@@ -172,21 +175,47 @@ async def generate_prompt_from_video_url(
     clean_url = str(video_url or "").strip()
     if not clean_url:
         raise ValueError("Video URL is empty")
-    model = _comet_video_prompt_model()
-    payload = {
-        "model": model,
-        "messages": _video_prompt_chat_messages(clean_url, fps=fps),
-        "max_completion_tokens": 4096,
-        "stream": False,
-    }
-    data = await _post_json(
-        f"{str(settings.COMET_BASE_URL).rstrip('/')}/v1/chat/completions",
-        {
-            "Authorization": f"Bearer {settings.COMET_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        payload,
-    )
-    result = VideoPromptResult(_extract_chat_text(data), "comet_chat", model)
-    logger.info("video_prompt generated via provider=%s model=%s", result.provider, result.model)
-    return result
+    if fps is not None:
+        raise ValueError("FPS sampling is unavailable with the verified KIE video contract")
+    route = await get_qwen_route("video")
+    providers = [route.primary_provider]
+    if route.backup_provider:
+        providers.append(route.backup_provider)
+    last_error: Exception | None = None
+    for provider in providers:
+        try:
+            if provider == "neironych":
+                text = await NeironychQwen38Service().analyze_video(
+                    video_url=clean_url, user_instruction=_VIDEO_PROMPT_REQUEST_TEXT,
+                    system_prompt=_VIDEO_SYSTEM_PROMPT, fps=fps,
+                )
+                if len(text.strip()) < 100:
+                    raise Qwen38ProviderError("unusable_video_prompt", ambiguous=True)
+                result = VideoPromptResult(text, "neironych", settings.NEIRONYCH_QWEN38_MODEL)
+            else:
+                model = str(settings.KIE_VIDEO_PROMPT_MODEL).strip()
+                if model != "gemini-3.1-pro":
+                    raise VideoPromptProviderError("Unverified KIE video model")
+                payload = {"messages": [{"role": "user", "content": [
+                    {"type": "text", "text": _VIDEO_SYSTEM_PROMPT + "\n\n" + _VIDEO_PROMPT_REQUEST_TEXT},
+                    {"type": "image_url", "image_url": {"url": clean_url}},
+                ]}], "stream": False, "include_thoughts": False, "reasoning_effort": "high"}
+                data = await _post_json(
+                    "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions",
+                    {"Authorization": f"Bearer {settings.KIE_AI_KEY}"}, payload,
+                )
+                result = VideoPromptResult(_extract_chat_text(data), "kie_chat", model)
+                if len(result.text.strip()) < 100:
+                    raise VideoPromptProviderError("Video provider returned no usable scene analysis")
+            logger.info("video_prompt generated via provider=%s model=%s", result.provider, result.model)
+            return result
+        except Qwen38ProviderError as exc:
+            last_error = exc
+            if exc.ambiguous:
+                raise VideoPromptProviderError("Video provider outcome is uncertain; no automatic paid retry") from exc
+        except VideoPromptProviderError:
+            raise
+        except Exception as exc:
+            last_error = exc
+            break
+    raise VideoPromptProviderError("Video analysis unavailable") from last_error

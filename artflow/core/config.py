@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     WAN30_NEIRONYCH_MODEL_ID: str = ""
     WAN30_PRIME_NEIRONYCH_MODEL_ID: str = ""
     NEIRONYCH_HTTP_TIMEOUT_SECONDS: float = 120.0
+    NEIRONYCH_QWEN38_MODEL: str = "qwen3.8-max"
+    NEIRONYCH_QWEN38_TIMEOUT_SECONDS: float = Field(default=90.0, ge=1.0, le=180.0)
+    KIE_VIDEO_PROMPT_MODEL: str = "gemini-3.1-pro"
     # Nano Banana 2.1: Neironych synchronous primary, Nexus async fallback.
     NANO_BANANA_21_PRIMARY_PROVIDER: Literal["neironych", "nexus"] = "neironych"
     # Keep below APIX's current nginx proxy_read_timeout (120s); this is a paid synchronous POST.
@@ -187,7 +190,6 @@ class Settings(BaseSettings):
     COMET_ASSISTANT_MODEL: str = "gpt-5.4"
     COMET_ASSISTANT_FALLBACK: str = "gpt-5.4-mini"
     COMET_VIDEO_PROMPT_MODEL: str = "qwen3.8-max"
-    COMET_VIDEO_PROMPT_FPS: float = Field(default=2.0, ge=0.1, le=10.0)
     TELEGRAM_VIDEO_PROMPT_DOWNLOAD_TIMEOUT_SECONDS: int = Field(default=180, ge=30, le=300)
 
     # Feature flags
