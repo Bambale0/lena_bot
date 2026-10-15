@@ -7,7 +7,13 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
-from api import image_http_failure, miniapp_routes, neironych_image_adapter, nexus_image_adapter
+from api import (
+    image_http_failure,
+    miniapp_routes,
+    neironych_image_adapter,
+    nexus_image_adapter,
+    video_reference_billing,
+)
 from api.video_reference_billing import VideoSeconds
 from bot.handlers import image_gen, video_gen
 from bot.utils.feed_media import feed_source_output_id
@@ -367,6 +373,9 @@ def video_launch(monkeypatch):
     monkeypatch.setattr(video_gen, "video_service", service)
     monkeypatch.setattr(video_gen, "_video_reference_image_url", AsyncMock(return_value=USER_IMAGE))
     async def measured_fixture_seconds(params, *, per_second):
+        urls = video_reference_billing.reference_video_urls(params)
+        if urls and video_reference_billing.local_upload_path_from_url(urls[0]) is not None:
+            return await video_reference_billing.measured_video_seconds(params, per_second=per_second)
         output = int(params["duration"])
         reference_count = int(bool(params.get("reference_video_url")))
         references = 5 if reference_count else 0
