@@ -620,7 +620,8 @@ def generation_public_error(generation, *, error_override: str | None = None) ->
         "⚠️ не удалось сгенерировать контент. попробуйте изменить параметры "
         "(сид, промпт) и повторить попытку."
     )
-    if str(getattr(generation, "task_id", "") or "").startswith("nexus:") and normalized == generic_nexus_error:
+    task_id = str(getattr(generation, "task_id", "") or "").removeprefix("web:")
+    if task_id.startswith("nexus:") and normalized == generic_nexus_error:
         return (
             "Генератор завершил задачу с ошибкой и не сообщил причину. "
             "Можно повторить запрос позже или выбрать другую модель."
