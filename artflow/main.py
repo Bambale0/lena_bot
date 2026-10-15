@@ -1855,7 +1855,7 @@ async def kie_webhook(
                 try:
                     if provider == "nexus" and gen.gen_type == GenerationType.image:
                         public_error = generation_public_error(gen, error_override=err) or "Ошибка генератора."
-                        notice = "❌ <b>Изображение не создано.</b>\n\n" + escape(public_error)
+                        notice = "❌ <b>Изображение не создано.</b>\n\n" + escape(public_error[:500])
                         if refunded > 0:
                             amount = f"{refunded:g}".replace(".", ",")
                             notice += f"\n\n{amount} 💋 вернулись на баланс."
