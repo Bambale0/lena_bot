@@ -938,13 +938,30 @@ async def _video_repeat_params_for_generation(session: AsyncSession, prev) -> di
     if str(getattr(prev, "model", "")) in WAN30_MODELS and isinstance(wan, dict) and wan.get("model") == prev.model:
         images = _url_list(wan.get("reference_image_urls"))
         videos = _url_list(wan.get("reference_video_urls"))
+        source_mode = str(wan.get("mode") or "text")
+        reference_mode = source_mode == "reference"
+        # The Telegram wizard uses text/image/video, whereas provider Wan
+        # distinguishes reference/edit/first/first_last. Keep supplemental
+        # reference URLs out of primary edit/frame inputs, otherwise a paid
+        # repeat silently changes operations when it is re-normalized.
+        ui_mode = (
+            "video" if source_mode == "edit" else
+            "image" if source_mode in {"first", "first_last"}
+            or (reference_mode and images) else "text"
+        )
         return {
             **stored, "duration": wan.get("duration"),
             "resolution": wan.get("resolution"),
             "aspect_ratio": wan.get("aspect_ratio"),
-            "image_url": images or wan.get("first_frame_url"),
-            "reference_video_url": videos[0] if videos else None,
-            "wan_reference_video_urls": videos[1:],
+            "wan_source_mode": source_mode,
+            "wan_restore_mode": ui_mode,
+            "image_url": (
+                wan.get("first_frame_url") if source_mode in {"first", "first_last"}
+                else images if source_mode == "edit" else None
+            ),
+            "reference_video_url": videos[0] if source_mode == "edit" and videos else None,
+            "wan_reference_image_urls": images if reference_mode else [],
+            "wan_reference_video_urls": videos[1:] if source_mode == "edit" else videos,
             "wan_reference_audio_urls": _url_list(wan.get("reference_audio_urls")),
             "wan_reference_file_urls": _url_list(wan.get("reference_file_urls")),
             "wan_reference_link_urls": _url_list(wan.get("reference_link_urls")),
@@ -1008,9 +1025,15 @@ def _video_state_from_repeat_params(model_key: str, repeat_params: dict) -> dict
     except ValueError:
         seed = None
 
+    from api.wan30_contract import WAN30_MODELS
+
+    wan_ui_mode = repeat_params.get("wan_restore_mode") if model_key in WAN30_MODELS else None
     state_data = {
         "model_key": model_key,
-        "mode": "video" if reference_video_url else ("image" if image_url else "text"),
+        "mode": (
+            wan_ui_mode if wan_ui_mode in {"text", "image", "video"}
+            else "video" if reference_video_url else ("image" if image_url else "text")
+        ),
         "duration": duration,
         "aspect_ratio": aspect_ratio,
         "resolution": resolution,
@@ -1027,10 +1050,10 @@ def _video_state_from_repeat_params(model_key: str, repeat_params: dict) -> dict
         "ref_file_ids": [],
         "motion_step": None,
     }
-    from api.wan30_contract import WAN30_MODELS
-
     if model_key in WAN30_MODELS:
         state_data.update({
+            "wan_source_mode": repeat_params.get("wan_source_mode"),
+            "wan_reference_image_urls": repeat_params.get("wan_reference_image_urls") or [],
             "wan_reference_video_urls": repeat_params.get("wan_reference_video_urls") or [],
             "wan_reference_audio_urls": repeat_params.get("wan_reference_audio_urls") or [],
             "wan_reference_file_urls": repeat_params.get("wan_reference_file_urls") or [],
@@ -1047,6 +1070,13 @@ def _video_state_has_required_input(data: dict) -> bool:
     model_key = str(data.get("model_key") or "")
     modes = VIDEO_CAPS.get(model_key, {}).get("modes", ["text"])
     mode = data.get("mode")
+    from api.wan30_contract import WAN30_MODELS
+
+    if model_key in WAN30_MODELS and mode == "image":
+        # Advanced reference images are not "first frame" inputs. They still
+        # satisfy the image wizard's required-input gate on paid repeats.
+        return bool(data.get("image_url") or data.get("wan_reference_image_urls")
+                    or data.get("wan_first_frame_url"))
     if mode == "motion" or ("motion" in modes and "text" not in modes and "image" not in modes):
         return bool(data.get("image_url") and data.get("reference_video_url"))
     if mode == "video":
