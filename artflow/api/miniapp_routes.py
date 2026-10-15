@@ -290,6 +290,8 @@ _FRIENDLY_MODEL_NAMES: dict[str, str] = {
     "kling-2.6/motion-control": "Kling Motion",
     "kling-3.0/video": "Kling 3.0",
     "kling-3.0/motion-control": "Kling 3.0 Motion",
+    "wan/3-0-video": "Wan 3.0",
+    "wan/3-0-video-prime": "Wan 3.0 Prime",
     "wan/2-7-text-to-video": "WAN Video",
     "wan/2-7-image-to-video": "WAN Animate",
     "bytedance/seedance-2": "Seedance 2",
@@ -770,6 +772,17 @@ async def _reconcile_neironych_video_generation(
 
         if not result_url:
             return gen
+        from api.wan30_contract import WAN30_MODELS
+        if gen.model in WAN30_MODELS:
+            from api.wan30_media import mirror_wan30_result
+            try:
+                result_url = await mirror_wan30_result(result_url)
+            except Exception as exc:
+                logger.warning(
+                    "Neironych Wan3 permanent video copy deferred gen=%s type=%s",
+                    gen.id, type(exc).__name__,
+                )
+                return gen
 
         # Once the first done-commit succeeds, feed royalties and linked
         # image-session state must finish even if Redis ownership is lost.
@@ -855,6 +868,9 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             logger.warning("Neironych video poll ownership lost gen=%s; retry later", gen.id)
             return gen
 
+    from api.wan30_contract import WAN30_MODELS
+
+    strict_wan_video = gen.gen_type == GenerationType.video and gen.model in WAN30_MODELS
     strict_nexus_image = (
         gen.gen_type == GenerationType.image
         and nexus_image_adapter.is_nexus_image_model(str(gen.model))
@@ -896,6 +912,10 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             return gen
     except Exception as exc:
         logger.warning('Reconcile failed generation gen=%s task=%s error=%s', gen.id, task_id, type(exc).__name__)
+        if strict_wan_video and not isinstance(exc, video_service.KieVideoTaskFailed):
+            # A GET timeout, 5xx or malformed response cannot prove that
+            # KIE accepted no paid work. Keep the task recoverable.
+            return gen
         if strict_nexus_image:
             if (not isinstance(exc, nexus_image_adapter.NexusImageTaskFailed)
                     or exc.task_id != nexus_image_adapter.strip_nexus_task_id(task_id)):
@@ -910,6 +930,15 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         return await repo.get_generation_by_id(session, gen.id)
 
     if result_url:
+        if strict_wan_video:
+            from api.wan30_media import mirror_wan30_result
+            try:
+                result_url = await mirror_wan30_result(result_url)
+                result_urls = [result_url]
+            except Exception as exc:
+                # Never call finish_generation with a short-lived KIE CDN URL.
+                logger.warning("Wan3 media mirror deferred gen=%s error=%s", gen.id, type(exc).__name__)
+                return gen
         if strict_nexus_image:
             try:
                 result_urls = [
@@ -922,7 +951,9 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
                 return await refund_stale_nexus("media_unavailable")
         finished = await repo.finish_generation(
             session, gen.id, result_url, result_urls=result_urls,
-            **({"expected_task_id": stored_task_id} if strict_nexus_image else {}),
+            **({"expected_task_id": stored_task_id} if strict_nexus_image or strict_wan_video else {}),
+            **({"queue_neironych_video_notice": True}
+               if strict_wan_video and not is_web_task_id(stored_task_id) else {}),
         )
         if finished and gen.image_session_id:
             await repo.update_image_session_last_result(session, gen.image_session_id, result_url, gen.id)
@@ -945,7 +976,10 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         ):
             user = await repo.get_user_by_id(session, finished.user_id)
             if user:
-                await _notify_reconciled_video_result_in_bot(user=user, gen=finished)
+                if strict_wan_video:
+                    await _deliver_pending_neironych_video_notice(session, finished.id)
+                else:
+                    await _notify_reconciled_video_result_in_bot(user=user, gen=finished)
             else:
                 logger.warning(
                     "Reconciled video user not found gen=%s user_id=%s",
@@ -958,6 +992,11 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
     if strict_nexus_image:
         # A pending/unknown Nexus task is not proof that paid work failed.
         return await refund_stale_nexus("provider_pending")
+
+    if strict_wan_video:
+        # Wan runs under the guarded provider recovery SLA, not the
+        # 20-minute generic timeout for short legacy generations.
+        return gen
 
     if age >= STALE_GENERATION_TIMEOUT:
         logger.warning(
@@ -1635,7 +1674,13 @@ def _normalize_video_request(
     caps: dict[str, Any] = VIDEO_CAPS.get(model_key, {})
     supported_modes = caps.get("modes", ["text"])
     normalized_mode = _normalize_mode(mode, supported_modes)
-    all_refs = _normalize_public_urls(image_url, *(reference_urls or [])) if normalized_mode == "image" else []
+    from api.wan30_contract import WAN30_MODELS
+    is_wan30 = model_key in WAN30_MODELS
+    all_refs = (
+        _normalize_public_urls(image_url, *(reference_urls or []))
+        if normalized_mode == "image" or (is_wan30 and (image_url or reference_urls))
+        else []
+    )
     max_refs = int(caps.get("max_refs", 1) or 1)
     if len(all_refs) > max_refs:
         raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
@@ -1657,12 +1702,19 @@ def _normalize_video_request(
         raise HTTPException(status_code=422, detail="Selected mode requires video_url")
 
     duration_input = None if model_key == GEMINI_OMNI_VIDEO_MODEL and duration == 5 else duration
-    normalized_duration = _normalize_int_choice(
-        duration_input,
-        caps.get("duration_options", []),
-        field_name="duration",
-        default=None if model_key == GEMINI_OMNI_VIDEO_MODEL else duration,
-    )
+    if is_wan30:
+        # Provider allows every integer second from 2 to 30. Keep the
+        # visible presets compact, but do not artificially reject 4/7/17s.
+        if type(duration) is not int or not 2 <= duration <= 30:
+            raise HTTPException(status_code=422, detail="Wan duration must be 2–30 seconds")
+        normalized_duration = duration
+    else:
+        normalized_duration = _normalize_int_choice(
+            duration_input,
+            caps.get("duration_options", []),
+            field_name="duration",
+            default=None if model_key == GEMINI_OMNI_VIDEO_MODEL else duration,
+        )
     normalized_resolution_input = _normalize_video_resolution(model_key, resolution)
     normalized_resolution = _normalize_choice(
         normalized_resolution_input,
@@ -1715,12 +1767,14 @@ def _normalize_video_request(
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    elif audio_ids or character_ids or seed is not None or normalized_video_url:
+    elif audio_ids or character_ids or (seed is not None and not is_wan30) or (normalized_video_url and not is_wan30):
         raise HTTPException(status_code=422, detail="Gemini Omni extras are not supported by selected model")
+    elif is_wan30:
+        normalized_seed = seed
 
     start = float(video_start or 0)
     end = video_end
-    if normalized_video_url:
+    if normalized_video_url and not is_wan30:
         end = float(end if end is not None else min(normalized_duration or 10, 10))
         if end <= start:
             raise HTTPException(status_code=422, detail="video_end must be greater than video_start")
@@ -1927,6 +1981,15 @@ class VideoGenRequest(BaseModel):
     character_ids: list[str] = []
     seed: int | None = None
     grok_mode: str = "normal"
+    # Wan3: sensible defaults; extra materials live behind Advanced settings.
+    wan_audio: bool = True
+    wan_nsfw_checker: bool = True
+    wan_reference_audio_urls: list[str] = Field(default_factory=list, max_length=5)
+    wan_reference_video_urls: list[str] = Field(default_factory=list, max_length=5)
+    wan_reference_file_urls: list[str] = Field(default_factory=list, max_length=1)
+    wan_reference_link_urls: list[str] = Field(default_factory=list, max_length=1)
+    wan_first_frame_url: str | None = None
+    wan_last_frame_url: str | None = None
     trend_user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
 
 
@@ -2999,6 +3062,56 @@ async def create_image_generation(
 
 # ── video generation ──────────────────────────────────────────────────────────
 
+@router.post("/generate/video/quote")
+async def quote_wan30_video(
+    body: VideoGenRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    """Read-only exact quote; never trust a browser-provided video duration."""
+    from api.wan30_contract import WAN30_MODELS
+    from api.wan30_launch import create_wan30_request, get_wan30_quote
+
+    if body.model not in WAN30_MODELS:
+        raise HTTPException(status_code=422, detail="Quote is available for Wan 3.0 only")
+    try:
+        request = await create_wan30_request(
+            model=body.model,
+            prompt=(body.prompt or "Предпросмотр видео").strip(),
+            mode=body.mode,
+            image_urls=_normalize_public_urls(body.image_url, *(body.reference_urls or [])),
+            video_url=body.video_url,
+            duration=body.duration,
+            resolution=body.resolution or "720p",
+            aspect_ratio=body.aspect_ratio,
+            options={
+                "audio": body.wan_audio,
+                "nsfw_checker": body.wan_nsfw_checker,
+                "seed": body.seed,
+                "reference_video_urls": body.wan_reference_video_urls,
+                "reference_audio_urls": body.wan_reference_audio_urls,
+                "reference_file_urls": body.wan_reference_file_urls,
+                "reference_link_urls": body.wan_reference_link_urls,
+                "first_frame_url": body.wan_first_frame_url,
+                "last_frame_url": body.wan_last_frame_url,
+            },
+        )
+        quote = await get_wan30_quote(session, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "model": body.model,
+        "credits": quote.credits,
+        "billable_seconds": quote.billable_seconds,
+        "input_video_seconds": round(sum(request.reference_video_durations), 3),
+        "output_seconds": request.duration,
+        "rate": quote.rate,
+        "resolution": quote.resolution,
+        "max_output_seconds": max(0, int(30 - sum(request.reference_video_durations))),
+        "user_credits": user.credits,
+    }
+
+
 @router.post("/generate/video", response_model=GenerationOut, status_code=202)
 async def create_video_generation(
     body: VideoGenRequest,
@@ -3146,6 +3259,37 @@ async def create_video_generation(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    from api.wan30_contract import WAN30_MODELS
+    from api.wan30_launch import create_wan30_request, get_wan30_quote
+
+    wan_quote = None
+    if body.model in WAN30_MODELS:
+        try:
+            wan_request = await create_wan30_request(
+                model=body.model,
+                prompt=user_prompt,
+                mode=normalized["mode"],
+                image_urls=normalized["image_url"],
+                video_url=normalized["reference_video_url"],
+                duration=normalized["duration"],
+                resolution=normalized["resolution"] or "720p",
+                aspect_ratio=normalized["aspect_ratio"],
+                options={
+                    "audio": body.wan_audio,
+                    "nsfw_checker": body.wan_nsfw_checker,
+                    "seed": normalized["seed"],
+                    "reference_audio_urls": body.wan_reference_audio_urls,
+                    "reference_video_urls": body.wan_reference_video_urls,
+                    "reference_file_urls": body.wan_reference_file_urls,
+                    "reference_link_urls": body.wan_reference_link_urls,
+                    "first_frame_url": body.wan_first_frame_url,
+                    "last_frame_url": body.wan_last_frame_url,
+                },
+            )
+            wan_quote = await get_wan30_quote(session, wan_request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     has_gemini_omni_video_input = body.model == GEMINI_OMNI_VIDEO_MODEL and bool(normalized["reference_video_url"])
     model_cost = await repo.resolve_video_model_cost(
         session,
@@ -3157,11 +3301,16 @@ async def create_video_generation(
         raise HTTPException(status_code=422, detail="Model not available")
 
     caps: dict[str, Any] = VIDEO_CAPS.get(body.model, {})
-    total_credits = _video_total_credits(
-        normalized["duration"],
-        model_cost.credits,
-        is_per_second=_is_per_second_video_model(caps),
+    total_credits = (
+        wan_quote.credits if wan_quote else
+        _video_total_credits(
+            normalized["duration"],
+            model_cost.credits,
+            is_per_second=_is_per_second_video_model(caps),
+        )
     )
+    if wan_quote:
+        normalized.update(wan_quote.stored_params())
     image_url = normalized["image_url"]
 
     if user.credits < total_credits:
@@ -3215,6 +3364,7 @@ async def create_video_generation(
             ),
             idempotency_key=f"apix-video-{gen.id}",
             **({"neironych_submission": submission_context} if submission_context else {}),
+            **({"wan_request": wan_quote.request} if wan_quote else {}),
         )
     except NeironychPreSubmitFailure:
         if await handle_submission_not_sent(session, failed_generation_id, submission_context):

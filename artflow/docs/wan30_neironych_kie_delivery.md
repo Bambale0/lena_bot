@@ -1,58 +1,75 @@
-# Wan 3.0 / Wan 3.0 Prime - Neironych primary, KIE backup
+# Wan 3.0 / Wan 3.0 Prime - APIX release
 
-## Verified: 15 October 2026
+## Provider routing (checked 15 October 2026)
 
-- KIE IDs: wan/3-0-video, wan/3-0-video-prime.
-  Source: https://docs.kie.ai/market/wan/3-0-video
-  and https://docs.kie.ai/market/wan/3-0-video-prime .
-- Live Neironych GET /v1/models (using APIX credentials) returned 13 models;
-  neither Wan 3.0 nor Prime is currently available to APIX.
-- No invented Neironych IDs: environment fields WAN30_NEIRONYCH_MODEL_ID
-  and WAN30_PRIME_NEIRONYCH_MODEL_ID are empty by default.
-- With current availability, any successful Wan video would run via KIE
-  backup. It cannot truthfully be described as Neironych execution.
+Neironych is primary, KIE is standby. The real APIX Neironych key
+GET /v1/models returned 13 models, none Wan3/Prime. Therefore today
+all Wan3 jobs will use KIE. Do not claim Neironych completed them
+until the partner grants access and WAN30_NEIRONYCH_MODEL_ID and
+WAN30_PRIME_NEIRONYCH_MODEL_ID are configured from verified model IDs.
+No paid probe to guessed IDs. 5xx, timeout, unknown acceptance may NOT
+create a second paid task. KIE createTask is single-shot.
 
-## Implemented contract and routing layer (not yet a user-visible feature)
+Official KIE documentation:
+https://docs.kie.ai/market/wan/3-0-video
+https://docs.kie.ai/market/wan/3-0-video-prime
 
-- api/wan30_contract.py: all 14 KIE fields, model IDs, mode semantics,
-  durations, ordering, max refs, seed=0, audio=false, edit, file, link.
-- wan30_max_billable_seconds computes video input seconds + output seconds;
-  Auto reserves max 30 seconds.
-- api/wan30_routing.py: Neironych first only with documented fields and
-  verified live catalog availability, KIE backup for absent model or
-  definite pre-admission rejection; never fallback after ambiguous payment.
-- api/wan30_neironych_transport.py: one paid POST with stable idempotency
-  headers and durable before_submit callback, no POST retry.
-- api/wan30_provider.py: dual-provider orchestration.
-- api/kieai_client.py: Wan requests use safe single POST, unlike the legacy
-  3-attempt POST retry policy.
-- New unit tests run against isolated mocks. No live paid requests sent.
+## Simple user workflow
 
-## Release blockers / work remaining
+1. Select Wan 3.0 or Wan 3.0 Prime.
+2. Select Text, Animate photo, or Edit video.
+3. Choose 480p / 720p / 1080p and 2-30 output seconds (maximum total,
+   including all input video ref durations: 30 seconds).
+4. Upload input media and type the instruction. Two photos in basic
+   photo mode are treated as first and last frame. The optional
+   sound, seed, extra references, safety and file/link fields are
+   available in collapsed Advanced section in the modern Studio.
+5. Inspect exact credits. APIX measures input-video lengths using
+   ffprobe on owned uploads, adds output seconds and rounds total
+   up to the next full second. Remote video URLs cannot bypass billing.
+6. Telegram requires a one-time price confirmation. After submission,
+   tasks appear in History and result MP4 is delivered to Telegram.
+   On restart the provider poll worker and signed callback recover jobs.
 
-This provider SDK is NOT yet a complete paid-user integration. Before
-production activation:
+## APIX retail prices - credits per billable second
 
-1. Neironych must enable the two specific Wan models and advertise their
-   approved IDs in GET /v1/models, or owner must accept temporary KIE-only.
-2. Owner/admin must confirm APIX retail prices for both models at 480p,
-   720p and 1080p. KIE credits are not APIX retail credits.
-3. Add inactive model registry and price rows, then activate with admin
-   approval. Ensure web, Mini App, Telegram bot share the same controls.
-4. Wire scenario editor for text/first/first+last/reference/edit/file/link,
-   media ownership and URL security, measured video+audio reference lengths,
-   upload and file role ordering.
-5. Quote, atomic balance reserve, actual-duration settlement and exactly-once
-   refund for Auto; preserve existing user balances/history.
-6. Expand durable Neironych admission journal, read-only reconciliation and
-   polling worker; handle missing callback or restart.
-7. KIE callback/polling, durable local MP4, Telegram delivery, history,
-   retry/duplicate protections.
-8. Full backend/integration/concurrency/browser E2E and ONE explicitly
-   approved paid live generation before reporting release success.
+| Model | 480p | 720p | 1080p |
+|---|---:|---:|---:|
+| Wan 3.0 | 6 | 12 | 24 |
+| Wan 3.0 Prime | 9 | 18 | 36 |
 
-Until these checks complete, keep Wan 3.0 OUT of the active public models.
-No pricing migrations, provider POST, or production modifications in
-this stage. Existing Seedance, Wan 2.7, and Nano Banana are untouched.
+Migration 042 adds only missing rows and does not overwrite custom
+admin tariffs. Exact active resolution row is mandatory; there is no
+silent fallback to an inactive or cheaper base tariff.
 
-Rollback: revert the branch/PR; no financial or data migrations included.
+## Safety
+
+- Prompt limit 4500 characters, seed=0 valid, and false audio preserved.
+- Photo/video/audio reference order and counts validated before POST.
+- Input videos total 15s max, output+input 30s max.
+- Neironych durable before-submit journal with client request identity.
+- KIE signed callback, no retries for paid createTask POST.
+- Only completed MP4 mirrored to local permanent APIX storage counts
+  as done. No expiring CDN URLs used as completed output.
+- Transient canonical GET errors do not fail or refund accepted tasks.
+- Scheduler owns 1-hour expiration and guarded refund/provider review.
+- KIE callback and worker share durable Telegram notice outbox and
+  atomic DB transitions; duplicate completions have no side effects.
+- Repeating a Wan result uses the same quoted-price route, never
+  the old output-only regeneration charger.
+
+## Known deliberate limit
+
+KIE supports automatic duration=-1 in the lower-level validated
+contract. It is NOT offered as a paid UI choice yet: charging a
+30-second reserve without an exactly-once actual-duration refund
+would overcharge shorter outputs. Ordinary fixed durations 2-30 sec
+are fully supported; automatic duration needs separate settlement work.
+
+## Release / rollback
+
+Run backend and UI tests, code review, and GitHub CI. Main autodeploy
+migrates DB before updating containers. Verify live API and both model
+variants. No live paid smoke until user explicitly authorizes that
+particular test. Rollback by reverting PR and disabling model base rows
+via existing admin UI; do not delete historical financial data.

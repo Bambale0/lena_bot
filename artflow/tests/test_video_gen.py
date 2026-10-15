@@ -1354,3 +1354,33 @@ async def test_handle_video_prompt_passes_gemini_omni_extras() -> None:
     assert kwargs["character_ids"] == ["character_1"]
     assert kwargs["video_end"] == 8
     assert kwargs["seed"] == 99
+
+@pytest.mark.asyncio
+async def test_wan30_initial_telegram_selection_defaults_to_5sec_720p(monkeypatch):
+    call = make_callback(data="vid_model:wan/3-0-video")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    state = _fake_state()
+    model_cost = _make_video_model_cost("wan/3-0-video", 12, "Wan 3.0")
+    resolve = AsyncMock(return_value=model_cost)
+    monkeypatch.setattr(video_gen, "_resolve_video_model_cost", resolve)
+    await video_gen.cb_video_model(call, AsyncMock(), state,
+        SimpleNamespace(id=42, credits=1000, language="ru"))
+    assert resolve.await_args.kwargs["duration"] == 5
+    assert resolve.await_args.kwargs["resolution"] == "720p"
+    data = await state.get_data()
+    assert data["aspect_ratio"] == "adaptive"
+    assert data["resolution"] == "720p"
+    assert data["duration"] == 5
+
+@pytest.mark.asyncio
+async def test_wan30_telegram_low_balance_can_still_choose_cheaper_quality(monkeypatch):
+    call = make_callback(data="vid_model:wan/3-0-video")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    state = _fake_state()
+    model_cost = _make_video_model_cost("wan/3-0-video", 12, "Wan 3.0")
+    monkeypatch.setattr(video_gen, "_resolve_video_model_cost", AsyncMock(return_value=model_cost))
+    await video_gen.cb_video_model(call, AsyncMock(), state,
+        SimpleNamespace(id=42, credits=35, language="ru"))
+    assert state.set_state.await_args.args[0] == VideoGenFSM.mode_select

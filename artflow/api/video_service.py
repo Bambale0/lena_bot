@@ -22,11 +22,12 @@ except ImportError:
     class StrEnum(str, Enum):
         pass
 
-from api import comet_fallback, kieai_client, neironych_seedance_runtime
+from api import comet_fallback, kieai_client, neironych_seedance_runtime, wan30_provider
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
 from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
 from api.seedance_provider_routing import submit_seedance
 from api.video_prompt_limits import validate_video_prompt
+from api.wan30_contract import Wan30Request
 from core.gemini_omni import (
     build_gemini_omni_audio_payload,
     build_gemini_omni_character_payload,
@@ -47,6 +48,8 @@ class VideoModel(StrEnum):
     # WAN
     WAN_27_T2V = "wan/2-7-text-to-video"
     WAN_27_I2V = "wan/2-7-image-to-video"
+    WAN_30 = "wan/3-0-video"
+    WAN_30_PRIME = "wan/3-0-video-prime"
     # Seedance
     SEEDANCE_2 = "bytedance/seedance-2"
     SEEDANCE_2_FAST = "bytedance/seedance-2-fast"
@@ -278,6 +281,7 @@ async def generate_video(
     enable_translation: bool = False,
     idempotency_key: str | None = None,
     neironych_submission: neironych_seedance_runtime.SubmissionContext | None = None,
+    wan_request: "Wan30Request | None" = None,
 ) -> VideoResult:
     del image_bytes  # the URL/file-upload path is the canonical provider contract
 
@@ -286,6 +290,20 @@ async def generate_video(
 
     raw_image_url = image_url
     raw_reference_video_url = reference_video_url
+
+    if model in {VideoModel.WAN_30, VideoModel.WAN_30_PRIME}:
+        if wan_request is None or wan_request.model != model.value:
+            raise ValueError("Wan 3.0 requires a verified quoted request")
+        submitted = await wan30_provider.submit_wan30_provider(
+            wan_request, idempotency_key=str(idempotency_key or ""),
+            callback_url=callback_url,
+            submission_context=neironych_submission,
+        )
+        return VideoResult(
+            task_id=submitted.task_id,
+            provider=submitted.provider,
+            uses_webhook=submitted.provider == "kieai" and bool(callback_url),
+        )
 
     if model == VideoModel.SEEDANCE_2:
         images = _reference_list(raw_image_url)
@@ -686,6 +704,10 @@ async def get_veo_1080p_url(task_id: str, index: int = 0) -> str:
     return result_url
 
 
+class KieVideoTaskFailed(RuntimeError):
+    """Provider GET confirmed terminal failure; unlike transport errors."""
+
+
 async def poll_kieai_status(task_id: str) -> str | None:
     """Universal poller for all non-Veo KIE.AI models."""
     if comet_fallback.is_comet_task_id(task_id):
@@ -710,7 +732,7 @@ async def poll_kieai_status(task_id: str) -> str | None:
         raise RuntimeError("KIE.AI: success but no result URL")
 
     if state == "fail":
-        raise RuntimeError(f"KIE.AI task failed: {data.get('failMsg', 'unknown error')}")
+        raise KieVideoTaskFailed(f"KIE.AI task failed: {data.get('failMsg', 'unknown error')}")
 
     return None
 

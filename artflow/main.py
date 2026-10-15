@@ -1825,6 +1825,9 @@ async def kie_webhook(
             logger.warning("KIE webhook user not found for generation=%s", gen.id)
             return {"ok": True}
 
+        from api.wan30_contract import WAN30_MODELS
+
+        strict_wan_video = gen.gen_type == GenerationType.video and gen.model in WAN30_MODELS
         strict_nexus_image = (
             provider == "nexus" and gen.gen_type == GenerationType.image
             and gen.model == "nano-banana-2.1"
@@ -1905,12 +1908,15 @@ async def kie_webhook(
             try:
                 if strict_nexus_image:
                     result_urls.append(await nexus_image_adapter.mirror_verified_nano_banana21_result(url))
+                elif strict_wan_video:
+                    from api.wan30_media import mirror_wan30_result
+                    result_urls.append(await mirror_wan30_result(url))
                 else:
                     result_urls.append(await mirror_url(url))
             except Exception as e:
-                if strict_nexus_image:
-                    logger.warning("Nexus image verification deferred gen=%s error=%s", gen.id, type(e).__name__)
-                    raise HTTPException(status_code=503, detail="Nexus image verification pending") from e
+                if strict_nexus_image or strict_wan_video:
+                    logger.warning("Provider media verification deferred gen=%s error=%s", gen.id, type(e).__name__)
+                    raise HTTPException(status_code=503, detail="Video media recovery pending") from e
                 logger.warning("Failed to mirror KIE result task_id=%s url=%s: %s", task_id, url, e)
                 result_urls.append(url)
         if image_session is not None:
@@ -1946,11 +1952,25 @@ async def kie_webhook(
 
         result_url = result_urls[0]
 
+        wan_notify = strict_wan_video and _should_notify_generation_in_bot(gen)
         finished = await repo.finish_generation(
             session, gen.id, result_url, result_urls=result_urls,
-            **({"expected_task_id": gen.task_id} if strict_nexus_image else {}),
+            **({"expected_task_id": gen.task_id} if strict_nexus_image or strict_wan_video else {}),
+            **({"queue_neironych_video_notice": True} if wan_notify else {}),
         )
         if not finished:
+            return {"ok": True}
+
+        if strict_wan_video:
+            # Wan3 delivery uses the existing durable Telegram outbox instead
+            # of best-effort sends inside the webhook. A process restart can
+            # never erase an unsent notice after the done commit.
+            if wan_notify:
+                try:
+                    from api.miniapp_routes import _deliver_pending_neironych_video_notice
+                    await _deliver_pending_neironych_video_notice(session, finished.id)
+                except Exception:
+                    logger.exception("Wan3 Telegram notice deferred gen=%s", finished.id)
             return {"ok": True}
 
         if gen.image_session_id:

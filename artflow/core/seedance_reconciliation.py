@@ -17,7 +17,11 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 RECONCILIATION_KEY = "neironych_video_reconciliation"
 PUBLIC_REVIEW_STATUS = "reconciliation_required"
-PRODUCT_MODELS = frozenset({"bytedance/seedance-2", "bytedance/seedance-2-5"})
+# Shared durable video admission/callback identities for Seedance and Wan3.
+PRODUCT_MODELS = frozenset({
+    "bytedance/seedance-2", "bytedance/seedance-2-5",
+    "wan/3-0-video", "wan/3-0-video-prime",
+})
 
 
 def public_generation_status(gen: Any) -> str:

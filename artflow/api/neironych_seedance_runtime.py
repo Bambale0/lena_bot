@@ -54,6 +54,9 @@ class NeironychVideoReconciliationRequired(RuntimeError):
 PRODUCT_MODELS = {
     "bytedance/seedance-2": "seedance-2.0",
     "bytedance/seedance-2-5": "seedance-2.5",
+    # Catalog-gated model IDs: no paid POST is attempted with these empty defaults.
+    "wan/3-0-video": settings.WAN30_NEIRONYCH_MODEL_ID,
+    "wan/3-0-video-prime": settings.WAN30_PRIME_NEIRONYCH_MODEL_ID,
 }
 
 

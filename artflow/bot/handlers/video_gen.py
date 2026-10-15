@@ -336,6 +336,8 @@ async def _send_video_with_fallback(
                 logger.warning("Failed to remove temporary video file: %s", tmp_file)
 
 _DEFAULT_DURATION: dict[str, int] = {
+    VideoModel.WAN_30: 5,
+    VideoModel.WAN_30_PRIME: 5,
     VideoModel.KLING_26_T2V: 5,
     VideoModel.KLING_26_I2V: 5,
     VideoModel.KLING_30: 5,
@@ -350,6 +352,8 @@ _DEFAULT_DURATION: dict[str, int] = {
     **{model_key: 1 for model_key in GENJUTSU_MODEL_KEYS},
 }
 _DEFAULT_RATIO: dict[str, str] = {
+    VideoModel.WAN_30: "adaptive",
+    VideoModel.WAN_30_PRIME: "adaptive",
     VideoModel.KLING_26_T2V: "16:9",
     VideoModel.KLING_30: "16:9",
     VideoModel.WAN_27_T2V: "16:9",
@@ -363,6 +367,8 @@ _DEFAULT_RATIO: dict[str, str] = {
     GEMINI_OMNI_VIDEO_MODEL: "16:9",
 }
 _DEFAULT_RES: dict[str, str] = {
+    VideoModel.WAN_30: "720p",
+    VideoModel.WAN_30_PRIME: "720p",
     VideoModel.KLING_26_T2V: "720p",
     VideoModel.KLING_26_I2V: "720p",
     VideoModel.WAN_27_T2V: "1080p",
@@ -447,6 +453,7 @@ def _video_params_reply_markup(model_key: str, data: dict):
         ref_count=_video_ref_count(data),
         next_label=_video_params_next_label(data),
         identity_transfer=bool(data.get("seedance_identity_transfer")),
+        wan_audio=data.get("wan_audio", True),
     )
 
 
@@ -1284,7 +1291,9 @@ async def cb_video_model(
         await call.answer("Модель недоступна", show_alert=True)
         return
     min_credits = _video_total_credits(model_key, default_duration, model_cost.credits)
-    if db_user.credits < min_credits:
+    # Wan3 is quoted exactly after resolution and source-media selection.
+    # A customer who cannot afford the default 720p may afford 480p.
+    if model_key not in {VideoModel.WAN_30, VideoModel.WAN_30_PRIME} and db_user.credits < min_credits:
         await call.answer(
             f"Недостаточно 💋! Нужно минимум {_video_price_text(model_key, default_duration, model_cost.credits)}, у тебя {db_user.credits:g} 💋.",
             show_alert=True,
@@ -1298,6 +1307,7 @@ async def cb_video_model(
         aspect_ratio=default_ratio,
         resolution=default_resolution,
         grok_mode=chosen_grok_mode if caps.get("mode_options") else None,
+        wan_audio=True,
     )
 
     caps = VIDEO_CAPS.get(model_key, {})
@@ -1404,7 +1414,9 @@ async def _handle_mode(
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
             f"✅ <b>{display_name}</b> · видео-референс\n\n"
-            "🎞️ Загрузи исходное видео до 30 сек. Gemini Omni возьмёт фрагмент до 10 сек.",
+            + ("🎞️ Загрузи исходное видео до 15 секунд. Затем выбери качество, длительность и напиши, что изменить."
+             if model_key in {"wan/3-0-video", "wan/3-0-video-prime"}
+             else "🎞️ Загрузи исходное видео до 30 сек. Gemini Omni возьмёт фрагмент до 10 сек."),
             reply_markup=video_back_kb(),
         )
     elif mode == "motion":
@@ -1480,6 +1492,7 @@ async def handle_video_upload(
     motion_step: str | None = data.get("motion_step")
     model_key: str = data["model_key"]
     is_gemini_omni_video_mode = model_key == GEMINI_OMNI_VIDEO_MODEL and data.get("mode") == "video"
+    is_wan30_video_mode = model_key in {"wan/3-0-video", "wan/3-0-video-prime"} and data.get("mode") == "video"
     is_genjutsu_video_mode = model_key in GENJUTSU_MODEL_KEYS and data.get("genjutsu_step") == "video"
     is_seedance_identity_video_mode = (
         model_key == SEEDANCE25_MODEL_KEY
@@ -1490,6 +1503,7 @@ async def handle_video_upload(
     if (
         motion_step != "video_url"
         and not is_gemini_omni_video_mode
+        and not is_wan30_video_mode
         and not is_genjutsu_video_mode
         and not is_seedance_identity_video_mode
     ):
@@ -1545,7 +1559,7 @@ async def handle_video_upload(
     )
     total_credits = _video_total_credits(model_key, billable_duration, rate_or_flat)
 
-    if db_user.credits < total_credits:
+    if not is_wan30_video_mode and db_user.credits < total_credits:
         await message.answer(
             f"❌ Недостаточно 💋!\n"
             f"Видео: {_video_price_text(model_key, billable_duration, rate_or_flat)}\n"
@@ -1622,6 +1636,30 @@ async def handle_video_upload(
             f"💋 Стоимость: <b>{_video_price_text(model_key, video_duration, rate_or_flat)}</b>\n\n"
             f"⚙️ <b>Параметры</b> · {display_name}\n"
             f"{_video_params_hint(model_key, updated)}",
+            reply_markup=_video_params_reply_markup(model_key, updated),
+        )
+        return
+
+    if is_wan30_video_mode:
+        from api.media_gateway import MediaKind
+        from api.wan30_launch import _duration_for_owned_media
+
+        try:
+            measured = await _duration_for_owned_media(video_url, MediaKind.VIDEO)
+            if measured > 15:
+                raise ValueError("Wan 3.0 принимает видео-референсы суммарно до 15 секунд.")
+        except ValueError as exc:
+            await message.answer(f"❌ {escape(str(exc))}", reply_markup=video_back_kb())
+            return
+        await state.update_data(
+            reference_video_url=video_url,
+            wan_reference_video_seconds=measured,
+        )
+        updated = await state.get_data()
+        await state.set_state(VideoGenFSM.params_select)
+        await message.answer(
+            f"✅ Видео загружено: <b>{measured:g} сек</b>. Эти секунды учитываются в цене.\n\n"
+            f"⚙️ <b>Выбери длительность и качество</b> · {display_name}",
             reply_markup=_video_params_reply_markup(model_key, updated),
         )
         return
@@ -1875,6 +1913,54 @@ async def cb_vpar_mode(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer(mode)
 
 
+@router.callback_query(VideoGenFSM.params_select, F.data == "vpar_wan_duration")
+async def cb_vpar_wan_duration(call: CallbackQuery, state: FSMContext) -> None:
+    if not await _accept_video_parameter(call, state):
+        return
+    data = await state.get_data()
+    if data.get("model_key") not in {"wan/3-0-video", "wan/3-0-video-prime"}:
+        await call.answer("Эта настройка только для Wan 3.0", show_alert=True)
+        return
+    await state.update_data(wan_duration_waiting=True)
+    await call.message.answer(
+        "⏱ Напиши длительность ролика числом от 2 до 30 секунд.",
+    )
+    await call.answer()
+
+
+@router.message(VideoGenFSM.params_select, F.text)
+async def handle_wan_duration_text(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    if not data.get("wan_duration_waiting"):
+        return
+    text = str(message.text or "").strip()
+    if not text.isascii() or not text.isdecimal() or not 2 <= int(text) <= 30:
+        await message.answer("Введи целое число от 2 до 30.")
+        return
+    duration = int(text)
+    await state.update_data(duration=duration, wan_duration_waiting=False)
+    updated = await state.get_data()
+    await message.answer(
+        f"✅ Выбрано {duration} сек. Теперь можно продолжить.",
+        reply_markup=_video_params_reply_markup(updated["model_key"], updated),
+    )
+
+
+@router.callback_query(VideoGenFSM.params_select, F.data == "vpar_wan_audio")
+async def cb_vpar_wan_audio(call: CallbackQuery, state: FSMContext) -> None:
+    if not await _accept_video_parameter(call, state):
+        return
+    data = await state.get_data()
+    if data.get("model_key") not in {"wan/3-0-video", "wan/3-0-video-prime"}:
+        await call.answer("Эта кнопка только для Wan 3.0", show_alert=True)
+        return
+    audio = not data.get("wan_audio", True)
+    await state.update_data(wan_audio=audio)
+    updated = await state.get_data()
+    await call.message.edit_reply_markup(reply_markup=_video_params_reply_markup(updated["model_key"], updated))
+    await call.answer("Со звуком" if audio else "Без звука")
+
+
 @router.callback_query(VideoGenFSM.params_select, F.data.startswith("vpar_omni:"))
 async def cb_vpar_omni_extra(call: CallbackQuery, state: FSMContext) -> None:
     target = call.data.split(":")[1]  # type: ignore[union-attr]
@@ -2084,6 +2170,33 @@ async def _show_video_cost_quote(
     )
 
 
+@router.callback_query(F.data.startswith("wan30_confirm:"))
+async def cb_wan30_confirm(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
+) -> None:
+    data = await state.get_data()
+    token = str(call.data or "").removeprefix("wan30_confirm:")
+    prior = data.get("wan30_quote")
+    if (
+        not isinstance(prior, dict)
+        or prior.get("user_id") != db_user.id
+        or data.get("model_key") not in {"wan/3-0-video", "wan/3-0-video-prime"}
+        or not token
+        or not secrets.compare_digest(str(prior.get("token") or "").encode(), token.encode())
+    ):
+        await safe_answer_callback(call, "Эта кнопка устарела. Открой настройки ещё раз.", show_alert=True)
+        return
+    await safe_answer_callback(call)
+    await _launch_video_generation_from_state(
+        source_message=call.message, state=state, session=session,
+        db_user=db_user, bot=bot,
+        prompt=str(prior["prompt"]), wan_confirmation_token=token,
+        source_feed_gen_id=prior.get("source_feed_gen_id"),
+        parent_generation_id=prior.get("parent_generation_id"),
+        hidden_feed_prompt=bool(prior.get("hidden_feed_prompt")),
+    )
+
+
 @router.callback_query(F.data.startswith("feed_video_confirm:"))
 async def cb_feed_video_confirm(
     call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
@@ -2125,6 +2238,7 @@ async def _launch_video_generation_from_state(
     parent_generation_id: int | None = None,
     hidden_feed_prompt: bool = False,
     price_confirmation_token: str | None = None,
+    wan_confirmation_token: str | None = None,
 ) -> bool:
     data = await state.get_data()
     model_key: str = data["model_key"]
@@ -2274,6 +2388,29 @@ async def _launch_video_generation_from_state(
                 "seedance_video_edit": True,
             }
 
+    from api.wan30_contract import WAN30_MODELS
+    from api.wan30_launch import create_wan30_request, get_wan30_quote
+
+    wan_quote = None
+    if model_key in WAN30_MODELS:
+        try:
+            wan_request = await create_wan30_request(
+                model=model_key, prompt=prompt, mode=data.get("mode", "text"),
+                image_urls=image_url,
+                video_url=data.get("reference_video_url"),
+                duration=duration,
+                resolution=resolution or "720p",
+                aspect_ratio=aspect_ratio,
+                options={"audio": data.get("wan_audio", True), "seed": data.get("seed")},
+            )
+            wan_quote = await get_wan30_quote(session, wan_request)
+        except ValueError as exc:
+            await source_message.answer(
+                f"❌ {escape(str(exc))}\n\nПоменяй настройки или исходный ролик.",
+                reply_markup=_video_params_reply_markup(model_key, data),
+            )
+            return False
+
     has_gemini_omni_video_input = _has_gemini_omni_video_input(model_key, data)
     model_cost = await _resolve_video_model_cost(
         session,
@@ -2286,7 +2423,9 @@ async def _launch_video_generation_from_state(
         await source_message.answer("Seedance 2.5 сейчас недоступен. Попробуй позже.")
         return False
     motion_credits = None if content_edit else data.get("motion_credits")
-    if motion_credits is not None:
+    if wan_quote is not None:
+        credits = wan_quote.credits
+    elif motion_credits is not None:
         credits = float(motion_credits)
     else:
         rate_or_flat = model_cost.credits if model_cost else float(data.get("credits", 0))
@@ -2319,6 +2458,76 @@ async def _launch_video_generation_from_state(
     )
     if source_feed_gen_id and FEED_REMIX_CONTEXT_KEY in data:
         input_params[FEED_REMIX_CONTEXT_KEY] = feed_remix_context(source_feed_gen_id, prompt)
+    if wan_quote is not None:
+        input_params.update(wan_quote.stored_params())
+        identity = hashlib.sha256(json.dumps({
+            "user": db_user.id, "model": model_key, "prompt": prompt,
+            "params": input_params, "credits": credits,
+        }, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
+        previous_quote = data.get("wan30_quote")
+        confirmed = (
+            wan_confirmation_token is not None
+            and isinstance(previous_quote, dict)
+            and previous_quote.get("user_id") == db_user.id
+            and previous_quote.get("fingerprint") == identity
+            and secrets.compare_digest(
+                str(previous_quote.get("token") or "").encode(),
+                wan_confirmation_token.encode(),
+            )
+        )
+        if not confirmed:
+            if wan_confirmation_token is not None:
+                await source_message.answer(
+                    "Цена или параметры изменились. Подтверди обновлённую стоимость."
+                )
+            token = secrets.token_hex(8)
+            await state.update_data(wan30_quote={
+                "token": token, "user_id": db_user.id,
+                "fingerprint": identity, "prompt": prompt,
+                "source_feed_gen_id": source_feed_gen_id,
+                "parent_generation_id": parent_generation_id,
+                "hidden_feed_prompt": hidden_feed_prompt,
+            })
+            input_seconds = sum(wan_quote.request.reference_video_durations)
+            await source_message.answer(
+                f"🎬 <b>Проверь заказ Wan 3.0</b>\n\n"
+                f"Качество: <b>{escape(wan_quote.resolution)}</b>\n"
+                f"Ролик: <b>{duration} сек</b>"
+                + (f" + исходное видео <b>{input_seconds:g} сек</b>" if input_seconds else "")
+                + f"\nК оплате: <b>{credits:g} 💋</b>."
+                + "\n\nСпишем деньги только после подтверждения.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text=f"▶️ Создать за {credits:g} 💋",
+                        callback_data=f"wan30_confirm:{token}",
+                    )],
+                    [InlineKeyboardButton(text="Отмена", callback_data="menu:main")],
+                ]),
+            )
+            return False
+        # Atomic across concurrent callback handlers and bot processes. A
+        # retry of the same button cannot create a second paid generation.
+        from redis.asyncio import Redis
+
+        cache = Redis.from_url(
+            settings.REDIS_URL, decode_responses=True,
+            socket_connect_timeout=2, socket_timeout=2,
+        )
+        try:
+            claimed = await cache.set(
+                f"apix:wan30:confirm:{db_user.id}:{wan_confirmation_token}",
+                1, nx=True, ex=86400,
+            )
+        except Exception:
+            await source_message.answer("Не удалось подтвердить заказ. Попробуй позже.")
+            return False
+        finally:
+            await cache.aclose()
+        if not claimed:
+            await source_message.answer("Эта кнопка уже использована. Проверь историю задач.")
+            return False
+        await state.update_data(wan30_quote=None)
+
     if price_confirmation_token is not None or (
         source_feed_gen_id and model_key == SEEDANCE25_MODEL_KEY and edit_billing_duration is not None
     ):
@@ -2402,6 +2611,7 @@ async def _launch_video_generation_from_state(
             ),
             idempotency_key=f"apix-video-{gen_id}",
             **({"neironych_submission": submission_context} if submission_context else {}),
+            **({"wan_request": wan_quote.request} if wan_quote else {}),
             **seedance_kwargs,
         )
     except NeironychPreSubmitFailure:
@@ -2464,6 +2674,11 @@ async def _launch_video_generation_from_state(
             await _show_video_submission_review(status_msg, state, session, gen_id)
             return
     await _show_video_task_started(status_msg, result.task_id)
+    if model_key in WAN30_MODELS:
+        # Signed KIE webhook + background Neironych/KIE Wan worker own
+        # completion and durable delivery, not process-local polling.
+        await state.clear()
+        return True
     poll_fn = video_service.get_poll_fn(result.provider)
 
     async def on_success(url: str) -> None:
@@ -3027,6 +3242,42 @@ async def cb_regen_video(
         video_model = VideoModel(model_key)
     except ValueError:
         await call.answer("Эту видео-модель нельзя повторить", show_alert=True)
+        return
+
+    from api.wan30_contract import WAN30_MODELS
+
+    if model_key in WAN30_MODELS:
+        # Re-enter the one-shot measured quote flow, never the legacy
+        # duration-only repeat charger (it omitted reference video seconds).
+        if confirmation_token is not None:
+            await call.answer("Подтверди стоимость в новых параметрах", show_alert=True)
+            return
+        original_feed_id = getattr(prev, "source_feed_gen_id", None)
+        restored = await _restore_video_result_state(
+            call=call, session=session, state=state, prev=prev,
+            reuse_prompt=str(prev.prompt),
+            source_feed_gen_id=original_feed_id,
+        )
+        if not restored:
+            return
+        _, display_name, data = restored
+        if not _video_state_has_required_input(data):
+            upload_mode = _video_required_upload_mode(model_key, data)
+            if not upload_mode:
+                await call.answer("Повтор требует исходный референс", show_alert=True)
+                return
+            await state.update_data(mode=upload_mode)
+            await _handle_mode(call, state, session, model_key, display_name, upload_mode)
+            await safe_answer_callback(call)
+            return
+        await safe_answer_callback(call)
+        await _launch_video_generation_from_state(
+            source_message=call.message, state=state, session=session,
+            db_user=db_user, bot=bot, prompt=str(prev.prompt),
+            source_feed_gen_id=original_feed_id,
+            parent_generation_id=prev.id,
+            hidden_feed_prompt=bool(original_feed_id),
+        )
         return
 
     repeat_params = await _video_repeat_params_for_generation(session, prev)
