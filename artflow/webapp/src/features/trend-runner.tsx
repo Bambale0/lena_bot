@@ -97,6 +97,12 @@ function initDataHeader(): string {
   }
 }
 
+class TrendApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+  }
+}
+
 async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = init.body;
   const isForm = body instanceof FormData;
@@ -110,13 +116,16 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!response.ok) {
     let message = `Ошибка API ${response.status}`;
+    let code: string | undefined;
     try {
       const payload = await response.json();
-      message = String(payload?.error?.message || payload?.detail || payload?.message || message);
+      const detail = payload?.detail;
+      code = typeof detail?.code === "string" ? detail.code : undefined;
+      message = String(payload?.error?.message || detail?.message || detail || payload?.message || message);
     } catch {
       // Keep fallback message.
     }
-    throw new Error(message);
+    throw new TrendApiError(message, response.status, code);
   }
   if (response.status === 204) return undefined as T;
   const payload = await response.json();
@@ -558,6 +567,7 @@ function TrendRunnerPortal() {
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const processedStart = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const runKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const genericBusy = phase === "uploading" || phase === "generating";
   const busy = genericBusy || pinterestBusy;
@@ -570,6 +580,7 @@ function TrendRunnerPortal() {
   const personalized = userFields.length > 0;
 
   const resetRunner = useCallback(() => {
+    runKeyRef.current = null;
     setPhase("idle");
     setError("");
     setPinterestBusy(false);
@@ -716,15 +727,25 @@ function TrendRunnerPortal() {
 
   const startTrend = useCallback(async (assetId: string, values: Record<string, string>) => {
     if (!trend || genericBusy) return;
+    if (!checkout) {
+      toast.error("Сначала дождись расчёта стоимости тренда");
+      return;
+    }
     setError("");
     try {
       setPhase("generating");
+      const fingerprint = JSON.stringify([trend.id, assetId, values]);
+      const requestKey = runKeyRef.current?.fingerprint === fingerprint
+        ? runKeyRef.current.key
+        : buildIdempotencyKey(trend.id);
+      runKeyRef.current = { fingerprint, key: requestKey };
       const result = await apiJson<TrendRunResponse>(`/trends/${trend.id}/run`, {
         method: "POST",
         body: JSON.stringify({
           asset_id: assetId,
-          idempotency_key: buildIdempotencyKey(trend.id),
+          idempotency_key: requestKey,
           user_values: values,
+          quoted_credits: checkout.cost_credits,
         }),
       });
       if (!result.task?.id) throw new Error("Backend не вернул задачу");
@@ -739,9 +760,14 @@ function TrendRunnerPortal() {
       const message = runError instanceof Error ? runError.message : "Не удалось запустить тренд";
       setError(message);
       setPhase("error");
+      if (runError instanceof TrendApiError && runError.code === "trend_quote_stale") {
+        await refreshCheckout(trend.id);
+        setPhase("idle");
+        return;
+      }
       toast.error(message);
     }
-  }, [genericBusy, resetRunner, trend]);
+  }, [checkout, genericBusy, refreshCheckout, resetRunner, trend]);
 
   const runPhoto = useCallback(async (file: File | undefined | null) => {
     if (!trend || !file || genericBusy) return;
@@ -758,7 +784,7 @@ function TrendRunnerPortal() {
       const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
       if (!uploaded.asset_id) throw new Error("Backend не вернул asset_id");
       setUploadedAsset(uploaded);
-      if ((trend.user_fields || []).length || (checkout && !checkout.can_run)) {
+      if ((trend.user_fields || []).length || !checkout || !checkout.can_run) {
         setPhase("idle");
         toast.success(checkout && !checkout.can_run ? "Фото готово — пополни баланс прямо здесь" : "Фото готово");
         return;
@@ -972,7 +998,7 @@ function TrendRunnerPortal() {
 
               {uploadedAsset ? (
                 <Button
-                  disabled={genericBusy || !userFieldsReady || Boolean(checkout && !checkout.can_run)}
+                  disabled={genericBusy || !userFieldsReady || !checkout || !checkout.can_run}
                   className="min-h-12 w-full"
                   onClick={() => {
                     if (uploadedAsset) void startTrend(uploadedAsset.asset_id, userValues);

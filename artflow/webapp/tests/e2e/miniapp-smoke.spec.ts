@@ -85,6 +85,10 @@ async function mockApi(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: trends }));
   await page.route("**/api/v1/trends/101", (route) => route.fulfill({ json: trends[0] }));
+  await page.route("**/api/v1/trends/101/checkout", (route) => route.fulfill({ json: {
+    cost_credits: 1.5, balance_credits: 100, can_run: true,
+    deficit_credits: 0, recommended_plan: null,
+  } }));
   await page.route("**/api/v1/trends/101/link", (route) => route.fulfill({ json: { link: "https://t.me/apix_bot?start=ref_REF123__trend_101" } }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: plans }));
   await page.route("**/api/v1/referrals", (route) => route.fulfill({ json: {
@@ -211,10 +215,85 @@ test("one-photo trend runner uploads and runs without exposing generation contro
   await expect(page.getByRole("dialog", { name: /Задача #9001/ })).toBeVisible();
   expect(runPayload).toMatchObject({ asset_id: "apixasset.test.signature" });
   expect(typeof runPayload?.idempotency_key).toBe("string");
+  expect(runPayload?.quoted_credits).toBe(1.5);
   expect(runPayload).not.toHaveProperty("model");
   expect(runPayload).not.toHaveProperty("prompt");
   expect(runPayload).not.toHaveProperty("ratio");
   expect(runPayload).not.toHaveProperty("duration");
+});
+
+test("retrying a trend after a lost response keeps the same request key", async ({ page }) => {
+  const keys: string[] = [];
+  await page.route("**/api/v1/trends/upload", (route) => route.fulfill({ json: {
+    asset_id: "apixasset.retry.signature", url: "https://example.test/user.jpg", kind: "image",
+  } }));
+  await page.route("**/api/v1/trends/101/run", (route) => {
+    const body = route.request().postDataJSON() as { idempotency_key: string };
+    keys.push(body.idempotency_key);
+    return route.fulfill({ status: 503, json: { detail: "Temporary response failure" } });
+  });
+
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("tab", { name: "Тренды" }).click();
+  await page.getByRole("button", { name: "✨ Портреты", exact: true }).click();
+  await page.getByRole("button", { name: /Повторить/ }).first().click();
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+  await expect.poll(() => keys.length).toBe(1);
+  await dialog.getByRole("button", { name: /Создать/ }).click();
+  await expect.poll(() => keys.length).toBe(2);
+  expect(keys[1]).toBe(keys[0]);
+});
+
+test("stale trend price refreshes checkout and reuses the uploaded photo", async ({ page }) => {
+  let price = 1.5;
+  let uploads = 0;
+  const runs: Array<{ asset_id: string; idempotency_key: string; quoted_credits: number }> = [];
+  await page.route("**/api/v1/trends/101/checkout", route => route.fulfill({ json: {
+    cost_credits: price, balance_credits: 100, can_run: true,
+    deficit_credits: 0, recommended_plan: null,
+  } }));
+  await page.route("**/api/v1/trends/upload", route => {
+    uploads++;
+    return route.fulfill({ json: {
+      asset_id: "apixasset.price.signature", url: "https://example.test/user.jpg", kind: "image",
+    } });
+  });
+  await page.route("**/api/v1/trends/101/run", route => {
+    const body = route.request().postDataJSON() as typeof runs[number];
+    runs.push(body);
+    if (runs.length === 1) {
+      price = 2;
+      return route.fulfill({ status: 409, json: { detail: {
+        code: "trend_quote_stale", message: "Цена тренда изменилась. Проверь стоимость и подтверди запуск.",
+      } } });
+    }
+    return route.fulfill({ json: { ok: true, credits: 98, task: {
+      id: 9002, task_id: "web:trend-price", model: "Nano Banana 2",
+      gen_type: "image", prompt: "", prompt_hidden: true, status: "pending",
+      result_url: null, result_urls: [], credits_spent: 2,
+      created_at: new Date().toISOString(),
+    } } });
+  });
+
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("tab", { name: "Тренды" }).click();
+  await page.getByRole("button", { name: "✨ Портреты", exact: true }).click();
+  await page.getByRole("button", { name: /Повторить/ }).first().click();
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+  await expect.poll(() => runs.length).toBe(1);
+  await expect(dialog.getByRole("button", { name: "Создать · 2 💋" })).toBeVisible();
+  await dialog.getByRole("button", { name: /Создать/ }).click();
+  await expect(page.getByRole("dialog", { name: /Задача #9002/ })).toBeVisible();
+  expect(uploads).toBe(1);
+  expect(runs.map(run => run.quoted_credits)).toEqual([1.5, 2]);
+  expect(runs[1].asset_id).toBe(runs[0].asset_id);
+  expect(runs[1].idempotency_key).toBe(runs[0].idempotency_key);
 });
 
 

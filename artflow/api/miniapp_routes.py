@@ -186,6 +186,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["miniapp"])
 
 
+class PreSubmitRejection(HTTPException):
+    """A generation rejected before any provider submission or paid task exists."""
+
+
 @router.api_route("/health", methods=["GET", "HEAD"])
 async def health() -> dict:
     return {"status": "ok"}
@@ -2898,7 +2902,7 @@ async def create_image_generation(
         await _reconcile_user_active_generations(session, user.id)
         active = await repo.count_user_active_generations(session, user.id)
         if active >= MAX_CONCURRENT:
-            raise HTTPException(status_code=429, detail="Too many concurrent generations")
+            raise PreSubmitRejection(status_code=429, detail="Too many concurrent generations")
         charge = await repo.charge_image_generation(
             session,
             user_id=user.id,
@@ -2906,7 +2910,7 @@ async def create_image_generation(
             amount=model_cost.credits,
         )
         if not charge.allowed:
-            raise HTTPException(status_code=402, detail="Failed to spend credits")
+            raise PreSubmitRejection(status_code=402, detail="Failed to spend credits")
         charged_credits = charge.charged_credits
         gen_prompt = user_prompt or f"blend:{len(all_refs)}"
         image_session = await repo.create_image_session(session=session, user_id=user.id, model=body.model, mode="image" if all_refs else "text", aspect_ratio=normalized_ratio, quality="basic", count=1, base_prompt=None if prompt_meta["hidden_prompt"] else gen_prompt, reference_file_id=None, reference_url=all_refs[0] if all_refs else None, reference_urls=all_refs, prompt_provenance="user_supplied" if body.prompt_id is None else None)
@@ -2963,7 +2967,7 @@ async def create_image_generation(
     await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
-        raise HTTPException(status_code=429, detail="Too many concurrent generations")
+        raise PreSubmitRejection(status_code=429, detail="Too many concurrent generations")
 
     charge = await repo.charge_image_generation(
         session,
@@ -2972,7 +2976,7 @@ async def create_image_generation(
         amount=model_cost.credits,
     )
     if not charge.allowed:
-        raise HTTPException(
+        raise PreSubmitRejection(
             status_code=402,
             detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}",
         )
@@ -3346,14 +3350,14 @@ async def create_video_generation(
         if not model_cost or not getattr(model_cost, "is_active", True):
             raise HTTPException(status_code=422, detail="Model not available")
         if user.credits < model_cost.credits:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}")
+            raise PreSubmitRejection(status_code=402, detail=f"Insufficient credits: need {model_cost.credits}, have {user.credits}")
         await _reconcile_user_active_generations(session, user.id)
         active = await repo.count_user_active_generations(session, user.id)
         if active >= MAX_CONCURRENT:
-            raise HTTPException(status_code=429, detail="Too many concurrent generations")
+            raise PreSubmitRejection(status_code=429, detail="Too many concurrent generations")
         ok = await repo.spend_credits(session, user.id, model_cost.credits)
         if not ok:
-            raise HTTPException(status_code=402, detail="Failed to spend credits")
+            raise PreSubmitRejection(status_code=402, detail="Failed to spend credits")
         prompt = user_prompt
         gen = await repo.create_generation(session, user.id, body.model, GenerationType.video, prompt or "mj-video", model_cost.credits, input_params=prompt_meta)
         try:
@@ -3416,7 +3420,7 @@ async def create_video_generation(
     image_url = normalized["image_url"]
 
     if user.credits < total_credits:
-        raise HTTPException(
+        raise PreSubmitRejection(
             status_code=402,
             detail=f"Insufficient credits: need {total_credits}, have {user.credits}",
         )
@@ -3424,11 +3428,11 @@ async def create_video_generation(
     await _reconcile_user_active_generations(session, user.id)
     active = await repo.count_user_active_generations(session, user.id)
     if active >= MAX_CONCURRENT:
-        raise HTTPException(status_code=429, detail="Too many concurrent generations")
+        raise PreSubmitRejection(status_code=429, detail="Too many concurrent generations")
 
     ok = await repo.spend_credits(session, user.id, total_credits)
     if not ok:
-        raise HTTPException(status_code=402, detail="Failed to spend credits")
+        raise PreSubmitRejection(status_code=402, detail="Failed to spend credits")
 
     normalized.update(prompt_meta)
     normalized["billing_output_seconds"] = billing_seconds.output

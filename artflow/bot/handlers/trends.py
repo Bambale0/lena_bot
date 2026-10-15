@@ -24,6 +24,7 @@ from bot.filters.admin import IsAdmin
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
+from core.gemini_omni import GEMINI_OMNI_DURATIONS, GEMINI_OMNI_VIDEO_MODEL
 from core.trends import (
     TREND_CATEGORIES,
     TREND_TAG,
@@ -324,8 +325,10 @@ async def trend_scenario(call: CallbackQuery, state: FSMContext) -> None:
     scenario = call.data.rsplit(":", 1)[1]  # type: ignore[union-attr]
     await state.update_data(scenario=scenario, requires_reference=scenario == "image")
     await state.set_state(TrendAdminFSM.duration)
+    data = await state.get_data()
+    durations = GEMINI_OMNI_DURATIONS if data.get("model") == GEMINI_OMNI_VIDEO_MODEL else (5, 8, 10)
     builder = InlineKeyboardBuilder()
-    builder.row(*(InlineKeyboardButton(text=f"{value} сек", callback_data=f"trends:duration:{value}") for value in (5, 8, 10)))
+    builder.row(*(InlineKeyboardButton(text=f"{value} сек", callback_data=f"trends:duration:{value}") for value in durations))
     await call.message.answer("Длительность по умолчанию:", reply_markup=builder.as_markup())
     await safe_answer_callback(call)
 
@@ -333,6 +336,11 @@ async def trend_scenario(call: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(TrendAdminFSM.duration, F.data.startswith("trends:duration:"), IsAdmin())
 async def trend_duration(call: CallbackQuery, state: FSMContext) -> None:
     duration = int(call.data.rsplit(":", 1)[1])  # type: ignore[union-attr]
+    data = await state.get_data()
+    allowed = GEMINI_OMNI_DURATIONS if data.get("model") == GEMINI_OMNI_VIDEO_MODEL else (5, 8, 10)
+    if duration not in allowed:
+        await call.answer("Для этой модели выбери доступную длительность", show_alert=True)
+        return
     await state.update_data(duration=duration)
     await state.set_state(TrendAdminFSM.preview)
     await call.message.answer("Пришли video preview: MP4, WEBM или MOV до 20 МБ.")
@@ -422,6 +430,9 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
         "duration": data.get("duration"),
         "requires_reference": bool(data.get("requires_reference")),
     }
+    if kind == "video" and data.get("model") == GEMINI_OMNI_VIDEO_MODEL and data.get("duration") not in GEMINI_OMNI_DURATIONS:
+        await call.answer("Для Gemini Omni выбери длительность 4, 6, 8 или 10 сек", show_alert=True)
+        return
     prompt = await create_prompt(
         session,
         author_id=db_user.id,
