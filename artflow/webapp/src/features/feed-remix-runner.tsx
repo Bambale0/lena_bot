@@ -649,7 +649,10 @@ function FeedRemixRunnerPortal() {
     try {
       const task = await apiJson<GenerationTask>(`/feed/${item.id}/remix`, {
         method: "POST",
-        body: JSON.stringify({ ...requestBody, quoted_credits: quote?.cost_credits }),
+        body: JSON.stringify({
+          ...requestBody,
+          ...(item && itemLooksVideo(item) ? { quoted_credits: quote?.cost_credits } : {}),
+        }),
       });
       pendingRemix?.resolve(task);
       pendingRemix = null;

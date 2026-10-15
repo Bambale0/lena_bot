@@ -110,13 +110,13 @@ async def test_measured_duration_is_quoted_before_any_charge_or_submit(quoted_re
     fixture.repo.spend_credits.assert_not_awaited()
     fixture.service.generate_video.assert_not_awaited()
     assert "7 сек" in fixture.call.message.answer.await_args.args[0]
-    assert "28 💋" in fixture.call.message.answer.await_args.args[0]
+    assert "56 💋" in fixture.call.message.answer.await_args.args[0]
     callback = _confirm_callback(fixture)
     assert len(callback.encode()) <= 64
     fixture.call.data = callback
     await fixture.run("regen")
     fixture.repo.spend_credits.assert_awaited_once()
-    assert fixture.repo.spend_credits.await_args.args[2] == 28
+    assert fixture.repo.spend_credits.await_args.args[2] == 56
     assert fixture.service.generate_video.await_args.kwargs["duration"] == 7
     await fixture.run("regen")
     fixture.repo.spend_credits.assert_awaited_once()
@@ -187,7 +187,7 @@ async def test_changed_price_requires_quote_even_when_duration_is_unchanged(quot
     fixture.previous.credits_spent = 21
     await fixture.run("regen")
     fixture.repo.spend_credits.assert_not_awaited()
-    assert "28 💋" in fixture.call.message.answer.await_args.args[0]
+    assert "56 💋" in fixture.call.message.answer.await_args.args[0]
 
 
 async def test_quote_shows_all_six_billed_decimal_places(quoted_regen):
@@ -195,10 +195,10 @@ async def test_quote_shows_all_six_billed_decimal_places(quoted_regen):
     fixture.repo.resolve_video_model_cost.side_effect = None
     fixture.repo.resolve_video_model_cost.return_value = SimpleNamespace(credits=1234.56789, display_name="Seedance", is_active=True)
     await fixture.run("regen")
-    assert "8641.97523 💋" in fixture.call.message.answer.await_args.args[0]
+    assert "17283.95046 💋" in fixture.call.message.answer.await_args.args[0]
     fixture.call.data = _confirm_callback(fixture)
     await fixture.run("regen")
-    assert fixture.repo.spend_credits.await_args.args[2] == 8641.97523
+    assert fixture.repo.spend_credits.await_args.args[2] == 17283.95046
 
 
 async def test_cancel_button_through_navigation_invalidates_confirmation(quoted_regen):
@@ -291,12 +291,12 @@ async def test_initial_feed_picker_to_photo_to_params_requires_measured_quote(in
     fixture.repo.spend_credits.assert_not_awaited()
     fixture.service.generate_video.assert_not_awaited()
     sent = fixture.initial_call.message.answer.await_args
-    assert "7 сек" in sent.args[0] and "28 💋" in sent.args[0]
+    assert "7 сек" in sent.args[0] and "56 💋" in sent.args[0]
     assert SECRET not in sent.args[0]
     callback = sent.kwargs["reply_markup"].inline_keyboard[0][0].callback_data
     await _initial_confirm(fixture, callback)
     fixture.repo.spend_credits.assert_awaited_once()
-    assert fixture.repo.spend_credits.await_args.args[2] == 28
+    assert fixture.repo.spend_credits.await_args.args[2] == 56
     assert fixture.service.generate_video.await_args.kwargs["duration"] == 7
     assert SECRET not in fixture.service.generate_video.await_args.args[1]
     await _initial_confirm(fixture, callback)
