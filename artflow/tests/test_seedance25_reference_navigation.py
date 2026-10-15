@@ -245,3 +245,28 @@ async def test_seedance25_old_back_always_skips_identity_picker(state, provider,
     charge, post = provider
     charge.assert_not_awaited()
     post.assert_not_awaited()
+
+
+
+@pytest.mark.asyncio
+async def test_legacy_parameter_back_callback_cannot_resurrect_identity_mode(state, provider):
+    # A direct legacy handler/alternate router registration must follow the
+    # same navigation contract, rather than display the old paid mode picker.
+    await state.set_state(VideoGenFSM.params_select)
+    await state.update_data(
+        model_key=MODEL_KEY, mode="text", duration=5,
+        resolution="720p", aspect_ratio="adaptive",
+        wizard_scenario="advanced", video_model_menu="vid_wizard:advanced",
+        seedance_identity_transfer=False, ref_file_ids=[],
+    )
+    call = make_callback(data="vpar_back")
+    await video_gen.cb_vpar_back(
+        call, state, AsyncMock(),
+        SimpleNamespace(id=2, tg_id=2, credits=10000),
+    )
+    assert await state.get_state() == VideoGenFSM.seedance25_reference_upload.state
+    assert "s25ref:done" in callbacks(call)
+    assert not any(v.startswith("vid_mode:") for v in callbacks(call))
+    spend, provider_post = provider
+    spend.assert_not_awaited()
+    provider_post.assert_not_awaited()

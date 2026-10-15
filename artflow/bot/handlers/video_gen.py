@@ -75,7 +75,6 @@ from bot.keyboards.models import (
     VIDEO_CAPS,
     VIDEO_GROUP_TITLES,
     after_generation_kb,
-    feed_video_models_kb,
     model_cost_display_text,
     multi_ref_kb,
     video_mode_kb,
@@ -2454,41 +2453,17 @@ async def cb_vpar_next(
 
 
 @router.callback_query(VideoGenFSM.params_select, F.data == "vpar_back")
-async def cb_vpar_back(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
-    data = await state.get_data()
-    model_key = data["model_key"]
-    caps = VIDEO_CAPS.get(model_key, {})
-    modes = caps.get("modes", ["text"])
-    model_cost = await repo.get_model_cost(session, model_key)
-    display_name = model_cost.display_name if model_cost else model_key
+async def cb_vpar_back(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User,
+) -> None:
+    """Legacy registration delegates to the canonical wizard Back handler.
 
-    if data.get("feed_force_reference"):
-        model_costs = await repo.get_all_model_costs(session)
-        await state.set_state(VideoGenFSM.model_select)
-        await call.message.edit_text(  # type: ignore[union-attr]
-            "🎬 <b>Повторить видео</b>\n\n"
-            "Выбери модель для повтора по твоему фото/референсу:",
-            reply_markup=feed_video_models_kb(model_costs),
-        )
-        await call.answer()
-        return
+    Prevent a later router-order change from resurrecting the old Seedance
+    mode picker and its unintended identity-edit path.
+    """
+    from bot.handlers.video_navigation import back_in_video
 
-    if len(modes) > 1:
-        await state.set_state(VideoGenFSM.mode_select)
-        await call.message.edit_text(  # type: ignore[union-attr]
-            f"✅ <b>{display_name}</b>\n\nВыбери режим:",
-            reply_markup=video_mode_kb(model_key),
-        )
-    else:
-        model_costs = await repo.get_all_model_costs(session)
-        await state.set_state(VideoGenFSM.model_select)
-        await call.message.edit_text(  # type: ignore[union-attr]
-            "🎬 <b>Генерация видео</b>\n\nВыбери модель:",
-            reply_markup=video_models_kb(model_costs),
-        )
-    await call.answer()
-
-
+    await back_in_video(call, state, session, db_user)
 
 
 async def _show_video_cost_quote(
