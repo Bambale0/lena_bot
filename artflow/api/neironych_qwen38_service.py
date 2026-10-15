@@ -43,7 +43,8 @@ def extract_chat_text(data: Any) -> str:
     elif isinstance(content, list):
         result = "\n".join(
             item["text"].strip() for item in content
-            if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip()
+            if isinstance(item, dict) and item.get("type") in {"text", "output_text"}
+            and isinstance(item.get("text"), str) and item["text"].strip()
         ).strip()
     else:
         result = ""

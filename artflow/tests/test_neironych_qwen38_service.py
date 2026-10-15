@@ -25,6 +25,7 @@ async def test_text_uses_exact_chat_contract_and_extracts_blocks() -> None:
     def handler(request):
         seen["request"] = request
         return httpx.Response(200, json={"choices": [{"message": {"content": [
+            {"type": "reasoning", "text": "private chain"},
             {"type": "text", "text": "Первый"}, {"type": "text", "text": "Второй"},
         ]}}]})
 

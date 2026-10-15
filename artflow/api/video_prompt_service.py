@@ -127,7 +127,8 @@ def _extract_chat_text(payload: Any) -> str:
             text = "\n".join(
                 item["text"].strip()
                 for item in content
-                if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"]
+                if isinstance(item, dict) and item.get("type") in {"text", "output_text"}
+                and isinstance(item.get("text"), str) and item["text"]
             ).strip()
             if text:
                 return _validated_prompt_text(text)

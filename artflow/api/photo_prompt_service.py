@@ -100,7 +100,8 @@ def _extract_chat_text(payload: Any) -> str:
             text = "\n".join(
                 str(item.get("text") or "").strip()
                 for item in content
-                if isinstance(item, dict) and item.get("text")
+                if isinstance(item, dict) and item.get("type") in {"text", "output_text"}
+                and item.get("text")
             ).strip()
             if text:
                 return text
@@ -261,6 +262,8 @@ async def generate_prompt_from_photo_result(
                 # This verified chat route is a single paid call. The older
                 # Responses-to-Chat helper can make an ambiguous second call.
                 result = await _call_kie_chat(model, image_data_url)
+                if len(result.text.strip()) < 20:
+                    raise RuntimeError("KIE returned no usable photo prompt")
             logger.info("photo_prompt generated via provider=%s model=%s", result.provider, result.model)
             return result
         except Qwen38ProviderError as exc:
