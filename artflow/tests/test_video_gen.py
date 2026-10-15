@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from api.video_reference_billing import VideoSeconds
 from bot.handlers import video_gen
 from bot.states import VideoGenFSM
 from db.models import GenerationType
@@ -966,6 +967,9 @@ async def test_seedance_repeat_launch_sends_role_order_to_provider() -> None:
             "bot.handlers.video_gen.seedance25_edit_billing_duration",
             AsyncMock(return_value=5),
         ),
+        patch("bot.handlers.video_gen.measured_video_seconds", AsyncMock(
+            return_value=VideoSeconds(output=5, references=0, billable=5, reference_count=0),
+        )),
         patch("bot.handlers.video_gen.video_service", new=SimpleNamespace(
             generate_video=AsyncMock(
                 return_value=SimpleNamespace(
@@ -1291,7 +1295,9 @@ async def test_handle_video_prompt_motion_control_keeps_user_prompt() -> None:
     mock_cost = _make_video_model_cost("kling-2.6/motion-control", 7, "Kling 2.6 Motion")
     mock_gen = SimpleNamespace(id=101, task_id=None, model="kling-2.6/motion-control")
 
-    with patch("bot.handlers.video_gen.repo", AsyncMock(
+    with patch("bot.handlers.video_gen.measured_video_seconds", AsyncMock(
+        return_value=VideoSeconds(output=5, references=0, billable=5, reference_count=0),
+    )), patch("bot.handlers.video_gen.repo", AsyncMock(
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=mock_gen),
         update_generation_task=AsyncMock(),
@@ -1334,7 +1340,9 @@ async def test_handle_video_prompt_passes_gemini_omni_extras() -> None:
     mock_cost = _make_video_model_cost("gemini-omni-video", 240, "Gemini Omni")
     mock_gen = SimpleNamespace(id=102, task_id=None, model="gemini-omni-video")
 
-    with patch("bot.handlers.video_gen.repo", AsyncMock(
+    with patch("bot.handlers.video_gen.measured_video_seconds", AsyncMock(
+        return_value=VideoSeconds(output=4, references=0, billable=4, reference_count=0),
+    )), patch("bot.handlers.video_gen.repo", AsyncMock(
         spend_credits=AsyncMock(return_value=True),
         create_generation=AsyncMock(return_value=mock_gen),
         update_generation_task=AsyncMock(),

@@ -61,6 +61,7 @@ from api.video_prompt_limits import (
     validate_video_prompt,
     video_prompt_max_chars,
 )
+from api.video_reference_billing import measured_video_seconds
 from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_service import VideoModel
 from bot.keyboards.main_menu import back_to_menu_kb, main_menu_kb
@@ -2065,22 +2066,45 @@ async def cb_vpar_back(call: CallbackQuery, state: FSMContext, session: AsyncSes
 async def _show_video_cost_quote(
     source_message: Message, state: FSMContext, *, state_key: str,
     user_id: int, fingerprint: str, duration: int, credits: float,
-    callback_prefix: str, context: dict,
+    callback_prefix: str, context: dict, reference_seconds: int = 0,
 ) -> None:
     token = secrets.token_hex(8)
     credits_text = f"{credits:.6f}".rstrip("0").rstrip(".")
     await state.update_data(**{state_key: {
         **context, "token": token, "user_id": user_id, "fingerprint": fingerprint,
     }})
+    duration_text = (
+        f"Видеореференс: <b>{reference_seconds} сек</b> + результат: <b>{duration} сек</b>.\n"
+        if reference_seconds else f"Длительность: <b>{duration} сек</b>.\n"
+    )
     await source_message.answer(
-        "🔁 <b>Проверь стоимость повтора</b>\n\n"
-        f"Длительность: <b>{duration} сек</b> (по исходному видео).\n"
-        f"Итого: <b>{credits_text} 💋</b>.\n\n"
+        "🎬 <b>Проверь стоимость видео</b>\n\n"
+        + duration_text
+        + f"Итого: <b>{credits_text} 💋</b>.\n\n"
         "Параметры уточнены. Подтверди запуск по этой цене.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"Запустить за {credits_text} 💋", callback_data=f"{callback_prefix}{token}")],
             [InlineKeyboardButton(text="Отмена", callback_data="menu:main")],
         ]),
+    )
+
+
+@router.callback_query(F.data.startswith("video_price_confirm:"))
+async def cb_video_price_confirm(
+    call: CallbackQuery, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
+) -> None:
+    data = await state.get_data()
+    quote = data.get("video_reference_quote")
+    token = str(call.data or "").removeprefix("video_price_confirm:")
+    if (not isinstance(quote, dict) or quote.get("user_id") != db_user.id
+            or quote.get("model_key") != data.get("model_key")
+            or not secrets.compare_digest(str(quote.get("token") or "").encode(), token.encode())):
+        await safe_answer_callback(call, "Цена устарела. Проверь параметры видео ещё раз.", show_alert=True)
+        return
+    await safe_answer_callback(call)
+    await _launch_video_generation_from_state(
+        source_message=call.message, state=state, session=session, db_user=db_user, bot=bot,
+        prompt=str(quote.get("prompt") or ""), price_confirmation_token=token,
     )
 
 
@@ -2125,6 +2149,7 @@ async def _launch_video_generation_from_state(
     parent_generation_id: int | None = None,
     hidden_feed_prompt: bool = False,
     price_confirmation_token: str | None = None,
+    preconfirmed_credits: float | None = None,
 ) -> bool:
     data = await state.get_data()
     model_key: str = data["model_key"]
@@ -2286,10 +2311,10 @@ async def _launch_video_generation_from_state(
         await source_message.answer("Seedance 2.5 сейчас недоступен. Попробуй позже.")
         return False
     motion_credits = None if content_edit else data.get("motion_credits")
+    rate_or_flat = model_cost.credits if model_cost else float(data.get("credits", 0))
     if motion_credits is not None:
         credits = float(motion_credits)
     else:
-        rate_or_flat = model_cost.credits if model_cost else float(data.get("credits", 0))
         credits = float(_video_total_credits(model_key, duration, rate_or_flat))
 
     if model_key == SEEDANCE25_MODEL_KEY and data.get("seedance_identity_transfer"):
@@ -2304,10 +2329,6 @@ async def _launch_video_generation_from_state(
             "audio_ids": list(dict.fromkeys([*audio_ids, *identity_tokens])),
         }
 
-    if content_edit and data.get("gj_quoted_cost") != credits:
-        await source_message.answer("Стоимость изменилась. Проверь новую цену перед запуском.")
-        return False
-
     input_params = _video_input_params_from_generation_state(
         model_key=model_key,
         data=data,
@@ -2319,9 +2340,24 @@ async def _launch_video_generation_from_state(
     )
     if source_feed_gen_id and FEED_REMIX_CONTEXT_KEY in data:
         input_params[FEED_REMIX_CONTEXT_KEY] = feed_remix_context(source_feed_gen_id, prompt)
-    if price_confirmation_token is not None or (
-        source_feed_gen_id and model_key == SEEDANCE25_MODEL_KEY and edit_billing_duration is not None
-    ):
+    try:
+        billing_seconds = await measured_video_seconds(
+            input_params, per_second=_is_per_second_video_model(model_key),
+        )
+    except (ValueError, OSError, RuntimeError) as exc:
+        await source_message.answer(
+            f"❌ {escape(str(exc)) if isinstance(exc, ValueError) else 'Не удалось проверить длительность видеореференса.'} "
+            "Кредиты не списаны.", reply_markup=main_menu_kb(),
+        )
+        return False
+    credits = float(_video_total_credits(model_key, billing_seconds.billable, rate_or_flat))
+    input_params.update(
+        billing_output_seconds=billing_seconds.output,
+        billing_reference_seconds=billing_seconds.references,
+        billing_total_seconds=billing_seconds.billable,
+        billing_rate=float(rate_or_flat),
+    )
+    if (billing_seconds.reference_count or price_confirmation_token is not None) and preconfirmed_credits != credits:
         # Every feed-source edit needs a measured quote, even after a previous
         # preflight updated FSM duration. Pressing Next again is not consent.
         fingerprint = hashlib.sha256(json.dumps({
@@ -2329,21 +2365,23 @@ async def _launch_video_generation_from_state(
             "parent_generation_id": parent_generation_id, "model": model_key,
             "prompt": prompt, "input_params": input_params, "credits": credits,
         }, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
-        quote = data.get("video_feed_quote")
+        quote_key = "video_feed_quote" if source_feed_gen_id else "video_reference_quote"
+        quote = data.get(quote_key)
         if (price_confirmation_token is None or not isinstance(quote, dict)
                 or quote.get("user_id") != db_user.id or quote.get("fingerprint") != fingerprint
                 or not secrets.compare_digest(str(quote.get("token") or "").encode(), price_confirmation_token.encode())):
             await _show_video_cost_quote(
-                source_message, state, state_key="video_feed_quote", user_id=db_user.id,
+                source_message, state, state_key=quote_key, user_id=db_user.id,
                 fingerprint=fingerprint, duration=duration, credits=credits,
-                callback_prefix="feed_video_confirm:", context={
+                reference_seconds=billing_seconds.references,
+                callback_prefix="feed_video_confirm:" if source_feed_gen_id else "video_price_confirm:", context={
                     "source_feed_gen_id": source_feed_gen_id, "parent_generation_id": parent_generation_id,
-                    "model_key": model_key,
+                    "model_key": model_key, "prompt": prompt,
                 },
             )
             return False
         # The Redis FSM quote is single use, including across an interrupted launch.
-        await state.update_data(video_feed_quote=None)
+        await state.update_data(**{quote_key: None})
     ok = await repo.spend_credits(session, db_user.id, credits)
     if not ok:
         await source_message.answer("❌ Недостаточно 💋.", reply_markup=main_menu_kb())
@@ -3126,9 +3164,25 @@ async def cb_regen_video(
         await call.answer("Модель недоступна", show_alert=True)
         return
 
-    credits = float(_video_total_credits(model_key, duration, model_cost.credits))
+    try:
+        billing_seconds = await measured_video_seconds(
+            input_params, per_second=_is_per_second_video_model(model_key),
+        )
+    except (ValueError, OSError, RuntimeError) as exc:
+        await call.answer(
+            str(exc) if isinstance(exc, ValueError) else "Не удалось проверить длительность видеореференса.",
+            show_alert=True,
+        )
+        return
+    credits = float(_video_total_credits(model_key, billing_seconds.billable, model_cost.credits))
+    input_params.update(
+        billing_output_seconds=billing_seconds.output,
+        billing_reference_seconds=billing_seconds.references,
+        billing_total_seconds=billing_seconds.billable,
+        billing_rate=float(model_cost.credits),
+    )
     previous_credits = getattr(prev, "credits_spent", None)
-    needs_quote = confirmation_token is not None or (
+    needs_quote = billing_seconds.reference_count > 0 or confirmation_token is not None or (
         edit_billing_duration is not None and (
             duration != requested_duration
             or (isinstance(previous_credits, (int, float)) and previous_credits != credits)
@@ -3144,6 +3198,7 @@ async def cb_regen_video(
             await _show_video_cost_quote(
                 call.message, state, state_key="video_regen_quote", user_id=db_user.id,
                 fingerprint=fingerprint, duration=duration, credits=credits,
+                reference_seconds=billing_seconds.references,
                 callback_prefix=f"regen:video:{gen_id}:", context={"generation_id": gen_id},
             )
             await safe_answer_callback(call)

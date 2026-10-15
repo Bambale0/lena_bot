@@ -4672,6 +4672,23 @@ async function submitGeneration(form) {
           };
     }
     if (!body.model && state.generationKind !== "music") throw new Error("Модель недоступна");
+    if (state.generationKind === "video") {
+      const quotePath = feedRemixMode ? `/feed/${feedRemixId}/remix/quote` : "/generate/video/quote";
+      const quote = await request(quotePath, { method: "POST", body: JSON.stringify(body) });
+      const cost = Number(quote.cost_credits);
+      if (!Number.isFinite(cost) || cost < 0) throw new Error("Стоимость видео недоступна. Повторите попытку.");
+      if (!quote.can_run) throw new Error(`Недостаточно кредитов: нужно ${cost} 💋.`);
+      const referenceSeconds = Number(quote.reference_seconds || 0);
+      const outputSeconds = Number(quote.output_seconds || body.duration);
+      const confirmed = window.confirm(
+        `Видеореференсы: ${referenceSeconds} сек\nРезультат: ${outputSeconds} сек\nК оплате: ${cost} 💋\n\nЗапустить генерацию?`
+      );
+      if (!confirmed) {
+        setGenerationStatus({ status: "idle", progress: 0 });
+        return;
+      }
+      body.quoted_credits = cost;
+    }
     setGenerationStatus({
       status: "pending",
       title: feedRemixMode ? "Запускаем повтор из ленты" : "Отправляем задачу",
