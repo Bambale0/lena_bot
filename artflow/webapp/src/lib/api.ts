@@ -276,6 +276,20 @@ export class MiniAppApi {
     });
   }
 
+  quoteVideo(body: Record<string, unknown>): Promise<{
+    cost_credits: number;
+    balance_credits: number;
+    can_run: boolean;
+    output_seconds: number;
+    reference_seconds: number;
+    billable_seconds: number;
+  }> {
+    return this.request("/generate/video/quote", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   async checkReferenceAvailability(url: string, signal?: AbortSignal): Promise<unknown> {
     const response = await fetch("/api/web/upload-media/check", {
       method: "POST", cache: "no-store", signal,

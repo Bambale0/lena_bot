@@ -35,6 +35,9 @@ type FeedCheckoutQuote = {
   recommended_plan?: FeedCheckoutPlan | null;
   source_video_edit?: boolean;
   effective_duration_seconds?: number;
+  output_seconds?: number;
+  reference_seconds?: number;
+  billable_seconds?: number;
 };
 
 function draftStorage(): Storage | null {
@@ -646,7 +649,7 @@ function FeedRemixRunnerPortal() {
     try {
       const task = await apiJson<GenerationTask>(`/feed/${item.id}/remix`, {
         method: "POST",
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({ ...requestBody, quoted_credits: quote?.cost_credits }),
       });
       pendingRemix?.resolve(task);
       pendingRemix = null;
@@ -668,7 +671,7 @@ function FeedRemixRunnerPortal() {
     } finally {
       launchInFlight.current = false;
     }
-  }, [busy, canLaunch, item, persistDraft, refreshQuote, requestBody, requestBodyKey, resetForm, selectedModel]);
+  }, [busy, canLaunch, item, persistDraft, quote, refreshQuote, requestBody, requestBodyKey, resetForm, selectedModel]);
 
   const phaseLabel = useMemo(() => {
     if (phase === "uploading") return "Загружаем референсы…";

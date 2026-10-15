@@ -181,6 +181,10 @@ function GenerationScreen({
   const taskCount = clampTaskCount(draft.taskCount);
   const baseEstimate = kind === "image" ? imageBaseCost(selectedModel, draft.quality, draft.count) : videoBaseCost(selectedModel, draft);
   const estimate = baseEstimate * taskCount;
+  const referenceVideoPricePending = kind !== "image" && Boolean(
+    draft.videoUrl || draft.audioIds.some(item => item.startsWith("__apix_seedance25:video_ref="))
+    || (draft.model.startsWith("minimax-h3/") && draft.characterIds.length),
+  );
   const maxRefs = preserveMedia ? mediaInspection.maxReferences ?? 0 : Math.max(1, Number(selectedModel?.max_refs || 1));
   const maxAudioIds = Math.max(0, Number(selectedModel?.max_audio_ids || 0));
   const maxCharacterIds = Math.max(0, Number(selectedModel?.max_character_ids || 0));
@@ -190,7 +194,7 @@ function GenerationScreen({
   const missingVideo = (Boolean(selectedModel?.requires_video_input) || draft.mode === "video" || kind === "motion") && !draft.videoUrl;
   const missingPrompt = !draft.prompt.trim() && !draft.promptId && !selectedModel?.key.startsWith("higgsfield/genjutsu/");
   const maxPromptLength = promptMaxLength(kind, selectedModel?.key);
-  const insufficientCredits = estimate > Number(user.credits || 0);
+  const insufficientCredits = !referenceVideoPricePending && estimate > Number(user.credits || 0);
   const mediaUploading = referenceUploading || videoUploading;
   const invalidSeed = Boolean(
     selectedModel?.has_seed &&
@@ -617,7 +621,7 @@ function GenerationScreen({
             <div className="apix-launch-row flex items-center justify-between gap-2">
               <div>
                 <p className="text-[10px] text-muted-foreground">Стоимость</p>
-                <p className="text-lg font-bold leading-none">{formatCredits(estimate)} кр.</p>
+                <p className="text-lg font-bold leading-none">{referenceVideoPricePending ? "После проверки видео" : `${formatCredits(estimate)} кр.`}</p>
                 {selectedModel?.is_per_second ? <p className="mt-1 text-[10px] text-muted-foreground">{formatCredits(selectedModel.credits_per_sec ?? selectedModel.credits)} кр./сек</p> : null}
                 {taskCount > 1 ? <p className="mt-1 text-[10px] text-muted-foreground">{taskCount} задачи подряд</p> : null}
               </div>

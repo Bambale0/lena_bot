@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
-from api import seedance25_adapter, video_runtime_fixes
+from api import seedance25_adapter, video_reference_billing, video_runtime_fixes
+from api.miniapp_routes import _require_video_price_confirmation as require_video_price_confirmation
 from db.models import GenerationType
 from tests.test_feed_remix_prompt_security import (
     SECRET,
@@ -26,11 +28,37 @@ def seedance_api(request, monkeypatch):
     launch = request.getfixturevalue("api_launch")
     probe = AsyncMock(return_value=7)
     monkeypatch.setattr(launch.routes, "seedance25_edit_billing_duration", probe)
+    monkeypatch.setattr(video_reference_billing, "local_upload_path_from_url", lambda _url: Path("synthetic/source.mp4"))
+    monkeypatch.setattr(video_reference_billing, "probe_local_media", AsyncMock(return_value=SimpleNamespace(duration_seconds=7)))
+    monkeypatch.setattr(launch.routes, "_require_video_price_confirmation", lambda *_args: None)
     launch.source.gen_type = GenerationType.video
     launch.source.result_url = SOURCE_VIDEO
     launch.source.model = MODEL
     launch.probe = probe
     return launch
+
+
+@pytest.mark.asyncio
+async def test_direct_video_quote_is_measured_and_required_before_charge(seedance_api, monkeypatch):
+    routes = seedance_api.routes
+    monkeypatch.setattr(routes, "_require_video_price_confirmation", require_video_price_confirmation)
+    seedance_api.costs.return_value.model_key = MODEL
+    body = routes.VideoGenRequest(
+        model=MODEL, prompt="Change the source video", mode="video",
+        video_url=SOURCE_VIDEO, duration=5,
+    )
+    quote = await routes.quote_video_generation(body, seedance_api.session, seedance_api.user)
+    assert (quote["reference_seconds"], quote["output_seconds"], quote["cost_credits"]) == (7, 7, 56)
+    seedance_api.charge.assert_not_awaited()
+    with pytest.raises(HTTPException) as raised:
+        await routes.create_video_generation(body, seedance_api.session, seedance_api.user)
+    assert raised.value.status_code == 409
+    seedance_api.charge.assert_not_awaited()
+    await routes.create_video_generation(
+        body.model_copy(update={"quoted_credits": quote["cost_credits"]}),
+        seedance_api.session, seedance_api.user,
+    )
+    assert seedance_api.charge.await_args.args[2] == 56
 
 
 @pytest.mark.asyncio
@@ -55,8 +83,9 @@ async def test_seedance_personalization_keeps_source_and_isolates_author(seedanc
     assert submitted.kwargs["grok_mode"] == "multimodal"
     assert seedance25_adapter.is_explicit_video_edit_prompt(submitted.args[1]) is (source_kind == "video")
     expected_duration = 7 if source_kind == "video" else 5
-    assert quote["cost_credits"] == expected_duration * 4
-    assert seedance_api.charge.await_args.args[2] == expected_duration * 4
+    expected_billable = expected_duration + (7 if source_kind == "video" else 0)
+    assert quote["cost_credits"] == expected_billable * 4
+    assert seedance_api.charge.await_args.args[2] == expected_billable * 4
     assert seedance_api.save.await_args.kwargs["input_params"]["duration"] == expected_duration
     assert seedance_api.save.await_args.kwargs["source_feed_gen_id"] == 77
     if source_kind == "video":
@@ -128,6 +157,7 @@ async def test_seedance_duration_comes_from_real_source_probe_before_tariff(seed
     monkeypatch.setattr(video_runtime_fixes, "local_upload_path_from_url", lambda url: "synthetic/local-source.mp4")
     probe = AsyncMock(return_value=SimpleNamespace(width=1280, height=720, duration_seconds=6.2))
     monkeypatch.setattr(video_runtime_fixes, "probe_local_media", probe)
+    monkeypatch.setattr(video_reference_billing, "probe_local_media", AsyncMock(return_value=SimpleNamespace(duration_seconds=6.2)))
     async def tariff(*args, **kwargs):
         probe.assert_awaited_once()
         assert kwargs["duration"] == 7
@@ -135,7 +165,8 @@ async def test_seedance_duration_comes_from_real_source_probe_before_tariff(seed
     monkeypatch.setattr(seedance_api.routes.repo, "resolve_video_model_cost", AsyncMock(side_effect=tariff))
     body = seedance_api.routes.FeedRemixRequest(model=MODEL, image_url=USER_IMAGE, duration=client_duration, audio_ids=[f"__apix_seedance25:duration={client_duration}"])
     quote = await seedance_api.routes.quote_feed_remix(77, body, seedance_api.session, seedance_api.user)
-    assert quote["cost_credits"] == 28
+    assert quote["cost_credits"] == 56
+    assert (quote["reference_seconds"], quote["output_seconds"], quote["billable_seconds"]) == (7, 7, 14)
     seedance_api.charge.assert_not_awaited()
 
 
@@ -188,7 +219,7 @@ async def test_feed_video_intent_reaches_provider_appropriate_mode_contract(seed
             assert payload["omni_reference_task_type"] == "edit"
             assert "duration" not in payload and "aspect_ratio" not in payload
     assert SECRET not in str(payload)
-    assert seedance_api.charge.await_args.args[2] == 28
+    assert seedance_api.charge.await_args.args[2] == 56
 
 
 @pytest.mark.asyncio
