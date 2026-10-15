@@ -41,6 +41,7 @@ def test_generation_card_uses_first_available_result_url(tmp_path, monkeypatch) 
 def test_generation_card_shows_plain_nexus_failure_reason() -> None:
     card = GenerationCard.from_generation(_generation(
         model="nano-banana-pro",
+        task_id="nexus:example-task",
         status=GenerationStatus.failed,
         error_msg=(
             "⚠️ Не удалось сгенерировать контент. Попробуйте изменить параметры "
@@ -55,6 +56,7 @@ def test_generation_card_shows_plain_nexus_failure_reason() -> None:
 def test_miniapp_generation_history_shows_plain_nexus_failure_reason() -> None:
     generation = _generation(
         model="nano-banana-pro",
+        task_id="nexus:example-task",
         status=GenerationStatus.failed,
         error_msg=(
             "⚠️ Не удалось сгенерировать контент. Попробуйте изменить параметры "

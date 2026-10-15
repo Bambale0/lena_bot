@@ -62,6 +62,7 @@ def test_generation_event_replaces_nexus_boilerplate() -> None:
     )
     payload = realtime.generation_event_payload(_gen(
         model="nano-banana-pro",
+        task_id="nexus:example-task",
         status=GenerationStatus.failed,
         error_msg=provider_error,
     ))
@@ -69,6 +70,20 @@ def test_generation_event_replaces_nexus_boilerplate() -> None:
     assert "Генератор завершил задачу с ошибкой" in payload["error"]
     assert "сид" not in payload["error"]
     assert "промпт" not in payload["error"]
+
+
+def test_generation_event_preserves_nexus_diagnostic_with_specific_cause() -> None:
+    provider_error = (
+        "⚠️ Не удалось сгенерировать контент. Попробуйте изменить параметры "
+        "(сид, промпт) и повторить попытку. Причина: лимит провайдера."
+    )
+    payload = realtime.generation_event_payload(_gen(
+        task_id="nexus:example-task",
+        status=GenerationStatus.failed,
+        error_msg=provider_error,
+    ))
+
+    assert payload["error"] == provider_error
 
 
 def test_generation_event_still_hides_protected_error_details() -> None:

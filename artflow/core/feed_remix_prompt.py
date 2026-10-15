@@ -616,7 +616,11 @@ def generation_public_error(generation, *, error_override: str | None = None) ->
     if error and generation_prompt_is_protected(generation):
         return "Не удалось завершить генерацию. Проверьте статус задачи или обратитесь в поддержку."
     normalized = " ".join(str(error or "").casefold().split())
-    if "не удалось сгенерировать контент" in normalized and "сид, промпт" in normalized:
+    generic_nexus_error = (
+        "⚠️ не удалось сгенерировать контент. попробуйте изменить параметры "
+        "(сид, промпт) и повторить попытку."
+    )
+    if str(getattr(generation, "task_id", "") or "").startswith("nexus:") and normalized == generic_nexus_error:
         return (
             "Генератор завершил задачу с ошибкой и не сообщил причину. "
             "Можно повторить запрос позже или выбрать другую модель."

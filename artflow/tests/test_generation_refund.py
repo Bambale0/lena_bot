@@ -279,7 +279,7 @@ async def test_nexus_image_failure_uses_short_honest_message(monkeypatch, refund
     bot = AsyncMock()
     _patch_kie_failure_webhook(monkeypatch, (True, refunded), bot)
     image = _pending_video_generation(
-        id=59563,
+        id=42,
         gen_type=main.GenerationType.image,
         model="nano-banana-pro",
         task_id="nexus:ff554d5a20bb31f390bee57171950ae9",
@@ -306,10 +306,39 @@ async def test_nexus_image_failure_uses_short_honest_message(monkeypatch, refund
         assert "1,5 💋 вернулись на баланс" in text
     else:
         assert "вернулись на баланс" not in text
-    assert "Задача #59563" in text
+    assert "Задача #42" in text
     assert "сид" not in text
     assert "ff554d5a" not in text
     assert "<code>" not in text
+
+
+@pytest.mark.asyncio
+async def test_nexus_failure_notice_bounds_long_provider_error(monkeypatch) -> None:
+    bot = AsyncMock()
+    _patch_kie_failure_webhook(monkeypatch, (True, 1.5), bot)
+    image = _pending_video_generation(
+        gen_type=main.GenerationType.image,
+        model="nano-banana-pro",
+        task_id="nexus:ff554d5a20bb31f390bee57171950ae9",
+    )
+    monkeypatch.setattr(main.repo, "get_generation_by_task_id", AsyncMock(return_value=image))
+    monkeypatch.setattr(
+        main.nexus_image_adapter,
+        "get_nexus_task_payload",
+        AsyncMock(return_value={
+            "task_id": "ff554d5a20bb31f390bee57171950ae9",
+            "status": "failed",
+            "error": "&" * 5000,
+        }),
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=main.app), base_url="http://test") as client:
+        response = await client.post("/webhook/kie?provider=nexus", json=_failed_payload())
+
+    assert response.status_code == 200
+    notice = bot.send_message.await_args.args[1]
+    assert len(notice) < 4096
+    assert "вернулись на баланс" in notice
 
 
 @pytest.mark.asyncio
