@@ -178,6 +178,7 @@ async def test_web_referrals_return_site_link(monkeypatch) -> None:
     monkeypatch.setattr(referrals.repo, "get_user_withdrawal_requests", AsyncMock(return_value=[]))
     monkeypatch.setattr(referrals.repo, "get_referral_children", AsyncMock(return_value=[]))
 
+    monkeypatch.setattr(referrals.repo, "get_referral_commission_ledger", AsyncMock(return_value=[]))
     response = await referrals.referrals(
         session=object(),
         user=SimpleNamespace(id=1, referral_code="REF_123", referral_balance=0),
@@ -768,3 +769,11 @@ def test_web_task_id_helpers_preserve_provider_id() -> None:
     assert provider_task_id("web:task-1") == "task-1"
     assert is_web_task_id("web:task-1") is True
     assert is_web_task_id("task-1") is False
+
+
+@pytest.fixture(autouse=True)
+def isolated_auth_rate_limit_redis(monkeypatch):
+    from test_password_rate_limit_redis import FakeRedis
+
+    from core import password_rate_limit
+    monkeypatch.setattr(password_rate_limit, "_shared_redis_client", FakeRedis())

@@ -276,7 +276,7 @@ async def test_model_selection_opens_task_first_composer_for_any_model() -> None
         patch("bot.handlers.image_wizard_v2.safe_edit_message", AsyncMock()) as edit_message,
         patch("bot.handlers.image_wizard_v2.safe_answer_callback", AsyncMock()),
     ):
-        await image_gen.cb_image_model(call, state, AsyncMock())
+        await image_gen.cb_image_model(call, state, AsyncMock(), SimpleNamespace(id=7))
 
     state.set_state.assert_awaited_with(image_gen.ImageGenFSM.prompt_input)
     text = edit_message.await_args.args[1]

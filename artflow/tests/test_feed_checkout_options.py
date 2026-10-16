@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from tribute_fixtures import with_tribute_offer
 
 from core.config import settings
 from payments import tribute
@@ -15,7 +16,7 @@ def payment_configuration(monkeypatch):
 
 
 def plan(key="custom", **changes):
-    return SimpleNamespace(key=key, price_rub=180.0, is_active=True, **changes)
+    return with_tribute_offer(SimpleNamespace(key=key, price_rub=180.0, is_active=True, **changes))
 
 
 def test_plan_methods_require_that_plans_own_tribute_and_lava_mapping(monkeypatch):
@@ -35,7 +36,7 @@ def test_options_disclose_actual_tbank_crypto_and_tribute_currencies(monkeypatch
 
     for key in ("TBANK_TERMINAL_KEY", "TBANK_PASSWORD", "CRYPTOBOT_TOKEN", "TRIBUTE_API_KEY"):
         monkeypatch.setattr(settings, key, "test")
-    product = tribute.digital_product_for_plan("credits_15")
+    product = tribute.digital_product_for_plan(plan("credits_15"))
     assert product is not None
     assert payment_options_for_plan(plan("credits_15")) == [
         {"provider": "tbank", "amount": 180.0, "currency": "RUB"},

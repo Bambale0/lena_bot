@@ -17309,6 +17309,219 @@
         "x-required-role": "admin"
       }
     },
+    "/api/web/admin/payments/tribute-products": {
+      "get": {
+        "tags": [
+          "web-admin"
+        ],
+        "summary": "Admin Tribute Products",
+        "operationId": "admin_tribute_products_api_web_admin_payments_tribute_products_get",
+        "parameters": [
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
+      }
+    },
+    "/api/web/admin/payments/tribute-products/{product_id}": {
+      "put": {
+        "tags": [
+          "web-admin"
+        ],
+        "summary": "Admin Save Tribute Product",
+        "operationId": "admin_save_tribute_product_api_web_admin_payments_tribute_products__product_id__put",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TributeProductUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
+      }
+    },
     "/upload": {
       "post": {
         "summary": "Upload File",
@@ -20729,6 +20942,52 @@
           "size"
         ],
         "title": "TrendUploadResponse"
+      },
+      "TributeProductUpdate": {
+        "properties": {
+          "plan_key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Plan Key"
+          },
+          "payment_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Payment Url"
+          },
+          "currency": {
+            "type": "string",
+            "const": "usd",
+            "title": "Currency",
+            "default": "usd"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "exclusiveMaximum": 9.223372036854776e+18,
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Minor"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_key",
+          "payment_url",
+          "amount_minor",
+          "expected_revision"
+        ],
+        "title": "TributeProductUpdate"
       },
       "UserProfile": {
         "properties": {

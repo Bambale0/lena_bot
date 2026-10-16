@@ -2,7 +2,7 @@
 
 - Version: `1.0.0`
 - OpenAPI: `3.1.0`
-- Paths: `193`
+- Paths: `195`
 
 APIX AI API for Telegram auth, content generation, billing, prompt library, feed, and provider webhooks.
 
@@ -3762,6 +3762,49 @@ Parameters:
 
 | Name | In | Required | Type |
 | --- | --- | --- | --- |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
+- `422`: Validation Error (`application/json`)
+
+#### `GET /api/web/admin/payments/tribute-products`
+
+- Summary: Admin Tribute Products
+- Operation ID: `admin_tribute_products_api_web_admin_payments_tribute_products_get`
+- Auth: yes
+- Request body: none
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
+- `422`: Validation Error (`application/json`)
+
+#### `PUT /api/web/admin/payments/tribute-products/{product_id}`
+
+- Summary: Admin Save Tribute Product
+- Operation ID: `admin_save_tribute_product_api_web_admin_payments_tribute_products__product_id__put`
+- Auth: yes
+- Request body: `application/json`: `TributeProductUpdate`
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `product_id` | `path` | yes | `integer` |
 | `X-Dev-Tg-Id` | `header` | no | `string | null` |
 | `X-Web-Auth-Token` | `header` | no | `string | null` |
 | `X-Telegram-Init-Data` | `header` | no | `string | null` |

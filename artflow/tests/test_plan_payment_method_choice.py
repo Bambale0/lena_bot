@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from tribute_fixtures import with_tribute_offer
 
 from bot.handlers import payment
 from bot.i18n import t
@@ -35,7 +36,7 @@ def _callbacks(markup) -> list[str | None]:
 
 
 def test_main_topup_package_routes_to_payment_method_choice(monkeypatch) -> None:
-    plan = SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999")
+    plan = with_tribute_offer(SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999"))
     monkeypatch.setattr("bot.keyboards.payment.settings.TRIBUTE_API_KEY", "tribute", raising=False)
     buttons = [button for row in topup_kb([plan]).inline_keyboard for button in row]
     assert buttons[0].callback_data == "topup:plan:credits_100_999"
@@ -43,7 +44,7 @@ def test_main_topup_package_routes_to_payment_method_choice(monkeypatch) -> None
 
 
 def test_plan_payment_methods_include_tbank_tribute_and_crypto_without_stars(monkeypatch) -> None:
-    plan = SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999")
+    plan = with_tribute_offer(SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999"))
     monkeypatch.setattr("bot.keyboards.payment.settings.TBANK_TERMINAL_KEY", "terminal", raising=False)
     monkeypatch.setattr("bot.keyboards.payment.settings.TBANK_PASSWORD", "password", raising=False)
     monkeypatch.setattr("bot.keyboards.payment.settings.TRIBUTE_API_KEY", "tribute", raising=False)
@@ -63,13 +64,13 @@ def test_plan_payment_methods_include_tbank_tribute_and_crypto_without_stars(mon
 
 @pytest.mark.asyncio
 async def test_main_package_click_opens_method_choice_without_creating_tbank_invoice(monkeypatch) -> None:
-    plan = SimpleNamespace(
+    plan = with_tribute_offer(SimpleNamespace(
         key="credits_100_999",
         label="Профи",
         credits=100.0,
         price_rub=1000.0,
         is_active=True,
-    )
+    ))
     message = SimpleNamespace(edit_text=AsyncMock())
     call = SimpleNamespace(data="topup:plan:credits_100_999", message=message, answer=AsyncMock())
     monkeypatch.setattr(payment.repo, "get_price_plan_by_key", AsyncMock(return_value=plan))
@@ -93,7 +94,7 @@ async def test_main_package_click_opens_method_choice_without_creating_tbank_inv
 
 
 def test_main_topup_embeds_usd_price_and_removes_currency_shortcuts(monkeypatch) -> None:
-    plan = SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999")
+    plan = with_tribute_offer(SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999"))
     monkeypatch.setattr("bot.keyboards.payment.settings.TRIBUTE_API_KEY", "tribute", raising=False)
     monkeypatch.setattr("bot.keyboards.payment.settings.CRYPTOBOT_TOKEN", "crypto", raising=False)
     monkeypatch.setattr("bot.keyboards.payment.settings.LAVA_API_KEY", "lava", raising=False)
@@ -127,7 +128,7 @@ async def test_legacy_usd_callback_routes_to_tribute_not_lava(monkeypatch) -> No
 
 
 def test_rub_payment_buttons_offer_card_and_sbp_without_acquirer_branding(monkeypatch) -> None:
-    plan = SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999")
+    plan = with_tribute_offer(SimpleNamespace(label="Профи", credits=100, price_rub=1000.0, key="credits_100_999"))
     _enable_rub_only(monkeypatch)
 
     russian = _texts(plan_payment_methods_kb(plan, lang="ru")) + _texts(rub_methods_kb(lang="ru"))

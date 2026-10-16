@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -298,9 +299,38 @@ class Transaction(Base):
     status: Mapped[TransactionStatus] = mapped_column(
         Enum(TransactionStatus), default=TransactionStatus.pending, nullable=False
     )
+    provider_amount_minor: Mapped[int | None] = mapped_column(BigInteger)
+    provider_currency: Mapped[str | None] = mapped_column(String(3))
+    refunded_amount_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
+    refunded_credits: Mapped[float] = mapped_column(Float, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="transactions", lazy="noload")
+
+
+class PaymentRefundNotice(Base):
+    """A verified full refund may arrive before its local transaction exists."""
+    __tablename__ = "payment_refund_notices"
+    external_id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PaymentRefundEvent(Base):
+    """One immutable cumulative provider refund, committed with both ledgers."""
+
+    __tablename__ = "payment_refund_events"
+    __table_args__ = (
+        UniqueConstraint("transaction_id", "cumulative_amount_minor", name="uq_payment_refund_cumulative"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    transaction_id: Mapped[int] = mapped_column(Integer, ForeignKey("transactions.id"), nullable=False, index=True)
+    cumulative_amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    credits_delta: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class PromoCode(Base):
@@ -364,6 +394,7 @@ class ReferralCommissionLedger(Base):
             "recipient_user_id",
             "level",
             "event_type",
+            "refund_key",
             name="uq_referral_commission_tx_recipient_level_event",
         ),
         Index("ix_referral_commission_recipient_created", "recipient_user_id", "created_at"),
@@ -395,6 +426,7 @@ class ReferralCommissionLedger(Base):
     amount_rub: Mapped[float] = mapped_column(Float, nullable=False)
     balance_after_rub: Mapped[float] = mapped_column(Float, nullable=False)
     event_type: Mapped[str] = mapped_column(String(16), nullable=False, default="accrual", index=True)
+    refund_key: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     transaction: Mapped[Transaction] = relationship(lazy="noload")
@@ -458,6 +490,38 @@ class PricePlan(Base):
     price_stars: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    tribute_products: Mapped[list["TributeProduct"]] = relationship(lazy="raise")
+
+
+class TributeProduct(Base):
+    """Retained product offer. Economic terms are immutable per provider ID."""
+    __tablename__ = "tribute_products"
+    __table_args__ = (
+        Index("uq_tribute_active_plan", "plan_key", unique=True, postgresql_where=text("enabled")),
+    )
+    product_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    plan_key: Mapped[str] = mapped_column(String(64), ForeignKey("price_plans.key"), nullable=False, index=True)
+    payment_url: Mapped[str] = mapped_column(Text, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    credits: Mapped[float] = mapped_column(Float, nullable=False)
+    amount_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class TributeProductAudit(Base):
+    __tablename__ = "tribute_product_audit"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tribute_products.product_id"), nullable=False, index=True)
+    previous: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    current: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    admin_tg_id: Mapped[int | None] = mapped_column(BigInteger)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class ModelCost(Base):

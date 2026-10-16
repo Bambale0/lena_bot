@@ -116,7 +116,7 @@ Focused backend checks:
 pytest -q tests/test_trend_run_reliability.py tests/test_payment_webhooks.py
 ```
 
-The maintained release checks run in [GitHub Actions](.github/workflows/ci.yml). The full historical pytest suite has known failures outside that gate; see the [2026-10-16 project audit](artflow/docs/audits/2026-10-16-full-project.md). Current model availability and pricing come from backend metadata and database configuration, rather than this README.
+The maintained release checks run in [GitHub Actions](.github/workflows/ci.yml). The backend gate runs the full pytest suite; see the [audit completion](artflow/docs/audits/2026-10-16-completion.md) and [payment/catalog contracts](artflow/docs/payments-refunds-catalog.md). Current model availability and pricing come from backend metadata and database configuration, rather than this README.
 
 ## Engineering focus
 

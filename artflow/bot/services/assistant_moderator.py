@@ -21,6 +21,7 @@ from db.models import (
     User,
     WithdrawalStatus,
 )
+from db.payment_reporting import net_paid_amount_expr, net_paid_amount_rub, net_paid_credits
 from db.repository import InsufficientReferralBalanceError
 
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ def _format_user_brief_report(
 ) -> str:
     name = f"@{user.username}" if user.username else (user.full_name or f"TG {user.tg_id}")
     full_name = user.full_name or "—"
-    paid_total = sum(float(tx.amount_rub or 0) for tx in paid_transactions)
+    paid_total = sum(net_paid_amount_rub(tx) for tx in paid_transactions)
     status = "забанен" if user.is_banned else "активен"
     subscription = "есть" if user.is_subscribed else "нет"
 
@@ -197,7 +198,7 @@ def _format_user_brief_report(
         for tx in paid_transactions:
             provider = _enum_value(tx.provider)
             lines.append(
-                f"• {_format_rub(tx.amount_rub)} → {_format_credits(tx.credits)} кр., "
+                f"• {_format_rub(net_paid_amount_rub(tx))} → {_format_credits(net_paid_credits(tx))} кр., "
                 f"{provider}, {_format_msk_datetime(tx.created_at)}, tx {tx.id}"
             )
     else:
@@ -290,7 +291,7 @@ async def _build_user_brief_report(session: AsyncSession, user: User) -> str:
     direct_referrals_paid_total = float(
         (
             await session.execute(
-                select(func.coalesce(func.sum(Transaction.amount_rub), 0))
+                select(func.coalesce(func.sum(net_paid_amount_expr()), 0))
                 .join(User, User.id == Transaction.user_id)
                 .where(User.referrer_id == user.id, Transaction.status == TransactionStatus.paid)
             )

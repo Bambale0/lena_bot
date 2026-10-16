@@ -23,7 +23,7 @@ def test_seedance_family_exposes_video_mode():
         assert "video" in VIDEO_SPECS[model.value].supported_modes
 
 
-def test_seedance_payload_uses_reference_video_urls():
+def test_seedance_payload_preserves_documented_reference_video_urls():
     install_video_reference_support()
     model, payload = build_kie_input(
         model=VideoModel.SEEDANCE_2.value,
@@ -44,3 +44,10 @@ def test_seedance_payload_uses_reference_video_urls():
         "https://cdn.example/b.mov",
     ]
     assert "reference_image_urls" not in payload
+
+
+def test_registered_seedance_reference_builders_are_shared():
+    from api.kie_model_specs import MODEL_SPECS
+    install_video_reference_support()
+    for model in (VideoModel.SEEDANCE_2, VideoModel.SEEDANCE_2_FAST, VideoModel.SEEDANCE_2_MINI):
+        assert MODEL_SPECS[model.value] is VIDEO_SPECS[model.value]

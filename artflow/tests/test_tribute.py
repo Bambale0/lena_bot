@@ -6,7 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock
 
 import pytest
+from tribute_fixtures import with_tribute_offer
 
+import main  # noqa: F401 - install production repository policies before mocks
 from bot.handlers import payment
 from db.models import PaymentProvider, TransactionStatus
 from payments import tribute
@@ -38,7 +40,7 @@ async def test_tribute_create_order_uses_shop_api_and_kopecks(monkeypatch) -> No
     monkeypatch.setattr(tribute.settings, "WEB_PUBLIC_URL", "https://apixbotai.com")
     monkeypatch.setattr(tribute.settings, "TRIBUTE_SUCCESS_URL", "")
     monkeypatch.setattr(tribute.settings, "TRIBUTE_FAIL_URL", "")
-    plan = SimpleNamespace(key="credits_100", label="100 💋", price_rub=199.5, credits=100.0)
+    plan = with_tribute_offer(SimpleNamespace(key="credits_100", label="100 💋", price_rub=199.5, credits=100.0))
 
     order = await tribute.create_order(plan, user_id=7, amount_rub=149.25)
 
@@ -99,11 +101,12 @@ async def test_tribute_manual_reconcile_credits_atomically(monkeypatch) -> None:
     monkeypatch.setattr(payment.repo, "get_user_by_id", AsyncMock(return_value=SimpleNamespace(id=7, tg_id=123)))
     monkeypatch.setattr("main._accrue_referral_commissions", accrue)
 
-    status, balance = await payment._reconcile_transaction_status(object(), tx)
+    monkeypatch.setattr(payment.repo, "get_transaction_by_external_id", AsyncMock(return_value=paid_tx))
+    status, balance = await payment._reconcile_transaction_status(AsyncMock(), tx)
 
     assert status == TransactionStatus.paid
     assert balance == 321.0
-    atomic_confirm.assert_awaited_once_with(ANY, "tribute-order-77", note="Payment confirmed via tribute")
+    atomic_confirm.assert_awaited_once_with(ANY, "tribute-order-77")
     accrue.assert_awaited_once_with(ANY, ANY, paid_tx, None)
 
 @pytest.mark.asyncio
@@ -115,7 +118,7 @@ async def test_tribute_rejects_stars_only_shop_before_creating_order(monkeypatch
         return {"id": 1, "status": 1, "onlyStars": True}
 
     monkeypatch.setattr(tribute, "_request", fake_request)
-    plan = SimpleNamespace(key="credits_100", label="100 💋", price_rub=199.0, credits=100.0)
+    plan = with_tribute_offer(SimpleNamespace(key="credits_100", label="100 💋", price_rub=199.0, credits=100.0))
 
     with pytest.raises(RuntimeError, match="Stars-only"):
         await tribute.create_order(plan, user_id=7)
@@ -131,16 +134,18 @@ async def test_tribute_rejects_shop_with_wrong_webhook_url(monkeypatch) -> None:
     )
     monkeypatch.setattr(tribute.settings, "WEB_PUBLIC_URL", "https://apixbotai.com")
     monkeypatch.setattr(tribute.settings, "TRIBUTE_WEBHOOK_PATH", "/webhook/tribute")
-    plan = SimpleNamespace(key="credits_100", label="100 💋", price_rub=199.0, credits=100.0)
+    plan = with_tribute_offer(SimpleNamespace(key="credits_100", label="100 💋", price_rub=199.0, credits=100.0))
 
     with pytest.raises(RuntimeError, match="webhook URL must be configured"):
         await tribute.create_order(plan, user_id=7)
 
 
 def test_tribute_digital_product_catalog_matches_supplied_links() -> None:
+    import importlib
+    migration = importlib.import_module("db.migrations.versions.046_tribute_catalog")
     assert {
-        key: (item.product_id, item.payment_url, item.currency, item.amount_minor)
-        for key, item in tribute.TRIBUTE_DIGITAL_PRODUCTS.items()
+        key: (product_id, "https://web.tribute.tg/p/" + slug, "usd", amount)
+        for key, product_id, slug, amount in migration.SEED
     } == {
         "credits_15": (152362, "https://web.tribute.tg/p/DDs", "usd", 200),
         "credits_25": (152363, "https://web.tribute.tg/p/DDt", "usd", 300),
@@ -149,7 +154,6 @@ def test_tribute_digital_product_catalog_matches_supplied_links() -> None:
         "credits_200": (152366, "https://web.tribute.tg/p/DDw", "usd", 2400),
         "credits_500": (152367, "https://web.tribute.tg/p/DDx", "usd", 5800),
     }
-    assert tribute.digital_product_for_id(152365).plan_key == "credits_100_999"
     assert tribute.digital_purchase_external_id(78901) == "digital:78901"
 
 
@@ -174,7 +178,7 @@ def test_tribute_digital_webhook_extractors() -> None:
 
 @pytest.mark.asyncio
 async def test_tribute_digital_product_checkout_verifies_live_product(monkeypatch) -> None:
-    plan = SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0)
+    plan = with_tribute_offer(SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0))
     monkeypatch.setattr(
         tribute,
         "get_product",
@@ -198,7 +202,7 @@ async def test_tribute_digital_product_checkout_verifies_live_product(monkeypatc
 
 @pytest.mark.asyncio
 async def test_tribute_digital_product_checkout_rejects_price_drift(monkeypatch) -> None:
-    plan = SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0)
+    plan = with_tribute_offer(SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0))
     monkeypatch.setattr(
         tribute,
         "get_product",
@@ -218,7 +222,7 @@ async def test_tribute_digital_product_checkout_rejects_price_drift(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_tribute_digital_product_checkout_rejects_stars_enabled(monkeypatch) -> None:
-    plan = SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0)
+    plan = with_tribute_offer(SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0))
     monkeypatch.setattr(
         tribute,
         "get_product",
@@ -235,3 +239,19 @@ async def test_tribute_digital_product_checkout_rejects_stars_enabled(monkeypatc
 
     with pytest.raises(RuntimeError, match="Stars payments disabled"):
         await tribute.get_digital_product_checkout(plan)
+
+
+@pytest.mark.parametrize("value", [True, False, 1.5, -1, "1.5", "NaN", "-5", "9" * 100])
+@pytest.mark.parametrize("parser,field", [
+    (tribute.webhook_product_id, "product_id"),
+    (tribute.webhook_purchase_id, "purchase_id"),
+    (tribute.webhook_telegram_user_id, "telegram_user_id"),
+    (tribute.webhook_amount_minor, "amount"),
+])
+def test_digital_receipt_never_truncates_or_coerces_invalid_integer(parser, field, value):
+    assert parser({"payload": {field: value}}) is None
+
+
+@pytest.mark.parametrize("value", [True, 1.5, -1, "1.5", "9" * 100])
+def test_shop_amount_never_truncates_invalid_minor_units(value):
+    assert tribute.webhook_amount_rub({"payload": {"amount": value}}) is None

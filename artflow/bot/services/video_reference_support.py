@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 from api import video_service
 from api.advanced_video_service import SeedanceModel, create_seedance_task
-from api.kie_model_specs import VIDEO_SPECS
+from api.kie_model_specs import MODEL_SPECS, VIDEO_SPECS
 from api.video_service import VideoModel, VideoResult
 from bot.keyboards.models import VIDEO_CAPS, VIDEO_MODEL_DESC
 
@@ -119,6 +119,7 @@ def install_video_reference_support() -> None:
                 supported_modes=supported_modes,
                 param_builder=_wrap_seedance_builder(spec.param_builder),
             )
+            MODEL_SPECS[model_key] = VIDEO_SPECS[model_key]
 
     VIDEO_MODEL_DESC[VideoModel.SEEDANCE_2] = (
         "🌱 Seedance 2 · текст, фото или видео-референсы · до 3 видео"

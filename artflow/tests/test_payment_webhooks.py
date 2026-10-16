@@ -8,6 +8,7 @@ from unittest.mock import ANY, AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from tribute_fixtures import catalog_offer
 
 import main
 from db.models import PaymentProvider, TransactionStatus
@@ -56,41 +57,7 @@ async def test_tbank_confirmed_uses_atomic_credit_confirmation(monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_tbank_refund_reverses_credits_when_previous_status_was_paid(monkeypatch) -> None:
-    paid_tx = SimpleNamespace(
-        id=11,
-        user_id=7,
-        amount_rub=500.0,
-        credits=50.0,
-        provider=PaymentProvider.tbank,
-        status=TransactionStatus.paid,
-    )
-    refunded_tx = SimpleNamespace(
-        id=11,
-        user_id=7,
-        amount_rub=500.0,
-        credits=50.0,
-        provider=PaymentProvider.tbank,
-        status=TransactionStatus.refunded,
-    )
-    add_credits = AsyncMock()
-
-    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
-    monkeypatch.setattr(main, "verify_notification_token", lambda _data, _password: True)
-    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=paid_tx))
-    monkeypatch.setattr(main.repo, "set_transaction_status", AsyncMock(return_value=refunded_tx))
-    monkeypatch.setattr(main.repo, "add_credits", add_credits)
-    monkeypatch.setattr(main.repo, "get_user_by_id", AsyncMock(return_value=SimpleNamespace(id=7, tg_id=123)))
-    monkeypatch.setattr(main, "_reverse_referral_commissions", AsyncMock())
-
-    payload = {"Success": True, "Status": "REFUNDED", "PaymentId": "pay-1", "OrderId": "order-1"}
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/webhook/tbank", json=payload)
-
-    assert response.status_code == 200
-    assert response.text == "OK"
-    add_credits.assert_awaited_once()
-    assert add_credits.await_args.args[1:3] == (7, -50.0)
+    await _assert_atomic_refund(monkeypatch, "tbank", "pay-1", 50000, "rub")
 
 
 @pytest.mark.asyncio
@@ -278,43 +245,7 @@ async def test_tribute_webhook_does_not_credit_amount_mismatch(monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_tribute_refund_reverses_paid_credits_once(monkeypatch) -> None:
-    paid_tx = SimpleNamespace(
-        id=21,
-        user_id=7,
-        amount_rub=199.0,
-        credits=100.0,
-        provider=PaymentProvider.tribute,
-        status=TransactionStatus.paid,
-    )
-    refunded_tx = SimpleNamespace(**{**paid_tx.__dict__, "status": TransactionStatus.refunded})
-    add_credits = AsyncMock()
-    reverse_referrals = AsyncMock()
-
-    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
-    monkeypatch.setattr(main.settings, "TRIBUTE_API_KEY", "tribute-secret")
-    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=paid_tx))
-    monkeypatch.setattr(main.repo, "set_transaction_status", AsyncMock(return_value=refunded_tx))
-    monkeypatch.setattr(main.repo, "add_credits", add_credits)
-    monkeypatch.setattr(main.repo, "get_user_by_id", AsyncMock(return_value=SimpleNamespace(id=7, tg_id=123)))
-    monkeypatch.setattr(main, "_reverse_referral_commissions", reverse_referrals)
-
-    payload = {
-        "name": "shop_order_refunded",
-        "payload": {"uuid": "tribute-order-1", "amount": 19900, "currency": "rub", "status": "refunded"},
-    }
-    body, signature = _tribute_signed_body(payload)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post(
-            "/webhook/tribute",
-            content=body,
-            headers={"content-type": "application/json", "trbt-signature": signature},
-        )
-
-    assert response.status_code == 200
-    add_credits.assert_awaited_once()
-    assert add_credits.await_args.args[1:3] == (7, -100.0)
-    reverse_referrals.assert_awaited_once_with(ANY, ANY, refunded_tx)
+    await _assert_atomic_refund(monkeypatch, "shop", "tribute-order-1", 19900, "rub")
 
 
 @pytest.mark.asyncio
@@ -364,6 +295,7 @@ async def test_tribute_digital_product_webhook_credits_mapped_purchase_atomicall
     create_transaction.assert_awaited_once_with(
         ANY, user_id=7, amount_rub=150.0, credits=15.0,
         provider=PaymentProvider.tribute, external_id="digital:78901",
+        provider_amount_minor=200, provider_currency="usd",
     )
     confirm_and_add.assert_awaited_once_with(
         ANY, "digital:78901", note="Payment confirmed via tribute digital product",
@@ -449,45 +381,11 @@ async def test_tribute_digital_product_duplicate_paid_purchase_is_idempotent(mon
 
 @pytest.mark.asyncio
 async def test_tribute_digital_product_refund_reverses_purchase_once(monkeypatch) -> None:
-    paid_tx = SimpleNamespace(
-        id=91, user_id=7, amount_rub=150.0, credits=15.0,
-        provider=PaymentProvider.tribute, external_id="digital:78901", status=TransactionStatus.paid,
-    )
-    refunded_tx = SimpleNamespace(**{**paid_tx.__dict__, "status": TransactionStatus.refunded})
-    add_credits = AsyncMock()
-    reverse = AsyncMock()
-    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
-    monkeypatch.setattr(main.settings, "TRIBUTE_API_KEY", "tribute-secret")
-    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=paid_tx))
-    monkeypatch.setattr(main.repo, "set_transaction_status", AsyncMock(return_value=refunded_tx))
-    monkeypatch.setattr(main.repo, "add_credits", add_credits)
-    monkeypatch.setattr(main.repo, "get_user_by_id", AsyncMock(return_value=SimpleNamespace(id=7, tg_id=12321321)))
-    monkeypatch.setattr(main, "_reverse_referral_commissions", reverse)
-
-    payload = {
-        "name": "digital_product_refunded",
-        "payload": {
-            "product_id": 152362, "amount": 200, "currency": "usd",
-            "telegram_user_id": 12321321, "purchase_id": 78901,
-        },
-    }
-    body, signature = _tribute_signed_body(payload)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post(
-            "/webhook/tribute", content=body,
-            headers={"content-type": "application/json", "trbt-signature": signature},
-        )
-
-    assert response.status_code == 200
-    add_credits.assert_awaited_once_with(
-        ANY, 7, -15.0, entry_type="payment_refund", source_type="transaction",
-        source_id="91", note="Refund via tribute digital product",
-    )
-    reverse.assert_awaited_once_with(ANY, ANY, refunded_tx)
+    await _assert_atomic_refund(monkeypatch, "digital", "digital:78901", 200, "usd")
 
 
 @pytest.mark.asyncio
-async def test_tribute_digital_product_unknown_product_is_ignored(monkeypatch) -> None:
+async def test_tribute_digital_product_unknown_product_requests_retry(monkeypatch) -> None:
     monkeypatch.setattr(main.settings, "TRIBUTE_API_KEY", "tribute-secret")
     monkeypatch.setattr(main.repo, "confirm_transaction_and_add_credits", AsyncMock())
     payload = {
@@ -503,4 +401,42 @@ async def test_tribute_digital_product_unknown_product_is_ignored(monkeypatch) -
             "/webhook/tribute", content=body,
             headers={"content-type": "application/json", "trbt-signature": signature},
         )
+    assert response.status_code == 503
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_catalog_read(monkeypatch):
+    async def lookup(_session, product_id):
+        return catalog_offer() if product_id == 152362 else None
+    monkeypatch.setattr(main, "tribute_digital_product_for_id", lookup)
+
+
+async def _assert_atomic_refund(monkeypatch, kind, external_id, amount, currency):
+    from db.payment_refunds import RefundResult
+    from payments import refund_settlement
+    provider = PaymentProvider.tbank if kind == "tbank" else PaymentProvider.tribute
+    atomic = AsyncMock(return_value=RefundResult(21, TransactionStatus.refunded, True, 50))
+    unsafe_add, unsafe_status = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main, "verify_notification_token", lambda *_args: True)
+    monkeypatch.setattr(main.settings, "TRIBUTE_API_KEY", "tribute-secret")
+    monkeypatch.setattr(refund_settlement, "apply_payment_refund", atomic)
+    monkeypatch.setattr(main.repo, "add_credits", unsafe_add)
+    monkeypatch.setattr(main.repo, "set_transaction_status", unsafe_status)
+    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=SimpleNamespace(id=21, user_id=7, credits=50, provider=provider, status=TransactionStatus.paid)))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        if kind == "tbank":
+            response = await client.post("/webhook/tbank", json={"Success": True, "Status": "REFUNDED", "PaymentId": external_id, "Amount": amount})
+        else:
+            body, signature = _tribute_signed_body({
+                "name": "digital_product_refunded" if kind == "digital" else "shop_order_refunded",
+                "payload": {"uuid": external_id, "purchase_id": 78901, "product_id": 152362, "amount": amount, "currency": currency, "status": "refunded"},
+            })
+            response = await client.post("/webhook/tribute", content=body, headers={"trbt-signature": signature, "content-type": "application/json"})
     assert response.status_code == 200
+    if kind == "tbank":
+        atomic.assert_awaited_once_with(ANY, external_id, provider, remaining_amount_minor=None, currency="rub")
+    else:
+        atomic.assert_awaited_once_with(ANY, external_id, provider, original_amount_minor=amount, currency=currency)
+    unsafe_add.assert_not_awaited()
+    unsafe_status.assert_not_awaited()

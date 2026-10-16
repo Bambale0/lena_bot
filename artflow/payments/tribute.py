@@ -24,23 +24,15 @@ class TributeDigitalProduct:
     payment_url: str
     currency: str
     amount_minor: int
+    credits: float | None = None
+    amount_rub: float | None = None
+    revision: int = 0
 
     @property
     def amount_major(self) -> float:
         return self.amount_minor / 100.0
 
 
-TRIBUTE_DIGITAL_PRODUCTS: dict[str, TributeDigitalProduct] = {
-    "credits_15": TributeDigitalProduct("credits_15", 152362, "https://web.tribute.tg/p/DDs", "usd", 200),
-    "credits_25": TributeDigitalProduct("credits_25", 152363, "https://web.tribute.tg/p/DDt", "usd", 300),
-    "credits_50": TributeDigitalProduct("credits_50", 152364, "https://web.tribute.tg/p/DDu", "usd", 590),
-    "credits_100_999": TributeDigitalProduct("credits_100_999", 152365, "https://web.tribute.tg/p/DDv", "usd", 1200),
-    "credits_200": TributeDigitalProduct("credits_200", 152366, "https://web.tribute.tg/p/DDw", "usd", 2400),
-    "credits_500": TributeDigitalProduct("credits_500", 152367, "https://web.tribute.tg/p/DDx", "usd", 5800),
-}
-TRIBUTE_DIGITAL_PRODUCTS_BY_ID: dict[int, TributeDigitalProduct] = {
-    item.product_id: item for item in TRIBUTE_DIGITAL_PRODUCTS.values()
-}
 
 
 def _api_base_url() -> str:
@@ -141,34 +133,35 @@ async def create_order(
     return TributeOrder(order_uuid=order_uuid, payment_url=payment_url)
 
 
-def digital_product_for_plan(plan_key: str) -> TributeDigitalProduct | None:
-    return TRIBUTE_DIGITAL_PRODUCTS.get(str(plan_key))
+def _product_from_row(row) -> TributeDigitalProduct:
+    return TributeDigitalProduct(row.plan_key, row.product_id, row.payment_url,
+        row.currency, row.amount_minor, row.credits, row.amount_rub, row.revision)
 
 
-def digital_product_for_id(product_id: int | str) -> TributeDigitalProduct | None:
-    try:
-        parsed = int(product_id)
-    except (TypeError, ValueError):
-        return None
-    return TRIBUTE_DIGITAL_PRODUCTS_BY_ID.get(parsed)
+def digital_product_for_plan(plan: Any) -> TributeDigitalProduct | None:
+    """Project an eagerly loaded offer without IO or a process-local cache."""
+    rows = vars(plan).get("tribute_products", []) if hasattr(plan, "__dict__") else []
+    for row in rows:
+        if (row.enabled and row.plan_key == plan.key
+                and row.credits == plan.credits and row.amount_rub == plan.price_rub):
+            return _product_from_row(row)
+    return None
 
 
-def digital_product_plan_keys() -> set[str]:
-    return set(TRIBUTE_DIGITAL_PRODUCTS)
+async def digital_product_for_id(session: Any, product_id: int) -> TributeDigitalProduct | None:
+    from db.models import TributeProduct
+    row = await session.get(TributeProduct, product_id)
+    return _product_from_row(row) if row else None
 
 
-def digital_product_price_usd(plan_key: str) -> float | None:
-    product = digital_product_for_plan(plan_key)
-    if product is None or product.currency != "usd":
-        return None
-    return product.amount_major
+def digital_product_price_usd(plan: Any) -> float | None:
+    product = digital_product_for_plan(plan)
+    return product.amount_major if product is not None and product.currency == "usd" else None
 
 
-def digital_product_price_text(plan_key: str) -> str | None:
-    value = digital_product_price_usd(plan_key)
-    if value is None:
-        return None
-    return f"${value:.2f}".rstrip("0").rstrip(".")
+def digital_product_price_text(plan: Any) -> str | None:
+    value = digital_product_price_usd(plan)
+    return f"${value:.2f}".rstrip("0").rstrip(".") if value is not None else None
 
 
 def digital_purchase_external_id(purchase_id: int | str) -> str:
@@ -180,14 +173,19 @@ async def get_product(product_id: int) -> dict[str, Any]:
 
 
 async def get_digital_product_checkout(plan: Any) -> TributeDigitalProduct:
-    mapping = digital_product_for_plan(str(plan.key))
+    mapping = digital_product_for_plan(plan)
     if mapping is None:
-        raise RuntimeError(f"No Tribute digital product mapped for plan {plan.key}")
+        raise RuntimeError(f"No active Tribute digital product mapped for plan {plan.key}")
+    await validate_digital_product(mapping)
+    return mapping
 
+
+async def validate_digital_product(mapping: TributeDigitalProduct) -> None:
     data = await get_product(mapping.product_id)
     try:
-        product_id = int(data.get("id"))
-        amount_minor = int(data.get("amount"))
+        from db.payment_refunds import strict_minor
+        product_id = strict_minor(data.get("id"), positive=True)
+        amount_minor = strict_minor(data.get("amount"), positive=True)
     except (TypeError, ValueError) as exc:
         raise RuntimeError("Tribute digital product returned invalid id/amount") from exc
 
@@ -200,51 +198,44 @@ async def get_digital_product_checkout(plan: Any) -> TributeDigitalProduct:
     currency = str(data.get("currency") or "").strip().lower()
     if currency != mapping.currency:
         raise RuntimeError(
-            f"Tribute digital product currency mismatch for {plan.key}: "
+            f"Tribute digital product currency mismatch for {mapping.plan_key}: "
             f"expected {mapping.currency}, got {currency}"
         )
     if data.get("starsAmountEnabled") is True:
         raise RuntimeError("Tribute digital product must have Stars payments disabled")
     if amount_minor != mapping.amount_minor:
         raise RuntimeError(
-            f"Tribute digital product price mismatch for {plan.key}: "
+            f"Tribute digital product price mismatch for {mapping.plan_key}: "
             f"expected {mapping.amount_minor}, got {amount_minor}"
         )
 
     web_link = str(data.get("webLink") or "").strip()
     if web_link and web_link.rstrip("/") != mapping.payment_url.rstrip("/"):
         raise RuntimeError("Tribute digital product web link mismatch")
-    return mapping
+
+
+def _positive_payload_integer(data: dict[str, Any], field: str) -> int | None:
+    from db.payment_refunds import RefundNeedsReconciliation, strict_minor
+
+    payload = data.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return strict_minor(payload.get(field), positive=True)
+    except RefundNeedsReconciliation:
+        return None
 
 
 def webhook_product_id(data: dict[str, Any]) -> int | None:
-    payload = data.get("payload")
-    if not isinstance(payload, dict):
-        return None
-    try:
-        return int(payload.get("product_id"))
-    except (TypeError, ValueError):
-        return None
+    return _positive_payload_integer(data, "product_id")
 
 
 def webhook_purchase_id(data: dict[str, Any]) -> int | None:
-    payload = data.get("payload")
-    if not isinstance(payload, dict):
-        return None
-    try:
-        return int(payload.get("purchase_id"))
-    except (TypeError, ValueError):
-        return None
+    return _positive_payload_integer(data, "purchase_id")
 
 
 def webhook_telegram_user_id(data: dict[str, Any]) -> int | None:
-    payload = data.get("payload")
-    if not isinstance(payload, dict):
-        return None
-    try:
-        return int(payload.get("telegram_user_id"))
-    except (TypeError, ValueError):
-        return None
+    return _positive_payload_integer(data, "telegram_user_id")
 
 
 def webhook_telegram_username(data: dict[str, Any]) -> str | None:
@@ -281,26 +272,12 @@ def webhook_order_uuid(data: dict[str, Any]) -> str:
 
 
 def webhook_amount_minor(data: dict[str, Any]) -> int | None:
-    payload = data.get("payload")
-    if not isinstance(payload, dict):
-        return None
-    try:
-        return int(payload.get("amount"))
-    except (TypeError, ValueError):
-        return None
+    return _positive_payload_integer(data, "amount")
 
 
 def webhook_amount_rub(data: dict[str, Any]) -> float | None:
-    payload = data.get("payload")
-    if not isinstance(payload, dict):
-        return None
-    raw = payload.get("amount")
-    if raw is None:
-        return None
-    try:
-        return int(raw) / 100.0
-    except (TypeError, ValueError):
-        return None
+    value = webhook_amount_minor(data)
+    return value / 100.0 if value is not None else None
 
 
 def webhook_currency(data: dict[str, Any]) -> str:

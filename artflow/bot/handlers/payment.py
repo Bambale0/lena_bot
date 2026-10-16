@@ -129,92 +129,70 @@ def _promo_success_text(result: repo.PromoRedeemResult) -> str:
     )
 
 
-async def _confirm_paid_transaction(session: AsyncSession, tx) -> float | None:
-    if not tx:
-        return None
-    new_balance = await repo.add_credits(
-        session,
-        tx.user_id,
-        tx.credits,
-        entry_type="payment_credit",
-        source_type="transaction",
-        source_id=str(tx.id),
-        note=f"Payment confirmed via {tx.provider}",
-    )
-    user = await repo.get_user_by_id(session, tx.user_id)
-    if user:
-        from main import _accrue_referral_commissions
-        await _accrue_referral_commissions(session, user, tx, None)
-    return new_balance
+async def _confirm_paid_transaction(session: AsyncSession, external_id: str) -> float | None:
+    confirmed = await repo.confirm_transaction_and_add_credits(session, external_id)
+    tx = confirmed[0] if confirmed else await repo.get_transaction_by_external_id(session, external_id)
+    if tx and tx.status == TransactionStatus.paid:
+        user = await repo.get_user_by_id(session, tx.user_id)
+        if user:
+            from main import _accrue_referral_commissions
+            await _accrue_referral_commissions(session, user, tx, None)
+    return confirmed[1] if confirmed else None
 
 
 async def _reconcile_transaction_status(
-    session: AsyncSession,
-    tx,
+    session: AsyncSession, tx,
 ) -> tuple[TransactionStatus, float | None]:
-    if tx.provider == PaymentProvider.tbank and tx.external_id:
-        state = await tbank.get_payment_state(tx.external_id)
+    # Release the read transaction before the provider boundary. No locks or
+    # pooled connection should be held during a network request.
+    external_id, provider, local_status = tx.external_id, tx.provider, tx.status
+    amount_rub = tx.amount_rub
+    if not external_id or local_status == TransactionStatus.refunded:
+        return local_status, None
+    await session.commit()
+    balance = None
+    if provider == PaymentProvider.tbank:
+        state = await tbank.get_payment_state(external_id)
+        if str(state.get("PaymentId", external_id)) != external_id:
+            raise ValueError("Payment state identity mismatch")
         status = str(state.get("Status", "")).upper()
         if status == "CONFIRMED":
-            confirmed = await repo.confirm_transaction(session, tx.external_id)
-            balance = await _confirm_paid_transaction(session, confirmed) if confirmed else None
-            return TransactionStatus.paid, balance
-        if status in TBANK_FINAL_FAILURE_STATUSES:
-            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.failed)
-            return TransactionStatus.failed, None
-        if status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
-            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.refunded)
-            return TransactionStatus.refunded, None
-        return TransactionStatus.pending, None
-
-    if tx.provider == PaymentProvider.cryptobot and tx.external_id:
-        invoice = await cryptobot.get_invoice(int(tx.external_id))
+            balance = await _confirm_paid_transaction(session, external_id)
+        elif status in TBANK_FINAL_FAILURE_STATUSES | {"REVERSED"}:
+            await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
+        elif status in {"REFUNDED", "PARTIAL_REFUNDED"}:
+            from payments.refund_settlement import settle_tbank_refund
+            result = await settle_tbank_refund(session, external_id, status, state.get("Amount"))
+            return result.status, None
+    elif provider == PaymentProvider.cryptobot:
+        invoice = await cryptobot.get_invoice(int(external_id))
         status = str(invoice.get("status", "")).lower()
         if status == "paid":
-            confirmed = await repo.confirm_transaction(session, tx.external_id)
-            balance = await _confirm_paid_transaction(session, confirmed) if confirmed else None
-            return TransactionStatus.paid, balance
-        if status in {"expired", "invalid", "cancelled"}:
-            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.failed)
-            return TransactionStatus.failed, None
-        return TransactionStatus.pending, None
-
-    if tx.provider == PaymentProvider.lava and tx.external_id:
-        invoice = await lava.get_invoice(tx.external_id)
+            balance = await _confirm_paid_transaction(session, external_id)
+        elif status in {"expired", "invalid", "cancelled"}:
+            await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
+    elif provider == PaymentProvider.lava:
+        invoice = await lava.get_invoice(external_id)
         status = str(invoice.get("status", "")).lower()
-        event_type = str(invoice.get("eventType", "")).lower()
-        if status in {"completed", "success", "paid"} or event_type == "payment.success":
-            confirmed = await repo.confirm_transaction(session, tx.external_id)
-            balance = await _confirm_paid_transaction(session, confirmed) if confirmed else None
-            return TransactionStatus.paid, balance
-        if status in {"failed", "cancelled", "canceled", "expired"}:
-            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.failed)
-            return TransactionStatus.failed, None
-        return TransactionStatus.pending, None
-
-    if tx.provider == PaymentProvider.tribute and tx.external_id:
-        status = await tribute.get_order_status(tx.external_id)
+        if lava.is_paid_invoice(invoice):
+            balance = await _confirm_paid_transaction(session, external_id)
+        elif status in {"failed", "cancelled", "canceled", "expired"}:
+            await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
+    elif provider == PaymentProvider.tribute and not external_id.startswith("digital:"):
+        status = await tribute.get_order_status(external_id)
         if status == "paid":
-            confirmed = await repo.confirm_transaction_and_add_credits(
-                session,
-                tx.external_id,
-                note="Payment confirmed via tribute",
+            balance = await _confirm_paid_transaction(session, external_id)
+        elif status == "failed":
+            await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
+        elif status == "refunded":
+            from db.payment_refunds import money_minor
+            from payments.refund_settlement import settle_tribute_refund
+            result = await settle_tribute_refund(
+                session, external_id, amount_minor=money_minor(amount_rub), currency="rub", digital=False,
             )
-            balance = None
-            if confirmed:
-                paid_tx, balance = confirmed
-                user = await repo.get_user_by_id(session, paid_tx.user_id)
-                if user:
-                    from main import _accrue_referral_commissions
-
-                    await _accrue_referral_commissions(session, user, paid_tx, None)
-            return TransactionStatus.paid, balance
-        if status == "failed":
-            await repo.set_transaction_status(session, tx.external_id, TransactionStatus.failed)
-            return TransactionStatus.failed, None
-        return TransactionStatus.pending, None
-
-    return tx.status, None
+            return result.status, None
+    current = await repo.get_transaction_by_external_id(session, external_id)
+    return (current.status if current else local_status), balance
 
 
 @router.callback_query(F.data == "menu:topup")
@@ -285,8 +263,8 @@ async def cb_topup_tribute(call: CallbackQuery, session: AsyncSession, db_user: 
     if not settings.TRIBUTE_API_KEY:
         await call.answer("Оплата в USD сейчас недоступна" if lang == "ru" else "USD payment is unavailable right now", show_alert=True)
         return
-    allowed_plan_keys = tribute.digital_product_plan_keys()
-    plans = [plan for plan in await repo.get_active_price_plans(session) if plan.key in allowed_plan_keys]
+    plans = [plan for plan in await repo.get_active_price_plans(session)
+             if tribute.digital_product_for_plan(plan) is not None]
     if not plans:
         await call.answer("Оплата в USD сейчас недоступна" if lang == "ru" else "USD payment is unavailable right now", show_alert=True)
         return
@@ -312,7 +290,7 @@ async def cb_topup_tribute_plan(
         return
     plan_key = call.data.split(":", 2)[2]  # type: ignore[union-attr]
     plan = await repo.get_price_plan_by_key(session, plan_key)
-    if not plan or not plan.is_active or tribute.digital_product_for_plan(plan.key) is None:
+    if not plan or not plan.is_active or tribute.digital_product_for_plan(plan) is None:
         await call.answer(t("error_not_found", lang), show_alert=True)
         return
 
@@ -323,7 +301,7 @@ async def cb_topup_tribute_plan(
         await call.answer(t("error_generic", lang), show_alert=True)
         return
 
-    price_text = tribute.digital_product_price_text(plan.key) or f"{_fmt_amount(plan.price_rub)} ₽"
+    price_text = tribute.digital_product_price_text(plan) or f"{_fmt_amount(plan.price_rub)} ₽"
     return_callback, return_label = await _payment_return_context(state)
     await call.message.edit_text(  # type: ignore[union-attr]
         (
@@ -593,7 +571,7 @@ async def cb_check_payment_status(
     state: FSMContext | None = None,
 ) -> None:
     lang = db_user.language or "ru"
-    external_id = call.data.split(":")[-1]
+    external_id = call.data.split(":", 2)[-1]
     tx = await repo.get_transaction_by_external_id(session, external_id)
     if not tx or tx.user_id != db_user.id:
         await call.answer(t("error_not_found", lang), show_alert=True)
@@ -602,7 +580,8 @@ async def cb_check_payment_status(
     try:
         status, balance = await _reconcile_transaction_status(session, tx)
     except Exception as e:
-        logger.error("Payment reconcile error: %s", e)
+        from core.provider_logging import safe_identifier
+        logger.error("Payment reconcile error payment_id=%s error_type=%s", safe_identifier(external_id), type(e).__name__)
         await call.answer(t("error_generic", lang), show_alert=True)
         return
 
@@ -611,12 +590,21 @@ async def cb_check_payment_status(
         credits = refreshed.credits if refreshed else tx.credits
         current_balance = balance if balance is not None else (await repo.get_user_by_id(session, db_user.id)).credits
         return_callback, return_label = await _payment_return_context(state)
-        await call.message.edit_text(  # type: ignore[union-attr]
-            (
+        if refreshed and int(getattr(refreshed, "refunded_amount_minor", 0) or 0) > 0:
+            reversed_credits = _fmt_amount(float(refreshed.refunded_credits or 0))
+            status_text = (
+                f"↩️ <b>Частичный возврат учтён</b>\n\nСписано за возвраты: <b>{reversed_credits} 💋</b>\nБаланс: <b>{current_balance} 💋</b>"
+                if lang == "ru" else
+                f"↩️ <b>Partial refund recorded</b>\n\nCredits removed for refunds: <b>{reversed_credits} 💋</b>\nBalance: <b>{current_balance} 💋</b>"
+            )
+        else:
+            status_text = (
                 "✅ <b>Оплата подтверждена</b>\n\n"
                 + (f"Зачислено: <b>+{credits} 💋</b>\n" if lang == "ru" else f"Added: <b>+{credits} 💋</b>\n")
                 + (f"Баланс: <b>{current_balance} 💋</b>" if lang == "ru" else f"Balance: <b>{current_balance} 💋</b>")
-            ),
+            )
+        await call.message.edit_text(  # type: ignore[union-attr]
+            status_text,
             reply_markup=_payment_complete_kb(
                 return_callback,
                 return_label,
@@ -626,7 +614,10 @@ async def cb_check_payment_status(
         await call.answer()
         return
 
-    if status in {TransactionStatus.failed, TransactionStatus.refunded}:
+    if status == TransactionStatus.refunded:
+        await call.answer("Возврат платежа учтён" if lang == "ru" else "Payment refund recorded", show_alert=True)
+        return
+    if status == TransactionStatus.failed:
         await call.answer(
             "Платёж завершился без зачисления" if lang == "ru" else "Payment finished without credit",
             show_alert=True,

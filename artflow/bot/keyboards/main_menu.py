@@ -9,28 +9,12 @@ def main_menu_kb(
     has_active_image_session: bool = False,
     is_admin: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Legacy-compatible builder that mirrors the UX v2 home contract."""
-    builder = InlineKeyboardBuilder()
-    if has_active_image_session:
-        builder.row(
-            InlineKeyboardButton(text="🔥 Продолжить работу", callback_data="menu:image"),
-            InlineKeyboardButton(text="🆕 Новая работа", callback_data="img_session:new"),
-        )
-    builder.row(
-        InlineKeyboardButton(text="✨ Создать", callback_data="menu:create"),
-        InlineKeyboardButton(text="🤖 AI-ассистент", callback_data="menu:assistant"),
+    """Use the same app/trends/admin navigation as the primary home renderer."""
+    from bot.ui.main_menu import build_main_menu_keyboard
+
+    return build_main_menu_keyboard(
+        has_active_image_session=has_active_image_session, is_admin=is_admin,
     )
-    builder.row(
-        InlineKeyboardButton(text="📂 Мои работы", callback_data="menu:history"),
-        InlineKeyboardButton(text="🔥 Лента", callback_data="menu:feed"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="💳 Пополнить", callback_data="menu:topup"),
-        InlineKeyboardButton(text="☰ Ещё", callback_data="menu:more"),
-    )
-    if is_admin:
-        builder.row(InlineKeyboardButton(text="🧪 Тест", callback_data="menu:test"))
-    return builder.as_markup()
 
 
 def back_to_menu_kb(*, back_cb: str | None = None) -> InlineKeyboardMarkup:

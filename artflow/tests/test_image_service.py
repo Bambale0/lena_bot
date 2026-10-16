@@ -8,8 +8,8 @@ from api.image_service import ImageModel, _build_input, normalize_quality_for_as
 JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"
 
 
-def test_normalize_quality_for_aspect_ratio_downgrades_square_4k() -> None:
-    assert normalize_quality_for_aspect_ratio(ImageModel.GPT_IMAGE_2_I2I, "1:1", "4K") == "2K"
+def test_square_4k_preserves_gpt_but_normalizes_legacy_nano() -> None:
+    assert normalize_quality_for_aspect_ratio(ImageModel.GPT_IMAGE_2_I2I, "1:1", "4K") == "4K"
     assert normalize_quality_for_aspect_ratio("nano-banana-pro", "1:1", "4K") == "2K"
 
 
@@ -18,7 +18,7 @@ def test_normalize_quality_for_aspect_ratio_keeps_supported_combo() -> None:
     assert normalize_quality_for_aspect_ratio(ImageModel.SEEDREAM_45, "1:1", "high") == "high"
 
 
-def test_build_input_uses_2k_for_square_4k_request() -> None:
+def test_gpt_build_input_keeps_square_4k_request() -> None:
     _resolved_model, payload = _build_input(
         ImageModel.GPT_IMAGE_2_T2I,
         prompt="portrait",
@@ -28,7 +28,7 @@ def test_build_input_uses_2k_for_square_4k_request() -> None:
         quality="4K",
     )
 
-    assert payload["resolution"] == "2K"
+    assert payload["resolution"] == "4K"
 
 
 def test_build_input_omits_gpt_image_2_auto_aspect_ratio() -> None:
