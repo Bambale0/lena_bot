@@ -174,7 +174,7 @@ async def _reconcile_transaction_status(
     elif provider == PaymentProvider.lava:
         invoice = await lava.get_invoice(external_id)
         status = str(invoice.get("status", "")).lower()
-        if status in {"completed", "success", "paid"}:
+        if lava.is_paid_invoice(invoice):
             balance = await _confirm_paid_transaction(session, external_id)
         elif status in {"failed", "cancelled", "canceled", "expired"}:
             await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
@@ -580,7 +580,8 @@ async def cb_check_payment_status(
     try:
         status, balance = await _reconcile_transaction_status(session, tx)
     except Exception as e:
-        logger.error("Payment reconcile error: %s", e)
+        from core.provider_logging import safe_identifier
+        logger.error("Payment reconcile error payment_id=%s error_type=%s", safe_identifier(external_id), type(e).__name__)
         await call.answer(t("error_generic", lang), show_alert=True)
         return
 
@@ -589,12 +590,21 @@ async def cb_check_payment_status(
         credits = refreshed.credits if refreshed else tx.credits
         current_balance = balance if balance is not None else (await repo.get_user_by_id(session, db_user.id)).credits
         return_callback, return_label = await _payment_return_context(state)
-        await call.message.edit_text(  # type: ignore[union-attr]
-            (
+        if refreshed and int(getattr(refreshed, "refunded_amount_minor", 0) or 0) > 0:
+            reversed_credits = _fmt_amount(float(refreshed.refunded_credits or 0))
+            status_text = (
+                f"↩️ <b>Частичный возврат учтён</b>\n\nСписано за возвраты: <b>{reversed_credits} 💋</b>\nБаланс: <b>{current_balance} 💋</b>"
+                if lang == "ru" else
+                f"↩️ <b>Partial refund recorded</b>\n\nCredits removed for refunds: <b>{reversed_credits} 💋</b>\nBalance: <b>{current_balance} 💋</b>"
+            )
+        else:
+            status_text = (
                 "✅ <b>Оплата подтверждена</b>\n\n"
                 + (f"Зачислено: <b>+{credits} 💋</b>\n" if lang == "ru" else f"Added: <b>+{credits} 💋</b>\n")
                 + (f"Баланс: <b>{current_balance} 💋</b>" if lang == "ru" else f"Balance: <b>{current_balance} 💋</b>")
-            ),
+            )
+        await call.message.edit_text(  # type: ignore[union-attr]
+            status_text,
             reply_markup=_payment_complete_kb(
                 return_callback,
                 return_label,
@@ -604,7 +614,10 @@ async def cb_check_payment_status(
         await call.answer()
         return
 
-    if status in {TransactionStatus.failed, TransactionStatus.refunded}:
+    if status == TransactionStatus.refunded:
+        await call.answer("Возврат платежа учтён" if lang == "ru" else "Payment refund recorded", show_alert=True)
+        return
+    if status == TransactionStatus.failed:
         await call.answer(
             "Платёж завершился без зачисления" if lang == "ru" else "Payment finished without credit",
             show_alert=True,

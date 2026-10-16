@@ -43,3 +43,14 @@ Primary provider references reviewed:
 - https://github.com/tinkoff-mobile-tech/tinkoff-asdk-android/blob/master/core/src/main/java/ru/tinkoff/acquiring/sdk/responses/CancelResponse.kt
 
 The bank SDK exposes `OriginalAmount` and `NewAmount` on Cancel responses separately from GetState `Amount`. Documentation inspection and local contract tests do not constitute a live-bank sandbox settlement test.
+
+
+## Review follow-up: reporting and reconciliation
+
+A ledger-proven legacy payment whose status was overwritten to `failed` can still settle a partial refund: the service verifies a positive payment-credit row for the same transaction and payer, then restores the paid state and applies the partial refund in one transaction. Uncredited pending payments are still deferred; this is not an automatic historical balance backfill.
+
+Lava status reconciliation uses its shared `is_paid_invoice` adapter so event-only and nested success payloads remain supported. The bot shows partial/full refund state explicitly instead of claiming a fresh full credit after removing credits.
+
+Revenue aggregates in the bot, web admin, Mini App admin, referral summaries and assistant reports use one net-paid calculation. Original `amount_rub` remains unchanged for transaction provenance. Partial refunds contribute the remaining proportional RUB amount, rounded to kopecks; fully refunded and pending transactions contribute zero. Period reports still group by original payment creation date, not refund cash-flow date.
+
+Deferred refunds log provider, a safe external payment ID (or a stable hash for malformed IDs), and an allowlisted reason code. Unknown exception text and raw provider values are never emitted. These diagnostics identify amount/currency/state mismatches without exposing callback bodies.

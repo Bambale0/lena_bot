@@ -44,3 +44,10 @@ The repository has no new real provider payment/refund fixture. No paid AI gener
 - Full Ruff, compileall, JS syntax, deploy shell syntax and whitespace checks passed.
 
 Protected PR review, exact-head GitHub checks and merge-SHA production verification remain required. No completion statement is based solely on the local green gate.
+
+
+## Independent PR #279 review follow-up
+
+The first independent code review on `4c28376` identified five P2 issues; the security review had no findings. All five were reproduced and corrected before merge: Lava event-only success reconciliation; net revenue after partial refunds across every reporting surface; actionable safe rejection diagnostics; ledger-proven legacy partial refunds; and refund-aware bot status text. Seven new regression cases exercise these boundaries, including real PostgreSQL-backed web/Mini App/referral revenue reports. The assistant report fixture now explicitly marks its already-paid transactions as paid, preserving the original 400-RUB assertion.
+
+After the amendments: **3461 pytest passed, zero skips**, with the same three dependency/mock warnings; full Ruff, compileall, JavaScript/deploy-shell syntax and whitespace checks passed. Schema remains `046_tribute_catalog`; no new migration or public request contract was introduced. Exact amended-head CI and independent re-review remain the release gate.

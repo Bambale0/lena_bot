@@ -48,6 +48,7 @@ from db.models import (
     WebAuthCode,
     WithdrawalStatus,
 )
+from db.payment_reporting import net_paid_amount_expr
 from db.repeat_lookup import parse_input_params
 
 logger = logging.getLogger(__name__)
@@ -1117,7 +1118,7 @@ async def get_referral_children(
         .subquery()
     )
     revenue = (
-        select(Transaction.user_id.label("user_id"), func.coalesce(func.sum(Transaction.amount_rub), 0).label("rub"))
+        select(Transaction.user_id.label("user_id"), func.coalesce(func.sum(net_paid_amount_expr()), 0).label("rub"))
         .where(Transaction.status == TransactionStatus.paid)
         .group_by(Transaction.user_id)
         .subquery()
@@ -1154,7 +1155,7 @@ async def get_all_referral_bindings(
         .subquery()
     )
     revenue = (
-        select(Transaction.user_id.label("user_id"), func.coalesce(func.sum(Transaction.amount_rub), 0).label("rub"))
+        select(Transaction.user_id.label("user_id"), func.coalesce(func.sum(net_paid_amount_expr()), 0).label("rub"))
         .where(Transaction.status == TransactionStatus.paid)
         .group_by(Transaction.user_id)
         .subquery()
@@ -3514,7 +3515,7 @@ async def set_withdrawal_status(
 async def get_revenue_today(session: AsyncSession) -> float:
     start_utc, end_utc = moscow_day_bounds_utc()
     result = await session.execute(
-        select(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        select(func.coalesce(func.sum(net_paid_amount_expr()), 0))
         .where(
             Transaction.status == TransactionStatus.paid,
             Transaction.created_at >= start_utc,

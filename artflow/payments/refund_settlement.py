@@ -1,11 +1,13 @@
 """Provider status translation; all accounting is owned by the atomic DB seam."""
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.provider_logging import safe_identifier
 from db.models import PaymentProvider
 from db.payment_refunds import (
     RefundNeedsReconciliation,
@@ -15,6 +17,16 @@ from db.payment_refunds import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def log_refund_rejection(provider: str, external_id: str, error: RefundNeedsReconciliation) -> None:
+    payment_id = safe_identifier(external_id)
+    if payment_id in {"invalid", "unknown"}:
+        payment_id = "sha256:" + hashlib.sha256(str(external_id).encode()).hexdigest()[:16]
+    metadata = {"refund_provider": provider, "refund_payment_id": payment_id,
+                "refund_reason": error.reason_code}
+    logger.warning("payment_refund_deferred provider=%s payment_id=%s reason=%s",
+                   provider, payment_id, error.reason_code, extra=metadata)
 
 
 async def settle_tbank_refund(
@@ -28,7 +40,7 @@ async def settle_tbank_refund(
             remaining_amount_minor=remaining, currency="rub",
         )
     except RefundNeedsReconciliation as exc:
-        logger.warning("Payment refund deferred provider=tbank reason=%s", type(exc).__name__)
+        log_refund_rejection("tbank", external_id, exc)
         raise HTTPException(status_code=503, detail="Payment refund requires reconciliation") from exc
 
 
@@ -45,5 +57,5 @@ async def settle_tribute_refund(
             original_amount_minor=original, currency=currency,
         )
     except RefundNeedsReconciliation as exc:
-        logger.warning("Payment refund deferred provider=tribute reason=%s", type(exc).__name__)
+        log_refund_rejection("tribute", external_id, exc)
         raise HTTPException(status_code=503, detail="Payment refund requires reconciliation") from exc

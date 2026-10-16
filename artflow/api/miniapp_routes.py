@@ -174,6 +174,7 @@ from db.models import (
     UserPrompt,
     WithdrawalStatus,
 )
+from db.payment_reporting import net_paid_amount_expr
 from db.session import get_session
 from payments.checkout_options import crypto_amount_usdt, payment_options_for_plan
 
@@ -5166,8 +5167,8 @@ async def admin_overview(
     users_total = int((await session.execute(select(func.count(User.id)))).scalar() or 0)
     users_new_7d = int((await session.execute(select(func.count(User.id)).where(User.created_at >= seven_days_ago))).scalar() or 0)
     paid_users = int((await session.execute(select(func.count(func.distinct(Transaction.user_id))).where(Transaction.status == TransactionStatus.paid))).scalar() or 0)
-    revenue_total = float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.status == TransactionStatus.paid))).scalar() or 0)
-    revenue_7d = float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.status == TransactionStatus.paid, Transaction.created_at >= seven_days_ago))).scalar() or 0)
+    revenue_total = float((await session.execute(select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(Transaction.status == TransactionStatus.paid))).scalar() or 0)
+    revenue_7d = float((await session.execute(select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(Transaction.status == TransactionStatus.paid, Transaction.created_at >= seven_days_ago))).scalar() or 0)
     generations_total = int((await session.execute(select(func.count(Generation.id)))).scalar() or 0)
     generations_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago))).scalar() or 0)
     image_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago, Generation.gen_type == GenerationType.image))).scalar() or 0)
@@ -5186,7 +5187,7 @@ async def admin_overview(
         .order_by(cast(User.created_at, Date))
     )).all()
     revenue_rows = (await session.execute(
-        select(cast(Transaction.created_at, Date), func.coalesce(func.sum(Transaction.amount_rub), 0))
+        select(cast(Transaction.created_at, Date), func.coalesce(func.sum(net_paid_amount_expr()), 0))
         .where(Transaction.status == TransactionStatus.paid, Transaction.created_at >= since_dt)
         .group_by(cast(Transaction.created_at, Date))
         .order_by(cast(Transaction.created_at, Date))
@@ -5205,7 +5206,7 @@ async def admin_overview(
         .limit(8)
     )).all()
     providers = (await session.execute(
-        select(Transaction.provider, func.count(Transaction.id), func.coalesce(func.sum(Transaction.amount_rub), 0))
+        select(Transaction.provider, func.count(Transaction.id), func.coalesce(func.sum(net_paid_amount_expr()), 0))
         .where(Transaction.created_at >= thirty_days_ago)
         .group_by(Transaction.provider)
         .order_by(desc(func.count(Transaction.id)))
@@ -5271,7 +5272,7 @@ async def admin_users(
     items = []
     for row in rows:
         generations_count = int((await session.execute(select(func.count(Generation.id)).where(Generation.user_id == row.id))).scalar() or 0)
-        paid_rub = float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.user_id == row.id, Transaction.status == TransactionStatus.paid))).scalar() or 0)
+        paid_rub = float((await session.execute(select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(Transaction.user_id == row.id, Transaction.status == TransactionStatus.paid))).scalar() or 0)
         items.append({
             "id": int(row.id),
             "tg_id": int(row.tg_id),
@@ -5319,7 +5320,7 @@ async def admin_user_detail(
         },
         "stats": {
             "generations_count": int((await session.execute(select(func.count(Generation.id)).where(Generation.user_id == user_id))).scalar() or 0),
-            "paid_rub": float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.user_id == user_id, Transaction.status == TransactionStatus.paid))).scalar() or 0),
+            "paid_rub": float((await session.execute(select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(Transaction.user_id == user_id, Transaction.status == TransactionStatus.paid))).scalar() or 0),
             "payments_count": int((await session.execute(select(func.count(Transaction.id)).where(Transaction.user_id == user_id, Transaction.status == TransactionStatus.paid))).scalar() or 0),
             "referrals": {"l1": l1, "l2": l2, "l3": l3},
         },

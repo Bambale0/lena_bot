@@ -1,5 +1,8 @@
 ## 2026-10-16 - Complete remaining audit findings
 
+PR #279 review amendment: five independent P2 findings reproduced and fixed (Lava eventType, partial-refund net revenue, safe rejection correlation/reasons, ledger-proven legacy failed payments, partial/full refund bot copy). New tests initially failed on each cited behavior; all seven pass after repair. Full amended local release gate: 3461 passed, zero skips, three existing dependency/mock warnings; full Ruff/compile/JS/shell/diff checks pass. No schema change beyond already tested 045/046. Awaiting amended-head independent review, protected CI and autodeploy; no manual production mutation.
+
+
 Final local pre-PR: 3454 pytest passed with disposable PostgreSQL and official Nginx, zero skips (3 nonblocking pre-existing warnings); 58 Desktop Playwright tests and 114 frontend units passed. Independent OpenAPI exports match (195 paths); provider inventory/readiness/dry manifest report 98 contracts. Actual 045/046 migration roundtrip and guarded rollback pass. Full Ruff/compile/JS/deploy syntax/diff checks pass. All original runtime/fixture findings are implemented and classified; no paid API call or manual production mutation. Next gate is independent PR review plus exact SHA CI/autodeploy and running-source verification.
 
 

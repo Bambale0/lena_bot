@@ -23,8 +23,19 @@ from db.models import (
 logger = logging.getLogger(__name__)
 
 
+_DIAGNOSTIC_REASONS = frozenset(['Invalid minor-unit amount', 'Invalid original credit amount', 'Invalid original payment amount', 'Invalid stored refund totals', 'Original provider amount mismatch', 'Partial refund arrived before payment confirmation', 'Partial refund has no reduced amount', 'Partial refund without a local payment', 'Payment provider mismatch', 'Payment user missing', 'Payment/refund notice provider mismatch', 'Refund credit totals require reconciliation', 'Refund currency mismatch', 'Refund notice provider mismatch', 'Refund outside original payment amount', 'Unexpected Tribute currency', 'Unsupported payment state'])
+
+
 class RefundNeedsReconciliation(ValueError):
-    """No safe accounting decision: retry or reconcile, never acknowledge loss."""
+    """Unsettled payment state with an allowlisted, non-sensitive log reason."""
+
+    @property
+    def reason_code(self) -> str:
+        reason = str(self)
+        if reason not in _DIAGNOSTIC_REASONS:
+            return "unclassified_reconciliation_error"
+        return reason.lower().replace(" ", "_").replace("-", "_").replace("/", "_")
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,15 +172,19 @@ async def apply_payment_refund(
             await session.commit()
             return result
         paid = tx.status == TransactionStatus.paid
-        if not paid and target != original:
-            raise RefundNeedsReconciliation("Partial refund arrived before payment confirmation")
         if tx.status not in {TransactionStatus.pending, TransactionStatus.paid, TransactionStatus.failed}:
             raise RefundNeedsReconciliation("Unsupported payment state")
         # A failed legacy row may have been overwritten after a real credit.
         credited = paid or bool(await session.scalar(select(CreditLedgerEntry.id).where(
             CreditLedgerEntry.source_type == "transaction", CreditLedgerEntry.source_id == str(tx.id),
             CreditLedgerEntry.entry_type == "payment_credit",
+            CreditLedgerEntry.user_id == tx.user_id, CreditLedgerEntry.delta > 0,
         ).limit(1)))
+        if not credited and target != original:
+            raise RefundNeedsReconciliation("Partial refund arrived before payment confirmation")
+        if credited and not paid:
+            # Restore ledger-proven legacy state in the same atomic transaction.
+            tx.status = TransactionStatus.paid
         credits = Decimal(str(tx.credits))
         if not credits.is_finite() or credits < 0:
             raise RefundNeedsReconciliation("Invalid original credit amount")

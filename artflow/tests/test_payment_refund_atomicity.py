@@ -393,3 +393,88 @@ async def test_corrupt_credit_refund_snapshot_never_adds_wallet_credits(payment_
     assert (await post_refund("tbank", status="PARTIAL_REFUNDED", amount=25000)).status_code == 503
     async with factory() as session:
         assert (await session.get(User, payer_id)).credits == 50
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invoice", [{"eventType": "payment.success"}, {"data": {"event_type": "invoice.paid"}}])
+async def test_review_lava_event_only_invoice_is_reconciled_atomically(payment_db, monkeypatch, invoice):
+    from unittest.mock import AsyncMock
+
+    from bot.handlers import payment
+    factory, _ = payment_db
+    tx_id, payer_id, _ = await seed_payment(factory, PaymentProvider.lava, status=TransactionStatus.pending, balance=0)
+    monkeypatch.setattr(payment.lava, "get_invoice", AsyncMock(return_value=invoice))
+    monkeypatch.setattr(main.settings, "REFERRAL_L1_CREDITS", 0)
+    async with factory() as session:
+        status, _ = await payment._reconcile_transaction_status(session, await session.get(Transaction, tx_id))
+        assert status == TransactionStatus.paid
+    async with factory() as session:
+        assert (await session.get(User, payer_id)).credits == 50
+        entries = (await session.scalars(select(CreditLedgerEntry).where(CreditLedgerEntry.user_id == payer_id))).all()
+        assert len(entries) == 1 and entries[0].delta == 50
+
+
+@pytest.mark.asyncio
+async def test_review_legacy_failed_but_credited_partial_refund_is_settled(payment_db):
+    factory, _ = payment_db
+    tx_id, payer_id, parent_id = await seed_payment(factory, PaymentProvider.tbank)
+    async with factory() as session:
+        tx = await session.get(Transaction, tx_id)
+        tx.status = TransactionStatus.failed
+        await session.commit()
+    assert (await post_refund("tbank", status="PARTIAL_REFUNDED", amount=25000)).status_code == 200
+    async with factory() as session:
+        assert (await session.get(User, payer_id)).credits == 25
+        assert (await session.get(User, parent_id)).referral_balance == 7.5
+        assert (await session.get(Transaction, tx_id)).status == TransactionStatus.paid
+    assert (await post_refund("tbank", status="PARTIAL_REFUNDED", amount=25000)).status_code == 200
+    async with factory() as session:
+        assert (await session.get(User, payer_id)).credits == 25
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lang,title", [("ru", "Частичный возврат"), ("en", "Partial refund")])
+async def test_review_partial_refund_status_message_never_claims_full_credit(payment_db, monkeypatch, lang, title):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from bot.handlers import payment
+    factory, _ = payment_db
+    _, payer_id, _ = await seed_payment(factory, PaymentProvider.tbank)
+    monkeypatch.setattr(payment.tbank, "get_payment_state", AsyncMock(return_value={"Status": "PARTIAL_REFUNDED", "Amount": 25000}))
+    call = SimpleNamespace(data="pay:check:test-payment-1", answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+    async with factory() as session:
+        user = await session.get(User, payer_id)
+        user.language = lang
+        await session.commit()
+        await payment.cb_check_payment_status(call, session, user)
+    message = call.message.edit_text.await_args.args[0]
+    assert title in message and "25" in message
+    assert "+50" not in message and "Зачислено:" not in message and "Added:" not in message
+
+
+@pytest.mark.asyncio
+async def test_review_net_revenue_is_shared_by_bot_web_miniapp_and_referrals(payment_db, monkeypatch):
+    from api import miniapp_routes
+    from api.web import admin as web_admin
+    from db import repository as repo
+    factory, engine = payment_db
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    _, payer_id, parent_id = await seed_payment(factory, PaymentProvider.tbank)
+    assert (await post_refund("tbank", status="PARTIAL_REFUNDED", amount=25000)).status_code == 200
+    monkeypatch.setattr(main.settings, "ADMIN_IDS", [999001])
+    async with factory() as session:
+        session.add(Transaction(user_id=payer_id, amount_rub=9000, credits=900, provider=PaymentProvider.lava,
+            external_id="pending-report-fixture", status=TransactionStatus.pending))
+        await session.commit()
+        assert await repo.get_revenue_today(session) == 250
+        children = await repo.get_referral_children(session, parent_id)
+        assert children[0].paid_rub == 250
+        web = await web_admin._admin_overview_payload(session)
+        assert web["totals"]["revenue_total"] == 250
+        assert web["periods"]["revenue_today"] == 250
+        assert sum(row["value"] for row in web["series"]["revenue_14d"]) == 250
+        mini = await miniapp_routes.admin_overview(days=14, user=await session.get(User, payer_id), session=session)
+        assert mini["summary"]["revenue_total"] == 250
+        assert sum(row["revenue"] for row in mini["providers"]) == 250
